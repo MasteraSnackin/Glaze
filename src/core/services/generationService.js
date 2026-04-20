@@ -291,6 +291,8 @@ export async function generateChatResponse({
                 return {
                     role: 'system',
                     content,
+                    id: entry.id,
+                    position: entry.position,
                     blockName: `Lorebook: ${entry.comment || entry.keys?.[0] || 'Entry'}`,
                     isLorebook: true,
                     sources: tokens > 0 ? [{ source: 'vectorLore', tokens }] : [],
@@ -970,36 +972,74 @@ function injectMemoryMessages(messages, memoryInjection, settings = {}) {
     ];
 }
 
-function injectVectorLoreMessages(messages, loreEntries) {
-    if (!Array.isArray(loreEntries) || !loreEntries.length) return messages;
-
-    const combinedContent = loreEntries.map(msg => msg.content || '').filter(Boolean).join('\n\n');
-    if (!combinedContent) return messages;
-
+function combineLoreSources(messages = []) {
     const sourceMap = new Map();
-    for (const item of loreEntries.flatMap(msg => msg._allSources || msg.sources || [])) {
+    for (const item of messages.flatMap(msg => msg._allSources || msg.sources || [])) {
         if (!item?.source) continue;
         sourceMap.set(item.source, (sourceMap.get(item.source) || 0) + (item.tokens || 0));
     }
-    const combinedSources = [...sourceMap.entries()].map(([source, tokens]) => ({ source, tokens }));
-    const combinedMessage = {
+    return [...sourceMap.entries()].map(([source, tokens]) => ({ source, tokens }));
+}
+
+function buildVectorLoreBlock(entries, position) {
+    const combinedContent = entries.map(msg => msg.content || '').filter(Boolean).join('\n\n');
+    if (!combinedContent) return null;
+    const combinedSources = combineLoreSources(entries);
+    return {
         role: 'system',
         content: combinedContent,
-        blockName: 'Vector Lorebook',
+        blockName: position === 'worldInfoAfter' ? 'Vector Lorebook After' : 'Vector Lorebook Before',
         isLorebook: true,
         sources: combinedSources,
         _allSources: combinedSources
     };
+}
+
+function resolveLateVectorLorePosition(entry) {
+    const rawPosition = entry?.position === 'matchGlobal'
+        ? (lorebookState.globalSettings?.injectionPosition || 'worldInfoBefore')
+        : (entry?.position || 'worldInfoBefore');
+
+    if (rawPosition === 'worldInfoAfter') return 'worldInfoAfter';
+    if (rawPosition === 'lorebooksMacro') return 'worldInfoAfter';
+    return 'worldInfoBefore';
+}
+
+function injectVectorLoreMessages(messages, loreEntries) {
+    if (!Array.isArray(loreEntries) || !loreEntries.length) return messages;
+
+    const beforeEntries = [];
+    const afterEntries = [];
+    loreEntries.forEach(entry => {
+        if (resolveLateVectorLorePosition(entry) === 'worldInfoAfter') afterEntries.push(entry);
+        else beforeEntries.push(entry);
+    });
+
+    const beforeBlock = buildVectorLoreBlock(beforeEntries, 'worldInfoBefore');
+    const afterBlock = buildVectorLoreBlock(afterEntries, 'worldInfoAfter');
+    if (!beforeBlock && !afterBlock) return messages;
 
     const firstHistoryIndex = messages.findIndex(m => m.isHistory);
-    if (firstHistoryIndex === -1) {
-        return [...messages, combinedMessage];
+    const charCardIndex = messages.findIndex(m => m.blockId === 'char_card');
+    const afterInsertIndex = firstHistoryIndex === -1 ? messages.length : firstHistoryIndex;
+    const beforeInsertIndex = charCardIndex >= 0 ? charCardIndex : afterInsertIndex;
+
+    let nextMessages = [...messages];
+    if (afterBlock) {
+        nextMessages = [
+            ...nextMessages.slice(0, afterInsertIndex),
+            afterBlock,
+            ...nextMessages.slice(afterInsertIndex)
+        ];
     }
-    return [
-        ...messages.slice(0, firstHistoryIndex),
-        combinedMessage,
-        ...messages.slice(firstHistoryIndex)
-    ];
+    if (beforeBlock) {
+        nextMessages = [
+            ...nextMessages.slice(0, beforeInsertIndex),
+            beforeBlock,
+            ...nextMessages.slice(beforeInsertIndex)
+        ];
+    }
+    return nextMessages;
 }
 
 export async function generateMemoryDraft({ history, prompt, controller, apiConfigOverride = null }) {

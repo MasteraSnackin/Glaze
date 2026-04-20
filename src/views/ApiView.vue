@@ -301,6 +301,7 @@ function createNewApiPreset() {
                     stream: apiSettings.stream,
                     auto_hide_images: apiSettings.autoHideImages,
                     auto_hide_images_n: apiSettings.autoHideImagesN,
+                    reasoning_enabled: apiSettings.reasoningEnabled,
                     reasoning_effort: apiSettings.reasoningEffort
                 };
 
@@ -330,6 +331,7 @@ function applyApiPreset(p) {
     
     apiSettings.autoHideImages = (p.auto_hide_images === true || p.auto_hide_images === 'true');
     apiSettings.autoHideImagesN = parseInt(p.auto_hide_images_n || '1', 10);
+    apiSettings.reasoningEnabled = (p.reasoning_enabled === true || p.reasoning_enabled === 'true');
     apiSettings.reasoningEffort = p.reasoning_effort || 'medium';
     
     saveApiSetting('api-endpoint', p.endpoint);
@@ -342,6 +344,7 @@ function applyApiPreset(p) {
     saveApiSetting('gz_api_stream', p.stream);
     saveApiSetting('gz_api_auto_hide_images', apiSettings.autoHideImages.toString());
     saveApiSetting('gz_api_auto_hide_images_n', apiSettings.autoHideImagesN.toString());
+    saveApiSetting('gz_api_request_reasoning', apiSettings.reasoningEnabled.toString());
     saveApiSetting('gz_api_reasoning_effort', apiSettings.reasoningEffort);
     
     checkConnection();

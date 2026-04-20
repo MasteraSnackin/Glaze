@@ -164,6 +164,7 @@ function scanLorebooksPure(history, char, textToScan, chatId, lorebooks, globalS
 
     if (activeLorebooks.length === 0) return [];
 
+    const maxInjectedEntries = Math.max(1, Math.min(100, Number(globalSettings?.maxInjectedEntries || 5)));
     let allRelevantEntries = [];
     let candidates = [];
 
@@ -252,7 +253,11 @@ function scanLorebooksPure(history, char, textToScan, chatId, lorebooks, globalS
             };
 
             const scanDepth = entry.scanDepth ?? globalSettings.scanDepth ?? 10;
-            const messagesToScan = history.slice(-scanDepth).map(m => m.content).join("\n");
+            const temporalDepth = Math.max(entry.sticky || 0, entry.cooldown || 0);
+            const effectiveScanDepth = temporalDepth > 0
+                ? Math.min(scanDepth, temporalDepth)
+                : scanDepth;
+            const messagesToScan = history.slice(-effectiveScanDepth).map(m => m.content).join("\n");
 
             const scanSource = caseSensitive ?
                 (messagesToScan + textToScan) :
@@ -312,7 +317,9 @@ function scanLorebooksPure(history, char, textToScan, chatId, lorebooks, globalS
         }
     }
 
-    return allRelevantEntries.sort((a, b) => (a.order ?? 100) - (b.order ?? 100));
+    return allRelevantEntries
+        .sort((a, b) => (a.order ?? 100) - (b.order ?? 100))
+        .slice(0, maxInjectedEntries);
 }
 
 function squashHistory(historyMsgs, squashRole) {
@@ -399,6 +406,7 @@ function buildPromptMessagesWorker(args) {
     };
 
     let loreByPosition = { worldInfoBefore: [], worldInfoAfter: [], lorebooksMacro: [] };
+    let macroLoreEntries = [];
     if (lorebooks) {
         // DUAL-CHANNEL FIX: Extract current user message for keyword scanning
         const lastUserMessage = history && history.length > 0
@@ -413,6 +421,9 @@ function buildPromptMessagesWorker(args) {
             const pos = entry.position === 'matchGlobal'
                 ? (globalSettings?.injectionPosition || 'worldInfoBefore')
                 : (entry.position || 'worldInfoBefore');
+            if (pos === 'lorebooksMacro') {
+                macroLoreEntries.push(entry);
+            }
             const content = replaceMacros(entry.content || "", char, personaObj, sessionVars, notifyObj);
             const tokens = estimateTokens(content);
             const msg = {
@@ -427,6 +438,13 @@ function buildPromptMessagesWorker(args) {
             else loreByPosition.worldInfoBefore.push(msg);
         });
     }
+
+    const getMacroLorebookContent = () => {
+        return macroLoreEntries
+            .map(entry => replaceMacros(entry.content || "", char, personaObj, sessionVars, notifyObj))
+            .filter(Boolean)
+            .join('\n\n');
+    };
 
     const getLorebookContent = () => {
         return allLoreEntries
@@ -492,7 +510,7 @@ function buildPromptMessagesWorker(args) {
             if (!text) return text;
             let result = text;
             if (result.includes('{{lorebooks}}')) {
-                result = result.split('{{lorebooks}}').join(getLorebookContent());
+                result = result.split('{{lorebooks}}').join(getMacroLorebookContent());
             }
             if (result.includes('{{summary}}')) {
                 result = result.split('{{summary}}').join(summaryRawContent || '');
@@ -558,7 +576,7 @@ function buildPromptMessagesWorker(args) {
                 { regex: /\{\{personality\}\}/gi, value: char?.personality || '', source: 'character' },
                 { regex: /\{\{mesExamples\}\}/gi, value: char?.mes_example || '', source: 'character' },
                 { regex: /\{\{summary\}\}/gi, value: summaryRawContent || '', source: 'summary' },
-                { regex: /\{\{lorebooks\}\}/gi, value: getLorebookContent(), source: 'lorebook' }
+                { regex: /\{\{lorebooks\}\}/gi, value: getMacroLorebookContent(), source: 'lorebook' }
             ];
 
             const sources = [];
@@ -576,7 +594,7 @@ function buildPromptMessagesWorker(args) {
             literalTemplate = replaceMacros(literalTemplate, char, personaObj, sessionVars, notifyObj);
 
             if (content.includes('{{lorebooks}}')) {
-                content = content.split('{{lorebooks}}').join(getLorebookContent());
+                content = content.split('{{lorebooks}}').join(getMacroLorebookContent());
             }
             if (content.includes('{{summary}}')) {
                 content = content.split('{{summary}}').join(summaryRawContent || '');

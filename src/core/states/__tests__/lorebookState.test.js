@@ -13,6 +13,7 @@ vi.mock('@/utils/db.js', () => ({
 describe('Lorebook Logic', () => {
     beforeEach(() => {
         lorebookState.lorebooks = [];
+        lorebookState.globalSettings.maxInjectedEntries = 5;
     });
 
     it('matches basic primary keys', () => {
@@ -156,5 +157,21 @@ describe('Lorebook Logic', () => {
         ];
         const res2 = scanLorebooks(history2, null, 'current');
         expect(res2).toHaveLength(1);
+    });
+
+    it('respects max injected lorebook entries', () => {
+        lorebookState.globalSettings.maxInjectedEntries = 2;
+        lorebookState.lorebooks = [{
+            id: 'lb1', enabled: true, name: 'Limited',
+            entries: [
+                { id: 'e1', keys: ['topic'], content: 'One', enabled: true, order: 10 },
+                { id: 'e2', keys: ['topic'], content: 'Two', enabled: true, order: 20 },
+                { id: 'e3', keys: ['topic'], content: 'Three', enabled: true, order: 30 }
+            ]
+        }];
+
+        const res = scanLorebooks([], null, 'topic appears here');
+        expect(res).toHaveLength(2);
+        expect(res.map(entry => entry.id)).toEqual(['e1', 'e2']);
     });
 });

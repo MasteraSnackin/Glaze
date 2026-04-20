@@ -771,12 +771,18 @@ defineExpose({ open, openEntry, close, openLorebook });
                         </div>
                         <div class="settings-row">
                             <div class="settings-col">
-                                <label>{{ lorebookState.globalSettings.reserveMode === 'tokens' ? (t('label_budget_cap') || 'Exact tokens') : t('label_lorebook_reserve_percent') }}</label>
-                                <input type="number" v-model="lorebookState.globalSettings.reserveValue" :min="lorebookState.globalSettings.reserveMode === 'tokens' ? 0 : 1" :max="lorebookState.globalSettings.reserveMode === 'tokens' ? undefined : 100">
+                                <label>{{ t('label_lorebook_max_entries') || 'Max Injected Entries' }}</label>
+                                <input type="number" v-model="lorebookState.globalSettings.maxInjectedEntries" min="1" max="100">
                             </div>
-                             <div class="settings-col">
+                            <div class="settings-col">
                                 <label>{{ t('label_min_activations') }}</label>
                                 <input type="number" v-model="lorebookState.globalSettings.minActivations">
+                            </div>
+                        </div>
+                        <div class="settings-row">
+                            <div class="settings-col">
+                                <label>{{ lorebookState.globalSettings.reserveMode === 'tokens' ? (t('label_budget_cap') || 'Exact tokens') : t('label_lorebook_reserve_percent') }}</label>
+                                <input type="number" v-model="lorebookState.globalSettings.reserveValue" :min="lorebookState.globalSettings.reserveMode === 'tokens' ? 0 : 1" :max="lorebookState.globalSettings.reserveMode === 'tokens' ? undefined : 100">
                             </div>
                         </div>
                         <div class="settings-item">
