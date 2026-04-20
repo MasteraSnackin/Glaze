@@ -3206,6 +3206,44 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
         }
     }
     const msgId = currentMessages.value[msgIndex]?.id || genMsgId();
+    const promptMetaSnapshots = new Map();
+
+    const clonePromptMetaList = (items) => Array.isArray(items)
+        ? items.map(item => ({ ...item }))
+        : [];
+
+    const snapshotPromptMeta = (message) => {
+        if (!message?.id || promptMetaSnapshots.has(message.id)) return;
+        promptMetaSnapshots.set(message.id, {
+            hasTriggeredLorebooks: Object.prototype.hasOwnProperty.call(message, 'triggeredLorebooks'),
+            hasTriggeredMemories: Object.prototype.hasOwnProperty.call(message, 'triggeredMemories'),
+            hasContextRefs: Object.prototype.hasOwnProperty.call(message, 'contextRefs'),
+            triggeredLorebooks: clonePromptMetaList(message.triggeredLorebooks),
+            triggeredMemories: clonePromptMetaList(message.triggeredMemories),
+            contextRefs: clonePromptMetaList(message.contextRefs)
+        });
+    };
+
+    const restorePromptMetaOnMessages = (messages) => {
+        if (!Array.isArray(messages) || promptMetaSnapshots.size === 0) return false;
+        let changed = false;
+        messages.forEach(message => {
+            const snapshot = message?.id ? promptMetaSnapshots.get(message.id) : null;
+            if (!snapshot) return;
+
+            if (snapshot.hasTriggeredLorebooks) message.triggeredLorebooks = clonePromptMetaList(snapshot.triggeredLorebooks);
+            else delete message.triggeredLorebooks;
+
+            if (snapshot.hasTriggeredMemories) message.triggeredMemories = clonePromptMetaList(snapshot.triggeredMemories);
+            else delete message.triggeredMemories;
+
+            if (snapshot.hasContextRefs) message.contextRefs = clonePromptMetaList(snapshot.contextRefs);
+            else delete message.contextRefs;
+
+            changed = true;
+        });
+        return changed;
+    };
 
     // Save generation status for DialogList
     localStorage.setItem(`gz_generating_${char.id}_${sessionId}`, 'true');
@@ -3275,6 +3313,7 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
         const idx = currentMessages.value.findIndex(m => m.id === msgId);
         if (idx !== -1) {
             // User is still viewing this chat — update reactive state
+            restorePromptMetaOnMessages(currentMessages.value);
             currentMessages.value[idx].isTyping = false;
 
             if (!isError) {
@@ -3317,6 +3356,7 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
             // User navigated away — clean up directly in DB
             const data = await getChatData(char.id);
             if (data && data.sessions[sessionId]) {
+                restorePromptMetaOnMessages(data.sessions[sessionId]);
                 const dbIdx = data.sessions[sessionId].findIndex(m => m.id === msgId);
                 if (dbIdx !== -1) {
                     data.sessions[sessionId][dbIdx].isTyping = false;
@@ -3521,6 +3561,7 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
                 ];
 
                 const assignRefs = (m) => {
+                    snapshotPromptMeta(m);
                     m.triggeredLorebooks = triggeredLorebooks;
                     m.triggeredMemories = triggeredMemories;
                     m.contextRefs = contextRefs;
