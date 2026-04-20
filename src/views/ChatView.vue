@@ -1,8 +1,6 @@
 <script>
 // --- Module Level State (Persists across component mounts) ---
 let activeChatChar = null;
-const generatingStates = {}; // { charId: state }
-let genIdCounter = 0;
 let _cleanupScroll = null;
 let _msgIdCounter = 0;
 function genMsgId() {
@@ -68,6 +66,7 @@ import { createNewSession as dbCreateSession, deleteSession as dbDeleteSession, 
 import { lorebookState, getActiveLorebooksForContext } from '@/core/states/lorebookState.js';
 import { presetState, getEffectivePreset, getEffectivePresetId } from '@/core/states/presetState.js';
 import { useVirtualScroll } from '@/composables/chat/useVirtualScroll.js';
+import { useGenerationRegistry } from '@/composables/chat/useGenerationRegistry.js';
 import { useSidebarResizer } from '@/composables/ui/useSidebarResizer.js';
 import { sendMessageNotification, clearMessageNotifications, startGenerationNotification, stopGenerationNotification } from '@/core/services/notificationService.js';
 import { addNotification } from '@/core/states/notificationsState.js';
@@ -177,6 +176,16 @@ async function openMemoryEntryEditor(entryId) {
 }
 
 const isAndroid = Capacitor.getPlatform() === 'android';
+const {
+    nextGenerationId,
+    listGeneratingCharIds,
+    getGenerationState,
+    hasGenerationState,
+    setGenerationState,
+    clearGenerationState,
+    markGenerationPersisted,
+    clearPersistedGeneration
+} = useGenerationRegistry();
 
 // --- Component State ---
 const chatViewRoot = ref(null);
@@ -721,7 +730,7 @@ async function generateMemoryDraftForMessages(selectedMessages, { openSheet = fa
     if (!activeChatChar || !Array.isArray(selectedMessages) || !selectedMessages.length) return false;
     console.debug('[MemoryBooks] generateMemoryDraftForMessages:start', { source, existingDraftId, inputCount: selectedMessages.length });
 
-    const activeGeneration = generatingStates[activeChatChar.id];
+    const activeGeneration = getGenerationState(activeChatChar.id);
     if (activeGeneration && activeGeneration.type !== 'impersonation') {
         showToast('Stop the current response generation before starting a memory draft');
         return false;
@@ -2170,11 +2179,11 @@ const onChatSearch = (e) => {
 
 async function loadChats() {
     // Preserve in-memory data for ANY character currently generating
-    for (const charId of Object.keys(generatingStates)) {
+    for (const charId of listGeneratingCharIds()) {
         const memData = await getChatData(charId);
         if (!memData) continue;
 
-        const state = generatingStates[charId];
+        const state = getGenerationState(charId);
 
         let foundMsg = null;
         let foundSessionId = memData.currentId;
@@ -2218,7 +2227,7 @@ async function loadChats() {
 }
 
 async function abortActiveChatGeneration(charId, { restore = true } = {}) {
-    const state = generatingStates[charId];
+    const state = getGenerationState(charId);
     if (!state || state.type === 'impersonation') return false;
 
     if (state.controller) {
@@ -2237,9 +2246,7 @@ async function abortActiveChatGeneration(charId, { restore = true } = {}) {
         }
     }
 
-    if (generatingStates[charId]?.genId === state.genId) {
-        delete generatingStates[charId];
-    }
+    clearGenerationState(charId, state.genId);
 
     if (activeChatChar && activeChatChar.id === charId) {
         isGenerating.value = false;
@@ -2608,7 +2615,7 @@ async function openChat(char, onBack, force = false) {
     delete activeChatChar.summary;
 
     activeChar.value = activeChatChar;
-    isGenerating.value = !!generatingStates[char.id];
+    isGenerating.value = hasGenerationState(char.id);
 
     // Clear unread
     let unread = (await db.get('gz_unread')) || {};
@@ -2696,7 +2703,7 @@ async function openChat(char, onBack, force = false) {
     let dirty = false;
     while (msgs.length > 0) {
         const lastMsg = msgs[msgs.length - 1];
-        const isPhantomTyping = lastMsg.isTyping && !generatingStates[char.id];
+        const isPhantomTyping = lastMsg.isTyping && !hasGenerationState(char.id);
 
         if (isPhantomTyping) {
             if (lastMsg.swipes && lastMsg.swipes.length > 1) {
@@ -2841,8 +2848,8 @@ async function openChat(char, onBack, force = false) {
         // updateInputPreview(); // Handled by ChatInput component
 
         // Restore generation state if active
-        if (generatingStates[char.id]) {
-            const state = generatingStates[char.id];
+        if (hasGenerationState(char.id)) {
+            const state = getGenerationState(char.id);
             
             // Clear previous timer if exists (from previous mount)
             if (state.timerId) clearInterval(state.timerId);
@@ -3007,10 +3014,10 @@ function smartScroll() {
 async function sendMessage(attachedImage = null, guidanceText = null) {
     if (isGenerating.value && activeChatChar) {
         // Stop Generation
-        const state = generatingStates[activeChatChar.id];
+        const state = getGenerationState(activeChatChar.id);
         if (state?.type === 'impersonation') {
             if (state.controller) state.controller.abort();
-            delete generatingStates[activeChatChar.id];
+            clearGenerationState(activeChatChar.id);
             isGenerating.value = false;
             isImpersonating.value = false;
         } else if (state) {
@@ -3089,7 +3096,7 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
     const runtime = getApiRuntimeStorage();
     const model = runtime.model;
     const endpoint = runtime.normalizedEndpoint;
-    const existingState = generatingStates[char.id];
+    const existingState = getGenerationState(char.id);
 
     if (existingState && existingState.type !== 'impersonation') {
         console.warn('[generation] Ignoring overlapping startGeneration call for active chat request', {
@@ -3114,7 +3121,7 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
         return;
     }
 
-    const genId = ++genIdCounter;
+    const genId = nextGenerationId();
     const controller = new AbortController();
     const startTime = Date.now();
     // Capture session ID at start
@@ -3248,7 +3255,7 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
     };
 
     // Save generation status for DialogList
-    localStorage.setItem(`gz_generating_${char.id}_${sessionId}`, 'true');
+    markGenerationPersisted(char.id, sessionId);
 
     // Initialize state
     // Setup initial UI updater inline to avoid null gap between state creation and assignment (#8)
@@ -3268,16 +3275,16 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
         }
     };
 
-    generatingStates[char.id] = { 
+    setGenerationState(char.id, { 
         genId, 
         controller, 
         startTime, 
         msgId,
         timerId: null,
         onUIUpdate: initialUIUpdate
-    };
+    });
 
-    generatingStates[char.id].timerId = setInterval(() => {
+    getGenerationState(char.id).timerId = setInterval(() => {
         if (activeChatChar && activeChatChar.id === char.id) {
             const idx = currentMessages.value.findIndex(m => m.id === msgId);
             if (idx !== -1) {
@@ -3309,8 +3316,8 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
 
     const restoreState = async (isError = false) => {
         if (_bgUpdateTimer) { clearTimeout(_bgUpdateTimer); _bgUpdateTimer = null; }
-        if (generatingStates[char.id]?.timerId) clearInterval(generatingStates[char.id].timerId);
-        localStorage.removeItem(`gz_generating_${char.id}_${sessionId}`);
+        if (getGenerationState(char.id)?.timerId) clearInterval(getGenerationState(char.id).timerId);
+        clearPersistedGeneration(char.id, sessionId);
         
         const idx = currentMessages.value.findIndex(m => m.id === msgId);
         if (idx !== -1) {
@@ -3383,10 +3390,10 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
         if (onAbort) onAbort(isError);
     };
 
-    generatingStates[char.id].restoreState = restoreState;
+    getGenerationState(char.id).restoreState = restoreState;
 
     const onError = async (e) => {
-        const state = generatingStates[char.id];
+        const state = getGenerationState(char.id);
         if (!state || state.genId !== genId) return;
         if (_bgUpdateTimer) { clearTimeout(_bgUpdateTimer); _bgUpdateTimer = null; }
 
@@ -3415,14 +3422,14 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
             // Handle Context Limit gracefully (Bottom Sheet already shown by llmApi)
             if (e.message === "Context limit exceeded") {
                 await restoreState(false); // Treat as abort/cancel (removes typing indicator)
-                delete generatingStates[char.id];
+                clearGenerationState(char.id);
                 if (activeChatChar && activeChatChar.id === char.id) isGenerating.value = false;
                 window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: char.id, sessionId: sessionId } }));
                 return;
             }
 
             await restoreState(true);
-            delete generatingStates[char.id];
+            clearGenerationState(char.id);
             if (activeChatChar && activeChatChar.id === char.id) isGenerating.value = false;
 
             sendMessageNotification(
@@ -3463,7 +3470,7 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
             console.error('[onError] Error handler failed:', handlerErr);
             // Fallback: ensure typing is cleared even if main handler fails
             await ensureTypingCleared();
-            delete generatingStates[char.id];
+            clearGenerationState(char.id);
             if (activeChatChar && activeChatChar.id === char.id) isGenerating.value = false;
             window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: char.id, sessionId: sessionId } }));
         }
@@ -3491,7 +3498,7 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
         rawStreamText = effectiveText || (rawStreamText + (chunk || ""));
         
         // Update via dynamic updater (handles re-mounts)
-        const state = generatingStates[char.id];
+        const state = getGenerationState(char.id);
         if (state && state.genId === genId && state.onUIUpdate) {
             state.onUIUpdate(effectiveText, effectiveReasoning, true, textDelta);
         } else if (!state || state.genId !== genId) {
@@ -3504,7 +3511,7 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
                 _bgUpdateTimer = setTimeout(async () => {
                     _bgUpdateTimer = null;
                     if (_bgPendingText === null) return;
-                    const latestState = generatingStates[char.id];
+                    const latestState = getGenerationState(char.id);
                     if (!latestState || latestState.genId !== genId) return;
                     const data = await getChatData(char.id);
                     if (data && data.sessions[sessionId]) {
@@ -3586,21 +3593,21 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
             onComplete: async (response, finalReasoning, meta) => {
         // CRITICAL: Ensure cleanup happens even if handler fails
         const ensureCleanup = () => {
-            const currentState = generatingStates[char.id];
+            const currentState = getGenerationState(char.id);
             if (currentState && currentState.timerId) clearInterval(currentState.timerId);
             if (_bgUpdateTimer) { clearTimeout(_bgUpdateTimer); _bgUpdateTimer = null; }
-            localStorage.removeItem(`gz_generating_${char.id}_${sessionId}`);
-            delete generatingStates[char.id];
+            clearPersistedGeneration(char.id, sessionId);
+            clearGenerationState(char.id);
             if (activeChatChar && activeChatChar.id === char.id) isGenerating.value = false;
         };
 
         const ensureStaleCleanup = () => {
             if (_bgUpdateTimer) { clearTimeout(_bgUpdateTimer); _bgUpdateTimer = null; }
-            localStorage.removeItem(`gz_generating_${char.id}_${sessionId}`);
+            clearPersistedGeneration(char.id, sessionId);
         };
 
         try {
-            const currentState = generatingStates[char.id];
+            const currentState = getGenerationState(char.id);
             if (_bgUpdateTimer) { clearTimeout(_bgUpdateTimer); _bgUpdateTimer = null; }
 
             if (!currentState || currentState.genId !== genId) {
@@ -3611,7 +3618,7 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
             }
 
             if (currentState.timerId) clearInterval(currentState.timerId);
-            localStorage.removeItem(`gz_generating_${char.id}_${sessionId}`);
+            clearPersistedGeneration(char.id, sessionId);
             
             // Guard against race with abort
             const hasCompletionPayload = !!(response || finalReasoning || meta?.partialError);
@@ -3633,7 +3640,7 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
             }
         }
 
-        delete generatingStates[char.id];
+        clearGenerationState(char.id);
         if (activeChatChar && activeChatChar.id === char.id) isGenerating.value = false;
 
         const now = new Date();
@@ -3926,11 +3933,11 @@ function regenerateMessage(msgIndex, mode = 'normal', guidanceText = null) {
 async function branchSession(msgIndex) {
     if (!activeChatChar) return;
 
-    if (isGenerating.value && generatingStates[activeChatChar.id]) {
-        const state = generatingStates[activeChatChar.id];
+    if (isGenerating.value && hasGenerationState(activeChatChar.id)) {
+        const state = getGenerationState(activeChatChar.id);
         if (state?.type === 'impersonation') {
             if (state.controller) state.controller.abort();
-            delete generatingStates[activeChatChar.id];
+            clearGenerationState(activeChatChar.id);
             isGenerating.value = false;
         } else {
             await abortActiveChatGeneration(activeChatChar.id);
@@ -4102,11 +4109,11 @@ function openMessageActions(msg, index) {
                 icon: '<svg viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg>',
                 iconColor: '#ff4444',
                 onClick: () => {
-                    if (activeChatChar && generatingStates[activeChatChar.id]) {
-                        const state = generatingStates[activeChatChar.id];
+                    if (activeChatChar && hasGenerationState(activeChatChar.id)) {
+                        const state = getGenerationState(activeChatChar.id);
                         if (state?.type === 'impersonation') {
                             if (state.controller) state.controller.abort();
-                            delete generatingStates[activeChatChar.id];
+                            clearGenerationState(activeChatChar.id);
                             isGenerating.value = false;
                         } else {
                             abortActiveChatGeneration(activeChatChar.id);
@@ -4514,7 +4521,7 @@ async function startImpersonation(guidanceText = null) {
     isImpersonating.value = true;
     isGenerating.value = true;
     const controller = new AbortController();
-    generatingStates[charId] = { genId: ++genIdCounter, controller, type: 'impersonation' };
+    setGenerationState(charId, { genId: nextGenerationId(), controller, type: 'impersonation' });
 
     // Prepare history
     const history = currentMessages.value
@@ -4537,14 +4544,14 @@ async function startImpersonation(guidanceText = null) {
         inputValue.value = cleanText(response);
         isImpersonating.value = false;
         isGenerating.value = false;
-        delete generatingStates[charId];
+        clearGenerationState(charId);
         window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: charId } }));
             },
             onError: (err) => {
         console.error(err);
         isImpersonating.value = false;
         isGenerating.value = false;
-        delete generatingStates[charId];
+        clearGenerationState(charId);
         window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: charId } }));
             }
         }
@@ -4595,11 +4602,11 @@ function openAvatar(msg) {
 async function deleteSession(sessionId, targetChar) {
     const char = targetChar || activeChatChar;
 
-    if (char && generatingStates[char.id]) {
-        const state = generatingStates[char.id];
+    if (char && hasGenerationState(char.id)) {
+        const state = getGenerationState(char.id);
         if (state?.type === 'impersonation') {
             if (state.controller) state.controller.abort();
-            delete generatingStates[char.id];
+            clearGenerationState(char.id);
             if (activeChatChar && activeChatChar.id === char.id) {
                 isGenerating.value = false;
             }
@@ -5108,8 +5115,8 @@ onUnmounted(() => {
     stopMemoryDraftProgress();
     // Cleanup UI timers AND abort active generations for ALL generating states
     // This prevents leaked intervals, closures referencing unmounted reactive state, and stuck isTyping flags
-    for (const charId of Object.keys(generatingStates)) {
-        const state = generatingStates[charId];
+    for (const charId of listGeneratingCharIds()) {
+        const state = getGenerationState(charId);
         // Abort controller to stop ongoing API requests
         if (state.controller) {
             try {
@@ -5128,7 +5135,7 @@ onUnmounted(() => {
         // Clean localStorage flag
         const sessionId = activeChatChar?.sessionId;
         if (sessionId) {
-            localStorage.removeItem(`gz_generating_${charId}_${sessionId}`);
+            clearPersistedGeneration(charId, sessionId);
         }
     }
     window.removeEventListener('character-updated', onCharacterUpdated);
