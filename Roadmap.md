@@ -329,6 +329,7 @@ Current implementation status notes:
 - [done] Add an explicit session setting for memory injection target selection: `{{summary}}` macro slot vs dedicated chat summary block injection.
 - [done] Batch 3 persistence hardening: Memory Generation now preserves unsaved modal state across prompt preview/reopen flows, and DB normalization now keeps `autoCreateInterval`, `useDelayedAutomation`, `injectionTarget`, and the current Memory Books key-match defaults aligned during reload/save paths.
 - [done] Lorebook insertion now has a global default injection position and per-entry `Match Global` / `{{lorebooks}}` targets, so the `{{lorebooks}}` macro is legal at the lorebook-entry level instead of acting as a preset-wide override.
+- [done] Restore an explicit Lorebooks global setting for `Max Injected Entries`, separate from `scan depth`, so users can cap how many triggered lore entries actually reach the prompt.
 - [done] Lorebook ST round-trip now preserves Glaze-specific injection targets via `glazeMetadata`, so `Match Global` / `{{lorebooks}}` are not collapsed during export/import back into Glaze.
 
 4.5. Import/export/bootstrap and cloud-sync-safe serialization:
@@ -429,6 +430,7 @@ Manual verification that must stay visible in the roadmap:
 - [not done] Verify that auto mode without `Auto-Generate Draft Text` only creates `pending_generation` draft placeholders and never starts background generation by itself.
 - [not done] Verify that enabling `Auto-Generate Draft Text` immediately upgrades newly auto-created placeholders into generated drafts without skipping the placeholder step.
 - [not done] Verify that lorebook entries set to `Match Global`, `@worldInfoBefore`, `@worldInfoAfter`, and `{{lorebooks}}` inject at the expected locations without preset-level override regressions.
+- [not done] Verify that Lorebooks `Max Injected Entries` caps final prompt injection independently from `scan depth` and still preserves entry ordering.
 - [not done] Current known limitation: lorebook/memory entries now aggregate into single injected blocks per target, but when the target is a macro inside another preset block, the injected content still lands as a separate block adjacent to that area rather than truly inside the host block. Revisit later.
 - [not done] Verify that Glaze lorebook export/import preserves `Match Global` and `{{lorebooks}}` through the new `glazeMetadata` round-trip path.
 - [not done] Verify that backup export/import preserves memory books and rebuilds any derived vectors safely.

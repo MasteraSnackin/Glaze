@@ -164,6 +164,7 @@ function scanLorebooksPure(history, char, textToScan, chatId, lorebooks, globalS
 
     if (activeLorebooks.length === 0) return [];
 
+    const maxInjectedEntries = Math.max(1, Math.min(100, Number(globalSettings?.maxInjectedEntries || 5)));
     let allRelevantEntries = [];
     let candidates = [];
 
@@ -252,7 +253,11 @@ function scanLorebooksPure(history, char, textToScan, chatId, lorebooks, globalS
             };
 
             const scanDepth = entry.scanDepth ?? globalSettings.scanDepth ?? 10;
-            const messagesToScan = history.slice(-scanDepth).map(m => m.content).join("\n");
+            const temporalDepth = Math.max(entry.sticky || 0, entry.cooldown || 0);
+            const effectiveScanDepth = temporalDepth > 0
+                ? Math.min(scanDepth, temporalDepth)
+                : scanDepth;
+            const messagesToScan = history.slice(-effectiveScanDepth).map(m => m.content).join("\n");
 
             const scanSource = caseSensitive ?
                 (messagesToScan + textToScan) :
@@ -312,7 +317,9 @@ function scanLorebooksPure(history, char, textToScan, chatId, lorebooks, globalS
         }
     }
 
-    return allRelevantEntries.sort((a, b) => (a.order ?? 100) - (b.order ?? 100));
+    return allRelevantEntries
+        .sort((a, b) => (a.order ?? 100) - (b.order ?? 100))
+        .slice(0, maxInjectedEntries);
 }
 
 function squashHistory(historyMsgs, squashRole) {
