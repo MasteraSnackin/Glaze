@@ -67,7 +67,12 @@ import { lorebookState, getActiveLorebooksForContext } from '@/core/states/loreb
 import { presetState, getEffectivePreset, getEffectivePresetId } from '@/core/states/presetState.js';
 import { useVirtualScroll } from '@/composables/chat/useVirtualScroll.js';
 import { useGenerationRegistry } from '@/composables/chat/useGenerationRegistry.js';
+import { handleGenerationComplete } from '@/composables/chat/useGenerationCompleteHandler.js';
+import { handleGenerationError } from '@/composables/chat/useGenerationErrorHandler.js';
+import { handleGenerationPromptReady } from '@/composables/chat/useGenerationPromptReady.js';
 import { createPromptMetadataSnapshots } from '@/composables/chat/usePromptMetadataSnapshots.js';
+import { restoreGenerationState } from '@/composables/chat/useGenerationStateRestore.js';
+import { createGenerationStreamUpdater } from '@/composables/chat/useGenerationStreamUpdate.js';
 import { useTypingStateCleanup } from '@/composables/chat/useTypingStateCleanup.js';
 import { useSidebarResizer } from '@/composables/ui/useSidebarResizer.js';
 import { sendMessageNotification, clearMessageNotifications, startGenerationNotification, stopGenerationNotification } from '@/core/services/notificationService.js';
@@ -3260,155 +3265,60 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
         }
     }, 100);
 
-    const restoreState = async (isError = false) => {
-        if (_bgUpdateTimer) { clearTimeout(_bgUpdateTimer); _bgUpdateTimer = null; }
-        if (getGenerationState(char.id)?.timerId) clearInterval(getGenerationState(char.id).timerId);
-        clearPersistedGeneration(char.id, sessionId);
-        
-        const idx = currentMessages.value.findIndex(m => m.id === msgId);
-        if (idx !== -1) {
-            // User is still viewing this chat — update reactive state
-            restorePromptMetaOnMessages(currentMessages.value);
-            currentMessages.value[idx].isTyping = false;
-
-            if (!isError) {
-                const msg = currentMessages.value[idx];
-                if (msg.swipes && msg.swipes.length > 1) {
-                    const currentSwipeId = msg.swipeId || 0;
-                    msg.swipes.splice(currentSwipeId, 1);
-                    if (msg.swipesMeta) msg.swipesMeta.splice(currentSwipeId, 1);
-                    
-                    let newSwipeId = currentSwipeId - 1;
-                    if (newSwipeId < 0) newSwipeId = 0;
-                    
-                    msg.swipeId = newSwipeId;
-                    msg.text = msg.swipes[newSwipeId] || "";
-                    
-                    // Restore guidance from the reverted swipe's meta
-                    if (msg.swipesMeta && msg.swipesMeta[newSwipeId]) {
-                        msg.guidanceText = msg.swipesMeta[newSwipeId].guidanceText || null;
-                        msg.guidanceType = msg.swipesMeta[newSwipeId].guidanceType || 'GENERATION';
-                    } else {
-                        msg.guidanceText = null;
-                        msg.guidanceType = 'GENERATION';
-                    }
-                    
-                    if (msg.swipesMeta && msg.swipesMeta[newSwipeId]) {
-                        msg.reasoning = msg.swipesMeta[newSwipeId].reasoning;
-                        msg.genTime = msg.swipesMeta[newSwipeId].genTime;
-                    }
-                    updateSessionMessage(char, idx, msg);
-                } else {
-                    currentMessages.value.splice(idx, 1);
-                    const data = await getChatData(char.id);
-                    if (data && sessionId && data.sessions[sessionId]) {
-                        data.sessions[sessionId] = currentMessages.value;
-                        await db.saveChat(char.id, data);
-                    }
-                }
-            }
-        } else {
-            // User navigated away — clean up directly in DB
-            const data = await getChatData(char.id);
-            if (data && data.sessions[sessionId]) {
-                restorePromptMetaOnMessages(data.sessions[sessionId]);
-                const dbIdx = data.sessions[sessionId].findIndex(m => m.id === msgId);
-                if (dbIdx !== -1) {
-                    data.sessions[sessionId][dbIdx].isTyping = false;
-                    if (!isError) {
-                        const msg = data.sessions[sessionId][dbIdx];
-                        if (msg.swipes && msg.swipes.length > 1) {
-                            const currentSwipeId = msg.swipeId || 0;
-                            msg.swipes.splice(currentSwipeId, 1);
-                            if (msg.swipesMeta) msg.swipesMeta.splice(currentSwipeId, 1);
-                            let newSwipeId = currentSwipeId - 1;
-                            if (newSwipeId < 0) newSwipeId = 0;
-                            msg.swipeId = newSwipeId;
-                            msg.text = msg.swipes[newSwipeId] || "";
-                        } else {
-                            data.sessions[sessionId].splice(dbIdx, 1);
-                        }
-                    }
-                    await db.saveChat(char.id, data);
-                }
-            }
+    const { onUpdate, clearBackgroundUpdateTimer } = createGenerationStreamUpdater({
+        char,
+        sessionId,
+        msgId,
+        genId,
+        getGenerationState,
+        getChatData,
+        db,
+        onRawText: (effectiveText, chunk) => {
+            rawStreamText = effectiveText || (rawStreamText + (chunk || ''));
         }
-        if (onAbort) onAbort(isError);
+    });
+
+    const restoreState = async (isError = false) => {
+        await restoreGenerationState({
+            currentMessages,
+            getChatData,
+            db,
+            getGenerationState,
+            clearPersistedGeneration,
+            char,
+            sessionId,
+            msgId,
+            isError,
+            onAbort,
+            restorePromptMetaOnMessages,
+            clearBackgroundUpdateTimer,
+            updateSessionMessage
+        });
     };
 
     getGenerationState(char.id).restoreState = restoreState;
 
     const onError = async (e) => {
-        const state = getGenerationState(char.id);
-        if (!state || state.genId !== genId) return;
-        if (_bgUpdateTimer) { clearTimeout(_bgUpdateTimer); _bgUpdateTimer = null; }
-
-        // CRITICAL: Ensure isTyping is ALWAYS cleared, even if DB operations fail
-        const ensureTypingCleared = async () => {
-            await clearTypingStateForMessage({
-                charId: char.id,
-                sessionId,
-                msgId,
-                errorLabel: '[onError]'
-            });
-        };
-
-        try {
-            // Handle Context Limit gracefully (Bottom Sheet already shown by llmApi)
-            if (e.message === "Context limit exceeded") {
-                await restoreState(false); // Treat as abort/cancel (removes typing indicator)
-                clearGenerationState(char.id);
-                if (activeChatChar && activeChatChar.id === char.id) isGenerating.value = false;
-                window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: char.id, sessionId: sessionId } }));
-                return;
-            }
-
-            await restoreState(true);
-            clearGenerationState(char.id);
-            if (activeChatChar && activeChatChar.id === char.id) isGenerating.value = false;
-
-            sendMessageNotification(
-                `Error — ${char.name}`,
-                e.message || 'Generation failed',
-                char.avatar, char.id, sessionId, msgId
-            );
-
-            const idx = currentMessages.value.findIndex(m => m.id === msgId);
-            if (idx !== -1) {
-                // User is still viewing this chat
-                const msg = currentMessages.value[idx];
-                msg.text = formatError(e, rawStreamText);
-                msg.isError = true;
-                if (msg.swipes && msg.swipes.length > 0) {
-                    msg.swipes[msg.swipeId || 0] = msg.text;
-                }
-                updateSessionMessage(char, idx, msg);
-            } else {
-                // User navigated away — write error directly to DB
-                const data = await getChatData(char.id);
-                if (data && data.sessions[sessionId]) {
-                    const dbIdx = data.sessions[sessionId].findIndex(m => m.id === msgId);
-                    if (dbIdx !== -1) {
-                        const msg = data.sessions[sessionId][dbIdx];
-                        msg.text = formatError(e, rawStreamText);
-                        msg.isError = true;
-                        msg.isTyping = false;
-                        if (msg.swipes && msg.swipes.length > 0) {
-                            msg.swipes[msg.swipeId || 0] = msg.text;
-                        }
-                        await db.saveChat(char.id, data);
-                    }
-                }
-            }
-            window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: char.id, sessionId: sessionId } }));
-        } catch (handlerErr) {
-            console.error('[onError] Error handler failed:', handlerErr);
-            // Fallback: ensure typing is cleared even if main handler fails
-            await ensureTypingCleared();
-            clearGenerationState(char.id);
-            if (activeChatChar && activeChatChar.id === char.id) isGenerating.value = false;
-            window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: char.id, sessionId: sessionId } }));
-        }
+        await handleGenerationError({
+            error: e,
+            char,
+            sessionId,
+            msgId,
+            genId,
+            rawStreamText,
+            activeChatChar,
+            isGenerating,
+            currentMessages,
+            getGenerationState,
+            clearGenerationState,
+            restoreState,
+            clearBackgroundUpdateTimer,
+            clearTypingStateForMessage,
+            getChatData,
+            db,
+            formatError,
+            sendMessageNotification
+        });
     };
 
     // Prepare history for LLM
@@ -3425,43 +3335,6 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
             contextRefs: Array.isArray(m.contextRefs) ? m.contextRefs : []
         }));
 
-    let _bgUpdateTimer = null;
-    let _bgPendingText = null;
-    let _bgPendingReasoning = null;
-
-    const onUpdate = async (chunk, reasoningChunk, effectiveText, effectiveReasoning, textDelta) => {
-        rawStreamText = effectiveText || (rawStreamText + (chunk || ""));
-        
-        // Update via dynamic updater (handles re-mounts)
-        const state = getGenerationState(char.id);
-        if (state && state.genId === genId && state.onUIUpdate) {
-            state.onUIUpdate(effectiveText, effectiveReasoning, true, textDelta);
-        } else if (!state || state.genId !== genId) {
-            return;
-        } else {
-            // Background update — throttle DB writes to once per 2s (#7)
-            _bgPendingText = effectiveText;
-            _bgPendingReasoning = effectiveReasoning;
-            if (!_bgUpdateTimer) {
-                _bgUpdateTimer = setTimeout(async () => {
-                    _bgUpdateTimer = null;
-                    if (_bgPendingText === null) return;
-                    const latestState = getGenerationState(char.id);
-                    if (!latestState || latestState.genId !== genId) return;
-                    const data = await getChatData(char.id);
-                    if (data && data.sessions[sessionId]) {
-                        const dbMsg = data.sessions[sessionId].find(m => m.id === msgId);
-                        if (dbMsg) {
-                            dbMsg.text = _bgPendingText;
-                            dbMsg.reasoning = _bgPendingReasoning;
-                            await db.saveChat(char.id, data);
-                        }
-                    }
-                }, 2000);
-            }
-        }
-    };
-
     generateChatResponse({
         text,
         char,
@@ -3473,276 +3346,57 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
         controller,
         callbacks: {
             onPromptReady: async ({ loreEntries, memoryEntries }) => {
-                const triggeredLorebooks = loreEntries.map(e => ({
-                    id: e.id,
-                    name: e.comment || e.name || e.keys?.[0] || 'Entry',
-                    content: e.content,
-                    lorebookName: e.lorebookName,
-                    lorebookId: e.lorebookId,
-                    _source: e._source || 'keyword' // 'keyword' or 'vector'
-                }));
-                const triggeredMemories = (memoryEntries || []).map(entry => ({
-                    id: entry.id,
-                    name: entry.title || 'Memory',
-                    content: entry.content || '',
-                    messageIds: Array.isArray(entry.messageIds) ? entry.messageIds : []
-                }));
-                const contextRefs = [
-                    ...triggeredLorebooks.map(entry => ({
-                        id: entry.id,
-                        type: 'lorebook',
-                        label: entry.name,
-                        sourceId: entry.lorebookId || null,
-                        sourceName: entry.lorebookName || null
-                    })),
-                    ...triggeredMemories.map(entry => ({
-                        id: entry.id,
-                        type: 'memory',
-                        label: entry.name,
-                        sourceId: sessionId,
-                        sourceName: 'Memory Book'
-                    }))
-                ];
-
-                const assignRefs = (m) => {
-                    snapshotPromptMeta(m);
-                    m.triggeredLorebooks = triggeredLorebooks;
-                    m.triggeredMemories = triggeredMemories;
-                    m.contextRefs = contextRefs;
-                };
-
-                if (msgIndex !== -1 && currentMessages.value[msgIndex]) {
-                    assignRefs(currentMessages.value[msgIndex]);
-                }
-                if (msgIndex > 0 && currentMessages.value[msgIndex - 1]?.role === 'user') {
-                    assignRefs(currentMessages.value[msgIndex - 1]);
-                }
-
-                const data = await getChatData(char.id);
-                if (data) {
-                    data.sessions[sessionId] = currentMessages.value;
-                    await db.saveChat(char.id, data);
-                }
+                await handleGenerationPromptReady({
+                    loreEntries,
+                    memoryEntries,
+                    currentMessages,
+                    msgIndex,
+                    char,
+                    sessionId,
+                    getChatData,
+                    db,
+                    snapshotPromptMeta
+                });
             },
             onUpdate,
             onComplete: async (response, finalReasoning, meta) => {
-        // CRITICAL: Ensure cleanup happens even if handler fails
-        const ensureCleanup = () => {
-            const currentState = getGenerationState(char.id);
-            if (currentState && currentState.timerId) clearInterval(currentState.timerId);
-            if (_bgUpdateTimer) { clearTimeout(_bgUpdateTimer); _bgUpdateTimer = null; }
-            clearPersistedGeneration(char.id, sessionId);
-            clearGenerationState(char.id);
-            if (activeChatChar && activeChatChar.id === char.id) isGenerating.value = false;
-        };
-
-        const ensureStaleCleanup = () => {
-            if (_bgUpdateTimer) { clearTimeout(_bgUpdateTimer); _bgUpdateTimer = null; }
-            clearPersistedGeneration(char.id, sessionId);
-        };
-
-        try {
-            const currentState = getGenerationState(char.id);
-            if (_bgUpdateTimer) { clearTimeout(_bgUpdateTimer); _bgUpdateTimer = null; }
-
-            if (!currentState || currentState.genId !== genId) {
-                await clearTypingStateForMessage({ charId: char.id, sessionId, msgId });
-                ensureStaleCleanup();
-                window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: char.id, sessionId: sessionId } }));
-                return;
-            }
-
-            if (currentState.timerId) clearInterval(currentState.timerId);
-            clearPersistedGeneration(char.id, sessionId);
-            
-            // Guard against race with abort
-            const hasCompletionPayload = !!(response || finalReasoning || meta?.partialError);
-            if (controller.signal.aborted && !hasCompletionPayload) {
-                await clearTypingStateForMessage({ charId: char.id, sessionId, msgId });
-                ensureCleanup();
-                window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: char.id, sessionId: sessionId } }));
-                return;
-            }
-
-        let wasVisible = false;
-        let displayIndex = -1;
-        const foundIndex = currentMessages.value.findIndex(m => m.id === currentState.msgId);
-        
-        if (foundIndex !== -1) {
-            displayIndex = displayMessages.value.findIndex(m => m.type === 'message' && m.originalIndex === foundIndex);
-            if (displayIndex !== -1) {
-                wasVisible = isItemVisible(displayIndex);
-            }
-        }
-
-        clearGenerationState(char.id);
-        if (activeChatChar && activeChatChar.id === char.id) isGenerating.value = false;
-
-        const now = new Date();
-        response = cleanText(response);
-        const time = now.getHours() + ':' + String(now.getMinutes()).padStart(2, '0');
-        const duration = ((Date.now() - startTime) / 1000).toFixed(2) + 's';
-
-        // Try to find message in current view by timestamp, fallback to index if same instance
-        if (activeChatChar && activeChatChar.id === char.id && foundIndex !== -1) {
-            const msg = currentMessages.value[foundIndex];
-            msg.text = response;
-            msg.reasoning = finalReasoning;
-            msg.time = time;
-            msg.genTime = duration;
-            msg.tokens = estimateTokens(response);
-            msg.isTyping = false;
-            if (meta?.partialError) {
-                msg.isPartial = true;
-                msg.partialErrorMsg = meta.partialError;
-            }
-
-            // Update swipes
-            if (!msg.swipes) msg.swipes = [];
-            if (!msg.swipesMeta) msg.swipesMeta = [];
-            
-            // If this was a new generation (not a swipe add), it's the first swipe
-            if (msg.swipes.length === 1 && msg.swipes[0] === "") {
-                msg.swipes[0] = response;
-                msg.swipesMeta[0] = { 
-                    genTime: duration, 
-                    reasoning: finalReasoning, 
-                    tokens: msg.tokens,
-                    guidanceText: msg.guidanceText,
-                    guidanceType: msg.guidanceType
-                };
-                addMessageStats(char.id, sessionId, msg.tokens, response.length, msg.timestamp);
-                triggerAutoSyncCheck();
-            } else {
-                msg.swipes[msg.swipeId || 0] = response;
-                if (!msg.swipesMeta[msg.swipeId || 0]) msg.swipesMeta[msg.swipeId || 0] = {};
-                msg.swipesMeta[msg.swipeId || 0].genTime = duration;
-                msg.swipesMeta[msg.swipeId || 0].reasoning = finalReasoning;
-                msg.swipesMeta[msg.swipeId || 0].tokens = msg.tokens;
-                msg.swipesMeta[msg.swipeId || 0].guidanceText = guidanceText;
-                msg.swipesMeta[msg.swipeId || 0].guidanceType = guidanceType;
-                addRegenerationStats(char.id, sessionId, msg.tokens, response.length);
-            }
-            
-            updateSessionMessage(char, foundIndex, msg);
-
-            // Process image generation tags async (non-blocking)
-            processMessageImages(msg.text, (updatedText) => {
-                msg.text = updatedText;
-                msg.swipes[msg.swipeId || 0] = updatedText;
-                // Only persist to DB once all images are resolved (no loading states remain)
-                if (!updatedText.includes('imggen-loading')) {
-                    updateSessionMessage(char, foundIndex, msg);
-                }
-            }, { charAvatar: char.avatar || null, userAvatar: activePersona.value?.avatar || null, messages: currentMessages.value, currentMsgIndex: foundIndex }).then(finalText => {
-                if (finalText !== msg.text) {
-                    msg.text = finalText;
-                    msg.swipes[msg.swipeId || 0] = finalText;
-                    updateSessionMessage(char, foundIndex, msg);
-                }
-            }).catch(e => console.error('[ImageGen] processMessageImages failed:', e));
-
-            if (wasVisible) {
-                scrollToIndex(displayIndex, 'smooth', 'top');
-            } else {
-                smartScroll();
-            }
-
-            sendMessageNotification(char.name, response, char.avatar, char.id, sessionId, msgId);
-
-            if (guidanceType === 'GENERATION') {
-                const autoData = await getChatData(char.id);
-                if (autoData) {
-                    const autoSessionId = char.sessionId || autoData.currentId;
-                    autoData.sessions[autoSessionId] = currentMessages.value;
-                    await runMemoryAutomationAfterStableTurn(autoData, autoSessionId, currentMessages.value, { allowImmediate: true });
-                }
-            }
-
-            // Notify application about generation end (after update)
-            window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: char.id, sessionId: sessionId } }));
-        } else {
-            // Background completion — write directly to DB, NOT currentMessages.value
-            const bgData = await getChatData(char.id);
-            if (bgData && bgData.sessions[sessionId]) {
-                const bIdx = bgData.sessions[sessionId].findIndex(m => m.id === msgId);
-                if (bIdx !== -1) {
-                    const msg = bgData.sessions[sessionId][bIdx];
-                    msg.text = response;
-                    msg.reasoning = finalReasoning;
-                    msg.time = time;
-                    msg.genTime = duration;
-                    msg.tokens = estimateTokens(response);
-                    msg.isTyping = false;
-                    if (meta?.partialError) {
-                        msg.isPartial = true;
-                        msg.partialErrorMsg = meta.partialError;
-                    }
-
-                    if (!msg.swipes) msg.swipes = [];
-                    if (!msg.swipesMeta) msg.swipesMeta = [];
-                    
-                    if (msg.swipes.length === 1 && msg.swipes[0] === "") {
-                        msg.swipes[0] = response;
-                        msg.swipesMeta[0] = { genTime: duration, reasoning: finalReasoning, tokens: msg.tokens };
-                        addMessageStats(char.id, sessionId, msg.tokens, response.length, msg.timestamp);
-                        triggerAutoSyncCheck();
-                    } else {
-                        msg.swipes[msg.swipeId || 0] = response;
-                        if (!msg.swipesMeta[msg.swipeId || 0]) msg.swipesMeta[msg.swipeId || 0] = {};
-                        msg.swipesMeta[msg.swipeId || 0].genTime = duration;
-                        msg.swipesMeta[msg.swipeId || 0].reasoning = finalReasoning;
-                        msg.swipesMeta[msg.swipeId || 0].tokens = msg.tokens;
-                        addRegenerationStats(char.id, sessionId, msg.tokens, response.length);
-                    }
-                    
-                    processMessageImages(response, (updatedText) => {
-                        msg.text = updatedText;
-                        msg.swipes[msg.swipeId || 0] = updatedText;
-                        // Only persist to DB once all images are resolved (no loading states remain)
-                        if (!updatedText.includes('imggen-loading')) {
-                            db.saveChat(char.id, bgData);
-                        }
-                    }, { charAvatar: char.avatar || null, userAvatar: activePersona.value?.avatar || null, messages: bgData.sessions[sessionId], currentMsgIndex: bIdx }).then(finalText => {
-                        if (finalText !== msg.text) {
-                            msg.text = finalText;
-                            msg.swipes[msg.swipeId || 0] = finalText;
-                            db.saveChat(char.id, bgData);
-                        }
-                    }).catch(e => console.error('[ImageGen] background processMessageImages failed:', e));
-                    
-                    await db.saveChat(char.id, bgData);
-
-                    if (guidanceType === 'GENERATION') {
-                        await runMemoryAutomationAfterStableTurn(bgData, sessionId, bgData.sessions[sessionId], { allowImmediate: true });
-                    }
-
-                    sendMessageNotification(char.name, response, char.avatar, char.id, sessionId, msgId);
-                    
-                    // Mark unread
-                    db.get('gz_unread').then(unread => {
-                        const newUnread = unread || {};
-                        newUnread[char.id] = true;
-                        db.set('gz_unread', newUnread);
-                        window.dispatchEvent(new CustomEvent('chat-updated'));
-                    });
-
-                    window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: char.id, sessionId: sessionId } }));
-                }
-            }
-        }
-        } catch (completeErr) {
-            console.error('[onComplete] Completion handler failed:', completeErr);
-            // Ensure cleanup and isTyping cleared even if handler fails
-            ensureCleanup();
-            await clearTypingStateForMessage({
-                charId: char.id,
-                sessionId,
-                msgId,
-                errorLabel: '[onComplete]'
-            });
-            window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: char.id, sessionId: sessionId } }));
-        }
+                await handleGenerationComplete({
+                    response,
+                    finalReasoning,
+                    meta,
+                    char,
+                    sessionId,
+                    msgId,
+                    genId,
+                    startTime,
+                    controller,
+                    guidanceText,
+                    guidanceType,
+                    activeChatChar,
+                    isGenerating,
+                    currentMessages,
+                    displayMessages,
+                    getGenerationState,
+                    clearGenerationState,
+                    clearPersistedGeneration,
+                    clearBackgroundUpdateTimer,
+                    clearTypingStateForMessage,
+                    getChatData,
+                    db,
+                    cleanText,
+                    estimateTokens,
+                    updateSessionMessage,
+                    processMessageImages,
+                    userAvatar: activePersona.value?.avatar || null,
+                    isItemVisible,
+                    scrollToIndex,
+                    smartScroll,
+                    sendMessageNotification,
+                    runMemoryAutomationAfterStableTurn,
+                    addMessageStats,
+                    addRegenerationStats,
+                    triggerAutoSyncCheck
+                });
             },
             onError
         }

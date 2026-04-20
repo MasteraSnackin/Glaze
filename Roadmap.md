@@ -872,6 +872,15 @@ Done and tested:
 - [done] Runtime API config centralization started:
   - `APISettings.js` now exposes `getApiRuntimeStorage()`, `saveApiRuntimeSetting()`, `applyApiRuntimeConfig()`, and `getApiReasoningTags()`
   - hot-path callers (`ApiView.vue`, `OnboardingView.vue`, `ToolsView.vue`, `ChatView.vue`, `generationService.js`, `macroEngine.js`, `ChatMessage.vue`) now use these helpers instead of duplicating raw runtime config reads/writes.
+- [done] Generation lifecycle extraction started in `ChatView.vue` without behavior changes:
+  - `useGenerationRegistry.js` owns per-chat generation session state and persisted generating flags
+  - `usePromptMetadataSnapshots.js` owns prompt metadata snapshot/restore for abort/error rollback
+  - `useTypingStateCleanup.js` centralizes `isTyping` cleanup across stale/error/abort paths
+  - `useGenerationStateRestore.js` now owns generation abort/error restore flow for swipe rollback, message removal, and DB fallback cleanup
+  - `useGenerationErrorHandler.js` now owns error-path cleanup and persisted error-state writes after generation failures
+  - `useGenerationCompleteHandler.js` now owns completion-path cleanup, visible/background completion writes, and stale/abort finalization checks
+  - `useGenerationStreamUpdate.js` now owns stream fan-out and throttled background DB persistence during active generation
+  - `useGenerationPromptReady.js` now owns prompt metadata assignment and prompt-ready persistence for triggered lorebooks/memories/context refs
 
 Tested status:
 - [done] `npm test -- --run`
