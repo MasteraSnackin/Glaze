@@ -174,29 +174,31 @@ export async function connect() {
     authUrl.searchParams.set('prompt', 'consent');
 
     if (Capacitor.isNativePlatform()) {
-        const listener = await App.addListener('appUrlOpen', async (data) => {
-            try {
-                const url = new URL(data.url);
-                const code = url.searchParams.get('code');
-                const returnedState = url.searchParams.get('state');
+        await new Promise((resolve, reject) => {
+            App.addListener('appUrlOpen', async (data) => {
+                try {
+                    const url = new URL(data.url);
+                    const code = url.searchParams.get('code');
+                    const returnedState = url.searchParams.get('state');
 
-                if (!code) return;
+                    if (!code) return;
 
-                if (returnedState !== state) {
-                    console.error('[gdriveAdapter] State mismatch');
-                    return;
+                    if (returnedState !== state) {
+                        reject(new Error('State mismatch'));
+                        return;
+                    }
+
+                    await exchangeCodeForToken(code, verifier, redirectUri);
+                    resolve();
+                } catch (e) {
+                    reject(e);
+                } finally {
+                    try { await Browser.close(); } catch { }
                 }
-
-                await exchangeCodeForToken(code, verifier, redirectUri);
-            } catch (e) {
-                console.error('[gdriveAdapter] OAuth callback error:', e);
-            } finally {
-                listener.remove();
-                try { await Browser.close(); } catch { }
-            }
+            }).then(listener => {
+                Browser.open({ url: authUrl.toString() }).catch(reject);
+            });
         });
-
-        await Browser.open({ url: authUrl.toString() });
     } else {
         const code = await waitForWebOAuth(authUrl.toString(), state);
         if (code) {
