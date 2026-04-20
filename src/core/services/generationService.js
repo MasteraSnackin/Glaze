@@ -242,11 +242,14 @@ export async function generateChatResponse({
         const vectorResults = await vectorSearchLorebooks(safeHistory || history, text, char, char?.sessionId);
         if (vectorResults.length > 0 && result.loreEntries) {
             const keywordIds = new Set(result.loreEntries.map(e => e.id));
-            newVectorEntries = vectorResults.filter(e => !keywordIds.has(e.id));
-            newVectorEntries.forEach(e => { e._source = 'vector'; });
             result.loreEntries.forEach(e => { if (!e._source) e._source = 'keyword'; });
             const keywordEntries = result.loreEntries.filter(e => e._source === 'keyword');
-            const vectorOnly = newVectorEntries.sort((a, b) => (b.vectorScore || 0) - (a.vectorScore || 0));
+            newVectorEntries = limitVectorLoreEntries(
+                vectorResults.filter(e => !keywordIds.has(e.id)),
+                keywordEntries
+            );
+            newVectorEntries.forEach(e => { e._source = 'vector'; });
+            const vectorOnly = [...newVectorEntries];
             result.loreEntries = [...keywordEntries, ...vectorOnly];
         }
     } catch (e) {
@@ -540,7 +543,13 @@ export async function calculateContext({ char, history, authorsNote, summary }) 
             const vectorResults = await vectorSearchLorebooks(safeHistory || history, '', char, char?.sessionId);
             if (vectorResults.length > 0) {
                 const keywordIds = result.loreEntries ? new Set(result.loreEntries.map(e => e.id)) : new Set();
-                const newVectorEntries = vectorResults.filter(e => !keywordIds.has(e.id));
+                const keywordEntries = Array.isArray(result.loreEntries)
+                    ? result.loreEntries.filter(e => (e?._source || 'keyword') === 'keyword')
+                    : [];
+                const newVectorEntries = limitVectorLoreEntries(
+                    vectorResults.filter(e => !keywordIds.has(e.id)),
+                    keywordEntries
+                );
                 vectorLoreTokens = newVectorEntries.reduce((sum, entry) => {
                     const content = entry.content || '';
                     const tokens = estimateTokens(content);
@@ -979,6 +988,16 @@ function combineLoreSources(messages = []) {
         sourceMap.set(item.source, (sourceMap.get(item.source) || 0) + (item.tokens || 0));
     }
     return [...sourceMap.entries()].map(([source, tokens]) => ({ source, tokens }));
+}
+
+function limitVectorLoreEntries(vectorEntries = [], keywordEntries = []) {
+    const maxInjectedEntries = Math.max(1, Math.min(100, Number(lorebookState.globalSettings?.maxInjectedEntries || 5)));
+    const remainingSlots = Math.max(0, maxInjectedEntries - keywordEntries.length);
+    if (remainingSlots <= 0) return [];
+
+    return [...vectorEntries]
+        .sort((a, b) => (b.vectorScore || 0) - (a.vectorScore || 0))
+        .slice(0, remainingSlots);
 }
 
 function buildVectorLoreBlock(entries, position) {
