@@ -69,6 +69,26 @@ export async function executeRequest({
     };
     Object.assign(headers, provider.buildAuthHeaders(apiKey));
 
+    const completeStructuredResponse = ({ data, contextLabel, logLabel }) => {
+        logger.debug(logLabel, data);
+
+        const { content, reasoningContent } = extractOpenAiMessage(data, contextLabel);
+        const normalized = normalizeReasoningOutput({
+            content,
+            requestReasoning,
+            rawReasoning: reasoningContent,
+            hasInlineTags,
+            tagStart,
+            tagEnd,
+            headerModel,
+            headerInline
+        });
+
+        const cleanedText = cleanText(normalized.text);
+        finishNetworkTrace({ rawResponse: data, text: cleanedText, reasoning: normalized.reasoning });
+        if (onComplete) onComplete(cleanedText, normalized.reasoning);
+    };
+
     startNetworkTrace({
         requestType,
         apiUrl,
@@ -101,25 +121,14 @@ export async function executeRequest({
             }
 
             const data = response.data;
-            logger.debug("LLM Response (Native):", data);
             updateNetworkTrace({ responseStatus: response.status });
             throwIfAborted();
-            
-            const { content, reasoningContent } = extractOpenAiMessage(data, 'API response structure (Native)');
-            const normalized = normalizeReasoningOutput({
-                content,
-                requestReasoning,
-                rawReasoning: reasoningContent,
-                hasInlineTags,
-                tagStart,
-                tagEnd,
-                headerModel,
-                headerInline
+
+            completeStructuredResponse({
+                data,
+                contextLabel: 'API response structure (Native)',
+                logLabel: 'LLM Response (Native):'
             });
-
-            finishNetworkTrace({ rawResponse: data, text: cleanText(normalized.text), reasoning: normalized.reasoning });
-
-            if (onComplete) onComplete(cleanText(normalized.text), normalized.reasoning);
 
             // Exit function, finally block will still run for cleanup
             return;
@@ -166,24 +175,13 @@ export async function executeRequest({
                 }
 
                 const data = await response.json();
-                logger.debug('LLM Response (stream fallback):', data);
                 throwIfAborted();
 
-                const { content, reasoningContent } = extractOpenAiMessage(data, 'API response structure (stream fallback)');
-                const normalized = normalizeReasoningOutput({
-                    content,
-                    requestReasoning,
-                    rawReasoning: reasoningContent,
-                    hasInlineTags,
-                    tagStart,
-                    tagEnd,
-                    headerModel,
-                    headerInline
+                completeStructuredResponse({
+                    data,
+                    contextLabel: 'API response structure (stream fallback)',
+                    logLabel: 'LLM Response (stream fallback):'
                 });
-
-                finishNetworkTrace({ rawResponse: data, text: cleanText(normalized.text), reasoning: normalized.reasoning });
-
-                if (onComplete) onComplete(cleanText(normalized.text), normalized.reasoning);
                 return;
             }
 
@@ -272,24 +270,13 @@ export async function executeRequest({
 
         } else {
             const data = await response.json();
-            logger.debug("LLM Response:", data);
             throwIfAborted();
-            
-            const { content, reasoningContent } = extractOpenAiMessage(data, 'API response structure');
-            const normalized = normalizeReasoningOutput({
-                content,
-                requestReasoning,
-                rawReasoning: reasoningContent,
-                hasInlineTags,
-                tagStart,
-                tagEnd,
-                headerModel,
-                headerInline
+
+            completeStructuredResponse({
+                data,
+                contextLabel: 'API response structure',
+                logLabel: 'LLM Response:'
             });
-
-            finishNetworkTrace({ rawResponse: data, text: cleanText(normalized.text), reasoning: normalized.reasoning });
-
-            if (onComplete) onComplete(cleanText(normalized.text), normalized.reasoning);
         }
     } catch (e) {
         if (e.name === 'AbortError') {
