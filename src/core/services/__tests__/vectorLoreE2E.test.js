@@ -200,6 +200,88 @@ describe('Vector lorebook E2E verification', () => {
         expect(mockExecuteRequest).toHaveBeenCalledOnce();
     });
 
+    it('only injects lorebook macro entries into {{lorebooks}} blocks', async () => {
+        mockGetEmbeddings.mockImplementation(async (texts) => texts.map((text) => [{
+            text,
+            vector: [0.95, 0.05, 0]
+        }]));
+
+        lorebookState.globalSettings.searchType = 'keys';
+        lorebookState.globalSettings.injectionPosition = 'worldInfoBefore';
+        lorebookState.lorebooks = [{
+            id: 'lb-macro',
+            name: 'Macro split',
+            enabled: true,
+            entries: [
+                {
+                    id: 'entry-before',
+                    comment: 'Before entry',
+                    keys: ['topic'],
+                    content: 'Before block lore',
+                    enabled: true,
+                    position: 'worldInfoBefore'
+                },
+                {
+                    id: 'entry-macro',
+                    comment: 'Macro entry',
+                    keys: ['topic'],
+                    content: 'Macro block lore',
+                    enabled: true,
+                    position: 'lorebooksMacro'
+                }
+            ]
+        }];
+
+        const customWorkerData = {
+            messages: [
+                { role: 'system', content: 'Header' },
+                { role: 'system', content: 'Lore slot: Macro block lore' },
+                { role: 'system', content: 'Before block lore' },
+                { role: 'user', content: 'Current user message', isHistory: true }
+            ],
+            loreEntries: [
+                { id: 'entry-before', content: 'Before block lore', position: 'worldInfoBefore' },
+                { id: 'entry-macro', content: 'Macro block lore', position: 'lorebooksMacro' }
+            ],
+            staticTokens: 12,
+            contextBreakdown: { lorebook: 2 },
+            needsVarsSave: false,
+            sessionVars: {}
+        };
+
+        globalThis._genWorker = null;
+        globalThis.Worker = class extends MockWorker {
+            postMessage(message) {
+                queueMicrotask(() => {
+                    this.onmessage?.({ data: { id: message.id, success: true, data: customWorkerData } });
+                });
+            }
+        };
+
+        await generateChatResponse({
+            text: 'topic',
+            char: { id: 'char-1', name: 'Tester', sessionId: 'chat-1' },
+            history: [{ role: 'user', content: 'topic' }],
+            authorsNote: null,
+            summary: '',
+            controller: { signal: { aborted: false } },
+            callbacks: {
+                onUpdate: vi.fn(),
+                onComplete: vi.fn(),
+                onError: vi.fn(),
+                onPromptReady: vi.fn()
+            }
+        });
+
+        const lastPrompt = getLastPrompt();
+        expect(lastPrompt).toBeTruthy();
+        expect(lastPrompt.messages.some(message => message.content === 'Lore slot: Macro block lore')).toBe(true);
+        expect(lastPrompt.messages.some(message => message.content === 'Lore slot: Before block lore\n\nMacro block lore')).toBe(false);
+
+        globalThis._genWorker = null;
+        globalThis.Worker = MockWorker;
+    });
+
     it('fails generation with a visible error when embedding retrieval crashes', async () => {
         mockGetEmbeddings.mockImplementation(async (texts) => texts.map((text) => {
             if (text.includes('bright blue hair')) {
