@@ -1,10 +1,10 @@
-import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import { cleanText } from '@/utils/textFormatter.js';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { startNetworkTrace, updateNetworkTrace, appendNetworkTraceLine, finishNetworkTrace } from '@/core/services/networkDebugService.js';
 import { getProviderById } from '@/core/llm/providers/providerRegistry.js';
 import { completeStructuredResponse, finalizeStreamResponse, handleAbortOutcome, handleRequestFailure } from '@/core/llm/transport/requestOutcome.js';
+import { executeFetchRequest, executeNativeNonStreamingRequest, shouldUseNativeNonStreamingRequest, validateFetchResponse } from '@/core/llm/transport/requestExecution.js';
 import { setupRequestRuntimePolicy } from '@/core/llm/transport/requestRuntimePolicy.js';
 import { createStreamAccumulator } from '@/core/llm/transport/streamAccumulator.js';
 import { consumeSseDataLines, getTrailingSseDataLine } from '@/core/llm/transport/sseParser.js';
@@ -83,39 +83,28 @@ export async function executeRequest({
         // Bypass Mixed Content/Cleartext restrictions on Native for local HTTP
         // Use CapacitorHttp only for non-streaming requests.
         // For streaming, we fall through to standard fetch (requires android:usesCleartextTraffic="true")
-        if (Capacitor.isNativePlatform() && apiUrl.startsWith('http:') && !apiUrl.includes('https:') && !stream) {
-            const response = await CapacitorHttp.post({
-                url: requestUrl,
-                headers: headers,
-                data: requestBody,
-                responseType: 'json',
+        if (shouldUseNativeNonStreamingRequest({ apiUrl, stream })) {
+            const data = await executeNativeNonStreamingRequest({
+                requestUrl,
+                headers,
+                requestBody,
                 connectTimeout: CONNECT_TIMEOUT,
-                readTimeout: STREAM_TIMEOUT
+                streamTimeout: STREAM_TIMEOUT
             });
-
-            if (response.status >= 400) {
-                const errorData = typeof response.data === 'object' ? JSON.stringify(response.data) : String(response.data || '');
-                updateNetworkTrace({ responseStatus: response.status });
-                finishNetworkTrace({ rawResponse: response.data, error: `API Error: ${response.status} ${errorData}` });
-                throw new Error(`API Error: ${response.status} ${errorData}`);
-            }
-
-            const data = response.data;
-            updateNetworkTrace({ responseStatus: response.status });
             throwIfAborted();
 
-                completeStructuredResponse({
-                    data,
-                    contextLabel: 'API response structure (Native)',
-                    logLabel: 'LLM Response (Native):',
-                    requestReasoning,
-                    hasInlineTags,
-                    tagStart,
-                    tagEnd,
-                    headerModel,
-                    headerInline,
-                    onComplete
-                });
+            completeStructuredResponse({
+                data,
+                contextLabel: 'API response structure (Native)',
+                logLabel: 'LLM Response (Native):',
+                requestReasoning,
+                hasInlineTags,
+                tagStart,
+                tagEnd,
+                headerModel,
+                headerInline,
+                onComplete
+            });
 
             // Exit function, finally block will still run for cleanup
             return;
@@ -124,11 +113,11 @@ export async function executeRequest({
         // Connection timeout — abort if server doesn't respond
         connectTimer = setTimeout(() => { timedOut = true; if (controller) controller.abort(); }, CONNECT_TIMEOUT);
 
-        const response = await fetch(requestUrl, {
-            method: 'POST',
-            headers: headers,
-            body: JSON.stringify(requestBody),
-            signal: controller ? controller.signal : undefined
+        const response = await executeFetchRequest({
+            requestUrl,
+            headers,
+            requestBody,
+            controller
         });
 
         throwIfAborted();
@@ -136,18 +125,7 @@ export async function executeRequest({
         clearTimeout(connectTimer);
         connectTimer = null;
 
-        if (!response.ok) {
-            let errText = "";
-            try { errText = await response.text(); } catch (e) { }
-            updateNetworkTrace({ responseStatus: response.status, responseHeaders: Object.fromEntries(response.headers.entries()) });
-            finishNetworkTrace({ rawResponse: errText, error: `API Error: ${response.status} ${errText}` });
-            throw new Error(`API Error: ${response.status} ${errText}`);
-        }
-
-        updateNetworkTrace({
-            responseStatus: response.status,
-            responseHeaders: Object.fromEntries(response.headers.entries())
-        });
+        await validateFetchResponse(response);
 
         if (stream) {
             const contentType = (response.headers.get('content-type') || '').toLowerCase();
