@@ -67,6 +67,7 @@ import { lorebookState, getActiveLorebooksForContext } from '@/core/states/loreb
 import { presetState, getEffectivePreset, getEffectivePresetId } from '@/core/states/presetState.js';
 import { useVirtualScroll } from '@/composables/chat/useVirtualScroll.js';
 import { useGenerationRegistry } from '@/composables/chat/useGenerationRegistry.js';
+import { createPromptMetadataSnapshots } from '@/composables/chat/usePromptMetadataSnapshots.js';
 import { useSidebarResizer } from '@/composables/ui/useSidebarResizer.js';
 import { sendMessageNotification, clearMessageNotifications, startGenerationNotification, stopGenerationNotification } from '@/core/services/notificationService.js';
 import { addNotification } from '@/core/states/notificationsState.js';
@@ -3215,44 +3216,7 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
         }
     }
     const msgId = currentMessages.value[msgIndex]?.id || genMsgId();
-    const promptMetaSnapshots = new Map();
-
-    const clonePromptMetaList = (items) => Array.isArray(items)
-        ? items.map(item => ({ ...item }))
-        : [];
-
-    const snapshotPromptMeta = (message) => {
-        if (!message?.id || promptMetaSnapshots.has(message.id)) return;
-        promptMetaSnapshots.set(message.id, {
-            hasTriggeredLorebooks: Object.prototype.hasOwnProperty.call(message, 'triggeredLorebooks'),
-            hasTriggeredMemories: Object.prototype.hasOwnProperty.call(message, 'triggeredMemories'),
-            hasContextRefs: Object.prototype.hasOwnProperty.call(message, 'contextRefs'),
-            triggeredLorebooks: clonePromptMetaList(message.triggeredLorebooks),
-            triggeredMemories: clonePromptMetaList(message.triggeredMemories),
-            contextRefs: clonePromptMetaList(message.contextRefs)
-        });
-    };
-
-    const restorePromptMetaOnMessages = (messages) => {
-        if (!Array.isArray(messages) || promptMetaSnapshots.size === 0) return false;
-        let changed = false;
-        messages.forEach(message => {
-            const snapshot = message?.id ? promptMetaSnapshots.get(message.id) : null;
-            if (!snapshot) return;
-
-            if (snapshot.hasTriggeredLorebooks) message.triggeredLorebooks = clonePromptMetaList(snapshot.triggeredLorebooks);
-            else delete message.triggeredLorebooks;
-
-            if (snapshot.hasTriggeredMemories) message.triggeredMemories = clonePromptMetaList(snapshot.triggeredMemories);
-            else delete message.triggeredMemories;
-
-            if (snapshot.hasContextRefs) message.contextRefs = clonePromptMetaList(snapshot.contextRefs);
-            else delete message.contextRefs;
-
-            changed = true;
-        });
-        return changed;
-    };
+    const { snapshotPromptMeta, restorePromptMetaOnMessages } = createPromptMetadataSnapshots();
 
     // Save generation status for DialogList
     markGenerationPersisted(char.id, sessionId);
