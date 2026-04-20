@@ -73,6 +73,7 @@ export function ensureSessionMemoryBook(chatData, sessionId) {
             settings: {
                 enabled: true,
                 autoCreateEnabled: true,
+                autoGenerateEnabled: false,
                 maxInjectedEntries: 3,
                 autoCreateInterval: 12,
                 useDelayedAutomation: true,
@@ -92,6 +93,28 @@ export function ensureSessionMemoryBook(chatData, sessionId) {
             updatedAt: 0
         };
     }
+    if (!chatData.memoryBooks[sessionId].settings || typeof chatData.memoryBooks[sessionId].settings !== 'object') {
+        chatData.memoryBooks[sessionId].settings = {};
+    }
+    const settings = chatData.memoryBooks[sessionId].settings;
+    if (typeof settings.enabled !== 'boolean') settings.enabled = true;
+    if (typeof settings.autoCreateEnabled !== 'boolean') settings.autoCreateEnabled = true;
+    if (typeof settings.autoGenerateEnabled !== 'boolean') settings.autoGenerateEnabled = false;
+    if (!Number.isFinite(Number(settings.maxInjectedEntries)) || Number(settings.maxInjectedEntries) <= 0) settings.maxInjectedEntries = 3;
+    if (!Number.isFinite(Number(settings.autoCreateInterval)) || Number(settings.autoCreateInterval) <= 0) settings.autoCreateInterval = 12;
+    if (typeof settings.useDelayedAutomation !== 'boolean') settings.useDelayedAutomation = true;
+    settings.injectionTarget = settings.injectionTarget === 'summary_macro' ? 'summary_macro' : 'summary_block';
+    if (!Number.isFinite(Number(settings.batchSize)) || Number(settings.batchSize) <= 0) settings.batchSize = 1;
+    if (!Number.isFinite(Number(settings.parallelJobs)) || Number(settings.parallelJobs) <= 0) settings.parallelJobs = 1;
+    settings.generationSource = settings.generationSource === 'custom' ? 'custom' : 'current';
+    if (typeof settings.generationModel !== 'string') settings.generationModel = '';
+    if (typeof settings.generationUseCurrentModelOverride !== 'boolean') settings.generationUseCurrentModelOverride = false;
+    if (typeof settings.generationEndpoint !== 'string') settings.generationEndpoint = '';
+    if (typeof settings.generationApiKey !== 'string') settings.generationApiKey = '';
+    if (settings.generationTemperature !== null && !Number.isFinite(Number(settings.generationTemperature))) settings.generationTemperature = null;
+    if (settings.generationMaxTokens !== null && !Number.isFinite(Number(settings.generationMaxTokens))) settings.generationMaxTokens = null;
+    if (typeof settings.promptPreset !== 'string' || !settings.promptPreset) settings.promptPreset = 'detailed_beats';
+    if (!Array.isArray(settings.customPrompts)) settings.customPrompts = [];
     if (!memoryBooksHasAutomationState(chatData.memoryBooks[sessionId])) {
         chatData.memoryBooks[sessionId].automation = createMemoryAutomationState();
     }
