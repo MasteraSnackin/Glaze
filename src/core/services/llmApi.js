@@ -4,8 +4,8 @@ import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { startNetworkTrace, updateNetworkTrace, appendNetworkTraceLine, finishNetworkTrace } from '@/core/services/networkDebugService.js';
 import { getProviderById } from '@/core/llm/providers/providerRegistry.js';
+import { completeStructuredResponse, finalizeStreamResponse, handleAbortOutcome, handleRequestFailure } from '@/core/llm/transport/requestOutcome.js';
 import { setupRequestRuntimePolicy } from '@/core/llm/transport/requestRuntimePolicy.js';
-import { extractOpenAiMessage, normalizeReasoningOutput } from '@/core/llm/transport/responseNormalizer.js';
 import { createStreamAccumulator } from '@/core/llm/transport/streamAccumulator.js';
 import { consumeSseDataLines, getTrailingSseDataLine } from '@/core/llm/transport/sseParser.js';
 import { logger } from '../../utils/logger.js';
@@ -69,26 +69,6 @@ export async function executeRequest({
     };
     Object.assign(headers, provider.buildAuthHeaders(apiKey));
 
-    const completeStructuredResponse = ({ data, contextLabel, logLabel }) => {
-        logger.debug(logLabel, data);
-
-        const { content, reasoningContent } = extractOpenAiMessage(data, contextLabel);
-        const normalized = normalizeReasoningOutput({
-            content,
-            requestReasoning,
-            rawReasoning: reasoningContent,
-            hasInlineTags,
-            tagStart,
-            tagEnd,
-            headerModel,
-            headerInline
-        });
-
-        const cleanedText = cleanText(normalized.text);
-        finishNetworkTrace({ rawResponse: data, text: cleanedText, reasoning: normalized.reasoning });
-        if (onComplete) onComplete(cleanedText, normalized.reasoning);
-    };
-
     startNetworkTrace({
         requestType,
         apiUrl,
@@ -124,11 +104,18 @@ export async function executeRequest({
             updateNetworkTrace({ responseStatus: response.status });
             throwIfAborted();
 
-            completeStructuredResponse({
-                data,
-                contextLabel: 'API response structure (Native)',
-                logLabel: 'LLM Response (Native):'
-            });
+                completeStructuredResponse({
+                    data,
+                    contextLabel: 'API response structure (Native)',
+                    logLabel: 'LLM Response (Native):',
+                    requestReasoning,
+                    hasInlineTags,
+                    tagStart,
+                    tagEnd,
+                    headerModel,
+                    headerInline,
+                    onComplete
+                });
 
             // Exit function, finally block will still run for cleanup
             return;
@@ -180,7 +167,14 @@ export async function executeRequest({
                 completeStructuredResponse({
                     data,
                     contextLabel: 'API response structure (stream fallback)',
-                    logLabel: 'LLM Response (stream fallback):'
+                    logLabel: 'LLM Response (stream fallback):',
+                    requestReasoning,
+                    hasInlineTags,
+                    tagStart,
+                    tagEnd,
+                    headerModel,
+                    headerInline,
+                    onComplete
                 });
                 return;
             }
@@ -250,23 +244,10 @@ export async function executeRequest({
             if (streamTimer) { clearTimeout(streamTimer); streamTimer = null; }
             throwIfAborted();
 
-            // Final processing for onComplete
-            const finalResult = streamAccumulator.finalize();
-            const finalText = finalResult.text;
-            const finalReasoning = finalResult.reasoning;
-
-            logger.debug("Stream finished:", finalText);
-
-            finishNetworkTrace({
-                rawResponse: {
-                    mode: 'sse',
-                    eventCount: null
-                },
-                text: cleanText(finalText),
-                reasoning: finalReasoning
+            finalizeStreamResponse({
+                streamAccumulator,
+                onComplete
             });
-
-            if (onComplete) onComplete(cleanText(finalText), finalReasoning);
 
         } else {
             const data = await response.json();
@@ -275,48 +256,34 @@ export async function executeRequest({
             completeStructuredResponse({
                 data,
                 contextLabel: 'API response structure',
-                logLabel: 'LLM Response:'
+                logLabel: 'LLM Response:',
+                requestReasoning,
+                hasInlineTags,
+                tagStart,
+                tagEnd,
+                headerModel,
+                headerInline,
+                onComplete
             });
         }
     } catch (e) {
         if (e.name === 'AbortError') {
-            if (timedOut) {
-                // Timeout-induced abort — treat as error, not user cancellation
-                const partial = streamAccumulator.getPartial();
-                if (partial.text.length > 0) {
-                    finishNetworkTrace({ text: cleanText(partial.text), reasoning: partial.reasoning, error: 'Generation timed out' });
-                    if (onComplete) onComplete(cleanText(partial.text), partial.reasoning, { partialError: "Generation timed out" });
-                } else {
-                    finishNetworkTrace({ error: 'Generation timed out — no response from server' });
-                    if (onError) onError(new Error("Generation timed out — no response from server"));
-                }
-                return;
-            }
-
-            // User-initiated abort — save partial text if available
-            const partial = streamAccumulator.getPartial();
-            if (partial.text.length > 0) {
-                finishNetworkTrace({ text: cleanText(partial.text), reasoning: partial.reasoning, error: 'Generation aborted' });
-                if (onComplete) onComplete(cleanText(partial.text), partial.reasoning);
-            } else {
-                finishNetworkTrace({ error: e });
-                if (onError) onError(e);
-            }
+            handleAbortOutcome({
+                timedOut,
+                streamAccumulator,
+                onComplete,
+                onError,
+                abortError: e
+            });
             return;
         }
 
-        // Network error (connection abort, DNS failure, etc.) — save partial text cleanly
-        const partial = streamAccumulator.getPartial();
-        if (partial.text.length > 0) {
-            console.warn("Network error during stream, saving partial response:", e);
-            const errorMsg = e.message || "Stream Error";
-            finishNetworkTrace({ text: cleanText(partial.text), reasoning: partial.reasoning, error: errorMsg });
-            if (onComplete) onComplete(cleanText(partial.text), partial.reasoning, { partialError: errorMsg });
-            return;
-        }
-
-        finishNetworkTrace({ error: e });
-        if (onError) onError(e);
+        handleRequestFailure({
+            error: e,
+            streamAccumulator,
+            onComplete,
+            onError
+        });
     } finally {
         if (connectTimer) clearTimeout(connectTimer);
         if (streamTimer) clearTimeout(streamTimer);
