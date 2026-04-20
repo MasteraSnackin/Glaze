@@ -64,6 +64,18 @@ export async function executeRequest({
     let rawAccumulated = "";
     let accumulatedReasoning = "";
 
+    const createAbortError = () => {
+        const error = new Error('Generation aborted');
+        error.name = 'AbortError';
+        return error;
+    };
+
+    const throwIfAborted = () => {
+        if (controller?.signal?.aborted) {
+            throw createAbortError();
+        }
+    };
+
     const headers = {
         'Content-Type': 'application/json'
     };
@@ -103,6 +115,7 @@ export async function executeRequest({
             const data = response.data;
             logger.debug("LLM Response (Native):", data);
             updateNetworkTrace({ responseStatus: response.status });
+            throwIfAborted();
             
             // Defensive check: ensure API returned valid structure
             if (!data || !data.choices || !data.choices.length || !data.choices[0] || !data.choices[0].message) {
@@ -149,6 +162,8 @@ export async function executeRequest({
             signal: controller ? controller.signal : undefined
         });
 
+        throwIfAborted();
+
         clearTimeout(connectTimer);
         connectTimer = null;
 
@@ -166,11 +181,20 @@ export async function executeRequest({
         });
 
         if (stream) {
-            if (!response.body || typeof response.body.getReader !== 'function') {
-                console.warn('[llmApi] Streaming body is unavailable on this platform/runtime, falling back to non-streaming response handling.');
+            const contentType = (response.headers.get('content-type') || '').toLowerCase();
+            const supportsStreamingBody = !!response.body && typeof response.body.getReader === 'function';
+            const isSseResponse = contentType.includes('text/event-stream');
+
+            if (!supportsStreamingBody || !isSseResponse) {
+                if (!supportsStreamingBody) {
+                    console.warn('[llmApi] Streaming body is unavailable on this platform/runtime, falling back to non-streaming response handling.');
+                } else {
+                    console.warn('[llmApi] Stream requested but provider returned a non-SSE response, falling back to non-streaming handling.', { contentType });
+                }
 
                 const data = await response.json();
                 logger.debug('LLM Response (stream fallback):', data);
+                throwIfAborted();
 
                 if (!data || !data.choices || !data.choices.length || !data.choices[0] || !data.choices[0].message) {
                     throw new Error('Invalid API response structure (stream fallback): ' + JSON.stringify(data));
@@ -216,9 +240,11 @@ export async function executeRequest({
             resetStreamTimer();
 
             while (true) {
+                throwIfAborted();
                 const { done, value } = await reader.read();
                 if (done) break;
                 resetStreamTimer();
+                throwIfAborted();
 
                 const chunk = decoder.decode(value, { stream: true });
                 pendingLineBuffer += chunk;
@@ -232,6 +258,7 @@ export async function executeRequest({
                     const dataStr = trimmed.substring(6);
                     if (dataStr === '[DONE]') continue;
                     appendNetworkTraceLine(dataStr);
+                    throwIfAborted();
 
                     try {
                         const json = JSON.parse(dataStr);
@@ -320,6 +347,7 @@ export async function executeRequest({
             }
 
             if (streamTimer) { clearTimeout(streamTimer); streamTimer = null; }
+            throwIfAborted();
 
             // Final processing for onComplete
             let finalReasoning = requestReasoning ? accumulatedReasoning : "";
@@ -357,6 +385,7 @@ export async function executeRequest({
         } else {
             const data = await response.json();
             logger.debug("LLM Response:", data);
+            throwIfAborted();
             
             // Defensive check: ensure API returned valid structure
             if (!data || !data.choices || !data.choices.length || !data.choices[0] || !data.choices[0].message) {

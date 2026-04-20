@@ -619,6 +619,12 @@ async function generateMemoryDraftForMessages(selectedMessages, { openSheet = fa
     if (!activeChatChar || !Array.isArray(selectedMessages) || !selectedMessages.length) return false;
     console.debug('[MemoryBooks] generateMemoryDraftForMessages:start', { source, existingDraftId, inputCount: selectedMessages.length });
 
+    const activeGeneration = generatingStates[activeChatChar.id];
+    if (activeGeneration && activeGeneration.type !== 'impersonation') {
+        showToast('Stop the current response generation before starting a memory draft');
+        return false;
+    }
+
     const selected = selectedMessages.filter(msg => msg && !msg.isTyping && !msg.isError);
     console.debug('[MemoryBooks] generateMemoryDraftForMessages:filtered', { source, existingDraftId, filteredCount: selected.length });
     if (!selected.length) {
@@ -2119,6 +2125,37 @@ async function loadChats() {
     }
 }
 
+async function abortActiveChatGeneration(charId, { restore = true } = {}) {
+    const state = generatingStates[charId];
+    if (!state || state.type === 'impersonation') return false;
+
+    if (state.controller) {
+        try {
+            state.controller.abort();
+        } catch (abortErr) {
+            console.warn('[generation] Failed to abort controller:', abortErr);
+        }
+    }
+
+    if (restore && state.restoreState) {
+        try {
+            await state.restoreState();
+        } catch (restoreErr) {
+            console.error('[generation] Failed to restore state after abort:', restoreErr);
+        }
+    }
+
+    if (generatingStates[charId]?.genId === state.genId) {
+        delete generatingStates[charId];
+    }
+
+    if (activeChatChar && activeChatChar.id === charId) {
+        isGenerating.value = false;
+    }
+
+    return true;
+}
+
 async function updateContextCutoff() {
     if (!activeChatChar || !currentMessages.value) return;
 
@@ -2878,16 +2915,13 @@ async function sendMessage(attachedImage = null, guidanceText = null) {
     if (isGenerating.value && activeChatChar) {
         // Stop Generation
         const state = generatingStates[activeChatChar.id];
-        if (state) {
+        if (state?.type === 'impersonation') {
             if (state.controller) state.controller.abort();
-            if (state.restoreState) state.restoreState();
-
-            if (state.type === 'impersonation') {
-                isImpersonating.value = false;
-            }
-
             delete generatingStates[activeChatChar.id];
             isGenerating.value = false;
+            isImpersonating.value = false;
+        } else if (state) {
+            await abortActiveChatGeneration(activeChatChar.id);
         } else {
             // Stale isGenerating flag — no active generation found, just reset
             isGenerating.value = false;
@@ -2961,6 +2995,15 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
     // Check API Configuration
     const model = localStorage.getItem('api-model');
     const endpoint = localStorage.getItem('gz_api_endpoint_normalized') || localStorage.getItem('api-endpoint');
+    const existingState = generatingStates[char.id];
+
+    if (existingState && existingState.type !== 'impersonation') {
+        console.warn('[generation] Ignoring overlapping startGeneration call for active chat request', {
+            charId: char.id,
+            existingGenId: existingState.genId
+        });
+        return;
+    }
     
     if (!model || !endpoint) {
         showBottomSheet({
@@ -3315,8 +3358,10 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
         
         // Update via dynamic updater (handles re-mounts)
         const state = generatingStates[char.id];
-        if (state && state.onUIUpdate) {
+        if (state && state.genId === genId && state.onUIUpdate) {
             state.onUIUpdate(effectiveText, effectiveReasoning, true, textDelta);
+        } else if (!state || state.genId !== genId) {
+            return;
         } else {
             // Background update — throttle DB writes to once per 2s (#7)
             _bgPendingText = effectiveText;
@@ -3325,6 +3370,8 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
                 _bgUpdateTimer = setTimeout(async () => {
                     _bgUpdateTimer = null;
                     if (_bgPendingText === null) return;
+                    const latestState = generatingStates[char.id];
+                    if (!latestState || latestState.genId !== genId) return;
                     const data = await getChatData(char.id);
                     if (data && data.sessions[sessionId]) {
                         const dbMsg = data.sessions[sessionId].find(m => m.id === msgId);
@@ -3412,18 +3459,24 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
             if (activeChatChar && activeChatChar.id === char.id) isGenerating.value = false;
         };
 
-        try {
-            const currentState = generatingStates[char.id];
-            if (currentState && currentState.timerId) clearInterval(currentState.timerId);
+        const ensureStaleCleanup = () => {
             if (_bgUpdateTimer) { clearTimeout(_bgUpdateTimer); _bgUpdateTimer = null; }
             localStorage.removeItem(`gz_generating_${char.id}_${sessionId}`);
+        };
+
+        try {
+            const currentState = generatingStates[char.id];
+            if (_bgUpdateTimer) { clearTimeout(_bgUpdateTimer); _bgUpdateTimer = null; }
 
             if (!currentState || currentState.genId !== genId) {
                 await clearTypingStateForMessage();
-                ensureCleanup();
+                ensureStaleCleanup();
                 window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: char.id, sessionId: sessionId } }));
                 return;
             }
+
+            if (currentState.timerId) clearInterval(currentState.timerId);
+            localStorage.removeItem(`gz_generating_${char.id}_${sessionId}`);
             
             // Guard against race with abort
             const hasCompletionPayload = !!(response || finalReasoning || meta?.partialError);
@@ -3740,10 +3793,13 @@ async function branchSession(msgIndex) {
 
     if (isGenerating.value && generatingStates[activeChatChar.id]) {
         const state = generatingStates[activeChatChar.id];
-        if (state.controller) state.controller.abort();
-        if (state.restoreState) state.restoreState();
-        delete generatingStates[activeChatChar.id];
-        isGenerating.value = false;
+        if (state?.type === 'impersonation') {
+            if (state.controller) state.controller.abort();
+            delete generatingStates[activeChatChar.id];
+            isGenerating.value = false;
+        } else {
+            await abortActiveChatGeneration(activeChatChar.id);
+        }
     }
 
     const data = await getChatData(activeChatChar.id);
@@ -3914,10 +3970,13 @@ function openMessageActions(msg, index) {
                 onClick: () => {
                     if (activeChatChar && generatingStates[activeChatChar.id]) {
                         const state = generatingStates[activeChatChar.id];
-                        if (state.controller) state.controller.abort();
-                        if (state.restoreState) state.restoreState();
-                        delete generatingStates[activeChatChar.id];
-                        isGenerating.value = false;
+                        if (state?.type === 'impersonation') {
+                            if (state.controller) state.controller.abort();
+                            delete generatingStates[activeChatChar.id];
+                            isGenerating.value = false;
+                        } else {
+                            abortActiveChatGeneration(activeChatChar.id);
+                        }
                     } else {
                         currentMessages.value.splice(index, 1);
                         if (activeChatChar) {
@@ -4404,11 +4463,14 @@ async function deleteSession(sessionId, targetChar) {
 
     if (char && generatingStates[char.id]) {
         const state = generatingStates[char.id];
-        if (state.controller) state.controller.abort();
-        if (state.restoreState) state.restoreState();
-        delete generatingStates[char.id];
-        if (activeChatChar && activeChatChar.id === char.id) {
-            isGenerating.value = false;
+        if (state?.type === 'impersonation') {
+            if (state.controller) state.controller.abort();
+            delete generatingStates[char.id];
+            if (activeChatChar && activeChatChar.id === char.id) {
+                isGenerating.value = false;
+            }
+        } else {
+            await abortActiveChatGeneration(char.id);
         }
     }
 
