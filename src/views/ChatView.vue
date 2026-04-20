@@ -69,6 +69,7 @@ import { useVirtualScroll } from '@/composables/chat/useVirtualScroll.js';
 import { useGenerationRegistry } from '@/composables/chat/useGenerationRegistry.js';
 import { handleGenerationComplete } from '@/composables/chat/useGenerationCompleteHandler.js';
 import { handleGenerationError } from '@/composables/chat/useGenerationErrorHandler.js';
+import { buildGenerationAuthorsNote, buildGenerationHistory, ensureGenerationPlaceholderMessage } from '@/composables/chat/useGenerationPreparation.js';
 import { handleGenerationPromptReady } from '@/composables/chat/useGenerationPromptReady.js';
 import { createPromptMetadataSnapshots } from '@/composables/chat/usePromptMetadataSnapshots.js';
 import { restoreGenerationState } from '@/composables/chat/useGenerationStateRestore.js';
@@ -3166,50 +3167,27 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
 
     isGenerating.value = true;
     let msgIndex = existingMsgIndex;
+    const authorsNote = buildGenerationAuthorsNote({
+        getEffectivePreset,
+        charId: char.id,
+        sessionId,
+        anContent
+    });
 
-    // Get Authors Note combined object for current session and preset
-    const effectivePreset = getEffectivePreset(char.id, sessionId ? `${char.id}_${sessionId}` : null);
-    const anBlock = effectivePreset?.blocks?.find(b => b.id === 'authors_note');
-    let authorsNote = null;
-    
-    if (typeof anContent === 'object' && anContent !== null) anContent = anContent.content;
-
-    if (anBlock && anBlock.enabled && anContent) {
-        authorsNote = {
-            content: anContent,
-            role: anBlock.role || 'system',
-            enabled: true,
-            depth: anBlock.depth !== undefined ? anBlock.depth : 0,
-            insertion_mode: anBlock.insertion_mode || 'relative'
-        };
-    }
-
-    if (msgIndex === -1 && !text) {
-        const now = new Date();
-        const time = now.getHours() + ':' + String(now.getMinutes()).padStart(2, '0');
-
-        const msg = { 
-            id: genMsgId(),
-            role: 'char', 
-            text: "", 
-            time: time, 
-            timestamp: Date.now(),
-            swipes: [""],
-            swipeId: 0,
-            isTyping: true, // Custom flag for UI
-            guidanceText,
-            guidanceType,
-            ...createBaseMessageMeta()
-        };
-        currentMessages.value.push(msg);
-        msgIndex = currentMessages.value.length - 1;
-        const data = await getChatData(char.id);
-        if (data) {
-            data.sessions[sessionId] = currentMessages.value;
-            await db.saveChat(char.id, data);
-        }
-        scrollToBottom();
-    }
+    msgIndex = await ensureGenerationPlaceholderMessage({
+        msgIndex,
+        text,
+        guidanceText,
+        guidanceType,
+        currentMessages,
+        createBaseMessageMeta,
+        genMsgId,
+        charId: char.id,
+        sessionId,
+        getChatData,
+        db,
+        scrollToBottom
+    });
 
     // Get unique ID to identify message across re-mounts
     if (msgIndex !== -1 && currentMessages.value[msgIndex]) {
@@ -3321,19 +3299,7 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
         });
     };
 
-    // Prepare history for LLM
-    const history = currentMessages.value
-        .map((m, i) => ({ ...m, originalIndex: i }))
-        .filter(m => !m.isTyping && !m.isHidden)
-        .map(m => ({ 
-            role: m.role === 'user' ? 'user' : 'assistant', 
-            content: m.text || "", 
-            text: m.text || "", 
-            image: (m.image && !m.imageHidden) ? m.image : null,
-            chatId: m.originalIndex,
-            messageId: m.id || null,
-            contextRefs: Array.isArray(m.contextRefs) ? m.contextRefs : []
-        }));
+    const history = buildGenerationHistory(currentMessages);
 
     generateChatResponse({
         text,

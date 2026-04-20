@@ -881,6 +881,7 @@ Done and tested:
   - `useGenerationCompleteHandler.js` now owns completion-path cleanup, visible/background completion writes, and stale/abort finalization checks
   - `useGenerationStreamUpdate.js` now owns stream fan-out and throttled background DB persistence during active generation
   - `useGenerationPromptReady.js` now owns prompt metadata assignment and prompt-ready persistence for triggered lorebooks/memories/context refs
+  - `useGenerationPreparation.js` now owns authors-note assembly, placeholder message creation, and request history shaping for chat generation
 
 Tested status:
 - [done] `npm test -- --run`
