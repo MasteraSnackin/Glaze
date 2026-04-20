@@ -83,6 +83,7 @@ const stableConversationCount = computed(() => {
 const generationSettingsSummary = computed(() => {
   const interval = normalizeAutoCreateInterval(props.memoryBook);
   const autoCreate = props.memoryBook.settings?.autoCreateEnabled !== false ? 'auto on' : 'auto off';
+  const autoGenerate = props.memoryBook.settings?.autoGenerateEnabled === true ? 'auto text' : 'manual text';
   const delayed = props.memoryBook.settings?.useDelayedAutomation !== false ? 'delayed' : 'immediate';
   const target = props.memoryBook.settings?.injectionTarget === 'summary_macro' ? '{{summary}}' : 'summary block';
   const maxEntries = Math.max(1, Math.min(20, Number(props.memoryBook.settings?.maxInjectedEntries || 3)));
@@ -90,7 +91,7 @@ const generationSettingsSummary = computed(() => {
   const outputTokens = Number.isFinite(Number(props.memoryBook.settings?.generationMaxTokens)) && Number(props.memoryBook.settings?.generationMaxTokens) > 0
     ? `${Math.round(Number(props.memoryBook.settings.generationMaxTokens))} out`
     : 'auto out';
-  return `${interval} msgs • batch ${batchSize} • ${outputTokens} • ${autoCreate} • ${delayed} • ${target} • ${maxEntries} in prompt`;
+  return `${interval} msgs • batch ${batchSize} • ${outputTokens} • ${autoCreate} • ${autoGenerate} • ${delayed} • ${target} • ${maxEntries} in prompt`;
 });
 
 const statusSummary = computed(() => {

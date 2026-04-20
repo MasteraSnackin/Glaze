@@ -420,6 +420,92 @@ function getMemoryPromptLabel(settings = {}) {
     return options.find(item => item.key === settings.promptPreset)?.label || builtInMemoryPrompts[0].label;
 }
 
+function getMemoryPromptLabelByKey(settings = {}, promptPreset = 'detailed_beats') {
+    const options = getMemoryPromptOptions(settings);
+    return options.find(item => item.key === promptPreset)?.label || builtInMemoryPrompts[0].label;
+}
+
+function getNormalizedMemoryGenerationState(settings = {}, overrides = {}) {
+    return {
+        source: settings.generationSource || 'current',
+        model: settings.generationModel || '',
+        useCurrentModelOverride: settings.generationUseCurrentModelOverride === true,
+        endpoint: settings.generationEndpoint || '',
+        apiKey: settings.generationApiKey || '',
+        temperature: settings.generationTemperature,
+        maxTokens: Number.isFinite(Number(settings.generationMaxTokens)) && Number(settings.generationMaxTokens) > 0
+            ? Math.round(Number(settings.generationMaxTokens))
+            : null,
+        autoCreateEnabled: settings.autoCreateEnabled !== false,
+        autoGenerateEnabled: settings.autoGenerateEnabled === true,
+        promptPreset: getMemoryPromptOptions(settings).some(p => p.key === settings.promptPreset) ? settings.promptPreset : 'detailed_beats',
+        autoCreateInterval: Number.isFinite(Number(settings.autoCreateInterval)) && Number(settings.autoCreateInterval) > 0
+            ? Number(settings.autoCreateInterval)
+            : 12,
+        batchSize: Number.isFinite(Number(settings.batchSize)) && Number(settings.batchSize) > 0
+            ? Number(settings.batchSize)
+            : 1,
+        useDelayedAutomation: settings.useDelayedAutomation !== false,
+        maxInjectedEntries: Number.isFinite(Number(settings.maxInjectedEntries)) && Number(settings.maxInjectedEntries) > 0
+            ? Number(settings.maxInjectedEntries)
+            : 3,
+        injectionTarget: settings.injectionTarget === 'summary_macro' ? 'summary_macro' : 'summary_block',
+        ...overrides
+    };
+}
+
+function createPendingMemoryDraft(memoryBook, selectedMessages, { source = 'scan_chat', vectorSearch = false } = {}) {
+    const selected = (Array.isArray(selectedMessages) ? selectedMessages : []).filter(Boolean);
+    if (!memoryBook || !selected.length) return null;
+
+    const selectedIds = selected.map(msg => msg.id).filter(Boolean);
+    if (!selectedIds.length) return null;
+
+    const existingDrafts = Array.isArray(memoryBook.pendingDrafts) ? memoryBook.pendingDrafts : [];
+    const existingDraft = existingDrafts.find(draft => arraysEqual(normalizeEntryMessageIds(draft), selectedIds));
+    if (existingDraft) {
+        if (!existingDraft.content) existingDraft.status = 'pending_generation';
+        existingDraft.source = source;
+        existingDraft.updatedAt = Date.now();
+        return existingDraft;
+    }
+
+    const stableMessages = currentMessages.value.filter(m => m && !m.isTyping && !m.isError && (m.role === 'user' || m.role === 'char'));
+    const firstMessage = selected[0];
+    const lastMessage = selected[selected.length - 1];
+    const firstIdx = stableMessages.findIndex(m => m.id === firstMessage.id);
+    const lastIdx = stableMessages.findIndex(m => m.id === lastMessage.id);
+    const rangeDisplay = firstIdx >= 0 && lastIdx >= 0
+        ? `${firstIdx + 1}-${lastIdx + 1}`
+        : `Draft ${(Array.isArray(memoryBook.pendingDrafts) ? memoryBook.pendingDrafts.length : 0) + 1}`;
+    const createdAt = Date.now();
+    const draft = normalizeMemoryEntryShape({
+        id: genMemoryEntryId(),
+        title: rangeDisplay,
+        content: '',
+        rawContent: '',
+        keys: [],
+        glazeKeys: [],
+        vectorSearch,
+        messageIds: selectedIds,
+        messageRange: {
+            startMessageId: firstMessage.id,
+            endMessageId: lastMessage.id,
+            start: firstIdx >= 0 ? firstIdx + 1 : null,
+            end: lastIdx >= 0 ? lastIdx + 1 : null
+        },
+        status: 'pending_generation',
+        source,
+        createdAt,
+        updatedAt: createdAt,
+        generatedAt: null
+    });
+
+    if (!Array.isArray(memoryBook.pendingDrafts)) memoryBook.pendingDrafts = [];
+    memoryBook.pendingDrafts.push(draft);
+    return draft;
+}
+
 watch([isSearchMode, isSelectionMode], () => {
     ignoreScrollAdjustment = true;
     if (ignoreScrollAdjustmentTimer) clearTimeout(ignoreScrollAdjustmentTimer);
@@ -455,23 +541,39 @@ function buildMemoryContinuityContext(memoryBook, selected) {
 }
 
 function buildMemoryDraftLoreContext(selected) {
-    const selectedLabels = new Map();
+    const historicalLabels = new Map();
     selected.forEach(msg => {
         (Array.isArray(msg?.contextRefs) ? msg.contextRefs : []).forEach(ref => {
             if (ref?.type === 'lorebook' && ref?.id) {
                 const key = ref.id;
-                const existing = selectedLabels.get(key) || { label: ref.label || 'Entry', count: 0 };
+                const existing = historicalLabels.get(key) || { label: ref.label || 'Entry', count: 0 };
                 existing.count += 1;
-                selectedLabels.set(key, existing);
+                historicalLabels.set(key, existing);
             }
         });
     });
 
-    return [...selectedLabels.values()]
+    const historicalLines = [...historicalLabels.values()]
         .sort((a, b) => b.count - a.count)
-        .slice(0, 5)
-        .map(item => `${item.label}${item.count > 1 ? ` x${item.count}` : ''}`)
-        .join('\n');
+        .slice(0, 3)
+        .map(item => `- ${item.label}${item.count > 1 ? ` x${item.count}` : ''}`);
+
+    const liveCandidates = [...new Set(selected.flatMap(msg =>
+        (Array.isArray(msg?.triggeredLorebooks) ? msg.triggeredLorebooks : [])
+            .map(entry => entry?.name || entry?.label || '')
+            .filter(Boolean)
+    ))]
+        .slice(0, 2)
+        .map(label => `- ${label}`);
+
+    const sections = [];
+    if (historicalLines.length) {
+        sections.push(['Historical triggers:', ...historicalLines].join('\n'));
+    }
+    if (liveCandidates.length) {
+        sections.push(['Current live candidates:', ...liveCandidates].join('\n'));
+    }
+    return sections.join('\n\n');
 }
 
 function buildMemoryDraftSummaryExcerpt(summary) {
@@ -619,6 +721,12 @@ async function generateMemoryDraftForMessages(selectedMessages, { openSheet = fa
     if (!activeChatChar || !Array.isArray(selectedMessages) || !selectedMessages.length) return false;
     console.debug('[MemoryBooks] generateMemoryDraftForMessages:start', { source, existingDraftId, inputCount: selectedMessages.length });
 
+    const activeGeneration = generatingStates[activeChatChar.id];
+    if (activeGeneration && activeGeneration.type !== 'impersonation') {
+        showToast('Stop the current response generation before starting a memory draft');
+        return false;
+    }
+
     const selected = selectedMessages.filter(msg => msg && !msg.isTyping && !msg.isError);
     console.debug('[MemoryBooks] generateMemoryDraftForMessages:filtered', { source, existingDraftId, filteredCount: selected.length });
     if (!selected.length) {
@@ -751,32 +859,18 @@ async function generateMemoryDraftForMessages(selectedMessages, { openSheet = fa
             latestExistingDraft.updatedAt = generatedAt;
             latestExistingDraft.generatedAt = generatedAt;
         } else {
-            // Create new draft
-            // Calculate message range for title
-            const allMsgs = currentMessages.value.filter(m => m && !m.isTyping && !m.isError && (m.role === 'user' || m.role === 'char'));
-            const firstIdx = allMsgs.findIndex(m => m.id === firstMessage.id);
-            const lastIdx = allMsgs.findIndex(m => m.id === lastMessage.id);
-            const rangeDisplay = firstIdx >= 0 && lastIdx >= 0 ? `${firstIdx + 1}-${lastIdx + 1}` : `Draft ${latestMemoryBook.pendingDrafts.length + 1}`;
-
-            latestMemoryBook.pendingDrafts.push(normalizeMemoryEntryShape({
-                id: genMemoryEntryId(),
-                title: rangeDisplay,
-                content: (parsedDraft.content || parsedDraft.raw || '').trim(),
-                rawContent: (parsedDraft.raw || parsedDraft.content || '').trim(),
-                keys: parsedDraft.keys,
-                glazeKeys: [],
-                vectorSearch: vectorEnabled,
-                messageIds: selectedIds,
-                messageRange: {
-                    startMessageId: firstMessage.id,
-                    endMessageId: lastMessage.id
-                },
-                status: 'pending_approval',
-                source,
-                createdAt: generatedAt,
-                updatedAt: generatedAt,
-                generatedAt
-            }));
+            const createdDraft = createPendingMemoryDraft(latestMemoryBook, selected, { source, vectorSearch: vectorEnabled });
+            if (createdDraft) {
+                createdDraft.content = (parsedDraft.content || parsedDraft.raw || '').trim();
+                createdDraft.rawContent = (parsedDraft.raw || parsedDraft.content || '').trim();
+                createdDraft.keys = parsedDraft.keys || [];
+                createdDraft.glazeKeys = [];
+                createdDraft.vectorSearch = vectorEnabled;
+                createdDraft.status = 'pending_approval';
+                createdDraft.source = source;
+                createdDraft.updatedAt = generatedAt;
+                createdDraft.generatedAt = generatedAt;
+            }
         }
         latestAutomation.isGeneratingDraft = true;
         latestMemoryBook.updatedAt = generatedAt;
@@ -816,6 +910,7 @@ async function runMemoryAutomationAfterStableTurn(chatData, sessionId, messages,
     const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
     const automation = ensureMemoryAutomationState(memoryBook);
     const autoCreateEnabled = memoryBook.settings?.autoCreateEnabled !== false;
+    const autoGenerateEnabled = memoryBook.settings?.autoGenerateEnabled === true;
     const stableMessages = getStableVisibleMessages(messages).filter(msg => msg.role === 'user' || msg.role === 'char');
     const stableCount = stableMessages.length;
     const interval = normalizeAutoCreateInterval(memoryBook);
@@ -840,12 +935,18 @@ async function runMemoryAutomationAfterStableTurn(chatData, sessionId, messages,
         const completedExchanges = countCompletedExchangesSince(automation.pendingTrigger.triggerCount, stableCount);
         if (completedExchanges >= automation.pendingTrigger.waitExchanges) {
             const selected = resolvePendingTriggerMessages(stableMessages, automation.pendingTrigger);
-            const created = await generateMemoryDraftForMessages(selected, { source: 'auto_delayed' });
+            const pendingDraft = createPendingMemoryDraft(memoryBook, selected, { source: 'auto_delayed' });
             automation.lastProcessedMessageCount = stableCount;
             automation.pendingTrigger = null;
             memoryBook.updatedAt = Date.now();
             await db.saveChat(activeChatChar.id, chatData);
-            return created;
+            await updatePendingMemoryMessageIds(activeChatChar);
+            if (!pendingDraft) return false;
+            if (!autoGenerateEnabled) return true;
+            return await generateMemoryDraftForMessages(selected, {
+                source: 'auto_delayed',
+                existingDraftId: pendingDraft.id
+            });
         }
         memoryBook.updatedAt = Date.now();
         await db.saveChat(activeChatChar.id, chatData);
@@ -886,12 +987,17 @@ async function runMemoryAutomationAfterStableTurn(chatData, sessionId, messages,
     }
 
     const selected = stableMessages.slice(Math.max(0, stableCount - interval), stableCount);
-    const created = await generateMemoryDraftForMessages(selected, { source: 'auto_immediate' });
+    const pendingDraft = createPendingMemoryDraft(memoryBook, selected, { source: 'auto_immediate' });
     automation.lastProcessedMessageCount = stableCount;
     memoryBook.updatedAt = Date.now();
     await db.saveChat(activeChatChar.id, chatData);
-    updatePendingMemoryMessageIds(activeChatChar);
-    return created;
+    await updatePendingMemoryMessageIds(activeChatChar);
+    if (!pendingDraft) return false;
+    if (!autoGenerateEnabled) return true;
+    return await generateMemoryDraftForMessages(selected, {
+        source: 'auto_immediate',
+        existingDraftId: pendingDraft.id
+    });
 }
 
 async function bootstrapImportedMemoryDrafts(charId, sessionId) {
@@ -911,9 +1017,12 @@ async function bootstrapImportedMemoryDrafts(charId, sessionId) {
     let createdCount = 0;
     automation.pendingTrigger = null;
     for (const segment of segments) {
-        const created = await generateMemoryDraftForMessages(segment, { source: 'import_bootstrap' });
+        const created = createPendingMemoryDraft(memoryBook, segment, { source: 'import_bootstrap' });
         if (created) createdCount += 1;
     }
+
+    memoryBook.updatedAt = Date.now();
+    await db.saveChat(charId, chatData);
 
     const latestData = await getChatData(charId);
     if (!latestData?.sessions?.[sessionId]) return createdCount;
@@ -1252,7 +1361,7 @@ async function removeMemoryFromSelection() {
     clearSelection();
 }
 
-async function openMemoryGenerationSettings() {
+async function openMemoryGenerationSettings(initialState = null) {
     if (!activeChatChar) return;
 
     const chatData = await getChatData(activeChatChar.id);
@@ -1261,30 +1370,7 @@ async function openMemoryGenerationSettings() {
     if (!memoryBook.settings) memoryBook.settings = {};
     const currentApiConfig = getApiConfig();
     const settings = memoryBook.settings;
-    const state = {
-        source: settings.generationSource || 'current',
-        model: settings.generationModel || '',
-        useCurrentModelOverride: settings.generationUseCurrentModelOverride === true,
-        endpoint: settings.generationEndpoint || '',
-        apiKey: settings.generationApiKey || '',
-        temperature: settings.generationTemperature,
-        maxTokens: Number.isFinite(Number(settings.generationMaxTokens)) && Number(settings.generationMaxTokens) > 0
-            ? Math.round(Number(settings.generationMaxTokens))
-            : null,
-        autoCreateEnabled: settings.autoCreateEnabled !== false,
-        promptPreset: getMemoryPromptOptions(settings).some(p => p.key === settings.promptPreset) ? settings.promptPreset : 'detailed_beats',
-        autoCreateInterval: Number.isFinite(Number(settings.autoCreateInterval)) && Number(settings.autoCreateInterval) > 0
-            ? Number(settings.autoCreateInterval)
-            : 12,
-        batchSize: Number.isFinite(Number(settings.batchSize)) && Number(settings.batchSize) > 0
-            ? Number(settings.batchSize)
-            : 1,
-        useDelayedAutomation: settings.useDelayedAutomation !== false,
-        maxInjectedEntries: Number.isFinite(Number(settings.maxInjectedEntries)) && Number(settings.maxInjectedEntries) > 0
-            ? Number(settings.maxInjectedEntries)
-            : 3,
-        injectionTarget: settings.injectionTarget === 'summary_macro' ? 'summary_macro' : 'summary_block'
-    };
+    const state = getNormalizedMemoryGenerationState(settings, initialState || {});
 
     const renderSheet = () => {
         const content = document.createElement('div');
@@ -1327,7 +1413,7 @@ async function openMemoryGenerationSettings() {
             <div class="settings-item">
                 <label>Generation Rules</label>
                 <div class="clickable-selector" id="memory-prompt-selector">
-                    <span>${getMemoryPromptLabel(settings)}</span>
+                    <span>${getMemoryPromptLabelByKey(settings, state.promptPreset)}</span>
                     <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
                 </div>
                 <button type="button" class="memory-inline-link" id="memory-prompt-preview-btn">Preview Rule</button>
@@ -1347,6 +1433,13 @@ async function openMemoryGenerationSettings() {
                     <div class="settings-desc">Automatically create Memory Book drafts after enough stable messages accumulate.</div>
                 </div>
                 <input id="memory-auto-create-toggle" type="checkbox" class="vk-switch" ${state.autoCreateEnabled ? 'checked' : ''}>
+            </div>
+            <div class="settings-item-checkbox">
+                <div class="settings-text-col">
+                    <label>Auto-Generate Draft Text</label>
+                    <div class="settings-desc">When enabled, newly auto-created draft placeholders immediately generate text. When disabled, auto mode only marks segments and leaves text generation manual.</div>
+                </div>
+                <input id="memory-auto-generate-toggle" type="checkbox" class="vk-switch" ${state.autoGenerateEnabled ? 'checked' : ''}>
             </div>
             <div class="settings-item">
                 <label>Create Memory Every N Messages</label>
@@ -1424,17 +1517,19 @@ async function openMemoryGenerationSettings() {
             const promptItems = getMemoryPromptOptions(settings).map(item => ({
                 label: item.label,
                 onClick: () => {
-                    settings.promptPreset = item.key;
+                    state.promptPreset = item.key;
                     closeBottomSheet();
                     setTimeout(() => showBottomSheet({ title: 'Memory Generation', content: renderSheet(), isSolid: true }), 50);
                 }
             }));
             promptItems.push({
-                label: `Preview: ${getMemoryPromptLabel(settings)}`,
+                label: `Preview: ${getMemoryPromptLabelByKey(settings, state.promptPreset)}`,
                 onClick: () => {
-                    const selected = getMemoryPromptOptions(settings).find(item => item.key === settings.promptPreset);
+                    const selected = getMemoryPromptOptions(settings).find(item => item.key === state.promptPreset);
                     closeBottomSheet();
-                    setTimeout(() => openMemoryPromptPreview(selected, { onClose: openMemoryGenerationSettings }), 50);
+                    setTimeout(() => openMemoryPromptPreview(selected, {
+                        onClose: () => openMemoryGenerationSettings({ ...state })
+                    }), 50);
                 }
             });
             promptItems.push({
@@ -1449,9 +1544,11 @@ async function openMemoryGenerationSettings() {
 
         content.querySelector('#memory-prompt-preview-btn')?.addEventListener('click', () => {
             const options = getMemoryPromptOptions(settings);
-            const selected = options.find(item => item.key === settings.promptPreset) || options[0];
+            const selected = options.find(item => item.key === state.promptPreset) || options[0];
             closeBottomSheet();
-            setTimeout(() => openMemoryPromptPreview(selected, { onClose: openMemoryGenerationSettings }), 50);
+            setTimeout(() => openMemoryPromptPreview(selected, {
+                onClose: () => openMemoryGenerationSettings({ ...state })
+            }), 50);
         });
 
         content.querySelector('#memory-injection-target-selector')?.addEventListener('click', () => {
@@ -1512,6 +1609,7 @@ async function openMemoryGenerationSettings() {
                 ? null
                 : Math.max(200, Math.min(32000, Number.isFinite(Number(maxTokensValue)) ? Math.round(Number(maxTokensValue)) : 2000));
             settings.autoCreateEnabled = !!content.querySelector('#memory-auto-create-toggle')?.checked;
+            settings.autoGenerateEnabled = !!content.querySelector('#memory-auto-generate-toggle')?.checked;
             const autoIntervalValue = Number(content.querySelector('#memory-auto-interval-input')?.value || state.autoCreateInterval || 12);
             settings.autoCreateInterval = Math.max(1, Math.min(200, Number.isFinite(autoIntervalValue) ? Math.round(autoIntervalValue) : 12));
             const batchSizeValue = Number(content.querySelector('#memory-batch-size-input')?.value || state.batchSize || 1);
@@ -1520,7 +1618,7 @@ async function openMemoryGenerationSettings() {
             const maxInjectedValue = Number(content.querySelector('#memory-max-injected-input')?.value || state.maxInjectedEntries || 3);
             settings.maxInjectedEntries = Math.max(1, Math.min(20, Number.isFinite(maxInjectedValue) ? Math.round(maxInjectedValue) : 3));
             settings.injectionTarget = state.injectionTarget === 'summary_macro' ? 'summary_macro' : 'summary_block';
-            settings.promptPreset = settings.promptPreset || state.promptPreset || 'detailed_beats';
+            settings.promptPreset = state.promptPreset || 'detailed_beats';
             memoryBook.updatedAt = Date.now();
             await db.saveChat(activeChatChar.id, chatData);
             closeBottomSheet();
@@ -2117,6 +2215,37 @@ async function loadChats() {
             currentMessages.value = [];
         }
     }
+}
+
+async function abortActiveChatGeneration(charId, { restore = true } = {}) {
+    const state = generatingStates[charId];
+    if (!state || state.type === 'impersonation') return false;
+
+    if (state.controller) {
+        try {
+            state.controller.abort();
+        } catch (abortErr) {
+            console.warn('[generation] Failed to abort controller:', abortErr);
+        }
+    }
+
+    if (restore && state.restoreState) {
+        try {
+            await state.restoreState();
+        } catch (restoreErr) {
+            console.error('[generation] Failed to restore state after abort:', restoreErr);
+        }
+    }
+
+    if (generatingStates[charId]?.genId === state.genId) {
+        delete generatingStates[charId];
+    }
+
+    if (activeChatChar && activeChatChar.id === charId) {
+        isGenerating.value = false;
+    }
+
+    return true;
 }
 
 async function updateContextCutoff() {
@@ -2878,16 +3007,13 @@ async function sendMessage(attachedImage = null, guidanceText = null) {
     if (isGenerating.value && activeChatChar) {
         // Stop Generation
         const state = generatingStates[activeChatChar.id];
-        if (state) {
+        if (state?.type === 'impersonation') {
             if (state.controller) state.controller.abort();
-            if (state.restoreState) state.restoreState();
-
-            if (state.type === 'impersonation') {
-                isImpersonating.value = false;
-            }
-
             delete generatingStates[activeChatChar.id];
             isGenerating.value = false;
+            isImpersonating.value = false;
+        } else if (state) {
+            await abortActiveChatGeneration(activeChatChar.id);
         } else {
             // Stale isGenerating flag — no active generation found, just reset
             isGenerating.value = false;
@@ -2961,6 +3087,15 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
     // Check API Configuration
     const model = localStorage.getItem('api-model');
     const endpoint = localStorage.getItem('gz_api_endpoint_normalized') || localStorage.getItem('api-endpoint');
+    const existingState = generatingStates[char.id];
+
+    if (existingState && existingState.type !== 'impersonation') {
+        console.warn('[generation] Ignoring overlapping startGeneration call for active chat request', {
+            charId: char.id,
+            existingGenId: existingState.genId
+        });
+        return;
+    }
     
     if (!model || !endpoint) {
         showBottomSheet({
@@ -3315,8 +3450,10 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
         
         // Update via dynamic updater (handles re-mounts)
         const state = generatingStates[char.id];
-        if (state && state.onUIUpdate) {
+        if (state && state.genId === genId && state.onUIUpdate) {
             state.onUIUpdate(effectiveText, effectiveReasoning, true, textDelta);
+        } else if (!state || state.genId !== genId) {
+            return;
         } else {
             // Background update — throttle DB writes to once per 2s (#7)
             _bgPendingText = effectiveText;
@@ -3325,6 +3462,8 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
                 _bgUpdateTimer = setTimeout(async () => {
                     _bgUpdateTimer = null;
                     if (_bgPendingText === null) return;
+                    const latestState = generatingStates[char.id];
+                    if (!latestState || latestState.genId !== genId) return;
                     const data = await getChatData(char.id);
                     if (data && data.sessions[sessionId]) {
                         const dbMsg = data.sessions[sessionId].find(m => m.id === msgId);
@@ -3412,18 +3551,24 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
             if (activeChatChar && activeChatChar.id === char.id) isGenerating.value = false;
         };
 
-        try {
-            const currentState = generatingStates[char.id];
-            if (currentState && currentState.timerId) clearInterval(currentState.timerId);
+        const ensureStaleCleanup = () => {
             if (_bgUpdateTimer) { clearTimeout(_bgUpdateTimer); _bgUpdateTimer = null; }
             localStorage.removeItem(`gz_generating_${char.id}_${sessionId}`);
+        };
+
+        try {
+            const currentState = generatingStates[char.id];
+            if (_bgUpdateTimer) { clearTimeout(_bgUpdateTimer); _bgUpdateTimer = null; }
 
             if (!currentState || currentState.genId !== genId) {
                 await clearTypingStateForMessage();
-                ensureCleanup();
+                ensureStaleCleanup();
                 window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: char.id, sessionId: sessionId } }));
                 return;
             }
+
+            if (currentState.timerId) clearInterval(currentState.timerId);
+            localStorage.removeItem(`gz_generating_${char.id}_${sessionId}`);
             
             // Guard against race with abort
             const hasCompletionPayload = !!(response || finalReasoning || meta?.partialError);
@@ -3740,10 +3885,13 @@ async function branchSession(msgIndex) {
 
     if (isGenerating.value && generatingStates[activeChatChar.id]) {
         const state = generatingStates[activeChatChar.id];
-        if (state.controller) state.controller.abort();
-        if (state.restoreState) state.restoreState();
-        delete generatingStates[activeChatChar.id];
-        isGenerating.value = false;
+        if (state?.type === 'impersonation') {
+            if (state.controller) state.controller.abort();
+            delete generatingStates[activeChatChar.id];
+            isGenerating.value = false;
+        } else {
+            await abortActiveChatGeneration(activeChatChar.id);
+        }
     }
 
     const data = await getChatData(activeChatChar.id);
@@ -3914,10 +4062,13 @@ function openMessageActions(msg, index) {
                 onClick: () => {
                     if (activeChatChar && generatingStates[activeChatChar.id]) {
                         const state = generatingStates[activeChatChar.id];
-                        if (state.controller) state.controller.abort();
-                        if (state.restoreState) state.restoreState();
-                        delete generatingStates[activeChatChar.id];
-                        isGenerating.value = false;
+                        if (state?.type === 'impersonation') {
+                            if (state.controller) state.controller.abort();
+                            delete generatingStates[activeChatChar.id];
+                            isGenerating.value = false;
+                        } else {
+                            abortActiveChatGeneration(activeChatChar.id);
+                        }
                     } else {
                         currentMessages.value.splice(index, 1);
                         if (activeChatChar) {
@@ -4404,11 +4555,14 @@ async function deleteSession(sessionId, targetChar) {
 
     if (char && generatingStates[char.id]) {
         const state = generatingStates[char.id];
-        if (state.controller) state.controller.abort();
-        if (state.restoreState) state.restoreState();
-        delete generatingStates[char.id];
-        if (activeChatChar && activeChatChar.id === char.id) {
-            isGenerating.value = false;
+        if (state?.type === 'impersonation') {
+            if (state.controller) state.controller.abort();
+            delete generatingStates[char.id];
+            if (activeChatChar && activeChatChar.id === char.id) {
+                isGenerating.value = false;
+            }
+        } else {
+            await abortActiveChatGeneration(char.id);
         }
     }
 

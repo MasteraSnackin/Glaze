@@ -327,7 +327,9 @@ Current implementation status notes:
 - [not done] Replace the temporary bottom-sheet implementation with a dedicated polished memory sheet component before considering the UI complete.
 - [done] Add an explicit session setting for "раз в сколько сообщений создается мемори" so automation/bootstrap can use a user-configurable interval instead of a hardcoded threshold.
 - [done] Add an explicit session setting for memory injection target selection: `{{summary}}` macro slot vs dedicated chat summary block injection.
+- [done] Batch 3 persistence hardening: Memory Generation now preserves unsaved modal state across prompt preview/reopen flows, and DB normalization now keeps `autoCreateInterval`, `useDelayedAutomation`, `injectionTarget`, and the current Memory Books key-match defaults aligned during reload/save paths.
 - [done] Lorebook insertion now has a global default injection position and per-entry `Match Global` / `{{lorebooks}}` targets, so the `{{lorebooks}}` macro is legal at the lorebook-entry level instead of acting as a preset-wide override.
+- [done] Restore an explicit Lorebooks global setting for `Max Injected Entries`, separate from `scan depth`, so users can cap how many triggered lore entries actually reach the prompt.
 - [done] Lorebook ST round-trip now preserves Glaze-specific injection targets via `glazeMetadata`, so `Match Global` / `{{lorebooks}}` are not collapsed during export/import back into Glaze.
 
 4.5. Import/export/bootstrap and cloud-sync-safe serialization:
@@ -344,6 +346,7 @@ Current implementation status notes:
 - [not done] Define when automatic memory creation runs: for example after N new messages, after summary update, or on explicit background maintenance.
 - [done] Make the automatic creation interval user-configurable in UI as "раз в сколько сообщений создается мемори" instead of hardcoding the trigger threshold.
 - [done] Add a user-facing toggle for delayed automation (`работать с отставанием`) so automatic memory creation can intentionally wait for an extra user+assistant exchange before materializing a memory entry.
+- [done] Split auto mode into two stages: automatic segmentation always creates draft placeholders first, while a separate `Auto-Generate Draft Text` toggle controls whether those new drafts immediately request generated text.
 - [done] Define delayed-trigger semantics for `Create memory every N messages`: when the threshold is reached on an assistant reply, wait until the user replies and receives one more assistant reply; when the threshold is reached on a user message, wait until that user message gets an assistant reply and then wait for one more full user+assistant exchange before creating the memory entry.
 - [done] Keep delayed automation as the recommended default so users can still edit their last user turn or regenerate the latest assistant reply before a memory entry becomes fixed.
 - [done] A first session-level delayed automation engine now tracks pending auto-memory triggers and evaluates them after stable assistant reply completion in the normal generation flow.
@@ -416,6 +419,7 @@ Manual verification that must stay visible in the roadmap:
 - [not done] Verify that imported chats can bootstrap first memories without requiring a manually created seed entry.
 - [not done] Verify that `Current provider` generation uses the override model while still keeping the main endpoint/key path unchanged.
 - [not done] Verify that closing prompt preview returns to `Memory Generation` or the prompt manager instead of closing the whole flow.
+- [not done] Verify that unsaved `Memory Generation` changes survive `Preview Rule` and return to the sheet without resetting `promptPreset`, `injectionTarget`, `autoCreateEnabled`, or related controls.
 - [not done] Verify that memory injections count separately from lorebook injections during generation.
 - [not done] Verify that tokenizer visualization shows memory usage with summary-style accounting.
 - [not done] Verify that editing an approved memory entry correctly updates persisted content/keys and does not break message coverage metadata.
@@ -423,12 +427,16 @@ Manual verification that must stay visible in the roadmap:
 - [not done] Verify that the Memory Books key match mode (`plain` / `glaze` / `both`) changes retrieval as expected while using only the `Keys` field.
 - [not done] Verify that `Create memory every N messages` respects delayed mode correctly on both threshold cases: assistant-triggered thresholds wait one extra user+assistant exchange, and user-triggered thresholds wait for the current assistant reply plus one extra user+assistant exchange.
 - [not done] Verify that disabling `работать с отставанием` switches automation back to immediate threshold behavior without breaking edit/regenerate workflows.
+- [not done] Verify that auto mode without `Auto-Generate Draft Text` only creates `pending_generation` draft placeholders and never starts background generation by itself.
+- [not done] Verify that enabling `Auto-Generate Draft Text` immediately upgrades newly auto-created placeholders into generated drafts without skipping the placeholder step.
 - [not done] Verify that lorebook entries set to `Match Global`, `@worldInfoBefore`, `@worldInfoAfter`, and `{{lorebooks}}` inject at the expected locations without preset-level override regressions.
+- [not done] Verify that Lorebooks `Max Injected Entries` caps final prompt injection independently from `scan depth` and still preserves entry ordering.
 - [not done] Current known limitation: lorebook/memory entries now aggregate into single injected blocks per target, but when the target is a macro inside another preset block, the injected content still lands as a separate block adjacent to that area rather than truly inside the host block. Revisit later.
 - [not done] Verify that Glaze lorebook export/import preserves `Match Global` and `{{lorebooks}}` through the new `glazeMetadata` round-trip path.
 - [not done] Verify that backup export/import preserves memory books and rebuilds any derived vectors safely.
 - [not done] Verify that future cloud-sync serialization can round-trip memory books without duplication or orphaned entries.
 - [not done] Verify that Glaze-to-Glaze export/import preserves memory books, per-message markers, and memory generation settings without loss.
+- [not done] Verify that reloading a chat preserves `autoCreateInterval`, `useDelayedAutomation`, `injectionTarget`, and Memory Books search defaults for both fresh and legacy sessions.
 
 Important constraint:
 - [done] Do not implement memory books as a quick lorebook hack that hides lifecycle state in entry text or comments. That would reintroduce later refactor pressure.

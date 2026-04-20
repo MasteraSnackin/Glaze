@@ -405,7 +405,7 @@ export function useMemoryBooks(deps) {
             return;
         }
 
-        // Create pending draft entries with empty content (user will generate manually)
+        // Create pending draft entries with empty content so scan/automation share the same placeholder-first model.
         if (!Array.isArray(memoryBook.pendingDrafts)) memoryBook.pendingDrafts = [];
 
         for (let i = 0; i < segments.length; i++) {

@@ -73,30 +73,34 @@ function normalizeChatData(chatData) {
 
     for (const sessionId of Object.keys(chatData.sessions)) {
         if (!chatData.memoryBooks[sessionId] || typeof chatData.memoryBooks[sessionId] !== 'object') {
-                chatData.memoryBooks[sessionId] = {
-                    id: `memorybook_${sessionId}`,
-                    entries: [],
-                    pendingDrafts: [],
-                    settings: {
+            chatData.memoryBooks[sessionId] = {
+                id: `memorybook_${sessionId}`,
+                entries: [],
+                pendingDrafts: [],
+                settings: {
                     enabled: true,
                     autoCreateEnabled: true,
+                    autoGenerateEnabled: false,
                     maxInjectedEntries: 3,
+                    autoCreateInterval: 12,
+                    useDelayedAutomation: true,
+                    injectionTarget: 'summary_block',
                     batchSize: 1,
-                        parallelJobs: 1,
-                        vectorSearchEnabled: false,
-                        keyMatchMode: 'plain',
-                        generationSource: 'current',
-                        generationModel: '',
-                        generationUseCurrentModelOverride: false,
-                        generationEndpoint: '',
-                        generationApiKey: '',
-                        generationTemperature: null,
-                        generationMaxTokens: null,
-                        promptPreset: 'detailed_beats',
-                        customPrompts: []
-                    },
-                    updatedAt: 0
-                };
+                    parallelJobs: 1,
+                    vectorSearchEnabled: false,
+                    keyMatchMode: 'glaze',
+                    generationSource: 'current',
+                    generationModel: '',
+                    generationUseCurrentModelOverride: false,
+                    generationEndpoint: '',
+                    generationApiKey: '',
+                    generationTemperature: null,
+                    generationMaxTokens: null,
+                    promptPreset: 'detailed_beats',
+                    customPrompts: []
+                },
+                updatedAt: 0
+            };
         } else {
             const memoryBook = chatData.memoryBooks[sessionId];
             if (!memoryBook.id) memoryBook.id = `memorybook_${sessionId}`;
@@ -109,11 +113,15 @@ function normalizeChatData(chatData) {
             }
             if (typeof memoryBook.settings.enabled !== 'boolean') memoryBook.settings.enabled = true;
             if (typeof memoryBook.settings.autoCreateEnabled !== 'boolean') memoryBook.settings.autoCreateEnabled = true;
+            if (typeof memoryBook.settings.autoGenerateEnabled !== 'boolean') memoryBook.settings.autoGenerateEnabled = false;
             if (!Number.isFinite(memoryBook.settings.maxInjectedEntries)) memoryBook.settings.maxInjectedEntries = 3;
+            if (!Number.isFinite(memoryBook.settings.autoCreateInterval) || memoryBook.settings.autoCreateInterval <= 0) memoryBook.settings.autoCreateInterval = 12;
+            if (typeof memoryBook.settings.useDelayedAutomation !== 'boolean') memoryBook.settings.useDelayedAutomation = true;
+            memoryBook.settings.injectionTarget = memoryBook.settings.injectionTarget === 'summary_macro' ? 'summary_macro' : 'summary_block';
             if (!Number.isFinite(memoryBook.settings.batchSize)) memoryBook.settings.batchSize = 1;
             if (!Number.isFinite(memoryBook.settings.parallelJobs)) memoryBook.settings.parallelJobs = 1;
             if (typeof memoryBook.settings.vectorSearchEnabled !== 'boolean') memoryBook.settings.vectorSearchEnabled = false;
-            if (!['plain', 'glaze', 'both'].includes(memoryBook.settings.keyMatchMode)) memoryBook.settings.keyMatchMode = 'plain';
+            if (!['plain', 'glaze', 'both'].includes(memoryBook.settings.keyMatchMode)) memoryBook.settings.keyMatchMode = 'glaze';
             if (!memoryBook.settings.generationSource) memoryBook.settings.generationSource = 'current';
             if (typeof memoryBook.settings.generationModel !== 'string') memoryBook.settings.generationModel = '';
             if (typeof memoryBook.settings.generationUseCurrentModelOverride !== 'boolean') memoryBook.settings.generationUseCurrentModelOverride = false;

@@ -238,6 +238,7 @@ export const lorebookState = reactive({
     lorebooks: [],
     globalSettings: {
         scanDepth: 10,
+        maxInjectedEntries: 5,
         contextPercent: 100,
         budgetCap: 0,
         reserveMode: 'percent',
@@ -305,6 +306,9 @@ export async function initLorebookState(force = false) {
                     }
                     if (!data.settings.injectionPosition) {
                         data.settings.injectionPosition = 'worldInfoBefore';
+                    }
+                    if (!Number.isFinite(Number(data.settings.maxInjectedEntries)) || Number(data.settings.maxInjectedEntries) <= 0) {
+                        data.settings.maxInjectedEntries = 5;
                     }
                     Object.assign(lorebookState.globalSettings, data.settings);
                 }
@@ -525,7 +529,11 @@ export function scanLorebooks(history = [], char = null, textToScan = "", chatId
             };
 
             const scanDepth = entry.scanDepth ?? lorebookState.globalSettings.scanDepth ?? 10;
-            const messagesToScan = history.slice(-scanDepth).map(m => m.content).join("\n");
+            const temporalDepth = Math.max(entry.sticky || 0, entry.cooldown || 0);
+            const effectiveScanDepth = temporalDepth > 0
+                ? Math.min(scanDepth, temporalDepth)
+                : scanDepth;
+            const messagesToScan = history.slice(-effectiveScanDepth).map(m => m.content).join("\n");
 
             // Only scan generated text (textToScan) if recursive scan is enabled OR it's the first iteration (static scan)
             // Wait, iteration 1 SHOULD scan textToScan (the current user input/last assistant message).
@@ -616,7 +624,10 @@ export function scanLorebooks(history = [], char = null, textToScan = "", chatId
         }
     }
 
-    return allRelevantEntries.sort((a, b) => (a.order ?? 100) - (b.order ?? 100));
+    const maxInjectedEntries = Math.max(1, Math.min(100, Number(lorebookState.globalSettings?.maxInjectedEntries || 5)));
+    return allRelevantEntries
+        .sort((a, b) => (a.order ?? 100) - (b.order ?? 100))
+        .slice(0, maxInjectedEntries);
 }
 
 export async function importSTLorebook(json, fileName = 'Imported', options = {}) {
