@@ -541,23 +541,39 @@ function buildMemoryContinuityContext(memoryBook, selected) {
 }
 
 function buildMemoryDraftLoreContext(selected) {
-    const selectedLabels = new Map();
+    const historicalLabels = new Map();
     selected.forEach(msg => {
         (Array.isArray(msg?.contextRefs) ? msg.contextRefs : []).forEach(ref => {
             if (ref?.type === 'lorebook' && ref?.id) {
                 const key = ref.id;
-                const existing = selectedLabels.get(key) || { label: ref.label || 'Entry', count: 0 };
+                const existing = historicalLabels.get(key) || { label: ref.label || 'Entry', count: 0 };
                 existing.count += 1;
-                selectedLabels.set(key, existing);
+                historicalLabels.set(key, existing);
             }
         });
     });
 
-    return [...selectedLabels.values()]
+    const historicalLines = [...historicalLabels.values()]
         .sort((a, b) => b.count - a.count)
-        .slice(0, 5)
-        .map(item => `${item.label}${item.count > 1 ? ` x${item.count}` : ''}`)
-        .join('\n');
+        .slice(0, 3)
+        .map(item => `- ${item.label}${item.count > 1 ? ` x${item.count}` : ''}`);
+
+    const liveCandidates = [...new Set(selected.flatMap(msg =>
+        (Array.isArray(msg?.triggeredLorebooks) ? msg.triggeredLorebooks : [])
+            .map(entry => entry?.name || entry?.label || '')
+            .filter(Boolean)
+    ))]
+        .slice(0, 2)
+        .map(label => `- ${label}`);
+
+    const sections = [];
+    if (historicalLines.length) {
+        sections.push(['Historical triggers:', ...historicalLines].join('\n'));
+    }
+    if (liveCandidates.length) {
+        sections.push(['Current live candidates:', ...liveCandidates].join('\n'));
+    }
+    return sections.join('\n\n');
 }
 
 function buildMemoryDraftSummaryExcerpt(summary) {

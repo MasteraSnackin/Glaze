@@ -200,6 +200,79 @@ describe('Vector lorebook E2E verification', () => {
         expect(mockExecuteRequest).toHaveBeenCalledOnce();
     });
 
+    it('places late vector lore after char card when target is worldInfoAfter', async () => {
+        mockGetEmbeddings.mockImplementation(async (texts) => texts.map((text) => [{
+            text,
+            vector: text.includes('bright blue hair') ? [1, 0, 0] : [0.98, 0.02, 0]
+        }]));
+
+        lorebookState.lorebooks = [{
+            id: 'lb-vector-after',
+            name: 'Vector After',
+            enabled: true,
+            entries: [{
+                id: 'entry-vector-after',
+                comment: 'Asei After',
+                keys: ['Asei'],
+                content: 'After block lore',
+                enabled: true,
+                vectorSearch: true,
+                position: 'worldInfoAfter'
+            }]
+        }];
+
+        await indexLorebookEntries('lb-vector-after');
+
+        globalThis._genWorker = null;
+        globalThis.Worker = class extends MockWorker {
+            postMessage(message) {
+                const data = {
+                    messages: [
+                        { role: 'system', content: 'Character card', blockId: 'char_card' },
+                        { role: 'system', content: 'Scenario block', blockId: 'scenario' },
+                        { role: 'user', content: 'Current user message', isHistory: true }
+                    ],
+                    loreEntries: [],
+                    staticTokens: 8,
+                    contextBreakdown: { lorebook: 0 },
+                    needsVarsSave: false,
+                    sessionVars: {}
+                };
+                queueMicrotask(() => {
+                    this.onmessage?.({ data: { id: message.id, success: true, data } });
+                });
+            }
+        };
+
+        await generateChatResponse({
+            text: 'I am looking for the blue-haired catgirl with a fluffy tail.',
+            char: { id: 'char-1', name: 'Tester', sessionId: 'chat-1' },
+            history: [{ role: 'user', content: 'Tell me about the blue-haired catgirl.' }],
+            authorsNote: null,
+            summary: '',
+            controller: { signal: { aborted: false } },
+            callbacks: {
+                onUpdate: vi.fn(),
+                onComplete: vi.fn(),
+                onError: vi.fn(),
+                onPromptReady: vi.fn()
+            }
+        });
+
+        const lastPrompt = getLastPrompt();
+        expect(lastPrompt).toBeTruthy();
+        const contents = lastPrompt.messages.map(message => message.content);
+        expect(contents).toEqual([
+            'Character card',
+            'Scenario block',
+            'After block lore',
+            'Current user message'
+        ]);
+
+        globalThis._genWorker = null;
+        globalThis.Worker = MockWorker;
+    });
+
     it('only injects lorebook macro entries into {{lorebooks}} blocks', async () => {
         mockGetEmbeddings.mockImplementation(async (texts) => texts.map((text) => [{
             text,
