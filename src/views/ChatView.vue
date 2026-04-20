@@ -69,7 +69,7 @@ import { useVirtualScroll } from '@/composables/chat/useVirtualScroll.js';
 import { useGenerationRegistry } from '@/composables/chat/useGenerationRegistry.js';
 import { handleGenerationComplete } from '@/composables/chat/useGenerationCompleteHandler.js';
 import { handleGenerationError } from '@/composables/chat/useGenerationErrorHandler.js';
-import { buildGenerationAuthorsNote, buildGenerationHistory, ensureGenerationPlaceholderMessage } from '@/composables/chat/useGenerationPreparation.js';
+import { buildGenerationAuthorsNote, buildGenerationHistory, ensureGenerationPlaceholderMessage, resolveGenerationSessionContext } from '@/composables/chat/useGenerationPreparation.js';
 import { handleGenerationPromptReady } from '@/composables/chat/useGenerationPromptReady.js';
 import { createPromptMetadataSnapshots } from '@/composables/chat/usePromptMetadataSnapshots.js';
 import { restoreGenerationState } from '@/composables/chat/useGenerationStateRestore.js';
@@ -3134,34 +3134,15 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
     const genId = nextGenerationId();
     const controller = new AbortController();
     const startTime = Date.now();
-    // Capture session ID at start
     let rawStreamText = text || "";
-    let chatData = null;
-    let sessionId = null;
-    let summary = char.summary !== undefined ? char.summary : null;
-    let anContent = char.authors_note !== undefined ? char.authors_note : null;
+    resolveGenerationSessionContext({ char, db }).then(context => {
+        continueGeneration(context);
+    }).catch(e => {
+        console.error('Failed to load chat for generation:', e);
+        isGenerating.value = false;
+    });
 
-    if (!char.sessionId) {
-        // Fallback for missing sessionId (e.g. from background task without activeChatChar)
-        db.getChat(char.id).then(d => {
-            chatData = d;
-            sessionId = chatData?.currentId;
-            if (summary === null) summary = chatData?.summaries?.[sessionId];
-            if (typeof summary === 'object' && summary !== null) summary = summary.content;
-            if (anContent === null) anContent = chatData?.authorsNotes?.[sessionId];
-            if (typeof anContent === 'object' && anContent !== null) anContent = anContent.content;
-            continueGeneration();
-        }).catch(e => {
-            console.error('Failed to load chat for generation:', e);
-            isGenerating.value = false;
-        });
-        return; // wait for async db to finish
-    } else {
-        sessionId = char.sessionId;
-        continueGeneration();
-    }
-
-    async function continueGeneration() {
+    async function continueGeneration({ sessionId, summary, anContent }) {
 
     // Notify application about generation start
     window.dispatchEvent(new CustomEvent('chat-generation-started', { detail: { charId: char.id, sessionId: sessionId } }));

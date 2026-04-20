@@ -18,6 +18,44 @@ export function buildGenerationAuthorsNote({ getEffectivePreset, charId, session
     };
 }
 
+export async function resolveGenerationSessionContext({
+    char,
+    db
+}) {
+    let chatData = null;
+    let sessionId = char.sessionId || null;
+    let summary = char.summary !== undefined ? char.summary : null;
+    let anContent = char.authors_note !== undefined ? char.authors_note : null;
+
+    if (!char.sessionId) {
+        chatData = await db.getChat(char.id);
+        sessionId = chatData?.currentId;
+
+        if (summary === null) {
+            summary = chatData?.summaries?.[sessionId];
+        }
+
+        if (anContent === null) {
+            anContent = chatData?.authorsNotes?.[sessionId];
+        }
+    }
+
+    if (typeof summary === 'object' && summary !== null) {
+        summary = summary.content;
+    }
+
+    if (typeof anContent === 'object' && anContent !== null) {
+        anContent = anContent.content;
+    }
+
+    return {
+        chatData,
+        sessionId,
+        summary,
+        anContent
+    };
+}
+
 export async function ensureGenerationPlaceholderMessage({
     msgIndex,
     text,

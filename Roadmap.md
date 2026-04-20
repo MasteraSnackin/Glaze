@@ -883,6 +883,7 @@ Done and tested:
   - `useGenerationPromptReady.js` now owns prompt metadata assignment and prompt-ready persistence for triggered lorebooks/memories/context refs
   - `useGenerationPreparation.js` now owns authors-note assembly, placeholder message creation, and request history shaping for chat generation
   - `useGenerationStateSetup.js` now owns initial guidance patching plus per-generation UI update/timer state wiring
+  - `useGenerationPreparation.js` also resolves generation session context for active and background chat starts
 
 Tested status:
 - [done] `npm test -- --run`
