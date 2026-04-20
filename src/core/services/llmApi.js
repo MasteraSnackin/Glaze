@@ -7,6 +7,7 @@ import { currentLang } from '@/core/config/APPSettings.js';
 import { startNetworkTrace, updateNetworkTrace, appendNetworkTraceLine, finishNetworkTrace } from '@/core/services/networkDebugService.js';
 import { getProviderById } from '@/core/llm/providers/providerRegistry.js';
 import { extractOpenAiMessage, normalizeReasoningOutput } from '@/core/llm/transport/responseNormalizer.js';
+import { createStreamAccumulator } from '@/core/llm/transport/streamAccumulator.js';
 import { consumeSseDataLines, getTrailingSseDataLine } from '@/core/llm/transport/sseParser.js';
 import { logger } from '../../utils/logger.js';
 
@@ -66,9 +67,14 @@ export async function executeRequest({
         }
     }
 
-    let fullText = "";
-    let rawAccumulated = "";
-    let accumulatedReasoning = "";
+    const streamAccumulator = createStreamAccumulator({
+        requestReasoning,
+        tagStart,
+        tagEnd,
+        hasInlineTags,
+        headerModel,
+        headerInline
+    });
 
     const createAbortError = () => {
         const error = new Error('Generation aborted');
@@ -207,7 +213,6 @@ export async function executeRequest({
 
             const reader = response.body.getReader();
             const decoder = new TextDecoder("utf-8");
-            let previousEffectiveText = "";
             let pendingLineBuffer = '';
 
             const resetStreamTimer = () => {
@@ -247,56 +252,10 @@ export async function executeRequest({
 
                             if (content) logger.debug(content);
 
-                            fullText += content;
-                            rawAccumulated += content;
-                            if (reasoning) accumulatedReasoning += reasoning;
-
-                            // Process Outer CoT (Reasoning Tags)
-                            let effectiveText = rawAccumulated;
-                            let effectiveReasoning = "";
-
-                            if (requestReasoning) {
-                                effectiveReasoning = accumulatedReasoning || "";
-                            }
-
-                            let inlineReasoning = "";
-                            if (hasInlineTags && rawAccumulated.includes(tagStart)) {
-                                const startIndex = rawAccumulated.indexOf(tagStart);
-                                const endIndex = rawAccumulated.indexOf(tagEnd, startIndex);
-                                if (endIndex !== -1) {
-                                    inlineReasoning = rawAccumulated.substring(startIndex + tagStart.length, endIndex);
-                                    effectiveText = rawAccumulated.substring(0, startIndex) + rawAccumulated.substring(endIndex + tagEnd.length);
-                                } else {
-                                    inlineReasoning = rawAccumulated.substring(startIndex + tagStart.length);
-                                    effectiveText = rawAccumulated.substring(0, startIndex);
-                                }
-                            }
-
-                            if (effectiveReasoning && inlineReasoning) {
-                                effectiveReasoning = `${headerModel}\n${effectiveReasoning}\n\n---\n\n${headerInline}\n${inlineReasoning}`;
-                            } else if (inlineReasoning) {
-                                effectiveReasoning = inlineReasoning;
-                            }
-
-                            // Strip leading whitespace and decode HTML entities
-                            effectiveText = effectiveText.replace(/^\s+/, '')
-                                .replace(/&amp;/g, '&')
-                                .replace(/&gt;/g, '>')
-                                .replace(/&lt;/g, '<')
-                                .replace(/&quot;/g, '"')
-                                .replace(/&apos;/g, "'");
-
-                            // Buffer text ending in an incomplete HTML entity, flush it in the next delta
-                            const incompleteEntity = effectiveText.match(/&[a-zA-Z0-9#]*$/);
-                            if (incompleteEntity) {
-                                effectiveText = effectiveText.substring(0, incompleteEntity.index);
-                            }
-
-                            let textDelta = null;
-                            if (effectiveText.startsWith(previousEffectiveText)) {
-                                textDelta = effectiveText.substring(previousEffectiveText.length);
-                            }
-                            previousEffectiveText = effectiveText;
+                            const { effectiveText, effectiveReasoning, textDelta } = streamAccumulator.consumeDelta({
+                                content,
+                                reasoning
+                            });
 
                             if (onUpdate) onUpdate(content, reasoning, effectiveText, effectiveReasoning, textDelta);
                         }
@@ -318,24 +277,9 @@ export async function executeRequest({
             throwIfAborted();
 
             // Final processing for onComplete
-            let finalReasoning = requestReasoning ? accumulatedReasoning : "";
-            let finalText = fullText;
-            let inlineReasoning = "";
-
-            if (hasInlineTags && fullText.includes(tagStart)) {
-                const startIndex = fullText.indexOf(tagStart);
-                const endIndex = fullText.indexOf(tagEnd, startIndex);
-                if (endIndex !== -1) {
-                    inlineReasoning = fullText.substring(startIndex + tagStart.length, endIndex);
-                    finalText = fullText.substring(0, startIndex) + fullText.substring(endIndex + tagEnd.length);
-                }
-            }
-
-            if (finalReasoning && inlineReasoning) {
-                finalReasoning = `${headerModel}\n${finalReasoning}\n\n---\n\n${headerInline}\n${inlineReasoning}`;
-            } else if (inlineReasoning) {
-                finalReasoning = inlineReasoning;
-            }
+            const finalResult = streamAccumulator.finalize();
+            const finalText = finalResult.text;
+            const finalReasoning = finalResult.reasoning;
 
             logger.debug("Stream finished:", finalText);
 
@@ -345,10 +289,10 @@ export async function executeRequest({
                     eventCount: null
                 },
                 text: cleanText(finalText),
-                reasoning: finalReasoning || null
+                reasoning: finalReasoning
             });
 
-            if (onComplete) onComplete(cleanText(finalText), finalReasoning || null);
+            if (onComplete) onComplete(cleanText(finalText), finalReasoning);
 
         } else {
             const data = await response.json();
@@ -375,9 +319,10 @@ export async function executeRequest({
         if (e.name === 'AbortError') {
             if (timedOut) {
                 // Timeout-induced abort — treat as error, not user cancellation
-                if (fullText.length > 0) {
-                    finishNetworkTrace({ text: cleanText(fullText), reasoning: requestReasoning ? accumulatedReasoning : null, error: 'Generation timed out' });
-                    if (onComplete) onComplete(cleanText(fullText), requestReasoning ? accumulatedReasoning : null, { partialError: "Generation timed out" });
+                const partial = streamAccumulator.getPartial();
+                if (partial.text.length > 0) {
+                    finishNetworkTrace({ text: cleanText(partial.text), reasoning: partial.reasoning, error: 'Generation timed out' });
+                    if (onComplete) onComplete(cleanText(partial.text), partial.reasoning, { partialError: "Generation timed out" });
                 } else {
                     finishNetworkTrace({ error: 'Generation timed out — no response from server' });
                     if (onError) onError(new Error("Generation timed out — no response from server"));
@@ -386,9 +331,10 @@ export async function executeRequest({
             }
 
             // User-initiated abort — save partial text if available
-            if (fullText.length > 0) {
-                finishNetworkTrace({ text: cleanText(fullText), reasoning: requestReasoning ? accumulatedReasoning : null, error: 'Generation aborted' });
-                if (onComplete) onComplete(cleanText(fullText), requestReasoning ? accumulatedReasoning : null);
+            const partial = streamAccumulator.getPartial();
+            if (partial.text.length > 0) {
+                finishNetworkTrace({ text: cleanText(partial.text), reasoning: partial.reasoning, error: 'Generation aborted' });
+                if (onComplete) onComplete(cleanText(partial.text), partial.reasoning);
             } else {
                 finishNetworkTrace({ error: e });
                 if (onError) onError(e);
@@ -397,11 +343,12 @@ export async function executeRequest({
         }
 
         // Network error (connection abort, DNS failure, etc.) — save partial text cleanly
-        if (fullText.length > 0) {
+        const partial = streamAccumulator.getPartial();
+        if (partial.text.length > 0) {
             console.warn("Network error during stream, saving partial response:", e);
             const errorMsg = e.message || "Stream Error";
-            finishNetworkTrace({ text: cleanText(fullText), reasoning: requestReasoning ? accumulatedReasoning : null, error: errorMsg });
-            if (onComplete) onComplete(cleanText(fullText), requestReasoning ? accumulatedReasoning : null, { partialError: errorMsg });
+            finishNetworkTrace({ text: cleanText(partial.text), reasoning: partial.reasoning, error: errorMsg });
+            if (onComplete) onComplete(cleanText(partial.text), partial.reasoning, { partialError: errorMsg });
             return;
         }
 
