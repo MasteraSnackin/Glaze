@@ -10,6 +10,7 @@ import { presetState, initPresetState, getEffectivePreset } from '@/core/states/
 import { lorebookState, scanLorebooks, initLorebookState, vectorSearchLorebooks } from '@/core/states/lorebookState.js';
 import { getEffectivePersona } from '@/core/states/personaState.js';
 import { applyRegexes } from '@/core/services/regexService.js';
+import { buildChatRequestPayload, buildSummaryRequestPayload, buildMemoryDraftRequestPayload } from '@/core/llm/assemblers/requestAssemblers.js';
 import { db } from '@/utils/db.js';
 import { getEmbeddings } from '@/core/services/embeddingService.js';
 import { getEmbeddingConfig, isEmbeddingConfigured } from '@/core/config/embeddingSettings.js';
@@ -20,16 +21,6 @@ let lastPrompt = null;
 
 export function getLastPrompt() {
     return lastPrompt;
-}
-
-/**
- * Strips embedded base64 media from text so it doesn't inflate token counts limits.
- */
-function stripEmbeddedMedia(text) {
-    if (!text || text.length < 256) return text;
-    let cleaned = text.replace(/<img\s[^>]*src\s*=\s*["']data:image\/[^"']{256,}["'][^>]*\/?>/gi, '');
-    cleaned = cleaned.replace(/data:image\/[a-z+]+;base64,[A-Za-z0-9+/=\n\r]{256,}/gi, '');
-    return cleaned;
 }
 
 // --- Helpers ---
@@ -117,7 +108,7 @@ export async function generateChatResponse({
 }) {
     const { onUpdate, onComplete, onError } = callbacks;
     let apiConfig = getEffectiveApiConfig();
-    let { apiKey, apiUrl, model, stream, requestReasoning, reasoningEffort, temp, topP, maxTokens, contextSize } = apiConfig;
+    let { providerId, apiKey, apiUrl, model, stream, requestReasoning, reasoningEffort, temp, topP, maxTokens, contextSize } = apiConfig;
 
     const t = (key) => translations[currentLang.value]?.[key] || key;
 
@@ -390,47 +381,20 @@ export async function generateChatResponse({
         });
     }
 
-    const requestBody = {
-        model: model,
-        messages: messages,
+    const { previewBody, requestBody } = buildChatRequestPayload({
+        providerId,
+        model,
+        messages,
         temperature: temp,
-        top_p: topP,
-        stream: stream
-    };
-
-    if (reasoningEffort && reasoningEffort !== 'auto') {
-        requestBody.reasoning_effort = reasoningEffort;
-    }
-
-    if (maxTokens > 0) {
-        requestBody.max_tokens = maxTokens;
-    }
-
-    if (stopString) {
-        requestBody.stop = [stopString];
-    }
-
+        topP,
+        stream,
+        reasoningEffort,
+        maxTokens,
+        stopString
+    });
 
     // Save for preview
-    lastPrompt = JSON.parse(JSON.stringify(requestBody));
-
-    // Sanitize messages for API (strict OpenAI compliance: only role, content, name)
-    requestBody.messages = requestBody.messages.map(m => {
-        const cleanMsg = {
-            role: m.role,
-            content: stripEmbeddedMedia(m.content)
-        };
-
-        if (m.image) {
-            cleanMsg.content = [
-                { type: "text", text: m.content || "" },
-                { type: "image_url", image_url: { url: m.image } }
-            ];
-        }
-
-        if (m.name) cleanMsg.name = m.name;
-        return cleanMsg;
-    });
+    lastPrompt = JSON.parse(JSON.stringify(previewBody));
 
     // Final abort check before API call
     if (controller?.signal?.aborted) {
@@ -442,6 +406,7 @@ export async function generateChatResponse({
     try {
         logger.debug('[GenerationService] Final Request:', requestBody);
         await executeRequest({
+            providerId,
             apiUrl,
             apiKey,
             requestBody,
@@ -597,7 +562,7 @@ export async function generateSummary({ history, prompt, controller, apiConfigOv
         ...getEffectiveApiConfig(),
         ...(apiConfigOverride || {})
     };
-    const { apiKey, apiUrl, model, temp } = effectiveConfig;
+    const { providerId, apiKey, apiUrl, model, temp } = effectiveConfig;
 
     if (!apiUrl || !model) {
         throw new Error("API Not Configured");
@@ -613,14 +578,18 @@ export async function generateSummary({ history, prompt, controller, apiConfigOv
 
     let result = "";
 
+    const { requestBody } = buildSummaryRequestPayload({
+        providerId,
+        model,
+        prompt: finalPrompt,
+        temperature: temp
+    });
+
     await executeRequest({
+        providerId,
         apiUrl,
         apiKey,
-        requestBody: {
-            model,
-            messages: [{ role: 'user', content: finalPrompt }],
-            temperature: temp
-        },
+        requestBody,
         controller,
         callbacks: {
             onComplete: (text) => { result = text; }
@@ -1047,7 +1016,7 @@ export async function generateMemoryDraft({ history, prompt, controller, apiConf
         ...getEffectiveApiConfig(),
         ...(apiConfigOverride || {})
     };
-    const { apiKey, apiUrl, model, temp } = effectiveConfig;
+    const { providerId, apiKey, apiUrl, model, temp } = effectiveConfig;
 
     // Memory drafts need enough output budget for long summaries even when the
     // provider has a small default completion limit.
@@ -1085,17 +1054,18 @@ export async function generateMemoryDraft({ history, prompt, controller, apiConf
     let result = "";
     
     let requestError = null;
-    const requestBody = {
+    const { previewBody, requestBody } = buildMemoryDraftRequestPayload({
+        providerId,
         model,
-        messages: [{ role: 'user', content: finalPrompt }],
+        prompt: finalPrompt,
         temperature: temp,
-        max_tokens: memoryDraftMaxTokens,
-        stream: false
-    };
+        maxTokens: memoryDraftMaxTokens
+    });
 
-    lastPrompt = JSON.parse(JSON.stringify(requestBody));
+    lastPrompt = JSON.parse(JSON.stringify(previewBody));
     
     await executeRequest({
+        providerId,
         apiUrl,
         apiKey,
         requestBody,

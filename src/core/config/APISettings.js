@@ -1,5 +1,6 @@
-import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import { db } from '@/utils/db.js';
+import { DEFAULT_PROVIDER_ID } from '@/core/llm/contracts/providerContracts.js';
+import { getProviderById } from '@/core/llm/providers/providerRegistry.js';
 
 export const PROVIDER_BLACKLIST = [
     { name: 'EllyAI', match: 'ellyai' },
@@ -14,6 +15,7 @@ export function getBlacklistedProvider(url) {
 
 export async function initSettings() {
     // Ensure defaults exist
+    if (localStorage.getItem('gz_api_provider') === null) localStorage.setItem('gz_api_provider', DEFAULT_PROVIDER_ID);
     if (localStorage.getItem('gz_api_temp') === null) localStorage.setItem('gz_api_temp', '0.7');
     if (localStorage.getItem('gz_api_topp') === null) localStorage.setItem('gz_api_topp', '0.9');
     if (localStorage.getItem('gz_api_stream') === null) localStorage.setItem('gz_api_stream', 'true');
@@ -25,26 +27,18 @@ export async function initSettings() {
 }
 
 export function normalizeEndpoint(url) {
-    if (!url) return '';
-    let normalized = url.trim();
-    if (!/^https?:\/\//i.test(normalized)) {
-        normalized = 'https://' + normalized;
-    }
-    if (normalized.endsWith('/')) normalized = normalized.slice(0, -1);
+    return getProviderById(getApiProviderId()).normalizeEndpoint(url);
+}
 
-    const suffix = '/chat/completions';
-    if (normalized.toLowerCase().endsWith(suffix)) {
-        normalized = normalized.slice(0, -suffix.length);
-    }
-    if (normalized.endsWith('/')) normalized = normalized.slice(0, -1);
-
-    return normalized;
+export function getApiProviderId() {
+    return localStorage.getItem('gz_api_provider') || DEFAULT_PROVIDER_ID;
 }
 
 export function getApiConfig() {
     const mt = parseInt(localStorage.getItem('api-max-tokens'));
     const ctx = parseInt(localStorage.getItem('api-context'));
     return {
+        providerId: getApiProviderId(),
         apiKey: localStorage.getItem('api-key') || '',
         apiUrl: localStorage.getItem('gz_api_endpoint_normalized') || localStorage.getItem('api-endpoint') || '',
         model: localStorage.getItem('api-model') || '',
@@ -60,38 +54,9 @@ export function getApiConfig() {
     };
 }
 
-export async function fetchRemoteModels(endpoint, key) {
-    if (!endpoint) throw new Error("No endpoint");
-
-    let url = endpoint;
-    if (url.endsWith('/chat/completions')) url = url.replace('/chat/completions', '');
-    if (url.endsWith('/')) url = url.slice(0, -1);
-    if (!url.endsWith('/models')) url += '/models';
-
-    const headers = {};
-    if (key) headers['Authorization'] = `Bearer ${key}`;
-
-    let data;
-    if (Capacitor.isNativePlatform()) {
-        const response = await CapacitorHttp.get({
-            url: url,
-            headers: headers
-        });
-        if (response.status >= 400) throw new Error(`HTTP ${response.status}`);
-        data = response.data;
-    } else {
-        const res = await fetch(url, { headers });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        data = await res.json();
-    }
-
-    let models = [];
-    if (data.data && Array.isArray(data.data)) {
-        models = data.data.map(m => m.id);
-    } else if (Array.isArray(data)) {
-        models = data.map(m => m.id);
-    }
-    return models.sort();
+export async function fetchRemoteModels(endpoint, key, providerId = getApiProviderId()) {
+    const provider = getProviderById(providerId);
+    return provider.listModels({ endpoint, apiKey: key });
 }
 
 export async function getApiPresets() {
@@ -103,6 +68,7 @@ export async function getApiPresets() {
     return [{
         id: 'default',
         name: 'Default',
+        providerId: getApiProviderId(),
         endpoint: localStorage.getItem('api-endpoint') || '',
         key: localStorage.getItem('api-key') || '',
         model: localStorage.getItem('api-model') || '',

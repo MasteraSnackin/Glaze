@@ -2,7 +2,7 @@
 import { ref, computed, reactive, onMounted } from 'vue';
 import { importFullBackupAsync } from '@/core/services/backupService.js';
 import { addPersona, allPersonas, deletePersona } from '@/core/states/personaState.js';
-import { normalizeEndpoint, fetchRemoteModels, getApiPresets, saveApiPresets } from '@/core/config/APISettings.js';
+import { normalizeEndpoint, fetchRemoteModels, getApiPresets, saveApiPresets, getApiProviderId } from '@/core/config/APISettings.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import BackupSheet from '@/components/sheets/BackupSheet.vue';
 import { translations } from '@/utils/i18n.js';
@@ -258,6 +258,7 @@ async function savePreset() {
     const newPreset = {
         id: Date.now().toString(36),
         name: 'Onboarding Setup',
+        providerId: getApiProviderId(),
         endpoint: normalized,
         key: apiSettings.key,
         model: apiSettings.model,
@@ -271,6 +272,7 @@ async function savePreset() {
     presets.push(newPreset);
     await saveApiPresets(presets);
     localStorage.setItem('gz_active_api_preset_id', newPreset.id);
+    localStorage.setItem('gz_api_provider', newPreset.providerId);
 
     // Also save legacy globals for immediate use
     localStorage.setItem('api-endpoint', normalized);

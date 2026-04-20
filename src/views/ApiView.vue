@@ -12,7 +12,7 @@ function handleBack() {
         sheet.value?.close();
     }
 }
-import { normalizeEndpoint, fetchRemoteModels, getApiPresets, saveApiPresets, getApiConfig, getBlacklistedProvider } from '@/core/config/APISettings.js';
+import { normalizeEndpoint, fetchRemoteModels, getApiPresets, saveApiPresets, getApiConfig, getApiProviderId, getBlacklistedProvider } from '@/core/config/APISettings.js';
 import { getEmbeddingConfig, saveEmbeddingSetting, isEmbeddingConfigured } from '@/core/config/embeddingSettings.js';
 import { testEmbeddingConnection } from '@/core/services/embeddingService.js';
 import { updateLanguage, translations } from '@/utils/i18n.js';
@@ -291,6 +291,7 @@ function createNewApiPreset() {
                 const newPreset = {
                     id: Date.now().toString(36),
                     name: name,
+                    providerId: getApiProviderId(),
                     endpoint: apiSettings.endpoint,
                     key: apiSettings.key,
                     model: apiSettings.model,
@@ -319,6 +320,7 @@ function createNewApiPreset() {
 function applyApiPreset(p) {
     activeApiPresetId.value = p.id;
     localStorage.setItem('gz_active_api_preset_id', p.id);
+    localStorage.setItem('gz_api_provider', p.providerId || getApiProviderId());
     
     apiSettings.endpoint = p.endpoint;
     apiSettings.key = p.key;

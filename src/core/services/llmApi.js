@@ -5,9 +5,12 @@ import { cleanText } from '@/utils/textFormatter.js';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { startNetworkTrace, updateNetworkTrace, appendNetworkTraceLine, finishNetworkTrace } from '@/core/services/networkDebugService.js';
+import { getProviderById } from '@/core/llm/providers/providerRegistry.js';
+import { extractOpenAiMessage, normalizeReasoningOutput } from '@/core/llm/transport/responseNormalizer.js';
 import { logger } from '../../utils/logger.js';
 
 export async function executeRequest({
+    providerId,
     apiUrl,
     apiKey,
     requestBody,
@@ -23,6 +26,8 @@ export async function executeRequest({
     const t = (key) => translations[currentLang.value]?.[key] || key;
     const headerModel = `<span style="color: var(--vk-blue); font-weight: 700; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.5px;">${t('reasoning_model')}</span>`;
     const headerInline = `<span style="color: var(--vk-blue); font-weight: 700; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.5px;">${t('reasoning_inline')}</span>`;
+    const provider = getProviderById(providerId);
+    const requestUrl = provider.buildChatCompletionsUrl(apiUrl);
 
     const hasInlineTags = !!tagStart && !!tagEnd;
 
@@ -79,7 +84,7 @@ export async function executeRequest({
     const headers = {
         'Content-Type': 'application/json'
     };
-    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+    Object.assign(headers, provider.buildAuthHeaders(apiKey));
 
     startNetworkTrace({
         requestType,
@@ -97,7 +102,7 @@ export async function executeRequest({
         // For streaming, we fall through to standard fetch (requires android:usesCleartextTraffic="true")
         if (Capacitor.isNativePlatform() && apiUrl.startsWith('http:') && !apiUrl.includes('https:') && !stream) {
             const response = await CapacitorHttp.post({
-                url: `${apiUrl}/chat/completions`,
+                url: requestUrl,
                 headers: headers,
                 data: requestBody,
                 responseType: 'json',
@@ -117,36 +122,21 @@ export async function executeRequest({
             updateNetworkTrace({ responseStatus: response.status });
             throwIfAborted();
             
-            // Defensive check: ensure API returned valid structure
-            if (!data || !data.choices || !data.choices.length || !data.choices[0] || !data.choices[0].message) {
-                throw new Error("Invalid API response structure (Native): " + JSON.stringify(data));
-            }
-            
-            const content = data.choices[0].message.content;
-            const rawReasoning = data.choices[0].message.reasoning_content;
+            const { content, reasoningContent } = extractOpenAiMessage(data, 'API response structure (Native)');
+            const normalized = normalizeReasoningOutput({
+                content,
+                requestReasoning,
+                rawReasoning: reasoningContent,
+                hasInlineTags,
+                tagStart,
+                tagEnd,
+                headerModel,
+                headerInline
+            });
 
-            let finalText = content || "";
-            let finalReasoning = requestReasoning ? (rawReasoning || "") : "";
-            let inlineReasoning = "";
+            finishNetworkTrace({ rawResponse: data, text: cleanText(normalized.text), reasoning: normalized.reasoning });
 
-            if (hasInlineTags && content && content.includes(tagStart)) {
-                const startIndex = content.indexOf(tagStart);
-                const endIndex = content.indexOf(tagEnd, startIndex);
-                if (endIndex !== -1) {
-                    inlineReasoning = content.substring(startIndex + tagStart.length, endIndex);
-                    finalText = content.substring(0, startIndex) + content.substring(endIndex + tagEnd.length);
-                }
-            }
-
-            if (finalReasoning && inlineReasoning) {
-                finalReasoning = `${headerModel}\n${finalReasoning}\n\n---\n\n${headerInline}\n${inlineReasoning}`;
-            } else if (inlineReasoning) {
-                finalReasoning = inlineReasoning;
-            }
-
-            finishNetworkTrace({ rawResponse: data, text: cleanText(finalText), reasoning: finalReasoning || null });
-
-            if (onComplete) onComplete(cleanText(finalText), finalReasoning || null);
+            if (onComplete) onComplete(cleanText(normalized.text), normalized.reasoning);
 
             // Exit function, finally block will still run for cleanup
             return;
@@ -155,7 +145,7 @@ export async function executeRequest({
         // Connection timeout — abort if server doesn't respond
         connectTimer = setTimeout(() => { timedOut = true; if (controller) controller.abort(); }, CONNECT_TIMEOUT);
 
-        const response = await fetch(`${apiUrl}/chat/completions`, {
+        const response = await fetch(requestUrl, {
             method: 'POST',
             headers: headers,
             body: JSON.stringify(requestBody),
@@ -196,35 +186,21 @@ export async function executeRequest({
                 logger.debug('LLM Response (stream fallback):', data);
                 throwIfAborted();
 
-                if (!data || !data.choices || !data.choices.length || !data.choices[0] || !data.choices[0].message) {
-                    throw new Error('Invalid API response structure (stream fallback): ' + JSON.stringify(data));
-                }
+                const { content, reasoningContent } = extractOpenAiMessage(data, 'API response structure (stream fallback)');
+                const normalized = normalizeReasoningOutput({
+                    content,
+                    requestReasoning,
+                    rawReasoning: reasoningContent,
+                    hasInlineTags,
+                    tagStart,
+                    tagEnd,
+                    headerModel,
+                    headerInline
+                });
 
-                const content = data.choices[0].message.content;
-                const rawReasoning = data.choices[0].message.reasoning_content;
+                finishNetworkTrace({ rawResponse: data, text: cleanText(normalized.text), reasoning: normalized.reasoning });
 
-                let finalText = content || '';
-                let finalReasoning = requestReasoning ? (rawReasoning || '') : '';
-                let inlineReasoning = '';
-
-                if (hasInlineTags && content && content.includes(tagStart)) {
-                    const startIndex = content.indexOf(tagStart);
-                    const endIndex = content.indexOf(tagEnd, startIndex);
-                    if (endIndex !== -1) {
-                        inlineReasoning = content.substring(startIndex + tagStart.length, endIndex);
-                        finalText = content.substring(0, startIndex) + content.substring(endIndex + tagEnd.length);
-                    }
-                }
-
-                if (finalReasoning && inlineReasoning) {
-                    finalReasoning = `${headerModel}\n${finalReasoning}\n\n---\n\n${headerInline}\n${inlineReasoning}`;
-                } else if (inlineReasoning) {
-                    finalReasoning = inlineReasoning;
-                }
-
-                finishNetworkTrace({ rawResponse: data, text: cleanText(finalText), reasoning: finalReasoning || null });
-
-                if (onComplete) onComplete(cleanText(finalText), finalReasoning || null);
+                if (onComplete) onComplete(cleanText(normalized.text), normalized.reasoning);
                 return;
             }
 
@@ -387,36 +363,21 @@ export async function executeRequest({
             logger.debug("LLM Response:", data);
             throwIfAborted();
             
-            // Defensive check: ensure API returned valid structure
-            if (!data || !data.choices || !data.choices.length || !data.choices[0] || !data.choices[0].message) {
-                throw new Error("Invalid API response structure: " + JSON.stringify(data));
-            }
-            
-            const content = data.choices[0].message.content;
-            const rawReasoning = data.choices[0].message.reasoning_content;
+            const { content, reasoningContent } = extractOpenAiMessage(data, 'API response structure');
+            const normalized = normalizeReasoningOutput({
+                content,
+                requestReasoning,
+                rawReasoning: reasoningContent,
+                hasInlineTags,
+                tagStart,
+                tagEnd,
+                headerModel,
+                headerInline
+            });
 
-            let finalText = content || "";
-            let finalReasoning = requestReasoning ? (rawReasoning || "") : "";
-            let inlineReasoning = "";
+            finishNetworkTrace({ rawResponse: data, text: cleanText(normalized.text), reasoning: normalized.reasoning });
 
-            if (hasInlineTags && content && content.includes(tagStart)) {
-                const startIndex = content.indexOf(tagStart);
-                const endIndex = content.indexOf(tagEnd, startIndex);
-                if (endIndex !== -1) {
-                    inlineReasoning = content.substring(startIndex + tagStart.length, endIndex);
-                    finalText = content.substring(0, startIndex) + content.substring(endIndex + tagEnd.length);
-                }
-            }
-
-            if (finalReasoning && inlineReasoning) {
-                finalReasoning = `${headerModel}\n${finalReasoning}\n\n---\n\n${headerInline}\n${inlineReasoning}`;
-            } else if (inlineReasoning) {
-                finalReasoning = inlineReasoning;
-            }
-
-            finishNetworkTrace({ rawResponse: data, text: cleanText(finalText), reasoning: finalReasoning || null });
-
-            if (onComplete) onComplete(cleanText(finalText), finalReasoning || null);
+            if (onComplete) onComplete(cleanText(normalized.text), normalized.reasoning);
         }
     } catch (e) {
         if (e.name === 'AbortError') {
