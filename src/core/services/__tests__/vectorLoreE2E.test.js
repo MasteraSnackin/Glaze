@@ -355,6 +355,94 @@ describe('Vector lorebook E2E verification', () => {
         globalThis.Worker = MockWorker;
     });
 
+    it('respects maxInjectedEntries when vector-only results are added late', async () => {
+        mockGetEmbeddings.mockImplementation(async (texts) => texts.map((text) => [{
+            text,
+            vector: text.includes('Vector extra lore') ? [1, 0, 0] : [0.98, 0.02, 0]
+        }]));
+
+        lorebookState.globalSettings.searchType = 'both';
+        lorebookState.globalSettings.maxInjectedEntries = 1;
+        lorebookState.lorebooks = [{
+            id: 'lb-mixed-limit',
+            name: 'Mixed limit',
+            enabled: true,
+            entries: [
+                {
+                    id: 'entry-keyword',
+                    comment: 'Keyword entry',
+                    keys: ['topic'],
+                    content: 'Keyword lore',
+                    enabled: true,
+                    position: 'worldInfoBefore'
+                },
+                {
+                    id: 'entry-vector-only',
+                    comment: 'Vector only entry',
+                    keys: ['vector'],
+                    content: 'Vector extra lore',
+                    enabled: true,
+                    vectorSearch: true,
+                    useKeywordSearch: false,
+                    position: 'worldInfoBefore'
+                }
+            ]
+        }];
+
+        await indexLorebookEntries('lb-mixed-limit');
+
+        globalThis._genWorker = null;
+        globalThis.Worker = class extends MockWorker {
+            postMessage(message) {
+                const data = {
+                    messages: [
+                        { role: 'system', content: 'Keyword lore' },
+                        { role: 'user', content: 'Current user message', isHistory: true }
+                    ],
+                    loreEntries: [
+                        { id: 'entry-keyword', comment: 'Keyword entry', content: 'Keyword lore', position: 'worldInfoBefore', _source: 'keyword' }
+                    ],
+                    staticTokens: 8,
+                    contextBreakdown: { lorebook: 2 },
+                    needsVarsSave: false,
+                    sessionVars: {}
+                };
+                queueMicrotask(() => {
+                    this.onmessage?.({ data: { id: message.id, success: true, data } });
+                });
+            }
+        };
+
+        let promptReadyPayload = null;
+        await generateChatResponse({
+            text: 'topic and vector extra lore',
+            char: { id: 'char-1', name: 'Tester', sessionId: 'chat-1' },
+            history: [{ role: 'user', content: 'topic and vector extra lore' }],
+            authorsNote: null,
+            summary: '',
+            controller: { signal: { aborted: false } },
+            callbacks: {
+                onUpdate: vi.fn(),
+                onComplete: vi.fn(),
+                onError: vi.fn(),
+                onPromptReady: (payload) => {
+                    promptReadyPayload = payload;
+                }
+            }
+        });
+
+        expect(promptReadyPayload).toBeTruthy();
+        expect(promptReadyPayload.loreEntries.map(entry => entry.id)).toEqual(['entry-keyword']);
+
+        const lastPrompt = getLastPrompt();
+        expect(lastPrompt).toBeTruthy();
+        expect(lastPrompt.messages.some(message => typeof message.content === 'string' && message.content.includes('Vector extra lore'))).toBe(false);
+
+        lorebookState.globalSettings.maxInjectedEntries = 5;
+        globalThis._genWorker = null;
+        globalThis.Worker = MockWorker;
+    });
+
     it('fails generation with a visible error when embedding retrieval crashes', async () => {
         mockGetEmbeddings.mockImplementation(async (texts) => texts.map((text) => {
             if (text.includes('bright blue hair')) {
