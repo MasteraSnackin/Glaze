@@ -59,7 +59,7 @@ import { currentLang, chatPaddingLR, setChatPaddingLR } from '@/core/config/APPS
 import { translations } from '@/utils/i18n.js';
 import { generateChatResponse, calculateContext, generateMemoryDraft } from '@/core/services/generationService.js';
 import { executeRequest } from '@/core/services/llmApi.js';
-import { getApiConfig } from '@/core/config/APISettings.js';
+import { getApiConfig, getApiRuntimeStorage, getApiReasoningTags } from '@/core/config/APISettings.js';
 import { getEmbeddingConfig, isEmbeddingConfigured } from '@/core/config/embeddingSettings.js';
 import { animateTextChange, updateAppColors, initHeaderScroll, initRipple } from '@/core/services/ui.js';
 import { showBottomSheet, closeBottomSheet, bottomSheetState } from '@/core/states/bottomSheetState.js';
@@ -2275,8 +2275,9 @@ async function updateContextCutoff() {
         const sessionId = cutoffChatData.currentId;
 
         // Cache key includes context settings so changes to context size bust the cache
-        const contextSize = localStorage.getItem('api-context') || '32000';
-        const maxTokens = localStorage.getItem('api-max-tokens') || '8000';
+        const runtime = getApiRuntimeStorage();
+        const contextSize = String(runtime.contextSize || 32000);
+        const maxTokens = String(runtime.maxTokens || 8000);
         const cacheKey = `${currentCharId}_${sessionId}_${messageCount}_${contextSize}_${maxTokens}`;
 
         if (contextCutoffCache && contextCutoffCache.hash === cacheKey) {
@@ -3085,8 +3086,9 @@ async function sendMessage(attachedImage = null, guidanceText = null) {
 
 function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guidanceText = null, guidanceType = 'GENERATION') {
     // Check API Configuration
-    const model = localStorage.getItem('api-model');
-    const endpoint = localStorage.getItem('gz_api_endpoint_normalized') || localStorage.getItem('api-endpoint');
+    const runtime = getApiRuntimeStorage();
+    const model = runtime.model;
+    const endpoint = runtime.normalizedEndpoint;
     const existingState = generatingStates[char.id];
 
     if (existingState && existingState.type !== 'impersonation') {
@@ -4076,8 +4078,7 @@ function changeGreeting(msgIndex, dir, fromSwipe = false) {
 }
 
 function getReasoningTags() {
-    let start = localStorage.getItem('gz_api_reasoning_start') || '<think>';
-    let end = localStorage.getItem('gz_api_reasoning_end') || '</think>';
+    let { start, end } = getApiReasoningTags();
 
     try {
         const charId = activeChatChar?.id;

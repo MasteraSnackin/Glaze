@@ -12,7 +12,7 @@ import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetStat
 import { hideMessageId, hideGenerationTime, hideTokenCount } from '@/core/config/APPSettings.js';
 import RollingNumber from '@/components/ui/RollingNumber.vue';
 import SheetView from '@/components/ui/SheetView.vue';
-import { getBlacklistedProvider } from '@/core/config/APISettings.js';
+import { getBlacklistedProvider, getApiRuntimeStorage } from '@/core/config/APISettings.js';
 import { saveFile } from '@/core/services/fileSaver.js';
 
 const props = defineProps({
@@ -560,8 +560,7 @@ const showFooter = computed(() => {
 
 const blacklistedErrorProvider = computed(() => {
     if (!props.message.isError) return null;
-    const endpoint = localStorage.getItem('gz_api_endpoint_normalized')
-        || localStorage.getItem('api-endpoint') || '';
+    const endpoint = getApiRuntimeStorage().normalizedEndpoint || '';
     return getBlacklistedProvider(endpoint);
 });
 

@@ -3,7 +3,7 @@ import { onMounted, ref, computed } from 'vue';
 import { t, updateLanguage } from '@/utils/i18n.js';
 import { initRipple } from '@/core/services/ui.js';
 
-import { getApiPresets, fetchRemoteModels } from '@/core/config/APISettings.js';
+import { getApiPresets, fetchRemoteModels, getApiRuntimeStorage } from '@/core/config/APISettings.js';
 import { presetState, DEFAULT_PRESETS } from '@/core/states/presetState.js';
 import { lorebookState } from '@/core/states/lorebookState.js';
 import { activePersona } from '@/core/states/personaState.js';
@@ -67,14 +67,15 @@ onMounted(async () => {
 });
 
 async function checkConnection() {
-    const endpoint = localStorage.getItem('gz_api_endpoint_normalized') || localStorage.getItem('api-endpoint');
+    const runtime = getApiRuntimeStorage();
+    const endpoint = runtime.normalizedEndpoint;
     if (!endpoint) {
         apiStatus.value = 'failed';
         return;
     }
     apiStatus.value = 'connecting';
     try {
-        await fetchRemoteModels(endpoint, localStorage.getItem('api-key'));
+        await fetchRemoteModels(endpoint, runtime.key, runtime.providerId);
         apiStatus.value = 'connected';
     } catch (e) {
         apiStatus.value = 'failed';

@@ -1,4 +1,4 @@
-import { getApiConfig } from '@/core/config/APISettings.js';
+import { getApiConfig, getApiRuntimeStorage, getApiReasoningTags } from '@/core/config/APISettings.js';
 import { estimateTokens } from '@/utils/tokenizer.js';
 import { replaceMacros } from '@/utils/macroEngine.js';
 import { translations } from '@/utils/i18n.js';
@@ -27,13 +27,12 @@ export function getLastPrompt() {
 
 function getEffectiveApiConfig() {
     let config = getApiConfig();
+    const runtime = getApiRuntimeStorage();
     let { maxTokens, contextSize } = config;
 
-    // Fallback if contextSize is not returned by getApiConfig
-    if (!contextSize) contextSize = parseInt(localStorage.getItem('api-context')) || 32000;
+    if (!contextSize) contextSize = runtime.contextSize || 32000;
     if (maxTokens === undefined || maxTokens === null) {
-        const mt = parseInt(localStorage.getItem('api-max-tokens'));
-        maxTokens = isNaN(mt) ? 8000 : mt;
+        maxTokens = runtime.maxTokens || 8000;
     }
 
     return { ...config, maxTokens, contextSize };
@@ -133,8 +132,9 @@ export async function generateChatResponse({
     const activePreset = loadActivePreset(char, char?.sessionId);
 
     // Reasoning Tags from Preset
-    const tagStart = activePreset?.reasoningStart || localStorage.getItem('gz_api_reasoning_start');
-    const tagEnd = activePreset?.reasoningEnd || localStorage.getItem('gz_api_reasoning_end');
+    const reasoningTags = getApiReasoningTags();
+    const tagStart = activePreset?.reasoningStart || reasoningTags.start;
+    const tagEnd = activePreset?.reasoningEnd || reasoningTags.end;
 
     // Merge Settings from Preset
     const mergePrompts = activePreset?.mergePrompts || false;

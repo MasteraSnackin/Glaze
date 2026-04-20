@@ -426,6 +426,11 @@ MemorySettings: {
 
 This is intentionally small and compatibility-first: the current request flow still behaves as before, but provider-specific behavior now has an explicit place to live. At this stage, model discovery and chat transport setup already route through the provider boundary, while parsing and response normalization still live in `llmApi.js`.
 
+**Additional Progress Already Landed On The Refactor Branch:**
+- `APISettings.js` now owns a shared runtime-config boundary via `getApiRuntimeStorage()`, `saveApiRuntimeSetting()`, `applyApiRuntimeConfig()`, and `getApiReasoningTags()`
+- `ApiView.vue`, `OnboardingView.vue`, `ToolsView.vue`, `ChatView.vue`, `generationService.js`, `macroEngine.js`, and `ChatMessage.vue` have started moving off ad-hoc raw runtime config reads/writes toward those helpers
+- the refactor branch has also re-applied the merged regression safeguards from the bugfix chain, so late vector lore limits and prompt-metadata rollback still hold while refactor work continues
+
 **Config Layer:**
 - `src/core/llm/config/apiConfigStore.js` — read/write active runtime config without raw localStorage access in views
 - `src/core/llm/config/apiPresetStore.js` — preset CRUD only
@@ -470,7 +475,9 @@ This is intentionally small and compatibility-first: the current request flow st
 
 ### Recommended Refactor Sequence
 1. Centralize runtime API config reads/writes so feature views stop reading localStorage keys directly.
+   Status: partially done in this branch via `APISettings.js` helpers; remaining callers should be migrated incrementally.
 2. Split `llmApi.js` into smaller transport-focused modules without changing external behavior.
+   Status: partially done; one-shot response normalization moved out, but SSE parsing and runtime-policy side effects still live inline.
 3. Extract chat/session lifecycle code out of `ChatView.vue` into a dedicated generation-session composable.
 4. Separate prompt preview state from transport trace state, then store traces per generation/message instead of globally.
 5. Promote explicit request use cases (`chat`, `summary`, `memory_draft`, `model_discovery`) with a shared normalized transport result shape.

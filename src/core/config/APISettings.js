@@ -34,23 +34,93 @@ export function getApiProviderId() {
     return localStorage.getItem('gz_api_provider') || DEFAULT_PROVIDER_ID;
 }
 
-export function getApiConfig() {
-    const mt = parseInt(localStorage.getItem('api-max-tokens'));
-    const ctx = parseInt(localStorage.getItem('api-context'));
+export function getApiReasoningTags() {
+    return {
+        start: localStorage.getItem('gz_api_reasoning_start') || '<think>',
+        end: localStorage.getItem('gz_api_reasoning_end') || '</think>'
+    };
+}
+
+export function getApiRuntimeStorage() {
+    const maxTokens = parseInt(localStorage.getItem('api-max-tokens'));
+    const contextSize = parseInt(localStorage.getItem('api-context'));
     return {
         providerId: getApiProviderId(),
-        apiKey: localStorage.getItem('api-key') || '',
-        apiUrl: localStorage.getItem('gz_api_endpoint_normalized') || localStorage.getItem('api-endpoint') || '',
+        endpoint: localStorage.getItem('api-endpoint') || '',
+        normalizedEndpoint: localStorage.getItem('gz_api_endpoint_normalized') || localStorage.getItem('api-endpoint') || '',
+        key: localStorage.getItem('api-key') || '',
         model: localStorage.getItem('api-model') || '',
-        stream: localStorage.getItem('gz_api_stream') === 'true',
-        requestReasoning: localStorage.getItem('gz_api_request_reasoning') === 'true',
+        maxTokens: isNaN(maxTokens) ? 8000 : maxTokens,
+        contextSize: isNaN(contextSize) ? 32000 : contextSize,
         temp: parseFloat(localStorage.getItem('gz_api_temp')) || 0.7,
         topP: parseFloat(localStorage.getItem('gz_api_topp')) || 0.9,
-        maxTokens: isNaN(mt) ? 8000 : mt,
-        contextSize: isNaN(ctx) ? 32000 : ctx,
+        stream: localStorage.getItem('gz_api_stream') === 'true',
+        requestReasoning: localStorage.getItem('gz_api_request_reasoning') === 'true',
         autoHideImages: localStorage.getItem('gz_api_auto_hide_images') === 'true',
         autoHideImagesN: parseInt(localStorage.getItem('gz_api_auto_hide_images_n') || '1', 10),
-        reasoningEffort: localStorage.getItem('gz_api_reasoning_effort') || 'medium'
+        reasoningEffort: localStorage.getItem('gz_api_reasoning_effort') || 'medium',
+        reasoningTags: getApiReasoningTags()
+    };
+}
+
+export function saveApiRuntimeSetting(key, value) {
+    if (key === 'api-endpoint') {
+        localStorage.setItem('gz_api_endpoint_normalized', normalizeEndpoint(value));
+    }
+
+    localStorage.setItem(key, value);
+
+    if (key === 'api-context' || key === 'api-max-tokens') {
+        window.dispatchEvent(new CustomEvent('api-context-settings-changed'));
+    }
+}
+
+export function applyApiRuntimeConfig({
+    providerId,
+    endpoint,
+    apiKey,
+    model,
+    maxTokens,
+    contextSize,
+    temp,
+    topP,
+    stream,
+    autoHideImages,
+    autoHideImagesN,
+    requestReasoning,
+    reasoningEffort
+} = {}) {
+    if (providerId !== undefined) localStorage.setItem('gz_api_provider', providerId);
+    if (endpoint !== undefined) saveApiRuntimeSetting('api-endpoint', endpoint);
+    if (apiKey !== undefined) saveApiRuntimeSetting('api-key', apiKey);
+    if (model !== undefined) saveApiRuntimeSetting('api-model', model);
+    if (maxTokens !== undefined) saveApiRuntimeSetting('api-max-tokens', String(maxTokens));
+    if (contextSize !== undefined) saveApiRuntimeSetting('api-context', String(contextSize));
+    if (temp !== undefined) saveApiRuntimeSetting('gz_api_temp', String(temp));
+    if (topP !== undefined) saveApiRuntimeSetting('gz_api_topp', String(topP));
+    if (stream !== undefined) saveApiRuntimeSetting('gz_api_stream', String(stream));
+    if (autoHideImages !== undefined) saveApiRuntimeSetting('gz_api_auto_hide_images', String(autoHideImages));
+    if (autoHideImagesN !== undefined) saveApiRuntimeSetting('gz_api_auto_hide_images_n', String(autoHideImagesN));
+    if (requestReasoning !== undefined) saveApiRuntimeSetting('gz_api_request_reasoning', String(requestReasoning));
+    if (reasoningEffort !== undefined) saveApiRuntimeSetting('gz_api_reasoning_effort', String(reasoningEffort));
+}
+
+export function getApiConfig() {
+    const runtime = getApiRuntimeStorage();
+    return {
+        providerId: runtime.providerId,
+        apiKey: runtime.key,
+        apiUrl: runtime.normalizedEndpoint,
+        model: runtime.model,
+        stream: runtime.stream,
+        requestReasoning: runtime.requestReasoning,
+        temp: runtime.temp,
+        topP: runtime.topP,
+        maxTokens: runtime.maxTokens,
+        contextSize: runtime.contextSize,
+        autoHideImages: runtime.autoHideImages,
+        autoHideImagesN: runtime.autoHideImagesN,
+        reasoningEffort: runtime.reasoningEffort
     };
 }
 

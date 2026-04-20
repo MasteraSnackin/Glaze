@@ -7,6 +7,7 @@ import { currentLang } from '@/core/config/APPSettings.js';
 import { startNetworkTrace, updateNetworkTrace, appendNetworkTraceLine, finishNetworkTrace } from '@/core/services/networkDebugService.js';
 import { getProviderById } from '@/core/llm/providers/providerRegistry.js';
 import { extractOpenAiMessage, normalizeReasoningOutput } from '@/core/llm/transport/responseNormalizer.js';
+import { consumeSseDataLines, getTrailingSseDataLine } from '@/core/llm/transport/sseParser.js';
 import { logger } from '../../utils/logger.js';
 
 export async function executeRequest({
@@ -223,16 +224,10 @@ export async function executeRequest({
                 throwIfAborted();
 
                 const chunk = decoder.decode(value, { stream: true });
-                pendingLineBuffer += chunk;
-                const lines = pendingLineBuffer.split('\n');
-                pendingLineBuffer = lines.pop() || '';
+                const parsedChunk = consumeSseDataLines(pendingLineBuffer, chunk);
+                pendingLineBuffer = parsedChunk.remaining;
 
-                for (const line of lines) {
-                    const trimmed = line.trim();
-                    if (!trimmed || !trimmed.startsWith('data: ')) continue;
-
-                    const dataStr = trimmed.substring(6);
-                    if (dataStr === '[DONE]') continue;
+                for (const dataStr of parsedChunk.dataLines) {
                     appendNetworkTraceLine(dataStr);
                     throwIfAborted();
 
@@ -314,12 +309,9 @@ export async function executeRequest({
                 }
             }
 
-            const trailingLine = pendingLineBuffer.trim();
-            if (trailingLine.startsWith('data: ')) {
-                const dataStr = trailingLine.substring(6);
-                if (dataStr && dataStr !== '[DONE]') {
-                    appendNetworkTraceLine(dataStr);
-                }
+            const trailingDataLine = getTrailingSseDataLine(pendingLineBuffer);
+            if (trailingDataLine) {
+                appendNetworkTraceLine(trailingDataLine);
             }
 
             if (streamTimer) { clearTimeout(streamTimer); streamTimer = null; }
