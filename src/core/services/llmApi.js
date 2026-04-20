@@ -1,11 +1,10 @@
-import { BackgroundMode } from '@anuradev/capacitor-background-mode';
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
-import { startGenerationNotification, stopGenerationNotification } from '@/core/services/notificationService.js';
 import { cleanText } from '@/utils/textFormatter.js';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { startNetworkTrace, updateNetworkTrace, appendNetworkTraceLine, finishNetworkTrace } from '@/core/services/networkDebugService.js';
 import { getProviderById } from '@/core/llm/providers/providerRegistry.js';
+import { setupRequestRuntimePolicy } from '@/core/llm/transport/requestRuntimePolicy.js';
 import { extractOpenAiMessage, normalizeReasoningOutput } from '@/core/llm/transport/responseNormalizer.js';
 import { createStreamAccumulator } from '@/core/llm/transport/streamAccumulator.js';
 import { consumeSseDataLines, getTrailingSseDataLine } from '@/core/llm/transport/sseParser.js';
@@ -39,33 +38,10 @@ export async function executeRequest({
     let connectTimer = null;
     let streamTimer = null;
     let timedOut = false;
-
-    // Keep screen on during generation to prevent OS suspension
-    let wakeLock = null;
-    const requestWakeLock = async () => {
-        if ('wakeLock' in navigator && document.visibilityState === 'visible') {
-            try { wakeLock = await navigator.wakeLock.request('screen'); } catch (e) { console.warn("WakeLock error:", e); }
-        }
-    };
-    await requestWakeLock();
-
-    // Re-acquire lock if app comes back to foreground while generating
-    const handleVisibilityChange = () => { if (document.visibilityState === 'visible') requestWakeLock(); };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    // Keep app alive when backgrounded during generation
-    const isAndroid = Capacitor.getPlatform() === 'android';
-    const isIos = Capacitor.getPlatform() === 'ios';
-
-    if (isAndroid) {
-        await startGenerationNotification('Glaze', translations[currentLang.value]['model_typing'] || 'Generating...');
-    } else if (isIos) {
-        try {
-            await BackgroundMode.enable();
-        } catch (e) {
-            console.warn("BackgroundMode enable failed:", e);
-        }
-    }
+    const runtimePolicy = await setupRequestRuntimePolicy({
+        notificationTitle: 'Glaze',
+        notificationBody: translations[currentLang.value]['model_typing'] || 'Generating...'
+    });
 
     const streamAccumulator = createStreamAccumulator({
         requestReasoning,
@@ -357,17 +333,6 @@ export async function executeRequest({
     } finally {
         if (connectTimer) clearTimeout(connectTimer);
         if (streamTimer) clearTimeout(streamTimer);
-        document.removeEventListener('visibilitychange', handleVisibilityChange);
-        if (wakeLock) {
-            try { wakeLock.release(); } catch (e) { }
-        }
-
-        if (isAndroid) {
-            await stopGenerationNotification();
-        } else if (isIos) {
-            try {
-                await BackgroundMode.disable();
-            } catch (e) { }
-        }
+        await runtimePolicy.cleanup();
     }
 }
