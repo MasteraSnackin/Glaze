@@ -73,6 +73,7 @@ import { buildGenerationAuthorsNote, buildGenerationHistory, ensureGenerationPla
 import { handleGenerationPromptReady } from '@/composables/chat/useGenerationPromptReady.js';
 import { createPromptMetadataSnapshots } from '@/composables/chat/usePromptMetadataSnapshots.js';
 import { restoreGenerationState } from '@/composables/chat/useGenerationStateRestore.js';
+import { applyGenerationGuidanceState, setupGenerationState } from '@/composables/chat/useGenerationStateSetup.js';
 import { createGenerationStreamUpdater } from '@/composables/chat/useGenerationStreamUpdate.js';
 import { useTypingStateCleanup } from '@/composables/chat/useTypingStateCleanup.js';
 import { useSidebarResizer } from '@/composables/ui/useSidebarResizer.js';
@@ -3189,59 +3190,31 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
         scrollToBottom
     });
 
-    // Get unique ID to identify message across re-mounts
-    if (msgIndex !== -1 && currentMessages.value[msgIndex]) {
-        const msg = currentMessages.value[msgIndex];
-        msg.guidanceText = guidanceText;
-        msg.guidanceType = guidanceType;
-        // Force fallback to message-level guidance by clearing current swipe's metadata if it exists
-        if (msg.swipesMeta && msg.swipesMeta[msg.swipeId || 0]) {
-            msg.swipesMeta[msg.swipeId || 0].guidanceText = null;
-            msg.swipesMeta[msg.swipeId || 0].guidanceType = null;
-        }
-    }
+    applyGenerationGuidanceState({
+        currentMessages,
+        msgIndex,
+        guidanceText,
+        guidanceType
+    });
+
     const msgId = currentMessages.value[msgIndex]?.id || genMsgId();
     const { snapshotPromptMeta, restorePromptMetaOnMessages } = createPromptMetadataSnapshots();
 
     // Save generation status for DialogList
     markGenerationPersisted(char.id, sessionId);
 
-    // Initialize state
-    // Setup initial UI updater inline to avoid null gap between state creation and assignment (#8)
-    const initialUIUpdate = (text, reasoning, isTyping, textDelta) => {
-        const idx = currentMessages.value.findIndex(m => m.id === msgId);
-        if (idx !== -1) {
-            const m = currentMessages.value[idx];
-            if (textDelta) {
-                m.text = m.text.replace(/class="stream-char"/g, 'class="stream-char-done"');
-                m.text += `<span class="stream-char">${textDelta}</span>`;
-            } else {
-                m.text = text;
-            }
-            m.reasoning = reasoning;
-            m.isTyping = isTyping;
-            smartScroll();
-        }
-    };
-
-    setGenerationState(char.id, { 
-        genId, 
-        controller, 
-        startTime, 
+    setupGenerationState({
+        char,
         msgId,
-        timerId: null,
-        onUIUpdate: initialUIUpdate
+        genId,
+        controller,
+        startTime,
+        currentMessages,
+        activeChatChar,
+        setGenerationState,
+        getGenerationState,
+        smartScroll
     });
-
-    getGenerationState(char.id).timerId = setInterval(() => {
-        if (activeChatChar && activeChatChar.id === char.id) {
-            const idx = currentMessages.value.findIndex(m => m.id === msgId);
-            if (idx !== -1) {
-                const elapsed = ((Date.now() - startTime) / 1000).toFixed(1) + 's';
-                currentMessages.value[idx].genTime = elapsed;
-            }
-        }
-    }, 100);
 
     const { onUpdate, clearBackgroundUpdateTimer } = createGenerationStreamUpdater({
         char,
