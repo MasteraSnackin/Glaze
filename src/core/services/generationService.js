@@ -211,6 +211,38 @@ async function buildPromptMemoryInjection({ char, history, summary, safeContext,
     });
 }
 
+function normalizeKeywordLoreEntries(loreEntries = []) {
+    if (!Array.isArray(loreEntries)) return [];
+    loreEntries.forEach(entry => {
+        if (entry && !entry._source) entry._source = 'keyword';
+    });
+    return loreEntries.filter(entry => entry?._source === 'keyword');
+}
+
+function mergeLateVectorLoreEntries(result, vectorResults = []) {
+    const keywordEntries = normalizeKeywordLoreEntries(result?.loreEntries || []);
+    const keywordIds = new Set(keywordEntries.map(entry => entry.id));
+    const vectorEntries = limitVectorLoreEntries(
+        vectorResults.filter(entry => !keywordIds.has(entry.id)),
+        keywordEntries
+    );
+
+    vectorEntries.forEach(entry => { entry._source = 'vector'; });
+
+    if (Array.isArray(result?.loreEntries)) {
+        result.loreEntries = [...keywordEntries, ...vectorEntries];
+    }
+
+    return {
+        keywordEntries,
+        vectorEntries
+    };
+}
+
+function estimateVectorLoreTokens(entries = []) {
+    return entries.reduce((sum, entry) => sum + estimateTokens(entry?.content || ''), 0);
+}
+
 export async function generateChatResponse({
     text,
     char,
@@ -317,17 +349,8 @@ export async function generateChatResponse({
     let vectorLoreTokens = 0;
     try {
         const vectorResults = await vectorSearchLorebooks(safeHistory || history, text, char, char?.sessionId);
-        if (vectorResults.length > 0 && result.loreEntries) {
-            const keywordIds = new Set(result.loreEntries.map(e => e.id));
-            result.loreEntries.forEach(e => { if (!e._source) e._source = 'keyword'; });
-            const keywordEntries = result.loreEntries.filter(e => e._source === 'keyword');
-            newVectorEntries = limitVectorLoreEntries(
-                vectorResults.filter(e => !keywordIds.has(e.id)),
-                keywordEntries
-            );
-            newVectorEntries.forEach(e => { e._source = 'vector'; });
-            const vectorOnly = [...newVectorEntries];
-            result.loreEntries = [...keywordEntries, ...vectorOnly];
+        if (vectorResults.length > 0) {
+            ({ vectorEntries: newVectorEntries } = mergeLateVectorLoreEntries(result, vectorResults));
         }
     } catch (e) {
         console.warn('[generateChatResponse] Vector search failed:', e);
@@ -537,19 +560,8 @@ export async function calculateContext({ char, history, authorsNote, summary }) 
         try {
             const vectorResults = await vectorSearchLorebooks(safeHistory || history, '', char, char?.sessionId);
             if (vectorResults.length > 0) {
-                const keywordIds = result.loreEntries ? new Set(result.loreEntries.map(e => e.id)) : new Set();
-                const keywordEntries = Array.isArray(result.loreEntries)
-                    ? result.loreEntries.filter(e => (e?._source || 'keyword') === 'keyword')
-                    : [];
-                const newVectorEntries = limitVectorLoreEntries(
-                    vectorResults.filter(e => !keywordIds.has(e.id)),
-                    keywordEntries
-                );
-                vectorLoreTokens = newVectorEntries.reduce((sum, entry) => {
-                    const content = entry.content || '';
-                    const tokens = estimateTokens(content);
-                    return sum + tokens;
-                }, 0);
+                const { vectorEntries } = mergeLateVectorLoreEntries(result, vectorResults);
+                vectorLoreTokens = estimateVectorLoreTokens(vectorEntries);
             }
         } catch (e) {
             console.warn('[calculateContext] Vector search failed:', e);
