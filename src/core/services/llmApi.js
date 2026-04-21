@@ -1,10 +1,10 @@
-import { cleanText } from '@/utils/textFormatter.js';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { startNetworkTrace } from '@/core/services/networkDebugService.js';
 import { getProviderById } from '@/core/llm/providers/providerRegistry.js';
 import { completeStructuredResponse, finalizeStreamResponse, handleAbortOutcome, handleRequestFailure } from '@/core/llm/transport/requestOutcome.js';
 import { executeFetchRequest, executeNativeNonStreamingRequest, shouldUseNativeNonStreamingRequest, validateFetchResponse } from '@/core/llm/transport/requestExecution.js';
+import { completeJsonResponse, getStreamingResponseMode } from '@/core/llm/transport/responseHandling.js';
 import { setupRequestRuntimePolicy } from '@/core/llm/transport/requestRuntimePolicy.js';
 import { createStreamAccumulator } from '@/core/llm/transport/streamAccumulator.js';
 import { consumeStreamingSseResponse } from '@/core/llm/transport/streamingSse.js';
@@ -92,8 +92,9 @@ export async function executeRequest({
             });
             throwIfAborted();
 
-            completeStructuredResponse({
+            await completeJsonResponse({
                 data,
+                throwIfAborted,
                 contextLabel: 'API response structure (Native)',
                 logLabel: 'LLM Response (Native):',
                 requestReasoning,
@@ -127,22 +128,18 @@ export async function executeRequest({
         await validateFetchResponse(response);
 
         if (stream) {
-            const contentType = (response.headers.get('content-type') || '').toLowerCase();
-            const supportsStreamingBody = !!response.body && typeof response.body.getReader === 'function';
-            const isSseResponse = contentType.includes('text/event-stream');
+            const { contentType, supportsStreamingBody, canStreamSse } = getStreamingResponseMode(response);
 
-            if (!supportsStreamingBody || !isSseResponse) {
+            if (!canStreamSse) {
                 if (!supportsStreamingBody) {
                     console.warn('[llmApi] Streaming body is unavailable on this platform/runtime, falling back to non-streaming response handling.');
                 } else {
                     console.warn('[llmApi] Stream requested but provider returned a non-SSE response, falling back to non-streaming handling.', { contentType });
                 }
 
-                const data = await response.json();
-                throwIfAborted();
-
-                completeStructuredResponse({
-                    data,
+                await completeJsonResponse({
+                    response,
+                    throwIfAborted,
                     contextLabel: 'API response structure (stream fallback)',
                     logLabel: 'LLM Response (stream fallback):',
                     requestReasoning,
@@ -177,11 +174,9 @@ export async function executeRequest({
             });
 
         } else {
-            const data = await response.json();
-            throwIfAborted();
-
-            completeStructuredResponse({
-                data,
+            await completeJsonResponse({
+                response,
+                throwIfAborted,
                 contextLabel: 'API response structure',
                 logLabel: 'LLM Response:',
                 requestReasoning,
