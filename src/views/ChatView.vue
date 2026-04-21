@@ -185,6 +185,7 @@ async function openMemoryEntryEditor(entryId) {
 }
 
 const isAndroid = Capacitor.getPlatform() === 'android';
+const currentMessages = ref([]);
 const {
     nextGenerationId,
     listGeneratingCharIds,
@@ -223,7 +224,6 @@ watch(rightPaddingRef, (val) => {
 const chatInputRef = ref(null);
 const inputValue = ref('');
 const isImpersonating = ref(false);
-const currentMessages = ref([]);
 const isGenerating = ref(false);
 const showScrollButton = ref(false);
 const isLoading = ref(false);
