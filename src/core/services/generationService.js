@@ -94,6 +94,38 @@ function processPromptAsync(payload) {
     });
 }
 
+function getSafeContextLimit(contextSize, maxTokens) {
+    return contextSize - maxTokens > 0 ? contextSize - maxTokens : 8000;
+}
+
+function trimHistoryForContextWindow(history, safeContextLimit) {
+    const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent || '');
+    const memoryLimitFactor = isIOS ? 15 : 5;
+    const maxHistoryRetention = Math.max(100, Math.ceil(safeContextLimit / memoryLimitFactor));
+
+    if (history && history.length > maxHistoryRetention) {
+        return history.slice(-maxHistoryRetention);
+    }
+
+    return history;
+}
+
+function buildMergedContextBreakdown(contextBreakdown, { vectorLoreTokens = 0, memoryTokens = 0 } = {}) {
+    if (!contextBreakdown) return null;
+
+    return {
+        ...contextBreakdown,
+        memory: memoryTokens,
+        vectorLore: (contextBreakdown.vectorLore || 0) + vectorLoreTokens,
+        summaryBase: contextBreakdown.summary || 0,
+        summary: (contextBreakdown.summary || 0) + memoryTokens,
+        fixedBase: (contextBreakdown.fixedBase || 0) + memoryTokens,
+        fixedTotal: (contextBreakdown.fixedTotal || 0) + memoryTokens,
+        totalUsed: (contextBreakdown.totalUsed || 0) + memoryTokens,
+        remaining: Math.max(0, (contextBreakdown.remaining || 0) - memoryTokens)
+    };
+}
+
 export async function generateChatResponse({
     text,
     char,
@@ -178,14 +210,8 @@ export async function generateChatResponse({
     let result;
     let safeHistory = history;
     try {
-        const safeContextLimit = contextSize - maxTokens > 0 ? contextSize - maxTokens : 8000;
-        const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent || '');
-        const memoryLimitFactor = isIOS ? 15 : 5;
-        const maxHistoryRetention = Math.max(100, Math.ceil(safeContextLimit / memoryLimitFactor));
-
-        if (history && history.length > maxHistoryRetention) {
-            safeHistory = history.slice(-maxHistoryRetention);
-        }
+        const safeContextLimit = getSafeContextLimit(contextSize, maxTokens);
+        safeHistory = trimHistoryForContextWindow(history, safeContextLimit);
 
         const payload = JSON.parse(JSON.stringify({
             char,
@@ -350,32 +376,10 @@ export async function generateChatResponse({
     }
 
     if (callbacks.onPromptReady) {
-        const contextBreakdown = result.contextBreakdown
-            ? (() => {
-                const totalLoreTokens = (result.contextBreakdown.lorebook || 0) + vectorLoreTokens;
-                const reserveTokens = result.contextBreakdown.lorebookReserve || 0;
-                
-                // All lorebooks (keyword + vector) must fit within the reserve
-                // Reserve remains unchanged, lorebooks are displayed within it
-                const effectiveReserve = reserveTokens - totalLoreTokens;
-                
-                return {
-                    ...result.contextBreakdown,
-                    memory: memoryInjection.tokens || 0,
-                    vectorLore: (result.contextBreakdown.vectorLore || 0) + vectorLoreTokens,
-                    summaryBase: result.contextBreakdown.summary || 0,
-                    summary: (result.contextBreakdown.summary || 0) + (memoryInjection.tokens || 0),
-                    // Keep lorebook and vectorLore separate for UI display
-                    // lorebook = keyword-matched entries only (from generationWorker)
-                    // vectorLore = vector-retrieved entries only (from this service)
-                    // lorebookReserve stays the same - lorebooks are shown within it
-                    fixedBase: (result.contextBreakdown.fixedBase || 0) + (memoryInjection.tokens || 0),
-                    fixedTotal: (result.contextBreakdown.fixedTotal || 0) + (memoryInjection.tokens || 0),
-                    totalUsed: (result.contextBreakdown.totalUsed || 0) + (memoryInjection.tokens || 0),
-                    remaining: Math.max(0, (result.contextBreakdown.remaining || 0) - (memoryInjection.tokens || 0))
-                };
-            })()
-            : null;
+        const contextBreakdown = buildMergedContextBreakdown(result.contextBreakdown, {
+            vectorLoreTokens,
+            memoryTokens: memoryInjection.tokens || 0
+        });
 
         callbacks.onPromptReady({
             loreEntries: result.loreEntries,
@@ -459,15 +463,8 @@ export async function calculateContext({ char, history, authorsNote, summary }) 
     try { globalRegexes = JSON.parse(localStorage.getItem('regex_scripts')) || []; } catch (e) { }
 
     try {
-        const safeContextLimit = apiConfig.contextSize - apiConfig.maxTokens > 0 ? apiConfig.contextSize - apiConfig.maxTokens : 8000;
-        const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent || '');
-        const memoryLimitFactor = isIOS ? 15 : 5;
-        const maxHistoryRetention = Math.max(100, Math.ceil(safeContextLimit / memoryLimitFactor));
-
-        let safeHistory = history;
-        if (history && history.length > maxHistoryRetention) {
-            safeHistory = history.slice(-maxHistoryRetention);
-        }
+        const safeContextLimit = getSafeContextLimit(apiConfig.contextSize, apiConfig.maxTokens);
+        const safeHistory = trimHistoryForContextWindow(history, safeContextLimit);
 
         const payload = JSON.parse(JSON.stringify({
             char,
@@ -529,29 +526,10 @@ export async function calculateContext({ char, history, authorsNote, summary }) 
             ? result.cutoffOriginalIndex
             : result.cutoffIndex;
 
-        const contextBreakdown = result.contextBreakdown
-            ? (() => {
-                const totalLoreTokens = (result.contextBreakdown.lorebook || 0) + vectorLoreTokens;
-                const reserveTokens = result.contextBreakdown.lorebookReserve || 0;
-                
-                // All lorebooks (keyword + vector) must fit within the reserve
-                // Reserve remains unchanged, lorebooks are displayed within it
-                const effectiveReserve = reserveTokens - totalLoreTokens;
-                
-                return {
-                    ...result.contextBreakdown,
-                    memory: memoryInjection.tokens || 0,
-                    vectorLore: (result.contextBreakdown.vectorLore || 0) + vectorLoreTokens,
-                    summaryBase: result.contextBreakdown.summary || 0,
-                    summary: (result.contextBreakdown.summary || 0) + (memoryInjection.tokens || 0),
-                    // All lorebooks must fit within reserve - don't add to fixedBase
-                    fixedBase: (result.contextBreakdown.fixedBase || 0) + (memoryInjection.tokens || 0),
-                    fixedTotal: (result.contextBreakdown.fixedTotal || 0) + (memoryInjection.tokens || 0),
-                    totalUsed: (result.contextBreakdown.totalUsed || 0) + (memoryInjection.tokens || 0),
-                    remaining: Math.max(0, (result.contextBreakdown.remaining || 0) - (memoryInjection.tokens || 0))
-                };
-            })()
-            : null;
+        const contextBreakdown = buildMergedContextBreakdown(result.contextBreakdown, {
+            vectorLoreTokens,
+            memoryTokens: memoryInjection.tokens || 0
+        });
 
         return {
             cutoffIndex: resolvedCutoff,
