@@ -186,6 +186,13 @@ async function openMemoryEntryEditor(entryId) {
 
 const isAndroid = Capacitor.getPlatform() === 'android';
 const isBatterySaverUI = computed(() => shouldUseBatterySaverUI());
+const getGenerationTimerInterval = () => isBatterySaverUI.value ? 1000 : 100;
+const formatGenerationElapsed = (startTime) => {
+    const elapsedSeconds = (Date.now() - startTime) / 1000;
+    return isBatterySaverUI.value
+        ? elapsedSeconds.toFixed(0) + 's'
+        : elapsedSeconds.toFixed(1) + 's';
+};
 const currentMessages = ref([]);
 const {
     nextGenerationId,
@@ -2912,9 +2919,13 @@ async function openChat(char, onBack, force = false) {
                     m.reasoning = reasoning;
                     m.isTyping = isTyping;
 
-                    const now = Date.now();
-                    if (now - lastReopenScrollAt >= 180) {
-                        lastReopenScrollAt = now;
+                    if (isBatterySaverUI.value) {
+                        const now = Date.now();
+                        if (now - lastReopenScrollAt >= 180) {
+                            lastReopenScrollAt = now;
+                            smartScroll();
+                        }
+                    } else {
                         smartScroll();
                     }
                 }
@@ -2924,10 +2935,9 @@ async function openChat(char, onBack, force = false) {
             state.timerId = setInterval(() => {
                 const idx = currentMessages.value.findIndex(m => m.id === state.msgId);
                 if (idx !== -1) {
-                    const elapsed = ((Date.now() - state.startTime) / 1000).toFixed(0) + 's';
-                    currentMessages.value[idx].genTime = elapsed;
+                    currentMessages.value[idx].genTime = formatGenerationElapsed(state.startTime);
                 }
-            }, 1000);
+            }, getGenerationTimerInterval());
         }
     });
 
