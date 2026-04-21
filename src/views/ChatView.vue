@@ -444,6 +444,30 @@ function getMemoryPromptLabelByKey(settings = {}, promptPreset = 'detailed_beats
     return options.find(item => item.key === promptPreset)?.label || builtInMemoryPrompts[0].label;
 }
 
+function restoreVisibleSwipeState(messages = []) {
+    if (!Array.isArray(messages)) return [];
+
+    for (const msg of messages) {
+        if (!msg || !Array.isArray(msg.swipesMeta)) continue;
+
+        const swipeIndex = msg.swipeId || 0;
+        const swipeMeta = msg.swipesMeta[swipeIndex];
+        if (!swipeMeta) continue;
+
+        if (msg.reasoning == null && swipeMeta.reasoning != null) {
+            msg.reasoning = swipeMeta.reasoning;
+        }
+        if (msg.genTime == null && swipeMeta.genTime != null) {
+            msg.genTime = swipeMeta.genTime;
+        }
+        if ((msg.tokens == null || msg.tokens === 0) && swipeMeta.tokens != null) {
+            msg.tokens = swipeMeta.tokens;
+        }
+    }
+
+    return messages;
+}
+
 function getNormalizedMemoryGenerationState(settings = {}, overrides = {}) {
     return {
         source: settings.generationSource || 'current',
@@ -2229,7 +2253,7 @@ async function loadChats() {
         const data = await getChatData(activeChatChar.id);
         const sessionId = activeChatChar.sessionId || data.currentId;
         if (data && data.sessions && data.sessions[sessionId]) {
-            currentMessages.value = data.sessions[sessionId];
+            currentMessages.value = restoreVisibleSwipeState(data.sessions[sessionId]);
         } else {
             currentMessages.value = [];
         }
