@@ -872,6 +872,10 @@ Done and tested:
 - [done] Runtime API config centralization started:
   - `APISettings.js` now exposes `getApiRuntimeStorage()`, `saveApiRuntimeSetting()`, `applyApiRuntimeConfig()`, and `getApiReasoningTags()`
   - hot-path callers (`ApiView.vue`, `OnboardingView.vue`, `ToolsView.vue`, `ChatView.vue`, `generationService.js`, `macroEngine.js`, `ChatMessage.vue`) now use these helpers instead of duplicating raw runtime config reads/writes.
+- [done] `llmApi.js` transport extraction continued:
+  - `transport/requestOutcome.js` now owns structured completion, streaming finalization, and partial-result handling for abort/error paths
+  - `transport/requestExecution.js` now owns native/fetch execution branches and fetch response validation
+  - `transport/streamingSse.js` now owns SSE read/parse/update consumption while preserving the existing callback contract
 - [done] Generation lifecycle extraction started in `ChatView.vue` without behavior changes:
   - `useGenerationRegistry.js` owns per-chat generation session state and persisted generating flags
   - `usePromptMetadataSnapshots.js` owns prompt metadata snapshot/restore for abort/error rollback
@@ -897,7 +901,8 @@ Still not done:
 - [not done] Promote explicit request use cases (`generateChat`, `generateSummary`, `generateMemoryDraft`, `calculateContext`) instead of keeping orchestration concentrated in `generationService.js`.
 
 Immediate next refactor step:
-- [not done] Extract SSE parsing and stream normalization out of `llmApi.js` first, because that is the highest-complexity remaining transport logic and the biggest blocker to finishing the provider/network split cleanly.
+- [done] Extracted SSE parsing and stream normalization out of `llmApi.js` first, because that was the highest-complexity remaining transport logic and the biggest blocker to finishing the provider/network split cleanly.
+- [not done] Continue splitting the remaining `llmApi.js` orchestration path into a dedicated transport client boundary once the SSE slice is stabilized.
 
 ## Refactoring Phase — Tokenizer, Memory Books, Vectors/Lorebooks (Active)
 

@@ -1,13 +1,13 @@
 import { cleanText } from '@/utils/textFormatter.js';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
-import { startNetworkTrace, updateNetworkTrace, appendNetworkTraceLine, finishNetworkTrace } from '@/core/services/networkDebugService.js';
+import { startNetworkTrace } from '@/core/services/networkDebugService.js';
 import { getProviderById } from '@/core/llm/providers/providerRegistry.js';
 import { completeStructuredResponse, finalizeStreamResponse, handleAbortOutcome, handleRequestFailure } from '@/core/llm/transport/requestOutcome.js';
 import { executeFetchRequest, executeNativeNonStreamingRequest, shouldUseNativeNonStreamingRequest, validateFetchResponse } from '@/core/llm/transport/requestExecution.js';
 import { setupRequestRuntimePolicy } from '@/core/llm/transport/requestRuntimePolicy.js';
 import { createStreamAccumulator } from '@/core/llm/transport/streamAccumulator.js';
-import { consumeSseDataLines, getTrailingSseDataLine } from '@/core/llm/transport/sseParser.js';
+import { consumeStreamingSseResponse } from '@/core/llm/transport/streamingSse.js';
 import { logger } from '../../utils/logger.js';
 
 export async function executeRequest({
@@ -36,7 +36,6 @@ export async function executeRequest({
     const CONNECT_TIMEOUT = parseInt(localStorage.getItem('gz_api_connect_timeout')) || 90000;
     const STREAM_TIMEOUT = parseInt(localStorage.getItem('gz_api_stream_timeout')) || 120000;
     let connectTimer = null;
-    let streamTimer = null;
     let timedOut = false;
     const runtimePolicy = await setupRequestRuntimePolicy({
         notificationTitle: 'Glaze',
@@ -157,70 +156,20 @@ export async function executeRequest({
                 return;
             }
 
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder("utf-8");
-            let pendingLineBuffer = '';
-
-            const resetStreamTimer = () => {
-                if (streamTimer) clearTimeout(streamTimer);
-                streamTimer = setTimeout(() => { timedOut = true; if (controller) controller.abort(); }, STREAM_TIMEOUT);
-            };
-            resetStreamTimer();
-
-            while (true) {
-                throwIfAborted();
-                const { done, value } = await reader.read();
-                if (done) break;
-                resetStreamTimer();
-                throwIfAborted();
-
-                const chunk = decoder.decode(value, { stream: true });
-                const parsedChunk = consumeSseDataLines(pendingLineBuffer, chunk);
-                pendingLineBuffer = parsedChunk.remaining;
-
-                for (const dataStr of parsedChunk.dataLines) {
-                    appendNetworkTraceLine(dataStr);
-                    throwIfAborted();
-
-                    try {
-                        const json = JSON.parse(dataStr);
-
-                        if (json.error) {
-                            throw new Error("API Stream Error: " + (json.error.message || JSON.stringify(json.error)));
-                        }
-
-                        if (!json.choices || !json.choices.length) continue;
-
-                        const delta = json.choices[0].delta;
-                        if (delta && (delta.content || delta.reasoning_content)) {
-                            const content = delta.content || "";
-                            const reasoning = (requestReasoning && delta.reasoning_content) || null;
-
-                            if (content) logger.debug(content);
-
-                            const { effectiveText, effectiveReasoning, textDelta } = streamAccumulator.consumeDelta({
-                                content,
-                                reasoning
-                            });
-
-                            if (onUpdate) onUpdate(content, reasoning, effectiveText, effectiveReasoning, textDelta);
-                        }
-                    } catch (e) {
-                        if (e.message && e.message.startsWith("API Stream Error")) {
-                            throw e;
-                        }
-                        console.warn("Error parsing stream chunk", e);
+            await consumeStreamingSseResponse({
+                responseBody: response.body,
+                controller: controller && {
+                    abort() {
+                        timedOut = true;
+                        controller.abort();
                     }
-                }
-            }
-
-            const trailingDataLine = getTrailingSseDataLine(pendingLineBuffer);
-            if (trailingDataLine) {
-                appendNetworkTraceLine(trailingDataLine);
-            }
-
-            if (streamTimer) { clearTimeout(streamTimer); streamTimer = null; }
-            throwIfAborted();
+                },
+                streamTimeout: STREAM_TIMEOUT,
+                throwIfAborted,
+                requestReasoning,
+                streamAccumulator,
+                onUpdate
+            });
 
             finalizeStreamResponse({
                 streamAccumulator,
@@ -264,7 +213,6 @@ export async function executeRequest({
         });
     } finally {
         if (connectTimer) clearTimeout(connectTimer);
-        if (streamTimer) clearTimeout(streamTimer);
         await runtimePolicy.cleanup();
     }
 }
