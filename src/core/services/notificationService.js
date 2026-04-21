@@ -7,6 +7,7 @@ import { getActiveContext } from '@/core/services/timeTracker.js';
 const MessagingStyleNotification = registerPlugin('MessagingStyleNotification');
 
 let pendingNotificationData = null;
+const avatarBase64Cache = new Map();
 
 function stableIdFromString(str) {
     let hash = 0;
@@ -171,22 +172,31 @@ export async function sendMessageNotification(title, body, icon, charId, session
         if (Capacitor.getPlatform() === 'android') {
             let avatarBase64 = null;
             if (icon) {
+                const cacheKey = `${charId || 'unknown'}:${icon}`;
+                if (avatarBase64Cache.has(cacheKey)) {
+                    avatarBase64 = avatarBase64Cache.get(cacheKey);
+                }
                 let url = icon;
                 if (!url.startsWith('http') && !url.startsWith('data:') && !url.startsWith('blob:')) {
                     url = `/characters/${url}`;
                 }
-                try {
-                    const res = await fetch(url);
-                    const blob = await res.blob();
-                    await new Promise((resolve) => {
-                        const reader = new FileReader();
-                        reader.onloadend = () => {
-                            avatarBase64 = reader.result;
-                            resolve();
-                        };
-                        reader.readAsDataURL(blob);
-                    });
-                } catch (e) { console.warn("Failed to convert avatar to base64", e); }
+                if (!avatarBase64) {
+                    try {
+                        const res = await fetch(url);
+                        const blob = await res.blob();
+                        await new Promise((resolve) => {
+                            const reader = new FileReader();
+                            reader.onloadend = () => {
+                                avatarBase64 = reader.result;
+                                resolve();
+                            };
+                            reader.readAsDataURL(blob);
+                        });
+                        if (avatarBase64) {
+                            avatarBase64Cache.set(cacheKey, avatarBase64);
+                        }
+                    } catch (e) { console.warn("Failed to convert avatar to base64", e); }
+                }
             }
 
             await MessagingStyleNotification.showMessagingNotification({

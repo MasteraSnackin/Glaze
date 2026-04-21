@@ -1,8 +1,10 @@
 // src/composables/useVirtualScroll.js
-import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue';
+import { ref, computed, watch, nextTick, onBeforeUnmount, unref } from 'vue';
+import { Capacitor } from '@capacitor/core';
+import { shouldUseBatterySaverUI } from '@/core/config/APPSettings.js';
 
 export function useVirtualScroll(itemsRef, containerRef, options = {}) {
-    const buffer = options.buffer ?? 10; // Number of items to keep rendered above/below
+    const getBuffer = () => unref(options.buffer) ?? 10;
     const estimateHeight = options.estimateHeight ?? 80; // Fallback height for unmeasured items
 
     // State
@@ -13,6 +15,7 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
     const isScrolling = ref(false);
     const isProgrammaticScrolling = ref(false);
     let scrollTimeout = null;
+    let scrollRaf = null;
 
     // Cache for item heights: index -> height
     const itemHeights = new Map();
@@ -76,6 +79,7 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
         const total = itemsRef.value.length;
 
         // Expand window by buffer
+        const buffer = getBuffer();
         const newStart = Math.max(0, minVis - buffer);
         const newEnd = Math.min(total, maxVis + buffer + 1);
 
@@ -98,8 +102,11 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
             isScrolling.value = false;
         }, 150);
 
-        const scrollTop = containerRef.value.scrollTop;
-        const clientHeight = containerRef.value.clientHeight;
+        const runScrollWork = () => {
+            scrollRaf = null;
+
+            const scrollTop = containerRef.value.scrollTop;
+            const clientHeight = containerRef.value.clientHeight;
 
         // Define the rendered area in pixels
         const renderedTop = paddingTop.value;
@@ -119,7 +126,7 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
         const scrollBuffer = 2000;
 
         // Check if viewport is significantly outside the rendered bounds
-        if (scrollTop < renderedTop - scrollBuffer || scrollTop + clientHeight > renderedBottom + scrollBuffer) {
+            if (scrollTop < renderedTop - scrollBuffer || scrollTop + clientHeight > renderedBottom + scrollBuffer) {
             // We jumped far away. Recalculate window.
 
             // Find target index at scrollTop
@@ -140,6 +147,7 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
             if (targetIndex === -1) targetIndex = Math.max(0, count - 1);
 
             // Center window around target
+            const buffer = getBuffer();
             const newStart = Math.max(0, targetIndex - buffer);
 
             // Estimate end based on clientHeight
@@ -159,7 +167,7 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
                 updateSpacers();
                 nextTick(observeItems);
             }
-        } else {
+            } else if (!shouldUseBatterySaverUI()) {
             // Periodic visibility health check during normal scroll
             // This ensures realVisibleIndices doesn't get stuck if Observer missed a fast transition
             const children = containerRef.value.querySelectorAll('[data-index]');
@@ -181,7 +189,16 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
                     realVisibleIndices.delete(index);
                 }
             });
+            }
+        };
+
+        if (shouldUseBatterySaverUI()) {
+            if (scrollRaf) return;
+            scrollRaf = requestAnimationFrame(runScrollWork);
+            return;
         }
+
+        runScrollWork();
     };
 
     const getScrollAnchor = () => {
@@ -223,6 +240,7 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
             // Lock scroll handler to prevent "jump" logic from interfering
             isProgrammaticScrolling.value = true;
 
+            const buffer = getBuffer();
             renderStart.value = Math.max(0, index - buffer);
             renderEnd.value = Math.min(count, index + buffer + 1);
 
@@ -477,6 +495,10 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
         if (containerRef.value) {
             containerRef.value.removeEventListener('scroll', onContainerScroll);
         }
+        if (scrollRaf) {
+            cancelAnimationFrame(scrollRaf);
+            scrollRaf = null;
+        }
     });
 
     const scrollToIndex = (index, behavior = 'auto', align = 'center') => {
@@ -525,6 +547,7 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
             }
 
             // If completely out of bounds, change render window
+            const buffer = getBuffer();
             renderStart.value = Math.max(0, index - buffer);
             renderEnd.value = Math.min(count, index + buffer + 1);
 

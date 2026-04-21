@@ -97,6 +97,12 @@ export async function handleGenerationComplete({
     const ensureCleanup = () => {
         const currentState = getGenerationState(char.id);
         if (currentState && currentState.timerId) clearInterval(currentState.timerId);
+        if (currentState && typeof currentState.clearStreamFlushTimer === 'function') {
+            currentState.clearStreamFlushTimer();
+        }
+        if (currentState && typeof currentState.streamFlush === 'function') {
+            currentState.streamFlush();
+        }
         if (typeof clearBackgroundUpdateTimer === 'function') {
             clearBackgroundUpdateTimer();
         }
@@ -106,6 +112,13 @@ export async function handleGenerationComplete({
     };
 
     const ensureStaleCleanup = () => {
+        const currentState = getGenerationState(char.id);
+        if (currentState && typeof currentState.clearStreamFlushTimer === 'function') {
+            currentState.clearStreamFlushTimer();
+        }
+        if (currentState && typeof currentState.streamFlush === 'function') {
+            currentState.streamFlush();
+        }
         if (typeof clearBackgroundUpdateTimer === 'function') {
             clearBackgroundUpdateTimer();
         }
@@ -126,6 +139,12 @@ export async function handleGenerationComplete({
         }
 
         if (currentState.timerId) clearInterval(currentState.timerId);
+        if (typeof currentState.clearStreamFlushTimer === 'function') {
+            currentState.clearStreamFlushTimer();
+        }
+        if (typeof currentState.streamFlush === 'function') {
+            currentState.streamFlush();
+        }
         clearPersistedGeneration(char.id, sessionId);
 
         const hasCompletionPayload = !!(response || finalReasoning || meta?.partialError);

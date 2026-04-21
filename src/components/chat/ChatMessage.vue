@@ -1,10 +1,11 @@
 <script setup>
 import { ref, computed, nextTick, watch, onMounted, onUnmounted } from 'vue';
+import { Capacitor } from '@capacitor/core';
 import { formatText } from '@/utils/textFormatter.js';
 import { replaceMacros } from '@/utils/macroEngine.js';
 import ShadowContent from '@/components/ui/ShadowContent.vue';
 import { translations } from '@/utils/i18n.js';
-import { currentLang, disableSwipeRegeneration } from '@/core/config/APPSettings.js';
+import { currentLang, disableSwipeRegeneration, shouldUseBatterySaverUI } from '@/core/config/APPSettings.js';
 import { themeState } from '@/core/states/themeState.js';
 import { getAllGreetings } from '@/utils/sessions.js';
 import { getEffectivePersona, allPersonas } from '@/core/states/personaState.js';
@@ -38,6 +39,10 @@ const emit = defineEmits([
 
 const triggeredItemsSheet = ref(null);
 const t = (key) => translations[currentLang.value]?.[key] || key;
+const isNativePlatform = Capacitor.isNativePlatform();
+const useLiteNativeRenderer = computed(() => shouldUseBatterySaverUI());
+const enableAnimatedTransitions = computed(() => !useLiteNativeRenderer.value);
+const swipeTransitionName = computed(() => useLiteNativeRenderer.value ? '' : (props.message.swipeDirection || 'slide-next'));
 
 const isGuidedSwipeOpen = ref(false);
 const guidedSwipeText = ref('');
@@ -381,7 +386,9 @@ const combinedMessageData = computed(() => {
     }
 
     if (props.message.isTyping) {
-        html += ` <span class="typing-dots-bounce"><span>.</span><span>.</span><span>.</span></span>`;
+        html += useLiteNativeRenderer.value
+            ? ' <span class="typing-dots-static">...</span>'
+            : ` <span class="typing-dots-bounce"><span>.</span><span>.</span><span>.</span></span>`;
     }
     return { html, regexes: triggeredRegexes };
 });
@@ -619,7 +626,7 @@ onUnmounted(() => {
     <div 
         class="message-section"
         v-bind="$attrs"
-        :class="[message.role, `layout-${layoutMode}`, { error: message.isError, selected: isSelected, 'selection-mode': isSelectionMode, 'msg-hidden': message.isHidden }]"
+        :class="[message.role, `layout-${layoutMode}`, { error: message.isError, selected: isSelected, 'selection-mode': isSelectionMode, 'msg-hidden': message.isHidden, 'native-lite': useLiteNativeRenderer }]"
         @touchstart.passive="handleTouchStart"
         @touchmove="handleTouchMove"
         @touchend="handleTouchEnd"
@@ -687,7 +694,7 @@ onUnmounted(() => {
             </div>
             <div class="msg-reasoning-content">
                 <div class="msg-transition-wrapper" style="min-height: 0;">
-                    <Transition :name="message.swipeDirection || 'slide-next'">
+                    <Transition :name="swipeTransitionName" :css="enableAnimatedTransitions">
                         <ShadowContent 
                             class="msg-reasoning-inner" 
                             :key="(message.swipeId || 0) + '-' + (message.greetingIndex || 0)" 
@@ -700,7 +707,7 @@ onUnmounted(() => {
         </div>
 
         <div class="msg-transition-wrapper">
-            <Transition :name="message.swipeDirection || 'slide-next'">
+            <Transition :name="swipeTransitionName" :css="enableAnimatedTransitions">
                 <!-- Edit Mode -->
                 <div class="msg-body" v-if="message.isEditing" key="edit">
                     <textarea 
@@ -747,10 +754,11 @@ onUnmounted(() => {
                             <template v-if="!uiHideGenTime && message.genTime && message.genTime !== '0s'">
                                 <svg viewBox="0 0 24 24" style="width:12px;height:12px;fill:currentColor;margin-right:2px;"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg>
                                 <div class="gen-time-wrapper">
-                                    <RollingNumber class="gen-time" :value="message.genTime" />
+                                    <span v-if="useLiteNativeRenderer" class="gen-time">{{ message.genTime }}</span>
+                                    <RollingNumber v-else class="gen-time" :value="message.genTime" />
                                 </div>
                             </template>
-                            <Transition name="fade">
+                            <Transition name="fade" :css="enableAnimatedTransitions">
                                 <div class="token-count-inline" v-if="!uiHideTokenCnt && tokenCount > 0 && !(isGenerating && message.role === 'char')" style="display: flex; align-items: center;" :style="(!uiHideGenTime && message.genTime && message.genTime !== '0s') ? 'margin-left: 6px;' : ''" :title="t('label_tokens') || 'Tokens'">
                                     <svg viewBox="0 0 24 24" style="width:12px;height:12px;fill:currentColor;margin-right:2px;"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
                                     <span>{{ tokenCount }}t</span>
@@ -779,10 +787,11 @@ onUnmounted(() => {
                             <template v-if="!uiHideGenTime && message.genTime && message.genTime !== '0s'">
                                 <svg viewBox="0 0 24 24" style="width:12px;height:12px;fill:currentColor;margin-right:2px;"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg>
                                 <div class="gen-time-wrapper">
-                                    <RollingNumber class="gen-time" :value="message.genTime" />
+                                    <span v-if="useLiteNativeRenderer" class="gen-time">{{ message.genTime }}</span>
+                                    <RollingNumber v-else class="gen-time" :value="message.genTime" />
                                 </div>
                             </template>
-                            <Transition name="fade">
+                            <Transition name="fade" :css="enableAnimatedTransitions">
                                 <div class="token-count-inline" v-if="!uiHideTokenCnt && tokenCount > 0 && !isGenerating" style="display: flex; align-items: center;" :style="(!uiHideGenTime && message.genTime && message.genTime !== '0s') ? 'margin-left: 6px;' : ''" :title="t('label_tokens') || 'Tokens'">
                                     <svg viewBox="0 0 24 24" style="width:12px;height:12px;fill:currentColor;margin-right:2px;"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
                                     <span>{{ tokenCount }}t</span>
@@ -804,10 +813,11 @@ onUnmounted(() => {
                     <template v-if="!uiHideGenTime && message.genTime && message.genTime !== '0s'">
                         <svg viewBox="0 0 24 24" style="width:12px;height:12px;fill:currentColor;margin-right:4px;"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg>
                         <div class="gen-time-wrapper">
-                            <RollingNumber class="gen-time" :value="message.genTime" />
+                            <span v-if="useLiteNativeRenderer" class="gen-time">{{ message.genTime }}</span>
+                            <RollingNumber v-else class="gen-time" :value="message.genTime" />
                         </div>
                     </template>
-                    <Transition name="fade">
+                    <Transition name="fade" :css="enableAnimatedTransitions">
                         <div class="token-count-inline" v-if="!uiHideTokenCnt && tokenCount > 0 && !(isGenerating && message.role === 'char')" style="display: flex; align-items: center;" :style="(!uiHideGenTime && message.genTime && message.genTime !== '0s') ? 'margin-left: 6px;' : ''" :title="t('label_tokens') || 'Tokens'">
                             <svg viewBox="0 0 24 24" style="width:12px;height:12px;fill:currentColor;margin-right:2px;"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
                             <span>{{ tokenCount }}t</span>
@@ -823,7 +833,7 @@ onUnmounted(() => {
                         <svg viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
                     </div>
                     <div class="msg-switcher-count">
-                        <Transition :name="message.swipeDirection || 'slide-next'" mode="out-in">
+                        <Transition :name="swipeTransitionName" mode="out-in" :css="enableAnimatedTransitions">
                             <span :key="message.swipeId || 0" style="display: inline-block; min-width: 24px; text-align: center;">{{ (message.swipeId || 0) + 1 }}/{{ message.swipes.length }}</span>
                         </Transition>
                     </div>
@@ -838,7 +848,7 @@ onUnmounted(() => {
                         <svg viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
                     </div>
                     <div class="msg-switcher-count">
-                        <Transition :name="message.swipeDirection || 'slide-next'" mode="out-in">
+                        <Transition :name="swipeTransitionName" mode="out-in" :css="enableAnimatedTransitions">
                             <span :key="message.greetingIndex || 0" style="display: inline-block; min-width: 24px; text-align: center;">{{ (message.greetingIndex || 0) + 1 }}/{{ getAllGreetings(activeChatChar).length }}</span>
                         </Transition>
                     </div>
@@ -1700,6 +1710,14 @@ onUnmounted(() => {
     margin-left: 4px;
 }
 
+.msg-body :deep(.typing-dots-static) {
+    display: inline-block;
+    margin-left: 4px;
+    color: var(--text-gray);
+    font-size: 1em;
+    letter-spacing: 1px;
+}
+
 .msg-body :deep(.typing-dots-bounce span) {
     display: inline-block;
     animation: dotBounce 1.4s infinite ease-in-out both;
@@ -1840,6 +1858,60 @@ onUnmounted(() => {
 }
 .message-section.layout-bubble.msg-hidden .msg-body {
     opacity: 0.45;
+}
+
+.message-section.native-lite .msg-transition-wrapper {
+    display: block;
+}
+
+.message-section.native-lite .msg-transition-wrapper > * {
+    grid-area: auto;
+}
+
+.message-section.native-lite .msg-body,
+.message-section.native-lite .msg-reasoning,
+.message-section.native-lite .msg-switcher,
+.message-section.native-lite .msg-regenerate,
+.message-section.native-lite .msg-guided-swipe-btn,
+.message-section.native-lite .msg-actions-btn,
+.message-section.native-lite .edit-btn {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    box-shadow: none !important;
+}
+
+.message-section.native-lite .msg-body,
+.message-section.native-lite .msg-reasoning {
+    border-color: rgba(255, 255, 255, 0.08);
+}
+
+.message-section.native-lite .msg-memory-badge.pending {
+    animation: none;
+}
+
+.message-section.native-lite .msg-reasoning-content {
+    transition: none;
+}
+
+.message-section.native-lite .reasoning-arrow,
+.message-section.native-lite .msg-guided-swipe-btn,
+.message-section.native-lite .edit-btn,
+.message-section.native-lite .msg-lb-trigger-menu,
+.message-section.native-lite .triggered-item-card,
+.message-section.native-lite .error-copy-btn,
+.message-section.native-lite :global(.search-highlight) {
+    transition: none !important;
+}
+
+.message-section.native-lite .guided-swipe-container {
+    animation: none;
+}
+
+.message-section.native-lite .typing-container,
+.message-section.native-lite .bubble-meta,
+.message-section.native-lite .msg-footer,
+.message-section.native-lite .msg-header {
+    will-change: auto;
 }
 
 /* Guidance Block Styling */

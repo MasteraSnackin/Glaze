@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { updateLanguage, translations } from '@/utils/i18n.js';
-import { currentLang, setLanguage, imageViewerMode, setImageViewerMode, disableSwipeRegeneration, setDisableSwipeRegeneration, hideMessageId, setHideMessageId, hideGenerationTime, setHideGenerationTime, hideTokenCount, setHideTokenCount, hideHelpTips, setHideHelpTips, dialogGrouping, setDialogGrouping, enterToSubmit, setEnterToSubmit, chatPaddingLR, setChatPaddingLR, forceMobileLayout, setForceMobileLayout } from '@/core/config/APPSettings.js';
+import { currentLang, setLanguage, imageViewerMode, setImageViewerMode, disableSwipeRegeneration, setDisableSwipeRegeneration, hideMessageId, setHideMessageId, hideGenerationTime, setHideGenerationTime, hideTokenCount, setHideTokenCount, hideHelpTips, setHideHelpTips, dialogGrouping, setDialogGrouping, enterToSubmit, setEnterToSubmit, chatPaddingLR, setChatPaddingLR, forceMobileLayout, setForceMobileLayout, desktopBatterySaver, setDesktopBatterySaver } from '@/core/config/APPSettings.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import { requestNotificationPermission } from '@/core/services/notificationService.js';
 import { themeState, setChatLayout } from '@/core/states/themeState.js';
@@ -37,10 +37,16 @@ const toggleEnterToSubmit = () => {
 };
 
 const forceMobile = ref(forceMobileLayout.value);
+const desktopBatteryMode = ref(desktopBatterySaver.value);
 
 const toggleForceMobile = () => {
     forceMobile.value = !forceMobile.value;
     setForceMobileLayout(forceMobile.value);
+    window.dispatchEvent(new CustomEvent('settings-changed'));
+};
+const toggleDesktopBatteryMode = () => {
+    desktopBatteryMode.value = !desktopBatteryMode.value;
+    setDesktopBatterySaver(desktopBatteryMode.value);
     window.dispatchEvent(new CustomEvent('settings-changed'));
 };
 const hideHTips = ref(hideHelpTips.value);
@@ -228,6 +234,14 @@ onUnmounted(() => window.removeEventListener('language-changed', onLangChange));
                         <div class="settings-desc" style="font-size: 11px; color: var(--text-gray); font-weight: normal;">{{ t('desc_force_mobile') || 'Overrides the desktop responsive layout and forces the mobile UI' }}</div>
                     </div>
                     <input type="checkbox" class="vk-switch" :checked="forceMobile" style="pointer-events: none;">
+                </div>
+
+                <div class="settings-item-checkbox" @click="toggleDesktopBatteryMode" style="cursor: pointer; padding: 12px 16px;">
+                    <div class="settings-text-col">
+                        <label style="cursor: pointer; margin-bottom: 2px;">{{ t('menu_desktop_battery_saver') || 'Desktop Battery Saver' }}</label>
+                        <div class="settings-desc" style="font-size: 11px; color: var(--text-gray); font-weight: normal;">{{ t('desc_desktop_battery_saver') || 'Applies lower-animation, lower-update chat rendering on desktop without enabling native background/runtime hooks' }}</div>
+                    </div>
+                    <input type="checkbox" class="vk-switch" :checked="desktopBatteryMode" style="pointer-events: none;">
                 </div>
                 
                 <!-- Enter to Send -->

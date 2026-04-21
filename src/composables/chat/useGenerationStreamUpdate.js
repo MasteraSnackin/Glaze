@@ -1,3 +1,6 @@
+import { Capacitor } from '@capacitor/core';
+import { shouldUseBatterySaverUI } from '@/core/config/APPSettings.js';
+
 export function createGenerationStreamUpdater({
     char,
     sessionId,
@@ -11,6 +14,7 @@ export function createGenerationStreamUpdater({
     let backgroundUpdateTimer = null;
     let backgroundPendingText = null;
     let backgroundPendingReasoning = null;
+    const backgroundPersistDelay = Capacitor.isNativePlatform() ? 5000 : (shouldUseBatterySaverUI() ? 3500 : 2000);
 
     const clearBackgroundUpdateTimer = () => {
         if (backgroundUpdateTimer) {
@@ -56,7 +60,7 @@ export function createGenerationStreamUpdater({
                     await db.saveChat(char.id, data);
                 }
             }
-        }, 2000);
+        }, backgroundPersistDelay);
     };
 
     return {

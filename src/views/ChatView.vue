@@ -53,7 +53,7 @@ import { formatText, cleanText } from '@/utils/textFormatter.js';
 import { replaceMacros } from '@/utils/macroEngine.js';
 import { getEffectivePersona, activePersona, allPersonas } from '@/core/states/personaState.js';
 import { formatDate, formatDateSeparator } from '@/utils/dateFormatter.js';
-import { currentLang, chatPaddingLR, setChatPaddingLR } from '@/core/config/APPSettings.js';
+import { currentLang, chatPaddingLR, setChatPaddingLR, shouldUseBatterySaverUI } from '@/core/config/APPSettings.js';
 import { translations } from '@/utils/i18n.js';
 import { generateChatResponse, calculateContext, generateMemoryDraft } from '@/core/services/generationService.js';
 import { executeRequest } from '@/core/services/llmApi.js';
@@ -185,6 +185,7 @@ async function openMemoryEntryEditor(entryId) {
 }
 
 const isAndroid = Capacitor.getPlatform() === 'android';
+const isBatterySaverUI = computed(() => shouldUseBatterySaverUI());
 const currentMessages = ref([]);
 const {
     nextGenerationId,
@@ -1977,7 +1978,7 @@ const displayMessages = computed(() => {
 
 // --- Virtual Scroll Setup ---
 const { visibleItems, paddingTop, paddingBottom, refresh: refreshVirtualScroll, scrollToBottom: vsScrollToBottom, isScrolling, isProgrammaticScrolling, getScrollAnchor, scrollToAnchor, scrollToIndex, isItemVisible } = useVirtualScroll(displayMessages, messagesContainer, {
-    buffer: 75, // Significantly increased buffer for smoother fast scrolling
+    buffer: isBatterySaverUI.value ? 28 : 75,
     estimateHeight: 100
 });
 
@@ -2115,14 +2116,20 @@ const shouldRecommendHide = computed(() => {
 });
 
 let autoSyncRunning = false;
+let autoSyncCooldownUntil = 0;
 async function triggerAutoSyncCheck() {
     incrementMessageCounter();
     if (!shouldAutoSync()) return;
     if (autoSyncRunning) return;
+    if (Capacitor.isNativePlatform() && Date.now() < autoSyncCooldownUntil) return;
+    if (Capacitor.isNativePlatform() && (isGenerating.value || document.visibilityState !== 'visible')) return;
     autoSyncRunning = true;
     resetMessageCounter();
     try {
         await fullSync();
+        if (Capacitor.isNativePlatform()) {
+            autoSyncCooldownUntil = Date.now() + 60000;
+        }
     } catch (e) {
         console.warn('[ChatView] Auto-sync failed:', e);
     } finally {
@@ -2384,10 +2391,11 @@ async function updateContextCutoff() {
 }
 
 function debouncedUpdateContextCutoff(delay = 300) {
+    const effectiveDelay = isBatterySaverUI.value ? Math.max(delay, 700) : delay;
     if (cutoffDebounceTimer) clearTimeout(cutoffDebounceTimer);
     cutoffDebounceTimer = setTimeout(() => {
         updateContextCutoff();
-    }, delay);
+    }, effectiveDelay);
 }
 
 function invalidateContextCache() {
@@ -2886,6 +2894,7 @@ async function openChat(char, onBack, force = false) {
         // Restore generation state if active
         if (hasGenerationState(char.id)) {
             const state = getGenerationState(char.id);
+            let lastReopenScrollAt = 0;
             
             // Clear previous timer if exists (from previous mount)
             if (state.timerId) clearInterval(state.timerId);
@@ -2896,15 +2905,18 @@ async function openChat(char, onBack, force = false) {
                 if (idx !== -1) {
                     const m = currentMessages.value[idx];
                     if (textDelta) {
-                        // Remove stream animation from previously rendered characters
-                        m.text = m.text.replace(/class="stream-char"/g, 'class="stream-char-done"');
-                        m.text += `<span class="stream-char">${textDelta}</span>`;
+                        m.text += textDelta;
                     } else {
                         m.text = text;
                     }
                     m.reasoning = reasoning;
                     m.isTyping = isTyping;
-                    smartScroll();
+
+                    const now = Date.now();
+                    if (now - lastReopenScrollAt >= 180) {
+                        lastReopenScrollAt = now;
+                        smartScroll();
+                    }
                 }
             };
 
@@ -2912,10 +2924,10 @@ async function openChat(char, onBack, force = false) {
             state.timerId = setInterval(() => {
                 const idx = currentMessages.value.findIndex(m => m.id === state.msgId);
                 if (idx !== -1) {
-                    const elapsed = ((Date.now() - state.startTime) / 1000).toFixed(1) + 's';
+                    const elapsed = ((Date.now() - state.startTime) / 1000).toFixed(0) + 's';
                     currentMessages.value[idx].genTime = elapsed;
                 }
-            }, 100);
+            }, 1000);
         }
     });
 

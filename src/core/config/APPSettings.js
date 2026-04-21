@@ -1,3 +1,4 @@
+import { Capacitor } from '@capacitor/core';
 import { ref } from 'vue';
 import { logger } from '../../utils/logger.js';
 
@@ -31,6 +32,17 @@ export const forceMobileLayout = ref(localStorage.getItem('gz_force_mobile_layou
 export function setForceMobileLayout(value) {
     forceMobileLayout.value = value;
     localStorage.setItem('gz_force_mobile_layout', value);
+}
+
+export const desktopBatterySaver = ref(localStorage.getItem('gz_desktop_battery_saver') === 'true');
+
+export function setDesktopBatterySaver(value) {
+    desktopBatterySaver.value = value;
+    localStorage.setItem('gz_desktop_battery_saver', value);
+}
+
+export function shouldUseBatterySaverUI() {
+    return Capacitor.isNativePlatform() || forceMobileLayout.value || desktopBatterySaver.value;
 }
 
 export const hideMessageId = ref(localStorage.getItem('gz_hide_msg_id') === 'true');
