@@ -56,7 +56,7 @@ export async function restoreGenerationState({
     }
 
     const timerId = generationState?.timerId;
-    if (timerId) clearInterval(timerId);
+    if (timerId) clearTimeout(timerId);
     clearPersistedGeneration(char.id, sessionId);
 
     const idx = currentMessages.value.findIndex(m => m.id === msgId);

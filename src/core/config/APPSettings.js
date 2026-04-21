@@ -34,23 +34,15 @@ export function setForceMobileLayout(value) {
     localStorage.setItem('gz_force_mobile_layout', value);
 }
 
-export const desktopBatterySaver = ref(localStorage.getItem('gz_desktop_battery_saver') === 'true');
+export const batterySaverUI = ref(localStorage.getItem('gz_battery_saver_ui') === 'true');
 
-export function setDesktopBatterySaver(value) {
-    desktopBatterySaver.value = value;
-    localStorage.setItem('gz_desktop_battery_saver', value);
-}
-
-export const mobileBatterySaver = ref(localStorage.getItem('gz_mobile_battery_saver') !== 'false');
-
-export function setMobileBatterySaver(value) {
-    mobileBatterySaver.value = value;
-    localStorage.setItem('gz_mobile_battery_saver', value);
+export function setBatterySaverUI(value) {
+    batterySaverUI.value = value;
+    localStorage.setItem('gz_battery_saver_ui', value);
 }
 
 export function shouldUseBatterySaverUI() {
-    const isNativeBatterySaver = Capacitor.isNativePlatform() && mobileBatterySaver.value;
-    return isNativeBatterySaver || forceMobileLayout.value || desktopBatterySaver.value;
+    return batterySaverUI.value;
 }
 
 export const hideMessageId = ref(localStorage.getItem('gz_hide_msg_id') === 'true');

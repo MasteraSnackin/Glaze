@@ -96,7 +96,7 @@ export async function handleGenerationComplete({
 }) {
     const ensureCleanup = () => {
         const currentState = getGenerationState(char.id);
-        if (currentState && currentState.timerId) clearInterval(currentState.timerId);
+        if (currentState && currentState.timerId) clearTimeout(currentState.timerId);
         if (currentState && typeof currentState.clearStreamFlushTimer === 'function') {
             currentState.clearStreamFlushTimer();
         }
@@ -138,7 +138,7 @@ export async function handleGenerationComplete({
             return;
         }
 
-        if (currentState.timerId) clearInterval(currentState.timerId);
+        if (currentState.timerId) clearTimeout(currentState.timerId);
         if (typeof currentState.clearStreamFlushTimer === 'function') {
             currentState.clearStreamFlushTimer();
         }
