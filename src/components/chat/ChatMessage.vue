@@ -41,8 +41,8 @@ const triggeredItemsSheet = ref(null);
 const t = (key) => translations[currentLang.value]?.[key] || key;
 const isNativePlatform = Capacitor.isNativePlatform();
 const useLiteNativeRenderer = computed(() => shouldUseBatterySaverUI());
-const enableAnimatedTransitions = computed(() => !useLiteNativeRenderer.value);
-const swipeTransitionName = computed(() => useLiteNativeRenderer.value ? '' : (props.message.swipeDirection || 'slide-next'));
+const swipeTransitionName = computed(() => useLiteNativeRenderer.value ? 'transition-none' : (props.message.swipeDirection || 'slide-next'));
+const fadeTransitionName = computed(() => useLiteNativeRenderer.value ? 'transition-none' : 'fade');
 
 const isGuidedSwipeOpen = ref(false);
 const guidedSwipeText = ref('');
@@ -694,7 +694,7 @@ onUnmounted(() => {
             </div>
             <div class="msg-reasoning-content">
                 <div class="msg-transition-wrapper" style="min-height: 0;">
-                    <Transition :name="swipeTransitionName" :css="enableAnimatedTransitions">
+                    <Transition :name="swipeTransitionName">
                         <ShadowContent 
                             class="msg-reasoning-inner" 
                             :key="(message.swipeId || 0) + '-' + (message.greetingIndex || 0)" 
@@ -707,7 +707,7 @@ onUnmounted(() => {
         </div>
 
         <div class="msg-transition-wrapper">
-            <Transition :name="swipeTransitionName" :css="enableAnimatedTransitions">
+            <Transition :name="swipeTransitionName">
                 <!-- Edit Mode -->
                 <div class="msg-body" v-if="message.isEditing" key="edit">
                     <textarea 
@@ -758,7 +758,7 @@ onUnmounted(() => {
                                     <RollingNumber v-else class="gen-time" :value="message.genTime" />
                                 </div>
                             </template>
-                            <Transition name="fade" :css="enableAnimatedTransitions">
+                            <Transition :name="fadeTransitionName">
                                 <div class="token-count-inline" v-if="!uiHideTokenCnt && tokenCount > 0 && !(isGenerating && message.role === 'char')" style="display: flex; align-items: center;" :style="(!uiHideGenTime && message.genTime && message.genTime !== '0s') ? 'margin-left: 6px;' : ''" :title="t('label_tokens') || 'Tokens'">
                                     <svg viewBox="0 0 24 24" style="width:12px;height:12px;fill:currentColor;margin-right:2px;"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
                                     <span>{{ tokenCount }}t</span>
@@ -791,7 +791,7 @@ onUnmounted(() => {
                                     <RollingNumber v-else class="gen-time" :value="message.genTime" />
                                 </div>
                             </template>
-                            <Transition name="fade" :css="enableAnimatedTransitions">
+                            <Transition :name="fadeTransitionName">
                                 <div class="token-count-inline" v-if="!uiHideTokenCnt && tokenCount > 0 && !isGenerating" style="display: flex; align-items: center;" :style="(!uiHideGenTime && message.genTime && message.genTime !== '0s') ? 'margin-left: 6px;' : ''" :title="t('label_tokens') || 'Tokens'">
                                     <svg viewBox="0 0 24 24" style="width:12px;height:12px;fill:currentColor;margin-right:2px;"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
                                     <span>{{ tokenCount }}t</span>
@@ -817,7 +817,7 @@ onUnmounted(() => {
                             <RollingNumber v-else class="gen-time" :value="message.genTime" />
                         </div>
                     </template>
-                    <Transition name="fade" :css="enableAnimatedTransitions">
+                    <Transition :name="fadeTransitionName">
                         <div class="token-count-inline" v-if="!uiHideTokenCnt && tokenCount > 0 && !(isGenerating && message.role === 'char')" style="display: flex; align-items: center;" :style="(!uiHideGenTime && message.genTime && message.genTime !== '0s') ? 'margin-left: 6px;' : ''" :title="t('label_tokens') || 'Tokens'">
                             <svg viewBox="0 0 24 24" style="width:12px;height:12px;fill:currentColor;margin-right:2px;"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
                             <span>{{ tokenCount }}t</span>
@@ -833,7 +833,7 @@ onUnmounted(() => {
                         <svg viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
                     </div>
                     <div class="msg-switcher-count">
-                        <Transition :name="swipeTransitionName" mode="out-in" :css="enableAnimatedTransitions">
+                        <Transition :name="swipeTransitionName" mode="out-in">
                             <span :key="message.swipeId || 0" style="display: inline-block; min-width: 24px; text-align: center;">{{ (message.swipeId || 0) + 1 }}/{{ message.swipes.length }}</span>
                         </Transition>
                     </div>
@@ -848,7 +848,7 @@ onUnmounted(() => {
                         <svg viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
                     </div>
                     <div class="msg-switcher-count">
-                        <Transition :name="swipeTransitionName" mode="out-in" :css="enableAnimatedTransitions">
+                        <Transition :name="swipeTransitionName" mode="out-in">
                             <span :key="message.greetingIndex || 0" style="display: inline-block; min-width: 24px; text-align: center;">{{ (message.greetingIndex || 0) + 1 }}/{{ getAllGreetings(activeChatChar).length }}</span>
                         </Transition>
                     </div>
@@ -1595,6 +1595,14 @@ onUnmounted(() => {
 }
 .fade-enter-from, .fade-leave-to {
   opacity: 0;
+}
+
+.transition-none-enter-active, .transition-none-leave-active {
+  transition: none !important;
+}
+.transition-none-enter-from, .transition-none-leave-to {
+  opacity: 1;
+  transform: none;
 }
 
 /* Error State (Glassmorphism) */
