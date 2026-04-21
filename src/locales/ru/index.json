@@ -694,6 +694,8 @@
     "menu_interface_settings": "Настройки интерфейса",
     "menu_force_mobile": "Принудительный mobile layout",
     "desc_force_mobile": "Отключает desktop-раскладку и принудительно включает мобильный интерфейс",
+    "menu_mobile_battery_saver": "Экономия батареи на Mobile",
+    "desc_mobile_battery_saver": "Оставляет включёнными облегчённый рендер чата и более редкие streaming-обновления на native/mobile по умолчанию",
     "menu_desktop_battery_saver": "Режим экономии батареи для Desktop",
     "desc_desktop_battery_saver": "Включает менее анимированный и менее частый рендер чата на desktop, не затрагивая native background/runtime hooks",
     "desc_disable_swipe_regeneration": "Отключает генерацию ответа свайпом влево",
