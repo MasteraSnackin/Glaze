@@ -873,6 +873,7 @@ Done and tested:
   - `APISettings.js` now exposes `getApiRuntimeStorage()`, `saveApiRuntimeSetting()`, `applyApiRuntimeConfig()`, and `getApiReasoningTags()`
   - hot-path callers (`ApiView.vue`, `OnboardingView.vue`, `ToolsView.vue`, `ChatView.vue`, `generationService.js`, `macroEngine.js`, `ChatMessage.vue`) now use these helpers instead of duplicating raw runtime config reads/writes.
 - [done] `llmApi.js` transport extraction continued:
+  - `transport/chatCompletionsClient.js` now owns fetch-path request orchestration, including streaming fallback and stream finalization
   - `transport/requestOutcome.js` now owns structured completion, streaming finalization, and partial-result handling for abort/error paths
   - `transport/requestExecution.js` now owns native/fetch execution branches and fetch response validation
   - `transport/requestLifecycle.js` now owns timeout config, abort guards, request headers, and network-trace bootstrap

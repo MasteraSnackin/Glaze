@@ -1,13 +1,13 @@
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { getProviderById } from '@/core/llm/providers/providerRegistry.js';
-import { completeStructuredResponse, finalizeStreamResponse, handleAbortOutcome, handleRequestFailure } from '@/core/llm/transport/requestOutcome.js';
-import { executeFetchRequest, executeNativeNonStreamingRequest, shouldUseNativeNonStreamingRequest, validateFetchResponse } from '@/core/llm/transport/requestExecution.js';
+import { completeStructuredResponse, handleAbortOutcome, handleRequestFailure } from '@/core/llm/transport/requestOutcome.js';
+import { executeNativeNonStreamingRequest, shouldUseNativeNonStreamingRequest } from '@/core/llm/transport/requestExecution.js';
+import { executeFetchChatCompletions } from '@/core/llm/transport/chatCompletionsClient.js';
 import { createRequestLifecycle } from '@/core/llm/transport/requestLifecycle.js';
-import { completeJsonResponse, getStreamingResponseMode } from '@/core/llm/transport/responseHandling.js';
+import { completeJsonResponse } from '@/core/llm/transport/responseHandling.js';
 import { setupRequestRuntimePolicy } from '@/core/llm/transport/requestRuntimePolicy.js';
 import { createStreamAccumulator } from '@/core/llm/transport/streamAccumulator.js';
-import { consumeStreamingSseResponse } from '@/core/llm/transport/streamingSse.js';
 import { logger } from '../../utils/logger.js';
 
 export async function executeRequest({
@@ -89,78 +89,22 @@ export async function executeRequest({
             return;
         }
 
-        // Connection timeout — abort if server doesn't respond
-        requestLifecycle.startConnectTimeout();
-
-        const response = await executeFetchRequest({
+        await executeFetchChatCompletions({
             requestUrl,
-            headers: requestLifecycle.headers,
             requestBody,
-            controller
+            controller,
+            requestLifecycle,
+            stream,
+            requestReasoning,
+            hasInlineTags,
+            tagStart,
+            tagEnd,
+            headerModel,
+            headerInline,
+            streamAccumulator,
+            onUpdate,
+            onComplete
         });
-
-        requestLifecycle.throwIfAborted();
-
-        requestLifecycle.clearConnectTimeout();
-
-        await validateFetchResponse(response);
-
-        if (stream) {
-            const { contentType, supportsStreamingBody, canStreamSse } = getStreamingResponseMode(response);
-
-            if (!canStreamSse) {
-                if (!supportsStreamingBody) {
-                    console.warn('[llmApi] Streaming body is unavailable on this platform/runtime, falling back to non-streaming response handling.');
-                } else {
-                    console.warn('[llmApi] Stream requested but provider returned a non-SSE response, falling back to non-streaming handling.', { contentType });
-                }
-
-                await completeJsonResponse({
-                    response,
-                    throwIfAborted: requestLifecycle.throwIfAborted,
-                    contextLabel: 'API response structure (stream fallback)',
-                    logLabel: 'LLM Response (stream fallback):',
-                    requestReasoning,
-                    hasInlineTags,
-                    tagStart,
-                    tagEnd,
-                    headerModel,
-                    headerInline,
-                    onComplete
-                });
-                return;
-            }
-
-            await consumeStreamingSseResponse({
-                responseBody: response.body,
-                controller: requestLifecycle.createStreamingTimeoutController(),
-                streamTimeout: requestLifecycle.streamTimeout,
-                throwIfAborted: requestLifecycle.throwIfAborted,
-                requestReasoning,
-                streamAccumulator,
-                onUpdate
-            });
-
-            finalizeStreamResponse({
-                streamAccumulator,
-                onComplete
-            });
-
-        } else {
-            await completeJsonResponse({
-                response,
-                throwIfAborted: requestLifecycle.throwIfAborted,
-                contextLabel: 'API response structure',
-                logLabel: 'LLM Response:',
-                requestReasoning,
-                hasInlineTags,
-                tagStart,
-                tagEnd,
-                headerModel,
-                headerInline,
-                onComplete
-            });
-        }
     } catch (e) {
         if (e.name === 'AbortError') {
             handleAbortOutcome({
