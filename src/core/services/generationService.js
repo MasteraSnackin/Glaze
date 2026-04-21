@@ -1,4 +1,4 @@
-import { getApiConfig } from '@/core/config/APISettings.js';
+import { getApiConfig, getApiRuntimeStorage, getApiReasoningTags } from '@/core/config/APISettings.js';
 import { estimateTokens } from '@/utils/tokenizer.js';
 import { replaceMacros } from '@/utils/macroEngine.js';
 import { translations } from '@/utils/i18n.js';
@@ -10,6 +10,7 @@ import { presetState, initPresetState, getEffectivePreset } from '@/core/states/
 import { lorebookState, scanLorebooks, initLorebookState, vectorSearchLorebooks } from '@/core/states/lorebookState.js';
 import { getEffectivePersona } from '@/core/states/personaState.js';
 import { applyRegexes } from '@/core/services/regexService.js';
+import { buildChatRequestPayload, buildSummaryRequestPayload, buildMemoryDraftRequestPayload } from '@/core/llm/assemblers/requestAssemblers.js';
 import { db } from '@/utils/db.js';
 import { getEmbeddings } from '@/core/services/embeddingService.js';
 import { getEmbeddingConfig, isEmbeddingConfigured } from '@/core/config/embeddingSettings.js';
@@ -22,27 +23,16 @@ export function getLastPrompt() {
     return lastPrompt;
 }
 
-/**
- * Strips embedded base64 media from text so it doesn't inflate token counts limits.
- */
-function stripEmbeddedMedia(text) {
-    if (!text || text.length < 256) return text;
-    let cleaned = text.replace(/<img\s[^>]*src\s*=\s*["']data:image\/[^"']{256,}["'][^>]*\/?>/gi, '');
-    cleaned = cleaned.replace(/data:image\/[a-z+]+;base64,[A-Za-z0-9+/=\n\r]{256,}/gi, '');
-    return cleaned;
-}
-
 // --- Helpers ---
 
 function getEffectiveApiConfig() {
     let config = getApiConfig();
+    const runtime = getApiRuntimeStorage();
     let { maxTokens, contextSize } = config;
 
-    // Fallback if contextSize is not returned by getApiConfig
-    if (!contextSize) contextSize = parseInt(localStorage.getItem('api-context')) || 32000;
+    if (!contextSize) contextSize = runtime.contextSize || 32000;
     if (maxTokens === undefined || maxTokens === null) {
-        const mt = parseInt(localStorage.getItem('api-max-tokens'));
-        maxTokens = isNaN(mt) ? 8000 : mt;
+        maxTokens = runtime.maxTokens || 8000;
     }
 
     return { ...config, maxTokens, contextSize };
@@ -104,6 +94,165 @@ function processPromptAsync(payload) {
     });
 }
 
+function getSafeContextLimit(contextSize, maxTokens) {
+    return contextSize - maxTokens > 0 ? contextSize - maxTokens : 8000;
+}
+
+function trimHistoryForContextWindow(history, safeContextLimit) {
+    const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent || '');
+    const memoryLimitFactor = isIOS ? 15 : 5;
+    const maxHistoryRetention = Math.max(100, Math.ceil(safeContextLimit / memoryLimitFactor));
+
+    if (history && history.length > maxHistoryRetention) {
+        return history.slice(-maxHistoryRetention);
+    }
+
+    return history;
+}
+
+function buildMergedContextBreakdown(contextBreakdown, { vectorLoreTokens = 0, memoryTokens = 0 } = {}) {
+    if (!contextBreakdown) return null;
+
+    return {
+        ...contextBreakdown,
+        memory: memoryTokens,
+        vectorLore: (contextBreakdown.vectorLore || 0) + vectorLoreTokens,
+        summaryBase: contextBreakdown.summary || 0,
+        summary: (contextBreakdown.summary || 0) + memoryTokens,
+        fixedBase: (contextBreakdown.fixedBase || 0) + memoryTokens,
+        fixedTotal: (contextBreakdown.fixedTotal || 0) + memoryTokens,
+        totalUsed: (contextBreakdown.totalUsed || 0) + memoryTokens,
+        remaining: Math.max(0, (contextBreakdown.remaining || 0) - memoryTokens)
+    };
+}
+
+function getSessionVarsKey(char) {
+    const charId = char?.id || 'default';
+    const sessionId = char?.sessionId || 'current';
+    return `gz_vars_${charId}_${sessionId}`;
+}
+
+function loadSessionVars(char) {
+    const varsKey = getSessionVarsKey(char);
+    let sessionVars = {};
+    try { sessionVars = JSON.parse(localStorage.getItem(varsKey)) || {}; } catch (e) { }
+    return { varsKey, sessionVars };
+}
+
+function loadGlobalRegexes() {
+    let globalRegexes = [];
+    try { globalRegexes = JSON.parse(localStorage.getItem('regex_scripts')) || []; } catch (e) { }
+    return globalRegexes;
+}
+
+function getPromptWorkerOptions(char, activePreset) {
+    return {
+        mergePrompts: activePreset?.mergePrompts || false,
+        mergeRole: activePreset?.mergeRole || 'system',
+        noAssistant: activePreset?.noAssistant || false,
+        userPrefix: activePreset?.userPrefix || '',
+        charPrefix: activePreset?.charPrefix || '',
+        squashRole: activePreset?.squashRole || 'assistant',
+        personaObj: getEffectivePersona(char?.id, char?.sessionId) || { name: 'User', prompt: '' }
+    };
+}
+
+function buildPromptWorkerPayload({
+    char,
+    history,
+    summary,
+    activePreset,
+    promptOptions,
+    authorsNote,
+    guidanceText,
+    guidanceType,
+    globalRegexes,
+    sessionVars,
+    apiConfig
+}) {
+    return JSON.parse(JSON.stringify({
+        char,
+        history,
+        summary,
+        activePreset,
+        mergePrompts: promptOptions.mergePrompts,
+        mergeRole: promptOptions.mergeRole,
+        noAssistant: promptOptions.noAssistant,
+        userPrefix: promptOptions.userPrefix,
+        charPrefix: promptOptions.charPrefix,
+        squashRole: promptOptions.squashRole,
+        personaObj: promptOptions.personaObj,
+        authorsNote: (authorsNote && authorsNote.enabled) ? authorsNote : null,
+        guidanceText,
+        guidanceType,
+        lorebooks: lorebookState.lorebooks,
+        globalSettings: lorebookState.globalSettings,
+        activations: lorebookState.activations,
+        globalRegexes,
+        sessionVars,
+        apiConfig
+    }));
+}
+
+function resolvePromptCutoffIndex(result) {
+    if (!result) return -1;
+    return result.cutoffOriginalIndex !== undefined && result.cutoffOriginalIndex !== -1
+        ? result.cutoffOriginalIndex
+        : (result.cutoffIndex !== undefined ? result.cutoffIndex : -1);
+}
+
+async function buildPromptMemoryInjection({ char, history, summary, safeContext, result }) {
+    return buildMemoryInjection({
+        char,
+        history,
+        summary,
+        safeContext,
+        cutoffOriginalIndex: resolvePromptCutoffIndex(result)
+    });
+}
+
+function normalizeKeywordLoreEntries(loreEntries = []) {
+    if (!Array.isArray(loreEntries)) return [];
+    loreEntries.forEach(entry => {
+        if (entry && !entry._source) entry._source = 'keyword';
+    });
+    return loreEntries.filter(entry => entry?._source === 'keyword');
+}
+
+function mergeLateVectorLoreEntries(result, vectorResults = []) {
+    const keywordEntries = normalizeKeywordLoreEntries(result?.loreEntries || []);
+    const keywordIds = new Set(keywordEntries.map(entry => entry.id));
+    const vectorEntries = limitVectorLoreEntries(
+        vectorResults.filter(entry => !keywordIds.has(entry.id)),
+        keywordEntries
+    );
+
+    vectorEntries.forEach(entry => { entry._source = 'vector'; });
+
+    if (Array.isArray(result?.loreEntries)) {
+        result.loreEntries = [...keywordEntries, ...vectorEntries];
+    }
+
+    return {
+        keywordEntries,
+        vectorEntries
+    };
+}
+
+function estimateVectorLoreTokens(entries = []) {
+    return entries.reduce((sum, entry) => sum + estimateTokens(entry?.content || ''), 0);
+}
+
+function buildContextCalculationResult(result, { vectorLoreTokens = 0, memoryTokens = 0 } = {}) {
+    return {
+        cutoffIndex: resolvePromptCutoffIndex(result),
+        contextBreakdown: buildMergedContextBreakdown(result?.contextBreakdown, {
+            vectorLoreTokens,
+            memoryTokens
+        })
+    };
+}
+
 export async function generateChatResponse({
     text,
     char,
@@ -117,7 +266,7 @@ export async function generateChatResponse({
 }) {
     const { onUpdate, onComplete, onError } = callbacks;
     let apiConfig = getEffectiveApiConfig();
-    let { apiKey, apiUrl, model, stream, requestReasoning, reasoningEffort, temp, topP, maxTokens, contextSize } = apiConfig;
+    let { providerId, apiKey, apiUrl, model, stream, requestReasoning, reasoningEffort, temp, topP, maxTokens, contextSize } = apiConfig;
 
     const t = (key) => translations[currentLang.value]?.[key] || key;
 
@@ -142,19 +291,12 @@ export async function generateChatResponse({
     const activePreset = loadActivePreset(char, char?.sessionId);
 
     // Reasoning Tags from Preset
-    const tagStart = activePreset?.reasoningStart || localStorage.getItem('gz_api_reasoning_start');
-    const tagEnd = activePreset?.reasoningEnd || localStorage.getItem('gz_api_reasoning_end');
+    const reasoningTags = getApiReasoningTags();
+    const tagStart = activePreset?.reasoningStart || reasoningTags.start;
+    const tagEnd = activePreset?.reasoningEnd || reasoningTags.end;
 
-    // Merge Settings from Preset
-    const mergePrompts = activePreset?.mergePrompts || false;
-    const mergeRole = activePreset?.mergeRole || 'system';
-
-    // NoAssistant Settings from Preset
-    const noAssistant = activePreset?.noAssistant || false;
+    const promptOptions = getPromptWorkerOptions(char, activePreset);
     const stopString = activePreset?.stopString || '';
-    const userPrefix = activePreset?.userPrefix || '';
-    const charPrefix = activePreset?.charPrefix || '';
-    const squashRole = activePreset?.squashRole || 'assistant';
 
     if (activePreset && typeof activePreset.reasoningEnabled === 'boolean') {
         // Only override if preset explicitly enables it, otherwise keep user setting
@@ -167,57 +309,34 @@ export async function generateChatResponse({
         reasoningEffort = activePreset.reasoningEffort;
     }
 
-    // Get Persona object for macros
-    const personaObj = getEffectivePersona(char?.id, char?.sessionId) || { name: "User", prompt: "" };
-
-    const charId = char?.id || "default";
-    const sessionId = char?.sessionId || "current";
-    const varsKey = `gz_vars_${charId}_${sessionId}`;
-    let sessionVars = {};
-    try { sessionVars = JSON.parse(localStorage.getItem(varsKey)) || {}; } catch (e) { }
+    const { varsKey, sessionVars } = loadSessionVars(char);
 
     // Set reasoning macros for {{reasoningPrefix}} and {{reasoningSuffix}}
     sessionVars.reasoningPrefix = tagStart;
     sessionVars.reasoningSuffix = tagEnd;
     localStorage.setItem(varsKey, JSON.stringify(sessionVars));
 
-    let globalRegexes = [];
-    try { globalRegexes = JSON.parse(localStorage.getItem('regex_scripts')) || []; } catch (e) { }
+    const globalRegexes = loadGlobalRegexes();
 
     let result;
     let safeHistory = history;
     try {
-        const safeContextLimit = contextSize - maxTokens > 0 ? contextSize - maxTokens : 8000;
-        const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent || '');
-        const memoryLimitFactor = isIOS ? 15 : 5;
-        const maxHistoryRetention = Math.max(100, Math.ceil(safeContextLimit / memoryLimitFactor));
+        const safeContextLimit = getSafeContextLimit(contextSize, maxTokens);
+        safeHistory = trimHistoryForContextWindow(history, safeContextLimit);
 
-        if (history && history.length > maxHistoryRetention) {
-            safeHistory = history.slice(-maxHistoryRetention);
-        }
-
-        const payload = JSON.parse(JSON.stringify({
+        const payload = buildPromptWorkerPayload({
             char,
             history: safeHistory,
             summary,
             activePreset,
-            mergePrompts,
-            mergeRole,
-            noAssistant,
-            userPrefix,
-            charPrefix,
-            squashRole,
-            personaObj,
-            authorsNote: (authorsNote && authorsNote.enabled) ? authorsNote : null,
+            promptOptions,
+            authorsNote,
             guidanceText,
             guidanceType: type,
-            lorebooks: lorebookState.lorebooks,
-            globalSettings: lorebookState.globalSettings,
-            activations: lorebookState.activations,
             globalRegexes,
             sessionVars,
             apiConfig
-        }));
+        });
 
         result = await processPromptAsync(payload);
     } catch (e) {
@@ -240,17 +359,8 @@ export async function generateChatResponse({
     let vectorLoreTokens = 0;
     try {
         const vectorResults = await vectorSearchLorebooks(safeHistory || history, text, char, char?.sessionId);
-        if (vectorResults.length > 0 && result.loreEntries) {
-            const keywordIds = new Set(result.loreEntries.map(e => e.id));
-            result.loreEntries.forEach(e => { if (!e._source) e._source = 'keyword'; });
-            const keywordEntries = result.loreEntries.filter(e => e._source === 'keyword');
-            newVectorEntries = limitVectorLoreEntries(
-                vectorResults.filter(e => !keywordIds.has(e.id)),
-                keywordEntries
-            );
-            newVectorEntries.forEach(e => { e._source = 'vector'; });
-            const vectorOnly = [...newVectorEntries];
-            result.loreEntries = [...keywordEntries, ...vectorOnly];
+        if (vectorResults.length > 0) {
+            ({ vectorEntries: newVectorEntries } = mergeLateVectorLoreEntries(result, vectorResults));
         }
     } catch (e) {
         console.warn('[generateChatResponse] Vector search failed:', e);
@@ -268,15 +378,12 @@ export async function generateChatResponse({
     }
 
     const safeContext = contextSize - maxTokens;
-    const cutoffOriginalIndex = result.cutoffOriginalIndex !== undefined && result.cutoffOriginalIndex !== -1
-        ? result.cutoffOriginalIndex
-        : (result.cutoffIndex !== undefined ? result.cutoffIndex : -1);
-    const memoryInjection = await buildMemoryInjection({
+    const memoryInjection = await buildPromptMemoryInjection({
         char,
         history: safeHistory || history,
         summary,
         safeContext,
-        cutoffOriginalIndex
+        result
     });
     let messages = result.messages;
 
@@ -359,32 +466,10 @@ export async function generateChatResponse({
     }
 
     if (callbacks.onPromptReady) {
-        const contextBreakdown = result.contextBreakdown
-            ? (() => {
-                const totalLoreTokens = (result.contextBreakdown.lorebook || 0) + vectorLoreTokens;
-                const reserveTokens = result.contextBreakdown.lorebookReserve || 0;
-                
-                // All lorebooks (keyword + vector) must fit within the reserve
-                // Reserve remains unchanged, lorebooks are displayed within it
-                const effectiveReserve = reserveTokens - totalLoreTokens;
-                
-                return {
-                    ...result.contextBreakdown,
-                    memory: memoryInjection.tokens || 0,
-                    vectorLore: (result.contextBreakdown.vectorLore || 0) + vectorLoreTokens,
-                    summaryBase: result.contextBreakdown.summary || 0,
-                    summary: (result.contextBreakdown.summary || 0) + (memoryInjection.tokens || 0),
-                    // Keep lorebook and vectorLore separate for UI display
-                    // lorebook = keyword-matched entries only (from generationWorker)
-                    // vectorLore = vector-retrieved entries only (from this service)
-                    // lorebookReserve stays the same - lorebooks are shown within it
-                    fixedBase: (result.contextBreakdown.fixedBase || 0) + (memoryInjection.tokens || 0),
-                    fixedTotal: (result.contextBreakdown.fixedTotal || 0) + (memoryInjection.tokens || 0),
-                    totalUsed: (result.contextBreakdown.totalUsed || 0) + (memoryInjection.tokens || 0),
-                    remaining: Math.max(0, (result.contextBreakdown.remaining || 0) - (memoryInjection.tokens || 0))
-                };
-            })()
-            : null;
+        const contextBreakdown = buildMergedContextBreakdown(result.contextBreakdown, {
+            vectorLoreTokens,
+            memoryTokens: memoryInjection.tokens || 0
+        });
 
         callbacks.onPromptReady({
             loreEntries: result.loreEntries,
@@ -393,47 +478,20 @@ export async function generateChatResponse({
         });
     }
 
-    const requestBody = {
-        model: model,
-        messages: messages,
+    const { previewBody, requestBody } = buildChatRequestPayload({
+        providerId,
+        model,
+        messages,
         temperature: temp,
-        top_p: topP,
-        stream: stream
-    };
-
-    if (reasoningEffort && reasoningEffort !== 'auto') {
-        requestBody.reasoning_effort = reasoningEffort;
-    }
-
-    if (maxTokens > 0) {
-        requestBody.max_tokens = maxTokens;
-    }
-
-    if (stopString) {
-        requestBody.stop = [stopString];
-    }
-
+        topP,
+        stream,
+        reasoningEffort,
+        maxTokens,
+        stopString
+    });
 
     // Save for preview
-    lastPrompt = JSON.parse(JSON.stringify(requestBody));
-
-    // Sanitize messages for API (strict OpenAI compliance: only role, content, name)
-    requestBody.messages = requestBody.messages.map(m => {
-        const cleanMsg = {
-            role: m.role,
-            content: stripEmbeddedMedia(m.content)
-        };
-
-        if (m.image) {
-            cleanMsg.content = [
-                { type: "text", text: m.content || "" },
-                { type: "image_url", image_url: { url: m.image } }
-            ];
-        }
-
-        if (m.name) cleanMsg.name = m.name;
-        return cleanMsg;
-    });
+    lastPrompt = JSON.parse(JSON.stringify(previewBody));
 
     // Final abort check before API call
     if (controller?.signal?.aborted) {
@@ -445,6 +503,7 @@ export async function generateChatResponse({
     try {
         logger.debug('[GenerationService] Final Request:', requestBody);
         await executeRequest({
+            providerId,
             apiUrl,
             apiKey,
             requestBody,
@@ -474,67 +533,36 @@ export async function calculateContext({ char, history, authorsNote, summary }) 
     const apiConfig = getEffectiveApiConfig();
     const activePreset = loadActivePreset(char, char?.sessionId);
 
-    const mergePrompts = activePreset?.mergePrompts || false;
-    const mergeRole = activePreset?.mergeRole || 'system';
-    const noAssistant = activePreset?.noAssistant || false;
-    const userPrefix = activePreset?.userPrefix || '';
-    const charPrefix = activePreset?.charPrefix || '';
-    const squashRole = activePreset?.squashRole || 'assistant';
-    const personaObj = getEffectivePersona(char?.id, char?.sessionId) || { name: "User", prompt: "" };
+    const promptOptions = getPromptWorkerOptions(char, activePreset);
 
     const anData = authorsNote;
 
-    const charId = char?.id || "default";
-    const sessionId = char?.sessionId || "current";
-    const varsKey = `gz_vars_${charId}_${sessionId}`;
-    let sessionVars = {};
-    try { sessionVars = JSON.parse(localStorage.getItem(varsKey)) || {}; } catch (e) { }
-
-    let globalRegexes = [];
-    try { globalRegexes = JSON.parse(localStorage.getItem('regex_scripts')) || []; } catch (e) { }
+    const { sessionVars } = loadSessionVars(char);
+    const globalRegexes = loadGlobalRegexes();
 
     try {
-        const safeContextLimit = apiConfig.contextSize - apiConfig.maxTokens > 0 ? apiConfig.contextSize - apiConfig.maxTokens : 8000;
-        const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent || '');
-        const memoryLimitFactor = isIOS ? 15 : 5;
-        const maxHistoryRetention = Math.max(100, Math.ceil(safeContextLimit / memoryLimitFactor));
+        const safeContextLimit = getSafeContextLimit(apiConfig.contextSize, apiConfig.maxTokens);
+        const safeHistory = trimHistoryForContextWindow(history, safeContextLimit);
 
-        let safeHistory = history;
-        if (history && history.length > maxHistoryRetention) {
-            safeHistory = history.slice(-maxHistoryRetention);
-        }
-
-        const payload = JSON.parse(JSON.stringify({
+        const payload = buildPromptWorkerPayload({
             char,
             history: safeHistory,
             summary,
             activePreset,
-            mergePrompts,
-            mergeRole,
-            noAssistant,
-            userPrefix,
-            charPrefix,
-            squashRole,
-            personaObj,
-            authorsNote: (anData && anData.enabled) ? anData : null,
-            lorebooks: lorebookState.lorebooks,
-            globalSettings: lorebookState.globalSettings,
-            activations: lorebookState.activations,
+            promptOptions,
+            authorsNote: anData,
             globalRegexes,
             sessionVars,
             apiConfig
-        }));
+        });
 
         const result = await processPromptAsync(payload);
-        const cutoffOriginalIndex = result.cutoffOriginalIndex !== undefined && result.cutoffOriginalIndex !== -1
-            ? result.cutoffOriginalIndex
-            : (result.cutoffIndex !== undefined ? result.cutoffIndex : -1);
-        const memoryInjection = await buildMemoryInjection({
+        const memoryInjection = await buildPromptMemoryInjection({
             char,
             history: safeHistory,
             summary,
             safeContext: safeContextLimit,
-            cutoffOriginalIndex
+            result
         });
 
         // Calculate vector lorebook tokens for accurate breakdown display
@@ -542,56 +570,17 @@ export async function calculateContext({ char, history, authorsNote, summary }) 
         try {
             const vectorResults = await vectorSearchLorebooks(safeHistory || history, '', char, char?.sessionId);
             if (vectorResults.length > 0) {
-                const keywordIds = result.loreEntries ? new Set(result.loreEntries.map(e => e.id)) : new Set();
-                const keywordEntries = Array.isArray(result.loreEntries)
-                    ? result.loreEntries.filter(e => (e?._source || 'keyword') === 'keyword')
-                    : [];
-                const newVectorEntries = limitVectorLoreEntries(
-                    vectorResults.filter(e => !keywordIds.has(e.id)),
-                    keywordEntries
-                );
-                vectorLoreTokens = newVectorEntries.reduce((sum, entry) => {
-                    const content = entry.content || '';
-                    const tokens = estimateTokens(content);
-                    return sum + tokens;
-                }, 0);
+                const { vectorEntries } = mergeLateVectorLoreEntries(result, vectorResults);
+                vectorLoreTokens = estimateVectorLoreTokens(vectorEntries);
             }
         } catch (e) {
             console.warn('[calculateContext] Vector search failed:', e);
         }
 
-        const resolvedCutoff = result.cutoffOriginalIndex !== undefined && result.cutoffOriginalIndex !== -1
-            ? result.cutoffOriginalIndex
-            : result.cutoffIndex;
-
-        const contextBreakdown = result.contextBreakdown
-            ? (() => {
-                const totalLoreTokens = (result.contextBreakdown.lorebook || 0) + vectorLoreTokens;
-                const reserveTokens = result.contextBreakdown.lorebookReserve || 0;
-                
-                // All lorebooks (keyword + vector) must fit within the reserve
-                // Reserve remains unchanged, lorebooks are displayed within it
-                const effectiveReserve = reserveTokens - totalLoreTokens;
-                
-                return {
-                    ...result.contextBreakdown,
-                    memory: memoryInjection.tokens || 0,
-                    vectorLore: (result.contextBreakdown.vectorLore || 0) + vectorLoreTokens,
-                    summaryBase: result.contextBreakdown.summary || 0,
-                    summary: (result.contextBreakdown.summary || 0) + (memoryInjection.tokens || 0),
-                    // All lorebooks must fit within reserve - don't add to fixedBase
-                    fixedBase: (result.contextBreakdown.fixedBase || 0) + (memoryInjection.tokens || 0),
-                    fixedTotal: (result.contextBreakdown.fixedTotal || 0) + (memoryInjection.tokens || 0),
-                    totalUsed: (result.contextBreakdown.totalUsed || 0) + (memoryInjection.tokens || 0),
-                    remaining: Math.max(0, (result.contextBreakdown.remaining || 0) - (memoryInjection.tokens || 0))
-                };
-            })()
-            : null;
-
-        return {
-            cutoffIndex: resolvedCutoff,
-            contextBreakdown
-        };
+        return buildContextCalculationResult(result, {
+            vectorLoreTokens,
+            memoryTokens: memoryInjection.tokens || 0
+        });
     } catch (e) {
         console.error("Calculate context worker error", e);
         return {
@@ -606,7 +595,7 @@ export async function generateSummary({ history, prompt, controller, apiConfigOv
         ...getEffectiveApiConfig(),
         ...(apiConfigOverride || {})
     };
-    const { apiKey, apiUrl, model, temp } = effectiveConfig;
+    const { providerId, apiKey, apiUrl, model, temp } = effectiveConfig;
 
     if (!apiUrl || !model) {
         throw new Error("API Not Configured");
@@ -622,14 +611,18 @@ export async function generateSummary({ history, prompt, controller, apiConfigOv
 
     let result = "";
 
+    const { requestBody } = buildSummaryRequestPayload({
+        providerId,
+        model,
+        prompt: finalPrompt,
+        temperature: temp
+    });
+
     await executeRequest({
+        providerId,
         apiUrl,
         apiKey,
-        requestBody: {
-            model,
-            messages: [{ role: 'user', content: finalPrompt }],
-            temperature: temp
-        },
+        requestBody,
         controller,
         callbacks: {
             onComplete: (text) => { result = text; }
@@ -1066,7 +1059,7 @@ export async function generateMemoryDraft({ history, prompt, controller, apiConf
         ...getEffectiveApiConfig(),
         ...(apiConfigOverride || {})
     };
-    const { apiKey, apiUrl, model, temp } = effectiveConfig;
+    const { providerId, apiKey, apiUrl, model, temp } = effectiveConfig;
 
     // Memory drafts need enough output budget for long summaries even when the
     // provider has a small default completion limit.
@@ -1104,17 +1097,18 @@ export async function generateMemoryDraft({ history, prompt, controller, apiConf
     let result = "";
     
     let requestError = null;
-    const requestBody = {
+    const { previewBody, requestBody } = buildMemoryDraftRequestPayload({
+        providerId,
         model,
-        messages: [{ role: 'user', content: finalPrompt }],
+        prompt: finalPrompt,
         temperature: temp,
-        max_tokens: memoryDraftMaxTokens,
-        stream: false
-    };
+        maxTokens: memoryDraftMaxTokens
+    });
 
-    lastPrompt = JSON.parse(JSON.stringify(requestBody));
+    lastPrompt = JSON.parse(JSON.stringify(previewBody));
     
     await executeRequest({
+        providerId,
         apiUrl,
         apiKey,
         requestBody,

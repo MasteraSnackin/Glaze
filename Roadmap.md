@@ -838,11 +838,74 @@ Active branch: `fast-fixes`
     - Background/location detail enrichment from lorebooks
 
 ### Branch Strategy (updated)
-- Current: `feat/refactor-tokenizer-memorybooks` (from `origin/dev` at 210efa4)
+- Current bugfix chain: merged and closed (`fixes/mobile-network-memorybooks-batch1` -> PR #46, `fixes/regressions-post-merge` -> PR #47)
+- Current refactor branch: `feat/network-architecture-refactor`
 - Previous: Merged branches deleted (bug-fixes, feat/dual-lorebook-debug)
 - Policy: **Linear chain workflow** — each feature branches from previous feature OR origin/dev for new chains
 - Never create branches from dev that contain multiple unmerged features
 - All PRs target `upstream/dev`, never `main`
+
+## Provider / Network Refactor (Active)
+
+Branch: `feat/network-architecture-refactor`
+Status: In progress
+Goal: finish moving chat/provider request architecture toward explicit provider, assembler, and transport boundaries without changing prompt semantics or regressing mobile/network behavior.
+
+### Current State
+
+Done and tested:
+- [done] Added provider-oriented foundation under `src/core/llm/`:
+  - `contracts/providerContracts.js`
+  - `providers/providerRegistry.js`
+  - `providers/openaiCompatibleProvider.js`
+  - `assemblers/requestIntents.js`
+  - `assemblers/payloadBuilderRegistry.js`
+  - `assemblers/requestAssemblers.js`
+  - `transport/responseNormalizer.js`
+- [done] `generationService.js` now builds chat/summary/memory-draft payloads through request assemblers instead of inlining OpenAI-like payload shape in each use case.
+- [done] `APISettings.js` now routes endpoint normalization and model discovery through provider adapters.
+- [done] `ApiView.vue` preset creation/apply flow persists `providerId` with API presets.
+- [done] Refactor branch was rebased onto the merged mobile/memory/lorebook fixes and re-applied the regression safeguards from PR #47.
+- [done] Regression safeguards preserved on refactor branch:
+  - late vector lore respects `maxInjectedEntries`
+  - prompt metadata is restored on abort/error instead of leaving stale lore/memory refs behind
+- [done] Runtime API config centralization started:
+  - `APISettings.js` now exposes `getApiRuntimeStorage()`, `saveApiRuntimeSetting()`, `applyApiRuntimeConfig()`, and `getApiReasoningTags()`
+  - hot-path callers (`ApiView.vue`, `OnboardingView.vue`, `ToolsView.vue`, `ChatView.vue`, `generationService.js`, `macroEngine.js`, `ChatMessage.vue`) now use these helpers instead of duplicating raw runtime config reads/writes.
+- [done] `llmApi.js` transport extraction continued:
+  - `transport/chatCompletionsClient.js` now owns fetch-path request orchestration, including streaming fallback and stream finalization
+  - `transport/requestOutcome.js` now owns structured completion, streaming finalization, and partial-result handling for abort/error paths
+  - `transport/requestExecution.js` now owns native/fetch execution branches and fetch response validation
+  - `transport/requestLifecycle.js` now owns timeout config, abort guards, request headers, and network-trace bootstrap
+  - `transport/responseHandling.js` now owns fetch JSON completion and SSE capability detection/fallback shaping
+  - `transport/streamingSse.js` now owns SSE read/parse/update consumption while preserving the existing callback contract
+- [done] Generation lifecycle extraction started in `ChatView.vue` without behavior changes:
+  - `useGenerationRegistry.js` owns per-chat generation session state and persisted generating flags
+  - `usePromptMetadataSnapshots.js` owns prompt metadata snapshot/restore for abort/error rollback
+  - `useTypingStateCleanup.js` centralizes `isTyping` cleanup across stale/error/abort paths
+  - `useGenerationStateRestore.js` now owns generation abort/error restore flow for swipe rollback, message removal, and DB fallback cleanup
+  - `useGenerationErrorHandler.js` now owns error-path cleanup and persisted error-state writes after generation failures
+  - `useGenerationCompleteHandler.js` now owns completion-path cleanup, visible/background completion writes, and stale/abort finalization checks
+  - `useGenerationStreamUpdate.js` now owns stream fan-out and throttled background DB persistence during active generation
+  - `useGenerationPromptReady.js` now owns prompt metadata assignment and prompt-ready persistence for triggered lorebooks/memories/context refs
+  - `useGenerationPreparation.js` now owns authors-note assembly, placeholder message creation, and request history shaping for chat generation
+  - `useGenerationStateSetup.js` now owns initial guidance patching plus per-generation UI update/timer state wiring
+  - `useGenerationPreparation.js` also resolves generation session context for active and background chat starts
+
+Tested status:
+- [done] `npm test -- --run`
+- [done] `npm run build`
+
+Still not done:
+- [not done] Split `llmApi.js` into smaller transport modules (`chatCompletionsClient`, `sseParser`, runtime policy pieces) while preserving the current callback contract.
+- [not done] Move more remaining direct runtime API config access behind `APISettings.js` helpers, especially lower-priority UI code and legacy toggles.
+- [not done] Extract generation session lifecycle out of `ChatView.vue` into a dedicated composable/service.
+- [not done] Separate prompt preview storage from network trace storage and stop relying on singleton global last-trace state.
+- [not done] Promote explicit request use cases (`generateChat`, `generateSummary`, `generateMemoryDraft`, `calculateContext`) instead of keeping orchestration concentrated in `generationService.js`.
+
+Immediate next refactor step:
+- [done] Extracted SSE parsing and stream normalization out of `llmApi.js` first, because that was the highest-complexity remaining transport logic and the biggest blocker to finishing the provider/network split cleanly.
+- [not done] Continue splitting the remaining `llmApi.js` orchestration path into a dedicated transport client boundary once the SSE slice is stabilized.
 
 ## Refactoring Phase — Tokenizer, Memory Books, Vectors/Lorebooks (Active)
 

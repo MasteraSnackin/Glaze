@@ -271,7 +271,230 @@ MemorySettings: {
 
 ---
 
-## 6. Cloud Sync
+## 6. Network / LLM Requests
+
+### Files
+- `src/components/chat/ChatInput.vue` — Starts user send flow and exposes request preview sheet entry points
+- `src/components/chat/MagicDrawer.vue` — Secondary request preview entry point
+- `src/components/sheets/RequestPreviewSheet.vue` — Displays the last built prompt and optional captured network trace
+- `src/views/ChatView.vue` — Owns chat generation session lifecycle, placeholder message state, abort/cleanup, and persistence
+- `src/views/ApiView.vue` — API settings UI, model discovery, preset CRUD, and connection test UX
+- `src/core/config/APISettings.js` — Runtime API config reads, endpoint normalization, provider blacklist checks, and `/models` discovery
+- `src/core/services/generationService.js` — Prompt orchestration, enrichment, request body construction, and direct `executeRequest()` callers
+- `src/workers/generationWorker.js` — Prompt assembly, macro/regex application, keyword lore scan, and token accounting
+- `src/core/services/llmApi.js` — `/chat/completions` transport, streaming/non-stream parsing, native/mobile branching, timeouts, reasoning extraction, and runtime side effects
+- `src/core/services/networkDebugService.js` — Stores the last captured request/response trace for on-device inspection
+
+### Request Types
+- `chat` — Main character response generation from `ChatView.vue` via `generateChatResponse()`
+- `summary` — Preset/summary generation via `generateSummary()`
+- `memory_draft` — MemoryBook draft generation via `generateMemoryDraft()`
+- `model_discovery` — `/models` fetch from `ApiView.vue` via `fetchRemoteModels()`
+
+### Current End-to-End Flow
+
+**Chat Generation:**
+1. `ChatInput.vue` emits send-related events and `ChatView.vue` receives them.
+2. `ChatView.vue:startGeneration()` performs UI/session orchestration:
+   - checks basic API config availability
+   - creates `AbortController`
+   - creates or reuses the typing placeholder message
+   - snapshots visible history
+   - starts timers and `generatingStates`
+3. `generationService.js:generateChatResponse()` resolves the effective request inputs:
+   - loads API config from `APISettings.js`
+   - resolves active preset and reasoning tag settings
+   - collects session vars, persona, regexes, and prompt options
+   - sends prompt building to `generationWorker.js`
+4. After the worker returns, `generationService.js` performs late enrichment:
+   - vector lore retrieval
+   - memory injection
+   - context breakdown assembly
+   - request-body creation and sanitization
+   - `lastPrompt` snapshot for request preview UI
+5. `generationService.js` calls `llmApi.js:executeRequest()` with transport config, reasoning config, request type, abort controller, and callbacks.
+6. `llmApi.js` executes `/chat/completions` using either:
+   - `CapacitorHttp.post()` for native non-stream local HTTP requests
+   - `fetch()` for web and streaming requests
+7. `llmApi.js` parses either:
+   - one-shot JSON response
+   - SSE stream via `response.body.getReader()`
+   - one-shot fallback when a stream request has no readable body on the current runtime
+8. `llmApi.js` extracts assistant text plus reasoning from:
+   - native `reasoning_content`
+   - inline reasoning tags in `content`
+9. Callback flow returns to `ChatView.vue`:
+   - `onUpdate()` applies streaming text/reasoning to the placeholder message
+   - `onComplete()` finalizes the message, stores metadata, and clears generation state
+   - `onError()` restores UI/DB state and writes formatted error output
+
+**Summary + Memory Draft Requests:**
+1. `PresetView.vue` or `ChatView.vue` call `generateSummary()` / `generateMemoryDraft()`.
+2. `generationService.js` builds a simpler single-message request body.
+3. Both still reuse `llmApi.js:executeRequest()`.
+4. Request preview and network trace are still global, so these requests can overwrite the last visible chat debug payload.
+
+**Model Discovery:**
+1. `ApiView.vue` normalizes the endpoint and calls `fetchRemoteModels()`.
+2. `APISettings.js` requests `/models` using `fetch()` on web or `CapacitorHttp.get()` on native.
+3. Returned model IDs feed the API settings selector UI.
+
+### Current Responsibility Split
+
+**UI / Session Lifecycle:**
+- `ChatView.vue` owns generation session state, placeholder message creation, timers, background persistence, abort handling, and generation-end events.
+- `RequestPreviewSheet.vue` owns display of the last built prompt and the last stored network trace.
+- `ApiView.vue` owns API settings editing, preset CRUD, and `/models` connectivity UX.
+
+**Prompt Pipeline:**
+- `generationWorker.js` builds prompt blocks, applies macros and regexes, scans keyword lore, and returns prompt/context metadata.
+- `generationService.js` enriches worker output with vector lore and MemoryBook injection, computes final request payloads, and exposes generation entry points.
+
+**Transport / Runtime:**
+- `llmApi.js` owns request dispatch, timeout handling, streaming parser behavior, native runtime branching, wake-lock/background behavior, trace capture hooks, and reasoning extraction.
+- `networkDebugService.js` owns the persisted "last trace" singleton.
+
+**Config / Storage:**
+- `APISettings.js` reads runtime API values from `localStorage` and API presets from IndexedDB.
+- `ApiView.vue` writes many of those values directly back to `localStorage`, and also mutates the active API preset record.
+- `ChatView.vue` still performs some direct localStorage reads for preflight config checks.
+
+### Transport Behavior Today
+- Request endpoint is always `${apiUrl}/chat/completions` for generation and `${apiUrl}/models` for model discovery.
+- `CONNECT_TIMEOUT` and `STREAM_TIMEOUT` are read directly from `localStorage` inside `llmApi.js`.
+- Streaming requests use SSE parsing with `data: ...` lines and `[DONE]` termination.
+- If a streaming response body is unavailable on the current runtime, `llmApi.js` falls back to one-shot JSON parsing instead of hard-failing.
+- Abort handling is dual-purpose:
+  - user abort may still preserve partial text
+  - timeout-triggered abort is treated as an error and may preserve partial text with `partialError`
+- The transport contract is callback-based rather than event-object-based:
+  - `onUpdate(chunk, reasoningChunk, effectiveText, effectiveReasoning, textDelta)`
+  - `onComplete(text, reasoning, meta?)`
+  - `onError(error)`
+
+### Temporary Network Trace Debugging
+
+**Files:**
+- `src/core/services/networkDebugService.js` — Stores the last captured request/response trace in localStorage
+- `src/core/services/llmApi.js` — Starts/updates/completes capture during chat + memory draft requests
+- `src/core/services/generationService.js` — Tags captures by request type and exposes the last request body for preview
+- `src/components/sheets/RequestPreviewSheet.vue` — On-device viewer/toggle for the last captured trace
+
+**Purpose:**
+- Debug mobile/provider-specific failures without a dev console
+- Confirm whether providers return native `reasoning_content`, inline reasoning tags, or neither
+- Inspect exact memory draft request payloads and raw responses when summaries appear truncated
+
+**Stored Trace Shape:**
+- Request metadata: `requestType`, `apiUrl`, `stream`, timestamps, duration
+- Request payload: masked request headers + JSON body
+- Response metadata: HTTP status + response headers
+- Parsed output: final `text`, `reasoning`, and `error`
+- Stream-only diagnostics: bounded buffer of raw SSE `data:` lines
+
+**Operational Notes:**
+- Capture is gated by localStorage toggle `gz_debug_network_capture`
+- Last trace persists in localStorage key `gz_last_network_trace`
+- Request preview stays usable even when trace capture is disabled; the trace section is optional diagnostics only
+
+**Current Limitation:**
+- Trace storage is global and single-entry. A summary or memory draft request can overwrite the last chat trace.
+
+**Safe Removal Path:**
+- Remove `networkDebugService.js`
+- Remove its imports/calls from `llmApi.js`
+- Remove trace UI/toggle from `RequestPreviewSheet.vue`
+- Keep `generationService.js:getLastPrompt()` and prompt preview JSON unless request preview itself is being removed
+- Keep trace capture non-blocking; generation success must never depend on diagnostics state
+
+### Current Design Problems
+- `ChatView.vue` owns too much of the generation lifecycle: API prechecks, placeholder creation, DB sync, abort handling, UI streaming updates, and cleanup logic.
+- `generationService.js` mixes use-case orchestration, prompt enrichment, config resolution, debug preview state, and transport dispatch.
+- `llmApi.js` is not a pure transport client; it also handles reasoning extraction, network tracing, wake-lock/background behavior, and notification side effects.
+- Runtime config has multiple owners: `localStorage`, IndexedDB API presets, reactive `ApiView.vue` state, onboarding writes, and direct reads in feature views.
+- Debug state is global singleton state (`lastPrompt`, `lastNetworkTrace`) rather than per-generation or per-message state.
+- Request types are implicit instead of modeled as separate use cases with a shared transport contract.
+- Worker/service boundaries are not documented clearly: keyword lore lives in the worker, vector retrieval and memory injection happen later in the service layer.
+- Callback signatures are flexible but brittle across chat, summary, and memory-draft flows.
+
+### Better Target Structure
+
+**Current Foundation Added In This Branch:**
+- `src/core/llm/contracts/providerContracts.js` introduces provider IDs, request kinds, and baseline capability flags
+- `src/core/llm/providers/providerRegistry.js` introduces a registry boundary instead of hard-coding all provider behavior into settings/transport files
+- `src/core/llm/providers/openaiCompatibleProvider.js` wraps the current OpenAI-like endpoint normalization, auth header strategy, `/models` discovery, and chat completion URL building as the first adapter
+
+This is intentionally small and compatibility-first: the current request flow still behaves as before, but provider-specific behavior now has an explicit place to live. At this stage, model discovery and chat transport setup already route through the provider boundary, while parsing and response normalization still live in `llmApi.js`.
+
+**Additional Progress Already Landed On The Refactor Branch:**
+- `APISettings.js` now owns a shared runtime-config boundary via `getApiRuntimeStorage()`, `saveApiRuntimeSetting()`, `applyApiRuntimeConfig()`, and `getApiReasoningTags()`
+- `ApiView.vue`, `OnboardingView.vue`, `ToolsView.vue`, `ChatView.vue`, `generationService.js`, `macroEngine.js`, and `ChatMessage.vue` have started moving off ad-hoc raw runtime config reads/writes toward those helpers
+- the refactor branch has also re-applied the merged regression safeguards from the bugfix chain, so late vector lore limits and prompt-metadata rollback still hold while refactor work continues
+
+**Config Layer:**
+- `src/core/llm/config/apiConfigStore.js` — read/write active runtime config without raw localStorage access in views
+- `src/core/llm/config/apiPresetStore.js` — preset CRUD only
+- `src/core/llm/config/endpointUtils.js` — endpoint normalization and blacklist helpers
+
+**Transport Layer:**
+- `src/core/llm/transport/chatCompletionsClient.js` — POST `/chat/completions`
+- `src/core/llm/transport/modelDiscoveryClient.js` — GET `/models`
+- `src/core/llm/transport/sseParser.js` — SSE line parsing only
+- `src/core/llm/transport/responseNormalizer.js` — unify streaming and non-stream outputs into one shape
+- `src/core/llm/transport/runtimePolicy.js` — wake lock, background mode, and native/web branching rules
+
+**Transport Extraction Started In This Branch:**
+- `src/core/llm/transport/responseNormalizer.js` now owns shared final-response extraction for OpenAI-like one-shot/native/fallback responses
+- `llmApi.js` still owns streaming delta parsing and callback dispatch, but repeated non-stream result shaping is no longer duplicated inline
+
+**Prompt Layer:**
+- `src/core/llm/prompt/promptBuilderService.js` — wraps `generationWorker.js`
+- `src/core/llm/prompt/promptEnrichmentService.js` — vector lore + memory injection + rebudgeting
+- `src/core/llm/prompt/promptPreviewStore.js` — preview payloads separate from raw network traces
+
+**Assembler Layer Started In This Branch:**
+- `src/core/llm/assemblers/requestIntents.js` defines app-level request intents for `chat`, `summary`, and `memory_draft`
+- `src/core/llm/assemblers/payloadBuilderRegistry.js` is the first explicit boundary for provider-specific payload builders
+- `src/core/llm/assemblers/requestAssemblers.js` now bridges use cases to provider payload builders without keeping payload-shape details inline in `generationService.js`
+- `generationService.js` still decides what semantic request should be sent, but the OpenAI-like payload assembly no longer lives inline in every use case
+- this is the bridge toward future provider-specific payload builders without changing current prompt semantics
+
+**Use Cases:**
+- `src/core/llm/usecases/generateChat.js`
+- `src/core/llm/usecases/generateSummary.js`
+- `src/core/llm/usecases/generateMemoryDraft.js`
+- `src/core/llm/usecases/calculateContext.js`
+
+**UI Session Layer:**
+- `src/composables/chat/useGenerationSession.js` — placeholder message lifecycle, abort controller ownership, streaming UI application, persistence throttling, and cleanup
+
+**Debug / Observability:**
+- `src/core/llm/debug/requestTraceStore.js` — raw request/response traces keyed by generation
+- `src/core/llm/debug/requestHistoryStore.js` — last N traces instead of a single global trace
+- `src/core/llm/debug/previewAssembler.js` — joins prompt preview with request traces for the UI
+
+### Recommended Refactor Sequence
+1. Centralize runtime API config reads/writes so feature views stop reading localStorage keys directly.
+   Status: partially done in this branch via `APISettings.js` helpers; remaining callers should be migrated incrementally.
+2. Split `llmApi.js` into smaller transport-focused modules without changing external behavior.
+   Status: partially done; one-shot response normalization moved out, but SSE parsing and runtime-policy side effects still live inline.
+3. Extract chat/session lifecycle code out of `ChatView.vue` into a dedicated generation-session composable.
+4. Separate prompt preview state from transport trace state, then store traces per generation/message instead of globally.
+5. Promote explicit request use cases (`chat`, `summary`, `memory_draft`, `model_discovery`) with a shared normalized transport result shape.
+6. Document the worker/service split so future prompt and retrieval changes have a stable boundary.
+
+### Migration Guardrails
+- Keep streaming and non-streaming behavior functionally identical while splitting modules.
+- Preserve the native/mobile fallback where stream bodies are unavailable.
+- Preserve partial-response recovery on abort/timeout until a new event contract fully replaces callbacks.
+- Keep network trace capture optional and removable.
+- Avoid changing prompt semantics during the initial transport/config refactor.
+- Keep the embedding/vectorization stack out of this refactor until the chat/provider architecture stabilizes.
+- Keep `MemoryBooks -> generateMemoryDraft(apiConfigOverride)` behavior compatible until a later step adds explicit provider selection for custom memory generation.
+
+---
+
+## 7. Cloud Sync
 
 ### Files
 - `src/components/sheets/SyncSheet.vue` — UI for provider auth, encryption setup, push/pull, and conflict entry points
@@ -375,6 +598,16 @@ MemorySettings: {
 - Session vars loaded from `localStorage` and saved back if changed
 - Global vars persist across all chats
 
+### API Settings ↔ Network Requests
+- `ApiView.vue` edits runtime request settings and connection presets
+- `APISettings.js` normalizes endpoints and serves as the current read boundary for generation requests
+- `ChatView.vue`, `generationService.js`, and `llmApi.js` still depend on those settings directly or indirectly during request setup
+
+### Prompt Preview ↔ Network Trace
+- `generationService.js:getLastPrompt()` stores the last built request body before transport sanitization is sent
+- `networkDebugService.js` stores the last raw request/response trace after transport begins
+- `RequestPreviewSheet.vue` combines both views, which is useful for debugging but currently couples unrelated request types through shared singleton state
+
 ---
 
 ## Settings Ownership
@@ -395,6 +628,12 @@ MemorySettings: {
 | Connected sync provider | Sync state | `syncState.js` → localStorage |
 | Sync OAuth tokens | Sync state | IndexedDB via `SYNC_TOKENS_KEY` |
 | Recovery phrase-derived key | Crypto | IndexedDB via `keyManager.js` |
+| API endpoint/key/model | API runtime config | `APISettings.js` ↔ localStorage |
+| API stream/temp/topP/max tokens/context | API runtime config | `APISettings.js` ↔ localStorage |
+| Reasoning toggle/tags/effort | API runtime + preset override | `APISettings.js`, `PresetView.vue`, localStorage |
+| API connection presets | API presets | IndexedDB `gz_api_connection_presets` |
+| Last built prompt preview | Generation debug state | `generationService.js` singleton memory |
+| Last network trace | Network debug state | `networkDebugService.js` ↔ localStorage |
 
 ---
 
@@ -435,6 +674,16 @@ MemorySettings: {
 - [ ] Native reasoning_content field displayed
 - [ ] Both sources combined without duplication
 - [ ] Mobile/native stream fallback returns a full response instead of hard-failing when streaming body is unavailable
+
+### Network / LLM Requests
+- [ ] Chat requests succeed in both streaming and non-streaming modes
+- [ ] Native non-stream requests still work through `CapacitorHttp`
+- [ ] Missing stream reader fallback still produces a complete response
+- [ ] User abort preserves partial text when expected
+- [ ] Timeout abort reports an error and does not leave phantom typing state
+- [ ] Summary and memory-draft requests do not regress while chat transport is refactored
+- [ ] Request preview still shows the final built payload after prompt assembly
+- [ ] Network trace capture remains optional and does not affect generation success
 
 ### Cloud Sync
 - [ ] Provider buttons only appear when their env keys are configured

@@ -1,13 +1,17 @@
-import { BackgroundMode } from '@anuradev/capacitor-background-mode';
-import { Capacitor, CapacitorHttp } from '@capacitor/core';
-import { startGenerationNotification, stopGenerationNotification } from '@/core/services/notificationService.js';
-import { cleanText } from '@/utils/textFormatter.js';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
-import { startNetworkTrace, updateNetworkTrace, appendNetworkTraceLine, finishNetworkTrace } from '@/core/services/networkDebugService.js';
+import { getProviderById } from '@/core/llm/providers/providerRegistry.js';
+import { completeStructuredResponse, handleAbortOutcome, handleRequestFailure } from '@/core/llm/transport/requestOutcome.js';
+import { executeNativeNonStreamingRequest, shouldUseNativeNonStreamingRequest } from '@/core/llm/transport/requestExecution.js';
+import { executeFetchChatCompletions } from '@/core/llm/transport/chatCompletionsClient.js';
+import { createRequestLifecycle } from '@/core/llm/transport/requestLifecycle.js';
+import { completeJsonResponse } from '@/core/llm/transport/responseHandling.js';
+import { setupRequestRuntimePolicy } from '@/core/llm/transport/requestRuntimePolicy.js';
+import { createStreamAccumulator } from '@/core/llm/transport/streamAccumulator.js';
 import { logger } from '../../utils/logger.js';
 
 export async function executeRequest({
+    providerId,
     apiUrl,
     apiKey,
     requestBody,
@@ -23,70 +27,32 @@ export async function executeRequest({
     const t = (key) => translations[currentLang.value]?.[key] || key;
     const headerModel = `<span style="color: var(--vk-blue); font-weight: 700; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.5px;">${t('reasoning_model')}</span>`;
     const headerInline = `<span style="color: var(--vk-blue); font-weight: 700; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.5px;">${t('reasoning_inline')}</span>`;
+    const provider = getProviderById(providerId);
+    const requestUrl = provider.buildChatCompletionsUrl(apiUrl);
 
     const hasInlineTags = !!tagStart && !!tagEnd;
+    const runtimePolicy = await setupRequestRuntimePolicy({
+        notificationTitle: 'Glaze',
+        notificationBody: translations[currentLang.value]['model_typing'] || 'Generating...'
+    });
 
-    // Timeout configuration (configurable via localStorage for future settings UI)
-    const CONNECT_TIMEOUT = parseInt(localStorage.getItem('gz_api_connect_timeout')) || 90000;
-    const STREAM_TIMEOUT = parseInt(localStorage.getItem('gz_api_stream_timeout')) || 120000;
-    let connectTimer = null;
-    let streamTimer = null;
-    let timedOut = false;
+    const streamAccumulator = createStreamAccumulator({
+        requestReasoning,
+        tagStart,
+        tagEnd,
+        hasInlineTags,
+        headerModel,
+        headerInline
+    });
 
-    // Keep screen on during generation to prevent OS suspension
-    let wakeLock = null;
-    const requestWakeLock = async () => {
-        if ('wakeLock' in navigator && document.visibilityState === 'visible') {
-            try { wakeLock = await navigator.wakeLock.request('screen'); } catch (e) { console.warn("WakeLock error:", e); }
-        }
-    };
-    await requestWakeLock();
-
-    // Re-acquire lock if app comes back to foreground while generating
-    const handleVisibilityChange = () => { if (document.visibilityState === 'visible') requestWakeLock(); };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    // Keep app alive when backgrounded during generation
-    const isAndroid = Capacitor.getPlatform() === 'android';
-    const isIos = Capacitor.getPlatform() === 'ios';
-
-    if (isAndroid) {
-        await startGenerationNotification('Glaze', translations[currentLang.value]['model_typing'] || 'Generating...');
-    } else if (isIos) {
-        try {
-            await BackgroundMode.enable();
-        } catch (e) {
-            console.warn("BackgroundMode enable failed:", e);
-        }
-    }
-
-    let fullText = "";
-    let rawAccumulated = "";
-    let accumulatedReasoning = "";
-
-    const createAbortError = () => {
-        const error = new Error('Generation aborted');
-        error.name = 'AbortError';
-        return error;
-    };
-
-    const throwIfAborted = () => {
-        if (controller?.signal?.aborted) {
-            throw createAbortError();
-        }
-    };
-
-    const headers = {
-        'Content-Type': 'application/json'
-    };
-    if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
-
-    startNetworkTrace({
+    const requestLifecycle = createRequestLifecycle({
+        provider,
+        apiKey,
+        controller,
         requestType,
         apiUrl,
         stream,
-        requestBody,
-        headers
+        requestBody
     });
 
     try {
@@ -95,379 +61,70 @@ export async function executeRequest({
         // Bypass Mixed Content/Cleartext restrictions on Native for local HTTP
         // Use CapacitorHttp only for non-streaming requests.
         // For streaming, we fall through to standard fetch (requires android:usesCleartextTraffic="true")
-        if (Capacitor.isNativePlatform() && apiUrl.startsWith('http:') && !apiUrl.includes('https:') && !stream) {
-            const response = await CapacitorHttp.post({
-                url: `${apiUrl}/chat/completions`,
-                headers: headers,
-                data: requestBody,
-                responseType: 'json',
-                connectTimeout: CONNECT_TIMEOUT,
-                readTimeout: STREAM_TIMEOUT
+        if (shouldUseNativeNonStreamingRequest({ apiUrl, stream })) {
+            const data = await executeNativeNonStreamingRequest({
+                requestUrl,
+                headers: requestLifecycle.headers,
+                requestBody,
+                connectTimeout: requestLifecycle.connectTimeout,
+                streamTimeout: requestLifecycle.streamTimeout
             });
+            requestLifecycle.throwIfAborted();
 
-            if (response.status >= 400) {
-                const errorData = typeof response.data === 'object' ? JSON.stringify(response.data) : String(response.data || '');
-                updateNetworkTrace({ responseStatus: response.status });
-                finishNetworkTrace({ rawResponse: response.data, error: `API Error: ${response.status} ${errorData}` });
-                throw new Error(`API Error: ${response.status} ${errorData}`);
-            }
-
-            const data = response.data;
-            logger.debug("LLM Response (Native):", data);
-            updateNetworkTrace({ responseStatus: response.status });
-            throwIfAborted();
-            
-            // Defensive check: ensure API returned valid structure
-            if (!data || !data.choices || !data.choices.length || !data.choices[0] || !data.choices[0].message) {
-                throw new Error("Invalid API response structure (Native): " + JSON.stringify(data));
-            }
-            
-            const content = data.choices[0].message.content;
-            const rawReasoning = data.choices[0].message.reasoning_content;
-
-            let finalText = content || "";
-            let finalReasoning = requestReasoning ? (rawReasoning || "") : "";
-            let inlineReasoning = "";
-
-            if (hasInlineTags && content && content.includes(tagStart)) {
-                const startIndex = content.indexOf(tagStart);
-                const endIndex = content.indexOf(tagEnd, startIndex);
-                if (endIndex !== -1) {
-                    inlineReasoning = content.substring(startIndex + tagStart.length, endIndex);
-                    finalText = content.substring(0, startIndex) + content.substring(endIndex + tagEnd.length);
-                }
-            }
-
-            if (finalReasoning && inlineReasoning) {
-                finalReasoning = `${headerModel}\n${finalReasoning}\n\n---\n\n${headerInline}\n${inlineReasoning}`;
-            } else if (inlineReasoning) {
-                finalReasoning = inlineReasoning;
-            }
-
-            finishNetworkTrace({ rawResponse: data, text: cleanText(finalText), reasoning: finalReasoning || null });
-
-            if (onComplete) onComplete(cleanText(finalText), finalReasoning || null);
+            await completeJsonResponse({
+                data,
+                throwIfAborted: requestLifecycle.throwIfAborted,
+                contextLabel: 'API response structure (Native)',
+                logLabel: 'LLM Response (Native):',
+                requestReasoning,
+                hasInlineTags,
+                tagStart,
+                tagEnd,
+                headerModel,
+                headerInline,
+                onComplete
+            });
 
             // Exit function, finally block will still run for cleanup
             return;
         }
 
-        // Connection timeout — abort if server doesn't respond
-        connectTimer = setTimeout(() => { timedOut = true; if (controller) controller.abort(); }, CONNECT_TIMEOUT);
-
-        const response = await fetch(`${apiUrl}/chat/completions`, {
-            method: 'POST',
-            headers: headers,
-            body: JSON.stringify(requestBody),
-            signal: controller ? controller.signal : undefined
+        await executeFetchChatCompletions({
+            requestUrl,
+            requestBody,
+            controller,
+            requestLifecycle,
+            stream,
+            requestReasoning,
+            hasInlineTags,
+            tagStart,
+            tagEnd,
+            headerModel,
+            headerInline,
+            streamAccumulator,
+            onUpdate,
+            onComplete
         });
-
-        throwIfAborted();
-
-        clearTimeout(connectTimer);
-        connectTimer = null;
-
-        if (!response.ok) {
-            let errText = "";
-            try { errText = await response.text(); } catch (e) { }
-            updateNetworkTrace({ responseStatus: response.status, responseHeaders: Object.fromEntries(response.headers.entries()) });
-            finishNetworkTrace({ rawResponse: errText, error: `API Error: ${response.status} ${errText}` });
-            throw new Error(`API Error: ${response.status} ${errText}`);
-        }
-
-        updateNetworkTrace({
-            responseStatus: response.status,
-            responseHeaders: Object.fromEntries(response.headers.entries())
-        });
-
-        if (stream) {
-            const contentType = (response.headers.get('content-type') || '').toLowerCase();
-            const supportsStreamingBody = !!response.body && typeof response.body.getReader === 'function';
-            const isSseResponse = contentType.includes('text/event-stream');
-
-            if (!supportsStreamingBody || !isSseResponse) {
-                if (!supportsStreamingBody) {
-                    console.warn('[llmApi] Streaming body is unavailable on this platform/runtime, falling back to non-streaming response handling.');
-                } else {
-                    console.warn('[llmApi] Stream requested but provider returned a non-SSE response, falling back to non-streaming handling.', { contentType });
-                }
-
-                const data = await response.json();
-                logger.debug('LLM Response (stream fallback):', data);
-                throwIfAborted();
-
-                if (!data || !data.choices || !data.choices.length || !data.choices[0] || !data.choices[0].message) {
-                    throw new Error('Invalid API response structure (stream fallback): ' + JSON.stringify(data));
-                }
-
-                const content = data.choices[0].message.content;
-                const rawReasoning = data.choices[0].message.reasoning_content;
-
-                let finalText = content || '';
-                let finalReasoning = requestReasoning ? (rawReasoning || '') : '';
-                let inlineReasoning = '';
-
-                if (hasInlineTags && content && content.includes(tagStart)) {
-                    const startIndex = content.indexOf(tagStart);
-                    const endIndex = content.indexOf(tagEnd, startIndex);
-                    if (endIndex !== -1) {
-                        inlineReasoning = content.substring(startIndex + tagStart.length, endIndex);
-                        finalText = content.substring(0, startIndex) + content.substring(endIndex + tagEnd.length);
-                    }
-                }
-
-                if (finalReasoning && inlineReasoning) {
-                    finalReasoning = `${headerModel}\n${finalReasoning}\n\n---\n\n${headerInline}\n${inlineReasoning}`;
-                } else if (inlineReasoning) {
-                    finalReasoning = inlineReasoning;
-                }
-
-                finishNetworkTrace({ rawResponse: data, text: cleanText(finalText), reasoning: finalReasoning || null });
-
-                if (onComplete) onComplete(cleanText(finalText), finalReasoning || null);
-                return;
-            }
-
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder("utf-8");
-            let previousEffectiveText = "";
-            let pendingLineBuffer = '';
-
-            const resetStreamTimer = () => {
-                if (streamTimer) clearTimeout(streamTimer);
-                streamTimer = setTimeout(() => { timedOut = true; if (controller) controller.abort(); }, STREAM_TIMEOUT);
-            };
-            resetStreamTimer();
-
-            while (true) {
-                throwIfAborted();
-                const { done, value } = await reader.read();
-                if (done) break;
-                resetStreamTimer();
-                throwIfAborted();
-
-                const chunk = decoder.decode(value, { stream: true });
-                pendingLineBuffer += chunk;
-                const lines = pendingLineBuffer.split('\n');
-                pendingLineBuffer = lines.pop() || '';
-
-                for (const line of lines) {
-                    const trimmed = line.trim();
-                    if (!trimmed || !trimmed.startsWith('data: ')) continue;
-
-                    const dataStr = trimmed.substring(6);
-                    if (dataStr === '[DONE]') continue;
-                    appendNetworkTraceLine(dataStr);
-                    throwIfAborted();
-
-                    try {
-                        const json = JSON.parse(dataStr);
-
-                        if (json.error) {
-                            throw new Error("API Stream Error: " + (json.error.message || JSON.stringify(json.error)));
-                        }
-
-                        if (!json.choices || !json.choices.length) continue;
-
-                        const delta = json.choices[0].delta;
-                        if (delta && (delta.content || delta.reasoning_content)) {
-                            const content = delta.content || "";
-                            const reasoning = (requestReasoning && delta.reasoning_content) || null;
-
-                            if (content) logger.debug(content);
-
-                            fullText += content;
-                            rawAccumulated += content;
-                            if (reasoning) accumulatedReasoning += reasoning;
-
-                            // Process Outer CoT (Reasoning Tags)
-                            let effectiveText = rawAccumulated;
-                            let effectiveReasoning = "";
-
-                            if (requestReasoning) {
-                                effectiveReasoning = accumulatedReasoning || "";
-                            }
-
-                            let inlineReasoning = "";
-                            if (hasInlineTags && rawAccumulated.includes(tagStart)) {
-                                const startIndex = rawAccumulated.indexOf(tagStart);
-                                const endIndex = rawAccumulated.indexOf(tagEnd, startIndex);
-                                if (endIndex !== -1) {
-                                    inlineReasoning = rawAccumulated.substring(startIndex + tagStart.length, endIndex);
-                                    effectiveText = rawAccumulated.substring(0, startIndex) + rawAccumulated.substring(endIndex + tagEnd.length);
-                                } else {
-                                    inlineReasoning = rawAccumulated.substring(startIndex + tagStart.length);
-                                    effectiveText = rawAccumulated.substring(0, startIndex);
-                                }
-                            }
-
-                            if (effectiveReasoning && inlineReasoning) {
-                                effectiveReasoning = `${headerModel}\n${effectiveReasoning}\n\n---\n\n${headerInline}\n${inlineReasoning}`;
-                            } else if (inlineReasoning) {
-                                effectiveReasoning = inlineReasoning;
-                            }
-
-                            // Strip leading whitespace and decode HTML entities
-                            effectiveText = effectiveText.replace(/^\s+/, '')
-                                .replace(/&amp;/g, '&')
-                                .replace(/&gt;/g, '>')
-                                .replace(/&lt;/g, '<')
-                                .replace(/&quot;/g, '"')
-                                .replace(/&apos;/g, "'");
-
-                            // Buffer text ending in an incomplete HTML entity, flush it in the next delta
-                            const incompleteEntity = effectiveText.match(/&[a-zA-Z0-9#]*$/);
-                            if (incompleteEntity) {
-                                effectiveText = effectiveText.substring(0, incompleteEntity.index);
-                            }
-
-                            let textDelta = null;
-                            if (effectiveText.startsWith(previousEffectiveText)) {
-                                textDelta = effectiveText.substring(previousEffectiveText.length);
-                            }
-                            previousEffectiveText = effectiveText;
-
-                            if (onUpdate) onUpdate(content, reasoning, effectiveText, effectiveReasoning, textDelta);
-                        }
-                    } catch (e) {
-                        if (e.message && e.message.startsWith("API Stream Error")) {
-                            throw e;
-                        }
-                        console.warn("Error parsing stream chunk", e);
-                    }
-                }
-            }
-
-            const trailingLine = pendingLineBuffer.trim();
-            if (trailingLine.startsWith('data: ')) {
-                const dataStr = trailingLine.substring(6);
-                if (dataStr && dataStr !== '[DONE]') {
-                    appendNetworkTraceLine(dataStr);
-                }
-            }
-
-            if (streamTimer) { clearTimeout(streamTimer); streamTimer = null; }
-            throwIfAborted();
-
-            // Final processing for onComplete
-            let finalReasoning = requestReasoning ? accumulatedReasoning : "";
-            let finalText = fullText;
-            let inlineReasoning = "";
-
-            if (hasInlineTags && fullText.includes(tagStart)) {
-                const startIndex = fullText.indexOf(tagStart);
-                const endIndex = fullText.indexOf(tagEnd, startIndex);
-                if (endIndex !== -1) {
-                    inlineReasoning = fullText.substring(startIndex + tagStart.length, endIndex);
-                    finalText = fullText.substring(0, startIndex) + fullText.substring(endIndex + tagEnd.length);
-                }
-            }
-
-            if (finalReasoning && inlineReasoning) {
-                finalReasoning = `${headerModel}\n${finalReasoning}\n\n---\n\n${headerInline}\n${inlineReasoning}`;
-            } else if (inlineReasoning) {
-                finalReasoning = inlineReasoning;
-            }
-
-            logger.debug("Stream finished:", finalText);
-
-            finishNetworkTrace({
-                rawResponse: {
-                    mode: 'sse',
-                    eventCount: null
-                },
-                text: cleanText(finalText),
-                reasoning: finalReasoning || null
-            });
-
-            if (onComplete) onComplete(cleanText(finalText), finalReasoning || null);
-
-        } else {
-            const data = await response.json();
-            logger.debug("LLM Response:", data);
-            throwIfAborted();
-            
-            // Defensive check: ensure API returned valid structure
-            if (!data || !data.choices || !data.choices.length || !data.choices[0] || !data.choices[0].message) {
-                throw new Error("Invalid API response structure: " + JSON.stringify(data));
-            }
-            
-            const content = data.choices[0].message.content;
-            const rawReasoning = data.choices[0].message.reasoning_content;
-
-            let finalText = content || "";
-            let finalReasoning = requestReasoning ? (rawReasoning || "") : "";
-            let inlineReasoning = "";
-
-            if (hasInlineTags && content && content.includes(tagStart)) {
-                const startIndex = content.indexOf(tagStart);
-                const endIndex = content.indexOf(tagEnd, startIndex);
-                if (endIndex !== -1) {
-                    inlineReasoning = content.substring(startIndex + tagStart.length, endIndex);
-                    finalText = content.substring(0, startIndex) + content.substring(endIndex + tagEnd.length);
-                }
-            }
-
-            if (finalReasoning && inlineReasoning) {
-                finalReasoning = `${headerModel}\n${finalReasoning}\n\n---\n\n${headerInline}\n${inlineReasoning}`;
-            } else if (inlineReasoning) {
-                finalReasoning = inlineReasoning;
-            }
-
-            finishNetworkTrace({ rawResponse: data, text: cleanText(finalText), reasoning: finalReasoning || null });
-
-            if (onComplete) onComplete(cleanText(finalText), finalReasoning || null);
-        }
     } catch (e) {
         if (e.name === 'AbortError') {
-            if (timedOut) {
-                // Timeout-induced abort — treat as error, not user cancellation
-                if (fullText.length > 0) {
-                    finishNetworkTrace({ text: cleanText(fullText), reasoning: requestReasoning ? accumulatedReasoning : null, error: 'Generation timed out' });
-                    if (onComplete) onComplete(cleanText(fullText), requestReasoning ? accumulatedReasoning : null, { partialError: "Generation timed out" });
-                } else {
-                    finishNetworkTrace({ error: 'Generation timed out — no response from server' });
-                    if (onError) onError(new Error("Generation timed out — no response from server"));
-                }
-                return;
-            }
-
-            // User-initiated abort — save partial text if available
-            if (fullText.length > 0) {
-                finishNetworkTrace({ text: cleanText(fullText), reasoning: requestReasoning ? accumulatedReasoning : null, error: 'Generation aborted' });
-                if (onComplete) onComplete(cleanText(fullText), requestReasoning ? accumulatedReasoning : null);
-            } else {
-                finishNetworkTrace({ error: e });
-                if (onError) onError(e);
-            }
+            handleAbortOutcome({
+                timedOut: requestLifecycle.timedOut,
+                streamAccumulator,
+                onComplete,
+                onError,
+                abortError: e
+            });
             return;
         }
 
-        // Network error (connection abort, DNS failure, etc.) — save partial text cleanly
-        if (fullText.length > 0) {
-            console.warn("Network error during stream, saving partial response:", e);
-            const errorMsg = e.message || "Stream Error";
-            finishNetworkTrace({ text: cleanText(fullText), reasoning: requestReasoning ? accumulatedReasoning : null, error: errorMsg });
-            if (onComplete) onComplete(cleanText(fullText), requestReasoning ? accumulatedReasoning : null, { partialError: errorMsg });
-            return;
-        }
-
-        finishNetworkTrace({ error: e });
-        if (onError) onError(e);
+        handleRequestFailure({
+            error: e,
+            streamAccumulator,
+            onComplete,
+            onError
+        });
     } finally {
-        if (connectTimer) clearTimeout(connectTimer);
-        if (streamTimer) clearTimeout(streamTimer);
-        document.removeEventListener('visibilitychange', handleVisibilityChange);
-        if (wakeLock) {
-            try { wakeLock.release(); } catch (e) { }
-        }
-
-        if (isAndroid) {
-            await stopGenerationNotification();
-        } else if (isIos) {
-            try {
-                await BackgroundMode.disable();
-            } catch (e) { }
-        }
+        requestLifecycle.clearConnectTimeout();
+        await runtimePolicy.cleanup();
     }
 }

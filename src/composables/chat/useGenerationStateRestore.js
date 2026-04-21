@@ -1,0 +1,96 @@
+function rollbackPendingSwipe(message, { restoreSwipeMeta = false } = {}) {
+    if (!message?.swipes || message.swipes.length <= 1) {
+        return false;
+    }
+
+    const currentSwipeId = message.swipeId || 0;
+    message.swipes.splice(currentSwipeId, 1);
+    if (message.swipesMeta) message.swipesMeta.splice(currentSwipeId, 1);
+
+    let newSwipeId = currentSwipeId - 1;
+    if (newSwipeId < 0) newSwipeId = 0;
+
+    message.swipeId = newSwipeId;
+    message.text = message.swipes[newSwipeId] || '';
+
+    if (restoreSwipeMeta) {
+        if (message.swipesMeta && message.swipesMeta[newSwipeId]) {
+            message.guidanceText = message.swipesMeta[newSwipeId].guidanceText || null;
+            message.guidanceType = message.swipesMeta[newSwipeId].guidanceType || 'GENERATION';
+            message.reasoning = message.swipesMeta[newSwipeId].reasoning;
+            message.genTime = message.swipesMeta[newSwipeId].genTime;
+        } else {
+            message.guidanceText = null;
+            message.guidanceType = 'GENERATION';
+        }
+    }
+
+    return true;
+}
+
+export async function restoreGenerationState({
+    currentMessages,
+    getChatData,
+    db,
+    getGenerationState,
+    clearPersistedGeneration,
+    char,
+    sessionId,
+    msgId,
+    isError = false,
+    onAbort = null,
+    restorePromptMetaOnMessages,
+    clearBackgroundUpdateTimer,
+    updateSessionMessage
+}) {
+    if (typeof clearBackgroundUpdateTimer === 'function') {
+        clearBackgroundUpdateTimer();
+    }
+
+    const timerId = getGenerationState(char.id)?.timerId;
+    if (timerId) clearInterval(timerId);
+    clearPersistedGeneration(char.id, sessionId);
+
+    const idx = currentMessages.value.findIndex(m => m.id === msgId);
+    if (idx !== -1) {
+        restorePromptMetaOnMessages(currentMessages.value);
+        currentMessages.value[idx].isTyping = false;
+
+        if (!isError) {
+            const msg = currentMessages.value[idx];
+            const revertedSwipe = rollbackPendingSwipe(msg, { restoreSwipeMeta: true });
+
+            if (revertedSwipe) {
+                await updateSessionMessage(char, idx, msg);
+            } else {
+                currentMessages.value.splice(idx, 1);
+                const data = await getChatData(char.id);
+                if (data && sessionId && data.sessions[sessionId]) {
+                    data.sessions[sessionId] = currentMessages.value;
+                    await db.saveChat(char.id, data);
+                }
+            }
+        }
+    } else {
+        const data = await getChatData(char.id);
+        if (data && data.sessions[sessionId]) {
+            restorePromptMetaOnMessages(data.sessions[sessionId]);
+            const dbIdx = data.sessions[sessionId].findIndex(m => m.id === msgId);
+            if (dbIdx !== -1) {
+                data.sessions[sessionId][dbIdx].isTyping = false;
+
+                if (!isError) {
+                    const msg = data.sessions[sessionId][dbIdx];
+                    const revertedSwipe = rollbackPendingSwipe(msg);
+                    if (!revertedSwipe) {
+                        data.sessions[sessionId].splice(dbIdx, 1);
+                    }
+                }
+
+                await db.saveChat(char.id, data);
+            }
+        }
+    }
+
+    if (onAbort) onAbort(isError);
+}

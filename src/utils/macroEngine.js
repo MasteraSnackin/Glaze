@@ -1,3 +1,7 @@
+import { getApiReasoningTags } from '@/core/config/APISettings.js';
+
+let pickCount = 0;
+
 export function replaceMacros(text, char, persona, sessionVarsIn = null, notifyObj = null) {
     if (!text) return "";
 
@@ -75,7 +79,6 @@ export function replaceMacros(text, char, persona, sessionVarsIn = null, notifyO
     });
 
     // {{pick::a::b::c}}
-    let pickCount = 0;
     result = result.replace(/{{pick::(.*?)}}/gi, (match, optionsStr) => {
         const options = optionsStr.split("::");
         const version = sessionVars.__pick_version || 0;
@@ -97,10 +100,10 @@ export function replaceMacros(text, char, persona, sessionVarsIn = null, notifyO
 
     // {{reasoningPrefix}} / {{reasoningSuffix}} - reasoning tags from sessionVars or localStorage
     result = result.replace(/\{\{reasoningPrefix\}\}/gi, () => {
-        return sessionVars.reasoningPrefix || localStorage.getItem('gz_api_reasoning_start') || '<think>';
+        return sessionVars.reasoningPrefix || getApiReasoningTags().start;
     });
     result = result.replace(/\{\{reasoningSuffix\}\}/gi, () => {
-        return sessionVars.reasoningSuffix || localStorage.getItem('gz_api_reasoning_end') || '';
+        return sessionVars.reasoningSuffix || getApiReasoningTags().end;
     });
 
     // --- Escaping: \{\{ → {{ and \}\} → }} ---
