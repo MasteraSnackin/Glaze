@@ -13,8 +13,11 @@ if (error) {
 } else if (code) {
     if (window.opener) {
         window.opener.postMessage({ type: 'gdrive-oauth', code, state }, '*');
+        document.body.innerHTML = '<p style="text-align:center;margin-top:40%;font-family:sans-serif">Authorization successful! You can close this tab.</p>';
+    } else {
+        const nativeUrl = 'com.hydall.glaze://oauth/gdrive?code=' + encodeURIComponent(code) + '&state=' + encodeURIComponent(state || '');
+        window.location.href = nativeUrl;
     }
-    document.body.innerHTML = '<p style="text-align:center;margin-top:40%;font-family:sans-serif">Authorization successful! You can close this tab.</p>';
 } else {
     document.body.innerHTML = '<p style="text-align:center;margin-top:40%;font-family:sans-serif">No authorization code received.</p>';
 }

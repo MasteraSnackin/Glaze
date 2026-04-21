@@ -6,6 +6,7 @@ function env(value) {
 
 export const DROPBOX_APP_KEY = env(import.meta.env.VITE_DROPBOX_APP_KEY);
 export const GDRIVE_CLIENT_ID = env(import.meta.env.VITE_GDRIVE_CLIENT_ID);
+export const GDRIVE_CLIENT_SECRET = env(import.meta.env.VITE_GDRIVE_CLIENT_SECRET);
 
 export function canStartSyncAuth(provider) {
     switch (provider) {

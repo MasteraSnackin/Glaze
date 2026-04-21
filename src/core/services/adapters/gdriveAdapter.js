@@ -2,7 +2,7 @@ import { Capacitor } from '@capacitor/core';
 import { Browser } from '@capacitor/browser';
 import { App } from '@capacitor/app';
 import { db } from '@/utils/db.js';
-import { GDRIVE_CLIENT_ID } from '@/core/config/syncConfig.js';
+import { GDRIVE_CLIENT_ID, GDRIVE_CLIENT_SECRET } from '@/core/config/syncConfig.js';
 import { SYNC_TOKENS_KEY } from '@/core/states/syncState.js';
 
 const getNativeRedirectUri = () => {
@@ -69,7 +69,8 @@ async function refreshAccessToken(refreshToken) {
     const params = {
         grant_type: 'refresh_token',
         refresh_token: refreshToken,
-        client_id: GDRIVE_CLIENT_ID
+        client_id: GDRIVE_CLIENT_ID,
+        ...(GDRIVE_CLIENT_SECRET && { client_secret: GDRIVE_CLIENT_SECRET })
     };
 
     const response = await fetch(TOKEN_URL, {
@@ -326,7 +327,8 @@ async function exchangeCodeForToken(code, verifier, redirectUri) {
         code,
         code_verifier: verifier,
         client_id: GDRIVE_CLIENT_ID,
-        redirect_uri: redirectUri
+        redirect_uri: redirectUri,
+        ...(GDRIVE_CLIENT_SECRET && { client_secret: GDRIVE_CLIENT_SECRET })
     };
 
     const response = await fetch(TOKEN_URL, {

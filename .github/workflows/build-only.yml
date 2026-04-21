@@ -80,7 +80,9 @@ jobs:
         env:
           VITE_DROPBOX_APP_KEY: ${{ secrets.VITE_DROPBOX_APP_KEY }}
           VITE_DROPBOX_REDIRECT_NATIVE: ${{ secrets.VITE_DROPBOX_REDIRECT_NATIVE }}
-          VITE_GDRIVE_CLIENT_ID: ${{ secrets.VITE_GDRIVE_ANDROID_CLIENT_ID }}
+          VITE_GDRIVE_CLIENT_ID: ${{ secrets.VITE_GDRIVE_CLIENT_ID }}
+          VITE_GDRIVE_CLIENT_SECRET: ${{ secrets.VITE_GDRIVE_CLIENT_SECRET }}
+          VITE_GDRIVE_REDIRECT_NATIVE: https://hydall.github.io/Glaze/oauth/gdrive/redirect.html
         run: npx vite build
 
       - name: Capacitor Sync Android
