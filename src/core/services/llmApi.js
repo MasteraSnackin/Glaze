@@ -1,9 +1,9 @@
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
-import { startNetworkTrace } from '@/core/services/networkDebugService.js';
 import { getProviderById } from '@/core/llm/providers/providerRegistry.js';
 import { completeStructuredResponse, finalizeStreamResponse, handleAbortOutcome, handleRequestFailure } from '@/core/llm/transport/requestOutcome.js';
 import { executeFetchRequest, executeNativeNonStreamingRequest, shouldUseNativeNonStreamingRequest, validateFetchResponse } from '@/core/llm/transport/requestExecution.js';
+import { createRequestLifecycle } from '@/core/llm/transport/requestLifecycle.js';
 import { completeJsonResponse, getStreamingResponseMode } from '@/core/llm/transport/responseHandling.js';
 import { setupRequestRuntimePolicy } from '@/core/llm/transport/requestRuntimePolicy.js';
 import { createStreamAccumulator } from '@/core/llm/transport/streamAccumulator.js';
@@ -31,12 +31,6 @@ export async function executeRequest({
     const requestUrl = provider.buildChatCompletionsUrl(apiUrl);
 
     const hasInlineTags = !!tagStart && !!tagEnd;
-
-    // Timeout configuration (configurable via localStorage for future settings UI)
-    const CONNECT_TIMEOUT = parseInt(localStorage.getItem('gz_api_connect_timeout')) || 90000;
-    const STREAM_TIMEOUT = parseInt(localStorage.getItem('gz_api_stream_timeout')) || 120000;
-    let connectTimer = null;
-    let timedOut = false;
     const runtimePolicy = await setupRequestRuntimePolicy({
         notificationTitle: 'Glaze',
         notificationBody: translations[currentLang.value]['model_typing'] || 'Generating...'
@@ -51,29 +45,14 @@ export async function executeRequest({
         headerInline
     });
 
-    const createAbortError = () => {
-        const error = new Error('Generation aborted');
-        error.name = 'AbortError';
-        return error;
-    };
-
-    const throwIfAborted = () => {
-        if (controller?.signal?.aborted) {
-            throw createAbortError();
-        }
-    };
-
-    const headers = {
-        'Content-Type': 'application/json'
-    };
-    Object.assign(headers, provider.buildAuthHeaders(apiKey));
-
-    startNetworkTrace({
+    const requestLifecycle = createRequestLifecycle({
+        provider,
+        apiKey,
+        controller,
         requestType,
         apiUrl,
         stream,
-        requestBody,
-        headers
+        requestBody
     });
 
     try {
@@ -85,16 +64,16 @@ export async function executeRequest({
         if (shouldUseNativeNonStreamingRequest({ apiUrl, stream })) {
             const data = await executeNativeNonStreamingRequest({
                 requestUrl,
-                headers,
+                headers: requestLifecycle.headers,
                 requestBody,
-                connectTimeout: CONNECT_TIMEOUT,
-                streamTimeout: STREAM_TIMEOUT
+                connectTimeout: requestLifecycle.connectTimeout,
+                streamTimeout: requestLifecycle.streamTimeout
             });
-            throwIfAborted();
+            requestLifecycle.throwIfAborted();
 
             await completeJsonResponse({
                 data,
-                throwIfAborted,
+                throwIfAborted: requestLifecycle.throwIfAborted,
                 contextLabel: 'API response structure (Native)',
                 logLabel: 'LLM Response (Native):',
                 requestReasoning,
@@ -111,19 +90,18 @@ export async function executeRequest({
         }
 
         // Connection timeout — abort if server doesn't respond
-        connectTimer = setTimeout(() => { timedOut = true; if (controller) controller.abort(); }, CONNECT_TIMEOUT);
+        requestLifecycle.startConnectTimeout();
 
         const response = await executeFetchRequest({
             requestUrl,
-            headers,
+            headers: requestLifecycle.headers,
             requestBody,
             controller
         });
 
-        throwIfAborted();
+        requestLifecycle.throwIfAborted();
 
-        clearTimeout(connectTimer);
-        connectTimer = null;
+        requestLifecycle.clearConnectTimeout();
 
         await validateFetchResponse(response);
 
@@ -139,7 +117,7 @@ export async function executeRequest({
 
                 await completeJsonResponse({
                     response,
-                    throwIfAborted,
+                    throwIfAborted: requestLifecycle.throwIfAborted,
                     contextLabel: 'API response structure (stream fallback)',
                     logLabel: 'LLM Response (stream fallback):',
                     requestReasoning,
@@ -155,14 +133,9 @@ export async function executeRequest({
 
             await consumeStreamingSseResponse({
                 responseBody: response.body,
-                controller: controller && {
-                    abort() {
-                        timedOut = true;
-                        controller.abort();
-                    }
-                },
-                streamTimeout: STREAM_TIMEOUT,
-                throwIfAborted,
+                controller: requestLifecycle.createStreamingTimeoutController(),
+                streamTimeout: requestLifecycle.streamTimeout,
+                throwIfAborted: requestLifecycle.throwIfAborted,
                 requestReasoning,
                 streamAccumulator,
                 onUpdate
@@ -176,7 +149,7 @@ export async function executeRequest({
         } else {
             await completeJsonResponse({
                 response,
-                throwIfAborted,
+                throwIfAborted: requestLifecycle.throwIfAborted,
                 contextLabel: 'API response structure',
                 logLabel: 'LLM Response:',
                 requestReasoning,
@@ -191,7 +164,7 @@ export async function executeRequest({
     } catch (e) {
         if (e.name === 'AbortError') {
             handleAbortOutcome({
-                timedOut,
+                timedOut: requestLifecycle.timedOut,
                 streamAccumulator,
                 onComplete,
                 onError,
@@ -207,7 +180,7 @@ export async function executeRequest({
             onError
         });
     } finally {
-        if (connectTimer) clearTimeout(connectTimer);
+        requestLifecycle.clearConnectTimeout();
         await runtimePolicy.cleanup();
     }
 }

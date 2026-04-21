@@ -875,6 +875,7 @@ Done and tested:
 - [done] `llmApi.js` transport extraction continued:
   - `transport/requestOutcome.js` now owns structured completion, streaming finalization, and partial-result handling for abort/error paths
   - `transport/requestExecution.js` now owns native/fetch execution branches and fetch response validation
+  - `transport/requestLifecycle.js` now owns timeout config, abort guards, request headers, and network-trace bootstrap
   - `transport/responseHandling.js` now owns fetch JSON completion and SSE capability detection/fallback shaping
   - `transport/streamingSse.js` now owns SSE read/parse/update consumption while preserving the existing callback contract
 - [done] Generation lifecycle extraction started in `ChatView.vue` without behavior changes:
