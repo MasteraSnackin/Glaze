@@ -24,6 +24,17 @@ const STREAM_FRAME_INTERVAL_MS = 100;
 const STREAM_SCROLL_INTERVAL_MS = 180;
 const GENERATION_TIMER_INTERVAL_MS = 1000;
 
+function getGenerationTimerInterval() {
+    return shouldUseBatterySaverUI() ? 1000 : 100;
+}
+
+function formatGenerationElapsed(startTime) {
+    const elapsedSeconds = (Date.now() - startTime) / 1000;
+    return shouldUseBatterySaverUI()
+        ? elapsedSeconds.toFixed(0) + 's'
+        : elapsedSeconds.toFixed(1) + 's';
+}
+
 function applyMessageStreamUpdate(message, text, reasoning, isTyping, textDelta) {
     if (textDelta) {
         message.text += textDelta;
@@ -48,6 +59,7 @@ export function setupGenerationState({
     smartScroll
 }) {
     let streamFlushTimer = null;
+    let generationTimer = null;
     let pendingText = null;
     let pendingReasoning = null;
     let pendingTyping = null;
@@ -74,11 +86,16 @@ export function setupGenerationState({
         pendingTyping = null;
         pendingTextDelta = null;
 
-        const now = Date.now();
-        if (now - lastScrollAt >= STREAM_SCROLL_INTERVAL_MS) {
-            lastScrollAt = now;
-            smartScroll();
+        if (shouldUseBatterySaverUI()) {
+            const now = Date.now();
+            if (now - lastScrollAt >= STREAM_SCROLL_INTERVAL_MS) {
+                lastScrollAt = now;
+                smartScroll();
+            }
+            return;
         }
+
+        smartScroll();
     };
 
     const initialUIUpdate = (text, reasoning, isTyping, textDelta) => {
@@ -101,6 +118,31 @@ export function setupGenerationState({
         flushPendingUIUpdate();
     };
 
+    const clearGenerationTimer = () => {
+        if (!generationTimer) return;
+        clearTimeout(generationTimer);
+        generationTimer = null;
+    };
+
+    const scheduleGenerationTimer = () => {
+        clearGenerationTimer();
+        generationTimer = setTimeout(() => {
+            generationTimer = null;
+
+            if (activeChatChar && activeChatChar.id === char.id) {
+                const idx = currentMessages.value.findIndex(message => message.id === msgId);
+                if (idx !== -1) {
+                    currentMessages.value[idx].genTime = formatGenerationElapsed(startTime);
+                }
+            }
+
+            const state = getGenerationState(char.id);
+            if (state && state.genId === genId) {
+                scheduleGenerationTimer();
+            }
+        }, getGenerationTimerInterval());
+    };
+
     setGenerationState(char.id, {
         genId,
         controller,
@@ -112,19 +154,19 @@ export function setupGenerationState({
     });
 
     getGenerationState(char.id).streamFlush = flushPendingUIUpdate;
-    getGenerationState(char.id).timerId = setInterval(() => {
-        if (activeChatChar && activeChatChar.id === char.id) {
-            const idx = currentMessages.value.findIndex(message => message.id === msgId);
-            if (idx !== -1) {
-                const elapsed = ((Date.now() - startTime) / 1000).toFixed(0) + 's';
-                currentMessages.value[idx].genTime = elapsed;
-            }
-        }
-    }, GENERATION_TIMER_INTERVAL_MS);
+    getGenerationState(char.id).timerId = generationTimer;
+    getGenerationState(char.id).restartGenerationTimer = () => {
+        scheduleGenerationTimer();
+        getGenerationState(char.id).timerId = generationTimer;
+    };
+    scheduleGenerationTimer();
+    getGenerationState(char.id).timerId = generationTimer;
 
     getGenerationState(char.id).clearStreamFlushTimer = () => {
         if (!streamFlushTimer) return;
         clearTimeout(streamFlushTimer);
         streamFlushTimer = null;
     };
+
+    getGenerationState(char.id).clearGenerationTimer = clearGenerationTimer;
 }

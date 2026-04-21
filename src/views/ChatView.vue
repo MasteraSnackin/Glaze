@@ -186,6 +186,33 @@ async function openMemoryEntryEditor(entryId) {
 
 const isAndroid = Capacitor.getPlatform() === 'android';
 const isBatterySaverUI = computed(() => shouldUseBatterySaverUI());
+const formatGenerationElapsed = (startTime) => {
+    const elapsedSeconds = (Date.now() - startTime) / 1000;
+    return isBatterySaverUI.value
+        ? elapsedSeconds.toFixed(0) + 's'
+        : elapsedSeconds.toFixed(1) + 's';
+};
+const getGenerationTimerInterval = () => isBatterySaverUI.value ? 1000 : 100;
+const restartVisibleGenerationTimers = () => {
+    if (!activeChatChar) return;
+
+    const state = getGenerationState(activeChatChar.id);
+    if (!state) return;
+
+    if (typeof state.restartGenerationTimer === 'function') {
+        state.restartGenerationTimer();
+        return;
+    }
+
+    if (state.timerId) clearTimeout(state.timerId);
+    state.timerId = setTimeout(() => {
+        state.timerId = null;
+        const idx = currentMessages.value.findIndex(m => m.id === state.msgId);
+        if (idx !== -1) {
+            currentMessages.value[idx].genTime = formatGenerationElapsed(state.startTime);
+        }
+    }, getGenerationTimerInterval());
+};
 const currentMessages = ref([]);
 const {
     nextGenerationId,
@@ -2897,7 +2924,7 @@ async function openChat(char, onBack, force = false) {
             let lastReopenScrollAt = 0;
             
             // Clear previous timer if exists (from previous mount)
-            if (state.timerId) clearInterval(state.timerId);
+            if (state.timerId) clearTimeout(state.timerId);
 
             // Define updater for this component instance
             state.onUIUpdate = (text, reasoning, isTyping, textDelta) => {
@@ -2912,22 +2939,39 @@ async function openChat(char, onBack, force = false) {
                     m.reasoning = reasoning;
                     m.isTyping = isTyping;
 
-                    const now = Date.now();
-                    if (now - lastReopenScrollAt >= 180) {
-                        lastReopenScrollAt = now;
+                    if (isBatterySaverUI.value) {
+                        const now = Date.now();
+                        if (now - lastReopenScrollAt >= 180) {
+                            lastReopenScrollAt = now;
+                            smartScroll();
+                        }
+                    } else {
                         smartScroll();
                     }
                 }
             };
 
             // Restart timer for this component instance
-            state.timerId = setInterval(() => {
-                const idx = currentMessages.value.findIndex(m => m.id === state.msgId);
-                if (idx !== -1) {
-                    const elapsed = ((Date.now() - state.startTime) / 1000).toFixed(0) + 's';
-                    currentMessages.value[idx].genTime = elapsed;
-                }
-            }, 1000);
+            state.restartGenerationTimer = () => {
+                if (state.timerId) clearTimeout(state.timerId);
+
+                state.timerId = setTimeout(() => {
+                    state.timerId = null;
+
+                    const activeState = getGenerationState(char.id);
+                    if (!activeState || activeState.genId !== state.genId) return;
+
+                    const idx = currentMessages.value.findIndex(m => m.id === state.msgId);
+                    if (idx !== -1) {
+                        currentMessages.value[idx].genTime = formatGenerationElapsed(state.startTime);
+                    }
+
+                    if (typeof activeState.restartGenerationTimer === 'function') {
+                        activeState.restartGenerationTimer();
+                    }
+                }, getGenerationTimerInterval());
+            };
+            state.restartGenerationTimer();
         }
     });
 
@@ -4589,6 +4633,7 @@ onMounted(() => {
     window.addEventListener('regex-scripts-changed', onRegexChanged);
     window.addEventListener('header-chat-search', onChatSearch);
     window.addEventListener('api-context-settings-changed', updateContextCutoff);
+    window.addEventListener('settings-changed', restartVisibleGenerationTimers);
 });
 
 watch(() => currentMessages.value.length, () => {
@@ -4663,7 +4708,7 @@ onUnmounted(() => {
         }
         // Clear UI timer
         if (state.timerId) {
-            clearInterval(state.timerId);
+            clearTimeout(state.timerId);
             state.timerId = null;
         }
         // Disconnect UI updater to prevent updates to unmounted component
@@ -4707,6 +4752,7 @@ onUnmounted(() => {
     window.removeEventListener('regex-scripts-changed', onRegexChanged);
     window.removeEventListener('header-chat-search', onChatSearch);
     window.removeEventListener('api-context-settings-changed', updateContextCutoff);
+    window.removeEventListener('settings-changed', restartVisibleGenerationTimers);
     if (cutoffRerunTimer) {
         clearTimeout(cutoffRerunTimer);
         cutoffRerunTimer = null;

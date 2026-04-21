@@ -422,9 +422,9 @@ MemorySettings: {
 
 ### Current Mobile Power / Renderer Guardrails
 
-These are compatibility-first runtime optimizations added after the network refactor to reduce battery/renderer churn on native devices and on opt-in desktop battery-saver mode.
+These are compatibility-first runtime optimizations added after the network refactor to reduce battery/renderer churn when the shared battery-saver UI mode is enabled.
 
-- Battery-saver UI mode is enabled by `Force Mobile Layout`, by the dedicated Desktop battery-saver toggle, and on native by the Mobile battery-saver toggle which defaults to on.
+- Battery-saver UI mode is controlled only by the shared `Battery Saver UI` toggle. `Force Mobile Layout` changes layout only and does not imply lighter renderer behavior.
 - Generation UI updates are batched instead of repainting every single stream delta immediately.
 - `genTime` display updates once per second during generation instead of every 100ms.
 - Battery-saver chat messages use a static typing suffix, plain `genTime` text, and a no-op transition path for swipe/token micro-animations instead of the more animated desktop-oriented presentation. This keeps Vue's transition lifecycle intact while removing the renderer cost of those animations.
@@ -434,14 +434,11 @@ These are compatibility-first runtime optimizations added after the network refa
 - Native auto-sync is skipped while generation is active or the app is backgrounded, and it now has a cooldown between runs.
 - `useVirtualScroll.js` skips its extra per-scroll visibility health check and schedules heavy scroll work through `requestAnimationFrame` while battery-saver UI mode is active.
 
-Desktop battery-saver scope:
-- The Desktop battery-saver toggle only enables the lighter UI/rendering guardrails: reduced animation, batched stream painting, slower stream persistence, and lighter virtual-scroll behavior.
-
-Mobile battery-saver scope:
-- The Mobile battery-saver toggle controls whether native/mobile keeps those lighter UI/rendering guardrails enabled by default. It does not disable native-only runtime hooks such as background-mode or wake-lock behavior.
+Battery-saver UI scope:
+- The shared toggle enables the lighter UI/rendering guardrails: reduced animation, batched stream painting, slower stream persistence, and lighter virtual-scroll behavior, regardless of whether the user is in desktop or forced-mobile layout.
 
 Native-only scope retained:
-- `requestRuntimePolicy.js`, wake-lock/background-mode activation, notification-backed foreground runtime behavior, and generation auto-sync cooldown/background guards remain native-only runtime behavior and are not enabled by the desktop toggle.
+- `requestRuntimePolicy.js`, wake-lock/background-mode activation, notification-backed foreground runtime behavior, and generation auto-sync cooldown/background guards remain native-only runtime behavior and are not controlled by the battery-saver UI toggle.
 
 **Current Limitation:**
 - Trace storage is global and single-entry. A summary or memory draft request can overwrite the last chat trace.
