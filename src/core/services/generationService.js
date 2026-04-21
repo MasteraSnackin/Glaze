@@ -243,6 +243,16 @@ function estimateVectorLoreTokens(entries = []) {
     return entries.reduce((sum, entry) => sum + estimateTokens(entry?.content || ''), 0);
 }
 
+function buildContextCalculationResult(result, { vectorLoreTokens = 0, memoryTokens = 0 } = {}) {
+    return {
+        cutoffIndex: resolvePromptCutoffIndex(result),
+        contextBreakdown: buildMergedContextBreakdown(result?.contextBreakdown, {
+            vectorLoreTokens,
+            memoryTokens
+        })
+    };
+}
+
 export async function generateChatResponse({
     text,
     char,
@@ -567,17 +577,10 @@ export async function calculateContext({ char, history, authorsNote, summary }) 
             console.warn('[calculateContext] Vector search failed:', e);
         }
 
-        const resolvedCutoff = resolvePromptCutoffIndex(result);
-
-        const contextBreakdown = buildMergedContextBreakdown(result.contextBreakdown, {
+        return buildContextCalculationResult(result, {
             vectorLoreTokens,
             memoryTokens: memoryInjection.tokens || 0
         });
-
-        return {
-            cutoffIndex: resolvedCutoff,
-            contextBreakdown
-        };
     } catch (e) {
         console.error("Calculate context worker error", e);
         return {
