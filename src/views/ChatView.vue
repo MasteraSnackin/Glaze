@@ -447,25 +447,27 @@ function getMemoryPromptLabelByKey(settings = {}, promptPreset = 'detailed_beats
 function restoreVisibleSwipeState(messages = []) {
     if (!Array.isArray(messages)) return [];
 
-    for (const msg of messages) {
-        if (!msg || !Array.isArray(msg.swipesMeta)) continue;
+    return messages.map(msg => {
+        if (!msg || !Array.isArray(msg.swipesMeta)) return msg;
 
         const swipeIndex = msg.swipeId || 0;
         const swipeMeta = msg.swipesMeta[swipeIndex];
-        if (!swipeMeta) continue;
+        if (!swipeMeta) return msg;
+
+        let nextMsg = msg;
 
         if (msg.reasoning == null && swipeMeta.reasoning != null) {
-            msg.reasoning = swipeMeta.reasoning;
+            nextMsg = { ...nextMsg, reasoning: swipeMeta.reasoning };
         }
-        if (msg.genTime == null && swipeMeta.genTime != null) {
-            msg.genTime = swipeMeta.genTime;
+        if (nextMsg.genTime == null && swipeMeta.genTime != null) {
+            nextMsg = { ...nextMsg, genTime: swipeMeta.genTime };
         }
-        if ((msg.tokens == null || msg.tokens === 0) && swipeMeta.tokens != null) {
-            msg.tokens = swipeMeta.tokens;
+        if ((nextMsg.tokens == null || nextMsg.tokens === 0) && swipeMeta.tokens != null) {
+            nextMsg = { ...nextMsg, tokens: swipeMeta.tokens };
         }
-    }
 
-    return messages;
+        return nextMsg;
+    });
 }
 
 function getNormalizedMemoryGenerationState(settings = {}, overrides = {}) {
