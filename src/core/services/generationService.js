@@ -194,6 +194,23 @@ function buildPromptWorkerPayload({
     }));
 }
 
+function resolvePromptCutoffIndex(result) {
+    if (!result) return -1;
+    return result.cutoffOriginalIndex !== undefined && result.cutoffOriginalIndex !== -1
+        ? result.cutoffOriginalIndex
+        : (result.cutoffIndex !== undefined ? result.cutoffIndex : -1);
+}
+
+async function buildPromptMemoryInjection({ char, history, summary, safeContext, result }) {
+    return buildMemoryInjection({
+        char,
+        history,
+        summary,
+        safeContext,
+        cutoffOriginalIndex: resolvePromptCutoffIndex(result)
+    });
+}
+
 export async function generateChatResponse({
     text,
     char,
@@ -328,15 +345,12 @@ export async function generateChatResponse({
     }
 
     const safeContext = contextSize - maxTokens;
-    const cutoffOriginalIndex = result.cutoffOriginalIndex !== undefined && result.cutoffOriginalIndex !== -1
-        ? result.cutoffOriginalIndex
-        : (result.cutoffIndex !== undefined ? result.cutoffIndex : -1);
-    const memoryInjection = await buildMemoryInjection({
+    const memoryInjection = await buildPromptMemoryInjection({
         char,
         history: safeHistory || history,
         summary,
         safeContext,
-        cutoffOriginalIndex
+        result
     });
     let messages = result.messages;
 
@@ -510,15 +524,12 @@ export async function calculateContext({ char, history, authorsNote, summary }) 
         });
 
         const result = await processPromptAsync(payload);
-        const cutoffOriginalIndex = result.cutoffOriginalIndex !== undefined && result.cutoffOriginalIndex !== -1
-            ? result.cutoffOriginalIndex
-            : (result.cutoffIndex !== undefined ? result.cutoffIndex : -1);
-        const memoryInjection = await buildMemoryInjection({
+        const memoryInjection = await buildPromptMemoryInjection({
             char,
             history: safeHistory,
             summary,
             safeContext: safeContextLimit,
-            cutoffOriginalIndex
+            result
         });
 
         // Calculate vector lorebook tokens for accurate breakdown display
@@ -544,9 +555,7 @@ export async function calculateContext({ char, history, authorsNote, summary }) 
             console.warn('[calculateContext] Vector search failed:', e);
         }
 
-        const resolvedCutoff = result.cutoffOriginalIndex !== undefined && result.cutoffOriginalIndex !== -1
-            ? result.cutoffOriginalIndex
-            : result.cutoffIndex;
+        const resolvedCutoff = resolvePromptCutoffIndex(result);
 
         const contextBreakdown = buildMergedContextBreakdown(result.contextBreakdown, {
             vectorLoreTokens,
