@@ -126,6 +126,74 @@ function buildMergedContextBreakdown(contextBreakdown, { vectorLoreTokens = 0, m
     };
 }
 
+function getSessionVarsKey(char) {
+    const charId = char?.id || 'default';
+    const sessionId = char?.sessionId || 'current';
+    return `gz_vars_${charId}_${sessionId}`;
+}
+
+function loadSessionVars(char) {
+    const varsKey = getSessionVarsKey(char);
+    let sessionVars = {};
+    try { sessionVars = JSON.parse(localStorage.getItem(varsKey)) || {}; } catch (e) { }
+    return { varsKey, sessionVars };
+}
+
+function loadGlobalRegexes() {
+    let globalRegexes = [];
+    try { globalRegexes = JSON.parse(localStorage.getItem('regex_scripts')) || []; } catch (e) { }
+    return globalRegexes;
+}
+
+function getPromptWorkerOptions(char, activePreset) {
+    return {
+        mergePrompts: activePreset?.mergePrompts || false,
+        mergeRole: activePreset?.mergeRole || 'system',
+        noAssistant: activePreset?.noAssistant || false,
+        userPrefix: activePreset?.userPrefix || '',
+        charPrefix: activePreset?.charPrefix || '',
+        squashRole: activePreset?.squashRole || 'assistant',
+        personaObj: getEffectivePersona(char?.id, char?.sessionId) || { name: 'User', prompt: '' }
+    };
+}
+
+function buildPromptWorkerPayload({
+    char,
+    history,
+    summary,
+    activePreset,
+    promptOptions,
+    authorsNote,
+    guidanceText,
+    guidanceType,
+    globalRegexes,
+    sessionVars,
+    apiConfig
+}) {
+    return JSON.parse(JSON.stringify({
+        char,
+        history,
+        summary,
+        activePreset,
+        mergePrompts: promptOptions.mergePrompts,
+        mergeRole: promptOptions.mergeRole,
+        noAssistant: promptOptions.noAssistant,
+        userPrefix: promptOptions.userPrefix,
+        charPrefix: promptOptions.charPrefix,
+        squashRole: promptOptions.squashRole,
+        personaObj: promptOptions.personaObj,
+        authorsNote: (authorsNote && authorsNote.enabled) ? authorsNote : null,
+        guidanceText,
+        guidanceType,
+        lorebooks: lorebookState.lorebooks,
+        globalSettings: lorebookState.globalSettings,
+        activations: lorebookState.activations,
+        globalRegexes,
+        sessionVars,
+        apiConfig
+    }));
+}
+
 export async function generateChatResponse({
     text,
     char,
@@ -168,16 +236,8 @@ export async function generateChatResponse({
     const tagStart = activePreset?.reasoningStart || reasoningTags.start;
     const tagEnd = activePreset?.reasoningEnd || reasoningTags.end;
 
-    // Merge Settings from Preset
-    const mergePrompts = activePreset?.mergePrompts || false;
-    const mergeRole = activePreset?.mergeRole || 'system';
-
-    // NoAssistant Settings from Preset
-    const noAssistant = activePreset?.noAssistant || false;
+    const promptOptions = getPromptWorkerOptions(char, activePreset);
     const stopString = activePreset?.stopString || '';
-    const userPrefix = activePreset?.userPrefix || '';
-    const charPrefix = activePreset?.charPrefix || '';
-    const squashRole = activePreset?.squashRole || 'assistant';
 
     if (activePreset && typeof activePreset.reasoningEnabled === 'boolean') {
         // Only override if preset explicitly enables it, otherwise keep user setting
@@ -190,22 +250,14 @@ export async function generateChatResponse({
         reasoningEffort = activePreset.reasoningEffort;
     }
 
-    // Get Persona object for macros
-    const personaObj = getEffectivePersona(char?.id, char?.sessionId) || { name: "User", prompt: "" };
-
-    const charId = char?.id || "default";
-    const sessionId = char?.sessionId || "current";
-    const varsKey = `gz_vars_${charId}_${sessionId}`;
-    let sessionVars = {};
-    try { sessionVars = JSON.parse(localStorage.getItem(varsKey)) || {}; } catch (e) { }
+    const { varsKey, sessionVars } = loadSessionVars(char);
 
     // Set reasoning macros for {{reasoningPrefix}} and {{reasoningSuffix}}
     sessionVars.reasoningPrefix = tagStart;
     sessionVars.reasoningSuffix = tagEnd;
     localStorage.setItem(varsKey, JSON.stringify(sessionVars));
 
-    let globalRegexes = [];
-    try { globalRegexes = JSON.parse(localStorage.getItem('regex_scripts')) || []; } catch (e) { }
+    const globalRegexes = loadGlobalRegexes();
 
     let result;
     let safeHistory = history;
@@ -213,28 +265,19 @@ export async function generateChatResponse({
         const safeContextLimit = getSafeContextLimit(contextSize, maxTokens);
         safeHistory = trimHistoryForContextWindow(history, safeContextLimit);
 
-        const payload = JSON.parse(JSON.stringify({
+        const payload = buildPromptWorkerPayload({
             char,
             history: safeHistory,
             summary,
             activePreset,
-            mergePrompts,
-            mergeRole,
-            noAssistant,
-            userPrefix,
-            charPrefix,
-            squashRole,
-            personaObj,
-            authorsNote: (authorsNote && authorsNote.enabled) ? authorsNote : null,
+            promptOptions,
+            authorsNote,
             guidanceText,
             guidanceType: type,
-            lorebooks: lorebookState.lorebooks,
-            globalSettings: lorebookState.globalSettings,
-            activations: lorebookState.activations,
             globalRegexes,
             sessionVars,
             apiConfig
-        }));
+        });
 
         result = await processPromptAsync(payload);
     } catch (e) {
@@ -443,49 +486,28 @@ export async function calculateContext({ char, history, authorsNote, summary }) 
     const apiConfig = getEffectiveApiConfig();
     const activePreset = loadActivePreset(char, char?.sessionId);
 
-    const mergePrompts = activePreset?.mergePrompts || false;
-    const mergeRole = activePreset?.mergeRole || 'system';
-    const noAssistant = activePreset?.noAssistant || false;
-    const userPrefix = activePreset?.userPrefix || '';
-    const charPrefix = activePreset?.charPrefix || '';
-    const squashRole = activePreset?.squashRole || 'assistant';
-    const personaObj = getEffectivePersona(char?.id, char?.sessionId) || { name: "User", prompt: "" };
+    const promptOptions = getPromptWorkerOptions(char, activePreset);
 
     const anData = authorsNote;
 
-    const charId = char?.id || "default";
-    const sessionId = char?.sessionId || "current";
-    const varsKey = `gz_vars_${charId}_${sessionId}`;
-    let sessionVars = {};
-    try { sessionVars = JSON.parse(localStorage.getItem(varsKey)) || {}; } catch (e) { }
-
-    let globalRegexes = [];
-    try { globalRegexes = JSON.parse(localStorage.getItem('regex_scripts')) || []; } catch (e) { }
+    const { sessionVars } = loadSessionVars(char);
+    const globalRegexes = loadGlobalRegexes();
 
     try {
         const safeContextLimit = getSafeContextLimit(apiConfig.contextSize, apiConfig.maxTokens);
         const safeHistory = trimHistoryForContextWindow(history, safeContextLimit);
 
-        const payload = JSON.parse(JSON.stringify({
+        const payload = buildPromptWorkerPayload({
             char,
             history: safeHistory,
             summary,
             activePreset,
-            mergePrompts,
-            mergeRole,
-            noAssistant,
-            userPrefix,
-            charPrefix,
-            squashRole,
-            personaObj,
-            authorsNote: (anData && anData.enabled) ? anData : null,
-            lorebooks: lorebookState.lorebooks,
-            globalSettings: lorebookState.globalSettings,
-            activations: lorebookState.activations,
+            promptOptions,
+            authorsNote: anData,
             globalRegexes,
             sessionVars,
             apiConfig
-        }));
+        });
 
         const result = await processPromptAsync(payload);
         const cutoffOriginalIndex = result.cutoffOriginalIndex !== undefined && result.cutoffOriginalIndex !== -1
