@@ -47,7 +47,15 @@ export async function restoreGenerationState({
         clearBackgroundUpdateTimer();
     }
 
-    const timerId = getGenerationState(char.id)?.timerId;
+    const generationState = getGenerationState(char.id);
+    if (typeof generationState?.clearStreamFlushTimer === 'function') {
+        generationState.clearStreamFlushTimer();
+    }
+    if (typeof generationState?.streamFlush === 'function') {
+        generationState.streamFlush();
+    }
+
+    const timerId = generationState?.timerId;
     if (timerId) clearInterval(timerId);
     clearPersistedGeneration(char.id, sessionId);
 

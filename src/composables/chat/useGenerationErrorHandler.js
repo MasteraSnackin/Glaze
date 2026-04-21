@@ -21,6 +21,13 @@ export async function handleGenerationError({
     const state = getGenerationState(char.id);
     if (!state || state.genId !== genId) return;
 
+    if (typeof state.clearStreamFlushTimer === 'function') {
+        state.clearStreamFlushTimer();
+    }
+    if (typeof state.streamFlush === 'function') {
+        state.streamFlush();
+    }
+
     if (typeof clearBackgroundUpdateTimer === 'function') {
         clearBackgroundUpdateTimer();
     }

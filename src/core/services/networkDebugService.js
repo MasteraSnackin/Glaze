@@ -1,8 +1,10 @@
 const STORAGE_KEY = 'gz_last_network_trace';
 const ENABLED_KEY = 'gz_debug_network_capture';
 const MAX_STREAM_LINES = 200;
+const PERSIST_DEBOUNCE_MS = 1000;
 
 let lastNetworkTrace = null;
+let persistTimer = null;
 
 function clone(value) {
     if (value === undefined) return undefined;
@@ -19,6 +21,14 @@ function persist() {
     } catch (e) {
         console.warn('[networkDebug] Failed to persist trace', e);
     }
+}
+
+function schedulePersist() {
+    if (persistTimer) return;
+    persistTimer = setTimeout(() => {
+        persistTimer = null;
+        persist();
+    }, PERSIST_DEBOUNCE_MS);
 }
 
 function ensureLoaded() {
@@ -53,6 +63,10 @@ export function getLastNetworkTrace() {
 
 export function clearLastNetworkTrace() {
     lastNetworkTrace = null;
+    if (persistTimer) {
+        clearTimeout(persistTimer);
+        persistTimer = null;
+    }
     persist();
 }
 
@@ -90,7 +104,7 @@ export function updateNetworkTrace(patch = {}) {
     }
 
     Object.assign(lastNetworkTrace, clone(patch));
-    persist();
+    schedulePersist();
 }
 
 export function appendNetworkTraceLine(line) {
@@ -100,7 +114,7 @@ export function appendNetworkTraceLine(line) {
     if (lastNetworkTrace.streamLines.length > MAX_STREAM_LINES) {
         lastNetworkTrace.streamLines = lastNetworkTrace.streamLines.slice(-MAX_STREAM_LINES);
     }
-    persist();
+    schedulePersist();
 }
 
 export function finishNetworkTrace({ rawResponse, text, reasoning, error } = {}) {
@@ -117,5 +131,9 @@ export function finishNetworkTrace({ rawResponse, text, reasoning, error } = {})
 
     lastNetworkTrace.completedAt = Date.now();
     lastNetworkTrace.durationMs = Math.max(0, lastNetworkTrace.completedAt - (lastNetworkTrace.startedAt || lastNetworkTrace.completedAt));
+    if (persistTimer) {
+        clearTimeout(persistTimer);
+        persistTimer = null;
+    }
     persist();
 }

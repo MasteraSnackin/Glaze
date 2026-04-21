@@ -277,13 +277,30 @@ MemorySettings: {
 - `src/components/chat/ChatInput.vue` — Starts user send flow and exposes request preview sheet entry points
 - `src/components/chat/MagicDrawer.vue` — Secondary request preview entry point
 - `src/components/sheets/RequestPreviewSheet.vue` — Displays the last built prompt and optional captured network trace
-- `src/views/ChatView.vue` — Owns chat generation session lifecycle, placeholder message state, abort/cleanup, and persistence
+- `src/views/ChatView.vue` — Chat session orchestration, open/load paths, and integration of extracted generation composables
 - `src/views/ApiView.vue` — API settings UI, model discovery, preset CRUD, and connection test UX
 - `src/core/config/APISettings.js` — Runtime API config reads, endpoint normalization, provider blacklist checks, and `/models` discovery
-- `src/core/services/generationService.js` — Prompt orchestration, enrichment, request body construction, and direct `executeRequest()` callers
+- `src/core/services/generationService.js` — Prompt orchestration, late enrichment, request assembly, and direct `executeRequest()` callers
 - `src/workers/generationWorker.js` — Prompt assembly, macro/regex application, keyword lore scan, and token accounting
-- `src/core/services/llmApi.js` — `/chat/completions` transport, streaming/non-stream parsing, native/mobile branching, timeouts, reasoning extraction, and runtime side effects
-- `src/core/services/networkDebugService.js` — Stores the last captured request/response trace for on-device inspection
+- `src/core/services/llmApi.js` — Thin request entrypoint that wires transport modules together
+- `src/core/llm/transport/chatCompletionsClient.js` — Fetch-based `/chat/completions` execution
+- `src/core/llm/transport/requestLifecycle.js` — Timeouts, abort guards, request headers, trace start
+- `src/core/llm/transport/requestExecution.js` — Native non-stream vs fetch execution split
+- `src/core/llm/transport/streamingSse.js` — SSE stream consumption and delta dispatch
+- `src/core/llm/transport/responseHandling.js` — One-shot/native response shaping
+- `src/core/llm/transport/requestOutcome.js` — Abort/timeout/failure completion policy
+- `src/core/llm/transport/requestRuntimePolicy.js` — Wake lock / foreground-runtime behavior
+- `src/core/llm/transport/streamAccumulator.js` — Shared text/reasoning accumulation across transport paths
+- `src/core/services/networkDebugService.js` — Stores the last captured request/response trace for on-device inspection with debounced persistence
+- `src/composables/chat/useGenerationPreparation.js` — Placeholder/session context preparation
+- `src/composables/chat/useGenerationStateSetup.js` — Generation state registration and stream UI setup
+- `src/composables/chat/useGenerationStreamUpdate.js` — Background persistence throttling for streaming updates
+- `src/composables/chat/useGenerationPromptReady.js` — Prompt metadata assignment on ready
+- `src/composables/chat/useGenerationCompleteHandler.js` — Completion/finalization path
+- `src/composables/chat/useGenerationErrorHandler.js` — Error path and user-visible failure handling
+- `src/composables/chat/useGenerationStateRestore.js` — Abort/rollback restore path
+- `src/composables/chat/usePromptMetadataSnapshots.js` — Prompt metadata rollback snapshots
+- `src/composables/chat/useTypingStateCleanup.js` — Stale typing cleanup helpers
 
 ### Request Types
 - `chat` — Main character response generation from `ChatView.vue` via `generateChatResponse()`
@@ -295,12 +312,12 @@ MemorySettings: {
 
 **Chat Generation:**
 1. `ChatInput.vue` emits send-related events and `ChatView.vue` receives them.
-2. `ChatView.vue:startGeneration()` performs UI/session orchestration:
+2. `ChatView.vue:startGeneration()` performs top-level UI/session orchestration:
    - checks basic API config availability
    - creates `AbortController`
    - creates or reuses the typing placeholder message
-   - snapshots visible history
-   - starts timers and `generatingStates`
+   - resolves session context and authors note
+   - delegates placeholder/setup/restore/error/complete work to extracted chat composables
 3. `generationService.js:generateChatResponse()` resolves the effective request inputs:
    - loads API config from `APISettings.js`
    - resolves active preset and reasoning tag settings
@@ -309,21 +326,23 @@ MemorySettings: {
 4. After the worker returns, `generationService.js` performs late enrichment:
    - vector lore retrieval
    - memory injection
+   - late vector-lore budget limiting via `maxInjectedEntries`
    - context breakdown assembly
    - request-body creation and sanitization
    - `lastPrompt` snapshot for request preview UI
 5. `generationService.js` calls `llmApi.js:executeRequest()` with transport config, reasoning config, request type, abort controller, and callbacks.
-6. `llmApi.js` executes `/chat/completions` using either:
+6. `llmApi.js` builds a transport stack from `requestLifecycle`, `requestExecution`, `chatCompletionsClient`, `streamingSse`, `responseHandling`, and `requestOutcome`.
+7. The transport executes `/chat/completions` using either:
    - `CapacitorHttp.post()` for native non-stream local HTTP requests
    - `fetch()` for web and streaming requests
-7. `llmApi.js` parses either:
+8. The transport parses either:
    - one-shot JSON response
    - SSE stream via `response.body.getReader()`
    - one-shot fallback when a stream request has no readable body on the current runtime
-8. `llmApi.js` extracts assistant text plus reasoning from:
+9. Shared normalizers extract assistant text plus reasoning from:
    - native `reasoning_content`
    - inline reasoning tags in `content`
-9. Callback flow returns to `ChatView.vue`:
+10. Callback flow returns to `ChatView.vue` composables:
    - `onUpdate()` applies streaming text/reasoning to the placeholder message
    - `onComplete()` finalizes the message, stores metadata, and clears generation state
    - `onError()` restores UI/DB state and writes formatted error output
@@ -342,7 +361,8 @@ MemorySettings: {
 ### Current Responsibility Split
 
 **UI / Session Lifecycle:**
-- `ChatView.vue` owns generation session state, placeholder message creation, timers, background persistence, abort handling, and generation-end events.
+- `ChatView.vue` still owns chat-level orchestration, but detailed generation lifecycle logic is split across focused chat composables.
+- `useGenerationPreparation.js`, `useGenerationStateSetup.js`, `useGenerationStreamUpdate.js`, `useGenerationPromptReady.js`, `useGenerationCompleteHandler.js`, `useGenerationErrorHandler.js`, and `useGenerationStateRestore.js` now own the detailed generation subpaths.
 - `RequestPreviewSheet.vue` owns display of the last built prompt and the last stored network trace.
 - `ApiView.vue` owns API settings editing, preset CRUD, and `/models` connectivity UX.
 
@@ -351,7 +371,9 @@ MemorySettings: {
 - `generationService.js` enriches worker output with vector lore and MemoryBook injection, computes final request payloads, and exposes generation entry points.
 
 **Transport / Runtime:**
-- `llmApi.js` owns request dispatch, timeout handling, streaming parser behavior, native runtime branching, wake-lock/background behavior, trace capture hooks, and reasoning extraction.
+- `llmApi.js` is now the compatibility entrypoint, not the full transport implementation.
+- `requestLifecycle.js`, `requestExecution.js`, `chatCompletionsClient.js`, `streamingSse.js`, `responseHandling.js`, and `requestOutcome.js` own the concrete transport flow.
+- `requestRuntimePolicy.js` owns wake-lock / foreground-runtime behavior.
 - `networkDebugService.js` owns the persisted "last trace" singleton.
 
 **Config / Storage:**
@@ -361,9 +383,9 @@ MemorySettings: {
 
 ### Transport Behavior Today
 - Request endpoint is always `${apiUrl}/chat/completions` for generation and `${apiUrl}/models` for model discovery.
-- `CONNECT_TIMEOUT` and `STREAM_TIMEOUT` are read directly from `localStorage` inside `llmApi.js`.
+- `CONNECT_TIMEOUT` and `STREAM_TIMEOUT` are read from `localStorage` through `requestLifecycle.js`.
 - Streaming requests use SSE parsing with `data: ...` lines and `[DONE]` termination.
-- If a streaming response body is unavailable on the current runtime, `llmApi.js` falls back to one-shot JSON parsing instead of hard-failing.
+- If a streaming response body is unavailable on the current runtime, the transport falls back to one-shot JSON parsing instead of hard-failing.
 - Abort handling is dual-purpose:
   - user abort may still preserve partial text
   - timeout-triggered abort is treated as an error and may preserve partial text with `partialError`
@@ -395,7 +417,31 @@ MemorySettings: {
 **Operational Notes:**
 - Capture is gated by localStorage toggle `gz_debug_network_capture`
 - Last trace persists in localStorage key `gz_last_network_trace`
+- Trace persistence is debounced so streaming diagnostics do not write `localStorage` on every SSE chunk
 - Request preview stays usable even when trace capture is disabled; the trace section is optional diagnostics only
+
+### Current Mobile Power / Renderer Guardrails
+
+These are compatibility-first runtime optimizations added after the network refactor to reduce battery/renderer churn on native devices and on opt-in desktop battery-saver mode.
+
+- Battery-saver UI mode is enabled by `Force Mobile Layout`, by the dedicated Desktop battery-saver toggle, and on native by the Mobile battery-saver toggle which defaults to on.
+- Generation UI updates are batched instead of repainting every single stream delta immediately.
+- `genTime` display updates once per second during generation instead of every 100ms.
+- Battery-saver chat messages use a static typing suffix, plain `genTime` text, and a no-op transition path for swipe/token micro-animations instead of the more animated desktop-oriented presentation. This keeps Vue's transition lifecycle intact while removing the renderer cost of those animations.
+- `smartScroll()` during active generation is throttled instead of firing on every stream update.
+- Background persistence for in-flight stream text is slower on native and moderately slower in desktop battery-saver mode (`useGenerationStreamUpdate.js`) to reduce IndexedDB churn.
+- `requestRuntimePolicy.js` delays foreground/background runtime activation for short requests and enables it immediately when the app is backgrounded mid-generation.
+- Native auto-sync is skipped while generation is active or the app is backgrounded, and it now has a cooldown between runs.
+- `useVirtualScroll.js` skips its extra per-scroll visibility health check and schedules heavy scroll work through `requestAnimationFrame` while battery-saver UI mode is active.
+
+Desktop battery-saver scope:
+- The Desktop battery-saver toggle only enables the lighter UI/rendering guardrails: reduced animation, batched stream painting, slower stream persistence, and lighter virtual-scroll behavior.
+
+Mobile battery-saver scope:
+- The Mobile battery-saver toggle controls whether native/mobile keeps those lighter UI/rendering guardrails enabled by default. It does not disable native-only runtime hooks such as background-mode or wake-lock behavior.
+
+Native-only scope retained:
+- `requestRuntimePolicy.js`, wake-lock/background-mode activation, notification-backed foreground runtime behavior, and generation auto-sync cooldown/background guards remain native-only runtime behavior and are not enabled by the desktop toggle.
 
 **Current Limitation:**
 - Trace storage is global and single-entry. A summary or memory draft request can overwrite the last chat trace.
@@ -408,9 +454,9 @@ MemorySettings: {
 - Keep trace capture non-blocking; generation success must never depend on diagnostics state
 
 ### Current Design Problems
-- `ChatView.vue` owns too much of the generation lifecycle: API prechecks, placeholder creation, DB sync, abort handling, UI streaming updates, and cleanup logic.
+- `ChatView.vue` still owns too much of the chat lifecycle overall, but the detailed generation lifecycle is no longer fully inline.
 - `generationService.js` mixes use-case orchestration, prompt enrichment, config resolution, debug preview state, and transport dispatch.
-- `llmApi.js` is not a pure transport client; it also handles reasoning extraction, network tracing, wake-lock/background behavior, and notification side effects.
+- `llmApi.js` is much thinner now, but transport side effects are still callback-driven and spread across multiple helpers rather than an explicit event contract.
 - Runtime config has multiple owners: `localStorage`, IndexedDB API presets, reactive `ApiView.vue` state, onboarding writes, and direct reads in feature views.
 - Debug state is global singleton state (`lastPrompt`, `lastNetworkTrace`) rather than per-generation or per-message state.
 - Request types are implicit instead of modeled as separate use cases with a shared transport contract.
@@ -443,9 +489,15 @@ This is intentionally small and compatibility-first: the current request flow st
 - `src/core/llm/transport/responseNormalizer.js` — unify streaming and non-stream outputs into one shape
 - `src/core/llm/transport/runtimePolicy.js` — wake lock, background mode, and native/web branching rules
 
-**Transport Extraction Started In This Branch:**
-- `src/core/llm/transport/responseNormalizer.js` now owns shared final-response extraction for OpenAI-like one-shot/native/fallback responses
-- `llmApi.js` still owns streaming delta parsing and callback dispatch, but repeated non-stream result shaping is no longer duplicated inline
+**Transport Extraction Landed In This Branch:**
+- `src/core/llm/transport/requestLifecycle.js` owns timeout setup, abort guards, request headers, and trace start
+- `src/core/llm/transport/requestExecution.js` owns native non-stream vs fetch execution branching
+- `src/core/llm/transport/chatCompletionsClient.js` owns fetch-based `/chat/completions` execution
+- `src/core/llm/transport/streamingSse.js` owns SSE stream consumption and delta fanout
+- `src/core/llm/transport/responseHandling.js` owns one-shot/native completion shaping
+- `src/core/llm/transport/requestOutcome.js` owns abort/timeout/failure completion policy
+- `src/core/llm/transport/responseNormalizer.js` owns shared final-response extraction for OpenAI-like one-shot/native/fallback responses
+- `llmApi.js` is now primarily an entrypoint that wires those modules together
 
 **Prompt Layer:**
 - `src/core/llm/prompt/promptBuilderService.js` — wraps `generationWorker.js`
@@ -465,8 +517,18 @@ This is intentionally small and compatibility-first: the current request flow st
 - `src/core/llm/usecases/generateMemoryDraft.js`
 - `src/core/llm/usecases/calculateContext.js`
 
-**UI Session Layer:**
-- `src/composables/chat/useGenerationSession.js` — placeholder message lifecycle, abort controller ownership, streaming UI application, persistence throttling, and cleanup
+**UI Session Layer Landed In This Branch:**
+- `src/composables/chat/useGenerationPreparation.js`
+- `src/composables/chat/useGenerationStateSetup.js`
+- `src/composables/chat/useGenerationStreamUpdate.js`
+- `src/composables/chat/useGenerationPromptReady.js`
+- `src/composables/chat/useGenerationCompleteHandler.js`
+- `src/composables/chat/useGenerationErrorHandler.js`
+- `src/composables/chat/useGenerationStateRestore.js`
+- `src/composables/chat/usePromptMetadataSnapshots.js`
+- `src/composables/chat/useTypingStateCleanup.js`
+
+These composables now cover placeholder setup, stream UI application, prompt metadata rollback, background persistence throttling, abort/error restore, and completion finalization.
 
 **Debug / Observability:**
 - `src/core/llm/debug/requestTraceStore.js` — raw request/response traces keyed by generation
@@ -477,11 +539,15 @@ This is intentionally small and compatibility-first: the current request flow st
 1. Centralize runtime API config reads/writes so feature views stop reading localStorage keys directly.
    Status: partially done in this branch via `APISettings.js` helpers; remaining callers should be migrated incrementally.
 2. Split `llmApi.js` into smaller transport-focused modules without changing external behavior.
-   Status: partially done; one-shot response normalization moved out, but SSE parsing and runtime-policy side effects still live inline.
+   Status: mostly done; transport execution, lifecycle, SSE parsing, one-shot handling, and abort/failure outcomes are extracted. `llmApi.js` remains as the compatibility entrypoint.
 3. Extract chat/session lifecycle code out of `ChatView.vue` into a dedicated generation-session composable.
+   Status: largely done through multiple focused composables instead of one monolithic generation-session composable.
 4. Separate prompt preview state from transport trace state, then store traces per generation/message instead of globally.
+   Status: not done. Trace state is still singleton/global.
 5. Promote explicit request use cases (`chat`, `summary`, `memory_draft`, `model_discovery`) with a shared normalized transport result shape.
+   Status: partially done through request intents, payload builder registry, and normalized transport helpers.
 6. Document the worker/service split so future prompt and retrieval changes have a stable boundary.
+   Status: partially done in this document; should be kept current as retrieval/prompt work continues.
 
 ### Migration Guardrails
 - Keep streaming and non-streaming behavior functionally identical while splitting modules.
@@ -684,6 +750,10 @@ This is intentionally small and compatibility-first: the current request flow st
 - [ ] Summary and memory-draft requests do not regress while chat transport is refactored
 - [ ] Request preview still shows the final built payload after prompt assembly
 - [ ] Network trace capture remains optional and does not affect generation success
+- [ ] Native/mobile generation remains responsive on lower-end devices during long streaming responses
+- [ ] Native auto-sync does not start while active generation is still running
+- [ ] Prompt metadata rollback still works after abort/error paths
+- [ ] Late vector lore still respects `maxInjectedEntries` after transport/refactor changes
 
 ### Cloud Sync
 - [ ] Provider buttons only appear when their env keys are configured
