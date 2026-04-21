@@ -26,8 +26,7 @@ jobs:
       - name: Build Web Project
         env:
           VITE_DROPBOX_APP_KEY: ${{ secrets.VITE_DROPBOX_APP_KEY }}
-          VITE_GDRIVE_CLIENT_ID: ${{ secrets.VITE_GDRIVE_CLIENT_ID }}
-          VITE_GDRIVE_CLIENT_SECRET: ${{ secrets.VITE_GDRIVE_CLIENT_SECRET }}
+          VITE_GDRIVE_CLIENT_ID: ${{ secrets.VITE_GDRIVE_IOS_CLIENT_ID }}
         run: npx vite build
 
       - name: Capacitor Sync
@@ -81,8 +80,7 @@ jobs:
         env:
           VITE_DROPBOX_APP_KEY: ${{ secrets.VITE_DROPBOX_APP_KEY }}
           VITE_DROPBOX_REDIRECT_NATIVE: ${{ secrets.VITE_DROPBOX_REDIRECT_NATIVE }}
-          VITE_GDRIVE_CLIENT_ID: ${{ secrets.VITE_GDRIVE_CLIENT_ID }}
-          VITE_GDRIVE_CLIENT_SECRET: ${{ secrets.VITE_GDRIVE_CLIENT_SECRET }}
+          VITE_GDRIVE_CLIENT_ID: ${{ secrets.VITE_GDRIVE_ANDROID_CLIENT_ID }}
           VITE_GDRIVE_REDIRECT_NATIVE: ${{ secrets.VITE_GDRIVE_REDIRECT_NATIVE }}
         run: npx vite build
 
