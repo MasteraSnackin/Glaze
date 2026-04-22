@@ -112,10 +112,6 @@ const memoryProviderSettings = reactive({
     maxTokens: null
 });
 
-const memoryAvailableModels = ref([]);
-const memoryLoadingModels = ref(false);
-const memoryModelError = ref('');
-
 function loadMemoryProviderSettings() {
     const isSame = isServiceUsingLLMProfile(SERVICE_NAMES.MEMORY_BOOKS);
     const profile = isSame ? null : getServiceEffectiveProfile(SERVICE_NAMES.MEMORY_BOOKS);
@@ -125,47 +121,6 @@ function loadMemoryProviderSettings() {
     memoryProviderSettings.model = isSame ? '' : (profile?.model || '');
     memoryProviderSettings.temperature = null;
     memoryProviderSettings.maxTokens = null;
-    memoryAvailableModels.value = [];
-    memoryModelError.value = '';
-}
-
-async function fetchMemoryModels() {
-    if (!memoryProviderSettings.endpoint) {
-        memoryModelError.value = t('msg_endpoint_required') || 'Endpoint is required';
-        return;
-    }
-    memoryLoadingModels.value = true;
-    memoryModelError.value = '';
-    try {
-        const endpoint = normalizeEndpoint(memoryProviderSettings.endpoint);
-        const models = await fetchRemoteModels(endpoint, memoryProviderSettings.key);
-        memoryAvailableModels.value = models;
-    } catch (e) {
-        memoryModelError.value = e.message || 'Failed to fetch models';
-        memoryAvailableModels.value = [];
-    } finally {
-        memoryLoadingModels.value = false;
-    }
-}
-
-function openMemoryModelSelector() {
-    if (!memoryAvailableModels.value.length) {
-        showBottomSheet({
-            title: t('label_memory_model') || 'Model',
-            items: [{ label: t('msg_no_models_found') || 'No models found. Enter endpoint and key first.', onClick: closeBottomSheet }]
-        });
-        return;
-    }
-    const items = memoryAvailableModels.value.map(m => ({
-        label: m,
-        icon: memoryProviderSettings.model === m ? '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>' : null,
-        onClick: () => {
-            memoryProviderSettings.model = m;
-            onMemoryProviderInput('model', m);
-            closeBottomSheet();
-        }
-    }));
-    showBottomSheet({ title: t('label_memory_model') || 'Model', items });
 }
 
 function onMemoryProviderInput(key, value) {
@@ -174,28 +129,18 @@ function onMemoryProviderInput(key, value) {
         loadMemoryProviderSettings();
         return;
     }
-    if (key === 'endpoint' || key === 'key') {
-        memoryProviderSettings[key] = value;
-        memoryAvailableModels.value = [];
-        memoryModelError.value = '';
-        if (!memoryProviderSettings.useSame) {
-            const currentProfile = getServiceEffectiveProfile(SERVICE_NAMES.MEMORY_BOOKS);
-            const profileId = getServiceProfileId(SERVICE_NAMES.MEMORY_BOOKS);
-            if (profileId && profileId !== 'llm') {
-                saveProviderProfile({ id: profileId, [key === 'key' ? 'apiKey' : key]: value });
-            }
-        }
-        return;
-    }
-    if (key === 'model') {
-        memoryProviderSettings.model = value;
-    }
+    // For custom provider, save to a dedicated memory provider profile
     if (!memoryProviderSettings.useSame) {
+        // Create or update a memory-specific provider profile
         const currentProfile = getServiceEffectiveProfile(SERVICE_NAMES.MEMORY_BOOKS);
         const profileId = getServiceProfileId(SERVICE_NAMES.MEMORY_BOOKS);
         if (profileId && profileId !== 'llm') {
-            saveProviderProfile({ id: profileId, [key === 'key' ? 'apiKey' : key]: value });
+            saveProviderProfile({
+                id: profileId,
+                [key === 'key' ? 'apiKey' : key]: value
+            });
         } else {
+            // Create new profile for memory books
             const newProfile = createProviderProfile('Memory Books Provider', {
                 endpoint: memoryProviderSettings.endpoint,
                 apiKey: memoryProviderSettings.key,
@@ -917,23 +862,12 @@ onBeforeUnmount(() => {
                             <input type="text" v-model="memoryProviderSettings.endpoint" @input="onMemoryProviderInput('endpoint', $event.target.value)" placeholder="http://127.0.0.1:5000/v1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
                         </div>
                         <div class="settings-item">
+                            <label>{{ t('label_memory_model') || 'Model' }}</label>
+                            <input type="text" v-model="memoryProviderSettings.model" @input="onMemoryProviderInput('model', $event.target.value)" placeholder="gpt-4o-mini" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+                        </div>
+                        <div class="settings-item">
                             <label>{{ t('label_memory_key') || 'API Key' }}</label>
                             <input type="password" v-model="memoryProviderSettings.key" @input="onMemoryProviderInput('key', $event.target.value)" placeholder="sk-..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
-                        </div>
-                        <div class="settings-item" @click="fetchMemoryModels">
-                            <label>{{ t('label_memory_fetch_models') || 'Fetch Models' }}</label>
-                            <div class="clickable-selector">
-                                <span>{{ memoryLoadingModels.value ? (t('btn_fetching') || 'Fetching...') : (t('btn_fetch_models') || 'Fetch Models') }}</span>
-                                <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
-                            </div>
-                        </div>
-                        <div class="settings-item" @click="openMemoryModelSelector">
-                            <label>{{ t('label_memory_model') || 'Model' }}</label>
-                            <div class="clickable-selector" :class="{ 'selector-error': memoryModelError }">
-                                <span>{{ memoryProviderSettings.model || t('msg_select_model') || 'Select a model' }}</span>
-                                <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
-                            </div>
-                            <div v-if="memoryModelError" class="settings-desc" style="color: var(--vk-red); margin-top:4px;">{{ memoryModelError }}</div>
                         </div>
                     </template>
                 </div>
@@ -1044,9 +978,5 @@ onBeforeUnmount(() => {
     height: 24px;
     fill: var(--text-gray);
     opacity: 0.5;
-}
-
-.selector-error {
-    border-color: var(--vk-red);
 }
 </style>

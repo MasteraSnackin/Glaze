@@ -5,6 +5,8 @@ import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import { showToast } from '@/core/states/toastState.js';
+import { fetchRemoteModels } from '@/core/config/APISettings.js';
+import { getActiveLLMProfile } from '@/core/config/ProviderProfiles.js';
 
 const props = defineProps({
   memoryBook: {
@@ -48,7 +50,8 @@ const emit = defineEmits([
   'approve-draft',
   'delete-draft',
   'delete-entry',
-  'cancel-draft'
+  'cancel-draft',
+  'change-model'
 ]);
 
 const sheet = ref(null);
@@ -147,6 +150,81 @@ const shouldEnableVectorSearch = computed(() => {
   // Will be passed from parent
   return true;
 });
+
+const currentMemoryModelLabel = computed(() => {
+  const settings = props.memoryBook?.settings || {};
+  const isCustom = settings.generationSource === 'custom';
+  if (isCustom) {
+    return settings.generationModel || 'Custom endpoint';
+  }
+  return settings.generationModel || getActiveLLMProfile().model || 'Current LLM model';
+});
+
+async function openQuickModelSelector() {
+  const settings = props.memoryBook?.settings || {};
+  const isCustom = settings.generationSource === 'custom';
+  let endpoint, key;
+  if (isCustom) {
+    endpoint = settings.generationEndpoint || '';
+    key = settings.generationApiKey || '';
+  } else {
+    const profile = getActiveLLMProfile();
+    endpoint = profile.endpoint || '';
+    key = profile.apiKey || '';
+  }
+
+  if (!endpoint) {
+    showToast('Endpoint not configured. Set it in Generation Settings.');
+    return;
+  }
+
+  showBottomSheet({
+    title: 'Loading models...',
+    items: [{ label: 'Fetching available models...', onClick: () => {} }]
+  });
+
+  try {
+    const models = await fetchRemoteModels(endpoint, key);
+    const currentModel = settings.generationModel || '';
+    const items = models.map(m => ({
+      label: m,
+      icon: currentModel === m ? '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>' : null,
+      onClick: () => {
+        closeBottomSheet();
+        emit('change-model', m);
+      }
+    }));
+    if (!models.length) {
+      items.push({ label: 'No models found', onClick: closeBottomSheet });
+    }
+    items.push({
+      label: 'Enter model name manually',
+      onClick: () => {
+        closeBottomSheet();
+        setTimeout(() => {
+          showBottomSheet({
+            title: 'Enter Model Name',
+            input: {
+              placeholder: 'Model name',
+              value: currentModel,
+              confirmLabel: 'Save',
+              onConfirm: (value) => {
+                closeBottomSheet();
+                emit('change-model', value.trim());
+              }
+            }
+          });
+        }, 50);
+      }
+    });
+    closeBottomSheet();
+    setTimeout(() => showBottomSheet({ title: 'Select Model', items }), 50);
+  } catch (e) {
+    console.warn('Failed to fetch models for quick memory model switch:', e);
+    closeBottomSheet();
+    showToast('Failed to fetch models: ' + (e.message || String(e)));
+  }
+}
 
 // Helper functions
 function normalizeAutoCreateInterval(memoryBook) {
@@ -293,6 +371,11 @@ defineExpose({ open, close });
           <div class="memory-session-chip">{{ stableConversationCount }} stable msgs</div>
         </div>
         <div class="memory-session-overview-meta">{{ generationSettingsSummary }}</div>
+        <div class="memory-quick-model-row" @click="openQuickModelSelector">
+          <span class="memory-quick-model-label">Model</span>
+          <span class="memory-quick-model-value">{{ currentMemoryModelLabel }}</span>
+          <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+        </div>
       </div>
 
       <div class="memory-settings-item">
@@ -585,6 +668,47 @@ defineExpose({ open, close });
 .memory-session-overview-meta {
   font-size: 12px;
   color: var(--text-gray);
+}
+
+.memory-quick-model-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: rgba(var(--ui-bg-rgb), 0.3);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-top: 4px;
+}
+
+.memory-quick-model-row:active {
+  opacity: 0.7;
+}
+
+.memory-quick-model-label {
+  font-size: 11px;
+  color: var(--text-gray);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.memory-quick-model-value {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text-black);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memory-quick-model-row svg {
+  width: 18px;
+  height: 18px;
+  fill: var(--text-gray);
+  flex-shrink: 0;
 }
 
 /* Settings Items */

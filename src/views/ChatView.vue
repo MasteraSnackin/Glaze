@@ -57,7 +57,8 @@ import { currentLang, chatPaddingLR, setChatPaddingLR, shouldUseBatterySaverUI }
 import { translations } from '@/utils/i18n.js';
 import { generateChatResponse, calculateContext, generateMemoryDraft } from '@/core/services/generationService.js';
 import { executeRequest } from '@/core/services/llmApi.js';
-import { getApiConfig, getApiRuntimeStorage, getApiReasoningTags } from '@/core/config/APISettings.js';
+import { getApiConfig, getApiRuntimeStorage, getApiReasoningTags, fetchRemoteModels } from '@/core/config/APISettings.js';
+import { getActiveLLMProfile } from '@/core/config/ProviderProfiles.js';
 import { getEmbeddingConfig, isEmbeddingConfigured } from '@/core/config/embeddingSettings.js';
 import { animateTextChange, updateAppColors, initHeaderScroll, initRipple } from '@/core/services/ui.js';
 import { showBottomSheet, closeBottomSheet, bottomSheetState } from '@/core/states/bottomSheetState.js';
@@ -499,10 +500,10 @@ function restoreVisibleSwipeState(messages = []) {
 }
 
 function getNormalizedMemoryGenerationState(settings = {}, overrides = {}) {
+    const source = settings.generationSource === 'custom' ? 'custom' : 'llm';
     return {
-        source: settings.generationSource || 'current',
+        source,
         model: settings.generationModel || '',
-        useCurrentModelOverride: settings.generationUseCurrentModelOverride === true,
         endpoint: settings.generationEndpoint || '',
         apiKey: settings.generationApiKey || '',
         temperature: settings.generationTemperature,
@@ -842,7 +843,7 @@ async function generateMemoryDraftForMessages(selectedMessages, { openSheet = fa
             ...(generationMaxTokens ? { maxTokens: generationMaxTokens } : {})
         }
         : {
-            ...(settings.generationUseCurrentModelOverride && settings.generationModel
+            ...(settings.generationModel
                 ? { model: settings.generationModel }
                 : {}),
             ...(settings.generationTemperature != null
@@ -1448,41 +1449,7 @@ async function openMemoryGenerationSettings(initialState = null) {
     const renderSheet = () => {
         const content = document.createElement('div');
         content.className = 'context-sheet';
-        const currentEndpointLabel = currentApiConfig.apiUrl || 'Not configured';
-        const currentModelLabel = currentApiConfig.model || 'Not configured';
         content.innerHTML = `
-            <div class="settings-item">
-                <label>Provider</label>
-                <div class="clickable-selector" id="memory-provider-selector">
-                    <span>${state.source === 'current' ? 'Current provider' : 'Custom provider'}</span>
-                    <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
-                </div>
-            </div>
-            ${state.source === 'current'
-                ? `
-                    <div class="settings-item">
-                        <label>Using Current API Settings</label>
-                        <div class="context-sheet-note">Endpoint: ${currentEndpointLabel.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
-                        <div class="context-sheet-note">Model: ${(state.useCurrentModelOverride && state.model ? state.model : currentModelLabel).replace(/</g, '&lt;').replace(/>/g, '&gt;')}${state.useCurrentModelOverride && state.model ? ' (override)' : ''}</div>
-                    </div>
-                    <div class="settings-item">
-                        <label style="display:flex; align-items:center; gap:8px;">
-                            <input id="memory-current-model-override-toggle" type="checkbox" ${state.useCurrentModelOverride ? 'checked' : ''}>
-                            <span>Override current model</span>
-                        </label>
-                    </div>
-                    <div class="settings-item" id="memory-current-model-override-field" style="display:${state.useCurrentModelOverride ? 'block' : 'none'};">
-                        <label>Override Model</label>
-                        <input id="memory-current-model-input" type="text" value="${state.model.replace(/"/g, '&quot;')}" placeholder="Model name">
-                    </div>
-                `
-                : `
-                    <div class="settings-item">
-                        <label>Model</label>
-                        <input id="memory-model-input" type="text" value="${state.model.replace(/"/g, '&quot;')}" placeholder="Model name">
-                    </div>
-                `
-            }
             <div class="settings-item">
                 <label>Generation Rules</label>
                 <div class="clickable-selector" id="memory-prompt-selector">
@@ -1544,46 +1511,11 @@ async function openMemoryGenerationSettings(initialState = null) {
                 </div>
                 <div class="context-sheet-note">Choose whether retrieved memory context follows the dedicated summary block path or the {{summary}} macro location.</div>
             </div>
-            <div id="memory-custom-fields" style="display:${state.source === 'custom' ? 'block' : 'none'};">
-                <div class="settings-item">
-                    <label>Endpoint</label>
-                    <input id="memory-endpoint-input" type="text" value="${state.endpoint.replace(/"/g, '&quot;')}" placeholder="https://.../v1">
-                </div>
-                <div class="settings-item">
-                    <label>API Key</label>
-                    <input id="memory-apikey-input" type="password" value="${state.apiKey.replace(/"/g, '&quot;')}" placeholder="Optional API key">
-                </div>
-            </div>
             <div class="context-sheet-actions">
                 <button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-settings-cancel">Cancel</button>
                 <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="memory-settings-save">Save</button>
             </div>
         `;
-
-        content.querySelector('#memory-provider-selector')?.addEventListener('click', () => {
-            closeBottomSheet();
-            showBottomSheet({
-                title: 'Memory Provider',
-                items: [
-                    {
-                        label: 'Current provider',
-                        onClick: () => {
-                            state.source = 'current';
-                            closeBottomSheet();
-                            setTimeout(() => showBottomSheet({ title: 'Memory Generation', content: renderSheet(), isSolid: true }), 50);
-                        }
-                    },
-                    {
-                        label: 'Custom provider',
-                        onClick: () => {
-                            state.source = 'custom';
-                            closeBottomSheet();
-                            setTimeout(() => showBottomSheet({ title: 'Memory Generation', content: renderSheet(), isSolid: true }), 50);
-                        }
-                    }
-                ]
-            });
-        });
 
         content.querySelector('#memory-prompt-selector')?.addEventListener('click', () => {
             closeBottomSheet();
@@ -1649,26 +1581,14 @@ async function openMemoryGenerationSettings(initialState = null) {
             });
         });
 
-        content.querySelector('#memory-current-model-override-toggle')?.addEventListener('change', (event) => {
-            state.useCurrentModelOverride = event.target.checked;
-            closeBottomSheet();
-            setTimeout(() => showBottomSheet({ title: 'Memory Generation', content: renderSheet(), isSolid: true }), 50);
-        });
-
         content.querySelector('#memory-settings-cancel')?.addEventListener('click', () => {
             closeBottomSheet();
             setTimeout(() => openMemoryBooksSheet(), 50);
         });
         content.querySelector('#memory-settings-save')?.addEventListener('click', async () => {
             settings.generationSource = state.source;
-            settings.generationUseCurrentModelOverride = state.source === 'current'
-                ? !!content.querySelector('#memory-current-model-override-toggle')?.checked
-                : false;
-            settings.generationModel = state.source === 'custom'
-                ? (content.querySelector('#memory-model-input')?.value?.trim() || '')
-                : (settings.generationUseCurrentModelOverride
-                    ? (content.querySelector('#memory-current-model-input')?.value?.trim() || '')
-                    : '');
+            settings.generationUseCurrentModelOverride = false;
+            settings.generationModel = state.model || '';
             settings.generationEndpoint = state.source === 'custom'
                 ? (content.querySelector('#memory-endpoint-input')?.value?.trim() || '')
                 : '';
@@ -1920,6 +1840,25 @@ function handleMemoryPreview({ entry, kind }) {
 
 function handleMemoryOpenSettings() {
     openMemoryGenerationSettings();
+}
+
+function handleMemoryQuickModelChange(model) {
+    if (!activeChatChar || !currentMemoryBookData.value) return;
+    const settings = currentMemoryBookData.value.settings || {};
+    settings.generationModel = model || '';
+    settings.generationUseCurrentModelOverride = false;
+    currentMemoryBookData.value.updatedAt = Date.now();
+    getChatData(activeChatChar.id).then(chatData => {
+        const sessionId = activeChatChar.sessionId || chatData.currentId;
+        const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
+        if (memoryBook.settings) {
+            memoryBook.settings.generationModel = model || '';
+            memoryBook.settings.generationUseCurrentModelOverride = false;
+        }
+        memoryBook.updatedAt = Date.now();
+        db.saveChat(activeChatChar.id, chatData);
+    });
+    showToast('Memory generation model updated');
 }
 
 async function deleteSelectedMessages() {
@@ -4913,6 +4852,7 @@ onUnmounted(() => {
             @delete-draft="handleMemoryDeleteDraft"
             @delete-entry="handleMemoryDeleteEntry"
             @cancel-draft="handleMemoryCancelDraft"
+            @change-model="handleMemoryQuickModelChange"
             @back="handleSheetBack"
         />
     </div>
