@@ -900,5 +900,13 @@
     "catalog_error_extract": "Failed to submit for extraction",
     "catalog_extracting": "Extracting...",
     "catalog_extract_progress": "DataCat is fetching the character from JanitorAI. This may take a minute.",
-    "btn_retry": "Retry"
+    "btn_retry": "Retry",
+    "section_image_gen": "Image Generation",
+    "label_image_gen_enabled": "Enable Image Generation",
+    "desc_image_gen_enabled": "Generate images from [IMG:GEN] tags",
+    "label_imagegen_endpoint": "Image Gen Endpoint",
+    "label_imagegen_key": "API Key",
+    "section_sync_settings": "Sync Settings",
+    "label_sync_include_keys": "Include API Keys in Sync",
+    "desc_sync_include_keys": "Send provider API keys to cloud backup"
 }

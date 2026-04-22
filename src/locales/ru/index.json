@@ -906,5 +906,13 @@
     "catalog_error_extract": "Не удалось отправить на извлечение",
     "catalog_extracting": "Извлечение...",
     "catalog_extract_progress": "DataCat загружает персонажа с JanitorAI. Это может занять минуту.",
-    "btn_retry": "Повторить"
+    "btn_retry": "Повторить",
+    "section_image_gen": "Генерация изображений",
+    "label_image_gen_enabled": "Включить генерацию изображений",
+    "desc_image_gen_enabled": "Генерировать изображения из тегов [IMG:GEN]",
+    "label_imagegen_endpoint": "Эндпоинт генерации изображений",
+    "label_imagegen_key": "API ключ",
+    "section_sync_settings": "Настройки синхронизации",
+    "label_sync_include_keys": "Включить API ключи в синхронизацию",
+    "desc_sync_include_keys": "Отправлять ключи провайдеров в облачный бэкап"
 }

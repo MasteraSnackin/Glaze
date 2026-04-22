@@ -15,6 +15,8 @@ function handleBack() {
 import { normalizeEndpoint, fetchRemoteModels, getApiPresets, saveApiPresets, getApiConfig, getApiProviderId, getApiRuntimeStorage, saveApiRuntimeSetting, applyApiRuntimeConfig, getBlacklistedProvider } from '@/core/config/APISettings.js';
 import { getEmbeddingConfig, saveEmbeddingSetting, isEmbeddingConfigured } from '@/core/config/embeddingSettings.js';
 import { testEmbeddingConnection } from '@/core/services/embeddingService.js';
+import { getImageGenSettings, saveImageGenSettings } from '@/core/services/imageGenService.js';
+import { getProviderProfiles, getActiveLLMProfile, setActiveLLMProfile, getServiceEffectiveProfile, setServiceProfile, isServiceUsingLLMProfile, SERVICE_NAMES } from '@/core/config/ProviderProfiles.js';
 import { updateLanguage, translations } from '@/utils/i18n.js';
 import { initRipple } from '@/core/services/ui.js';
 import { currentLang } from '@/core/config/APPSettings.js';
@@ -29,6 +31,31 @@ const headerState = reactive({
     title: '',
     actions: [],
 });
+
+// --- Tabs ---
+const TABS = [
+    { id: 'llm', label: 'LLM' },
+    { id: 'embedding', label: 'Embeddings' },
+    { id: 'imagegen', label: 'Image Gen' }
+];
+const activeTab = ref('llm');
+
+// --- Provider Profiles ---
+const providerProfiles = ref({});
+const activeLLMProfileId = ref('default');
+
+function loadProviderProfiles() {
+    providerProfiles.value = getProviderProfiles();
+    activeLLMProfileId.value = getActiveLLMProfile().id;
+}
+
+function selectProfileForService(serviceName, profileId) {
+    if (profileId === 'llm') {
+        setServiceProfile(serviceName, { useSameAsLLM: true, profileId: null });
+    } else {
+        setServiceProfile(serviceName, { useSameAsLLM: false, profileId });
+    }
+}
 
 // --- API Settings State ---
 const apiSettings = reactive({
@@ -64,6 +91,35 @@ const embeddingSettings = reactive({
 const embeddingStatus = ref('idle');
 const embeddingDimension = ref(null);
 const embeddingError = ref('');
+
+// --- Image Gen Settings State ---
+const imageGenSettings = reactive({
+    useSame: true,
+    endpoint: '',
+    key: '',
+    model: '',
+    enabled: false
+});
+
+function loadImageGenSettings() {
+    const config = getImageGenSettings();
+    const isSame = isServiceUsingLLMProfile(SERVICE_NAMES.IMAGE_GEN);
+    const profile = isSame ? null : getServiceEffectiveProfile(SERVICE_NAMES.IMAGE_GEN);
+    imageGenSettings.useSame = isSame;
+    imageGenSettings.endpoint = isSame ? '' : (profile?.endpoint || config.endpoint || '');
+    imageGenSettings.key = isSame ? '' : (profile?.apiKey || config.apiKey || '');
+    imageGenSettings.model = isSame ? '' : (profile?.model || config.model || '');
+    imageGenSettings.enabled = config.enabled;
+}
+
+function onImageGenInput(key, value) {
+    if (key === 'useSame') {
+        selectProfileForService(SERVICE_NAMES.IMAGE_GEN, value ? 'llm' : 'custom');
+        loadImageGenSettings();
+        return;
+    }
+    saveImageGenSettings({ [key]: value });
+}
 
 function loadEmbeddingSettings() {
     const config = getEmbeddingConfig();
@@ -150,6 +206,7 @@ function showBlacklistWarning(providerName) {
 }
 
 function loadApiSettings() {
+    loadProviderProfiles();
     const runtime = getApiRuntimeStorage();
     apiSettings.endpoint = runtime.endpoint;
     apiSettings.key = runtime.key;
@@ -164,6 +221,7 @@ function loadApiSettings() {
     apiSettings.reasoningEnabled = runtime.requestReasoning;
     apiSettings.reasoningEffort = runtime.reasoningEffort;
     loadEmbeddingSettings();
+    loadImageGenSettings();
 }
 
 function saveApiSetting(key, value) {
@@ -542,6 +600,20 @@ onBeforeUnmount(() => {
                     </div>
                 </ConnectionStatus>
 
+                <!-- Tab Bar -->
+                <div class="api-tabs">
+                    <button
+                        v-for="tab in TABS"
+                        :key="tab.id"
+                        class="api-tab-btn"
+                        :class="{ active: activeTab === tab.id }"
+                        @click="activeTab = tab.id"
+                    >{{ tab.label }}</button>
+                </div>
+
+                <!-- LLM Tab -->
+                <template v-if="activeTab === 'llm'">
+
                 <div class="menu-group">
                     <div class="section-header">{{ t('section_connection') || 'Connection' }} <HelpTip term="api"/></div>
                     <div class="settings-item">
@@ -634,7 +706,10 @@ onBeforeUnmount(() => {
                         </div>
                     </div>
                 </div>
+                </template>
 
+                <!-- Embeddings Tab -->
+                <template v-if="activeTab === 'embedding'">
                 <div class="menu-group">
                     <div class="section-header">{{ t('section_embeddings') || 'Embeddings' }} <HelpTip term="embeddings"/></div>
                     <div class="settings-item-checkbox">
@@ -680,12 +755,77 @@ onBeforeUnmount(() => {
                         </div>
                     </template>
                 </div>
+                </template>
+
+                <!-- Image Gen Tab -->
+                <template v-if="activeTab === 'imagegen'">
+                <div class="menu-group">
+                    <div class="section-header">{{ t('section_image_gen') || 'Image Generation' }} <HelpTip term="image-gen"/></div>
+                    <div class="settings-item-checkbox">
+                        <div class="settings-text-col">
+                            <label>{{ t('label_image_gen_enabled') || 'Enable Image Generation' }}</label>
+                            <div class="settings-desc">{{ t('desc_image_gen_enabled') || 'Generate images from [IMG:GEN] tags' }}</div>
+                        </div>
+                        <input type="checkbox" v-model="imageGenSettings.enabled" @change="onImageGenInput('enabled', $event.target.checked)" class="vk-switch">
+                    </div>
+                    <template v-if="imageGenSettings.enabled">
+                        <div class="settings-item-checkbox">
+                            <div class="settings-text-col">
+                                <label>{{ t('label_use_llm_api') || 'Use LLM API' }}</label>
+                                <div class="settings-desc">{{ t('desc_use_llm_api') || 'Use the same endpoint as LLM for image generation' }}</div>
+                            </div>
+                            <input type="checkbox" v-model="imageGenSettings.useSame" @change="onImageGenInput('useSame', $event.target.checked)" class="vk-switch">
+                        </div>
+                        <template v-if="!imageGenSettings.useSame">
+                            <div class="settings-item">
+                                <label>{{ t('label_imagegen_endpoint') || 'Image Gen Endpoint' }}</label>
+                                <input type="text" v-model="imageGenSettings.endpoint" @input="onImageGenInput('endpoint', $event.target.value)" placeholder="http://127.0.0.1:5000/v1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+                            </div>
+                            <div class="settings-item">
+                                <label>{{ t('label_imagegen_model') || 'Model' }}</label>
+                                <input type="text" v-model="imageGenSettings.model" @input="onImageGenInput('model', $event.target.value)" placeholder="dall-e-3" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+                            </div>
+                            <div class="settings-item">
+                                <label>{{ t('label_imagegen_key') || 'API Key' }}</label>
+                                <input type="password" v-model="imageGenSettings.key" @input="onImageGenInput('apiKey', $event.target.value)" placeholder="sk-..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+                            </div>
+                        </template>
+                    </template>
+                </div>
+                </template>
         </div>
     </SheetView>
     </div>
 </template>
 
 <style scoped>
+.api-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px 14px 0;
+  border-bottom: 1px solid rgba(var(--text-color-rgb, 0, 0, 0), 0.08);
+}
+
+.api-tab-btn {
+  flex: 1;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: var(--text-gray, #888);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  border-radius: 8px 8px 0 0;
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s ease;
+}
+
+.api-tab-btn.active {
+  color: var(--vk-blue, #528bcc);
+  border-bottom-color: var(--vk-blue, #528bcc);
+  background: rgba(var(--vk-blue-rgb, 82, 139, 204), 0.08);
+}
+
 .preset-selector {
   height: 32px;
   display: flex;

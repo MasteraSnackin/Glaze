@@ -1,5 +1,6 @@
 import { db, getSyncDeletedEntries, clearSyncDeletedEntry } from '@/utils/db.js';
 import { encryptForSync, decryptFromSync, hasSyncKey, getSyncKey } from '@/core/services/crypto/keyManager.js';
+import { isSyncIncludingApiKeys } from '@/core/config/ProviderProfiles.js';
 
 const CLOUD_BASE = '/Glaze';
 
@@ -163,8 +164,12 @@ async function collectSingletonEntries() {
         'gz_battery_saver_ui', 'gz_api_provider', 'gz_api_endpoint_normalized',
         'gz_api_temp', 'gz_api_topp', 'gz_api_stream', 'gz_api_auto_hide_images',
         'gz_api_auto_hide_images_n', 'gz_api_request_reasoning', 'gz_api_reasoning_effort',
-        'gz_api_connect_timeout', 'gz_api_stream_timeout', 'api-key', 'api-model'
+        'gz_api_connect_timeout', 'gz_api_stream_timeout'
     ];
+    const includeKeys = isSyncIncludingApiKeys();
+    if (includeKeys) {
+        lsKeys.push('api-key', 'api-model', 'gz_embedding_key', 'gz_embedding_model', 'gz_embedding_endpoint');
+    }
     for (const k of lsKeys) {
         const v = localStorage.getItem(k);
         if (v !== null) lsData[k] = v;
