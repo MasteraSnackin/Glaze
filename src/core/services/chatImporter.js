@@ -108,15 +108,15 @@ async function importGlazeChatPackage(json, characterId, userPersona) {
  */
 export async function importSillyTavernChat(file, characterId, userPersona) {
     const fileName = String(file?.name || '').toLowerCase();
-    
-    if (fileName.endsWith('.txt')) {
-        throw new Error('TXT files are not supported. Please use JSONL or .glzchat.json format.');
-    }
-    
+
     if (fileName.endsWith('.glzchat.json')) {
         const text = await readFile(file);
         const json = JSON.parse(text);
         return importGlazeChatPackage(json, characterId, userPersona);
+    }
+
+    if (!fileName.endsWith('.json') && !fileName.endsWith('.jsonl')) {
+        throw new Error('Unsupported file format. Supported formats: JSON, JSONL, .glzchat.json');
     }
 
     let messages = [];
@@ -467,9 +467,6 @@ export function pickChatFile() {
     return new Promise((resolve) => {
         const input = document.createElement('input');
         input.type = 'file';
-        // Keep TXT visible in the picker so users can select it and receive the
-        // explicit unsupported-format error instead of it being silently hidden.
-        input.accept = '.json,.jsonl,.txt,.glzchat.json,text/plain,application/json';
         input.onchange = (e) => {
             const file = e.target.files[0] || null;
             resolve(file);
