@@ -1,5 +1,5 @@
 <script setup>
-import { reactive, computed, watch, nextTick, onMounted, onBeforeUnmount, ref } from 'vue';
+import { reactive, computed, watch, nextTick, onMounted, onBeforeUnmount, ref, onUnmounted } from 'vue';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { activePersona, allPersonas, setActivePersona } from '@/core/states/personaState.js';
@@ -15,6 +15,7 @@ const props = defineProps({
 const emit = defineEmits(['action-save', 'action-delete', 'action-close']);
 
 const headerEl = ref(null);
+const isDesktop = ref(typeof window !== 'undefined' && window.innerWidth >= 768);
 
 // State
 const state = reactive({
@@ -59,7 +60,7 @@ const headerClasses = computed(() => {
     const classes = ['app-header'];
     if (state.scrollHidden && !state.isChatSearchMode && state.mode !== 'editor') classes.push('scroll-hidden');
     if (state.mode === 'chat') classes.push('fixed-header');
-    if (['generation', 'more'].includes(state.mode) || state.hasSubheader || state.showSearch || state.lorebookBanner.show || state.lorebookBanner.isTransitioning) {
+    if (['generation', 'more'].includes(state.mode) || state.hasSubheader || state.lorebookBanner.show || state.lorebookBanner.isTransitioning) {
         classes.push('header-wrap');
     }
     return classes.join(' ');
@@ -470,6 +471,9 @@ onMounted(() => {
     window.addEventListener('header-setup-submenu', onSetupSubmenu);
     window.addEventListener('header-force-update', onForceUpdate);
     window.addEventListener('gl-header-update', onGlossaryHeaderUpdate);
+    const onResize = () => { isDesktop.value = window.innerWidth >= 768; };
+    window.addEventListener('resize', onResize);
+    onUnmounted(() => window.removeEventListener('resize', onResize));
 });
 
 onBeforeUnmount(() => {
@@ -494,7 +498,11 @@ function onGlossaryHeaderUpdate(e) {
 }
 
 watch(() => state.searchQuery, (val) => {
-    if (state.mode === 'chat' && state.isChatSearchMode) {
+    if (state.mode === 'chat' && (state.isChatSearchMode || isDesktop.value)) {
+        // On desktop, keep isSearchMode in sync with whether there's a query
+        if (isDesktop.value) {
+            window.dispatchEvent(new CustomEvent('header-chat-search-toggle', { detail: val.length > 0 }));
+        }
         window.dispatchEvent(new CustomEvent('header-chat-search', { detail: val }));
     } else {
         window.dispatchEvent(new CustomEvent('header-search', { detail: val }));
@@ -567,8 +575,9 @@ defineExpose({ updateHeader });
         @after-enter="onAfterTransition"
       >
           <!-- Chat Mode -->
-          <div v-if="state.mode === 'chat'" class="header-chat-info" id="header-chat-info" key="chat">
-              <template v-if="state.isChatSearchMode">
+          <div v-if="state.mode === 'chat'" class="header-chat-info" :class="{ 'header-chat-info--desktop': isDesktop }" id="header-chat-info" key="chat">
+              <!-- Mobile search overlay -->
+              <template v-if="state.isChatSearchMode && !isDesktop">
                   <div class="chat-search-wrapper">
                       <div class="chat-search-back" @click="handleBack">
                           <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
@@ -579,38 +588,55 @@ defineExpose({ updateHeader });
                       </div>
                   </div>
               </template>
+              <!-- Default (mobile) or desktop avatar+name -->
               <template v-else>
-                  <div class="header-avatar">
+                  <div class="header-avatar" :class="{ 'header-avatar--desktop': isDesktop }">
                       <img v-if="state.chat.avatar" id="chat-header-avatar" :src="state.chat.avatar" alt="" @click.stop="handleAvatarClick">
                       <div v-else id="chat-header-avatar-placeholder" class="avatar-placeholder" :style="{ backgroundColor: state.chat.color || '#ccc' }">
                           {{ state.chat.initial }}
                       </div>
                   </div>
-                  <div style="display: flex; flex-direction: column; justify-content: center; margin-left: 10px;">
+                  <div style="display: flex; flex-direction: column; justify-content: center; margin-left: 10px; min-width: 0; flex: 1;">
                       <div style="display: flex; align-items: center;">
                           <div class="header-name" id="chat-header-name" style="line-height: 1.2;">{{ state.chat.name }}</div>
                       </div>
                       <div id="chat-header-session" style="color: var(--text-gray); font-size: 0.8em; line-height: 1.2;">{{ state.chat.session }}</div>
+                  </div>
+                  <!-- Desktop inline search -->
+                  <div v-if="isDesktop" class="header-search-inline chat-search-inline-desktop">
+                      <div class="search-field-wrapper">
+                          <input type="text" v-model="state.searchQuery" :placeholder="t('search_messages') || 'Search messages'">
+                      </div>
                   </div>
               </template>
           </div>
 
           <!-- Default Mode (Title + Bottom Content) -->
           <div v-else class="header-default-group" key="default">
-              <!-- Center Content (Title) -->
-              <div class="header-content" id="header-content-default">
-                  <Transition name="title-fade">
-                      <span :key="state.title" id="header-title">{{ state.title }}</span>
-                  </Transition>
+              <!-- Top Row: Title (left, next to logo) + Inline Search (right) -->
+              <div class="header-top-row">
+                  <div class="header-content" id="header-content-default">
+                      <Transition name="title-fade">
+                          <span :key="state.title" id="header-title">{{ state.title }}</span>
+                      </Transition>
+                  </div>
+                  <!-- Inline Search -->
+                  <div v-if="state.showSearch" class="header-search-inline">
+                      <div class="search-field-wrapper">
+                          <Transition name="fade-slide">
+                              <input :key="state.searchPlaceholder" type="text" v-model="state.searchQuery" :placeholder="state.searchPlaceholder">
+                          </Transition>
+                      </div>
+                  </div>
               </div>
 
-              <!-- Dynamic Bottom Content (Tabs, Search, Persona) -->
-              <Transition name="header-fade" 
-                @before-leave="onBeforeTransition" 
-                @leave="onStartTransition" 
+              <!-- Dynamic Bottom Content (Generation Tabs only) -->
+              <Transition name="header-fade"
+                @before-leave="onBeforeTransition"
+                @leave="onStartTransition"
                 @after-leave="onAfterTransition"
-                @before-enter="onBeforeTransition" 
-                @enter="onStartTransition" 
+                @before-enter="onBeforeTransition"
+                @enter="onStartTransition"
                 @after-enter="onAfterTransition"
               >
                   <!-- Generation Sub-tabs -->
@@ -618,15 +644,6 @@ defineExpose({ updateHeader });
                       <div class="segmented-control">
                           <div class="sub-tab-btn" :class="{ active: state.generationTab === 'subview-api' }" @click="handleGenTabClick('subview-api')">{{ state.tabApiLabel }}</div>
                           <div class="sub-tab-btn" :class="{ active: state.generationTab === 'subview-preset' }" @click="handleGenTabClick('subview-preset')">{{ state.tabPresetLabel }}</div>
-                      </div>
-                  </div>
-
-                  <!-- Built-in Search Bar -->
-                  <div v-else-if="state.showSearch" class="search-bar" key="search">
-                      <div class="search-field-wrapper">
-                          <Transition name="fade-slide">
-                              <input :key="state.searchPlaceholder" type="text" v-model="state.searchQuery" :placeholder="state.searchPlaceholder">
-                          </Transition>
                       </div>
                   </div>
 
@@ -794,7 +811,15 @@ defineExpose({ updateHeader });
     width: 100%;
     display: flex;
     flex-direction: column;
+    align-items: stretch;
+}
+
+.header-top-row {
+    width: 100%;
+    display: flex;
+    flex-direction: row;
     align-items: center;
+    height: 56px;
 }
 
 .header-chat-info {
@@ -805,6 +830,12 @@ defineExpose({ updateHeader });
     height: 56px;
     width: 100%;
     justify-content: center;
+}
+
+.header-chat-info--desktop {
+    justify-content: flex-start;
+    padding-left: 52px;
+    padding-right: 12px;
 }
 
 .header-avatar {
@@ -827,38 +858,43 @@ defineExpose({ updateHeader });
     align-items: center;
     cursor: pointer;
     position: relative;
-    justify-content: center;
+    justify-content: flex-start;
     height: 56px;
     transition: width var(--transition-speed) ease;
     z-index: 5;
     background-color: transparent;
+    flex: 1;
+    min-width: 0;
+    padding-left: 52px;
 }
 
-/* When wrapped, title takes full width to force break to new line for custom content */
+/* In wrap mode (generation tabs) header-content fills the top row */
 .app-header.header-wrap .header-content {
     width: 100%;
+    flex: 1;
 }
 
 
 #header-title {
     display: block;
-    text-align: center;
+    text-align: left;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 #header-title.fade-out {
     opacity: 0;
 }
 
-/* Search Bar */
-.search-bar {
+/* Inline Search (in title row) */
+.header-search-inline {
     display: flex;
-    padding: 0 16px 12px 16px;
-    background-color: transparent;
-    width: 100%;
-    box-sizing: border-box;
-    order: 10;
-    flex-basis: 100%;
-    overflow: hidden;
+    align-items: center;
+    padding-right: 12px;
+    padding-left: 8px;
+    flex-shrink: 0;
+    width: 200px;
 }
 
 .search-field-wrapper {
@@ -870,13 +906,13 @@ defineExpose({ updateHeader });
     overflow: hidden;
 }
 
-.search-bar input {
+.header-search-inline input {
     width: 100%;
     height: 100%;
-    padding: 0 16px;
+    padding: 0 12px;
     border: none;
     background-color: var(--bg-gray);
-    font-size: 16px;
+    font-size: 14px;
     outline: none;
     color: var(--text-black);
     text-align: center;

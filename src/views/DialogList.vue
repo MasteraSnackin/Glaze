@@ -12,7 +12,8 @@ import { importSillyTavernChat, exportSillyTavernChat, exportGlazeChat, pickChat
 import { allPersonas, loadPersonas } from '@/core/states/personaState.js';
 
 const props = defineProps({
-  activeCategory: { type: String, default: 'all' }
+  activeCategory: { type: String, default: 'all' },
+  collapsed: { type: Boolean, default: false }
 });
 
 const emit = defineEmits(['open-chat']);
@@ -511,8 +512,32 @@ onUnmounted(() => {
 
 <template>
   <div class="view-content-wrapper">
-      <div class="list-container">
-          <template v-if="!dialogGrouping">
+      <div class="list-container" :class="{ 'list-container-collapsed': collapsed }">
+
+          <!-- Collapsed: icon-only avatar strip -->
+          <template v-if="collapsed">
+              <div v-for="group in groupedChats" :key="'col_' + group.latest.id"
+                   class="collapsed-avatar-item"
+                   :class="{ unread: unread[group.latest.id] }"
+                   :title="group.latest.name"
+                   @click="onOpenChat(group.latest)">
+                  <div class="collapsed-avatar-circle">
+                      <img v-if="group.latest.thumbnail || group.latest.avatar"
+                           :src="getAvatarUrl(group.latest.thumbnail || group.latest.avatar)"
+                           :alt="group.latest.name" loading="lazy">
+                      <div v-else class="avatar-placeholder"
+                           :style="{ backgroundColor: group.latest.color || '#66ccff' }">
+                          {{ group.latest.name && group.latest.name[0] ? group.latest.name[0].toUpperCase() : '?' }}
+                      </div>
+                  </div>
+                  <div class="collapsed-unread-dot" v-if="unread[group.latest.id]"></div>
+              </div>
+              <div v-if="groupedChats.length === 0" class="collapsed-empty">
+                  <svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/></svg>
+              </div>
+          </template>
+
+          <template v-if="!dialogGrouping && !collapsed">
               <div v-for="chat in filteredChats" :key="chat.id + '_' + chat.sessionId" class="list-item" :class="{ unread: unread[chat.id] && chat.isCurrent }" v-long-press="() => openActions(chat)" v-hover-glow @click="handleItemClick($event, chat)" @contextmenu.prevent="openActions(chat)">
                 <div class="avatar">
                     <img v-if="chat.thumbnail || chat.avatar" :src="getAvatarUrl(chat.thumbnail || chat.avatar)" :alt="chat.name" loading="lazy">
@@ -534,7 +559,7 @@ onUnmounted(() => {
           </template>
 
           <!-- Grouped mode -->
-          <template v-else>
+          <template v-else-if="dialogGrouping && !collapsed">
               <div v-for="group in groupedChats" :key="'g_' + group.latest.id" class="group-block">
                 <!-- Character group header -->
                 <div class="list-item group-header" :class="{ unread: unread[group.latest.id] && !expandedGroups.has(group.latest.id) }" v-long-press="() => openActions(group.latest, 'header')" v-hover-glow @click="handleHeaderClick($event, group.latest.id)" @contextmenu.prevent="openActions(group.latest, 'header')">
@@ -595,7 +620,7 @@ onUnmounted(() => {
               </div>
           </template>
 
-          <div v-if="filteredChats.length === 0" class="empty-state">
+          <div v-if="filteredChats.length === 0 && !collapsed" class="empty-state">
               <svg class="empty-state-icon" viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/></svg>
               <div class="empty-state-text">{{ translations[currentLang.value]?.no_dialogs || 'No dialogs' }}</div>
           </div>
@@ -605,6 +630,81 @@ onUnmounted(() => {
 
 <style scoped>
 .list-container { padding-bottom: calc(80px + var(--sab)); }
+.list-container-collapsed { padding-bottom: 0; }
+
+/* Lock list-item to a fixed height so it never changes on sidebar toggle */
+.list-item {
+    height: 72px;
+    box-sizing: border-box;
+    overflow: hidden;
+}
+.list-item .item-content {
+    overflow: hidden;
+}
+
+/* Collapsed avatar strip — mirrors .list-item padding and .avatar size */
+.collapsed-avatar-item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px 0;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background-color 0.15s ease;
+}
+.collapsed-avatar-item:hover { background-color: rgba(255, 255, 255, 0.05); }
+.collapsed-avatar-item.unread .collapsed-avatar-circle {
+    box-shadow: 0 0 0 2px var(--vk-blue);
+}
+.collapsed-avatar-circle {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.collapsed-avatar-circle img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+.collapsed-avatar-circle .avatar-placeholder {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: 1.5em;
+    font-weight: 500;
+}
+.collapsed-unread-dot {
+    position: absolute;
+    top: 10px;
+    /* avatar centered in 64px: starts at 8px, ends at 56px → dot at ~52px */
+    left: 52px;
+    width: 9px;
+    height: 9px;
+    background-color: var(--vk-blue);
+    border-radius: 50%;
+    border: 1.5px solid var(--ui-bg, #1e1e1e);
+}
+.collapsed-empty {
+    display: flex;
+    justify-content: center;
+    padding: 12px 0;
+    opacity: 0.3;
+}
+.collapsed-empty svg {
+    width: 22px;
+    height: 22px;
+    fill: var(--text-color, #fff);
+}
 .session-label { color: var(--text-gray); font-size: 0.8em; margin-bottom: 2px; }
 .msg-preview { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .session-count-label { color: var(--text-gray); font-size: 0.8em; margin-bottom: 2px; }

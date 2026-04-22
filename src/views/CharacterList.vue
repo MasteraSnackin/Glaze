@@ -583,16 +583,24 @@ defineExpose({ onAddCharacter, loadCharacters });
 <template>
   <div class="view-content-wrapper">
     <!-- Tab Bar -->
-    <div class="top-tabs-container">
-      <div class="tab-slider" :style="{ transform: `translateX(${activeTab === 'catalog' ? '100%' : '0'})` }"></div>
-      <div class="top-tab" :class="{ active: activeTab === 'characters' }" @click="activeTab = 'characters'">
-        <svg viewBox="0 0 24 24" class="tab-icon"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
-        <span>{{ t('tab_my_characters') }}</span>
+    <div class="tabs-row">
+      <div class="top-tabs-container">
+        <div class="tab-slider" :style="{ transform: `translateX(${activeTab === 'catalog' ? '100%' : '0'})` }"></div>
+        <div class="top-tab" :class="{ active: activeTab === 'characters' }" @click="activeTab = 'characters'">
+          <svg viewBox="0 0 24 24" class="tab-icon"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+          <span>{{ t('tab_my_characters') }}</span>
+        </div>
+        <div class="top-tab" :class="{ active: activeTab === 'catalog' }" @click="activeTab = 'catalog'">
+          <svg viewBox="0 0 24 24" class="tab-icon"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+          <span>{{ t('tab_catalog') }}</span>
+        </div>
       </div>
-      <div class="top-tab" :class="{ active: activeTab === 'catalog' }" @click="activeTab = 'catalog'">
-        <svg viewBox="0 0 24 24" class="tab-icon"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
-        <span>{{ t('tab_catalog') }}</span>
-      </div>
+      <Transition name="tabs-add-btn">
+        <button v-if="activeTab === 'characters'" class="tabs-add-btn" @click="onAddCharacter">
+          <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+          <span>{{ t('btn_add') }}</span>
+        </button>
+      </Transition>
     </div>
 
     <!-- Catalog Tab -->
@@ -712,12 +720,19 @@ defineExpose({ onAddCharacter, loadCharacters });
   height: calc(100dvh - var(--header-height, 60px) - 16px - 53px - var(--footer-height, 80px) - 20px);
 }
 
+.tabs-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 10px 16px 12px;
+}
+
 .top-tabs-container {
   display: flex;
   position: relative;
   align-items: stretch;
   padding: 0;
-  margin: 10px 16px 12px;
+  flex: 1;
   background-color: rgba(var(--vk-blue-rgb, 82, 139, 204), 0.1);
   backdrop-filter: blur(var(--element-blur, 12px));
   -webkit-backdrop-filter: blur(var(--element-blur, 12px));
@@ -728,9 +743,59 @@ defineExpose({ onAddCharacter, loadCharacters });
 
 @media (min-width: 600px) {
   .top-tabs-container {
-    width: clamp(320px, 33.333%, 500px);
-    margin-right: auto;
+    flex: 0 0 clamp(320px, 33.333%, 500px);
   }
+}
+
+.tabs-add-btn {
+  display: none;
+}
+
+@media (min-width: 600px) {
+  .tabs-add-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 40px;
+    padding: 0 16px;
+    border-radius: 100px;
+    background-color: var(--vk-blue, #4080ff);
+    color: #fff;
+    font-size: 14px;
+    font-weight: 600;
+    border: none;
+    cursor: pointer;
+    flex-shrink: 0;
+    margin-left: auto;
+    transition: transform 0.1s ease, opacity 0.2s;
+    user-select: none;
+  }
+
+  .tabs-add-btn:hover {
+    transform: translateY(-1px);
+  }
+
+  .tabs-add-btn:active {
+    transform: scale(0.95);
+    opacity: 0.85;
+  }
+
+  .tabs-add-btn svg {
+    width: 18px;
+    height: 18px;
+    fill: currentColor;
+  }
+}
+
+.tabs-add-btn-enter-active,
+.tabs-add-btn-leave-active {
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.tabs-add-btn-enter-from,
+.tabs-add-btn-leave-to {
+  opacity: 0;
+  transform: scale(0.85);
 }
 
 .tab-slider {

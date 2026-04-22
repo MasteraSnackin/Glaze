@@ -532,7 +532,7 @@ const fabConfig = computed(() => {
             text: translations[currentLang.value]?.btn_new_chat || 'New Chat',
             action: () => dialogListRef.value?.openNewChatPicker()
         };
-    } else if (currentView.value === 'view-characters') {
+    } else if (currentView.value === 'view-characters' && !isDesktop.value) {
         return {
             text: translations[currentLang.value]?.btn_add || 'Add',
             action: () => characterListRef.value?.onAddCharacter()

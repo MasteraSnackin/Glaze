@@ -37,10 +37,38 @@ const emit = defineEmits([
     'magic-glossary'
 ]);
 
-const { width: rightSidebarWidth, startResize: startRightResize } = useSidebarResizer('gz_right_sidebar_width', 300, 'right', 200, 800);
+// collapsed is derived from drag-resize width — same mechanic as left sidebar
+const { width: rightSidebarWidth, collapsed, startResize: startRightResizeOriginal } = useSidebarResizer('gz_right_sidebar_width', 300, 'right', 200, 800);
+
+const startRightResize = (e) => {
+    // If the user manually resizes, cancel any pending auto-collapse
+    wasAutoExpanded.value = false;
+    startRightResizeOriginal(e);
+};
 
 const isChat = computed(() => props.currentView === 'view-chat');
 const hasSheet = computed(() => props.bottomSheetState.visible || props.sidebarState.isOccupied);
+
+// ── Auto-expand on subview ──
+let wasAutoExpanded = ref(false);
+
+watch(hasSheet, (newHasSheet, oldHasSheet) => {
+    // Opening a sumbview
+    if (newHasSheet && !oldHasSheet) {
+        if (collapsed.value) {
+            wasAutoExpanded.value = true;
+            // Restore to user's saved width, or default 300
+            rightSidebarWidth.value = parseInt(localStorage.getItem('gz_right_sidebar_width')) || 300;
+        }
+    } 
+    // Closing a subview
+    else if (!newHasSheet && oldHasSheet) {
+        if (wasAutoExpanded.value) {
+            rightSidebarWidth.value = 64; // COLLAPSED_WIDTH
+            wasAutoExpanded.value = false;
+        }
+    }
+});
 
 // Active tool tracking
 const activeTool = ref(null);
@@ -53,6 +81,15 @@ const toolComponentMap = {
     'view-lorebook': LorebookSheet,
     'view-regex': RegexSheet,
 };
+
+// Tool strip icon definitions (mirrors ToolsView.vue tools list)
+const toolStripItems = [
+    { id: 'view-personas', icon: 'M19 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm6 12H6v-1c0-2 4-3.1 6-3.1s6 1.1 6 3.1v1z' },
+    { id: 'view-presets', icon: 'M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6h-6V2zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z' },
+    { id: 'view-api', icon: 'M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z' },
+    { id: 'view-lorebook', icon: 'M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9H9V9h10v2zm-4 4H9v-2h6v2zm4-8H9V5h10v2z' },
+    { id: 'view-regex', icon: 'M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z' },
+];
 
 const activeToolComponent = computed(() =>
     activeTool.value ? toolComponentMap[activeTool.value] : null
@@ -96,10 +133,16 @@ function openTool(viewId) {
         }
         return;
     }
+    
+    // Auto-expand before setting active tool so the component can mount
+    if (collapsed.value) {
+        wasAutoExpanded.value = true;
+        rightSidebarWidth.value = parseInt(localStorage.getItem('gz_right_sidebar_width')) || 300;
+    }
+    
     activeTool.value = viewId;
     // ref.open() will be called by the watch above when component mounts
 }
-
 
 </script>
 
@@ -110,7 +153,8 @@ function openTool(viewId) {
       :class="{
           'has-sheet': hasSheet,
           'tools-mode': !isChat,
-          'is-chat': isChat
+          'is-chat': isChat,
+          'sidebar-collapsed': collapsed
       }"
       :style="{ width: rightSidebarWidth + 'px', minWidth: rightSidebarWidth + 'px', maxWidth: rightSidebarWidth + 'px' }"
   >
@@ -121,8 +165,8 @@ function openTool(viewId) {
           <MagicDrawer
               :visible="true"
               :sidebar-mode="true"
-              :icon-only="hasSheet"
-              :class="{ 'left-icon-strip': hasSheet }"
+              :icon-only="hasSheet || collapsed"
+              :class="{ 'left-icon-strip': hasSheet && !collapsed }"
               :active-char="activeChatCharObj"
               @magic-notes="emit('magic-notes')"
               @magic-context="emit('magic-context')"
@@ -139,7 +183,7 @@ function openTool(viewId) {
               @magic-image-gen="emit('magic-image-gen')"
               @magic-glossary="emit('magic-glossary')"
               @request-preview="() => {}"
-               @close="() => {}"
+              @close="() => {}"
           />
 
           <BottomSheet
@@ -152,16 +196,39 @@ function openTool(viewId) {
 
       <!-- ── Non-chat mode: Tools icon strip + ToolsView + tool sheets ── -->
       <template v-else>
-          <!-- ToolsView background -->
-          <div class="tools-view-bg">
-              <ToolsView :sidebar-mode="true" @tool-select="openTool" />
-          </div>
+          <!-- Collapsed: vertical tool icon strip mirroring MagicDrawer icon styling -->
+          <template v-if="collapsed">
+              <div class="tools-strip magic-drawer-sidebar icon-only">
+                  <div class="drawer-content">
+                      <div
+                          v-for="item in toolStripItems"
+                          :key="item.id"
+                          class="magic-item"
+                          :class="{ active: activeTool === item.id }"
+                          @click="openTool(item.id)"
+                      >
+                          <div class="magic-item-content">
+                              <div class="card-icon">
+                                  <svg viewBox="0 0 24 24"><path :d="item.icon"/></svg>
+                              </div>
+                          </div>
+                      </div>
+                  </div>
+              </div>
+          </template>
 
-          <component
-              :is="activeToolComponent"
-              v-if="activeToolComponent"
-              ref="activeToolRef"
-          />
+          <!-- Expanded: ToolsView background + active tool sheet -->
+          <template v-else>
+              <div class="tools-view-bg">
+                  <ToolsView :sidebar-mode="true" @tool-select="openTool" />
+              </div>
+
+              <component
+                  :is="activeToolComponent"
+                  v-if="activeToolComponent"
+                  ref="activeToolRef"
+              />
+          </template>
       </template>
 
       <!-- Unified Sidebar Content container (Teleport target) -->
@@ -190,5 +257,102 @@ function openTool(viewId) {
 
 .tools-view-bg :deep(.view) {
     padding-bottom: 8px !important;
+}
+
+/* ── Collapsed tools strip ── */
+.tools-strip {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 64px;
+    height: 100%;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: none;
+    padding-top: 8px; /* Offset to match MagicDrawer strip padding natively if needed, though drawer-content adds padding */
+}
+
+.tools-strip::-webkit-scrollbar {
+    display: none;
+}
+
+/* Base Magic Drawer imitation classes for tools strip */
+.tools-strip.magic-drawer-sidebar {
+    position: relative !important;
+    background-color: transparent !important;
+    backdrop-filter: none !important;
+    border: none !important;
+    box-shadow: none !important;
+}
+
+.tools-strip .drawer-content {
+    display: flex;
+    flex-direction: column;
+    padding: 0 !important;
+    width: 100%;
+}
+
+.tools-strip .magic-item {
+    background-color: transparent !important;
+    backdrop-filter: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+    padding: 14px 16px !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+    margin: 0 !important;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    justify-content: flex-start !important;
+    min-height: 48px;
+    display: flex;
+}
+
+.tools-strip .magic-item:hover {
+    background-color: rgba(255, 255, 255, 0.04) !important;
+}
+
+.tools-strip .magic-item:active {
+    background-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+.tools-strip .magic-item.active {
+    background-color: rgba(82, 139, 204, 0.08) !important;
+}
+
+.tools-strip .magic-item.active .card-icon {
+    background-color: rgba(82, 139, 204, 0.15);
+}
+.tools-strip .magic-item.active .card-icon svg {
+    fill: var(--vk-blue, #528bcc);
+    opacity: 1;
+}
+
+.tools-strip .magic-item-content {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start !important;
+    width: 100%;
+}
+
+.tools-strip .card-icon {
+    width: 28px;
+    height: 28px;
+    flex-shrink: 0;
+    padding: 5px;
+    background-color: var(--accent-color, rgba(var(--ui-bg-rgb), 0.1));
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.2s;
+}
+
+.tools-strip .card-icon svg {
+    width: 100%;
+    height: 100%;
+    fill: #ffffff;
+    opacity: 0.8;
+    transition: fill 0.2s, opacity 0.2s;
 }
 </style>
