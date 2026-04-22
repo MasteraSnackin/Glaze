@@ -140,12 +140,16 @@ export async function importSillyTavernChat(file, characterId, userPersona) {
                 let lastTimestamp = 0;
                 messages = json.map(obj => {
                     const scMsg = convertMessage(obj, userPersona);
+                    // Skip completely empty messages
+                    if (!scMsg.text && (!scMsg.swipes || scMsg.swipes.every(s => !s))) {
+                        return null;
+                    }
                     if (scMsg.timestamp <= lastTimestamp) {
                         scMsg.timestamp = lastTimestamp + 1;
                     }
                     lastTimestamp = scMsg.timestamp;
                     return scMsg;
-                });
+                }).filter(Boolean);
             }
         } catch (e) {
             console.warn("Failed to parse JSON array mode, proceeding to JSONL stream", e);
@@ -164,12 +168,16 @@ export async function importSillyTavernChat(file, characterId, userPersona) {
                 if (obj.chat_metadata) {
                     metadata = obj.chat_metadata;
                 } else {
-                    const scMsg = convertMessage(obj, userPersona);
-                    if (scMsg.timestamp <= lastTimestamp) {
-                        scMsg.timestamp = lastTimestamp + 1;
-                    }
-                    lastTimestamp = scMsg.timestamp;
-                    messages.push(scMsg);
+                const scMsg = convertMessage(obj, userPersona);
+                // Skip completely empty messages
+                if (!scMsg.text && (!scMsg.swipes || scMsg.swipes.every(s => !s))) {
+                    return;
+                }
+                if (scMsg.timestamp <= lastTimestamp) {
+                    scMsg.timestamp = lastTimestamp + 1;
+                }
+                lastTimestamp = scMsg.timestamp;
+                messages.push(scMsg);
                 }
             } catch (e) {
                 console.warn(`Skipping invalid JSON line at index ${lineIndex}`, e);
@@ -345,6 +353,8 @@ export async function exportSillyTavernChat(chat) {
     // 2. Message Lines
     for (const msg of messages) {
         if (!msg) continue;
+        // Skip empty messages that have no meaningful content
+        if (!msg.text && (!msg.swipes || msg.swipes.every(s => !s))) continue;
         const isUser = msg.role === 'user';
         const name = isUser ? (msg.persona?.name || userName) : charName;
         const dateObj = new Date(msg.timestamp || Date.now());
@@ -515,13 +525,26 @@ function convertMessage(stMsg, userPersona) {
         time: time,
         timestamp: timestamp,
         id: stMsg.extra?.glazeMessageId || `legacy_${timestamp}_${Math.random().toString(36).slice(2, 6)}`,
-        // Ensure swipes are transferred
-        swipes: Array.isArray(stMsg.swipes) ? stMsg.swipes : [stMsg.mes || ""],
+        // Ensure swipes are transferred, filtering out null/undefined entries
+        swipes: Array.isArray(stMsg.swipes) 
+            ? stMsg.swipes.filter(s => s !== null && s !== undefined).map(s => String(s))
+            : [String(stMsg.mes || "")],
         swipeId: typeof stMsg.swipe_id === 'number' ? stMsg.swipe_id : 0,
         contextRefs: Array.isArray(stMsg.extra?.glazeContextRefs) ? stMsg.extra.glazeContextRefs : [],
         memoryCoverage: stMsg.extra?.glazeMemoryCoverage || createEmptyMemoryCoverage(),
         triggeredMemories: Array.isArray(stMsg.extra?.glazeTriggeredMemories) ? stMsg.extra.glazeTriggeredMemories : []
     };
+
+    // Normalize swipesMeta length to match swipes
+    if (scMsg.swipes.length > 0) {
+        if (!scMsg.swipesMeta) scMsg.swipesMeta = [];
+        while (scMsg.swipesMeta.length < scMsg.swipes.length) {
+            scMsg.swipesMeta.push({});
+        }
+        if (scMsg.swipesMeta.length > scMsg.swipes.length) {
+            scMsg.swipesMeta.length = scMsg.swipes.length;
+        }
+    }
 
     // User specific
     if (role === 'user') {
