@@ -1,3 +1,6 @@
+import { publishAppEvent } from '@/core/events/eventHub.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
+
 function applyCompletionToMessage({
     msg,
     response,
@@ -134,7 +137,7 @@ export async function handleGenerationComplete({
         if (!currentState || currentState.genId !== genId) {
             await clearTypingStateForMessage({ charId: char.id, sessionId, msgId });
             ensureStaleCleanup();
-            window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: char.id, sessionId } }));
+            publishAppEvent(APP_EVENTS.domain.generation.ended, { charId: char.id, sessionId });
             return;
         }
 
@@ -151,7 +154,7 @@ export async function handleGenerationComplete({
         if (controller.signal.aborted && !hasCompletionPayload) {
             await clearTypingStateForMessage({ charId: char.id, sessionId, msgId });
             ensureCleanup();
-            window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: char.id, sessionId } }));
+            publishAppEvent(APP_EVENTS.domain.generation.ended, { charId: char.id, sessionId });
             return;
         }
 
@@ -232,7 +235,7 @@ export async function handleGenerationComplete({
                 }
             }
 
-            window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: char.id, sessionId } }));
+            publishAppEvent(APP_EVENTS.domain.generation.ended, { charId: char.id, sessionId });
             return;
         }
 
@@ -290,10 +293,10 @@ export async function handleGenerationComplete({
                     const newUnread = unread || {};
                     newUnread[char.id] = true;
                     db.set('gz_unread', newUnread);
-                    window.dispatchEvent(new CustomEvent('chat-updated'));
+                    publishAppEvent(APP_EVENTS.domain.chat.updated);
                 });
 
-                window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: char.id, sessionId } }));
+                publishAppEvent(APP_EVENTS.domain.generation.ended, { charId: char.id, sessionId });
             }
         }
     } catch (completeErr) {
@@ -305,6 +308,6 @@ export async function handleGenerationComplete({
             msgId,
             errorLabel: '[onComplete]'
         });
-        window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: char.id, sessionId } }));
+        publishAppEvent(APP_EVENTS.domain.generation.ended, { charId: char.id, sessionId });
     }
 }

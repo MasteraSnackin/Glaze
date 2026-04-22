@@ -2,8 +2,10 @@ import { initGlobalErrorHandling } from './utils/errors.js';
 import { createApp } from 'vue';
 import App from './App.vue';
 import './assets/styles.css';
+import { initWindowEventBridge } from '@/core/events/bridges/windowEventBridge.js';
 
 initGlobalErrorHandling();
+initWindowEventBridge();
 
 const app = createApp(App);
 

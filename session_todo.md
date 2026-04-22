@@ -1,8 +1,13 @@
 # Session Todo - 2026-04-22
 
 ## Current Branch
-- `fixes/urgent-bugfixes`
-- Created from: `origin/dev` (23d7b36)
+- `feat/refactor-phase1-event-hub`
+- Created from: `fixes/urgent-bugfixes`
+
+## Branch Context
+- Stabilization work continues to live on `fixes/urgent-bugfixes`
+- Current work is the first dedicated architecture-refactor slice branched from that stabilized bugfix branch
+- Refactor rule for this branch: structural changes only, no intentional prompt/transport behavior changes
 
 ---
 
@@ -44,16 +49,16 @@
 
 ---
 
-## Active Bugfix Focus
+## Bugfix Follow-Ups (Deferred While Refactor Slice Is Isolated)
 
-### 1. Sync Verification (In Progress)
+### 1. Sync Verification
 - [x] Verify `fullPull()` restores API endpoint/model/temp across devices
 - [x] Verify active theme preset switches correctly after sync
 - [x] Verify API keys are NOT synced when toggle is OFF
 - [x] Verify API keys ARE synced when toggle is ON
 - [ ] Test sync speed with unchanged theme images
 
-### 2. Chat Open / Swipe Crash (In Progress)
+### 2. Chat Open / Swipe Crash
 - [ ] Re-import previously crashing chat and test open + swipe + scroll
 - [x] Verify exported JSONL no longer contains empty lines
 - [ ] If crash persists on 400+ messages, investigate virtual scroll rendering
@@ -109,6 +114,31 @@ Tracked in `REFACTOR_PLAN.md` and `REFACTOR_PHASE_0_CHECKLIST.md`:
 
 ---
 
+## Current Refactor Slice
+
+### Phase 1: Event Hub + Event Catalog Skeleton
+- [x] Created dedicated refactor branch from `fixes/urgent-bugfixes`
+- [x] Added `src/core/events/eventNames.js`
+- [x] Added `src/core/events/contracts.js`
+- [x] Added `src/core/events/eventHub.js`
+- [x] Added `src/core/events/bridges/windowEventBridge.js`
+- [x] Initialized window compatibility bridge in `src/main.js`
+- [x] Migrated a safe emitter subset to canonical app events
+- [x] Updated `ARCHITECTURE.md` during implementation
+- [x] `npm run build` passes
+- [ ] Migrate first listener subset off raw `window.addEventListener(...)`
+- [ ] Define official use-case entrypoint contracts
+- [ ] Add request ownership token model (next phase)
+
+### Safe Emitter Subset Migrated
+- generation started / ended
+- chat updated
+- sync data refreshed
+- API context settings changed
+- open API sheet
+
+---
+
 ## Commit Log
 
 1. `fix: include API runtime and theme state in cloud sync`
@@ -129,6 +159,7 @@ Target PR: `upstream/dev`
 
 - [x] `npm run build` passes
 - [ ] `npm test -- --run` passes
+- [x] Refactor slice: legacy `window` listeners preserved via event bridge
 - [x] Manual: chat generation start/stop
 - [x] Manual: abort + regenerate
 - [x] Manual: sync push/pull with updated settings round-trips correctly

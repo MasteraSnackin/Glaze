@@ -30,6 +30,24 @@ The current roadmap is:
 3. Add vector-based lorebook entries and retrieval
 4. Build memory books on top of that foundation
 
+## Current Refactor Branch
+
+- Branch: `feat/refactor-phase1-event-hub`
+- Base: `fixes/urgent-bugfixes`
+- Scope: start `REFACTOR_PLAN.md` Phase 1 with the smallest safe structural slice
+- Current slice status: `done`
+- Current slice testing: `tested` (`npm run build`)
+
+Current slice deliverables:
+- [done] Added internal event catalog in `src/core/events/eventNames.js`
+- [done] Added internal event hub in `src/core/events/eventHub.js`
+- [done] Added window compatibility bridge in `src/core/events/bridges/windowEventBridge.js`
+- [done] Initialized bridge in `src/main.js`
+- [done] Switched a safe subset of emitters to canonical internal events while preserving legacy `window` listeners
+- [not done] Migrate listener side to internal subscriptions
+- [not done] Introduce request ownership tokens
+- [not done] Promote `generateChat` and related flows to official use-case entrypoints
+
 This roadmap intentionally assumes the tokenizer and current context UI are already in place and are not being redesigned again unless a new decision is made explicitly.
 
 ## Decisions Already Made

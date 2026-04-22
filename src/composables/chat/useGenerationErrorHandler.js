@@ -1,3 +1,6 @@
+import { publishAppEvent } from '@/core/events/eventHub.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
+
 export async function handleGenerationError({
     error,
     char,
@@ -46,7 +49,7 @@ export async function handleGenerationError({
             await restoreState(false);
             clearGenerationState(char.id);
             if (activeChatChar && activeChatChar.id === char.id) isGenerating.value = false;
-            window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: char.id, sessionId } }));
+            publishAppEvent(APP_EVENTS.domain.generation.ended, { charId: char.id, sessionId });
             return;
         }
 
@@ -88,12 +91,12 @@ export async function handleGenerationError({
             }
         }
 
-        window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: char.id, sessionId } }));
+        publishAppEvent(APP_EVENTS.domain.generation.ended, { charId: char.id, sessionId });
     } catch (handlerErr) {
         console.error('[onError] Error handler failed:', handlerErr);
         await ensureTypingCleared();
         clearGenerationState(char.id);
         if (activeChatChar && activeChatChar.id === char.id) isGenerating.value = false;
-        window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: char.id, sessionId } }));
+        publishAppEvent(APP_EVENTS.domain.generation.ended, { charId: char.id, sessionId });
     }
 }

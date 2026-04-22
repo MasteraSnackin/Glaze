@@ -1,5 +1,72 @@
 # Architecture Audit — Tokenizer, Vectorization, MemoryBooks, Macros, Cloud Sync
 
+## 0. Refactor Transition State
+
+### Current Refactor Slice
+- Branch: `feat/refactor-phase1-event-hub`
+- Base: `fixes/urgent-bugfixes`
+- Status: Phase 1 skeleton started
+- Testing: `npm run build` passed
+
+### Before Refactor
+
+The app was functional, but core ownership was still too concentrated.
+
+- `src/views/ChatView.vue` owned too much chat-generation orchestration, UI coordination, and request lifecycle glue.
+- `src/core/services/generationService.js` still mixed prompt construction, enrichment, payload assembly, preview state, and request dispatch.
+- Many cross-feature reactions depended on ad-hoc `window.dispatchEvent(...)` usage with no internal catalog or explicit ownership boundary.
+
+This made the app hard to extend safely because new behavior often had to pass through the same large files.
+
+### Target Direction
+
+The refactor target is a hybrid model:
+
+```text
+UI
+  -> Use Cases
+    -> Ordered Pipelines
+      -> Transport
+
+Side effects / observers
+  <- Event Hub <- Use Cases / Pipelines
+```
+
+- `UI` gathers user intent and renders state.
+- `Use Cases` own actions like chat generation, summary generation, and memory-draft generation.
+- `Ordered Pipelines` preserve correctness-critical ordering for prompt and request flow.
+- `Event Hub` carries domain facts and optional side effects, but does not replace orchestration.
+
+### Phase 1 Event Layer Skeleton
+
+Files added:
+- `src/core/events/eventNames.js`
+- `src/core/events/contracts.js`
+- `src/core/events/eventHub.js`
+- `src/core/events/bridges/windowEventBridge.js`
+
+Current behavior:
+- Internal canonical event names now exist for a small safe subset of events.
+- `main.js` initializes a bridge from internal app events to the existing legacy `window` events.
+- Existing listeners still work unchanged because the bridge republishes the legacy browser events.
+- A few existing emitters now publish canonical app events first:
+  - generation started/ended
+  - chat updated
+  - sync data refreshed
+  - API context settings changed
+  - open API sheet
+
+What has **not** changed yet:
+- Most listeners still subscribe to `window` events.
+- `ChatView.vue` is still a large orchestration surface.
+- `generationService.js` is still a large orchestration surface.
+- No request-ownership model or use-case boundary was introduced in this slice.
+
+Why this slice is safe:
+- It adds a new internal boundary without removing the legacy one.
+- Runtime behavior stays compatible because `window` remains the active compatibility surface.
+- Later refactor slices can migrate listeners and side effects incrementally instead of forcing a one-shot rewrite.
+
 ## 1. Tokenizer
 
 ### Files
