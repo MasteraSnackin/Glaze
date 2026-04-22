@@ -8,6 +8,7 @@ import { formatError } from '@/utils/errors.js';
 import { processMessageImages } from '@/core/services/imageGenService.js';
 import { sendMessageNotification } from '@/core/services/notificationService.js';
 import { addMessageStats, addRegenerationStats } from '@/core/services/statsService.js';
+import { triggerAutoSyncCheck } from '@/composables/chat/useAutoSync.js';
 import { useGenerationRegistry } from '@/composables/chat/useGenerationRegistry.js';
 import { useTypingStateCleanup } from '@/composables/chat/useTypingStateCleanup.js';
 import { handleGenerationComplete } from '@/composables/chat/useGenerationCompleteHandler.js';
@@ -35,8 +36,7 @@ export function createChatGenerationServices({
     scrollToIndex,
     genMsgId,
     updateSessionMessage,
-    runMemoryAutomationAfterStableTurn,
-    triggerAutoSyncCheck
+    runMemoryAutomationAfterStableTurn
 }) {
     const registry = useGenerationRegistry();
     const { clearTypingStateForMessage } = useTypingStateCleanup({ currentMessages, getChatData, db });

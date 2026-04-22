@@ -92,8 +92,7 @@ import MemoryBooksSheet from '@/components/sheets/MemoryBooksSheet.vue';
 import { addMessageStats, addDeletedStats, addRegenerationStats, migrateStatsIfNeeded } from '@/core/services/statsService.js';
 import { processMessageImages, generateImage, makeLoadingHtml, makeErrorHtml, makeResultHtml } from '@/core/services/imageGenService.js';
 import { showToast } from '@/core/states/toastState.js';
-import { incrementMessageCounter, shouldAutoSync, resetMessageCounter } from '@/core/states/syncState.js';
-import { fullSync } from '@/core/services/syncService.js';
+import { triggerAutoSyncCheck } from '@/composables/chat/useAutoSync.js';
 import { useMemoryBooks } from '@/composables/chat/useMemoryBooks.js';
 import * as memoryBooksService from '@/core/services/memoryBooksService.js';
 import * as contextService from '@/core/services/contextService.js';
@@ -2095,27 +2094,6 @@ const shouldRecommendHide = computed(() => {
     return historyUsagePercent.value >= threshold;
 });
 
-let autoSyncRunning = false;
-let autoSyncCooldownUntil = 0;
-async function triggerAutoSyncCheck() {
-    incrementMessageCounter();
-    if (!shouldAutoSync()) return;
-    if (autoSyncRunning) return;
-    if (Capacitor.isNativePlatform() && Date.now() < autoSyncCooldownUntil) return;
-    if (Capacitor.isNativePlatform() && (isGenerating.value || document.visibilityState !== 'visible')) return;
-    autoSyncRunning = true;
-    resetMessageCounter();
-    try {
-        await fullSync();
-        if (Capacitor.isNativePlatform()) {
-            autoSyncCooldownUntil = Date.now() + 60000;
-        }
-    } catch (e) {
-        console.warn('[ChatView] Auto-sync failed:', e);
-    } finally {
-        autoSyncRunning = false;
-    }
-}
 
 // --- Search Logic ---
 watch(searchQuery, (newVal) => {
