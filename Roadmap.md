@@ -62,6 +62,7 @@ Current slice deliverables:
 - [done] Switch lifecycle and prompt-ready handlers to consume the shared `persistence` facade directly instead of separate `getChatData` / `db` arguments
 - [done] Switch chat completion/error notifications to narrow app adapters so lifecycle handlers no longer dispatch raw `window` events directly
 - [done] Extract the post-worker chat prompt pipeline (late vector retrieval, memory injection, prompt-ready callback, final request handoff) into a dedicated use-case helper
+- [done] Extract prepared prompt execution preflight (API config guard, worker execution, abort/vars-save handling) into a dedicated use-case helper
 - [not done] Continue moving the remaining prompt/request orchestration out of `generationService.js` into use-case/pipeline files
 
 This roadmap intentionally assumes the tokenizer and current context UI are already in place and are not being redesigned again unless a new decision is made explicitly.

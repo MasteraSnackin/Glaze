@@ -176,6 +176,7 @@ Tracked in `REFACTOR_PLAN.md` and `REFACTOR_PHASE_0_CHECKLIST.md`:
 - [x] Switched lifecycle and prompt-ready handlers to consume the shared `persistence` facade directly instead of separate `getChatData` / `db` arguments
 - [x] Switched completion/error notifications to narrow app adapters so lifecycle handlers no longer dispatch raw `window` events directly
 - [x] Extracted the post-worker chat prompt pipeline (late vector retrieval, memory injection, prompt-ready callback, final request handoff) into `src/core/llm/usecases/chatPostPromptPipeline.js`
+- [x] Extracted prepared prompt execution preflight (API config guard, worker execution, abort/vars-save handling) into `src/core/llm/usecases/chatPreparedPromptExecution.js`
 - [x] `npm run build` passes after extraction
 - [ ] Continue shrinking the remaining orchestration still owned by `generationService.js`
 - [ ] Reduce dependency surface passed from `ChatView.vue` into the chat use case

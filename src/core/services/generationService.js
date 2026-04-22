@@ -25,7 +25,7 @@ import {
     trimHistoryForContextWindow,
     processPromptAsync
 } from '@/core/llm/usecases/chatPromptShared.js';
-import { prepareChatPromptRequest, runPreparedChatPrompt } from '@/core/llm/usecases/chatPreparation.js';
+import { prepareChatPromptRequest } from '@/core/llm/usecases/chatPreparation.js';
 import {
     mergeLateVectorLoreEntries,
     estimateVectorLoreTokens,
@@ -33,6 +33,7 @@ import {
     injectLateVectorLoreMessages
 } from '@/core/llm/usecases/chatLateEnrichment.js';
 import { runChatPostPromptPipeline } from '@/core/llm/usecases/chatPostPromptPipeline.js';
+import { executePreparedChatPrompt } from '@/core/llm/usecases/chatPreparedPromptExecution.js';
 
 let lastPrompt = null;
 
@@ -320,77 +321,29 @@ export async function generateChatResponse({
         guidanceText,
         type
     });
-    let {
-        apiConfig,
-        tagStart,
-        tagEnd,
-        stopString,
-        requestReasoning,
-        reasoningEffort,
-        maxTokens,
-        contextSize,
-        varsKey,
-        safeHistory
-    } = preparedRequest;
-    let { providerId, apiKey, apiUrl, model, stream, temp, topP } = apiConfig;
 
     const t = (key) => translations[currentLang.value]?.[key] || key;
-
-    if (!apiUrl || !model) {
-        showBottomSheet({
-            title: t('section_connection') || "Connection",
-            bigInfo: {
-                icon: '<svg viewBox="0 0 24 24" style="fill:currentColor;width:100%;height:100%;"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.04.24.24.41.48.41h3.84c.24 0 .43-.17.47-.41l.36-2.54c.59-.24 1.13-.57 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>',
-                description: t('api_not_configured') || "API Not Configured",
-                buttonText: t('btn_configure') || "Configure",
-                onButtonClick: () => {
-                    closeBottomSheet();
-                    window.dispatchEvent(new CustomEvent('open-api-sheet'));
-                }
+    const preparedPromptExecution = await executePreparedChatPrompt({
+        preparedRequest,
+        onError,
+        deps: {
+            t,
+            showBottomSheet,
+            closeBottomSheet,
+            openApiSheet: () => {
+                window.dispatchEvent(new CustomEvent('open-api-sheet'));
             }
-        });
-        if (onError) onError(new Error("API Not Configured"));
-        return;
-    }
+        }
+    });
+    if (!preparedPromptExecution) return;
 
-    let result;
-    try {
-        const safeContextLimit = getSafeContextLimit(contextSize, maxTokens);
-        safeHistory = trimHistoryForContextWindow(history, safeContextLimit);
-
-        const memoryReserve = await getMemoryReserveEstimate(char, safeContextLimit);
-
-        const payload = buildPromptWorkerPayload({
-            char,
-            history: safeHistory,
-            summary,
-            activePreset,
-            promptOptions,
-            authorsNote,
-            guidanceText,
-            guidanceType: type,
-            globalRegexes,
-            sessionVars,
-            apiConfig,
-            memoryReserve
-        });
-
-        result = await processPromptAsync(payload);
-    } catch (e) {
-        console.error("Worker error:", e);
-        if (onError) onError(e);
-        return;
-    }
-
-    // Guard: if aborted while worker was building prompt, don't send API request
-    if (controller?.signal?.aborted) {
-        if (onError) onError(new DOMException('Aborted', 'AbortError'));
-        return;
-    }
-
-    if (result.needsVarsSave) {
-        localStorage.setItem(varsKey, JSON.stringify(result.sessionVars));
-    }
+    const {
+        result,
+        safeHistory,
+        contextSize,
+        maxTokens,
+        requestConfig
+    } = preparedPromptExecution;
 
     await runChatPostPromptPipeline({
         text,
@@ -401,21 +354,7 @@ export async function generateChatResponse({
         contextSize,
         maxTokens,
         result,
-        requestConfig: {
-            providerId,
-            apiUrl,
-            apiKey,
-            model,
-            temperature: temp,
-            topP,
-            stream,
-            reasoningEffort,
-            stopString,
-            controller,
-            requestReasoning,
-            tagStart,
-            tagEnd
-        },
+        requestConfig,
         callbacks: {
             ...callbacks,
             onUpdate,
