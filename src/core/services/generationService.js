@@ -34,6 +34,7 @@ import {
 } from '@/core/llm/usecases/chatLateEnrichment.js';
 import { runChatPostPromptPipeline } from '@/core/llm/usecases/chatPostPromptPipeline.js';
 import { executePreparedChatPrompt } from '@/core/llm/usecases/chatPreparedPromptExecution.js';
+import { executeChatContextCalculation } from '@/core/llm/usecases/chatContextCalculation.js';
 
 let lastPrompt = null;
 
@@ -380,68 +381,28 @@ export async function generateChatResponse({
 }
 
 export async function calculateContext({ char, history, authorsNote, summary }) {
-    const apiConfig = getEffectiveApiConfig();
-    const activePreset = loadActivePreset(char, char?.sessionId);
-
-    const promptOptions = getPromptWorkerOptions(char, activePreset);
-
-    const anData = authorsNote;
-
-    const { sessionVars } = loadSessionVars(char);
-    const globalRegexes = loadGlobalRegexes();
-
-    try {
-        const safeContextLimit = getSafeContextLimit(apiConfig.contextSize, apiConfig.maxTokens);
-        const safeHistory = trimHistoryForContextWindow(history, safeContextLimit);
-
-        const memoryReserve = await getMemoryReserveEstimate(char, safeContextLimit);
-
-        const payload = buildPromptWorkerPayload({
-            char,
-            history: safeHistory,
-            summary,
-            activePreset,
-            promptOptions,
-            authorsNote: anData,
-            globalRegexes,
-            sessionVars,
-            apiConfig,
-            memoryReserve
-        });
-
-        const result = await processPromptAsync(payload);
-        const memoryInjection = await buildPromptMemoryInjection({
-            char,
-            history: safeHistory,
-            summary,
-            safeContext: safeContextLimit,
-            result
-        });
-
-        // Calculate vector lorebook tokens for accurate breakdown display
-        let vectorLoreTokens = 0;
-        try {
-            const vectorResults = await vectorSearchLorebooks(safeHistory || history, '', char, char?.sessionId);
-            if (vectorResults.length > 0) {
-                const { vectorEntries } = mergeLateVectorLoreEntries(result, vectorResults);
-                vectorLoreTokens = estimateVectorLoreTokens(vectorEntries);
-            }
-        } catch (e) {
-            console.warn('[calculateContext] Vector search failed:', e);
+    return executeChatContextCalculation({
+        char,
+        history,
+        authorsNote,
+        summary,
+        deps: {
+            getEffectiveApiConfig,
+            loadActivePreset,
+            getPromptWorkerOptions,
+            loadSessionVars,
+            loadGlobalRegexes,
+            getSafeContextLimit,
+            trimHistoryForContextWindow,
+            buildPromptWorkerPayload,
+            processPromptAsync,
+            buildPromptMemoryInjection,
+            vectorSearchLorebooks,
+            mergeLateVectorLoreEntries,
+            estimateVectorLoreTokens,
+            buildContextCalculationResult
         }
-
-        return buildContextCalculationResult(result, {
-            vectorLoreTokens,
-            memoryTokens: memoryInjection.tokens || 0,
-            memoryReserve
-        });
-    } catch (e) {
-        console.error("Calculate context worker error", e);
-        return {
-            cutoffIndex: 0,
-            contextBreakdown: null
-        };
-    }
+    });
 }
 
 export async function generateSummary({ history, prompt, controller, apiConfigOverride = null }) {
