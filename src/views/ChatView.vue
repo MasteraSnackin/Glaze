@@ -3194,6 +3194,12 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
                 app: {
                     notifyGenerationStarted: ({ charId, sessionId }) => {
                         window.dispatchEvent(new CustomEvent('chat-generation-started', { detail: { charId, sessionId } }));
+                    },
+                    notifyGenerationEnded: ({ charId, sessionId }) => {
+                        window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId, sessionId } }));
+                    },
+                    notifyChatUpdated: () => {
+                        window.dispatchEvent(new CustomEvent('chat-updated'));
                     }
                 },
                 preparation: {

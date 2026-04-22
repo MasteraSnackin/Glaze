@@ -14,10 +14,12 @@ export async function handleGenerationError({
     clearBackgroundUpdateTimer,
     clearTypingStateForMessage,
     persistence,
+    app,
     formatError,
     sendMessageNotification
 }) {
     const { getChatData, db } = persistence;
+    const { notifyGenerationEnded } = app;
     const state = getGenerationState(char.id);
     if (!state || state.genId !== genId) return;
 
@@ -46,7 +48,7 @@ export async function handleGenerationError({
             await restoreState(false);
             clearGenerationState(char.id);
             if (activeChatChar && activeChatChar.id === char.id) isGenerating.value = false;
-            window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: char.id, sessionId } }));
+            notifyGenerationEnded({ charId: char.id, sessionId });
             return;
         }
 
@@ -88,12 +90,12 @@ export async function handleGenerationError({
             }
         }
 
-        window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: char.id, sessionId } }));
+        notifyGenerationEnded({ charId: char.id, sessionId });
     } catch (handlerErr) {
         console.error('[onError] Error handler failed:', handlerErr);
         await ensureTypingCleared();
         clearGenerationState(char.id);
         if (activeChatChar && activeChatChar.id === char.id) isGenerating.value = false;
-        window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: char.id, sessionId } }));
+        notifyGenerationEnded({ charId: char.id, sessionId });
     }
 }

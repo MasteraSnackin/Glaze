@@ -48,7 +48,9 @@ export async function executeChatGenerationUseCase({
         postprocess
     } = services;
     const {
-        notifyGenerationStarted
+        notifyGenerationStarted,
+        notifyGenerationEnded,
+        notifyChatUpdated
     } = app;
     const {
         buildAuthorsNote,
@@ -189,6 +191,9 @@ export async function executeChatGenerationUseCase({
             clearBackgroundUpdateTimer,
             clearTypingStateForMessage,
             persistence,
+            app: {
+                notifyGenerationEnded
+            },
             formatError,
             sendMessageNotification
         });
@@ -242,6 +247,10 @@ export async function executeChatGenerationUseCase({
                     clearBackgroundUpdateTimer,
                     clearTypingStateForMessage,
                     persistence,
+                    app: {
+                        notifyGenerationEnded,
+                        notifyChatUpdated
+                    },
                     cleanText,
                     estimateTokens,
                     updateSessionMessage,

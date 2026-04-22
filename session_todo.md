@@ -174,6 +174,7 @@ Tracked in `REFACTOR_PLAN.md` and `REFACTOR_PHASE_0_CHECKLIST.md`:
 - [x] Moved chat persistence access behind `lifecycle.persistence` so the chat use case no longer reads `getChatData` / `db` from loose top-level injections
 - [x] Dropped unused lifecycle callback arguments from the chat use-case handoff to keep the boundary narrower and match actual handler contracts
 - [x] Switched lifecycle and prompt-ready handlers to consume the shared `persistence` facade directly instead of separate `getChatData` / `db` arguments
+- [x] Switched completion/error notifications to narrow app adapters so lifecycle handlers no longer dispatch raw `window` events directly
 - [x] `npm run build` passes after extraction
 - [ ] Move late enrichment and final request assembly steps out of `generationService.js`
 - [ ] Reduce dependency surface passed from `ChatView.vue` into the chat use case
