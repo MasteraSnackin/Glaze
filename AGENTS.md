@@ -68,14 +68,15 @@ git checkout -b feat/memorybook-ui feat/multi-vector
 | Branch | Purpose | PR |
 |--------|---------|----|
 | `origin/dev` | Local mirror of upstream integration branch | No PR |
-| `feat/fast-fixes-batch3` | Mobile testing batch3 bug fixes | Not yet |
-| `feat/multi-vector-retrieval` | Multi-vector retrieval with MaxSim | Not yet |
+| `feat/refactor-phase1-event-hub` | Phase 1–3 structural refactor (event hub, request ownership, composable extraction) | Not yet |
 
 ### Historical (merged & deleted)
 - `feat/cloud-sync` → merged via PR #20
 - `feat/vectorization-v2` → merged via PR #24  
 - `feat/memorybook` → merged via PR #27
 - `fast-fixes` → merged via PR (batch1-2)
+- `feat/import-jsonl-fix` → merged, deleted
+- `fix/sync-runtime-import` → merged, deleted
 - `archive/feat/summary` → deleted
 - `archive/feat/tokenizer` → deleted
 

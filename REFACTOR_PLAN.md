@@ -533,7 +533,7 @@ Why this phase is early:
 - it gives a stable foundation for later transport and UI extraction.
 
 ### Phase 3. Move generation orchestration into use cases
-Status: partially done
+Status: done
 Testing: tested (`npm run build` passes)
 
 Purpose:
@@ -546,7 +546,7 @@ Work:
 - keep `generationService.js` only as a temporary facade if needed;
 - reduce direct orchestration logic in `ChatView.vue` to UI/session glue.
 
-Done so far:
+Done:
 - `generateChat` owns the chat execution shell
 - Deterministic chat prompt-preparation extracted into `chatPreparation.js`
 - Final chat request assembly/execution extracted into `chatRequestExecution.js`
@@ -561,10 +561,13 @@ Done so far:
 - Memory prompt presets extracted into `memoryPromptPresets.js`
 - Message edit helpers extracted into `messageEditHelpers.js`
 - Context breakdown computed properties extracted into `useContextBreakdown.js`
-- Message selection state extracted into `useMessageSelection.js`
+- Message selection state + delete/hide actions extracted into `useMessageSelection.js`
+- Chat search extracted into `useChatSearch.js`
+- Memory sheet UI (DOM builders, entry editor, prompt manager, generation settings, event handlers) extracted into `useMemorySheetUI.js`
+- Swipe/greeting navigation extracted into `useSwipeNavigation.js`
 - Auto-sync extracted into `useAutoSync.js`
 - Message display helpers extracted into `useChatMessageDisplay.js`
-- ChatView.vue reduced from ~5700 to 4664 lines (18.2%)
+- ChatView.vue reduced from ~5700 to 3774 lines (33.8%)
 
 Expected output:
 
@@ -751,14 +754,14 @@ Deliverables:
 - unified finalization policy via `useGenerationFinalization.js`.
 
 ### Candidate 3. Promote `generateChat` to real use-case entrypoint
-Status: partially done
+Status: done
 Testing: tested (`npm run build` passes)
 
 Deliverables:
 
 - `ChatView.vue` calls a dedicated use case rather than owning orchestration details; ✅
 - `generationService.js` reduced to a compatibility facade or prompt-domain helper; ⏳ (still owns late enrichment and request dispatch)
-- ChatView.vue reduced from ~5700 to 4664 lines through extraction of composables, services, and utils.
+- ChatView.vue reduced from ~5700 to 3774 lines through extraction of composables, services, and utils.
 
 ### Candidate 4. Split prompt preview from network trace state
 Status: not done

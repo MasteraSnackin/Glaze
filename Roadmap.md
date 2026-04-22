@@ -34,47 +34,24 @@ The current roadmap is:
 
 - Branch: `feat/refactor-phase1-event-hub`
 - Base: latest stabilized `dev`
-- Scope: start `REFACTOR_PLAN.md` Phase 1 with the smallest safe structural slice
-- Current slice status: `done`
+- Scope: `REFACTOR_PLAN.md` Phases 1–3 (event hub, request ownership, composable extraction)
+- Phase 1 status: `done`
+- Phase 2 status: `done`
+- Phase 3 status: `done`
 - Current slice testing: `tested` (`npm run build`)
 
-Current slice deliverables:
-- [done] Added internal event catalog in `src/core/events/eventNames.js`
-- [done] Added internal event hub in `src/core/events/eventHub.js`
-- [done] Added window compatibility bridge in `src/core/events/bridges/windowEventBridge.js`
-- [done] Initialized bridge in `src/main.js`
-- [done] Switched a safe subset of emitters to canonical internal events while preserving legacy `window` listeners
-- [done] Migrated a first listener subset to compatibility subscriptions for canonical app events
-- [done] Added official use-case entrypoint wrappers for chat, summary, memory draft, and context calculation
-- [not done] Migrate the remaining listener side to internal subscriptions
-- [done] Introduced explicit chat-generation request ownership tokens and stale-response guards
-- [not done] Finish full request ownership separation across all generation-like flows
-- [done] Promote `generateChat` and related flows to official use-case entrypoints
-- [done] Move the chat execution/orchestration shell behind `generateChat` use-case boundary
-- [done] Extract deterministic chat prompt-preparation stage into use-case-owned helper flow
-- [done] Extract final chat request assembly/execution into a dedicated use-case-owned helper
-- [done] Extract shared chat prompt-preparation primitives into a dedicated helper module used by both service and use-case layers
-- [done] Switch `ChatView.vue` to execute chat generation through the official `generateChat` use-case boundary
-- [done] Narrow the initial `ChatView` to chat use-case contract by grouping injected services by responsibility
-- [done] Replace direct app-event naming in the chat use case with a narrower generation-start notification adapter
-- [done] Move chat persistence access behind `lifecycle.persistence` so `generateChat` no longer depends on loose `getChatData` / `db` injections
-- [done] Trim unused lifecycle callback arguments from the `generateChat` handoff so the boundary matches the actual handler contracts more closely
-- [done] Switch lifecycle and prompt-ready handlers to consume the shared `persistence` facade directly instead of separate `getChatData` / `db` arguments
-- [done] Switch chat completion/error notifications to narrow app adapters so lifecycle handlers no longer dispatch raw `window` events directly
-- [done] Extract the post-worker chat prompt pipeline (late vector retrieval, memory injection, prompt-ready callback, final request handoff) into a dedicated use-case helper
-- [done] Extract prepared prompt execution preflight (API config guard, worker execution, abort/vars-save handling) into a dedicated use-case helper
-- [done] Extract context-calculation orchestration (worker payload, memory/vector breakdown merge, fallback handling) into a dedicated use-case helper
-- [done] Extract summary and memory-draft request paths into dedicated use-case helpers so `generationService.js` no longer owns those request shells inline
-- [done] Extract memory-book retrieval/index maintenance into a dedicated helper so `generationService.js` no longer owns memory embedding/indexing and summary-path injection selection inline
-- [done] Replace remaining direct `window.dispatchEvent` calls in `ChatView.vue` for generation/chat events with canonical app-event adapters, removing the last inline event-bridging from the view layer
-- [done] Extract ChatView generation-service wiring into `createChatGenerationServices` factory so ChatView no longer manually assembles the ~30-function injection bundle; only Vue-own state is passed as args
-- [done] Extract `triggerAutoSyncCheck` from ChatView into `composables/chat/useAutoSync.js`
-- [done] Extract memory automation functions (`runMemoryAutomationAfterStableTurn`, `generateMemoryDraftForMessages`, `createPendingMemoryDraft`, `bootstrapImportedMemoryDrafts`, `buildMemoryContinuityContext`, `buildMemoryDraftLoreContext`, `buildMemoryDraftSummaryExcerpt`, `parseMemoryDraftResponse`) from ChatView into `composables/chat/useMemoryAutomation.js`
-- [done] Extract memory prompt presets (`builtInMemoryPrompts`, `getMemoryPromptOptions`, `resolveMemoryPrompt`, `getMemoryPromptLabel`, `getMemoryPromptLabelByKey`) from ChatView into `core/services/memoryPromptPresets.js`
-- [done] Extract message edit helpers (`normalizeImgGenHtmlForEditing`, `prepareEditText`, `restoreEditText`) from ChatView into `core/utils/messageEditHelpers.js`
-- [done] Extract context breakdown computed properties (`contextSegments`, `contextBreakdownItems`, `contextLegendItems`, `visibleHistoryMessages`, `historyUsagePercent`, `historyHidePreview`, `shouldRecommendHide`) from ChatView into `composables/chat/useContextBreakdown.js`
-- [done] Extract message selection state (`selectedMessages`, `isSelectionMode`, `selectionIncludesLast`, `toggleSelection`, `clearSelection`) from ChatView into `composables/chat/useMessageSelection.js`
-- [done] Move `handleMemoryBatchGenerate` and `handleMemoryQuickModelChange` logic into `useMemoryAutomation` composable
+Phase 3 composable extractions:
+- [done] Extract `triggerAutoSyncCheck` into `composables/chat/useAutoSync.js`
+- [done] Extract memory automation functions into `composables/chat/useMemoryAutomation.js`
+- [done] Extract memory prompt presets into `core/services/memoryPromptPresets.js`
+- [done] Extract message edit helpers into `core/utils/messageEditHelpers.js`
+- [done] Extract context breakdown computed properties into `composables/chat/useContextBreakdown.js`
+- [done] Extract message selection state + delete/hide actions into `composables/chat/useMessageSelection.js`
+- [done] Extract chat search into `composables/chat/useChatSearch.js`
+- [done] Extract memory sheet UI (DOM builders, entry editor, prompt manager, generation settings, event handlers) into `composables/chat/useMemorySheetUI.js`
+- [done] Extract swipe/greeting navigation into `composables/chat/useSwipeNavigation.js`
+- [done] Extract message display helpers into `composables/chat/useChatMessageDisplay.js`
+- [done] ChatView.vue reduced from ~5700 to 3774 lines (33.8%)
 - [not done] Continue moving the remaining prompt/request orchestration out of `generationService.js` into use-case/pipeline files
 
 This roadmap intentionally assumes the tokenizer and current context UI are already in place and are not being redesigned again unless a new decision is made explicitly.
