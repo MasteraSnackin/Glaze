@@ -95,6 +95,7 @@ import { useMemoryAutomation } from '@/composables/chat/useMemoryAutomation.js';
 import { useChatMessageDisplay, restoreVisibleSwipeState } from '@/composables/chat/useChatMessageDisplay.js';
 import { useContextBreakdown } from '@/composables/chat/useContextBreakdown.js';
 import { useMessageSelection } from '@/composables/chat/useMessageSelection.js';
+import { useChatSearch } from '@/composables/chat/useChatSearch.js';
 import { normalizeImgGenHtmlForEditing, prepareEditText, restoreEditText } from '@/core/utils/messageEditHelpers.js';
 
 function genMsgId() {
@@ -391,11 +392,7 @@ const pendingGuidance = ref(null); // { text, type }
 let ignoreScrollAdjustment = false;
 let ignoreScrollAdjustmentTimer = null;
 
-// --- Search State ---
-const isSearchMode = ref(false);
-const searchQuery = ref('');
-const searchResults = ref([]); // array of original indices
-const currentSearchIndex = ref(-1);
+
 
 // --- Selection State ---
 const {
@@ -403,8 +400,17 @@ const {
     isSelectionMode,
     selectionIncludesLast,
     toggleSelection,
-    clearSelection
-} = useMessageSelection(currentMessages);
+    clearSelection,
+    deleteSelectedMessages,
+    toggleHideSelectedMessages
+} = useMessageSelection(currentMessages, {
+    getChatData,
+    db,
+    addDeletedStats,
+    reconcileSessionMemoryState,
+    debouncedUpdateContextCutoff: () => debouncedUpdateContextCutoff(),
+    getActiveChatChar: () => activeChatChar
+});
 
 watch([isSearchMode, isSelectionMode], () => {
     ignoreScrollAdjustment = true;
@@ -1090,54 +1096,6 @@ function handleMemoryQuickModelChange(model) {
     handleMemoryQuickModelChange_impl(model);
 }
 
-async function deleteSelectedMessages() {
-    if (selectedMessages.value.size === 0) return;
-
-    const lastMsg = currentMessages.value[currentMessages.value.length - 1];
-    if (!lastMsg || !selectedMessages.value.has(lastMsg.id)) return;
-
-    const newMsgs = currentMessages.value.filter(msg => msg && !selectedMessages.value.has(msg.id));
-    const count = currentMessages.value.length - newMsgs.length;
-    currentMessages.value = newMsgs;
-    
-    // Save to active chat data
-    if (activeChatChar) {
-        if (count > 0) {
-            const sid = activeChatChar.sessionId || (await getChatData(activeChatChar.id)).currentId;
-            addDeletedStats(activeChatChar.id, sid, count);
-        }
-
-        let chatData = await getChatData(activeChatChar.id);
-        const sessionId = activeChatChar.sessionId || chatData.currentId;
-        reconcileSessionMemoryState(chatData, sessionId, currentMessages.value);
-        chatData.sessions[sessionId] = currentMessages.value;
-        await db.saveChat(activeChatChar.id, chatData);
-        debouncedUpdateContextCutoff();
-    }
-    
-    clearSelection();
-}
-
-async function toggleHideSelectedMessages() {
-    if (selectedMessages.value.size === 0) return;
-    
-    for (const msg of currentMessages.value) {
-        if (msg && selectedMessages.value.has(msg.id)) {
-            msg.isHidden = !msg.isHidden;
-        }
-    }
-    
-    if (activeChatChar) {
-        let chatData = await getChatData(activeChatChar.id);
-        const sessionId = activeChatChar.sessionId || chatData.currentId;
-        chatData.sessions[sessionId] = currentMessages.value;
-        await db.saveChat(activeChatChar.id, chatData);
-        debouncedUpdateContextCutoff();
-    }
-    
-    clearSelection();
-}
-
 // --- Display Logic (Separators) ---
 const displayMessages = computed(() => {
     const msgs = currentMessages.value;
@@ -1198,85 +1156,18 @@ window.forceScrollToBottom = () => { vsScrollToBottom('auto') };
 const t = (key) => translations[currentLang.value]?.[key] || key;
 
 // --- Search Logic ---
-watch(searchQuery, (newVal) => {
-    if (!newVal || !isSearchMode.value) {
-        searchResults.value = [];
-        currentSearchIndex.value = -1;
-        return;
-    }
-    const query = newVal.toLowerCase();
-    const results = [];
-    currentMessages.value.forEach((msg, idx) => {
-        if (msg && msg.text) {
-            const text = msg.text.toLowerCase();
-            let lastIdx = -1;
-            while ((lastIdx = text.indexOf(query, lastIdx + 1)) !== -1) {
-                results.push({ msgIdx: idx, matchIdx: lastIdx });
-            }
-        }
-    });
-    searchResults.value = results;
-    if (results.length > 0) {
-        currentSearchIndex.value = results.length - 1; // Start from most recent (bottom)
-        scrollToSearchResult();
-    } else {
-        currentSearchIndex.value = -1;
-    }
-});
-
-function scrollToSearchResult() {
-    if (currentSearchIndex.value >= 0 && currentSearchIndex.value < searchResults.value.length) {
-        const { msgIdx } = searchResults.value[currentSearchIndex.value];
-        const displayIndex = displayMessages.value.findIndex(m => m.type === 'message' && m.originalIndex === msgIdx);
-        if (displayIndex !== -1) {
-            scrollToIndex(displayIndex, 'smooth').then(() => {
-                const el = document.getElementById(`msg-${msgIdx}`);
-                if (el) {
-                    el.classList.add('search-highlight');
-                    setTimeout(() => el.classList.remove('search-highlight'), 1500);
-                }
-            });
-        }
-    }
-}
-
-function nextSearchResult() {
-    if (searchResults.value.length === 0) return;
-    currentSearchIndex.value = (currentSearchIndex.value + 1) % searchResults.value.length;
-    scrollToSearchResult();
-}
-
-function prevSearchResult() {
-    if (searchResults.value.length === 0) return;
-    currentSearchIndex.value = (currentSearchIndex.value - 1 + searchResults.value.length) % searchResults.value.length;
-    scrollToSearchResult();
-}
-
-const searchMatchState = computed(() => {
-    if (!isSearchMode.value || searchResults.value.length === 0 || currentSearchIndex.value < 0) return { msgIdx: -1, occurrenceIdx: -1 };
-    const activeMatch = searchResults.value[currentSearchIndex.value];
-    let occurrenceIdx = 0;
-    for (let i = 0; i < currentSearchIndex.value; i++) {
-        if (searchResults.value[i].msgIdx === activeMatch.msgIdx) {
-            occurrenceIdx++;
-        }
-    }
-    return {
-        msgIdx: activeMatch.msgIdx,
-        occurrenceIdx: occurrenceIdx
-    };
-});
-
-const onChatSearchToggle = (e) => {
-    isSearchMode.value = e.detail;
-    if (!isSearchMode.value) {
-        searchQuery.value = '';
-    }
-};
-
-const onChatSearch = (e) => {
-    searchQuery.value = e.detail;
-};
+const {
+    isSearchMode,
+    searchQuery,
+    searchResults,
+    currentSearchIndex,
+    searchMatchState,
+    scrollToSearchResult,
+    nextSearchResult,
+    prevSearchResult,
+    onChatSearchToggle,
+    onChatSearch
+} = useChatSearch({ currentMessages, scrollToIndex, displayMessages });
 
 // --- Data Management ---
 
