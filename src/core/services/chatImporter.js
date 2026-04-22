@@ -467,14 +467,12 @@ export function pickChatFile() {
     return new Promise((resolve) => {
         const input = document.createElement('input');
         input.type = 'file';
-        input.accept = '.json,.jsonl,.glzchat.json';
+        // Keep TXT visible in the picker so users can select it and receive the
+        // explicit unsupported-format error instead of it being silently hidden.
+        input.accept = '.json,.jsonl,.txt,.glzchat.json,text/plain,application/json';
         input.onchange = (e) => {
             const file = e.target.files[0] || null;
-            if (file && file.name.toLowerCase().endsWith('.txt')) {
-                resolve(null);
-            } else {
-                resolve(file);
-            }
+            resolve(file);
         };
         input.click();
     });
@@ -486,16 +484,6 @@ export function pickChatFile() {
 export function triggerChatImport(characterId, userPersona, onImport) {
     pickChatFile().then(async (file) => {
         if (!file) {
-            const t = translations[currentLang.value];
-            showBottomSheet({
-                title: t?.title_error || "Error",
-                bigInfo: {
-                    icon: '<svg viewBox="0 0 24 24" style="fill:currentColor;width:100%;height:100%;color:#ff4444"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>',
-                    description: t?.msg_import_chat_unsupported_format || "Unsupported file format. Please use JSONL or .glzchat.json files.",
-                    buttonText: t?.btn_ok || "OK",
-                    onButtonClick: () => closeBottomSheet()
-                }
-            });
             return;
         }
         try {
