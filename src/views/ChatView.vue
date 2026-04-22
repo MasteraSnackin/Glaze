@@ -47,6 +47,7 @@ const {
 <script setup>
 import { ref, nextTick, onMounted, onUnmounted, watch, computed, onBeforeUnmount } from 'vue';
 import { Capacitor } from '@capacitor/core';
+import { App } from '@capacitor/app';
 import { keyboardOverlap } from '@/core/services/keyboardHandler.js';
 import { estimateTokens } from '@/utils/tokenizer.js';
 import { formatText, cleanText } from '@/utils/textFormatter.js';
@@ -2944,21 +2945,15 @@ async function openChat(char, onBack, force = false) {
 
 function asyncSaveCurrentSessionState() {
     if (activeChatChar && messagesContainer.value) {
-        // Capture activeChar synchronously since closing chat will nullify it
         const charContext = activeChatChar;
         const sessionId = charContext.sessionId;
         const inputValueDraft = inputValue.value;
         const currentAnchor = getScrollAnchor();
-        
-        getChatData(charContext.id).then(data => {
-            if (!data) return;
-            // Save anchor instead of pixel position for reliable restoration
+
+        db.patchChatData(charContext.id, (data) => {
             data.lastScrollAnchor = currentAnchor;
-            
-            // Save draft of new message
             data.draft = inputValueDraft;
 
-            // Remove edit state from messages (do not save draft of edited message)
             if (sessionId && data.sessions && data.sessions[sessionId]) {
                 const msgs = data.sessions[sessionId];
                 for (let i = msgs.length - 1; i >= 0; i--) {
@@ -2973,14 +2968,14 @@ function asyncSaveCurrentSessionState() {
                             const errorSwipeId = msg.swipeId || 0;
                             msg.swipes.splice(errorSwipeId, 1);
                             if (msg.swipesMeta) msg.swipesMeta.splice(errorSwipeId, 1);
-                            
+
                             let newSwipeId = errorSwipeId - 1;
                             if (newSwipeId < 0) newSwipeId = 0;
-                            
+
                             msg.swipeId = newSwipeId;
                             msg.text = msg.swipes[newSwipeId] || "";
                             msg.isError = false;
-                            
+
                             if (msg.swipesMeta && msg.swipesMeta[newSwipeId]) {
                                 msg.reasoning = msg.swipesMeta[newSwipeId].reasoning;
                                 msg.genTime = msg.swipesMeta[newSwipeId].genTime;
@@ -2996,7 +2991,6 @@ function asyncSaveCurrentSessionState() {
                 data.sessions[sessionId] = msgs;
             }
 
-            // Persist Author's Note and Summary content back to chat data
             if (charContext.authors_note !== undefined) {
                 if (!data.authorsNotes) data.authorsNotes = {};
                 data.authorsNotes[sessionId] = charContext.authors_note;
@@ -3005,8 +2999,6 @@ function asyncSaveCurrentSessionState() {
                 if (!data.summaries) data.summaries = {};
                 data.summaries[sessionId] = charContext.summary;
             }
-
-            db.saveChat(charContext.id, data);
         });
     }
 }
@@ -4466,7 +4458,28 @@ const onCharacterUpdated = (e) => {
 };
 
 const onVisibilityChange = () => {
-    if (document.visibilityState === 'visible' && activeChatChar) {
+    if (document.visibilityState === 'hidden' && activeChatChar) {
+        const charId = activeChatChar.id;
+        const sessionId = activeChatChar.sessionId;
+        const messagesSnapshot = currentMessages.value;
+        const draft = inputValue.value;
+        const authorsNote = activeChatChar.authors_note;
+        const summary = activeChatChar.summary;
+        db.patchChatData(charId, (data) => {
+            if (sessionId && messagesSnapshot.length > 0) {
+                data.sessions[sessionId] = messagesSnapshot;
+            }
+            data.draft = draft;
+            if (authorsNote !== undefined) {
+                if (!data.authorsNotes) data.authorsNotes = {};
+                data.authorsNotes[sessionId] = authorsNote;
+            }
+            if (summary !== undefined) {
+                if (!data.summaries) data.summaries = {};
+                data.summaries[sessionId] = summary;
+            }
+        });
+    } else if (document.visibilityState === 'visible' && activeChatChar) {
         clearMessageNotifications(activeChatChar.id);
     }
 };
@@ -4561,6 +4574,23 @@ onMounted(() => {
     // Clear notifications when app comes to foreground and chat is active
     document.addEventListener('visibilitychange', onVisibilityChange);
 
+    if (Capacitor.isNativePlatform()) {
+        App.addListener('appStateChange', ({ isActive }) => {
+            if (!isActive && activeChatChar) {
+                const charId = activeChatChar.id;
+                const sessionId = activeChatChar.sessionId;
+                const messagesSnapshot = currentMessages.value;
+                const draft = inputValue.value;
+                db.patchChatData(charId, (data) => {
+                    if (sessionId && messagesSnapshot.length > 0) {
+                        data.sessions[sessionId] = messagesSnapshot;
+                    }
+                    data.draft = draft;
+                });
+            }
+        });
+    }
+
     if (chatInputContainer.value) {
         inputResizeObserver = new ResizeObserver(updateContentPadding);
         inputResizeObserver.observe(chatInputContainer.value);
@@ -4619,13 +4649,26 @@ watch(activeChar, async (newVal) => {
 onBeforeUnmount(() => {
     if (activeChatChar && messagesContainer.value) {
         const charId = activeChatChar.id;
+        const sessionId = activeChatChar.sessionId;
         const currentAnchor = getScrollAnchor();
         const draft = inputValue.value;
-        getChatData(charId).then(data => {
-            if (!data) return;
+        const messagesSnapshot = currentMessages.value;
+        const authorsNote = activeChatChar.authors_note;
+        const summary = activeChatChar.summary;
+        db.patchChatData(charId, (data) => {
             data.lastScrollAnchor = currentAnchor;
             data.draft = draft;
-            db.saveChat(charId, data);
+            if (sessionId && messagesSnapshot.length > 0) {
+                data.sessions[sessionId] = messagesSnapshot;
+            }
+            if (authorsNote !== undefined) {
+                if (!data.authorsNotes) data.authorsNotes = {};
+                data.authorsNotes[sessionId] = authorsNote;
+            }
+            if (summary !== undefined) {
+                if (!data.summaries) data.summaries = {};
+                data.summaries[sessionId] = summary;
+            }
         });
     }
 });

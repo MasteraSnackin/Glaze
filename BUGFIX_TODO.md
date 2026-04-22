@@ -3,33 +3,32 @@
 ## Critical
 
 ### BUG-1: DB read-modify-write race — settings lost on close
-**Status:** not fixed  
+**Status:** fixed  
 **Symptom:** Memory book custom prompts, model settings, generation config disappear after closing/opening app.  
 **Root cause:** `asyncSaveCurrentSessionState` and `onBeforeUnmount` both do `getChatData()` → modify → `db.saveChat()` as fire-and-forget. If the memory sheet saved settings between the read and the write-back, the stale chatData overwrites the new settings.  
-**Fix:**
-1. Switch `db.saveChat` to use `db.queuedSet` (write queue already exists at db.js:146 but `saveChat` bypasses it)
-2. In `asyncSaveCurrentSessionState` and `onBeforeUnmount`, merge only the fields they actually change (scrollAnchor, draft, authorsNotes, summaries) into the DB record instead of overwriting the entire chatData object
-3. Alternatively: make all `saveChat` callers go through a single `persistChatDelta(charId, patch)` function that does read-modify-write-merge atomically
+**Fix applied:**
+1. `db.saveChat` now uses `queueDbWrite` (serialized writes, no concurrent overwrites)
+2. Added `db.patchChatData(charId, patchFn)` — reads fresh DB state, applies only the patch, saves atomically
+3. `asyncSaveCurrentSessionState` and `onBeforeUnmount` switched to `patchChatData` (no stale overwrites)
 
 **Files:** `src/utils/db.js`, `src/views/ChatView.vue`
 
 ---
 
 ### BUG-2: No save on app background — DB reverts to last launch on crash
-**Status:** not fixed  
+**Status:** fixed  
 **Symptom:** App freeze during memory draft → kill → chat reverts hours back (to last app launch).  
 **Root cause:**
 - No `visibilitychange` or Capacitor `appStateChange` handler saves chat state when going to background
 - `onBeforeUnmount` is fire-and-forget, only saves scrollAnchor + draft (NOT currentMessages)
-- No periodic auto-save of `currentMessages.value` to DB
 - `db.set` resolves on `req.onsuccess` (not `tx.oncomplete`) — data may not be durable when process is killed
 
-**Fix:**
-1. Add `document.addEventListener('visibilitychange', ...)` that saves `currentMessages.value` when `visibilityState === 'hidden'`
-2. Add Capacitor `App.addListener('appStateChange', ...)` that saves on `isActive === false`
-3. Add debounced auto-save watcher on `currentMessages` (e.g. every 30s of inactivity)
-4. Switch `db.set` to resolve on `tx.oncomplete` instead of `req.onsuccess` for durability
-5. Make `onBeforeUnmount` await the save and include `currentMessages.value`
+**Fix applied:**
+1. `onVisibilityChange` now saves `currentMessages` + draft + authorsNote + summary via `patchChatData` when `visibilityState === 'hidden'`
+2. Added Capacitor `App.addListener('appStateChange')` that saves messages + draft on `isActive === false`
+3. `db.set` and `db.delete` now resolve on `tx.oncomplete` instead of `req.onsuccess` (durable writes)
+4. `onBeforeUnmount` now saves `currentMessages` + draft + authorsNote + summary via `patchChatData`
+5. `db.saveChat` now uses `queueDbWrite` (serialized writes)
 
 **Files:** `src/views/ChatView.vue`, `src/utils/db.js`
 

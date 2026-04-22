@@ -287,8 +287,12 @@ export const db = {
             const tx = database.transaction(STORE_KEYVALUE, 'readwrite');
             const store = tx.objectStore(STORE_KEYVALUE);
             const req = store.put(toPlain(value), key);
-            req.onsuccess = () => {
+            tx.oncomplete = () => {
                 resolve();
+                database.close();
+            };
+            tx.onerror = () => {
+                reject(tx.error);
                 database.close();
             };
             req.onerror = () => {
@@ -305,8 +309,12 @@ export const db = {
             const tx = database.transaction(storeName, 'readwrite');
             const store = tx.objectStore(storeName);
             const req = store.delete(key);
-            req.onsuccess = () => {
+            tx.oncomplete = () => {
                 resolve();
+                database.close();
+            };
+            tx.onerror = () => {
+                reject(tx.error);
                 database.close();
             };
             req.onerror = () => {
@@ -507,8 +515,16 @@ export const db = {
         }
         return data;
     },
-    saveChat: async (charId, chatData) => {
-        await db.set(`gz_chat_${charId}`, normalizeChatData(chatData));
+    saveChat: (charId, chatData) => {
+        const normalized = normalizeChatData(chatData);
+        return queueDbWrite(() => db.set(`gz_chat_${charId}`, normalized));
+    },
+    patchChatData: async (charId, patchFn) => {
+        const data = await db.getChat(charId);
+        if (!data) return;
+        patchFn(data);
+        const normalized = normalizeChatData(data);
+        await queueDbWrite(() => db.set(`gz_chat_${charId}`, normalized));
     },
     createSession: async (charId) => {
         let data = await db.get(`gz_chat_${charId}`);
