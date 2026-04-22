@@ -328,6 +328,7 @@
     "msg_vector_generation_failed": "The embedding model did not respond during generation, so vector lorebook retrieval could not complete.",
     "msg_import_char_failed": "Failed to import character",
     "msg_import_chat_failed": "Failed to import chat",
+    "msg_import_chat_unsupported_format": "Unsupported file format. Please use JSONL or .glzchat.json files.",
     "error_name_required": "Name is required.",
     "select_persona_import": "Select User Persona",
     "select_char_import": "Select Character",

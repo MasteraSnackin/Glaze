@@ -108,6 +108,12 @@ async function importGlazeChatPackage(json, characterId, userPersona) {
  */
 export async function importSillyTavernChat(file, characterId, userPersona) {
     const fileName = String(file?.name || '').toLowerCase();
+    
+    // Reject TXT files explicitly — they are not a valid chat format
+    if (fileName.endsWith('.txt')) {
+        throw new Error('TXT files are not supported for chat import. Please use JSONL or .glzchat.json format.');
+    }
+    
     if (fileName.endsWith('.glzchat.json')) {
         const text = await readFile(file);
         const json = JSON.parse(text);
@@ -462,9 +468,14 @@ export function pickChatFile() {
     return new Promise((resolve) => {
         const input = document.createElement('input');
         input.type = 'file';
-        input.accept = '.json,.jsonl,application/json,text/plain,*/*';
+        input.accept = '.json,.jsonl,.glzchat.json,application/json,text/plain';
         input.onchange = (e) => {
-            resolve(e.target.files[0] || null);
+            const file = e.target.files[0] || null;
+            if (file && file.name.toLowerCase().endsWith('.txt')) {
+                resolve(null); // Will be handled by the caller with error
+            } else {
+                resolve(file);
+            }
         };
         input.click();
     });
@@ -475,7 +486,20 @@ export function pickChatFile() {
  */
 export function triggerChatImport(characterId, userPersona, onImport) {
     pickChatFile().then(async (file) => {
-        if (!file) return;
+        if (!file) {
+            // User cancelled or selected unsupported format (e.g. TXT)
+            const t = translations[currentLang.value];
+            showBottomSheet({
+                title: t?.title_error || "Error",
+                bigInfo: {
+                    icon: '<svg viewBox="0 0 24 24" style="fill:currentColor;width:100%;height:100%;color:#ff4444"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>',
+                    description: t?.msg_import_chat_unsupported_format || "Unsupported file format. Please use JSONL or .glzchat.json files.",
+                    buttonText: t?.btn_ok || "OK",
+                    onButtonClick: () => closeBottomSheet()
+                }
+            });
+            return;
+        }
         try {
             const result = await importSillyTavernChat(file, characterId, userPersona);
             if (onImport) {

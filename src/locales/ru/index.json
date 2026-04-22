@@ -333,6 +333,7 @@
     "msg_vector_generation_failed": "Во время генерации не ответила модель эмбеддингов, поэтому векторный поиск по лорбукам не смог выполниться.",
     "msg_import_char_failed": "Не удалось импортировать персонажа",
     "msg_import_chat_failed": "Не удалось импортировать чат",
+    "msg_import_chat_unsupported_format": "Неподдерживаемый формат файла. Используйте JSONL или .glzchat.json файлы.",
     "error_name_required": "Имя обязательно для заполнения.",
     "select_persona_import": "Выберите персону пользователя",
     "select_char_import": "Выберите персонажа",
