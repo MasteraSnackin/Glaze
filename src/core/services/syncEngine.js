@@ -10,6 +10,7 @@ const ENTITY_TYPES = {
     LOREBOOKS: 'lorebooks',
     API_PRESETS: 'api_presets',
     THEME_PRESETS: 'theme_presets',
+    THEME_STATE: 'theme_state',
     LOCAL_STORAGE: 'local_storage',
     MANIFEST: 'manifest'
 };
@@ -38,6 +39,7 @@ function cloudPath(type, id) {
         case ENTITY_TYPES.LOREBOOKS: return `${CLOUD_BASE}/lorebooks${e}`;
         case ENTITY_TYPES.API_PRESETS: return `${CLOUD_BASE}/api_presets${e}`;
         case ENTITY_TYPES.THEME_PRESETS: return `${CLOUD_BASE}/theme_presets${e}`;
+        case ENTITY_TYPES.THEME_STATE: return `${CLOUD_BASE}/theme_state${e}`;
         case ENTITY_TYPES.LOCAL_STORAGE: return `${CLOUD_BASE}/local_storage${e}`;
         case ENTITY_TYPES.MANIFEST: return `${CLOUD_BASE}/manifest.json`;
         default: return `${CLOUD_BASE}/misc/${id}${e}`;
@@ -149,11 +151,20 @@ async function collectSingletonEntries() {
     const singletons = [
         { type: ENTITY_TYPES.LOREBOOKS, id: 'lorebooks', data: await db.get('gz_lorebooks') },
         { type: ENTITY_TYPES.API_PRESETS, id: 'api_presets', data: await db.get('gz_api_connection_presets') },
-        { type: ENTITY_TYPES.THEME_PRESETS, id: 'theme_presets', data: await db.get('gz_theme_presets') }
+        { type: ENTITY_TYPES.THEME_PRESETS, id: 'theme_presets', data: await db.get('gz_theme_presets') },
+        { type: ENTITY_TYPES.THEME_STATE, id: 'theme_state', data: await db.get('gz_theme_active_preset') }
     ];
 
     const lsData = {};
-    const lsKeys = ['silly_cradle_presets', 'silly_cradle_current_preset_id', 'gz_preset_connections', 'regex_scripts', 'gz_active_persona_id', 'gz_persona_connections'];
+    const lsKeys = [
+        'silly_cradle_presets', 'silly_cradle_current_preset_id', 'gz_preset_connections', 
+        'regex_scripts', 'gz_active_persona_id', 'gz_persona_connections',
+        'gz_lang', 'gz_theme', 'gz_chat_padding_lr', 'gz_force_mobile_layout', 
+        'gz_battery_saver_ui', 'gz_api_provider', 'gz_api_endpoint_normalized',
+        'gz_api_temp', 'gz_api_topp', 'gz_api_stream', 'gz_api_auto_hide_images',
+        'gz_api_auto_hide_images_n', 'gz_api_request_reasoning', 'gz_api_reasoning_effort',
+        'gz_api_connect_timeout', 'gz_api_stream_timeout', 'api-key', 'api-model'
+    ];
     for (const k of lsKeys) {
         const v = localStorage.getItem(k);
         if (v !== null) lsData[k] = v;
@@ -288,6 +299,8 @@ async function applyCloudEntry(adapter, entry, key) {
         await db.queuedSet('gz_api_connection_presets', entity);
     } else if (entry.type === ENTITY_TYPES.THEME_PRESETS) {
         await db.queuedSet('gz_theme_presets', entity);
+    } else if (entry.type === ENTITY_TYPES.THEME_STATE) {
+        await db.queuedSet('gz_theme_active_preset', entity);
     } else if (entry.type === ENTITY_TYPES.LOCAL_STORAGE) {
         for (const [lsKey, lsVal] of Object.entries(entity || {})) {
             localStorage.setItem(lsKey, lsVal);
