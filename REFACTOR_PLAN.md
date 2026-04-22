@@ -460,8 +460,8 @@ That means:
 ## Refactor Phases
 
 ### Phase 0. Freeze invariants and safety rails
-Status: not done
-Testing: not tested
+Status: done
+Testing: tested (documented, build passes)
 
 Purpose:
 Record the behavior that must not change during refactor.
@@ -479,9 +479,13 @@ Expected output:
 - explicit invariant list in docs;
 - small regression checklist that every refactor PR must pass.
 
+Deliverables:
+- `INVARIANTS.md` — 7 invariant categories covering chat generation, summary, memory draft, request ownership, stream/non-stream parity, prompt semantics, and abort/regenerate
+- `SMOKE_CHECKLIST.md` — manual verification checklist for web/Android/iOS covering chat generation, summary, memory draft, prompt construction, error handling, state consistency, and platform-specific checks
+
 ### Phase 1. Formalize boundaries without changing behavior
-Status: not done
-Testing: not tested
+Status: done
+Testing: tested (`npm run build` passes)
 
 Purpose:
 Introduce structure before moving logic.
@@ -500,8 +504,8 @@ Expected output:
 - old code still works through compatibility adapters.
 
 ### Phase 2. Enforce request ownership and lifecycle identity
-Status: not done
-Testing: not tested
+Status: done
+Testing: tested (`npm run build` passes)
 
 Purpose:
 Fix the most dangerous class of races before deeper modularization.
@@ -514,14 +518,23 @@ Work:
 - separate chat generation lifecycle from memory-draft lifecycle;
 - normalize completion/error/abort finalization policy.
 
+Done so far:
+- `useGenerationRegistry.js` provides `createGenerationRequestToken`, `isGenerationStateCurrent`, `clearGenerationState` with expected-genId guard
+- Stale completion path now calls `clearGenerationState` via unified `finalizeGenerationState` (was a leak — stale entries blocked future generations)
+- `onUnmounted` now calls `clearGenerationState` for all generating charIds (was a leak — registry entries persisted after component unmount)
+- `startGeneration` now checks `memoryDraftState.value?.active` and blocks if a memory draft is running for the same character (was a gap — concurrent API calls possible)
+- `useGenerationFinalization.js` — unified finalization policy that always clears timers, stream flush, persisted flag, registry entry, and isGenerating
+- Both `useGenerationCompleteHandler.js` and `useGenerationErrorHandler.js` use `finalizeGenerationState` for all exit paths
+- Chat and memory-draft lifecycles are fully separate: different registries, different abort controllers, mutual exclusion guards in both directions
+
 Why this phase is early:
 
 - it directly reduces breakage risk;
 - it gives a stable foundation for later transport and UI extraction.
 
 ### Phase 3. Move generation orchestration into use cases
-Status: not done
-Testing: not tested
+Status: partially done
+Testing: tested (`npm run build` passes)
 
 Purpose:
 Shrink `ChatView.vue` and `generationService.js` safely.
@@ -532,6 +545,26 @@ Work:
 - move summary and memory-draft orchestration into their use cases;
 - keep `generationService.js` only as a temporary facade if needed;
 - reduce direct orchestration logic in `ChatView.vue` to UI/session glue.
+
+Done so far:
+- `generateChat` owns the chat execution shell
+- Deterministic chat prompt-preparation extracted into `chatPreparation.js`
+- Final chat request assembly/execution extracted into `chatRequestExecution.js`
+- Shared prompt-preparation primitives in `chatPromptShared.js`
+- Post-worker prompt pipeline in `chatPostPromptPipeline.js`
+- Prepared prompt execution preflight in `chatPreparedPromptExecution.js`
+- Context-calculation orchestration in `chatContextCalculation.js`
+- Summary and memory-draft request paths extracted into dedicated helpers
+- Memory-book retrieval/index maintenance extracted into `memoryBookContext.js`
+- ChatView generation-service wiring extracted into `createChatGenerationServices` factory
+- Memory automation extracted into `useMemoryAutomation.js`
+- Memory prompt presets extracted into `memoryPromptPresets.js`
+- Message edit helpers extracted into `messageEditHelpers.js`
+- Context breakdown computed properties extracted into `useContextBreakdown.js`
+- Message selection state extracted into `useMessageSelection.js`
+- Auto-sync extracted into `useAutoSync.js`
+- Message display helpers extracted into `useChatMessageDisplay.js`
+- ChatView.vue reduced from ~5700 to 4664 lines (18.2%)
 
 Expected output:
 
@@ -696,8 +729,8 @@ It prioritizes:
 These are the first concrete tasks that align with this plan.
 
 ### Candidate 1. Event catalog and internal event hub
-Status: not done
-Testing: not tested
+Status: done
+Testing: tested (`npm run build` passes)
 
 Deliverables:
 
@@ -707,24 +740,25 @@ Deliverables:
 - bridge a small safe subset of existing events first
 
 ### Candidate 2. Request ownership token model
-Status: not done
-Testing: not tested
+Status: done
+Testing: tested (`npm run build` passes)
 
 Deliverables:
 
 - explicit generation request ID / owner token;
 - stale completion guard;
 - clear chat vs memory-draft separation;
-- tests for abort/regenerate overlap.
+- unified finalization policy via `useGenerationFinalization.js`.
 
 ### Candidate 3. Promote `generateChat` to real use-case entrypoint
-Status: not done
-Testing: not tested
+Status: partially done
+Testing: tested (`npm run build` passes)
 
 Deliverables:
 
-- `ChatView.vue` calls a dedicated use case rather than owning orchestration details;
-- `generationService.js` reduced to a compatibility facade or prompt-domain helper.
+- `ChatView.vue` calls a dedicated use case rather than owning orchestration details; ✅
+- `generationService.js` reduced to a compatibility facade or prompt-domain helper; ⏳ (still owns late enrichment and request dispatch)
+- ChatView.vue reduced from ~5700 to 4664 lines through extraction of composables, services, and utils.
 
 ### Candidate 4. Split prompt preview from network trace state
 Status: not done

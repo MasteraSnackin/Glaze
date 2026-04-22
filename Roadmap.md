@@ -71,6 +71,10 @@ Current slice deliverables:
 - [done] Extract `triggerAutoSyncCheck` from ChatView into `composables/chat/useAutoSync.js`
 - [done] Extract memory automation functions (`runMemoryAutomationAfterStableTurn`, `generateMemoryDraftForMessages`, `createPendingMemoryDraft`, `bootstrapImportedMemoryDrafts`, `buildMemoryContinuityContext`, `buildMemoryDraftLoreContext`, `buildMemoryDraftSummaryExcerpt`, `parseMemoryDraftResponse`) from ChatView into `composables/chat/useMemoryAutomation.js`
 - [done] Extract memory prompt presets (`builtInMemoryPrompts`, `getMemoryPromptOptions`, `resolveMemoryPrompt`, `getMemoryPromptLabel`, `getMemoryPromptLabelByKey`) from ChatView into `core/services/memoryPromptPresets.js`
+- [done] Extract message edit helpers (`normalizeImgGenHtmlForEditing`, `prepareEditText`, `restoreEditText`) from ChatView into `core/utils/messageEditHelpers.js`
+- [done] Extract context breakdown computed properties (`contextSegments`, `contextBreakdownItems`, `contextLegendItems`, `visibleHistoryMessages`, `historyUsagePercent`, `historyHidePreview`, `shouldRecommendHide`) from ChatView into `composables/chat/useContextBreakdown.js`
+- [done] Extract message selection state (`selectedMessages`, `isSelectionMode`, `selectionIncludesLast`, `toggleSelection`, `clearSelection`) from ChatView into `composables/chat/useMessageSelection.js`
+- [done] Move `handleMemoryBatchGenerate` and `handleMemoryQuickModelChange` logic into `useMemoryAutomation` composable
 - [not done] Continue moving the remaining prompt/request orchestration out of `generationService.js` into use-case/pipeline files
 
 This roadmap intentionally assumes the tokenizer and current context UI are already in place and are not being redesigned again unless a new decision is made explicitly.

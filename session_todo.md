@@ -188,8 +188,12 @@ Tracked in `REFACTOR_PLAN.md` and `REFACTOR_PHASE_0_CHECKLIST.md`:
 - [x] Extracted batch draft generation into `useMemoryAutomation` composable
 - [x] Extracted `getNormalizedMemoryGenerationState` into `memoryPromptPresets.js`
 - [x] Extracted message display helpers (`getAvatar`, `getAvatarLetter`, `getAvatarColor`, `getDisplayName`, `openAvatar`) + `restoreVisibleSwipeState` into `composables/chat/useChatMessageDisplay.js`
+- [x] Extracted message edit helpers (`normalizeImgGenHtmlForEditing`, `prepareEditText`, `restoreEditText`) into `core/utils/messageEditHelpers.js`
+- [x] Extracted context breakdown computed properties (`contextSegments`, `contextBreakdownItems`, `contextLegendItems`, `visibleHistoryMessages`, `historyUsagePercent`, `historyHidePreview`, `shouldRecommendHide`) into `composables/chat/useContextBreakdown.js`
+- [x] Extracted message selection state (`selectedMessages`, `isSelectionMode`, `selectionIncludesLast`, `toggleSelection`, `clearSelection`) into `composables/chat/useMessageSelection.js`
+- [x] Moved `handleMemoryBatchGenerate` and `handleMemoryQuickModelChange` logic into `useMemoryAutomation` composable
 - [x] `npm run build` passes after each extraction slice
-- [x] ChatView.vue: 5700 → ~4900 lines (14% reduction)
+- [x] ChatView.vue: 5700 → 4664 lines (18.2% reduction this session)
 - [ ] Continue shrinking the remaining orchestration still owned by `generationService.js`
 - [ ] Reduce dependency surface passed from `ChatView.vue` into the chat use case
 
@@ -207,6 +211,10 @@ Tracked in `REFACTOR_PLAN.md` and `REFACTOR_PHASE_0_CHECKLIST.md`:
 8. `feat: refactor memory generation UI with model dropdown and quick model row`
 9. `feat: expand sync coverage for provider profiles, image gen, and embedding settings`
 10. `refactor: split chat prompt and late-enrichment pipeline`
+11. `refactor: extract message edit helpers into core/utils/messageEditHelpers.js`
+12. `refactor: move handleMemoryBatchGenerate and handleMemoryQuickModelChange logic into useMemoryAutomation`
+13. `refactor: extract context breakdown computed properties into useContextBreakdown composable`
+14. `refactor: extract message selection state into useMessageSelection composable`
 
 Target PR: `upstream/dev`
 

@@ -2222,6 +2222,14 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
         });
         return;
     }
+
+    if (memoryDraftState.value?.active && char.id === activeChatChar?.id) {
+        console.warn('[generation] Ignoring startGeneration while memory draft is active', {
+            charId: char.id
+        });
+        showToast(t('stop_memory_draft_first') || 'Stop the memory draft before generating a response');
+        return;
+    }
     
     if (!model || !endpoint) {
         showBottomSheet({
@@ -3493,6 +3501,12 @@ onUnmounted(() => {
             clearTimeout(state.timerId);
             state.timerId = null;
         }
+        if (typeof state.clearStreamFlushTimer === 'function') {
+            state.clearStreamFlushTimer();
+        }
+        if (typeof state.streamFlush === 'function') {
+            state.streamFlush();
+        }
         // Disconnect UI updater to prevent updates to unmounted component
         state.onUIUpdate = null;
         // Clean localStorage flag
@@ -3500,6 +3514,8 @@ onUnmounted(() => {
         if (sessionId) {
             clearPersistedGeneration(charId, sessionId);
         }
+        // Clear registry entry to prevent stale state from blocking future generations
+        clearGenerationState(charId);
     }
     window.removeEventListener('character-updated', onCharacterUpdated);
     document.removeEventListener('visibilitychange', onVisibilityChange);

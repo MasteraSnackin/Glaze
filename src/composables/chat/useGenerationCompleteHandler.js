@@ -1,3 +1,5 @@
+import { finalizeGenerationState } from './useGenerationFinalization.js';
+
 function applyCompletionToMessage({
     msg,
     response,
@@ -97,34 +99,30 @@ export async function handleGenerationComplete({
     const { getChatData, db } = persistence;
     const { notifyGenerationEnded, notifyChatUpdated } = app;
     const ensureCleanup = () => {
-        const currentState = getGenerationState(char.id);
-        if (currentState && currentState.timerId) clearTimeout(currentState.timerId);
-        if (currentState && typeof currentState.clearStreamFlushTimer === 'function') {
-            currentState.clearStreamFlushTimer();
-        }
-        if (currentState && typeof currentState.streamFlush === 'function') {
-            currentState.streamFlush();
-        }
-        if (typeof clearBackgroundUpdateTimer === 'function') {
-            clearBackgroundUpdateTimer();
-        }
-        clearPersistedGeneration(char.id, sessionId);
-        clearGenerationState(char.id);
-        if (activeChatChar && activeChatChar.id === char.id) isGenerating.value = false;
+        finalizeGenerationState({
+            charId: char.id,
+            sessionId,
+            getGenerationState,
+            clearGenerationState,
+            clearPersistedGeneration,
+            clearBackgroundUpdateTimer,
+            isGenerating,
+            activeChatChar
+        });
     };
 
     const ensureStaleCleanup = () => {
-        const currentState = getGenerationState(char.id);
-        if (currentState && typeof currentState.clearStreamFlushTimer === 'function') {
-            currentState.clearStreamFlushTimer();
-        }
-        if (currentState && typeof currentState.streamFlush === 'function') {
-            currentState.streamFlush();
-        }
-        if (typeof clearBackgroundUpdateTimer === 'function') {
-            clearBackgroundUpdateTimer();
-        }
-        clearPersistedGeneration(char.id, sessionId);
+        finalizeGenerationState({
+            charId: char.id,
+            sessionId,
+            expectedGenId: genId,
+            getGenerationState,
+            clearGenerationState,
+            clearPersistedGeneration,
+            clearBackgroundUpdateTimer,
+            isGenerating,
+            activeChatChar
+        });
     };
 
     try {

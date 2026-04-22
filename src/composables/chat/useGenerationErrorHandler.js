@@ -1,3 +1,5 @@
+import { finalizeGenerationState } from './useGenerationFinalization.js';
+
 export async function handleGenerationError({
     error,
     char,
@@ -46,15 +48,31 @@ export async function handleGenerationError({
     try {
         if (error.message === 'Context limit exceeded') {
             await restoreState(false);
-            clearGenerationState(char.id);
-            if (activeChatChar && activeChatChar.id === char.id) isGenerating.value = false;
+            finalizeGenerationState({
+                charId: char.id,
+                sessionId,
+                getGenerationState,
+                clearGenerationState,
+                clearPersistedGeneration,
+                clearBackgroundUpdateTimer,
+                isGenerating,
+                activeChatChar
+            });
             notifyGenerationEnded({ charId: char.id, sessionId });
             return;
         }
 
         await restoreState(true);
-        clearGenerationState(char.id);
-        if (activeChatChar && activeChatChar.id === char.id) isGenerating.value = false;
+        finalizeGenerationState({
+            charId: char.id,
+            sessionId,
+            getGenerationState,
+            clearGenerationState,
+            clearPersistedGeneration,
+            clearBackgroundUpdateTimer,
+            isGenerating,
+            activeChatChar
+        });
 
         sendMessageNotification(
             `Error - ${char.name}`,
@@ -94,8 +112,16 @@ export async function handleGenerationError({
     } catch (handlerErr) {
         console.error('[onError] Error handler failed:', handlerErr);
         await ensureTypingCleared();
-        clearGenerationState(char.id);
-        if (activeChatChar && activeChatChar.id === char.id) isGenerating.value = false;
+        finalizeGenerationState({
+            charId: char.id,
+            sessionId,
+            getGenerationState,
+            clearGenerationState,
+            clearPersistedGeneration,
+            clearBackgroundUpdateTimer,
+            isGenerating,
+            activeChatChar
+        });
         notifyGenerationEnded({ charId: char.id, sessionId });
     }
 }

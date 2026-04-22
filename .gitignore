@@ -88,6 +88,11 @@ captures/
 !README.md
 !CLAUDE.md
 !CONTRIBUTING.md
+!INVARIANTS.md
+!SMOKE_CHECKLIST.md
+!REFACTOR_PLAN.md
+!ARCHITECTURE.md
+!Roadmap.md
 /.claude
 docs/index.html
 /tavo-backup
