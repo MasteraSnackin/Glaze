@@ -185,7 +185,11 @@ Tracked in `REFACTOR_PLAN.md` and `REFACTOR_PHASE_0_CHECKLIST.md`:
 - [x] Extracted `triggerAutoSyncCheck` from ChatView into `composables/chat/useAutoSync.js`
 - [x] Extracted memory automation functions (~318 lines) from ChatView into `composables/chat/useMemoryAutomation.js`
 - [x] Extracted memory prompt presets (~130 lines) from ChatView into `core/services/memoryPromptPresets.js`
-- [x] `npm run build` passes after extraction
+- [x] Extracted batch draft generation into `useMemoryAutomation` composable
+- [x] Extracted `getNormalizedMemoryGenerationState` into `memoryPromptPresets.js`
+- [x] Extracted message display helpers (`getAvatar`, `getAvatarLetter`, `getAvatarColor`, `getDisplayName`, `openAvatar`) + `restoreVisibleSwipeState` into `composables/chat/useChatMessageDisplay.js`
+- [x] `npm run build` passes after each extraction slice
+- [x] ChatView.vue: 5700 → ~4900 lines (14% reduction)
 - [ ] Continue shrinking the remaining orchestration still owned by `generationService.js`
 - [ ] Reduce dependency surface passed from `ChatView.vue` into the chat use case
 
