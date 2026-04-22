@@ -52,6 +52,8 @@ Current slice deliverables:
 - [done] Promote `generateChat` and related flows to official use-case entrypoints
 - [done] Move the chat execution/orchestration shell behind `generateChat` use-case boundary
 - [done] Extract deterministic chat prompt-preparation stage into use-case-owned helper flow
+- [done] Extract final chat request assembly/execution into a dedicated use-case-owned helper
+- [done] Extract shared chat prompt-preparation primitives into a dedicated helper module used by both service and use-case layers
 - [not done] Continue moving the remaining prompt/request orchestration out of `generationService.js` into use-case/pipeline files
 
 This roadmap intentionally assumes the tokenizer and current context UI are already in place and are not being redesigned again unless a new decision is made explicitly.

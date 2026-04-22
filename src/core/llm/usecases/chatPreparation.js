@@ -9,7 +9,7 @@ import {
     getSafeContextLimit,
     trimHistoryForContextWindow,
     processPromptAsync
-} from '@/core/services/generationService.js';
+} from '@/core/llm/usecases/chatPromptShared.js';
 
 export function prepareChatPromptRequest({
     text,

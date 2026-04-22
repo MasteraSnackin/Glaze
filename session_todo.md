@@ -166,6 +166,8 @@ Tracked in `REFACTOR_PLAN.md` and `REFACTOR_PHASE_0_CHECKLIST.md`:
 - [x] Preserved existing `generationService.js` prompt/request engine as the inner compatibility layer
 - [x] Extracted deterministic chat prompt-preparation into `src/core/llm/usecases/chatPreparation.js`
 - [x] Updated `generationService.js` to consume that preparation helper instead of owning the full preparation path inline
+- [x] Extracted final chat request assembly/execution into `src/core/llm/usecases/chatRequestExecution.js`
+- [x] Extracted shared prompt-preparation primitives into `src/core/llm/usecases/chatPromptShared.js` to avoid service/use-case cycle
 - [x] `npm run build` passes after extraction
 - [ ] Move late enrichment and final request assembly steps out of `generationService.js`
 - [ ] Reduce dependency surface passed from `ChatView.vue` into the chat use case

@@ -1,21 +1,37 @@
-import { getApiConfig, getApiRuntimeStorage, getApiReasoningTags } from '@/core/config/APISettings.js';
+import { getApiReasoningTags } from '@/core/config/APISettings.js';
 import { estimateTokens } from '@/utils/tokenizer.js';
 import { replaceMacros } from '@/utils/macroEngine.js';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import { executeRequest } from '@/core/services/llmApi.js';
-import { sendMessageNotification } from '@/core/services/notificationService.js';
-import { presetState, initPresetState, getEffectivePreset } from '@/core/states/presetState.js';
+import { initPresetState } from '@/core/states/presetState.js';
 import { lorebookState, scanLorebooks, initLorebookState, vectorSearchLorebooks } from '@/core/states/lorebookState.js';
-import { getEffectivePersona } from '@/core/states/personaState.js';
 import { applyRegexes } from '@/core/services/regexService.js';
-import { buildChatRequestPayload, buildSummaryRequestPayload, buildMemoryDraftRequestPayload } from '@/core/llm/assemblers/requestAssemblers.js';
+import { buildSummaryRequestPayload, buildMemoryDraftRequestPayload } from '@/core/llm/assemblers/requestAssemblers.js';
 import { db } from '@/utils/db.js';
 import { getEmbeddings } from '@/core/services/embeddingService.js';
 import { getEmbeddingConfig, isEmbeddingConfigured } from '@/core/config/embeddingSettings.js';
 import { findTopK } from '@/utils/vectorMath.js';
-import { logger } from '../../utils/logger.js';
+import { executeFinalChatRequest } from '@/core/llm/usecases/chatRequestExecution.js';
+import {
+    getEffectiveApiConfig,
+    loadActivePreset,
+    loadSessionVars,
+    loadGlobalRegexes,
+    getPromptWorkerOptions,
+    buildPromptWorkerPayload,
+    getSafeContextLimit,
+    trimHistoryForContextWindow,
+    processPromptAsync
+} from '@/core/llm/usecases/chatPromptShared.js';
+import { prepareChatPromptRequest, runPreparedChatPrompt } from '@/core/llm/usecases/chatPreparation.js';
+import {
+    mergeLateVectorLoreEntries,
+    estimateVectorLoreTokens,
+    injectMemoryMessages,
+    injectLateVectorLoreMessages
+} from '@/core/llm/usecases/chatLateEnrichment.js';
 
 let lastPrompt = null;
 
@@ -294,8 +310,28 @@ export async function generateChatResponse({
     callbacks
 }) {
     const { onUpdate, onComplete, onError } = callbacks;
-    let apiConfig = getEffectiveApiConfig();
-    let { providerId, apiKey, apiUrl, model, stream, requestReasoning, reasoningEffort, temp, topP, maxTokens, contextSize } = apiConfig;
+    const preparedRequest = prepareChatPromptRequest({
+        text,
+        char,
+        history,
+        authorsNote,
+        summary,
+        guidanceText,
+        type
+    });
+    let {
+        apiConfig,
+        tagStart,
+        tagEnd,
+        stopString,
+        requestReasoning,
+        reasoningEffort,
+        maxTokens,
+        contextSize,
+        varsKey,
+        safeHistory
+    } = preparedRequest;
+    let { providerId, apiKey, apiUrl, model, stream, temp, topP } = apiConfig;
 
     const t = (key) => translations[currentLang.value]?.[key] || key;
 
@@ -316,39 +352,7 @@ export async function generateChatResponse({
         return;
     }
 
-    // --- Prompt Construction based on Preset ---
-    const activePreset = loadActivePreset(char, char?.sessionId);
-
-    // Reasoning Tags from Preset
-    const reasoningTags = getApiReasoningTags();
-    const tagStart = activePreset?.reasoningStart || reasoningTags.start;
-    const tagEnd = activePreset?.reasoningEnd || reasoningTags.end;
-
-    const promptOptions = getPromptWorkerOptions(char, activePreset);
-    const stopString = activePreset?.stopString || '';
-
-    if (activePreset && typeof activePreset.reasoningEnabled === 'boolean') {
-        // Only override if preset explicitly enables it, otherwise keep user setting
-        if (activePreset.reasoningEnabled === true) {
-            requestReasoning = true;
-        }
-        // If preset is false and user enabled reasoning in API settings, keep user's choice
-    }
-    if (activePreset && activePreset.reasoningEffort) {
-        reasoningEffort = activePreset.reasoningEffort;
-    }
-
-    const { varsKey, sessionVars } = loadSessionVars(char);
-
-    // Set reasoning macros for {{reasoningPrefix}} and {{reasoningSuffix}}
-    sessionVars.reasoningPrefix = tagStart;
-    sessionVars.reasoningSuffix = tagEnd;
-    localStorage.setItem(varsKey, JSON.stringify(sessionVars));
-
-    const globalRegexes = loadGlobalRegexes();
-
     let result;
-    let safeHistory = history;
     try {
         const safeContextLimit = getSafeContextLimit(contextSize, maxTokens);
         safeHistory = trimHistoryForContextWindow(history, safeContextLimit);
@@ -426,60 +430,11 @@ export async function generateChatResponse({
     }
 
     if (newVectorEntries.length > 0) {
-        const vectorLoreMessages = newVectorEntries
-            .map(entry => {
-                const content = entry.content || '';
-                const tokens = estimateTokens(content);
-                return {
-                    role: 'system',
-                    content,
-                    id: entry.id,
-                    position: entry.position,
-                    blockName: `Lorebook: ${entry.comment || entry.keys?.[0] || 'Entry'}`,
-                    isLorebook: true,
-                    sources: tokens > 0 ? [{ source: 'vectorLore', tokens }] : [],
-                    _allSources: tokens > 0 ? [{ source: 'vectorLore', tokens }] : []
-                };
-            })
-            .filter(msg => msg.content && msg.content.trim().length > 0);
-
-        vectorLoreTokens = vectorLoreMessages.reduce((sum, m) => sum + (m._allSources?.[0]?.tokens || 0), 0);
-
-        if (vectorLoreMessages.length > 0) {
-            messages = injectVectorLoreMessages(messages, vectorLoreMessages);
-
-            // Re-apply history trimming after late vector lore injection so we don't blow the effective context.
-            const staticMessages = messages.filter(m => !m.isHistory);
-            const historyMessages = messages.filter(m => m.isHistory);
-            let staticTokens = 0;
-            for (const msg of staticMessages) {
-                staticTokens += estimateTokens(msg.content || '');
-            }
-
-            if (staticTokens >= safeContext) {
-                messages = staticMessages;
-            } else {
-                let remainingHistoryBudget = safeContext - staticTokens;
-                let includedHistoryCount = 0;
-                let currentHistoryTokens = 0;
-
-                for (let i = historyMessages.length - 1; i >= 0; i--) {
-                    const tokens = estimateTokens(historyMessages[i].content || '');
-                    if (currentHistoryTokens + tokens <= remainingHistoryBudget) {
-                        currentHistoryTokens += tokens;
-                        includedHistoryCount++;
-                    } else {
-                        break;
-                    }
-                }
-
-                const keptHistoryMessages = historyMessages.slice(historyMessages.length - includedHistoryCount);
-                messages = [
-                    ...staticMessages,
-                    ...keptHistoryMessages
-                ];
-            }
-        }
+        ({ messages, vectorLoreTokens } = injectLateVectorLoreMessages({
+            messages,
+            newVectorEntries,
+            safeContext
+        }));
     }
 
     if (result.staticTokens >= safeContext) {
@@ -510,8 +465,11 @@ export async function generateChatResponse({
         });
     }
 
-    const { previewBody, requestBody } = buildChatRequestPayload({
+    await executeFinalChatRequest({
+        char,
         providerId,
+        apiUrl,
+        apiKey,
         model,
         messages,
         temperature: temp,
@@ -519,46 +477,16 @@ export async function generateChatResponse({
         stream,
         reasoningEffort,
         maxTokens,
-        stopString
+        stopString,
+        controller,
+        requestReasoning,
+        tagStart,
+        tagEnd,
+        callbacks: { onUpdate, onComplete, onError },
+        onPreviewReady: (previewBody) => {
+            lastPrompt = JSON.parse(JSON.stringify(previewBody));
+        }
     });
-
-    // Save for preview
-    lastPrompt = JSON.parse(JSON.stringify(previewBody));
-
-    // Final abort check before API call
-    if (controller?.signal?.aborted) {
-        if (onError) onError(new DOMException('Aborted', 'AbortError'));
-        return;
-    }
-
-    // Call LLM API
-    try {
-        logger.debug('[GenerationService] Final Request:', requestBody);
-        await executeRequest({
-            providerId,
-            apiUrl,
-            apiKey,
-            requestBody,
-            stream,
-            controller,
-            requestReasoning,
-            tagStart,
-            tagEnd,
-            requestType: 'chat',
-            callbacks: { onUpdate, onComplete, onError }
-        });
-    } catch (e) {
-        console.error("Generation error:", e);
-        sendMessageNotification(
-            t('error_generation') || "Generation Error",
-            e.message,
-            null,
-            char?.id,
-            null, // sessionId unknown here in catch block context easily without refactor
-            null  // msgId
-        );
-        if (onError) onError(e);
-    }
 }
 
 export async function calculateContext({ char, history, authorsNote, summary }) {
@@ -950,144 +878,6 @@ async function buildMemoryInjection({ char, history, summary, safeContext, cutof
         injectionTarget: settings.injectionTarget === 'summary_macro' ? 'summary_macro' : 'summary_block',
         macroContent
     };
-}
-
-function findSummaryInsertIndex(messages) {
-    return messages.findIndex(msg => Array.isArray(msg?.sources) && msg.sources.some(source => source?.source === 'summary'));
-}
-
-function injectMemoryIntoSummaryMacro(messages, memoryInjection) {
-    if (!memoryInjection?.macroContent) return messages;
-
-    const summaryIndex = findSummaryInsertIndex(messages);
-    if (summaryIndex === -1) return null;
-
-    const summaryMessage = messages[summaryIndex];
-    const existingContent = String(summaryMessage?.content || '').trim();
-    const appendedContent = existingContent
-        ? `${existingContent}\n\n${memoryInjection.macroContent}`
-        : memoryInjection.macroContent;
-
-    const nextSources = Array.isArray(summaryMessage?.sources) ? [...summaryMessage.sources] : [];
-    const memorySource = nextSources.find(source => source?.source === 'memory');
-    if (memorySource) memorySource.tokens += memoryInjection.tokens || 0;
-    else if ((memoryInjection.tokens || 0) > 0) nextSources.push({ source: 'memory', tokens: memoryInjection.tokens || 0 });
-
-    const nextAllSources = Array.isArray(summaryMessage?._allSources) ? [...summaryMessage._allSources] : [];
-    if ((memoryInjection.tokens || 0) > 0) nextAllSources.push({ source: 'memory', tokens: memoryInjection.tokens || 0 });
-
-    return [
-        ...messages.slice(0, summaryIndex),
-        {
-            ...summaryMessage,
-            content: appendedContent,
-            sources: nextSources,
-            _allSources: nextAllSources
-        },
-        ...messages.slice(summaryIndex + 1)
-    ];
-}
-
-function injectMemoryMessages(messages, memoryInjection, settings = {}) {
-    if (!memoryInjection?.messages?.length) return messages;
-
-    const injectionTarget = settings.injectionTarget === 'summary_macro' ? 'summary_macro' : 'summary_block';
-    if (injectionTarget === 'summary_macro') {
-        const macroInjected = injectMemoryIntoSummaryMacro(messages, memoryInjection);
-        if (macroInjected) {
-            return macroInjected;
-        }
-    }
-
-    const firstHistoryIndex = messages.findIndex(m => m.isHistory);
-    if (firstHistoryIndex === -1) {
-        return [...messages, ...memoryInjection.messages];
-    }
-    return [
-        ...messages.slice(0, firstHistoryIndex),
-        ...memoryInjection.messages,
-        ...messages.slice(firstHistoryIndex)
-    ];
-}
-
-function combineLoreSources(messages = []) {
-    const sourceMap = new Map();
-    for (const item of messages.flatMap(msg => msg._allSources || msg.sources || [])) {
-        if (!item?.source) continue;
-        sourceMap.set(item.source, (sourceMap.get(item.source) || 0) + (item.tokens || 0));
-    }
-    return [...sourceMap.entries()].map(([source, tokens]) => ({ source, tokens }));
-}
-
-function limitVectorLoreEntries(vectorEntries = [], keywordEntries = []) {
-    const maxInjectedEntries = Math.max(1, Math.min(100, Number(lorebookState.globalSettings?.maxInjectedEntries || 5)));
-    const remainingSlots = Math.max(0, maxInjectedEntries - keywordEntries.length);
-    if (remainingSlots <= 0) return [];
-
-    return [...vectorEntries]
-        .sort((a, b) => (b.vectorScore || 0) - (a.vectorScore || 0))
-        .slice(0, remainingSlots);
-}
-
-function buildVectorLoreBlock(entries, position) {
-    const combinedContent = entries.map(msg => msg.content || '').filter(Boolean).join('\n\n');
-    if (!combinedContent) return null;
-    const combinedSources = combineLoreSources(entries);
-    return {
-        role: 'system',
-        content: combinedContent,
-        blockName: position === 'worldInfoAfter' ? 'Vector Lorebook After' : 'Vector Lorebook Before',
-        isLorebook: true,
-        sources: combinedSources,
-        _allSources: combinedSources
-    };
-}
-
-function resolveLateVectorLorePosition(entry) {
-    const rawPosition = entry?.position === 'matchGlobal'
-        ? (lorebookState.globalSettings?.injectionPosition || 'worldInfoBefore')
-        : (entry?.position || 'worldInfoBefore');
-
-    if (rawPosition === 'worldInfoAfter') return 'worldInfoAfter';
-    if (rawPosition === 'lorebooksMacro') return 'worldInfoAfter';
-    return 'worldInfoBefore';
-}
-
-function injectVectorLoreMessages(messages, loreEntries) {
-    if (!Array.isArray(loreEntries) || !loreEntries.length) return messages;
-
-    const beforeEntries = [];
-    const afterEntries = [];
-    loreEntries.forEach(entry => {
-        if (resolveLateVectorLorePosition(entry) === 'worldInfoAfter') afterEntries.push(entry);
-        else beforeEntries.push(entry);
-    });
-
-    const beforeBlock = buildVectorLoreBlock(beforeEntries, 'worldInfoBefore');
-    const afterBlock = buildVectorLoreBlock(afterEntries, 'worldInfoAfter');
-    if (!beforeBlock && !afterBlock) return messages;
-
-    const firstHistoryIndex = messages.findIndex(m => m.isHistory);
-    const charCardIndex = messages.findIndex(m => m.blockId === 'char_card');
-    const afterInsertIndex = firstHistoryIndex === -1 ? messages.length : firstHistoryIndex;
-    const beforeInsertIndex = charCardIndex >= 0 ? charCardIndex : afterInsertIndex;
-
-    let nextMessages = [...messages];
-    if (afterBlock) {
-        nextMessages = [
-            ...nextMessages.slice(0, afterInsertIndex),
-            afterBlock,
-            ...nextMessages.slice(afterInsertIndex)
-        ];
-    }
-    if (beforeBlock) {
-        nextMessages = [
-            ...nextMessages.slice(0, beforeInsertIndex),
-            beforeBlock,
-            ...nextMessages.slice(beforeInsertIndex)
-        ];
-    }
-    return nextMessages;
 }
 
 export async function generateMemoryDraft({ history, prompt, controller, apiConfigOverride = null }) {
