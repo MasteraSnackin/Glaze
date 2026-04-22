@@ -57,7 +57,7 @@ import { formatDate, formatDateSeparator } from '@/utils/dateFormatter.js';
 import { currentLang, chatPaddingLR, setChatPaddingLR, shouldUseBatterySaverUI } from '@/core/config/APPSettings.js';
 import { translations } from '@/utils/i18n.js';
 import { calculateContext, generateMemoryDraft } from '@/core/services/generationService.js';
-import { executeChatGenerationUseCase, createGenerationAppAdapters } from '@/core/llm/usecases/generateChat.js';
+import { executeChatGenerationUseCase, createChatGenerationServices } from '@/core/llm/usecases/generateChat.js';
 import { executeRequest } from '@/core/services/llmApi.js';
 import { getApiConfig, getApiRuntimeStorage, getApiReasoningTags, fetchRemoteModels } from '@/core/config/APISettings.js';
 import { getActiveLLMProfile } from '@/core/config/ProviderProfiles.js';
@@ -70,14 +70,6 @@ import { lorebookState, getActiveLorebooksForContext } from '@/core/states/loreb
 import { presetState, getEffectivePreset, getEffectivePresetId } from '@/core/states/presetState.js';
 import { useVirtualScroll } from '@/composables/chat/useVirtualScroll.js';
 import { useGenerationRegistry } from '@/composables/chat/useGenerationRegistry.js';
-import { handleGenerationComplete } from '@/composables/chat/useGenerationCompleteHandler.js';
-import { handleGenerationError } from '@/composables/chat/useGenerationErrorHandler.js';
-import { buildGenerationAuthorsNote, buildGenerationHistory, ensureGenerationPlaceholderMessage, resolveGenerationSessionContext } from '@/composables/chat/useGenerationPreparation.js';
-import { handleGenerationPromptReady } from '@/composables/chat/useGenerationPromptReady.js';
-import { createPromptMetadataSnapshots } from '@/composables/chat/usePromptMetadataSnapshots.js';
-import { restoreGenerationState } from '@/composables/chat/useGenerationStateRestore.js';
-import { applyGenerationGuidanceState, setupGenerationState } from '@/composables/chat/useGenerationStateSetup.js';
-import { createGenerationStreamUpdater } from '@/composables/chat/useGenerationStreamUpdate.js';
 import { useTypingStateCleanup } from '@/composables/chat/useTypingStateCleanup.js';
 import { useSidebarResizer } from '@/composables/ui/useSidebarResizer.js';
 import { sendMessageNotification, clearMessageNotifications, startGenerationNotification, stopGenerationNotification } from '@/core/services/notificationService.js';
@@ -113,7 +105,18 @@ const {
     reindexAllMemoryEntries
 } = memoryBooksService;
 
-const generationAppAdapters = createGenerationAppAdapters();
+const chatGenerationServices = createChatGenerationServices({
+    activeChatChar,
+    isGenerating,
+    currentMessages,
+    displayMessages,
+    smartScroll,
+    scrollToBottom,
+    isItemVisible,
+    scrollToIndex,
+    genMsgId,
+    updateSessionMessage
+});
 
 async function openMemoryEntryEditor(entryId) {
     if (!activeChatChar || !entryId) return;
@@ -3186,78 +3189,7 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
                 requestToken,
                 rawStreamRef
             },
-            state: {
-                activeChatChar,
-                isGenerating,
-                currentMessages,
-                displayMessages
-            },
-            services: {
-                app: generationAppAdapters,
-                preparation: {
-                    buildAuthorsNote: ({ charId, sessionId, anContent }) => buildGenerationAuthorsNote({
-                        getEffectivePreset,
-                        charId,
-                        sessionId,
-                        anContent
-                    }),
-                    ensurePlaceholderMessage: ({ msgIndex, text, guidanceText, guidanceType, charId, sessionId }) => ensureGenerationPlaceholderMessage({
-                        msgIndex,
-                        text,
-                        guidanceText,
-                        guidanceType,
-                        currentMessages,
-                        createBaseMessageMeta,
-                        genMsgId,
-                        charId,
-                        sessionId,
-                        getChatData,
-                        db,
-                        scrollToBottom
-                    }),
-                    genMessageId: genMsgId,
-                    applyGenerationGuidanceState,
-                    createPromptMetadataSnapshots,
-                    buildGenerationHistory,
-                    updateSessionMessage
-                },
-                lifecycle: {
-                    markGenerationPersisted,
-                    setupGenerationState,
-                    setGenerationState,
-                    getGenerationState,
-                    createGenerationStreamUpdater,
-                    isGenerationStateCurrent,
-                    restoreGenerationState,
-                    clearPersistedGeneration,
-                    handleGenerationError,
-                    clearGenerationState,
-                    clearTypingStateForMessage,
-                    handleGenerationPromptReady,
-                    handleGenerationComplete,
-                    persistence: {
-                        getChatData,
-                        db
-                    }
-                },
-                effects: {
-                    smartScroll,
-                    formatError,
-                    sendMessageNotification,
-                    userAvatar: activePersona.value?.avatar || null,
-                    isItemVisible,
-                    scrollToIndex
-                },
-                postprocess: {
-                    cleanText,
-                    estimateTokens,
-                    processMessageImages,
-                    runMemoryAutomationAfterStableTurn,
-                    addMessageStats,
-                    addRegenerationStats,
-                    triggerAutoSyncCheck
-                }
-            }
+            services: chatGenerationServices
         });
     }
 }
@@ -3965,7 +3897,7 @@ async function startImpersonation(guidanceText = null) {
         .filter(m => !m.isTyping && !m.isHidden)
         .map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text, chatId: m.originalIndex }));
 
-    generationAppAdapters.notifyGenerationStarted({ charId, sessionId: activeChatChar.sessionId });
+    chatGenerationServices.app.notifyGenerationStarted({ charId, sessionId: activeChatChar.sessionId });
 
     generateChatResponse({
         text: promptText,
@@ -3981,14 +3913,14 @@ async function startImpersonation(guidanceText = null) {
         isImpersonating.value = false;
         isGenerating.value = false;
         clearGenerationState(charId);
-        generationAppAdapters.notifyGenerationEnded({ charId: charId });
+        chatGenerationServices.app.notifyGenerationEnded({ charId: charId });
             },
             onError: (err) => {
         console.error(err);
         isImpersonating.value = false;
         isGenerating.value = false;
         clearGenerationState(charId);
-        generationAppAdapters.notifyGenerationEnded({ charId: charId });
+        chatGenerationServices.app.notifyGenerationEnded({ charId: charId });
             }
         }
     });
@@ -4112,7 +4044,7 @@ async function deleteSession(sessionId, targetChar) {
         }
         
         // Notify other components
-        generationAppAdapters.notifyChatUpdated();
+        chatGenerationServices.app.notifyChatUpdated();
     }
 }
 

@@ -67,6 +67,7 @@ Current slice deliverables:
 - [done] Extract summary and memory-draft request paths into dedicated use-case helpers so `generationService.js` no longer owns those request shells inline
 - [done] Extract memory-book retrieval/index maintenance into a dedicated helper so `generationService.js` no longer owns memory embedding/indexing and summary-path injection selection inline
 - [done] Replace remaining direct `window.dispatchEvent` calls in `ChatView.vue` for generation/chat events with canonical app-event adapters, removing the last inline event-bridging from the view layer
+- [done] Extract ChatView generation-service wiring into `createChatGenerationServices` factory so ChatView no longer manually assembles the ~30-function injection bundle; only Vue-own state is passed as args
 - [not done] Continue moving the remaining prompt/request orchestration out of `generationService.js` into use-case/pipeline files
 
 This roadmap intentionally assumes the tokenizer and current context UI are already in place and are not being redesigned again unless a new decision is made explicitly.

@@ -3,25 +3,12 @@ import {
 } from '@/core/services/generationService.js';
 
 export { createGenerationAppAdapters } from '@/core/llm/usecases/chatGenerationAppAdapters.js';
+export { createChatGenerationServices } from '@/core/llm/usecases/chatGenerationServiceFactory.js';
 
-/**
- * Official chat-generation use-case entrypoint.
- *
- * This is intentionally a thin wrapper for now so callers can stop depending
- * on `generationService.js` directly before the underlying orchestration is
- * extracted into dedicated pipeline steps.
- *
- * @param {Parameters<typeof generateChatResponse>[0]} input
- */
 export async function generateChat(input) {
     return generateChatResponse(input);
 }
 
-/**
- * Executes the UI-owned chat generation lifecycle once the session context is
- * already resolved. This keeps Vue state in the view layer while moving the
- * request orchestration body behind the official use-case boundary.
- */
 export async function executeChatGenerationUseCase({
     char,
     text,
@@ -31,24 +18,24 @@ export async function executeChatGenerationUseCase({
     onAbort = null,
     resolvedContext,
     request,
-    state,
     services
 }) {
     const { sessionId, summary, anContent } = resolvedContext;
     const { genId, controller, startTime, ownerKey, requestToken } = request;
     const {
-        activeChatChar,
-        isGenerating,
-        currentMessages,
-        displayMessages
-    } = state;
-    const {
+        state,
         app,
         preparation,
         lifecycle,
         effects,
         postprocess
     } = services;
+    const {
+        activeChatChar,
+        isGenerating,
+        currentMessages,
+        displayMessages
+    } = state;
     const {
         notifyGenerationStarted,
         notifyGenerationEnded,
@@ -123,7 +110,8 @@ export async function executeChatGenerationUseCase({
         guidanceType
     });
 
-    const msgId = currentMessages.value[msgIndex]?.id || genMessageId();
+    const currentMessagesVal = currentMessages.value || currentMessages;
+    const msgId = currentMessagesVal[msgIndex]?.id || genMessageId();
     const { snapshotPromptMeta, restorePromptMetaOnMessages } = createPromptMetadataSnapshots();
 
     markGenerationPersisted(char.id, sessionId);
