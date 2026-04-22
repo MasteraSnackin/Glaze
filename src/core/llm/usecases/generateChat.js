@@ -147,8 +147,7 @@ export async function executeChatGenerationUseCase({
         genId,
         getGenerationState,
         isGenerationStateCurrent,
-        getChatData,
-        db,
+        persistence,
         onRawText: (effectiveText, chunk) => {
             request.rawStreamRef.value = effectiveText || (request.rawStreamRef.value + (chunk || ''));
         }
@@ -157,8 +156,7 @@ export async function executeChatGenerationUseCase({
     const restoreState = async (isError = false) => {
         await restoreGenerationState({
             currentMessages,
-            getChatData,
-            db,
+            persistence,
             getGenerationState,
             clearPersistedGeneration,
             char,
@@ -190,8 +188,7 @@ export async function executeChatGenerationUseCase({
             restoreState,
             clearBackgroundUpdateTimer,
             clearTypingStateForMessage,
-            getChatData,
-            db,
+            persistence,
             formatError,
             sendMessageNotification
         });
@@ -217,8 +214,7 @@ export async function executeChatGenerationUseCase({
                     msgIndex,
                     char,
                     sessionId,
-                    getChatData,
-                    db,
+                    persistence,
                     snapshotPromptMeta
                 });
             },
@@ -245,8 +241,7 @@ export async function executeChatGenerationUseCase({
                     clearPersistedGeneration,
                     clearBackgroundUpdateTimer,
                     clearTypingStateForMessage,
-                    getChatData,
-                    db,
+                    persistence,
                     cleanText,
                     estimateTokens,
                     updateSessionMessage,

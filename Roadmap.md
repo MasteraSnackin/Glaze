@@ -59,6 +59,7 @@ Current slice deliverables:
 - [done] Replace direct app-event naming in the chat use case with a narrower generation-start notification adapter
 - [done] Move chat persistence access behind `lifecycle.persistence` so `generateChat` no longer depends on loose `getChatData` / `db` injections
 - [done] Trim unused lifecycle callback arguments from the `generateChat` handoff so the boundary matches the actual handler contracts more closely
+- [done] Switch lifecycle and prompt-ready handlers to consume the shared `persistence` facade directly instead of separate `getChatData` / `db` arguments
 - [not done] Continue moving the remaining prompt/request orchestration out of `generationService.js` into use-case/pipeline files
 
 This roadmap intentionally assumes the tokenizer and current context UI are already in place and are not being redesigned again unless a new decision is made explicitly.

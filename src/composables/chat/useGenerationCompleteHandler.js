@@ -78,8 +78,7 @@ export async function handleGenerationComplete({
     clearPersistedGeneration,
     clearBackgroundUpdateTimer,
     clearTypingStateForMessage,
-    getChatData,
-    db,
+    persistence,
     cleanText,
     estimateTokens,
     updateSessionMessage,
@@ -94,6 +93,7 @@ export async function handleGenerationComplete({
     addRegenerationStats,
     triggerAutoSyncCheck
 }) {
+    const { getChatData, db } = persistence;
     const ensureCleanup = () => {
         const currentState = getGenerationState(char.id);
         if (currentState && currentState.timerId) clearTimeout(currentState.timerId);

@@ -13,11 +13,11 @@ export async function handleGenerationError({
     restoreState,
     clearBackgroundUpdateTimer,
     clearTypingStateForMessage,
-    getChatData,
-    db,
+    persistence,
     formatError,
     sendMessageNotification
 }) {
+    const { getChatData, db } = persistence;
     const state = getGenerationState(char.id);
     if (!state || state.genId !== genId) return;
 

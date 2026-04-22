@@ -30,8 +30,7 @@ function rollbackPendingSwipe(message, { restoreSwipeMeta = false } = {}) {
 
 export async function restoreGenerationState({
     currentMessages,
-    getChatData,
-    db,
+    persistence,
     getGenerationState,
     clearPersistedGeneration,
     char,
@@ -43,6 +42,7 @@ export async function restoreGenerationState({
     clearBackgroundUpdateTimer,
     updateSessionMessage
 }) {
+    const { getChatData, db } = persistence;
     if (typeof clearBackgroundUpdateTimer === 'function') {
         clearBackgroundUpdateTimer();
     }

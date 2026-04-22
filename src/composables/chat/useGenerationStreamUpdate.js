@@ -8,10 +8,10 @@ export function createGenerationStreamUpdater({
     genId,
     getGenerationState,
     isGenerationStateCurrent,
-    getChatData,
-    db,
+    persistence,
     onRawText
 }) {
+    const { getChatData, db } = persistence;
     let backgroundUpdateTimer = null;
     let backgroundPendingText = null;
     let backgroundPendingReasoning = null;
