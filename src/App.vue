@@ -39,7 +39,7 @@ const PersonasView = defineAsyncComponent(() => import('@/views/PersonasView.vue
 const RegexSheet = defineAsyncComponent(() => import('@/components/sheets/RegexSheet.vue'));
 import { Capacitor } from '@capacitor/core';
 import { isKeyboardOpen, onKeyboardShow, onKeyboardHide } from '@/core/services/keyboardHandler.js';
-import { initSettings } from '@/core/config/APISettings.js';
+import { initSettings, applyApiRuntimeConfig } from '@/core/config/APISettings.js';
 import { initTheme, themeState } from '@/core/states/themeState.js';
 import { updateLanguage } from '@/utils/i18n.js';
 import { currentLang, imageViewerMode, forceMobileLayout } from '@/core/config/APPSettings.js';
