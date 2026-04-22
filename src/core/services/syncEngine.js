@@ -158,17 +158,36 @@ async function collectSingletonEntries() {
 
     const lsData = {};
     const lsKeys = [
-        'silly_cradle_presets', 'silly_cradle_current_preset_id', 'gz_preset_connections', 
+        'silly_cradle_presets', 'silly_cradle_current_preset_id', 'gz_preset_connections',
         'regex_scripts', 'gz_active_persona_id', 'gz_persona_connections',
-        'gz_lang', 'gz_theme', 'gz_chat_padding_lr', 'gz_force_mobile_layout', 
-        'gz_battery_saver_ui', 'gz_api_provider', 'gz_api_endpoint_normalized',
-        'gz_api_temp', 'gz_api_topp', 'gz_api_stream', 'gz_api_auto_hide_images',
-        'gz_api_auto_hide_images_n', 'gz_api_request_reasoning', 'gz_api_reasoning_effort',
-        'gz_api_connect_timeout', 'gz_api_stream_timeout'
+        'gz_lang', 'gz_theme', 'gz_chat_padding_lr', 'gz_force_mobile_layout',
+        'gz_battery_saver_ui',
+        // Legacy LLM runtime
+        'api-endpoint', 'api-max-tokens', 'api-context',
+        'gz_api_provider', 'gz_api_endpoint_normalized',
+        'gz_api_temp', 'gz_api_topp', 'gz_api_stream',
+        'gz_api_auto_hide_images', 'gz_api_auto_hide_images_n',
+        'gz_api_request_reasoning', 'gz_api_reasoning_start', 'gz_api_reasoning_end', 'gz_api_reasoning_effort',
+        'gz_api_connect_timeout', 'gz_api_stream_timeout',
+        // Embeddings (non-sensitive)
+        'gz_embedding_use_same', 'gz_embedding_target', 'gz_embedding_scan_depth',
+        'gz_embedding_threshold', 'gz_embedding_top_k', 'gz_embedding_max_chunk_tokens',
+        'gz_embedding_enabled',
+        // Image Gen (non-sensitive)
+        'gz_imggen_enabled', 'gz_imggen_api_type', 'gz_imggen_endpoint', 'gz_imggen_model',
+        'gz_imggen_size', 'gz_imggen_quality', 'gz_imggen_aspect_ratio', 'gz_imggen_image_size',
+        'gz_imggen_naistera_model', 'gz_imggen_naistera_aspect_ratio',
+        'gz_imggen_naistera_send_char_avatar', 'gz_imggen_naistera_send_user_avatar',
+        'gz_imggen_image_context_enabled', 'gz_imggen_image_context_count',
+        'gz_imggen_additional_refs',
+        // Provider profiles (metadata only; the JSON with keys is conditional below)
+        'gz_active_llm_profile_id', 'gz_service_profile_map', 'gz_provider_profiles_migrated',
+        'gz_sync_include_api_keys'
     ];
     const includeKeys = isSyncIncludingApiKeys();
     if (includeKeys) {
         lsKeys.push('api-key', 'api-model', 'gz_embedding_key', 'gz_embedding_model', 'gz_embedding_endpoint');
+        lsKeys.push('gz_provider_profiles', 'gz_imggen_api_key');
     }
     for (const k of lsKeys) {
         const v = localStorage.getItem(k);
