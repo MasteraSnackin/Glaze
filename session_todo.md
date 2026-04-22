@@ -59,9 +59,13 @@
 - [ ] If crash persists on 400+ messages, investigate virtual scroll rendering
 
 ### 3. TXT Import Rejection ✅
-- [x] File picker filters TXT files
+- [x] File picker/import flow handles TXT explicitly
 - [x] `importSillyTavernChat` throws explicit error for .txt
 - [x] Error message localized (EN/RU)
+
+### 4. JSONL Import Picker Visibility Follow-Up ✅
+- [x] Keep `.jsonl` and `.txt` visible/selectable in the picker instead of silently hiding `.txt`
+- [x] Preserve explicit `.txt` rejection in `importSillyTavernChat(...)`
 
 ---
 
