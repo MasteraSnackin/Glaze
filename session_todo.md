@@ -175,8 +175,9 @@ Tracked in `REFACTOR_PLAN.md` and `REFACTOR_PHASE_0_CHECKLIST.md`:
 - [x] Dropped unused lifecycle callback arguments from the chat use-case handoff to keep the boundary narrower and match actual handler contracts
 - [x] Switched lifecycle and prompt-ready handlers to consume the shared `persistence` facade directly instead of separate `getChatData` / `db` arguments
 - [x] Switched completion/error notifications to narrow app adapters so lifecycle handlers no longer dispatch raw `window` events directly
+- [x] Extracted the post-worker chat prompt pipeline (late vector retrieval, memory injection, prompt-ready callback, final request handoff) into `src/core/llm/usecases/chatPostPromptPipeline.js`
 - [x] `npm run build` passes after extraction
-- [ ] Move late enrichment and final request assembly steps out of `generationService.js`
+- [ ] Continue shrinking the remaining orchestration still owned by `generationService.js`
 - [ ] Reduce dependency surface passed from `ChatView.vue` into the chat use case
 
 ---
