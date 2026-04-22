@@ -167,7 +167,7 @@ const openResolutionSelector = () => {
 };
 
 const openNaisteraModelSelector = () => {
-    const options = ['grok', 'nano banana', 'novelai'];
+    const options = ['grok', 'grok-pro', 'nano banana', 'novelai'];
     showBottomSheet({
         title: t('imggen_model') || 'Model',
         items: options.map(v => ({

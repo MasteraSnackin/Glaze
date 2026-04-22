@@ -95,10 +95,11 @@ const embeddingError = ref('');
 
 // --- Image Gen Settings State ---
 const imageGenSettings = reactive({
-    useSame: true,
+    apiType: 'openai',
     endpoint: '',
-    key: '',
+    apiKey: '',
     model: '',
+    naisteraModel: 'grok',
     enabled: false
 });
 
@@ -153,22 +154,65 @@ function onMemoryProviderInput(key, value) {
 
 function loadImageGenSettings() {
     const config = getImageGenSettings();
-    const isSame = isServiceUsingLLMProfile(SERVICE_NAMES.IMAGE_GEN);
-    const profile = isSame ? null : getServiceEffectiveProfile(SERVICE_NAMES.IMAGE_GEN);
-    imageGenSettings.useSame = isSame;
-    imageGenSettings.endpoint = isSame ? '' : (profile?.endpoint || config.endpoint || '');
-    imageGenSettings.key = isSame ? '' : (profile?.apiKey || config.apiKey || '');
-    imageGenSettings.model = isSame ? '' : (profile?.model || config.model || '');
+    imageGenSettings.apiType = config.apiType || 'openai';
+    imageGenSettings.endpoint = config.endpoint || '';
+    imageGenSettings.apiKey = config.apiKey || '';
+    imageGenSettings.model = config.model || '';
+    imageGenSettings.naisteraModel = config.naisteraModel || 'grok';
     imageGenSettings.enabled = config.enabled;
 }
 
 function onImageGenInput(key, value) {
-    if (key === 'useSame') {
-        selectProfileForService(SERVICE_NAMES.IMAGE_GEN, value ? 'llm' : 'custom');
-        loadImageGenSettings();
-        return;
-    }
     saveImageGenSettings({ [key]: value });
+    if (key === 'apiType') {
+        if (value === 'naistera') {
+            imageGenSettings.apiType = 'naistera';
+        }
+        if (value !== 'openai') {
+            imageGenSettings.model = imageGenSettings.model || '';
+        }
+    }
+}
+
+const showImageGenOpenAIOptions = computed(() => imageGenSettings.apiType === 'openai');
+const showImageGenGeminiOptions = computed(() => imageGenSettings.apiType === 'gemini');
+const showImageGenNaisteraOptions = computed(() => imageGenSettings.apiType === 'naistera');
+
+function openImageGenApiTypeSelector() {
+    const options = [
+        { label: 'OpenAI', value: 'openai' },
+        { label: 'Gemini', value: 'gemini' },
+        { label: 'Naistera', value: 'naistera' }
+    ];
+
+    showBottomSheet({
+        title: t('imggen_api_type') || 'API Type',
+        items: options.map(option => ({
+            label: option.label,
+            sublabel: imageGenSettings.apiType === option.value ? (t('preset_active') || 'Active') : '',
+            onClick: () => {
+                imageGenSettings.apiType = option.value;
+                onImageGenInput('apiType', option.value);
+                closeBottomSheet();
+            }
+        }))
+    });
+}
+
+function openImageGenNaisteraModelSelector() {
+    const options = ['grok', 'grok-pro', 'nano banana', 'novelai'];
+    showBottomSheet({
+        title: t('imggen_model') || 'Model',
+        items: options.map(option => ({
+            label: option,
+            sublabel: imageGenSettings.naisteraModel === option ? (t('preset_active') || 'Active') : '',
+            onClick: () => {
+                imageGenSettings.naisteraModel = option;
+                onImageGenInput('naisteraModel', option);
+                closeBottomSheet();
+            }
+        }))
+    });
 }
 
 function loadEmbeddingSettings() {
@@ -820,25 +864,38 @@ onBeforeUnmount(() => {
                         <input type="checkbox" v-model="imageGenSettings.enabled" @change="onImageGenInput('enabled', $event.target.checked)" class="vk-switch">
                     </div>
                     <template v-if="imageGenSettings.enabled">
-                        <div class="settings-item-checkbox">
-                            <div class="settings-text-col">
-                                <label>{{ t('label_use_llm_api') || 'Use LLM API' }}</label>
-                                <div class="settings-desc">{{ t('desc_use_llm_api') || 'Use the same endpoint as LLM for image generation' }}</div>
+                        <div class="settings-item" @click="openImageGenApiTypeSelector">
+                            <label>{{ t('imggen_api_type') || 'API Type' }}</label>
+                            <div class="clickable-selector">
+                                <span>{{ imageGenSettings.apiType === 'openai' ? 'OpenAI' : imageGenSettings.apiType === 'gemini' ? 'Gemini' : 'Naistera' }}</span>
+                                <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
                             </div>
-                            <input type="checkbox" v-model="imageGenSettings.useSame" @change="onImageGenInput('useSame', $event.target.checked)" class="vk-switch">
                         </div>
-                        <template v-if="!imageGenSettings.useSame">
+
+                        <template v-if="!showImageGenNaisteraOptions">
                             <div class="settings-item">
                                 <label>{{ t('label_imagegen_endpoint') || 'Image Gen Endpoint' }}</label>
-                                <input type="text" v-model="imageGenSettings.endpoint" @input="onImageGenInput('endpoint', $event.target.value)" placeholder="http://127.0.0.1:5000/v1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+                                <input type="text" v-model="imageGenSettings.endpoint" @input="onImageGenInput('endpoint', $event.target.value)" :placeholder="showImageGenGeminiOptions ? 'https://generativelanguage.googleapis.com' : 'http://127.0.0.1:5000/v1'" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
                             </div>
+                        </template>
+
+                        <div class="settings-item">
+                            <label>{{ t('label_imagegen_key') || 'API Key' }}</label>
+                            <input type="password" v-model="imageGenSettings.apiKey" @input="onImageGenInput('apiKey', $event.target.value)" :placeholder="showImageGenNaisteraOptions ? 'Telegram bot token' : 'sk-...'" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+                        </div>
+
+                        <div v-if="showImageGenNaisteraOptions" class="settings-item" @click="openImageGenNaisteraModelSelector">
+                            <label>{{ t('imggen_model') || 'Model' }}</label>
+                            <div class="clickable-selector">
+                                <span>{{ imageGenSettings.naisteraModel || 'grok' }}</span>
+                                <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                            </div>
+                        </div>
+
+                        <template v-if="showImageGenOpenAIOptions || showImageGenGeminiOptions">
                             <div class="settings-item">
                                 <label>{{ t('label_imagegen_model') || 'Model' }}</label>
-                                <input type="text" v-model="imageGenSettings.model" @input="onImageGenInput('model', $event.target.value)" placeholder="dall-e-3" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
-                            </div>
-                            <div class="settings-item">
-                                <label>{{ t('label_imagegen_key') || 'API Key' }}</label>
-                                <input type="password" v-model="imageGenSettings.key" @input="onImageGenInput('apiKey', $event.target.value)" placeholder="sk-..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+                                <input type="text" v-model="imageGenSettings.model" @input="onImageGenInput('model', $event.target.value)" :placeholder="showImageGenGeminiOptions ? 'imagen-3.0-generate-002' : 'dall-e-3'" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
                             </div>
                         </template>
                     </template>
