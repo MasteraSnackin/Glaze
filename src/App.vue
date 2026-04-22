@@ -676,6 +676,9 @@ const reloadSyncedData = async () => {
         initPresetState(true)
     ]);
 
+    // Re-apply synced API runtime settings so generation uses updated values immediately
+    applyApiRuntimeConfig({});
+
     if (characterListRef.value?.loadCharacters) {
         await characterListRef.value.loadCharacters();
     }

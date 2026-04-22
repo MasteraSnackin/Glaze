@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 import SheetView from '@/components/ui/SheetView.vue';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
@@ -18,6 +18,7 @@ import * as gdriveAdapter from '@/core/services/adapters/gdriveAdapter.js';
 import { generateSyncKey, hasSyncKey, restoreKeyFromPhrase, deleteSyncKey, getSyncKey } from '@/core/services/crypto/keyManager.js';
 import { fullPush, fullPull, fullSync, checkSyncReadiness } from '@/core/services/syncService.js';
 import { cloudHasData, verifyCloudKey, wipeCloudData } from '@/core/services/syncEngine.js';
+import { isSyncIncludingApiKeys, setSyncIncludeApiKeys } from '@/core/config/ProviderProfiles.js';
 import { db } from '@/utils/db.js';
 
 const sheet = ref(null);
@@ -37,6 +38,11 @@ const restoreError = ref('');
 const restoreSuccess = ref(false);
 const localSyncStatus = ref('');
 const syncResult = ref(null);
+const syncIncludeApiKeys = ref(isSyncIncludingApiKeys());
+
+watch(syncIncludeApiKeys, (val) => {
+    setSyncIncludeApiKeys(val);
+});
 
 function formatSyncBreakdown(result) {
     if (!result?.breakdown) return '';
@@ -505,6 +511,19 @@ onMounted(async () => {
                         <label>{{ t('sync_every') || 'Every' }}</label>
                         <input type="number" v-model.number="autoSyncThreshold" min="1" max="50" class="sync-threshold-input">
                         <label>{{ t('sync_messages') || 'messages' }}</label>
+                    </div>
+                </div>
+
+                <div class="bs-separator"></div>
+
+                <div class="bs-section">
+                    <div class="bs-section-title">{{ t('section_sync_settings') || 'Sync Settings' }}</div>
+                    <div class="settings-item-checkbox" @click="syncIncludeApiKeys = !syncIncludeApiKeys">
+                        <div class="settings-text-col">
+                            <label>{{ t('label_sync_include_keys') || 'Include API Keys in Sync' }}</label>
+                            <div class="settings-desc">{{ t('desc_sync_include_keys') || 'Send provider API keys to cloud backup' }}</div>
+                        </div>
+                        <input type="checkbox" class="vk-switch" :checked="syncIncludeApiKeys" @change="syncIncludeApiKeys = $event.target.checked" style="pointer-events: none;">
                     </div>
                 </div>
 

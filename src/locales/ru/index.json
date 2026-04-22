@@ -333,6 +333,7 @@
     "msg_vector_generation_failed": "Во время генерации не ответила модель эмбеддингов, поэтому векторный поиск по лорбукам не смог выполниться.",
     "msg_import_char_failed": "Не удалось импортировать персонажа",
     "msg_import_chat_failed": "Не удалось импортировать чат",
+    "msg_import_chat_unsupported_format": "Неподдерживаемый формат файла. Используйте JSONL или .glzchat.json файлы.",
     "error_name_required": "Имя обязательно для заполнения.",
     "select_persona_import": "Выберите персону пользователя",
     "select_char_import": "Выберите персонажа",
@@ -905,5 +906,15 @@
     "catalog_error_extract": "Не удалось отправить на извлечение",
     "catalog_extracting": "Извлечение...",
     "catalog_extract_progress": "DataCat загружает персонажа с JanitorAI. Это может занять минуту.",
-    "btn_retry": "Повторить"
+    "btn_retry": "Повторить",
+    "section_image_gen": "Генерация изображений",
+    "label_image_gen_enabled": "Включить генерацию изображений",
+    "desc_image_gen_enabled": "Генерировать изображения из тегов [IMG:GEN]",
+    "label_imagegen_endpoint": "Эндпоинт генерации изображений",
+    "label_imagegen_key": "API ключ",
+    "section_memory_books_provider": "Генерация Memory Books",
+    "desc_use_llm_api_memory": "Использовать тот же endpoint что и LLM для генерации памяти",
+    "label_memory_endpoint": "Endpoint генерации памяти",
+    "label_memory_model": "Модель",
+    "label_memory_key": "API ключ"
 }

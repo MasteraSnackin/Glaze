@@ -108,6 +108,12 @@ async function importGlazeChatPackage(json, characterId, userPersona) {
  */
 export async function importSillyTavernChat(file, characterId, userPersona) {
     const fileName = String(file?.name || '').toLowerCase();
+    
+    // Reject TXT files explicitly — they are not a valid chat format
+    if (fileName.endsWith('.txt')) {
+        throw new Error('TXT files are not supported for chat import. Please use JSONL or .glzchat.json format.');
+    }
+    
     if (fileName.endsWith('.glzchat.json')) {
         const text = await readFile(file);
         const json = JSON.parse(text);
@@ -140,12 +146,16 @@ export async function importSillyTavernChat(file, characterId, userPersona) {
                 let lastTimestamp = 0;
                 messages = json.map(obj => {
                     const scMsg = convertMessage(obj, userPersona);
+                    // Skip completely empty messages
+                    if (!scMsg.text && (!scMsg.swipes || scMsg.swipes.every(s => !s))) {
+                        return null;
+                    }
                     if (scMsg.timestamp <= lastTimestamp) {
                         scMsg.timestamp = lastTimestamp + 1;
                     }
                     lastTimestamp = scMsg.timestamp;
                     return scMsg;
-                });
+                }).filter(Boolean);
             }
         } catch (e) {
             console.warn("Failed to parse JSON array mode, proceeding to JSONL stream", e);
@@ -164,12 +174,16 @@ export async function importSillyTavernChat(file, characterId, userPersona) {
                 if (obj.chat_metadata) {
                     metadata = obj.chat_metadata;
                 } else {
-                    const scMsg = convertMessage(obj, userPersona);
-                    if (scMsg.timestamp <= lastTimestamp) {
-                        scMsg.timestamp = lastTimestamp + 1;
-                    }
-                    lastTimestamp = scMsg.timestamp;
-                    messages.push(scMsg);
+                const scMsg = convertMessage(obj, userPersona);
+                // Skip completely empty messages
+                if (!scMsg.text && (!scMsg.swipes || scMsg.swipes.every(s => !s))) {
+                    return;
+                }
+                if (scMsg.timestamp <= lastTimestamp) {
+                    scMsg.timestamp = lastTimestamp + 1;
+                }
+                lastTimestamp = scMsg.timestamp;
+                messages.push(scMsg);
                 }
             } catch (e) {
                 console.warn(`Skipping invalid JSON line at index ${lineIndex}`, e);
@@ -345,6 +359,8 @@ export async function exportSillyTavernChat(chat) {
     // 2. Message Lines
     for (const msg of messages) {
         if (!msg) continue;
+        // Skip empty messages that have no meaningful content
+        if (!msg.text && (!msg.swipes || msg.swipes.every(s => !s))) continue;
         const isUser = msg.role === 'user';
         const name = isUser ? (msg.persona?.name || userName) : charName;
         const dateObj = new Date(msg.timestamp || Date.now());
@@ -452,9 +468,14 @@ export function pickChatFile() {
     return new Promise((resolve) => {
         const input = document.createElement('input');
         input.type = 'file';
-        input.accept = '.json,.jsonl,application/json,text/plain,*/*';
+        input.accept = '.json,.jsonl,.glzchat.json,application/json,text/plain';
         input.onchange = (e) => {
-            resolve(e.target.files[0] || null);
+            const file = e.target.files[0] || null;
+            if (file && file.name.toLowerCase().endsWith('.txt')) {
+                resolve(null); // Will be handled by the caller with error
+            } else {
+                resolve(file);
+            }
         };
         input.click();
     });
@@ -465,7 +486,20 @@ export function pickChatFile() {
  */
 export function triggerChatImport(characterId, userPersona, onImport) {
     pickChatFile().then(async (file) => {
-        if (!file) return;
+        if (!file) {
+            // User cancelled or selected unsupported format (e.g. TXT)
+            const t = translations[currentLang.value];
+            showBottomSheet({
+                title: t?.title_error || "Error",
+                bigInfo: {
+                    icon: '<svg viewBox="0 0 24 24" style="fill:currentColor;width:100%;height:100%;color:#ff4444"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>',
+                    description: t?.msg_import_chat_unsupported_format || "Unsupported file format. Please use JSONL or .glzchat.json files.",
+                    buttonText: t?.btn_ok || "OK",
+                    onButtonClick: () => closeBottomSheet()
+                }
+            });
+            return;
+        }
         try {
             const result = await importSillyTavernChat(file, characterId, userPersona);
             if (onImport) {
@@ -515,13 +549,26 @@ function convertMessage(stMsg, userPersona) {
         time: time,
         timestamp: timestamp,
         id: stMsg.extra?.glazeMessageId || `legacy_${timestamp}_${Math.random().toString(36).slice(2, 6)}`,
-        // Ensure swipes are transferred
-        swipes: Array.isArray(stMsg.swipes) ? stMsg.swipes : [stMsg.mes || ""],
+        // Ensure swipes are transferred, filtering out null/undefined entries
+        swipes: Array.isArray(stMsg.swipes) 
+            ? stMsg.swipes.filter(s => s !== null && s !== undefined).map(s => String(s))
+            : [String(stMsg.mes || "")],
         swipeId: typeof stMsg.swipe_id === 'number' ? stMsg.swipe_id : 0,
         contextRefs: Array.isArray(stMsg.extra?.glazeContextRefs) ? stMsg.extra.glazeContextRefs : [],
         memoryCoverage: stMsg.extra?.glazeMemoryCoverage || createEmptyMemoryCoverage(),
         triggeredMemories: Array.isArray(stMsg.extra?.glazeTriggeredMemories) ? stMsg.extra.glazeTriggeredMemories : []
     };
+
+    // Normalize swipesMeta length to match swipes
+    if (scMsg.swipes.length > 0) {
+        if (!scMsg.swipesMeta) scMsg.swipesMeta = [];
+        while (scMsg.swipesMeta.length < scMsg.swipes.length) {
+            scMsg.swipesMeta.push({});
+        }
+        if (scMsg.swipesMeta.length > scMsg.swipes.length) {
+            scMsg.swipesMeta.length = scMsg.swipes.length;
+        }
+    }
 
     // User specific
     if (role === 'user') {

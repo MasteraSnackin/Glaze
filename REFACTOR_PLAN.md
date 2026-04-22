@@ -1,221 +1,766 @@
-# Backend/Service Logic Refactoring Plan
+# Refactor Plan
 
-## Current Situation
+## Purpose
 
-ChatView.vue содержит ~6787 строк, из которых:
-- ~68 функций для Memory Books logic
-- ~11 функций для Context/Tokenizer logic  
-- Множество helper функций смешаны с UI логикой
+This document defines a safe staged refactor plan for the app architecture.
 
-## Proposed Extraction
+The goal is not to chase a fashionable architecture label. The goal is to make the codebase:
 
-### 1. Memory Books Service (HIGH PRIORITY)
+- hard to break during refactors;
+- easier to extend without editing core files every time;
+- less dependent on god-objects;
+- suitable for experimental feature work like "I want to add this feature and see what happens" without turning the app into a pile of special cases.
 
-**File:** `src/core/services/memoryBooksService.js`
+The desired result is a hybrid architecture:
 
-**Functions to extract (~50-60 functions, ~800-1000 lines):**
+- **ordered deterministic pipeline** for prompt and generation flow where order must be guaranteed;
+- **event-driven architecture** for extensions, side effects, UI coordination, and plugins;
+- **reactive state modules** as read models for Vue UI, not as a replacement for use cases.
 
-#### Core Memory Book Management
-- `ensureSessionMemoryBook(chatData, sessionId)` — создание/получение memory book
-- `createEmptyMemoryCoverage()` — инициализация coverage
-- `createMemoryAutomationState()` — инициализация automation
-- `ensureMemoryAutomationState(memoryBook)` — ensure automation state
-- `reconcileMemoryBookForMessages(memoryBook, messages)` — синхронизация entries с messages
-- `reconcileSessionMemoryState(chatData, sessionId, messages)` — reconcile session state
-- `runMemoryMaintenancePass(chatData, sessionId, options)` — cleanup и maintenance
-
-#### Memory Entry Operations
-- `genMemoryEntryId()` — ID generation
-- `normalizeMemoryEntryShape(entry)` — normalize entry structure
-- `parseMemoryKeyInput(value)` — parse key input
-- `buildMemoryKeysFromText(text, fallback)` — extract keys from text
-- `findConflictingMemoryEntry(memoryBook, selectedIds, options)` — conflict detection
-- `normalizeEntryMessageIds(entry)` — normalize messageIds array
-
-#### Vector/Embedding Operations
-- `indexMemoryEntryIfNeeded(entry, charId, sessionId)` — index if vector search enabled
-- `deleteMemoryEntryIndexIfPresent(entryId)` — delete embedding
-- `reindexMemoryEntry(entry, charId, sessionId)` — reindex single entry
-- `reindexAllMemoryEntries(memoryBook, charId, sessionId)` — reindex all entries
-- `shouldEnableMemoryVectorSearch()` — check if vector search available
-- `getMemoryVectorSearchEnabled(memoryBook)` — get vector search state
-- `setMemoryVectorSearchOnEntries(memoryBook, enabled)` — toggle vector search
-
-#### Memory Draft Generation
-- `generateMemoryDraftForMessages(selectedMessages, options)` — generate draft
-- `runBatchDraftGeneration(chatData, sessionId, memoryBook, segments, count)` — batch generation
-- `runMemoryAutomationAfterStableTurn(chatData, sessionId, messages, options)` — auto-generation
-- `bootstrapImportedMemoryDrafts(charId, sessionId)` — bootstrap after import
-- `parseMemoryDraftResponse(rawText, fallbackKeys)` — parse LLM response
-- `buildMemoryContinuityContext(memoryBook, selected)` — build context for continuity
-- `buildMemoryDraftLoreContext(selected)` — build lorebook context
-- `buildMemoryDraftSummaryExcerpt(summary)` — build summary excerpt
-
-#### Memory Prompt Management
-- `getMemoryPromptOptions(settings)` — get available prompts
-- `resolveMemoryPrompt(settings)` — resolve prompt text
-- `getMemoryPromptLabel(settings)` — get prompt label
-- `builtInMemoryPrompts` — константы built-in промптов
-
-#### Automation & Triggers
-- `normalizeAutoCreateInterval(memoryBook)` — normalize interval
-- `memoryBooksHasAutomationState(memoryBook)` — check automation state
-- `resolvePendingTriggerMessages(stableMessages, pendingTrigger)` — resolve pending triggers
-- `buildBootstrapSegments(messages, interval)` — build segments for bootstrap
-- `countStableConversationMessages(messages)` — count stable messages
-- `getLastStableConversationRole(messages)` — get last role
-- `computeDelayedWaitExchanges(triggerRole)` — compute wait exchanges
-
-#### Utilities
-- `arraysEqual(a, b)` — array equality
-- `calculateMessageOverlapRatio(leftIds, rightIds)` — overlap calculation
-- `formatElapsedSeconds(ms)` — format time
-- `getMemoryKeyMatchMode(memoryBook)` — get key match mode
-
-**Benefits:**
-- Уменьшит ChatView на ~800-1000 строк
-- Изолирует Memory Books бизнес-логику
-- Позволит тестировать логику отдельно от UI
-- Упростит переиспользование (например, в worker'ах)
+This plan must prioritize compatibility and behavior preservation over cleanup speed.
 
 ---
 
-### 2. Composable: useMemoryBooks (MEDIUM PRIORITY)
+## Primary Goals
 
-**File:** `src/composables/chat/useMemoryBooks.js`
+### Goal 1. Do not break working behavior
 
-**Reactive state + UI interaction logic (~200-300 lines):**
+The most important requirement is safety.
 
-#### State
-- `currentMemoryBookData` — ref для текущего memory book
-- `memoryDraftState` — ref для draft generation state
-- `pendingMemoryMessageIds` — ref для pending message IDs
-- `draftMemoryMessageIds` — ref для draft message IDs
+That means:
 
-#### UI Handlers (already extracted to ChatView, но можно в composable)
-- `loadCurrentMemoryBook()` — load reactive memory book
-- `updatePendingMemoryMessageIds()` — update pending IDs
-- `handleMemoryKeyModeUpdate()` — key mode change
-- `handleMemoryVectorToggle(enabled)` — vector search toggle
-- `handleMemoryReindexAll()` — reindex all
-- `handleMemoryScanChat()` — scan chat
-- `handleMemoryBatchGenerate()` — batch generate
-- `handleMemoryApproveDraft(draftId)` — approve draft
-- `handleMemoryDeleteDraft(draftId)` — delete draft
-- `handleMemoryDeleteEntry(entryId)` — delete entry
-- `handleMemoryCancelDraft()` — cancel draft generation
+- no large rewrite in one branch;
+- no prompt semantics changes unless explicitly intended;
+- no transport behavior changes hidden inside structural refactors;
+- no migration that forces MemoryBooks, vectorization, sync, and generation internals to move at the same time.
 
-#### Progress Tracking
-- `startMemoryDraftProgress(label)` — start progress timer
-- `stopMemoryDraftProgress()` — stop progress timer
-- `cancelMemoryDraft()` — cancel + cleanup
+### Goal 2. Remove god-objects
 
-**Benefits:**
-- Убирает reactive state из ChatView
-- Группирует UI interaction logic
-- Легко переиспользовать в других view
+The current architecture still has several overloaded ownership points:
 
----
+- `src/views/ChatView.vue`
+- `src/core/services/generationService.js`
+- `src/core/services/llmApi.js` compatibility entrypoint
+- parts of `ApiView.vue` and settings/config write paths
 
-### 3. Context/Tokenizer Service (LOW PRIORITY)
+These files currently mix multiple responsibilities:
 
-**File:** `src/core/services/contextService.js`
+- orchestration;
+- state mutation;
+- request lifecycle;
+- config access;
+- transport coordination;
+- debug storage;
+- UI decisions.
 
-**Functions to extract (~5-8 functions, ~200-300 lines):**
+The refactor should reduce this by splitting ownership, not by simply moving the same complexity into new files.
 
-#### Context Calculation
-- `updateContextCutoff()` — calculate context cutoff
-- `debouncedUpdateContextCutoff(delay)` — debounced version
-- `invalidateContextCache()` — invalidate cache
+### Goal 3. Make feature work cheap
 
-#### History Management
-- `persistHistoryContextSettings(fillThreshold, hidePercent)` — save settings
-- `clampHistoryFillThreshold(value)` — clamp value
-- `clampHistoryHidePercent(value)` — clamp value
-- `hideTopMessagesNow()` — hide messages
-- `confirmHideTopMessages()` — confirm dialog
+Adding a new feature should not require editing half the app.
 
-**Computed properties (остаются в ChatView или composable):**
-- `contextSegments` — segment breakdown
-- `contextBreakdownItems` — breakdown items
-- `contextLegendItems` — legend items
-- `historyUsagePercent` — usage percentage
-- `historyHidePreview` — preview info
-- `shouldRecommendHide` — recommendation flag
+Examples of the desired end state:
 
-**Benefits:**
-- Изолирует context calculation logic
-- Проще тестировать
-- Но меньший приоритет, т.к. уже относительно небольшой и чистый код
+- add a new request type without touching all transport files;
+- add a provider adapter without rewriting generation orchestration;
+- add a plugin hook without wiring random `window.dispatchEvent` calls everywhere;
+- add a prompt-enrichment rule without modifying unrelated UI code;
+- add diagnostics, experiments, or optional automation with isolated extension points.
+
+### Goal 4. Keep order where order matters
+
+The core generation flow must stay deterministic.
+
+The prompt pipeline is not a free-for-all event system. It must preserve ordering for:
+
+- prompt block resolution;
+- macro application;
+- regex transforms;
+- keyword lore scan;
+- vector enrichment;
+- memory injection;
+- final payload assembly.
+
+This plan explicitly rejects replacing the prompt pipeline with uncontrolled event subscribers.
 
 ---
 
-## Execution Order
+## Non-Goals
 
-### Phase 7: Memory Books Service Extraction
+The following are not goals of this refactor phase:
 
-**Priority:** HIGH  
-**Impact:** ~800-1000 lines from ChatView  
-**Complexity:** MEDIUM-HIGH (много взаимосвязей)
-
-**Steps:**
-1. Create `src/core/services/memoryBooksService.js`
-2. Extract pure functions (no refs, no reactive state)
-3. Update imports in ChatView
-4. Update imports in MemoryBooksSheet (if needed)
-5. Test: npm run build
-6. Manual testing: Memory Books functionality
-
-### Phase 8: useMemoryBooks Composable (OPTIONAL)
-
-**Priority:** MEDIUM  
-**Impact:** ~200-300 lines from ChatView  
-**Complexity:** MEDIUM (reactive state management)
-
-**Steps:**
-1. Create `src/composables/chat/useMemoryBooks.js`
-2. Move reactive state (refs, computed)
-3. Move UI handlers
-4. Return from composable: `{ state, handlers }`
-5. Import and use in ChatView
-6. Test: npm run build
-
-### Phase 9: Context Service (OPTIONAL, LOW PRIORITY)
-
-**Priority:** LOW  
-**Impact:** ~200-300 lines  
-**Complexity:** LOW
+- rewriting the app to TypeScript;
+- replacing reactive modules with Pinia or Vuex;
+- replacing custom navigation with Vue Router;
+- redesigning prompt semantics;
+- reworking vectorization internals without a concrete bug;
+- fully redesigning MemoryBooks at the same time as the transport/use-case refactor;
+- removing all legacy compatibility in one pass.
 
 ---
 
-## Estimated Final State
+## Current Problems
 
-**After all extractions:**
+### 1. Core ownership is too concentrated
 
-```
-src/views/ChatView.vue                    ~5200 строк (-1587 от текущих 6787)
-src/core/services/memoryBooksService.js   ~900 строк (новый)
-src/composables/chat/useMemoryBooks.js    ~250 строк (новый, опционально)
-src/core/services/contextService.js       ~250 строк (новый, опционально)
-```
+`ChatView.vue` still carries too much session and generation orchestration.
 
-**Total code organization improvement:**
-- ChatView.vue focus: UI orchestration, message rendering, chat flow
-- Services: Business logic, data transformation, calculations
-- Composables: Reactive state + UI interaction patterns
-- Sheets: Presentation components
+`generationService.js` still acts as a central kitchen for:
+
+- request intent decisions;
+- prompt preparation and enrichment;
+- preview/debug state;
+- transport dispatch.
+
+This makes changes risky because one file becomes the merge point for unrelated features.
+
+### 2. There is no formal event model
+
+The app already uses `window.dispatchEvent(new CustomEvent(...))`, but this is still an ad-hoc signaling layer, not a defined architecture.
+
+Problems:
+
+- event names are not organized by domain;
+- payload contracts are informal;
+- UI events and domain events are mixed together;
+- there is no ownership boundary between transport events, app events, and feature events.
+
+### 3. Transport is thinner, but still callback-heavy
+
+The transport split has progressed, but the lifecycle is still expressed through flexible callback wiring instead of a normalized contract.
+
+That creates risk for:
+
+- abort behavior;
+- late completion races;
+- stream vs non-stream parity;
+- memory-draft vs chat request overlap.
+
+### 4. Debug state is still singleton/global
+
+Prompt preview and network trace state still leak across request types and sessions.
+
+This is manageable for debugging, but structurally wrong.
+
+### 5. Extensibility still tends to route through core files
+
+New behavior often ends up in one of these places:
+
+- `ChatView.vue`
+- `generationService.js`
+- settings views
+- direct config reads/writes
+
+That is exactly how god-objects regrow after each cleanup.
 
 ---
 
-## Questions for Discussion
+## Target Architecture
 
-1. **Should we extract Memory Books Service first?** (рекомендую да — самый большой impact)
-2. **Do we need composables or keep handlers in ChatView?** (зависит от того, планируем ли переиспользовать)
-3. **Should context logic stay in ChatView?** (да, пока небольшой и специфичный для ChatView)
-4. **Testing strategy?** (unit tests для services, integration tests для composables)
+### Overview
+
+The target model is:
+
+1. **Use cases decide what action is being performed.**
+2. **Ordered pipelines execute deterministic core flow.**
+3. **Event bus publishes facts after or around those flows.**
+4. **Reactive state modules store read models for UI.**
+5. **Plugins/extensions react only through declared extension points.**
+
+Short version:
+
+- use cases decide;
+- pipelines guarantee order;
+- events broadcast facts;
+- stores expose read models;
+- plugins attach at controlled boundaries.
+
+### Layer Model
+
+#### 1. UI Layer
+
+Vue views and components should:
+
+- gather user intent;
+- call a use case;
+- read reactive state;
+- render;
+- dispatch only UI/navigation events when necessary.
+
+Vue views should not own multi-stage generation orchestration.
+
+#### 2. Use Case Layer
+
+Use cases represent app actions.
+
+Examples:
+
+- `generateChat`
+- `generateSummary`
+- `generateMemoryDraft`
+- `calculateContext`
+- future sync, import, indexing, or tool actions
+
+Each use case should:
+
+- validate inputs;
+- claim ownership of its session/request;
+- invoke ordered pipeline steps;
+- publish domain events;
+- return a normalized result contract.
+
+#### 3. Pipeline Layer
+
+This is the deterministic core.
+
+Pipelines must be explicit and ordered.
+
+Examples:
+
+- prompt build pipeline;
+- request assembly pipeline;
+- request lifecycle pipeline;
+- memory extraction-context pipeline.
+
+Pipelines are not generic magic middleware for everything. They are for flows where order is part of correctness.
+
+#### 4. Event Layer
+
+The event layer is a mailbox, not a dispatcher of app truth.
+
+It should publish domain facts such as:
+
+- generation started;
+- prompt built;
+- request sent;
+- stream delta received;
+- generation completed;
+- generation failed;
+- settings changed;
+- sync finished.
+
+The bus must not decide prompt order or replace use-case orchestration.
+
+#### 5. State / Read Model Layer
+
+Reactive state modules should hold data projected for UI usage.
+
+Examples:
+
+- active generation status;
+- request trace history;
+- prompt preview history;
+- sync progress;
+- notification state.
+
+These state modules should react to explicit calls or domain events, instead of each view maintaining private copies of cross-cutting state.
+
+#### 6. Plugin / Extension Layer
+
+Plugin-like features should attach to stable extension points rather than patching core files directly.
+
+Examples:
+
+- diagnostics;
+- request logging;
+- experimental prompt enrichers;
+- alternate preview builders;
+- future external integrations.
 
 ---
 
-## Decision
+## Architectural Rule: Hybrid, Not Pure EDA
 
-Твоё мнение: начинать ли Phase 7 (Memory Books Service extraction) сейчас, или сначала протестировать текущие UI компоненты?
+This project should not move to pure event-driven architecture.
+
+Pure EDA would be harmful in the generation core because prompt construction requires stable ordering.
+
+The correct split is:
+
+- **EDA for extensions and side effects**
+- **ordered middleware/pipeline for generation correctness**
+
+### Where EDA is a good fit
+
+- plugin hooks;
+- analytics and diagnostics;
+- optional observers;
+- UI coordination across distant components;
+- notifications and non-critical side effects;
+- sync refresh broadcasts;
+- feature modules that need low coupling.
+
+### Where EDA is a bad fit
+
+- final prompt block ordering;
+- request ownership and abort rules;
+- macro/regex/lore/vector/memory insertion order;
+- transport completion semantics;
+- lifecycle-critical cleanup.
+
+---
+
+## Event Model Rules
+
+### Rule 1. Separate event categories
+
+Events must be grouped by ownership.
+
+Suggested categories:
+
+- `ui.*` for component/view interaction events
+- `nav.*` for navigation and sheet open/close requests
+- `domain.generation.*` for generation lifecycle
+- `domain.memory.*` for memory lifecycle
+- `domain.sync.*` for sync lifecycle
+- `infra.request.*` for transport-level facts
+- `debug.*` for diagnostics only
+
+### Rule 2. Define event contracts explicitly
+
+Even in JavaScript-only code, event payloads should be formalized via:
+
+- event name constants;
+- event creator helpers;
+- JSDoc typedefs;
+- runtime validation only at critical boundaries.
+
+### Rule 3. Keep the bus dumb
+
+The event hub should do only this:
+
+- publish;
+- subscribe;
+- unsubscribe;
+- optionally record/debug.
+
+It should not:
+
+- decide business flow;
+- reorder pipeline work;
+- mutate hidden global state as a side effect of publication.
+
+### Rule 4. Keep `window` as a compatibility bridge only
+
+`window.dispatchEvent` can remain for legacy app-shell integration and gradual migration, but it should stop being the primary architecture boundary inside the app.
+
+The internal target should be an app event hub with optional bridge adapters.
+
+---
+
+## Pipeline Model Rules
+
+### Rule 1. Use explicit pipeline context objects
+
+Each ordered flow should have a single context object with clearly owned fields.
+
+For example, chat generation should evolve through a `GenerationContext` that tracks:
+
+- request intent;
+- session ownership token;
+- resolved config;
+- prompt parts;
+- enriched prompt state;
+- provider payload;
+- transport status;
+- result;
+- debug metadata.
+
+### Rule 2. Each step has one job
+
+Pipeline steps should be small and named after what they decide or enrich.
+
+Examples:
+
+- `resolveApiConfigStep`
+- `resolvePresetStep`
+- `buildPromptStep`
+- `applyLoreRetrievalStep`
+- `applyMemoryInjectionStep`
+- `assembleProviderPayloadStep`
+- `executeRequestStep`
+- `normalizeResponseStep`
+
+### Rule 3. Extension points must be named and bounded
+
+If the app allows extensibility around the pipeline, hooks should exist only at declared points such as:
+
+- `beforePromptBuild`
+- `afterPromptBuild`
+- `beforeRequestAssembly`
+- `beforeRequestSend`
+- `afterResponseNormalize`
+- `afterGenerationCommit`
+
+Unbounded "any subscriber can mutate anything at any time" must be avoided.
+
+---
+
+## File/Ownership Direction
+
+This is the target direction, not a one-shot move.
+
+### UI
+
+- `src/views/ChatView.vue`
+  - keep as chat page composition and UI glue only
+  - remove deep generation orchestration over time
+
+- `src/views/ApiView.vue`
+  - keep as editor/view for runtime config and presets
+  - remove direct ownership of config side effects where possible
+
+### Use Cases
+
+- `src/core/llm/usecases/generateChat.js`
+- `src/core/llm/usecases/generateSummary.js`
+- `src/core/llm/usecases/generateMemoryDraft.js`
+- `src/core/llm/usecases/calculateContext.js`
+
+These should become the official public entrypoints instead of `generationService.js` acting as the universal orchestrator.
+
+### Pipelines
+
+- `src/core/llm/pipeline/` for generation-related ordered steps
+- `src/core/memory/pipeline/` later for memory extraction-context and automation flows
+
+### Events
+
+- `src/core/events/eventNames.js`
+- `src/core/events/eventHub.js`
+- `src/core/events/contracts.js`
+- `src/core/events/bridges/windowEventBridge.js`
+
+### Read Models / State
+
+- keep `src/core/states/` as the Vue-facing state layer
+- add dedicated projection state where needed instead of storing debug/session state in arbitrary services
+
+### Debug
+
+- move prompt preview and request traces to explicit debug stores keyed by generation/session
+- stop using singleton "last trace" as the primary design
+
+---
+
+## Migration Strategy
+
+The migration must follow a strangler pattern.
+
+That means:
+
+- keep the current flow running;
+- add new boundaries next to it;
+- move one responsibility at a time;
+- leave compatibility adapters until the new path is proven;
+- remove old code only after behavior parity is verified.
+
+---
+
+## Refactor Phases
+
+### Phase 0. Freeze invariants and safety rails
+Status: not done
+Testing: not tested
+
+Purpose:
+Record the behavior that must not change during refactor.
+
+Work:
+
+- define generation invariants for chat, summary, and memory-draft flows;
+- define request ownership invariants around abort/regenerate;
+- define stream vs fallback parity expectations;
+- define prompt semantics invariants;
+- define manual smoke checklist for mobile/native/web.
+
+Expected output:
+
+- explicit invariant list in docs;
+- small regression checklist that every refactor PR must pass.
+
+### Phase 1. Formalize boundaries without changing behavior
+Status: not done
+Testing: not tested
+
+Purpose:
+Introduce structure before moving logic.
+
+Work:
+
+- add event catalog and event hub;
+- add event naming rules and payload contracts;
+- add compatibility bridge for existing `window.dispatchEvent` usage;
+- define official use-case entrypoints;
+- define normalized result shape for request-oriented use cases.
+
+Expected output:
+
+- new architectural skeleton exists;
+- old code still works through compatibility adapters.
+
+### Phase 2. Enforce request ownership and lifecycle identity
+Status: not done
+Testing: not tested
+
+Purpose:
+Fix the most dangerous class of races before deeper modularization.
+
+Work:
+
+- create explicit request/session ownership tokens;
+- ensure late responses cannot mutate a newer generation state;
+- make abort semantics unambiguous;
+- separate chat generation lifecycle from memory-draft lifecycle;
+- normalize completion/error/abort finalization policy.
+
+Why this phase is early:
+
+- it directly reduces breakage risk;
+- it gives a stable foundation for later transport and UI extraction.
+
+### Phase 3. Move generation orchestration into use cases
+Status: not done
+Testing: not tested
+
+Purpose:
+Shrink `ChatView.vue` and `generationService.js` safely.
+
+Work:
+
+- make `generateChat` the real orchestration entrypoint;
+- move summary and memory-draft orchestration into their use cases;
+- keep `generationService.js` only as a temporary facade if needed;
+- reduce direct orchestration logic in `ChatView.vue` to UI/session glue.
+
+Expected output:
+
+- views call use cases;
+- orchestration stops living in Vue pages.
+
+### Phase 4. Extract deterministic pipelines
+Status: not done
+Testing: not tested
+
+Purpose:
+Make the generation core modular without losing order.
+
+Work:
+
+- introduce explicit pipeline context objects;
+- move prompt build/enrichment/assembly into named steps;
+- document ordering and forbidden reorderings;
+- add bounded extension hooks around steps;
+- keep prompt semantics unchanged unless explicitly tested and approved.
+
+Expected output:
+
+- feature authors can extend declared hooks or steps instead of editing a god-object.
+
+### Phase 5. Move side effects to events and projections
+Status: not done
+Testing: not tested
+
+Purpose:
+Reduce cross-file coupling.
+
+Work:
+
+- publish domain events from use cases and pipelines;
+- update state modules from explicit projection paths;
+- move diagnostics, previews, and optional UI reactions out of the generation core;
+- separate prompt preview state from request-trace state.
+
+Expected output:
+
+- core logic becomes smaller;
+- observers stop requiring direct imports into orchestration files.
+
+### Phase 6. Add plugin/extension API
+Status: not done
+Testing: not tested
+
+Purpose:
+Support experimental feature work safely.
+
+Work:
+
+- define extension-point registration API;
+- support non-core enrichers/observers/plugins through declared hooks;
+- keep plugin scope constrained so experiments cannot silently corrupt prompt order or ownership rules;
+- document which hooks are read-only and which are allowed to mutate context.
+
+Expected output:
+
+- future features can be prototyped with lower risk and lower merge pressure on core files.
+
+### Phase 7. Remove compatibility shims and dead paths
+Status: not done
+Testing: not tested
+
+Purpose:
+Finish cleanup only after parity is proven.
+
+Work:
+
+- remove obsolete direct `window.dispatchEvent` internals where migrated;
+- remove temporary facade logic from `generationService.js`;
+- remove singleton debug state after keyed stores replace it;
+- remove duplicate config access paths once all callers use shared helpers.
+
+---
+
+## Safety Rules For Every Phase
+
+### Rule 1. One responsibility move per PR
+
+Do not combine these in one PR unless there is a clear dependency:
+
+- transport split;
+- prompt semantics changes;
+- MemoryBooks behavior redesign;
+- settings persistence cleanup;
+- plugin system work.
+
+### Rule 2. Every structural PR must prove parity
+
+Each refactor PR should include at least one of:
+
+- tests proving unchanged behavior;
+- build verification;
+- manual verification checklist for affected flows;
+- if useful, prompt snapshot/golden comparisons.
+
+### Rule 3. Keep compatibility adapters during migration
+
+It is acceptable to keep temporary adapters if they reduce risk.
+
+Examples:
+
+- facade functions in `generationService.js`;
+- `window` event bridge;
+- legacy callback adapter around normalized transport events.
+
+### Rule 4. Do not move unstable domains too early
+
+MemoryBooks should not be deeply re-architected until the request/use-case/event boundaries are stable.
+
+Vectorization should remain mostly untouched unless a concrete bug requires a change.
+
+---
+
+## How This Helps Experimental Features
+
+The target architecture should make experimental work possible without risking the app core.
+
+Examples:
+
+- a feature author can add a new prompt-enrichment experiment as a bounded pipeline hook instead of editing `ChatView.vue` and `generationService.js` directly;
+- a new provider can be added through provider registry + payload builders + transport contracts;
+- a new debug panel can subscribe to request and generation events without changing generation logic;
+- a future plugin can add optional metadata, inspection, or automation without becoming part of the critical request path.
+
+This is the practical meaning of "I want to try a feature and see what happens":
+
+- fast to add;
+- easy to remove;
+- hard to break unrelated behavior.
+
+---
+
+## Initial Priority Order
+
+If work starts now, the recommended order is:
+
+1. Phase 0: write down invariants and regression checklist
+2. Phase 1: add event catalog and internal event hub
+3. Phase 2: enforce request ownership tokens and stale-response protection
+4. Phase 3: make use cases the official orchestration boundary
+5. Phase 5: separate preview/trace state from singleton globals
+6. Phase 4: continue extracting deterministic pipelines as use cases stabilize
+7. Phase 6: add extension API only after the boundaries above are real
+
+This order is intentionally safety-first.
+
+It prioritizes:
+
+- race prevention;
+- ownership clarity;
+- behavior preservation;
+- gradual decompression of god-objects.
+
+---
+
+## Immediate Candidate Work Items
+
+These are the first concrete tasks that align with this plan.
+
+### Candidate 1. Event catalog and internal event hub
+Status: not done
+Testing: not tested
+
+Deliverables:
+
+- add `src/core/events/eventNames.js`
+- add `src/core/events/eventHub.js`
+- add JSDoc event contracts
+- bridge a small safe subset of existing events first
+
+### Candidate 2. Request ownership token model
+Status: not done
+Testing: not tested
+
+Deliverables:
+
+- explicit generation request ID / owner token;
+- stale completion guard;
+- clear chat vs memory-draft separation;
+- tests for abort/regenerate overlap.
+
+### Candidate 3. Promote `generateChat` to real use-case entrypoint
+Status: not done
+Testing: not tested
+
+Deliverables:
+
+- `ChatView.vue` calls a dedicated use case rather than owning orchestration details;
+- `generationService.js` reduced to a compatibility facade or prompt-domain helper.
+
+### Candidate 4. Split prompt preview from network trace state
+Status: not done
+Testing: not tested
+
+Deliverables:
+
+- prompt preview keyed by generation/session;
+- trace history keyed by request;
+- remove coupling between chat, summary, and memory-draft debug state.
+
+---
+
+## Success Criteria
+
+The refactor is successful when the following become true:
+
+- adding a feature does not require editing the main chat view and one giant service file;
+- request ownership and abort behavior are explicit and race-safe;
+- prompt assembly remains deterministic and documented;
+- event usage is structured and contract-based rather than ad-hoc;
+- debug and preview state are scoped, not singleton-global;
+- plugins/extensions can be added at declared hooks without rewriting the core;
+- transport, prompt, UI, and state concerns each have a clear home.
+
+---
+
+## Final Guiding Principle
+
+This refactor should optimize for safe change, not for theoretical purity.
+
+If a step makes the code more modular but also makes behavior harder to reason about, that is the wrong step.
+
+The target is a practical architecture where:
+
+- correctness-critical flow stays strict;
+- optional behavior stays loosely coupled;
+- experimentation gets easier;
+- regressions get harder.
