@@ -114,6 +114,9 @@ Current behavior:
 - Memory-book retrieval/index maintenance now lives in `src/core/llm/usecases/memoryBookContext.js` and is consumed both by chat/context flows and by `memoryBooksService.js`.
 - `ChatView.vue` no longer dispatches raw `window` events for generation/chat lifecycle; it uses `createGenerationAppAdapters()` which publishes canonical app events through the event hub, with the bridge handling legacy compatibility.
 - `ChatView.vue` no longer manually assembles the ~30-function service injection bundle for `executeChatGenerationUseCase`. The `createChatGenerationServices` factory in `src/core/llm/usecases/chatGenerationServiceFactory.js` imports and wires all composable/service dependencies, taking only genuinely Vue-own state refs as arguments.
+- Memory automation functions (`runMemoryAutomationAfterStableTurn`, `generateMemoryDraftForMessages`, `createPendingMemoryDraft`, `bootstrapImportedMemoryDrafts`, etc.) are extracted from `ChatView.vue` into `composables/chat/useMemoryAutomation.js`, a dedicated composable that accepts only the Vue refs and callbacks it needs.
+- Auto-sync logic (`triggerAutoSyncCheck`) is extracted from `ChatView.vue` into `composables/chat/useAutoSync.js`, removing sync-state imports from the view.
+- Memory prompt presets (`builtInMemoryPrompts`, `getMemoryPromptOptions`, `resolveMemoryPrompt`, etc.) are extracted from `ChatView.vue` into `core/services/memoryPromptPresets.js`.
 
 Why this slice is safe:
 - It adds a new internal boundary without removing the legacy one.

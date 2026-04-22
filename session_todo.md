@@ -182,6 +182,9 @@ Tracked in `REFACTOR_PLAN.md` and `REFACTOR_PHASE_0_CHECKLIST.md`:
 - [x] Extracted memory-book retrieval/index maintenance into `src/core/llm/usecases/memoryBookContext.js` and switched `memoryBooksService.js` to use it directly
 - [x] Replaced remaining direct `window.dispatchEvent` calls in `ChatView.vue` for generation/chat events with canonical `createGenerationAppAdapters()` from `src/core/llm/usecases/chatGenerationAppAdapters.js`
 - [x] Extracted ChatView generation-service wiring into `createChatGenerationServices` factory (`src/core/llm/usecases/chatGenerationServiceFactory.js`), removing ~65 lines of manual service assembly from the view
+- [x] Extracted `triggerAutoSyncCheck` from ChatView into `composables/chat/useAutoSync.js`
+- [x] Extracted memory automation functions (~318 lines) from ChatView into `composables/chat/useMemoryAutomation.js`
+- [x] Extracted memory prompt presets (~130 lines) from ChatView into `core/services/memoryPromptPresets.js`
 - [x] `npm run build` passes after extraction
 - [ ] Continue shrinking the remaining orchestration still owned by `generationService.js`
 - [ ] Reduce dependency surface passed from `ChatView.vue` into the chat use case

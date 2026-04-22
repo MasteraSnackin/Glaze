@@ -1,4 +1,4 @@
-<script>
+﻿<script>
 // --- Module Level State (Persists across component mounts) ---
 let activeChatChar = null;
 let _cleanupScroll = null;
@@ -94,6 +94,8 @@ import { processMessageImages, generateImage, makeLoadingHtml, makeErrorHtml, ma
 import { showToast } from '@/core/states/toastState.js';
 import { triggerAutoSyncCheck } from '@/composables/chat/useAutoSync.js';
 import { useMemoryBooks } from '@/composables/chat/useMemoryBooks.js';
+import { useMemoryAutomation } from '@/composables/chat/useMemoryAutomation.js';
+import { getMemoryPromptOptions, getMemoryPromptLabel, getMemoryPromptLabelByKey } from '@/core/services/memoryPromptPresets.js';
 import * as memoryBooksService from '@/core/services/memoryBooksService.js';
 import * as contextService from '@/core/services/contextService.js';
 
@@ -114,7 +116,8 @@ const chatGenerationServices = createChatGenerationServices({
     isItemVisible,
     scrollToIndex,
     genMsgId,
-    updateSessionMessage
+    updateSessionMessage,
+    runMemoryAutomationAfterStableTurn
 });
 
 async function openMemoryEntryEditor(entryId) {
@@ -313,6 +316,29 @@ const {
     db
 });
 
+const {
+    createPendingMemoryDraft,
+    generateMemoryDraftForMessages,
+    runMemoryAutomationAfterStableTurn,
+    bootstrapImportedMemoryDrafts,
+    buildMemoryContinuityContext,
+    buildMemoryDraftLoreContext,
+    buildMemoryDraftSummaryExcerpt,
+    parseMemoryDraftResponse
+} = useMemoryAutomation({
+    activeChatChar,
+    currentMessages,
+    activePersona,
+    getGenerationState,
+    memoryDraftState,
+    loadCurrentMemoryBook,
+    updatePendingMemoryMessageIds,
+    startMemoryDraftProgress,
+    stopMemoryDraftProgress,
+    setMemoryDraftAbortController,
+    openMemoryBooksSheet
+});
+
 const onRegexChanged = () => { regexRevision.value++; };
 const contextBreakdown = ref(null);
 // Import context settings from service
@@ -350,137 +376,6 @@ const selectionIncludesLast = computed(() => {
     return true;
 });
 
-const builtInMemoryPrompts = [
-    {
-        key: 'detailed_beats',
-        label: 'Detailed beats (recommended)',
-        prompt: [
-            'Analyze the following roleplay segment and create a comprehensive memory entry.',
-            'Preserve the original language of the source segment. Do not translate it.',
-            'Exclude all [OOC] (out-of-character) conversation — it is not useful for memory.',
-            '',
-            'Create a detailed beat-by-beat summary in narrative prose. Include:',
-            '- Timeline: Date/time context if mentioned',
-            '- Story Beats: All important plot events, decisions, and developments in order',
-            '- Key Interactions: Significant character exchanges, dialogue highlights, and relationship developments',
-            '- Notable Details: Important objects, settings, revelations, memorable quotes',
-            '- Outcome: Results, resolutions, emotional states, and consequences for future continuity',
-            '',
-            'Capture all nuance without repeating verbatim. Use concrete nouns (e.g., "rice cooker" not "appliance").',
-            'Write in past tense, third person. Focus on cause → intention → reaction → consequence.',
-            '',
-            'For keywords: generate 15-30 concrete, scene-specific retrieval tags:',
-            '- Use proper nouns (locations: "Chinatown", "Ritz-Carlton bar")',
-            '- Use specific objects ("CPAP machine", "chocolate chip cookies")',
-            '- Use distinctive actions ("cookie baking", "piano apology")',
-            '- Use unique phrases from the scene ("pack for forever", specific nicknames)',
-            '- DO NOT use abstract themes ("intimacy", "trust", "vulnerability")',
-            '- DO NOT use character names ({{char}}, {{user}})',
-            '- DO NOT combine multiple concepts into one keyword',
-            '',
-            'Return plain text in this exact format:',
-            'Memory: <detailed beat-by-beat summary following the structure above>',
-            'Keys: <15-30 comma-separated concrete keywords as specified>',
-            '',
-            '{{history}}'
-        ].join('\n')
-    },
-    {
-        key: 'concise_narrative',
-        label: 'Concise narrative',
-        prompt: [
-            'Analyze the following roleplay segment and create a concise memory entry.',
-            'Preserve the original language. Do not translate. Exclude all [OOC] conversation.',
-            '',
-            'Write a compact 3-5 sentence narrative summary in past tense, third person.',
-            'Focus on:',
-            '- What happened (main events and decisions)',
-            '- Key character interactions or developments',
-            '- Important outcome or state change',
-            '',
-            'For keywords: provide 10-20 concrete, scene-specific keywords:',
-            '- Locations, objects, proper nouns, unique actions',
-            '- NOT abstract themes, emotions, or character names',
-            '',
-            'Return plain text in this exact format:',
-            'Memory: <3-5 sentence concise narrative summary>',
-            'Keys: <10-20 comma-separated concrete keywords>',
-            '',
-            '{{history}}'
-        ].join('\n')
-    },
-    {
-        key: 'structured_markdown',
-        label: 'Structured (markdown)',
-        prompt: [
-            'Analyze the following roleplay segment and create a structured memory entry.',
-            'Preserve the original language. Exclude all [OOC] conversation.',
-            '',
-            'Use this markdown structure (skip sections if not applicable):',
-            '**Timeline**: Day/time this scene covers',
-            '**Story Beats**: Important plot events and developments',
-            '**Key Interactions**: Significant character exchanges and relationship shifts',
-            '**Notable Details**: Important objects, settings, revelations, quotes',
-            '**Outcome**: Results, emotional states, consequences',
-            '',
-            'Write in past tense, third person. Be comprehensive but avoid verbatim repetition.',
-            '',
-            'For keywords: generate 15-25 concrete scene-specific tags:',
-            '- Proper nouns, locations, specific objects, unique actions',
-            '- NOT abstract concepts, emotions, or character names',
-            '',
-            'Return plain text in this exact format:',
-            'Memory: <structured markdown summary following the template above>',
-            'Keys: <15-25 comma-separated concrete keywords>',
-            '',
-            '{{history}}'
-        ].join('\n')
-    },
-    {
-        key: 'minimal_factual',
-        label: 'Minimal (1-2 sentences)',
-        prompt: [
-            'Create a minimal memory entry from the following roleplay segment.',
-            'Preserve the original language. Exclude [OOC] conversation.',
-            '',
-            'Write 1-2 sentences capturing only the most important factual development.',
-            'Focus on durable outcomes: status changes, revealed facts, decisions, or relationship shifts.',
-            '',
-            'For keywords: provide 5-10 most relevant concrete keywords (locations, objects, proper nouns).',
-            'Do not use abstract themes or character names.',
-            '',
-            'Return plain text in this exact format:',
-            'Memory: <1-2 sentence factual summary>',
-            'Keys: <5-10 comma-separated concrete keywords>',
-            '',
-            '{{history}}'
-        ].join('\n')
-    }
-];
-
-function getMemoryPromptOptions(settings = {}) {
-    const custom = Array.isArray(settings.customPrompts) ? settings.customPrompts : [];
-    return [
-        ...builtInMemoryPrompts,
-        ...custom.map(item => ({ key: item.id, label: item.name || 'Custom prompt', prompt: item.prompt || '' }))
-    ];
-}
-
-function resolveMemoryPrompt(settings = {}) {
-    const options = getMemoryPromptOptions(settings);
-    const selected = options.find(item => item.key === settings.promptPreset);
-    return selected?.prompt || builtInMemoryPrompts[0].prompt;
-}
-
-function getMemoryPromptLabel(settings = {}) {
-    const options = getMemoryPromptOptions(settings);
-    return options.find(item => item.key === settings.promptPreset)?.label || builtInMemoryPrompts[0].label;
-}
-
-function getMemoryPromptLabelByKey(settings = {}, promptPreset = 'detailed_beats') {
-    const options = getMemoryPromptOptions(settings);
-    return options.find(item => item.key === promptPreset)?.label || builtInMemoryPrompts[0].label;
-}
 
 function restoreVisibleSwipeState(messages = []) {
     if (!Array.isArray(messages)) return [];
@@ -537,58 +432,6 @@ function getNormalizedMemoryGenerationState(settings = {}, overrides = {}) {
     };
 }
 
-function createPendingMemoryDraft(memoryBook, selectedMessages, { source = 'scan_chat', vectorSearch = false } = {}) {
-    const selected = (Array.isArray(selectedMessages) ? selectedMessages : []).filter(Boolean);
-    if (!memoryBook || !selected.length) return null;
-
-    const selectedIds = selected.map(msg => msg.id).filter(Boolean);
-    if (!selectedIds.length) return null;
-
-    const existingDrafts = Array.isArray(memoryBook.pendingDrafts) ? memoryBook.pendingDrafts : [];
-    const existingDraft = existingDrafts.find(draft => arraysEqual(normalizeEntryMessageIds(draft), selectedIds));
-    if (existingDraft) {
-        if (!existingDraft.content) existingDraft.status = 'pending_generation';
-        existingDraft.source = source;
-        existingDraft.updatedAt = Date.now();
-        return existingDraft;
-    }
-
-    const stableMessages = currentMessages.value.filter(m => m && !m.isTyping && !m.isError && (m.role === 'user' || m.role === 'char'));
-    const firstMessage = selected[0];
-    const lastMessage = selected[selected.length - 1];
-    const firstIdx = stableMessages.findIndex(m => m.id === firstMessage.id);
-    const lastIdx = stableMessages.findIndex(m => m.id === lastMessage.id);
-    const rangeDisplay = firstIdx >= 0 && lastIdx >= 0
-        ? `${firstIdx + 1}-${lastIdx + 1}`
-        : `Draft ${(Array.isArray(memoryBook.pendingDrafts) ? memoryBook.pendingDrafts.length : 0) + 1}`;
-    const createdAt = Date.now();
-    const draft = normalizeMemoryEntryShape({
-        id: genMemoryEntryId(),
-        title: rangeDisplay,
-        content: '',
-        rawContent: '',
-        keys: [],
-        glazeKeys: [],
-        vectorSearch,
-        messageIds: selectedIds,
-        messageRange: {
-            startMessageId: firstMessage.id,
-            endMessageId: lastMessage.id,
-            start: firstIdx >= 0 ? firstIdx + 1 : null,
-            end: lastIdx >= 0 ? lastIdx + 1 : null
-        },
-        status: 'pending_generation',
-        source,
-        createdAt,
-        updatedAt: createdAt,
-        generatedAt: null
-    });
-
-    if (!Array.isArray(memoryBook.pendingDrafts)) memoryBook.pendingDrafts = [];
-    memoryBook.pendingDrafts.push(draft);
-    return draft;
-}
-
 watch([isSearchMode, isSelectionMode], () => {
     ignoreScrollAdjustment = true;
     if (ignoreScrollAdjustmentTimer) clearTimeout(ignoreScrollAdjustmentTimer);
@@ -607,114 +450,6 @@ function toggleSelection(msgId) {
 
 function clearSelection() {
     selectedMessages.value = new Set();
-}
-
-function buildMemoryContinuityContext(memoryBook, selected) {
-    const selectedIds = new Set(selected.map(msg => msg.id));
-    const activeEntries = Array.isArray(memoryBook.entries) ? memoryBook.entries : [];
-    return activeEntries
-        .filter(entry => {
-            const ids = Array.isArray(entry.messageIds) ? entry.messageIds : [];
-            return ids.length && ids.every(id => !selectedIds.has(id));
-        })
-        .slice(-2)
-        .map(entry => `${entry.title || 'Memory'}: ${entry.content || ''}`.trim())
-        .filter(Boolean)
-        .join('\n\n');
-}
-
-function buildMemoryDraftLoreContext(selected) {
-    const historicalLabels = new Map();
-    selected.forEach(msg => {
-        (Array.isArray(msg?.contextRefs) ? msg.contextRefs : []).forEach(ref => {
-            if (ref?.type === 'lorebook' && ref?.id) {
-                const key = ref.id;
-                const existing = historicalLabels.get(key) || { label: ref.label || 'Entry', count: 0 };
-                existing.count += 1;
-                historicalLabels.set(key, existing);
-            }
-        });
-    });
-
-    const historicalLines = [...historicalLabels.values()]
-        .sort((a, b) => b.count - a.count)
-        .slice(0, 3)
-        .map(item => `- ${item.label}${item.count > 1 ? ` x${item.count}` : ''}`);
-
-    const liveCandidates = [...new Set(selected.flatMap(msg =>
-        (Array.isArray(msg?.triggeredLorebooks) ? msg.triggeredLorebooks : [])
-            .map(entry => entry?.name || entry?.label || '')
-            .filter(Boolean)
-    ))]
-        .slice(0, 2)
-        .map(label => `- ${label}`);
-
-    const sections = [];
-    if (historicalLines.length) {
-        sections.push(['Historical triggers:', ...historicalLines].join('\n'));
-    }
-    if (liveCandidates.length) {
-        sections.push(['Current live candidates:', ...liveCandidates].join('\n'));
-    }
-    return sections.join('\n\n');
-}
-
-function buildMemoryDraftSummaryExcerpt(summary) {
-    if (!summary) return '';
-    if (typeof summary === 'string') return summary.trim().slice(0, 800);
-    if (typeof summary === 'object') {
-        if (typeof summary.content === 'string') return summary.content.trim().slice(0, 800);
-        return ['timeline', 'characterArcs', 'conflictsThreads', 'notHappenedYet', 'notes']
-            .map(key => summary[key])
-            .filter(value => typeof value === 'string' && value.trim())
-            .join('\n\n')
-            .slice(0, 800);
-    }
-    return '';
-}
-
-function parseMemoryDraftResponse(rawText, fallbackKeys = []) {
-    const text = String(rawText || '').trim();
-    const lines = text.split(/\r?\n/);
-    const memoryLines = [];
-    let keysLine = '';
-    let inMemoryBlock = false;
-
-    for (const line of lines) {
-        if (/^memory\s*:/i.test(line)) {
-            inMemoryBlock = true;
-            const firstLine = line.replace(/^memory\s*:/i, '').trim();
-            if (firstLine) memoryLines.push(firstLine);
-            continue;
-        }
-        if (/^keys\s*:/i.test(line)) {
-            keysLine = line.replace(/^keys\s*:/i, '').trim();
-            inMemoryBlock = false;
-            continue;
-        }
-        if (inMemoryBlock) {
-            memoryLines.push(line);
-        }
-    }
-
-    let memory = memoryLines.join('\n').trim();
-
-    if (!memory) {
-        const nonMeta = lines.filter(line => !/^keys\s*:/i.test(line)).join('\n').trim();
-        memory = nonMeta.replace(/^memory\s*:/i, '').trim();
-    }
-
-    const parsedKeys = keysLine
-        ? keysLine.split(',').map(item => item.trim()).filter(Boolean)
-        : [];
-
-    const content = memory || text;
-
-    return {
-        content,
-        raw: text,
-        keys: parsedKeys.length ? parsedKeys : buildMemoryKeysFromText(content, fallbackKeys)
-    };
 }
 
 function openMemoryPromptPreview(item, options = {}) {
@@ -798,324 +533,6 @@ async function generateMemoryDraftFromSelection() {
     if (!selected.length) return;
     clearSelection();
     await generateMemoryDraftForMessages(selected, { openSheet: true, source: 'manual_draft' });
-}
-
-async function generateMemoryDraftForMessages(selectedMessages, { openSheet = false, source = 'auto_delayed', existingDraftId = null } = {}) {
-    if (!activeChatChar || !Array.isArray(selectedMessages) || !selectedMessages.length) return false;
-    console.debug('[MemoryBooks] generateMemoryDraftForMessages:start', { source, existingDraftId, inputCount: selectedMessages.length });
-
-    const activeGeneration = getGenerationState(activeChatChar.id);
-    if (activeGeneration && activeGeneration.type !== 'impersonation') {
-        showToast('Stop the current response generation before starting a memory draft');
-        return false;
-    }
-
-    const selected = selectedMessages.filter(msg => msg && !msg.isTyping && !msg.isError);
-    console.debug('[MemoryBooks] generateMemoryDraftForMessages:filtered', { source, existingDraftId, filteredCount: selected.length });
-    if (!selected.length) {
-        showToast('No valid messages found for memory draft generation');
-        return false;
-    }
-
-    const chatData = await getChatData(activeChatChar.id);
-    const sessionId = activeChatChar.sessionId || chatData.currentId;
-    const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
-    const automation = ensureMemoryAutomationState(memoryBook);
-    const isManualDraftRequest = source === 'manual_draft' || source === 'manual_regenerate';
-
-    if (automation.isGeneratingDraft && !isManualDraftRequest) {
-        showToast('Already generating a draft. Please wait...');
-        return false;
-    }
-
-    const vectorEnabled = getMemoryVectorSearchEnabled(memoryBook);
-    const settings = memoryBook.settings || {};
-    const generationMaxTokens = Number.isFinite(Number(settings.generationMaxTokens)) && Number(settings.generationMaxTokens) > 0
-        ? Math.round(Number(settings.generationMaxTokens))
-        : null;
-    const summary = chatData?.summaries?.[sessionId] || null;
-    const playerName = selected.find(msg => msg?.role === 'user')?.persona?.name || activePersona.value?.name || 'User';
-    const history = selected
-        .map(msg => `${msg.role === 'user' ? (msg.persona?.name || playerName) : (activeChatChar?.name || 'Character')}: ${msg.text || ''}`.trim())
-        .filter(Boolean)
-        .join('\n');
-
-    const continuity = buildMemoryContinuityContext(memoryBook, selected);
-    const loreContext = buildMemoryDraftLoreContext(selected);
-    const summaryExcerpt = buildMemoryDraftSummaryExcerpt(summary);
-    const apiConfigOverride = settings.generationSource === 'custom'
-        ? {
-            apiUrl: settings.generationEndpoint,
-            apiKey: settings.generationApiKey,
-            model: settings.generationModel,
-            temp: settings.generationTemperature ?? undefined,
-            ...(generationMaxTokens ? { maxTokens: generationMaxTokens } : {})
-        }
-        : {
-            ...(settings.generationModel
-                ? { model: settings.generationModel }
-                : {}),
-            ...(settings.generationTemperature != null
-                ? { temp: settings.generationTemperature }
-                : {}),
-            ...(generationMaxTokens ? { maxTokens: generationMaxTokens } : {})
-        };
-    const prompt = resolveMemoryPrompt(settings)
-        .replaceAll('{{user}}', playerName)
-        .replaceAll('{{char}}', activeChatChar?.name || 'Character');
-    const finalPrompt = [
-        prompt,
-        continuity ? `Previous approved memory context:\n${continuity}` : '',
-        loreContext ? `Historical lore trigger candidates:\n${loreContext}` : '',
-        summaryExcerpt ? `Summary excerpt:\n${summaryExcerpt}` : ''
-    ].filter(Boolean).join('\n\n');
-
-    const firstMessage = selected[0];
-    const lastMessage = selected[selected.length - 1];
-    const selectedIds = selected.map(msg => msg.id).filter(Boolean);
-    if (!selectedIds.length) return false;
-    const progressDraftId = existingDraftId || `memory_draft_${selectedIds[0]}`;
-    const generatedAt = Date.now();
-
-    if (existingDraftId && memoryDraftState.value?.activeDrafts?.[progressDraftId]) {
-        showToast('This draft is already generating');
-        return false;
-    }
-
-    // Find existing draft if ID provided
-    let existingDraft = null;
-    if (existingDraftId) {
-        existingDraft = (Array.isArray(memoryBook.pendingDrafts) ? memoryBook.pendingDrafts : [])
-            .find(d => d.id === existingDraftId);
-    }
-
-    // Skip conflict check for manual drafts — user explicitly wants to create/update a draft
-    if (source !== 'manual_draft' && source !== 'manual_regenerate') {
-        const conflictingEntry = findConflictingMemoryEntry(memoryBook, selectedIds, {
-            includeEntries: true,
-            includeDrafts: true,
-            overlapThreshold: 0.8
-        });
-        if (conflictingEntry) {
-            return false;
-        }
-    }
-
-    try {
-        automation.isGeneratingDraft = true;
-        memoryBook.updatedAt = Date.now();
-        await db.saveChat(activeChatChar.id, chatData);
-
-        const progressLabel = existingDraftId
-            ? `Draft ${existingDraft?.title || 'generation'}`
-            : (source === 'manual_draft' ? 'Generating selected memory draft' : 'Generating memory draft');
-        startMemoryDraftProgress(progressLabel, progressDraftId);
-        if (!existingDraftId || source !== 'manual_draft') {
-            showToast('Generating memory draft...', 2000);
-        }
-        const memoryDraftAbortController = new AbortController();
-        setMemoryDraftAbortController(memoryDraftAbortController, progressDraftId);
-        const draftText = await generateMemoryDraft({ history, prompt: finalPrompt, controller: memoryDraftAbortController, apiConfigOverride });
-        console.debug('[MemoryBooks] generateMemoryDraftForMessages:request-complete', { existingDraftId, textLength: draftText?.length || 0 });
-        const parsedDraft = parseMemoryDraftResponse(draftText || '', [playerName, activeChatChar?.name || 'Character']);
-
-        const latestChatData = await getChatData(activeChatChar.id);
-        const latestSessionId = activeChatChar.sessionId || latestChatData.currentId;
-        const latestMemoryBook = ensureSessionMemoryBook(latestChatData, latestSessionId);
-        const latestAutomation = ensureMemoryAutomationState(latestMemoryBook);
-
-        if (!Array.isArray(latestMemoryBook.pendingDrafts)) latestMemoryBook.pendingDrafts = [];
-
-        const latestExistingDraft = existingDraftId
-            ? latestMemoryBook.pendingDrafts.find(d => d.id === existingDraftId)
-            : null;
-
-        if (latestExistingDraft) {
-            // Update existing draft
-            latestExistingDraft.content = (parsedDraft.content || parsedDraft.raw || '').trim();
-            latestExistingDraft.rawContent = (parsedDraft.raw || parsedDraft.content || '').trim();
-            latestExistingDraft.keys = parsedDraft.keys || [];
-            latestExistingDraft.glazeKeys = [];
-            latestExistingDraft.vectorSearch = vectorEnabled;
-            latestExistingDraft.status = 'pending_approval';
-            latestExistingDraft.source = source;
-            latestExistingDraft.updatedAt = generatedAt;
-            latestExistingDraft.generatedAt = generatedAt;
-        } else {
-            const createdDraft = createPendingMemoryDraft(latestMemoryBook, selected, { source, vectorSearch: vectorEnabled });
-            if (createdDraft) {
-                createdDraft.content = (parsedDraft.content || parsedDraft.raw || '').trim();
-                createdDraft.rawContent = (parsedDraft.raw || parsedDraft.content || '').trim();
-                createdDraft.keys = parsedDraft.keys || [];
-                createdDraft.glazeKeys = [];
-                createdDraft.vectorSearch = vectorEnabled;
-                createdDraft.status = 'pending_approval';
-                createdDraft.source = source;
-                createdDraft.updatedAt = generatedAt;
-                createdDraft.generatedAt = generatedAt;
-            }
-        }
-        latestAutomation.isGeneratingDraft = true;
-        latestMemoryBook.updatedAt = generatedAt;
-        await db.saveChat(activeChatChar.id, latestChatData);
-        stopMemoryDraftProgress(progressDraftId);
-        const postSaveChatData = await getChatData(activeChatChar.id);
-        const postSaveSessionId = activeChatChar.sessionId || postSaveChatData.currentId;
-        const postSaveMemoryBook = ensureSessionMemoryBook(postSaveChatData, postSaveSessionId);
-        const postSaveAutomation = ensureMemoryAutomationState(postSaveMemoryBook);
-        postSaveAutomation.isGeneratingDraft = Object.keys(memoryDraftState.value.activeDrafts || {}).length > 0;
-        postSaveMemoryBook.updatedAt = Date.now();
-        await db.saveChat(activeChatChar.id, postSaveChatData);
-        await updatePendingMemoryMessageIds(activeChatChar);
-        await loadCurrentMemoryBook(activeChatChar);
-        showToast(latestExistingDraft ? 'Draft updated' : 'Memory draft created');
-        if (openSheet && (!bottomSheetState.isOpen || bottomSheetState.title !== 'Memory Books')) {
-            openMemoryBooksSheet();
-        }
-        return true;
-    } catch (error) {
-        stopMemoryDraftProgress(progressDraftId);
-        const latestChatData = await getChatData(activeChatChar.id);
-        const latestSessionId = activeChatChar.sessionId || latestChatData.currentId;
-        const latestMemoryBook = ensureSessionMemoryBook(latestChatData, latestSessionId);
-        const latestAutomation = ensureMemoryAutomationState(latestMemoryBook);
-        latestAutomation.isGeneratingDraft = Object.keys(memoryDraftState.value.activeDrafts || {}).length > 0;
-        latestMemoryBook.updatedAt = Date.now();
-        await db.saveChat(activeChatChar.id, latestChatData);
-        await loadCurrentMemoryBook(activeChatChar);
-        console.error('Failed to generate memory draft:', error);
-        showToast(`Memory draft failed: ${formatError(error)}`, 5000);
-        return false;
-    }
-}
-
-async function runMemoryAutomationAfterStableTurn(chatData, sessionId, messages, { allowImmediate = true } = {}) {
-    const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
-    const automation = ensureMemoryAutomationState(memoryBook);
-    const autoCreateEnabled = memoryBook.settings?.autoCreateEnabled !== false;
-    const autoGenerateEnabled = memoryBook.settings?.autoGenerateEnabled === true;
-    const stableMessages = getStableVisibleMessages(messages).filter(msg => msg.role === 'user' || msg.role === 'char');
-    const stableCount = stableMessages.length;
-    const interval = normalizeAutoCreateInterval(memoryBook);
-    const delayed = memoryBook.settings?.useDelayedAutomation !== false;
-    const lastRole = getLastStableConversationRole(stableMessages);
-
-    if (!autoCreateEnabled) {
-        automation.pendingTrigger = null;
-        automation.lastProcessedMessageCount = Math.max(automation.lastProcessedMessageCount || 0, stableCount);
-        memoryBook.updatedAt = Date.now();
-        await db.saveChat(activeChatChar.id, chatData);
-        return false;
-    }
-
-    if (!stableCount || !lastRole) {
-        automation.lastProcessedMessageCount = stableCount;
-        automation.pendingTrigger = null;
-        return false;
-    }
-
-    if (automation.pendingTrigger) {
-        const completedExchanges = countCompletedExchangesSince(automation.pendingTrigger.triggerCount, stableCount);
-        if (completedExchanges >= automation.pendingTrigger.waitExchanges) {
-            const selected = resolvePendingTriggerMessages(stableMessages, automation.pendingTrigger);
-            const pendingDraft = createPendingMemoryDraft(memoryBook, selected, { source: 'auto_delayed' });
-            automation.lastProcessedMessageCount = stableCount;
-            automation.pendingTrigger = null;
-            memoryBook.updatedAt = Date.now();
-            await db.saveChat(activeChatChar.id, chatData);
-            await updatePendingMemoryMessageIds(activeChatChar);
-            if (!pendingDraft) return false;
-            if (!autoGenerateEnabled) return true;
-            return await generateMemoryDraftForMessages(selected, {
-                source: 'auto_delayed',
-                existingDraftId: pendingDraft.id
-            });
-        }
-        memoryBook.updatedAt = Date.now();
-        await db.saveChat(activeChatChar.id, chatData);
-        return false;
-    }
-
-    if (!allowImmediate || automation.isGeneratingDraft || stableCount < interval) {
-        automation.lastProcessedMessageCount = Math.max(automation.lastProcessedMessageCount, stableCount);
-        memoryBook.updatedAt = Date.now();
-        await db.saveChat(activeChatChar.id, chatData);
-        return false;
-    }
-
-    const nextThreshold = Math.floor(stableCount / interval) * interval;
-    if (nextThreshold <= 0 || nextThreshold <= automation.lastProcessedMessageCount) {
-        automation.lastProcessedMessageCount = Math.max(automation.lastProcessedMessageCount, stableCount);
-        memoryBook.updatedAt = Date.now();
-        await db.saveChat(activeChatChar.id, chatData);
-        return false;
-    }
-
-    if (delayed) {
-        const windowEndExclusive = nextThreshold;
-        const windowStartIndex = Math.max(0, windowEndExclusive - interval);
-        const windowMessages = stableMessages.slice(windowStartIndex, windowEndExclusive);
-        automation.pendingTrigger = {
-            triggerCount: stableCount,
-            triggerRole: lastRole,
-            waitExchanges: computeDelayedWaitExchanges(lastRole),
-            windowStartIndex,
-            windowEndIndex: Math.max(windowStartIndex, windowEndExclusive - 1),
-            messageIds: windowMessages.map(msg => msg.id).filter(Boolean),
-            createdAt: Date.now()
-        };
-        memoryBook.updatedAt = Date.now();
-        await db.saveChat(activeChatChar.id, chatData);
-        return false;
-    }
-
-    const selected = stableMessages.slice(Math.max(0, stableCount - interval), stableCount);
-    const pendingDraft = createPendingMemoryDraft(memoryBook, selected, { source: 'auto_immediate' });
-    automation.lastProcessedMessageCount = stableCount;
-    memoryBook.updatedAt = Date.now();
-    await db.saveChat(activeChatChar.id, chatData);
-    await updatePendingMemoryMessageIds(activeChatChar);
-    if (!pendingDraft) return false;
-    if (!autoGenerateEnabled) return true;
-    return await generateMemoryDraftForMessages(selected, {
-        source: 'auto_immediate',
-        existingDraftId: pendingDraft.id
-    });
-}
-
-async function bootstrapImportedMemoryDrafts(charId, sessionId) {
-    const chatData = await getChatData(charId);
-    if (!chatData?.sessions?.[sessionId]) return 0;
-
-    const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
-    const automation = ensureMemoryAutomationState(memoryBook);
-    const existingEntries = Array.isArray(memoryBook.entries) ? memoryBook.entries.length : 0;
-    const existingDrafts = Array.isArray(memoryBook.pendingDrafts) ? memoryBook.pendingDrafts.length : 0;
-    if (existingEntries > 0 || existingDrafts > 0) return 0;
-
-    const interval = normalizeAutoCreateInterval(memoryBook);
-    const segments = buildBootstrapSegments(chatData.sessions[sessionId], interval);
-    if (!segments.length) return 0;
-
-    let createdCount = 0;
-    automation.pendingTrigger = null;
-    for (const segment of segments) {
-        const created = createPendingMemoryDraft(memoryBook, segment, { source: 'import_bootstrap' });
-        if (created) createdCount += 1;
-    }
-
-    memoryBook.updatedAt = Date.now();
-    await db.saveChat(charId, chatData);
-
-    const latestData = await getChatData(charId);
-    if (!latestData?.sessions?.[sessionId]) return createdCount;
-    const latestMemoryBook = ensureSessionMemoryBook(latestData, sessionId);
-    const latestAutomation = ensureMemoryAutomationState(latestMemoryBook);
-    latestAutomation.lastProcessedMessageCount = countStableConversationMessages(latestData.sessions[sessionId]);
-    latestAutomation.pendingTrigger = null;
-    latestMemoryBook.updatedAt = Date.now();
-    await db.saveChat(charId, latestData);
-    return createdCount;
 }
 
 async function runBatchDraftGeneration(chatData, sessionId, memoryBook, segments, count) {
