@@ -168,6 +168,8 @@ Tracked in `REFACTOR_PLAN.md` and `REFACTOR_PHASE_0_CHECKLIST.md`:
 - [x] Updated `generationService.js` to consume that preparation helper instead of owning the full preparation path inline
 - [x] Extracted final chat request assembly/execution into `src/core/llm/usecases/chatRequestExecution.js`
 - [x] Extracted shared prompt-preparation primitives into `src/core/llm/usecases/chatPromptShared.js` to avoid service/use-case cycle
+- [x] Switched `ChatView.vue` from inline chat-generation orchestration to `executeChatGenerationUseCase(...)`
+- [x] Grouped injected chat-use-case services into `app` / `preparation` / `lifecycle` / `effects` / `postprocess`
 - [x] `npm run build` passes after extraction
 - [ ] Move late enrichment and final request assembly steps out of `generationService.js`
 - [ ] Reduce dependency surface passed from `ChatView.vue` into the chat use case
@@ -185,6 +187,7 @@ Tracked in `REFACTOR_PLAN.md` and `REFACTOR_PHASE_0_CHECKLIST.md`:
 7. `feat: add memory books provider tab to API settings`
 8. `feat: refactor memory generation UI with model dropdown and quick model row`
 9. `feat: expand sync coverage for provider profiles, image gen, and embedding settings`
+10. `refactor: split chat prompt and late-enrichment pipeline`
 
 Target PR: `upstream/dev`
 

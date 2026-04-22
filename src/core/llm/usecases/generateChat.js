@@ -1,7 +1,6 @@
 import {
     generateChatResponse
 } from '@/core/services/generationService.js';
-import { prepareChatPromptRequest, runPreparedChatPrompt } from '@/core/llm/usecases/chatPreparation.js';
 
 /**
  * Official chat-generation use-case entrypoint.
@@ -31,7 +30,7 @@ export async function executeChatGenerationUseCase({
     resolvedContext,
     request,
     state,
-    deps
+    services
 }) {
     const { sessionId, summary, anContent } = resolvedContext;
     const { genId, controller, startTime, ownerKey, requestToken } = request;
@@ -42,8 +41,17 @@ export async function executeChatGenerationUseCase({
         displayMessages
     } = state;
     const {
+        app,
+        preparation,
+        lifecycle,
+        effects,
+        postprocess
+    } = services;
+    const {
         publishAppEvent,
-        APP_EVENTS,
+        APP_EVENTS
+    } = app;
+    const {
         buildGenerationAuthorsNote,
         getEffectivePreset,
         ensureGenerationPlaceholderMessage,
@@ -54,35 +62,41 @@ export async function executeChatGenerationUseCase({
         scrollToBottom,
         applyGenerationGuidanceState,
         createPromptMetadataSnapshots,
+        buildGenerationHistory,
+        updateSessionMessage
+    } = preparation;
+    const {
         markGenerationPersisted,
         setupGenerationState,
         setGenerationState,
         getGenerationState,
-        smartScroll,
         createGenerationStreamUpdater,
         isGenerationStateCurrent,
         restoreGenerationState,
         clearPersistedGeneration,
-        updateSessionMessage,
         handleGenerationError,
         clearGenerationState,
         clearTypingStateForMessage,
+        handleGenerationPromptReady,
+        handleGenerationComplete
+    } = lifecycle;
+    const {
+        smartScroll,
         formatError,
         sendMessageNotification,
-        buildGenerationHistory,
-        handleGenerationPromptReady,
-        handleGenerationComplete,
+        userAvatar,
+        isItemVisible,
+        scrollToIndex
+    } = effects;
+    const {
         cleanText,
         estimateTokens,
         processMessageImages,
-        userAvatar,
-        isItemVisible,
-        scrollToIndex,
         runMemoryAutomationAfterStableTurn,
         addMessageStats,
         addRegenerationStats,
         triggerAutoSyncCheck
-    } = deps;
+    } = postprocess;
 
     publishAppEvent(APP_EVENTS.domain.generation.started, { charId: char.id, sessionId });
 

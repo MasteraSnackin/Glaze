@@ -56,7 +56,8 @@ import { getEffectivePersona, activePersona, allPersonas } from '@/core/states/p
 import { formatDate, formatDateSeparator } from '@/utils/dateFormatter.js';
 import { currentLang, chatPaddingLR, setChatPaddingLR, shouldUseBatterySaverUI } from '@/core/config/APPSettings.js';
 import { translations } from '@/utils/i18n.js';
-import { generateChatResponse, calculateContext, generateMemoryDraft } from '@/core/services/generationService.js';
+import { calculateContext, generateMemoryDraft } from '@/core/services/generationService.js';
+import { executeChatGenerationUseCase } from '@/core/llm/usecases/generateChat.js';
 import { executeRequest } from '@/core/services/llmApi.js';
 import { getApiConfig, getApiRuntimeStorage, getApiReasoningTags, fetchRemoteModels } from '@/core/config/APISettings.js';
 import { getActiveLLMProfile } from '@/core/config/ProviderProfiles.js';
@@ -222,9 +223,12 @@ const {
     getGenerationState,
     hasGenerationState,
     setGenerationState,
+    isGenerationStateCurrent,
     clearGenerationState,
     markGenerationPersisted,
-    clearPersistedGeneration
+    clearPersistedGeneration,
+    buildGenerationOwnerKey,
+    createGenerationRequestToken
 } = useGenerationRegistry();
 const { clearTypingStateForMessage } = useTypingStateCleanup({ currentMessages, getChatData, db });
 
@@ -3152,7 +3156,7 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
     const genId = nextGenerationId();
     const controller = new AbortController();
     const startTime = Date.now();
-    let rawStreamText = text || "";
+    const rawStreamRef = ref(text || '');
     resolveGenerationSessionContext({ char, db }).then(context => {
         continueGeneration(context);
     }).catch(e => {
@@ -3161,184 +3165,90 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
     });
 
     async function continueGeneration({ sessionId, summary, anContent }) {
+        const ownerKey = buildGenerationOwnerKey(char.id, sessionId, 'chat');
+        const requestToken = createGenerationRequestToken(ownerKey, genId);
 
-    // Notify application about generation start
-    window.dispatchEvent(new CustomEvent('chat-generation-started', { detail: { charId: char.id, sessionId: sessionId } }));
-
-    isGenerating.value = true;
-    let msgIndex = existingMsgIndex;
-    const authorsNote = buildGenerationAuthorsNote({
-        getEffectivePreset,
-        charId: char.id,
-        sessionId,
-        anContent
-    });
-
-    msgIndex = await ensureGenerationPlaceholderMessage({
-        msgIndex,
-        text,
-        guidanceText,
-        guidanceType,
-        currentMessages,
-        createBaseMessageMeta,
-        genMsgId,
-        charId: char.id,
-        sessionId,
-        getChatData,
-        db,
-        scrollToBottom
-    });
-
-    applyGenerationGuidanceState({
-        currentMessages,
-        msgIndex,
-        guidanceText,
-        guidanceType
-    });
-
-    const msgId = currentMessages.value[msgIndex]?.id || genMsgId();
-    const { snapshotPromptMeta, restorePromptMetaOnMessages } = createPromptMetadataSnapshots();
-
-    // Save generation status for DialogList
-    markGenerationPersisted(char.id, sessionId);
-
-    setupGenerationState({
-        char,
-        msgId,
-        genId,
-        controller,
-        startTime,
-        currentMessages,
-        activeChatChar,
-        setGenerationState,
-        getGenerationState,
-        smartScroll
-    });
-
-    const { onUpdate, clearBackgroundUpdateTimer } = createGenerationStreamUpdater({
-        char,
-        sessionId,
-        msgId,
-        genId,
-        getGenerationState,
-        getChatData,
-        db,
-        onRawText: (effectiveText, chunk) => {
-            rawStreamText = effectiveText || (rawStreamText + (chunk || ''));
-        }
-    });
-
-    const restoreState = async (isError = false) => {
-        await restoreGenerationState({
-            currentMessages,
-            getChatData,
-            db,
-            getGenerationState,
-            clearPersistedGeneration,
+        await executeChatGenerationUseCase({
             char,
-            sessionId,
-            msgId,
-            isError,
+            text,
+            existingMsgIndex,
+            guidanceText,
+            guidanceType,
             onAbort,
-            restorePromptMetaOnMessages,
-            clearBackgroundUpdateTimer,
-            updateSessionMessage
-        });
-    };
-
-    getGenerationState(char.id).restoreState = restoreState;
-
-    const onError = async (e) => {
-        await handleGenerationError({
-            error: e,
-            char,
-            sessionId,
-            msgId,
-            genId,
-            rawStreamText,
-            activeChatChar,
-            isGenerating,
-            currentMessages,
-            getGenerationState,
-            clearGenerationState,
-            restoreState,
-            clearBackgroundUpdateTimer,
-            clearTypingStateForMessage,
-            getChatData,
-            db,
-            formatError,
-            sendMessageNotification
-        });
-    };
-
-    const history = buildGenerationHistory(currentMessages);
-
-    generateChatResponse({
-        text,
-        char,
-        history,
-        authorsNote,
-        summary,
-        guidanceText,
-        type: 'normal',
-        controller,
-        callbacks: {
-            onPromptReady: async ({ loreEntries, memoryEntries }) => {
-                await handleGenerationPromptReady({
-                    loreEntries,
-                    memoryEntries,
-                    currentMessages,
-                    msgIndex,
-                    char,
-                    sessionId,
-                    getChatData,
-                    db,
-                    snapshotPromptMeta
-                });
+            resolvedContext: { sessionId, summary, anContent },
+            request: {
+                genId,
+                controller,
+                startTime,
+                ownerKey,
+                requestToken,
+                rawStreamRef
             },
-            onUpdate,
-            onComplete: async (response, finalReasoning, meta) => {
-                await handleGenerationComplete({
-                    response,
-                    finalReasoning,
-                    meta,
-                    char,
-                    sessionId,
-                    msgId,
-                    genId,
-                    startTime,
-                    controller,
-                    guidanceText,
-                    guidanceType,
-                    activeChatChar,
-                    isGenerating,
-                    currentMessages,
-                    displayMessages,
-                    getGenerationState,
-                    clearGenerationState,
-                    clearPersistedGeneration,
-                    clearBackgroundUpdateTimer,
-                    clearTypingStateForMessage,
+            state: {
+                activeChatChar,
+                isGenerating,
+                currentMessages,
+                displayMessages
+            },
+            services: {
+                app: {
+                    publishAppEvent: (eventName, detail) => window.dispatchEvent(new CustomEvent(eventName, { detail })),
+                    APP_EVENTS: {
+                        domain: {
+                            generation: {
+                                started: 'chat-generation-started'
+                            }
+                        }
+                    }
+                },
+                preparation: {
+                    buildGenerationAuthorsNote,
+                    getEffectivePreset,
+                    ensureGenerationPlaceholderMessage,
+                    createBaseMessageMeta,
+                    genMsgId,
                     getChatData,
                     db,
-                    cleanText,
-                    estimateTokens,
-                    updateSessionMessage,
-                    processMessageImages,
+                    scrollToBottom,
+                    applyGenerationGuidanceState,
+                    createPromptMetadataSnapshots,
+                    buildGenerationHistory,
+                    updateSessionMessage
+                },
+                lifecycle: {
+                    markGenerationPersisted,
+                    setupGenerationState,
+                    setGenerationState,
+                    getGenerationState,
+                    createGenerationStreamUpdater,
+                    isGenerationStateCurrent,
+                    restoreGenerationState,
+                    clearPersistedGeneration,
+                    handleGenerationError,
+                    clearGenerationState,
+                    clearTypingStateForMessage,
+                    handleGenerationPromptReady,
+                    handleGenerationComplete
+                },
+                effects: {
+                    smartScroll,
+                    formatError,
+                    sendMessageNotification,
                     userAvatar: activePersona.value?.avatar || null,
                     isItemVisible,
-                    scrollToIndex,
-                    smartScroll,
-                    sendMessageNotification,
+                    scrollToIndex
+                },
+                postprocess: {
+                    cleanText,
+                    estimateTokens,
+                    processMessageImages,
                     runMemoryAutomationAfterStableTurn,
                     addMessageStats,
                     addRegenerationStats,
                     triggerAutoSyncCheck
-                });
-            },
-            onError
-        }
-    });
+                }
+            }
+        });
     }
 }
 
