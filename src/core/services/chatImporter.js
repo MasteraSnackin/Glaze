@@ -109,9 +109,8 @@ async function importGlazeChatPackage(json, characterId, userPersona) {
 export async function importSillyTavernChat(file, characterId, userPersona) {
     const fileName = String(file?.name || '').toLowerCase();
     
-    // Reject TXT files explicitly — they are not a valid chat format
     if (fileName.endsWith('.txt')) {
-        throw new Error('TXT files are not supported for chat import. Please use JSONL or .glzchat.json format.');
+        throw new Error('TXT files are not supported. Please use JSONL or .glzchat.json format.');
     }
     
     if (fileName.endsWith('.glzchat.json')) {
@@ -468,11 +467,11 @@ export function pickChatFile() {
     return new Promise((resolve) => {
         const input = document.createElement('input');
         input.type = 'file';
-        input.accept = '.json,.jsonl,.glzchat.json,application/json,text/plain';
+        input.accept = '.json,.jsonl,.glzchat.json';
         input.onchange = (e) => {
             const file = e.target.files[0] || null;
             if (file && file.name.toLowerCase().endsWith('.txt')) {
-                resolve(null); // Will be handled by the caller with error
+                resolve(null);
             } else {
                 resolve(file);
             }
@@ -487,7 +486,6 @@ export function pickChatFile() {
 export function triggerChatImport(characterId, userPersona, onImport) {
     pickChatFile().then(async (file) => {
         if (!file) {
-            // User cancelled or selected unsupported format (e.g. TXT)
             const t = translations[currentLang.value];
             showBottomSheet({
                 title: t?.title_error || "Error",
