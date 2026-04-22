@@ -48,8 +48,11 @@ function applyMessageStreamUpdate(message, text, reasoning, isTyping, textDelta)
 
 export function setupGenerationState({
     char,
+    sessionId,
     msgId,
     genId,
+    ownerKey,
+    requestToken,
     controller,
     startTime,
     currentMessages,
@@ -145,6 +148,11 @@ export function setupGenerationState({
 
     setGenerationState(char.id, {
         genId,
+        ownerKey,
+        requestToken,
+        sessionId,
+        charId: char.id,
+        type: 'chat',
         controller,
         startTime,
         msgId,

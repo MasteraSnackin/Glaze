@@ -3,8 +3,6 @@ import * as dropboxAdapter from '@/core/services/adapters/dropboxAdapter.js';
 import * as gdriveAdapter from '@/core/services/adapters/gdriveAdapter.js';
 import { pushEntities, pullEntities, detectEncryptionState, isEncryptionEnabled } from '@/core/services/syncEngine.js';
 import { getSyncKey, hasSyncKey } from '@/core/services/crypto/keyManager.js';
-import { publishAppEvent } from '@/core/events/eventHub.js';
-import { APP_EVENTS } from '@/core/events/eventNames.js';
 
 function getAdapter() {
     if (syncProvider.value === PROVIDERS.DROPBOX) return dropboxAdapter;
@@ -78,7 +76,7 @@ export async function fullPull() {
             syncStatus.value = SYNC_STATUS.IDLE;
         }
         clearSyncProgress();
-        publishAppEvent(APP_EVENTS.domain.sync.dataRefreshed, result);
+        window.dispatchEvent(new CustomEvent('sync-data-refreshed', { detail: result }));
         return result;
     } catch (e) {
         setSyncError(e.message);

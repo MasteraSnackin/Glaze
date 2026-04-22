@@ -33,7 +33,7 @@ The current roadmap is:
 ## Current Refactor Branch
 
 - Branch: `feat/refactor-phase1-event-hub`
-- Base: `fixes/urgent-bugfixes`
+- Base: latest stabilized `dev`
 - Scope: start `REFACTOR_PLAN.md` Phase 1 with the smallest safe structural slice
 - Current slice status: `done`
 - Current slice testing: `tested` (`npm run build`)
@@ -44,9 +44,15 @@ Current slice deliverables:
 - [done] Added window compatibility bridge in `src/core/events/bridges/windowEventBridge.js`
 - [done] Initialized bridge in `src/main.js`
 - [done] Switched a safe subset of emitters to canonical internal events while preserving legacy `window` listeners
-- [not done] Migrate listener side to internal subscriptions
-- [not done] Introduce request ownership tokens
-- [not done] Promote `generateChat` and related flows to official use-case entrypoints
+- [done] Migrated a first listener subset to compatibility subscriptions for canonical app events
+- [done] Added official use-case entrypoint wrappers for chat, summary, memory draft, and context calculation
+- [not done] Migrate the remaining listener side to internal subscriptions
+- [done] Introduced explicit chat-generation request ownership tokens and stale-response guards
+- [not done] Finish full request ownership separation across all generation-like flows
+- [done] Promote `generateChat` and related flows to official use-case entrypoints
+- [done] Move the chat execution/orchestration shell behind `generateChat` use-case boundary
+- [done] Extract deterministic chat prompt-preparation stage into use-case-owned helper flow
+- [not done] Continue moving the remaining prompt/request orchestration out of `generationService.js` into use-case/pipeline files
 
 This roadmap intentionally assumes the tokenizer and current context UI are already in place and are not being redesigned again unless a new decision is made explicitly.
 

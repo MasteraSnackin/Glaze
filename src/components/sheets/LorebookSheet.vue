@@ -8,6 +8,8 @@ import { lorebookState, initLorebookState, createLorebook, deleteLorebook, delet
 import { saveFile } from '@/core/services/fileSaver.js';
 import HelpTip from '@/components/ui/HelpTip.vue';
 import { showToast } from '@/core/states/toastState.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
+import { subscribeLegacyCompatibleEvent } from '@/core/events/legacyCompatibleSubscription.js';
 
 const sheet = ref(null);
 const t = (key) => translations[currentLang.value]?.[key] || key;
@@ -20,6 +22,7 @@ const currentView = ref('list'); // list, entries, edit_entry
 const activeLorebook = ref(null);
 const activeEntry = ref(null);
 const activeEntryIndex = ref(-1);
+let unsubscribeSyncDataRefreshed = null;
 
 
 
@@ -470,12 +473,17 @@ onMounted(async () => {
     await initLorebookState();
     loadPickerData();
     await updateVectorReindexNotice();
-    window.addEventListener('sync-data-refreshed', handleSyncDataRefreshed);
+    unsubscribeSyncDataRefreshed = subscribeLegacyCompatibleEvent({
+        appEventName: APP_EVENTS.domain.sync.dataRefreshed,
+        legacyEventName: 'sync-data-refreshed',
+        listener: handleSyncDataRefreshed
+    });
     window.addEventListener('app-back-navigation', handleBackNavigation);
 });
 
 onUnmounted(() => {
-    window.removeEventListener('sync-data-refreshed', handleSyncDataRefreshed);
+    unsubscribeSyncDataRefreshed?.();
+    unsubscribeSyncDataRefreshed = null;
     window.removeEventListener('app-back-navigation', handleBackNavigation);
 });
 

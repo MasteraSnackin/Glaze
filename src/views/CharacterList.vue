@@ -15,6 +15,8 @@ import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetStat
 import { attachLongPress } from '@/core/services/ui.js';
 import { estimateTokens } from '@/utils/tokenizer.js';
 import { formatDate } from '@/utils/dateFormatter.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
+import { subscribeLegacyCompatibleEvent } from '@/core/events/legacyCompatibleSubscription.js';
 
 const props = defineProps({
   activeCategory: {
@@ -30,6 +32,7 @@ const emit = defineEmits(['open-chat']);
 const characters = ref([]);
 const searchQuery = ref('');
 const isLoading = ref(true);
+let unsubscribeSyncDataRefreshed = null;
 
 const getCharTokens = (char) => {
   let text = char.name || "";
@@ -394,7 +397,17 @@ onMounted(() => {
   loadCharacters();
   window.addEventListener('header-search', (e) => searchQuery.value = e.detail);
   window.addEventListener('character-updated', loadCharacters);
-  window.addEventListener('sync-data-refreshed', loadCharacters);
+  unsubscribeSyncDataRefreshed = subscribeLegacyCompatibleEvent({
+    appEventName: APP_EVENTS.domain.sync.dataRefreshed,
+    legacyEventName: 'sync-data-refreshed',
+    listener: loadCharacters
+  });
+});
+
+onUnmounted(() => {
+  window.removeEventListener('character-updated', loadCharacters);
+  unsubscribeSyncDataRefreshed?.();
+  unsubscribeSyncDataRefreshed = null;
 });
 
 // Custom Directive for Long Press

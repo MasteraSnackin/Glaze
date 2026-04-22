@@ -57,6 +57,8 @@ import { sidebarState } from '@/core/states/sidebarState.js';
 import { initSyncState, syncProvider } from '@/core/states/syncState.js';
 import { fullPull, checkSyncReadiness } from '@/core/services/syncService.js';
 import { startTracking } from '@/core/services/timeTracker.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
+import { subscribeLegacyCompatibleEvent } from '@/core/events/legacyCompatibleSubscription.js';
 
 
 
@@ -126,6 +128,8 @@ const glossaryStyle = computed(() => {
 let isDraggingGlossary = false;
 let glossaryDragStartX = 0, glossaryDragStartY = 0;
 let glossaryInitialX = 0, glossaryInitialY = 0;
+let unsubscribeOpenApiSheet = null;
+let unsubscribeSyncDataRefreshed = null;
 
 function startGlossaryDrag(e) {
     if (e.target.closest('button')) return;
@@ -766,11 +770,19 @@ onMounted(async () => {
     window.addEventListener('open-sync-sheet', onOpenSyncSheet);
     window.addEventListener('open-conflict-sheet', onOpenConflictSheet);
     window.addEventListener('open-preset-sheet', onOpenPresetSheet);
-    window.addEventListener('open-api-sheet', onOpenApiSheet);
+    unsubscribeOpenApiSheet = subscribeLegacyCompatibleEvent({
+        appEventName: APP_EVENTS.nav.openApiSheet,
+        legacyEventName: 'open-api-sheet',
+        listener: onOpenApiSheet
+    });
     window.addEventListener('header-setup-editor', onHeaderSetupEditor);
     window.addEventListener('header-setup-generation', onHeaderSetupGeneration);
     window.addEventListener('header-reset', onHeaderReset);
-    window.addEventListener('sync-data-refreshed', onSyncDataRefreshed);
+    unsubscribeSyncDataRefreshed = subscribeLegacyCompatibleEvent({
+        appEventName: APP_EVENTS.domain.sync.dataRefreshed,
+        legacyEventName: 'sync-data-refreshed',
+        listener: onSyncDataRefreshed
+    });
 
     window.addEventListener('open-glossary', (e) => {
         if (isDesktop.value) {
@@ -833,11 +845,13 @@ onBeforeUnmount(() => {
     window.removeEventListener('open-sync-sheet', onOpenSyncSheet);
     window.removeEventListener('open-conflict-sheet', onOpenConflictSheet);
     window.removeEventListener('open-preset-sheet', onOpenPresetSheet);
-    window.removeEventListener('open-api-sheet', onOpenApiSheet);
+    unsubscribeOpenApiSheet?.();
+    unsubscribeOpenApiSheet = null;
     window.removeEventListener('header-setup-editor', onHeaderSetupEditor);
     window.removeEventListener('header-setup-generation', onHeaderSetupGeneration);
     window.removeEventListener('header-reset', onHeaderReset);
-    window.removeEventListener('sync-data-refreshed', onSyncDataRefreshed);
+    unsubscribeSyncDataRefreshed?.();
+    unsubscribeSyncDataRefreshed = null;
     window.removeEventListener('gl-header-update', onGlossaryHeaderUpdate);
     stopGlossaryDrag();
     kbListeners.forEach(l => l.remove());

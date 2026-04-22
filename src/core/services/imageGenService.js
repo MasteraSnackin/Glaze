@@ -184,7 +184,6 @@ const NAISTERA_DEFAULT_ENDPOINT = 'https://naistera.org';
 
 function normalizeNaisteraModel(model) {
     const raw = String(model || '').trim().toLowerCase();
-    if (raw === 'grok pro' || raw === 'grok-pro') return 'grok-pro';
     if (raw.startsWith('nano')) return 'nano banana';
     if (raw === 'grok') return 'grok';
     if (raw === 'novelai') return 'novelai';
@@ -192,8 +191,8 @@ function normalizeNaisteraModel(model) {
 }
 
 function getNaisteraEndpoint(settings) {
-    // Naistera keeps a fixed service endpoint. Do not reuse custom image-gen endpoints here.
-    return `${NAISTERA_DEFAULT_ENDPOINT}/api/generate`;
+    const base = (settings.endpoint || NAISTERA_DEFAULT_ENDPOINT).replace(/\/$/, '').replace(/\/api\/generate$/i, '');
+    return `${base}/api/generate`;
 }
 
 function trimTrailingSlash(url) {
@@ -485,7 +484,7 @@ export async function checkImageGenConnection() {
             throw new Error(`HTTP ${response.status}: ${txt.slice(0, 200)}`);
         }
     } else if (settings.apiType === 'naistera') {
-        const base = NAISTERA_DEFAULT_ENDPOINT;
+        const base = (settings.endpoint || NAISTERA_DEFAULT_ENDPOINT).replace(/\/$/, '');
         const response = await fetchWithTimeout(base, {}, 10000);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
     }

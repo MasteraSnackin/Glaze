@@ -2,11 +2,11 @@
 
 ## Current Branch
 - `feat/refactor-phase1-event-hub`
-- Created from: `fixes/urgent-bugfixes`
+- Created from: latest stabilized `dev` state
 
 ## Branch Context
-- Stabilization work continues to live on `fixes/urgent-bugfixes`
-- Current work is the first dedicated architecture-refactor slice branched from that stabilized bugfix branch
+- Stabilization fixes were synced back into `dev` and isolated bugfix follow-ups now move in their own short-lived fix branches
+- Current work is the first dedicated architecture-refactor slice continuing on top of that stabilized `dev` state
 - Refactor rule for this branch: structural changes only, no intentional prompt/transport behavior changes
 
 ---
@@ -126,9 +126,18 @@ Tracked in `REFACTOR_PLAN.md` and `REFACTOR_PHASE_0_CHECKLIST.md`:
 - [x] Migrated a safe emitter subset to canonical app events
 - [x] Updated `ARCHITECTURE.md` during implementation
 - [x] `npm run build` passes
-- [ ] Migrate first listener subset off raw `window.addEventListener(...)`
-- [ ] Define official use-case entrypoint contracts
-- [ ] Add request ownership token model (next phase)
+- [x] Migrate first listener subset off raw `window.addEventListener(...)`
+- [x] Define official use-case entrypoint contracts
+- [x] Add initial request ownership token model for chat generation
+
+### Phase 2: Request Ownership Safety Slice
+- [x] Added explicit `ownerKey` + `requestToken` metadata to chat generation registry state
+- [x] Guarded stream updates against stale session/request ownership
+- [x] Guarded completion/error finalization against stale session/request ownership
+- [x] Kept impersonation lifecycle separate from chat generation ownership metadata
+- [x] `npm run build` passes after ownership slice
+- [ ] Add automated overlap coverage for abort/regenerate races
+- [ ] Extend explicit ownership model to other generation-like flows where needed
 
 ### Safe Emitter Subset Migrated
 - generation started / ended
@@ -136,6 +145,30 @@ Tracked in `REFACTOR_PLAN.md` and `REFACTOR_PHASE_0_CHECKLIST.md`:
 - sync data refreshed
 - API context settings changed
 - open API sheet
+
+### First Listener Subset Migrated
+- `App.vue`: open API sheet, sync data refreshed
+- `ChatView.vue`: generation ended, API context settings changed
+- `DialogList.vue`: sync data refreshed, chat updated, generation started, generation ended
+- `LorebookSheet.vue`: sync data refreshed
+- `CharacterList.vue`: sync data refreshed
+
+### Initial Use-Case Entrypoints Added
+- `src/core/llm/usecases/generateChat.js`
+- `src/core/llm/usecases/calculateContext.js`
+- `src/core/llm/usecases/generateSummary.js`
+- `src/core/llm/usecases/generateMemoryDraft.js`
+- `ChatView.vue` and `PresetView.vue` now import these entrypoints instead of calling `generationService.js` actions directly
+
+### Phase 3: Use-Case Boundary Extraction (Partial)
+- [x] Moved the chat execution/orchestration shell from `ChatView.vue` into `src/core/llm/usecases/generateChat.js`
+- [x] Kept Vue-owned state and UI side effects injected from the view instead of coupling the use case directly to Vue refs
+- [x] Preserved existing `generationService.js` prompt/request engine as the inner compatibility layer
+- [x] Extracted deterministic chat prompt-preparation into `src/core/llm/usecases/chatPreparation.js`
+- [x] Updated `generationService.js` to consume that preparation helper instead of owning the full preparation path inline
+- [x] `npm run build` passes after extraction
+- [ ] Move late enrichment and final request assembly steps out of `generationService.js`
+- [ ] Reduce dependency surface passed from `ChatView.vue` into the chat use case
 
 ---
 

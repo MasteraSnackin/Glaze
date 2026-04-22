@@ -4,8 +4,8 @@
 
 ### Current Refactor Slice
 - Branch: `feat/refactor-phase1-event-hub`
-- Base: `fixes/urgent-bugfixes`
-- Status: Phase 1 skeleton started
+- Base: latest `dev` state plus refactor-only commits
+- Status: Phase 1 skeleton plus first listener migration slice
 - Testing: `npm run build` passed
 
 ### Before Refactor
@@ -48,24 +48,80 @@ Files added:
 Current behavior:
 - Internal canonical event names now exist for a small safe subset of events.
 - `main.js` initializes a bridge from internal app events to the existing legacy `window` events.
-- Existing listeners still work unchanged because the bridge republishes the legacy browser events.
+- Existing legacy listeners still work because the bridge republishes the legacy browser events.
 - A few existing emitters now publish canonical app events first:
   - generation started/ended
   - chat updated
   - sync data refreshed
   - API context settings changed
   - open API sheet
+- A first listener subset now subscribes through `subscribeLegacyCompatibleEvent(...)` instead of raw `window.addEventListener(...)` for those same canonical events.
+
+Current listener subset migrated:
+- `App.vue`
+  - open API sheet
+  - sync data refreshed
+- `ChatView.vue`
+  - generation ended
+  - API context settings changed
+- `DialogList.vue`
+  - sync data refreshed
+  - chat updated
+  - generation started
+  - generation ended
+- `LorebookSheet.vue`
+  - sync data refreshed
+- `CharacterList.vue`
+  - sync data refreshed
 
 What has **not** changed yet:
 - Most listeners still subscribe to `window` events.
 - `ChatView.vue` is still a large orchestration surface.
 - `generationService.js` is still a large orchestration surface.
-- No request-ownership model or use-case boundary was introduced in this slice.
+- Full request ownership separation is not finished yet.
+
+### Phase 2 Request Ownership Safety Slice
+
+Current behavior:
+- Chat-generation state now carries explicit ownership metadata:
+  - `ownerKey`
+  - `requestToken`
+  - `sessionId`
+  - `type`
+- Stream updates, completion handling, error handling, and abort cleanup now validate that they still belong to the active chat request before mutating state.
+- This makes late completions less dangerous when request lifecycle overlaps occur around abort/regenerate/session changes.
+- Impersonation keeps a separate ownership scope instead of sharing the normal chat-generation identity.
+
+What this does **not** do yet:
+- It does not move orchestration out of `ChatView.vue`.
+- It does not yet introduce automated overlap tests for abort/regenerate races.
+- It does not yet unify all generation-like flows under one final lifecycle contract.
+
+### Initial Use-Case Entrypoint Layer
+
+Files added:
+- `src/core/llm/usecases/generateChat.js`
+- `src/core/llm/usecases/calculateContext.js`
+- `src/core/llm/usecases/generateSummary.js`
+- `src/core/llm/usecases/generateMemoryDraft.js`
+
+Current behavior:
+- UI callers now depend on official use-case entrypoints instead of importing generation actions from `generationService.js` directly.
+- `generateChat.js` is no longer only a passthrough wrapper: it now owns the chat execution shell after session context is resolved.
+- Deterministic chat prompt-preparation now lives in `src/core/llm/usecases/chatPreparation.js` instead of being fully inlined inside `generationService.js`.
+- Vue-owned state, UI callbacks, and persistence helpers are still injected from `ChatView.vue`, so behavior remains unchanged while the dependency boundary becomes real.
+- `generationService.js` still owns late enrichment and final request execution, and acts as the compatibility layer under that use case.
 
 Why this slice is safe:
 - It adds a new internal boundary without removing the legacy one.
 - Runtime behavior stays compatible because `window` remains the active compatibility surface.
+- Migrated listeners still observe legacy browser events from non-migrated emitters and ignore bridged duplicates from migrated emitters.
 - Later refactor slices can migrate listeners and side effects incrementally instead of forcing a one-shot rewrite.
+
+What has **not** changed yet:
+- `ChatView.vue` still prepares and injects a large dependency bundle into the chat use case.
+- Late enrichment and final request assembly still live inside `generationService.js`.
+- The next safe extraction step is to move those remaining deterministic stages under the use-case/pipeline layer without changing ordering.
 
 ## 1. Tokenizer
 

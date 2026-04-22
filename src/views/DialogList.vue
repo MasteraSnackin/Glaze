@@ -10,6 +10,8 @@ import { attachLongPress, attachHoverGlow } from '@/core/services/ui.js';
 import { getChatData, createNewSession, deleteSession, renameSession } from '@/utils/sessions.js';
 import { importSillyTavernChat, exportSillyTavernChat, exportGlazeChat, pickChatFile } from '@/core/services/chatImporter.js';
 import { allPersonas, loadPersonas } from '@/core/states/personaState.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
+import { subscribeLegacyCompatibleEvent } from '@/core/events/legacyCompatibleSubscription.js';
 
 const props = defineProps({
   activeCategory: { type: String, default: 'all' },
@@ -23,6 +25,10 @@ const characters = ref([]);
 const searchQuery = ref('');
 const unread = ref({});
 const generating = ref({}); // { charName: boolean }
+let unsubscribeSyncDataRefreshed = null;
+let unsubscribeChatUpdated = null;
+let unsubscribeGenerationStarted = null;
+let unsubscribeGenerationEnded = null;
 
 const loadData = async () => {
     try {
@@ -492,20 +498,40 @@ defineExpose({ openNewChatPicker });
 
 onMounted(() => {
     loadData();
-    window.addEventListener('sync-data-refreshed', loadData);
-    window.addEventListener('chat-updated', loadData);
+    unsubscribeSyncDataRefreshed = subscribeLegacyCompatibleEvent({
+        appEventName: APP_EVENTS.domain.sync.dataRefreshed,
+        legacyEventName: 'sync-data-refreshed',
+        listener: loadData
+    });
+    unsubscribeChatUpdated = subscribeLegacyCompatibleEvent({
+        appEventName: APP_EVENTS.domain.chat.updated,
+        legacyEventName: 'chat-updated',
+        listener: loadData
+    });
     window.addEventListener('character-updated', loadData);
-    window.addEventListener('chat-generation-started', onGenerationStarted);
-    window.addEventListener('chat-generation-ended', onGenerationEnded);
+    unsubscribeGenerationStarted = subscribeLegacyCompatibleEvent({
+        appEventName: APP_EVENTS.domain.generation.started,
+        legacyEventName: 'chat-generation-started',
+        listener: onGenerationStarted
+    });
+    unsubscribeGenerationEnded = subscribeLegacyCompatibleEvent({
+        appEventName: APP_EVENTS.domain.generation.ended,
+        legacyEventName: 'chat-generation-ended',
+        listener: onGenerationEnded
+    });
     window.addEventListener('header-search', (e) => searchQuery.value = e.detail);
 });
 
 onUnmounted(() => {
-    window.removeEventListener('sync-data-refreshed', loadData);
-    window.removeEventListener('chat-updated', loadData);
+    unsubscribeSyncDataRefreshed?.();
+    unsubscribeSyncDataRefreshed = null;
+    unsubscribeChatUpdated?.();
+    unsubscribeChatUpdated = null;
     window.removeEventListener('character-updated', loadData);
-    window.removeEventListener('chat-generation-started', onGenerationStarted);
-    window.removeEventListener('chat-generation-ended', onGenerationEnded);
+    unsubscribeGenerationStarted?.();
+    unsubscribeGenerationStarted = null;
+    unsubscribeGenerationEnded?.();
+    unsubscribeGenerationEnded = null;
     // Note: anonymous listener for header-search is fine as component is unmounted
 });
 </script>

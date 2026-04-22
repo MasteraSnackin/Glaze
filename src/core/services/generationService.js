@@ -16,8 +16,6 @@ import { getEmbeddings } from '@/core/services/embeddingService.js';
 import { getEmbeddingConfig, isEmbeddingConfigured } from '@/core/config/embeddingSettings.js';
 import { findTopK } from '@/utils/vectorMath.js';
 import { logger } from '../../utils/logger.js';
-import { publishAppEvent } from '@/core/events/eventHub.js';
-import { APP_EVENTS } from '@/core/events/eventNames.js';
 
 let lastPrompt = null;
 
@@ -310,7 +308,7 @@ export async function generateChatResponse({
                 buttonText: t('btn_configure') || "Configure",
                 onButtonClick: () => {
                     closeBottomSheet();
-                    publishAppEvent(APP_EVENTS.nav.openApiSheet);
+                    window.dispatchEvent(new CustomEvent('open-api-sheet'));
                 }
             }
         });

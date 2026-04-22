@@ -104,8 +104,6 @@ import { fullSync } from '@/core/services/syncService.js';
 import { useMemoryBooks } from '@/composables/chat/useMemoryBooks.js';
 import * as memoryBooksService from '@/core/services/memoryBooksService.js';
 import * as contextService from '@/core/services/contextService.js';
-import { publishAppEvent } from '@/core/events/eventHub.js';
-import { APP_EVENTS } from '@/core/events/eventNames.js';
 
 // Import additional memory service functions needed locally
 const {
@@ -3165,7 +3163,7 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
     async function continueGeneration({ sessionId, summary, anContent }) {
 
     // Notify application about generation start
-    publishAppEvent(APP_EVENTS.domain.generation.started, { charId: char.id, sessionId });
+    window.dispatchEvent(new CustomEvent('chat-generation-started', { detail: { charId: char.id, sessionId: sessionId } }));
 
     isGenerating.value = true;
     let msgIndex = existingMsgIndex;
@@ -4047,7 +4045,7 @@ async function startImpersonation(guidanceText = null) {
         .filter(m => !m.isTyping && !m.isHidden)
         .map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text, chatId: m.originalIndex }));
 
-    publishAppEvent(APP_EVENTS.domain.generation.started, { charId, sessionId: activeChatChar.sessionId });
+    window.dispatchEvent(new CustomEvent('chat-generation-started', { detail: { charId, sessionId: activeChatChar.sessionId } }));
 
     generateChatResponse({
         text: promptText,
@@ -4063,14 +4061,14 @@ async function startImpersonation(guidanceText = null) {
         isImpersonating.value = false;
         isGenerating.value = false;
         clearGenerationState(charId);
-        publishAppEvent(APP_EVENTS.domain.generation.ended, { charId });
+        window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: charId } }));
             },
             onError: (err) => {
         console.error(err);
         isImpersonating.value = false;
         isGenerating.value = false;
         clearGenerationState(charId);
-        publishAppEvent(APP_EVENTS.domain.generation.ended, { charId });
+        window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: charId } }));
             }
         }
     });

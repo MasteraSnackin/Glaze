@@ -9,7 +9,7 @@ import { replaceMacros } from '@/utils/macroEngine.js';
 import { normalizeBlockId } from '@/utils/presetBlockIds.js';
 import { getEffectivePersona } from '@/core/states/personaState.js';
 import { convertSTPreset, convertLatexPreset, exportSTPreset, detectPresetFormat, finalizeImportedPreset, mandatoryBlocks } from '@/core/services/presetImportService.js';
-import { generateSummary } from '@/core/services/generationService.js';
+import { generateSummary } from '@/core/llm/usecases/generateSummary.js';
 import { presetState, initPresetState, setPresetConnection, getEffectivePresetId, DEFAULT_PRESETS, flushPresetSave } from '@/core/states/presetState.js';
 import { Browser } from '@capacitor/browser';
 import { Toast } from '@capacitor/toast';
