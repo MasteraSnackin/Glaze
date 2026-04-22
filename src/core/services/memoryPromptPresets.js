@@ -129,3 +129,32 @@ export function getMemoryPromptLabelByKey(settings = {}, promptPreset = 'detaile
     const options = getMemoryPromptOptions(settings);
     return options.find(item => item.key === promptPreset)?.label || builtInMemoryPrompts[0].label;
 }
+
+export function getNormalizedMemoryGenerationState(settings = {}, overrides = {}) {
+    const source = settings.generationSource === 'custom' ? 'custom' : 'llm';
+    return {
+        source,
+        model: settings.generationModel || '',
+        endpoint: settings.generationEndpoint || '',
+        apiKey: settings.generationApiKey || '',
+        temperature: settings.generationTemperature,
+        maxTokens: Number.isFinite(Number(settings.generationMaxTokens)) && Number(settings.generationMaxTokens) > 0
+            ? Math.round(Number(settings.generationMaxTokens))
+            : null,
+        autoCreateEnabled: settings.autoCreateEnabled !== false,
+        autoGenerateEnabled: settings.autoGenerateEnabled === true,
+        promptPreset: getMemoryPromptOptions(settings).some(p => p.key === settings.promptPreset) ? settings.promptPreset : 'detailed_beats',
+        autoCreateInterval: Number.isFinite(Number(settings.autoCreateInterval)) && Number(settings.autoCreateInterval) > 0
+            ? Number(settings.autoCreateInterval)
+            : 12,
+        batchSize: Number.isFinite(Number(settings.batchSize)) && Number(settings.batchSize) > 0
+            ? Number(settings.batchSize)
+            : 1,
+        useDelayedAutomation: settings.useDelayedAutomation !== false,
+        maxInjectedEntries: Number.isFinite(Number(settings.maxInjectedEntries)) && Number(settings.maxInjectedEntries) > 0
+            ? Number(settings.maxInjectedEntries)
+            : 3,
+        injectionTarget: settings.injectionTarget === 'summary_macro' ? 'summary_macro' : 'summary_block',
+        ...overrides
+    };
+}
