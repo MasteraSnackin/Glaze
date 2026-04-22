@@ -179,6 +179,7 @@ Tracked in `REFACTOR_PLAN.md` and `REFACTOR_PHASE_0_CHECKLIST.md`:
 - [x] Extracted prepared prompt execution preflight (API config guard, worker execution, abort/vars-save handling) into `src/core/llm/usecases/chatPreparedPromptExecution.js`
 - [x] Extracted context-calculation orchestration (worker payload, memory/vector breakdown merge, fallback handling) into `src/core/llm/usecases/chatContextCalculation.js`
 - [x] Extracted summary and memory-draft request paths into `src/core/llm/usecases/summaryRequest.js` and `src/core/llm/usecases/memoryDraftRequest.js`
+- [x] Extracted memory-book retrieval/index maintenance into `src/core/llm/usecases/memoryBookContext.js` and switched `memoryBooksService.js` to use it directly
 - [x] `npm run build` passes after extraction
 - [ ] Continue shrinking the remaining orchestration still owned by `generationService.js`
 - [ ] Reduce dependency surface passed from `ChatView.vue` into the chat use case

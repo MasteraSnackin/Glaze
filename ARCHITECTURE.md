@@ -111,6 +111,7 @@ Current behavior:
 - Deterministic chat prompt-preparation now lives in `src/core/llm/usecases/chatPreparation.js` instead of being fully inlined inside `generationService.js`.
 - Vue-owned state, UI callbacks, and persistence helpers are still injected from `ChatView.vue`, so behavior remains unchanged while the dependency boundary becomes real.
 - `generationService.js` still owns late enrichment and final request execution, and acts as the compatibility layer under that use case.
+- Memory-book retrieval/index maintenance now lives in `src/core/llm/usecases/memoryBookContext.js` and is consumed both by chat/context flows and by `memoryBooksService.js`.
 
 Why this slice is safe:
 - It adds a new internal boundary without removing the legacy one.
@@ -121,6 +122,7 @@ Why this slice is safe:
 What has **not** changed yet:
 - `ChatView.vue` still prepares and injects a large dependency bundle into the chat use case.
 - Late enrichment and final request assembly still live inside `generationService.js`.
+- Memory-book retrieval heuristics are now extracted out of `generationService.js`, but they are still deterministic helper logic rather than a final dedicated domain service boundary.
 - The next safe extraction step is to move those remaining deterministic stages under the use-case/pipeline layer without changing ordering.
 
 ## 1. Tokenizer

@@ -15,6 +15,10 @@
 
 import { generateMemoryDraft } from './generationService.js';
 import { db } from '@/utils/db.js';
+import {
+    indexMemoryEntryForSession,
+    deleteMemoryEntryIndex
+} from '@/core/llm/usecases/memoryBookContext.js';
 
 // ============================================================================
 // INITIALIZATION & STATE CREATION
@@ -452,18 +456,12 @@ export function setMemoryVectorSearchOnEntries(memoryBook, enabled) {
 
 export async function indexMemoryEntryIfNeeded(entry, charId, sessionId) {
     if (!entry?.vectorSearch) return;
-    const generationService = await import('./generationService.js');
-    if (typeof generationService.indexMemoryEntryForSession === 'function') {
-        await generationService.indexMemoryEntryForSession(entry, charId, sessionId);
-    }
+    await indexMemoryEntryForSession(entry, charId, sessionId);
 }
 
 export async function deleteMemoryEntryIndexIfPresent(entryId) {
     if (!entryId) return;
-    const generationService = await import('./generationService.js');
-    if (typeof generationService.deleteMemoryEntryIndex === 'function') {
-        await generationService.deleteMemoryEntryIndex(entryId);
-    }
+    await deleteMemoryEntryIndex(entryId);
 }
 
 export async function reindexMemoryEntry(entry, charId, sessionId) {
