@@ -1,4 +1,4 @@
-﻿<script>
+<script>
 // --- Module Level State (Persists across component mounts) ---
 let activeChatChar = null;
 let _cleanupScroll = null;
@@ -94,6 +94,7 @@ import { useMemoryBooks } from '@/composables/chat/useMemoryBooks.js';
 import { useMemoryAutomation } from '@/composables/chat/useMemoryAutomation.js';
 import { useChatMessageDisplay, restoreVisibleSwipeState } from '@/composables/chat/useChatMessageDisplay.js';
 import { useContextBreakdown } from '@/composables/chat/useContextBreakdown.js';
+import { useMessageSelection } from '@/composables/chat/useMessageSelection.js';
 import { normalizeImgGenHtmlForEditing, prepareEditText, restoreEditText } from '@/core/utils/messageEditHelpers.js';
 
 function genMsgId() {
@@ -397,20 +398,13 @@ const searchResults = ref([]); // array of original indices
 const currentSearchIndex = ref(-1);
 
 // --- Selection State ---
-const selectedMessages = ref(new Set());
-const isSelectionMode = computed(() => selectedMessages.value.size > 0);
-
-const selectionIncludesLast = computed(() => {
-    if (selectedMessages.value.size === 0 || !currentMessages.value.length) return false;
-    // All selected messages must be consecutive from the end
-    const msgs = currentMessages.value;
-    for (let i = msgs.length - 1; i >= msgs.length - selectedMessages.value.size; i--) {
-        if (i < 0 || !msgs[i] || !selectedMessages.value.has(msgs[i].id)) return false;
-    }
-    return true;
-});
-
-
+const {
+    selectedMessages,
+    isSelectionMode,
+    selectionIncludesLast,
+    toggleSelection,
+    clearSelection
+} = useMessageSelection(currentMessages);
 
 watch([isSearchMode, isSelectionMode], () => {
     ignoreScrollAdjustment = true;
@@ -420,17 +414,6 @@ watch([isSearchMode, isSelectionMode], () => {
     }, 400); // Wait for transition animations
 });
 
-function toggleSelection(msgId) {
-    if (selectedMessages.value.has(msgId)) {
-        selectedMessages.value.delete(msgId);
-    } else {
-        selectedMessages.value.add(msgId);
-    }
-}
-
-function clearSelection() {
-    selectedMessages.value = new Set();
-}
 
 function openMemoryPromptPreview(item, options = {}) {
     if (!item) return;
