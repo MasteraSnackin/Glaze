@@ -329,7 +329,9 @@ const {
     parseMemoryDraftResponse,
     runBatchDraftGeneration,
     runBatchDraftGenerationFromIds,
-    generateSingleDraft
+    generateSingleDraft,
+    handleMemoryBatchGenerate: handleMemoryBatchGenerate_impl,
+    handleMemoryQuickModelChange: handleMemoryQuickModelChange_impl
 } = useMemoryAutomation({
     activeChatChar,
     currentMessages,
@@ -1044,29 +1046,7 @@ async function handleMemoryScanChat() {
 }
 
 async function handleMemoryBatchGenerate() {
-    if (!activeChatChar || !currentMemoryBookData.value) return;
-
-    const chatData = await getChatData(activeChatChar.id);
-    const sessionId = activeChatChar.sessionId || chatData.currentId;
-    const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
-
-    // Get drafts that need generation (no content yet)
-    const draftsNeedingGeneration = (Array.isArray(memoryBook.pendingDrafts) ? memoryBook.pendingDrafts : [])
-        .filter(d => !d.content && d.status === 'pending_generation' && !memoryDraftState.value?.activeDrafts?.[d.id]);
-    const maxBatchSize = Math.max(1, Math.min(50, Number(memoryBook.settings?.batchSize) || 1));
-
-    if (!draftsNeedingGeneration.length) {
-        showToast(memoryDraftState.value?.activeCount ? 'All remaining drafts are already generating' : 'No drafts need generation');
-        return;
-    }
-
-    await runBatchDraftGenerationFromIds(
-        chatData,
-        sessionId,
-        memoryBook,
-        draftsNeedingGeneration,
-        Math.min(draftsNeedingGeneration.length, maxBatchSize)
-    );
+    await handleMemoryBatchGenerate_impl();
 }
 
 async function handleMemoryGenerateSingleDraft(draftId) {
@@ -1106,22 +1086,7 @@ function handleMemoryOpenSettings() {
 }
 
 function handleMemoryQuickModelChange(model) {
-    if (!activeChatChar || !currentMemoryBookData.value) return;
-    const settings = currentMemoryBookData.value.settings || {};
-    settings.generationModel = model || '';
-    settings.generationUseCurrentModelOverride = false;
-    currentMemoryBookData.value.updatedAt = Date.now();
-    getChatData(activeChatChar.id).then(chatData => {
-        const sessionId = activeChatChar.sessionId || chatData.currentId;
-        const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
-        if (memoryBook.settings) {
-            memoryBook.settings.generationModel = model || '';
-            memoryBook.settings.generationUseCurrentModelOverride = false;
-        }
-        memoryBook.updatedAt = Date.now();
-        db.saveChat(activeChatChar.id, chatData);
-    });
-    showToast('Memory generation model updated');
+    handleMemoryQuickModelChange_impl(model);
 }
 
 async function deleteSelectedMessages() {

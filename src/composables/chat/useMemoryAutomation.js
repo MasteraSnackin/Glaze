@@ -641,6 +641,50 @@ export function useMemoryAutomation({
         }
     }
 
+    async function handleMemoryBatchGenerate() {
+        if (!activeChatChar.value || !currentMemoryBookData) return;
+
+        const chatData = await getChatData(activeChatChar.value.id);
+        const sessionId = activeChatChar.value.sessionId || chatData.currentId;
+        const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
+
+        const draftsNeedingGeneration = (Array.isArray(memoryBook.pendingDrafts) ? memoryBook.pendingDrafts : [])
+            .filter(d => !d.content && d.status === 'pending_generation' && !memoryDraftState.value?.activeDrafts?.[d.id]);
+        const maxBatchSize = Math.max(1, Math.min(50, Number(memoryBook.settings?.batchSize) || 1));
+
+        if (!draftsNeedingGeneration.length) {
+            showToast(memoryDraftState.value?.activeCount ? 'All remaining drafts are already generating' : 'No drafts need generation');
+            return;
+        }
+
+        await runBatchDraftGenerationFromIds(
+            chatData,
+            sessionId,
+            memoryBook,
+            draftsNeedingGeneration,
+            Math.min(draftsNeedingGeneration.length, maxBatchSize)
+        );
+    }
+
+    function handleMemoryQuickModelChange(model) {
+        if (!activeChatChar.value || !currentMemoryBookData) return;
+        const settings = currentMemoryBookData.settings || {};
+        settings.generationModel = model || '';
+        settings.generationUseCurrentModelOverride = false;
+        currentMemoryBookData.updatedAt = Date.now();
+        getChatData(activeChatChar.value.id).then(chatData => {
+            const sessionId = activeChatChar.value.sessionId || chatData.currentId;
+            const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
+            if (memoryBook.settings) {
+                memoryBook.settings.generationModel = model || '';
+                memoryBook.settings.generationUseCurrentModelOverride = false;
+            }
+            memoryBook.updatedAt = Date.now();
+            db.saveChat(activeChatChar.value.id, chatData);
+        });
+        showToast('Memory generation model updated');
+    }
+
     return {
         createPendingMemoryDraft,
         generateMemoryDraftForMessages,
@@ -652,6 +696,8 @@ export function useMemoryAutomation({
         parseMemoryDraftResponse,
         runBatchDraftGeneration,
         runBatchDraftGenerationFromIds,
-        generateSingleDraft
+        generateSingleDraft,
+        handleMemoryBatchGenerate,
+        handleMemoryQuickModelChange
     };
 }
