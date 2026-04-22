@@ -912,7 +912,19 @@
     "desc_image_gen_enabled": "Генерировать изображения из тегов [IMG:GEN]",
     "label_imagegen_endpoint": "Эндпоинт генерации изображений",
     "label_imagegen_key": "API ключ",
-    "section_sync_settings": "Настройки синхронизации",
+    "section_memory_books_provider": "Генерация Memory Books",
+    "desc_use_llm_api_memory": "Использовать тот же endpoint что и LLM для генерации памяти",
+    "label_memory_endpoint": "Endpoint генерации памяти",
+    "label_memory_model": "Модель",
+    "label_memory_key": "API ключ",
+    "label_memory_fetch_models": "Загрузить модели",
+    "btn_fetch_models": "Загрузить модели",
+    "btn_fetching": "Загрузка...",
+    "msg_select_model": "Выберите модель",
+    "msg_no_models_found": "Модели не найдены",
+    "msg_endpoint_required": "Требуется endpoint",
+    "label_sync_settings": "Настройки синхронизации",
     "label_sync_include_keys": "Включить API ключи в синхронизацию",
-    "desc_sync_include_keys": "Отправлять ключи провайдеров в облачный бэкап"
+    "desc_sync_include_keys": "Если включено, API ключи и URL endpoints будут включены в облачную синхронизацию",
+    "msg_import_chat_unsupported_format": "Формат TXT не поддерживается. Используйте файлы экспорта чатов JSON или JSONL."
 }

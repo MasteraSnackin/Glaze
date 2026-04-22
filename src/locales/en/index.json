@@ -906,7 +906,19 @@
     "desc_image_gen_enabled": "Generate images from [IMG:GEN] tags",
     "label_imagegen_endpoint": "Image Gen Endpoint",
     "label_imagegen_key": "API Key",
-    "section_sync_settings": "Sync Settings",
+    "section_memory_books_provider": "Memory Books Generation",
+    "desc_use_llm_api_memory": "Use the same endpoint as LLM for memory book generation",
+    "label_memory_endpoint": "Memory Gen Endpoint",
+    "label_memory_model": "Model",
+    "label_memory_key": "API Key",
+    "label_memory_fetch_models": "Fetch Models",
+    "btn_fetch_models": "Fetch Models",
+    "btn_fetching": "Fetching...",
+    "msg_select_model": "Select a model",
+    "msg_no_models_found": "No models found",
+    "msg_endpoint_required": "Endpoint is required",
+    "label_sync_settings": "Sync Settings",
     "label_sync_include_keys": "Include API Keys in Sync",
-    "desc_sync_include_keys": "Send provider API keys to cloud backup"
+    "desc_sync_include_keys": "When enabled, API keys and endpoint URLs will be included in cloud sync",
+    "msg_import_chat_unsupported_format": "TXT format is not supported. Please use JSON or JSONL chat export files."
 }

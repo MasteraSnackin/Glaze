@@ -16,7 +16,7 @@ import { normalizeEndpoint, fetchRemoteModels, getApiPresets, saveApiPresets, ge
 import { getEmbeddingConfig, saveEmbeddingSetting, isEmbeddingConfigured } from '@/core/config/embeddingSettings.js';
 import { testEmbeddingConnection } from '@/core/services/embeddingService.js';
 import { getImageGenSettings, saveImageGenSettings } from '@/core/services/imageGenService.js';
-import { getProviderProfiles, getActiveLLMProfile, setActiveLLMProfile, getServiceEffectiveProfile, setServiceProfile, isServiceUsingLLMProfile, SERVICE_NAMES } from '@/core/config/ProviderProfiles.js';
+import { getProviderProfiles, getActiveLLMProfile, setActiveLLMProfile, getServiceEffectiveProfile, getServiceProfileId, setServiceProfile, isServiceUsingLLMProfile, saveProviderProfile, createProviderProfile, SERVICE_NAMES } from '@/core/config/ProviderProfiles.js';
 import { updateLanguage, translations } from '@/utils/i18n.js';
 import { initRipple } from '@/core/services/ui.js';
 import { currentLang } from '@/core/config/APPSettings.js';
@@ -36,7 +36,8 @@ const headerState = reactive({
 const TABS = [
     { id: 'llm', label: 'LLM' },
     { id: 'embedding', label: 'Embeddings' },
-    { id: 'imagegen', label: 'Image Gen' }
+    { id: 'imagegen', label: 'Image Gen' },
+    { id: 'memory', label: 'Memory' }
 ];
 const activeTab = ref('llm');
 
@@ -100,6 +101,110 @@ const imageGenSettings = reactive({
     model: '',
     enabled: false
 });
+
+// --- Memory Books Provider Settings ---
+const memoryProviderSettings = reactive({
+    useSame: true,
+    endpoint: '',
+    key: '',
+    model: '',
+    temperature: null,
+    maxTokens: null
+});
+
+const memoryAvailableModels = ref([]);
+const memoryLoadingModels = ref(false);
+const memoryModelError = ref('');
+
+function loadMemoryProviderSettings() {
+    const isSame = isServiceUsingLLMProfile(SERVICE_NAMES.MEMORY_BOOKS);
+    const profile = isSame ? null : getServiceEffectiveProfile(SERVICE_NAMES.MEMORY_BOOKS);
+    memoryProviderSettings.useSame = isSame;
+    memoryProviderSettings.endpoint = isSame ? '' : (profile?.endpoint || '');
+    memoryProviderSettings.key = isSame ? '' : (profile?.apiKey || '');
+    memoryProviderSettings.model = isSame ? '' : (profile?.model || '');
+    memoryProviderSettings.temperature = null;
+    memoryProviderSettings.maxTokens = null;
+    memoryAvailableModels.value = [];
+    memoryModelError.value = '';
+}
+
+async function fetchMemoryModels() {
+    if (!memoryProviderSettings.endpoint) {
+        memoryModelError.value = t('msg_endpoint_required') || 'Endpoint is required';
+        return;
+    }
+    memoryLoadingModels.value = true;
+    memoryModelError.value = '';
+    try {
+        const endpoint = normalizeEndpoint(memoryProviderSettings.endpoint);
+        const models = await fetchRemoteModels(endpoint, memoryProviderSettings.key);
+        memoryAvailableModels.value = models;
+    } catch (e) {
+        memoryModelError.value = e.message || 'Failed to fetch models';
+        memoryAvailableModels.value = [];
+    } finally {
+        memoryLoadingModels.value = false;
+    }
+}
+
+function openMemoryModelSelector() {
+    if (!memoryAvailableModels.value.length) {
+        showBottomSheet({
+            title: t('label_memory_model') || 'Model',
+            items: [{ label: t('msg_no_models_found') || 'No models found. Enter endpoint and key first.', onClick: closeBottomSheet }]
+        });
+        return;
+    }
+    const items = memoryAvailableModels.value.map(m => ({
+        label: m,
+        icon: memoryProviderSettings.model === m ? '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>' : null,
+        onClick: () => {
+            memoryProviderSettings.model = m;
+            onMemoryProviderInput('model', m);
+            closeBottomSheet();
+        }
+    }));
+    showBottomSheet({ title: t('label_memory_model') || 'Model', items });
+}
+
+function onMemoryProviderInput(key, value) {
+    if (key === 'useSame') {
+        selectProfileForService(SERVICE_NAMES.MEMORY_BOOKS, value ? 'llm' : 'custom');
+        loadMemoryProviderSettings();
+        return;
+    }
+    if (key === 'endpoint' || key === 'key') {
+        memoryProviderSettings[key] = value;
+        memoryAvailableModels.value = [];
+        memoryModelError.value = '';
+        if (!memoryProviderSettings.useSame) {
+            const currentProfile = getServiceEffectiveProfile(SERVICE_NAMES.MEMORY_BOOKS);
+            const profileId = getServiceProfileId(SERVICE_NAMES.MEMORY_BOOKS);
+            if (profileId && profileId !== 'llm') {
+                saveProviderProfile({ id: profileId, [key === 'key' ? 'apiKey' : key]: value });
+            }
+        }
+        return;
+    }
+    if (key === 'model') {
+        memoryProviderSettings.model = value;
+    }
+    if (!memoryProviderSettings.useSame) {
+        const currentProfile = getServiceEffectiveProfile(SERVICE_NAMES.MEMORY_BOOKS);
+        const profileId = getServiceProfileId(SERVICE_NAMES.MEMORY_BOOKS);
+        if (profileId && profileId !== 'llm') {
+            saveProviderProfile({ id: profileId, [key === 'key' ? 'apiKey' : key]: value });
+        } else {
+            const newProfile = createProviderProfile('Memory Books Provider', {
+                endpoint: memoryProviderSettings.endpoint,
+                apiKey: memoryProviderSettings.key,
+                model: memoryProviderSettings.model
+            });
+            selectProfileForService(SERVICE_NAMES.MEMORY_BOOKS, newProfile.id);
+        }
+    }
+}
 
 function loadImageGenSettings() {
     const config = getImageGenSettings();
@@ -222,6 +327,7 @@ function loadApiSettings() {
     apiSettings.reasoningEffort = runtime.reasoningEffort;
     loadEmbeddingSettings();
     loadImageGenSettings();
+    loadMemoryProviderSettings();
 }
 
 function saveApiSetting(key, value) {
@@ -793,6 +899,45 @@ onBeforeUnmount(() => {
                     </template>
                 </div>
                 </template>
+
+                <!-- Memory Books Provider Tab -->
+                <template v-if="activeTab === 'memory'">
+                <div class="menu-group">
+                    <div class="section-header">{{ t('section_memory_books_provider') || 'Memory Books Generation' }} <HelpTip term="memory-books"/></div>
+                    <div class="settings-item-checkbox">
+                        <div class="settings-text-col">
+                            <label>{{ t('label_use_llm_api') || 'Use LLM API' }}</label>
+                            <div class="settings-desc">{{ t('desc_use_llm_api_memory') || 'Use the same endpoint as LLM for memory book generation' }}</div>
+                        </div>
+                        <input type="checkbox" v-model="memoryProviderSettings.useSame" @change="onMemoryProviderInput('useSame', $event.target.checked)" class="vk-switch">
+                    </div>
+                    <template v-if="!memoryProviderSettings.useSame">
+                        <div class="settings-item">
+                            <label>{{ t('label_memory_endpoint') || 'Memory Gen Endpoint' }}</label>
+                            <input type="text" v-model="memoryProviderSettings.endpoint" @input="onMemoryProviderInput('endpoint', $event.target.value)" placeholder="http://127.0.0.1:5000/v1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+                        </div>
+                        <div class="settings-item">
+                            <label>{{ t('label_memory_key') || 'API Key' }}</label>
+                            <input type="password" v-model="memoryProviderSettings.key" @input="onMemoryProviderInput('key', $event.target.value)" placeholder="sk-..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+                        </div>
+                        <div class="settings-item" @click="fetchMemoryModels">
+                            <label>{{ t('label_memory_fetch_models') || 'Fetch Models' }}</label>
+                            <div class="clickable-selector">
+                                <span>{{ memoryLoadingModels.value ? (t('btn_fetching') || 'Fetching...') : (t('btn_fetch_models') || 'Fetch Models') }}</span>
+                                <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                            </div>
+                        </div>
+                        <div class="settings-item" @click="openMemoryModelSelector">
+                            <label>{{ t('label_memory_model') || 'Model' }}</label>
+                            <div class="clickable-selector" :class="{ 'selector-error': memoryModelError }">
+                                <span>{{ memoryProviderSettings.model || t('msg_select_model') || 'Select a model' }}</span>
+                                <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                            </div>
+                            <div v-if="memoryModelError" class="settings-desc" style="color: var(--vk-red); margin-top:4px;">{{ memoryModelError }}</div>
+                        </div>
+                    </template>
+                </div>
+                </template>
         </div>
     </SheetView>
     </div>
@@ -899,5 +1044,9 @@ onBeforeUnmount(() => {
     height: 24px;
     fill: var(--text-gray);
     opacity: 0.5;
+}
+
+.selector-error {
+    border-color: var(--vk-red);
 }
 </style>
