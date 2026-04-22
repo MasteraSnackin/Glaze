@@ -3192,24 +3192,32 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
             },
             services: {
                 app: {
-                    publishAppEvent: (eventName, detail) => window.dispatchEvent(new CustomEvent(eventName, { detail })),
-                    APP_EVENTS: {
-                        domain: {
-                            generation: {
-                                started: 'chat-generation-started'
-                            }
-                        }
+                    notifyGenerationStarted: ({ charId, sessionId }) => {
+                        window.dispatchEvent(new CustomEvent('chat-generation-started', { detail: { charId, sessionId } }));
                     }
                 },
                 preparation: {
-                    buildGenerationAuthorsNote,
-                    getEffectivePreset,
-                    ensureGenerationPlaceholderMessage,
-                    createBaseMessageMeta,
-                    genMsgId,
-                    getChatData,
-                    db,
-                    scrollToBottom,
+                    buildAuthorsNote: ({ charId, sessionId, anContent }) => buildGenerationAuthorsNote({
+                        getEffectivePreset,
+                        charId,
+                        sessionId,
+                        anContent
+                    }),
+                    ensurePlaceholderMessage: ({ msgIndex, text, guidanceText, guidanceType, charId, sessionId }) => ensureGenerationPlaceholderMessage({
+                        msgIndex,
+                        text,
+                        guidanceText,
+                        guidanceType,
+                        currentMessages,
+                        createBaseMessageMeta,
+                        genMsgId,
+                        charId,
+                        sessionId,
+                        getChatData,
+                        db,
+                        scrollToBottom
+                    }),
+                    genMessageId: genMsgId,
                     applyGenerationGuidanceState,
                     createPromptMetadataSnapshots,
                     buildGenerationHistory,
@@ -3228,7 +3236,11 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
                     clearGenerationState,
                     clearTypingStateForMessage,
                     handleGenerationPromptReady,
-                    handleGenerationComplete
+                    handleGenerationComplete,
+                    persistence: {
+                        getChatData,
+                        db
+                    }
                 },
                 effects: {
                     smartScroll,

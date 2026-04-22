@@ -48,18 +48,12 @@ export async function executeChatGenerationUseCase({
         postprocess
     } = services;
     const {
-        publishAppEvent,
-        APP_EVENTS
+        notifyGenerationStarted
     } = app;
     const {
-        buildGenerationAuthorsNote,
-        getEffectivePreset,
-        ensureGenerationPlaceholderMessage,
-        createBaseMessageMeta,
-        genMsgId,
-        getChatData,
-        db,
-        scrollToBottom,
+        buildAuthorsNote,
+        ensurePlaceholderMessage,
+        genMessageId,
         applyGenerationGuidanceState,
         createPromptMetadataSnapshots,
         buildGenerationHistory,
@@ -78,8 +72,13 @@ export async function executeChatGenerationUseCase({
         clearGenerationState,
         clearTypingStateForMessage,
         handleGenerationPromptReady,
-        handleGenerationComplete
+        handleGenerationComplete,
+        persistence
     } = lifecycle;
+    const {
+        getChatData,
+        db
+    } = persistence;
     const {
         smartScroll,
         formatError,
@@ -98,30 +97,19 @@ export async function executeChatGenerationUseCase({
         triggerAutoSyncCheck
     } = postprocess;
 
-    publishAppEvent(APP_EVENTS.domain.generation.started, { charId: char.id, sessionId });
+    notifyGenerationStarted({ charId: char.id, sessionId });
 
     isGenerating.value = true;
     let msgIndex = existingMsgIndex;
-    const authorsNote = buildGenerationAuthorsNote({
-        getEffectivePreset,
-        charId: char.id,
-        sessionId,
-        anContent
-    });
+    const authorsNote = buildAuthorsNote({ charId: char.id, sessionId, anContent });
 
-    msgIndex = await ensureGenerationPlaceholderMessage({
+    msgIndex = await ensurePlaceholderMessage({
         msgIndex,
         text,
         guidanceText,
         guidanceType,
-        currentMessages,
-        createBaseMessageMeta,
-        genMsgId,
         charId: char.id,
-        sessionId,
-        getChatData,
-        db,
-        scrollToBottom
+        sessionId
     });
 
     applyGenerationGuidanceState({
@@ -131,7 +119,7 @@ export async function executeChatGenerationUseCase({
         guidanceType
     });
 
-    const msgId = currentMessages.value[msgIndex]?.id || genMsgId();
+    const msgId = currentMessages.value[msgIndex]?.id || genMessageId();
     const { snapshotPromptMeta, restorePromptMetaOnMessages } = createPromptMetadataSnapshots();
 
     markGenerationPersisted(char.id, sessionId);
@@ -193,13 +181,11 @@ export async function executeChatGenerationUseCase({
             sessionId,
             msgId,
             genId,
-            requestToken,
             rawStreamText: request.rawStreamRef.value,
             activeChatChar,
             isGenerating,
             currentMessages,
             getGenerationState,
-            isGenerationStateCurrent,
             clearGenerationState,
             restoreState,
             clearBackgroundUpdateTimer,
@@ -246,7 +232,6 @@ export async function executeChatGenerationUseCase({
                     sessionId,
                     msgId,
                     genId,
-                    requestToken,
                     startTime,
                     controller,
                     guidanceText,
@@ -256,7 +241,6 @@ export async function executeChatGenerationUseCase({
                     currentMessages,
                     displayMessages,
                     getGenerationState,
-                    isGenerationStateCurrent,
                     clearGenerationState,
                     clearPersistedGeneration,
                     clearBackgroundUpdateTimer,

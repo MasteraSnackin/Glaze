@@ -56,6 +56,9 @@ Current slice deliverables:
 - [done] Extract shared chat prompt-preparation primitives into a dedicated helper module used by both service and use-case layers
 - [done] Switch `ChatView.vue` to execute chat generation through the official `generateChat` use-case boundary
 - [done] Narrow the initial `ChatView` to chat use-case contract by grouping injected services by responsibility
+- [done] Replace direct app-event naming in the chat use case with a narrower generation-start notification adapter
+- [done] Move chat persistence access behind `lifecycle.persistence` so `generateChat` no longer depends on loose `getChatData` / `db` injections
+- [done] Trim unused lifecycle callback arguments from the `generateChat` handoff so the boundary matches the actual handler contracts more closely
 - [not done] Continue moving the remaining prompt/request orchestration out of `generationService.js` into use-case/pipeline files
 
 This roadmap intentionally assumes the tokenizer and current context UI are already in place and are not being redesigned again unless a new decision is made explicitly.
