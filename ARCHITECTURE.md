@@ -617,6 +617,22 @@ These composables now cover placeholder setup, stream UI application, prompt met
 - Encryption key material: IndexedDB via `keyManager.js`
 - Device identity and sync metadata: local storage + IndexedDB manifest state
 
+**Synced Singleton Coverage:**
+- Characters, personas, chats: full IndexedDB stores
+- Lorebooks: single IndexedDB blob (`gz_lorebooks`)
+- API connection presets: single IndexedDB blob (`gz_api_connection_presets`)
+- Theme presets: single IndexedDB blob (`gz_theme_presets`)
+- Theme active preset: single IndexedDB blob (`gz_theme_active_preset`) via `theme_state` entity
+- App / API runtime settings: selected `localStorage` keys bundled under the `local_storage` entity
+  - Includes: prompt presets, active preset IDs, persona connections, regex scripts, language, theme/layout toggles, battery saver, API provider/endpoint/model, temperature, stream, reasoning settings, timeouts
+  - Also includes API key and model key (users should be aware credentials travel with this bundle)
+- Not synced: active generation state, temporary UI state, push-notification tokens, debug network traces, embedding vectors
+
+**Wipe Semantics:**
+- `wipeCloudData()` deletes every file found under `/Glaze` via the provider adapter (`listAllFiles` + `deleteFile`).
+- `resetSyncIdentityAfterWipe()` clears the local sync encryption key, manifest, deleted-entries registry, and device ID.
+- After a wipe the cloud is effectively empty; the next `push` creates a fresh manifest and repopulates `/Glaze`.
+
 ---
 
 ## Key Integration Points
