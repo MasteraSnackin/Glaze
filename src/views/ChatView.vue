@@ -57,7 +57,7 @@ import { formatDate, formatDateSeparator } from '@/utils/dateFormatter.js';
 import { currentLang, chatPaddingLR, setChatPaddingLR, shouldUseBatterySaverUI } from '@/core/config/APPSettings.js';
 import { translations } from '@/utils/i18n.js';
 import { calculateContext, generateMemoryDraft } from '@/core/services/generationService.js';
-import { executeChatGenerationUseCase } from '@/core/llm/usecases/generateChat.js';
+import { executeChatGenerationUseCase, createGenerationAppAdapters } from '@/core/llm/usecases/generateChat.js';
 import { executeRequest } from '@/core/services/llmApi.js';
 import { getApiConfig, getApiRuntimeStorage, getApiReasoningTags, fetchRemoteModels } from '@/core/config/APISettings.js';
 import { getActiveLLMProfile } from '@/core/config/ProviderProfiles.js';
@@ -112,6 +112,8 @@ const {
     setMemoryVectorSearchOnEntries,
     reindexAllMemoryEntries
 } = memoryBooksService;
+
+const generationAppAdapters = createGenerationAppAdapters();
 
 async function openMemoryEntryEditor(entryId) {
     if (!activeChatChar || !entryId) return;
@@ -3191,17 +3193,7 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
                 displayMessages
             },
             services: {
-                app: {
-                    notifyGenerationStarted: ({ charId, sessionId }) => {
-                        window.dispatchEvent(new CustomEvent('chat-generation-started', { detail: { charId, sessionId } }));
-                    },
-                    notifyGenerationEnded: ({ charId, sessionId }) => {
-                        window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId, sessionId } }));
-                    },
-                    notifyChatUpdated: () => {
-                        window.dispatchEvent(new CustomEvent('chat-updated'));
-                    }
-                },
+                app: generationAppAdapters,
                 preparation: {
                     buildAuthorsNote: ({ charId, sessionId, anContent }) => buildGenerationAuthorsNote({
                         getEffectivePreset,
@@ -3973,7 +3965,7 @@ async function startImpersonation(guidanceText = null) {
         .filter(m => !m.isTyping && !m.isHidden)
         .map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text, chatId: m.originalIndex }));
 
-    window.dispatchEvent(new CustomEvent('chat-generation-started', { detail: { charId, sessionId: activeChatChar.sessionId } }));
+    generationAppAdapters.notifyGenerationStarted({ charId, sessionId: activeChatChar.sessionId });
 
     generateChatResponse({
         text: promptText,
@@ -3989,14 +3981,14 @@ async function startImpersonation(guidanceText = null) {
         isImpersonating.value = false;
         isGenerating.value = false;
         clearGenerationState(charId);
-        window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: charId } }));
+        generationAppAdapters.notifyGenerationEnded({ charId: charId });
             },
             onError: (err) => {
         console.error(err);
         isImpersonating.value = false;
         isGenerating.value = false;
         clearGenerationState(charId);
-        window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: charId } }));
+        generationAppAdapters.notifyGenerationEnded({ charId: charId });
             }
         }
     });
@@ -4120,7 +4112,7 @@ async function deleteSession(sessionId, targetChar) {
         }
         
         // Notify other components
-        window.dispatchEvent(new CustomEvent('chat-updated'));
+        generationAppAdapters.notifyChatUpdated();
     }
 }
 

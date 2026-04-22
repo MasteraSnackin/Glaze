@@ -2,6 +2,8 @@ import {
     generateChatResponse
 } from '@/core/services/generationService.js';
 
+export { createGenerationAppAdapters } from '@/core/llm/usecases/chatGenerationAppAdapters.js';
+
 /**
  * Official chat-generation use-case entrypoint.
  *

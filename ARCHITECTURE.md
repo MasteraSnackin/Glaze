@@ -112,6 +112,7 @@ Current behavior:
 - Vue-owned state, UI callbacks, and persistence helpers are still injected from `ChatView.vue`, so behavior remains unchanged while the dependency boundary becomes real.
 - `generationService.js` still owns late enrichment and final request execution, and acts as the compatibility layer under that use case.
 - Memory-book retrieval/index maintenance now lives in `src/core/llm/usecases/memoryBookContext.js` and is consumed both by chat/context flows and by `memoryBooksService.js`.
+- `ChatView.vue` no longer dispatches raw `window` events for generation/chat lifecycle; it uses `createGenerationAppAdapters()` which publishes canonical app events through the event hub, with the bridge handling legacy compatibility.
 
 Why this slice is safe:
 - It adds a new internal boundary without removing the legacy one.
