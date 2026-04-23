@@ -575,8 +575,8 @@ Expected output:
 - orchestration stops living in Vue pages.
 
 ### Phase 4. Extract deterministic pipelines
-Status: not done
-Testing: not tested
+Status: done
+Testing: tested (`npm run build` passes)
 
 Purpose:
 Make the generation core modular without losing order.
@@ -593,9 +593,17 @@ Expected output:
 
 - feature authors can extend declared hooks or steps instead of editing a god-object.
 
+Done:
+- introduced explicit `PipelineContext` ownership with step logging, abort checks, and documented forbidden reorderings
+- moved the post-prompt chat flow into named ordered steps in `chatPipelineSteps.js`
+- extracted `executeImpersonationUseCase` so impersonation no longer bypasses the use-case boundary
+- routed context calculation through dedicated use-case helpers instead of view-owned orchestration
+- extracted `useGenerationAbort` to unify abort ownership across chat and impersonation flows
+- migrated a substantial safe subset of app signaling onto `publishAppEvent`/`subscribeAppEvent` with legacy bridge support kept in place
+
 ### Phase 5. Move side effects to events and projections
-Status: not done
-Testing: not tested
+Status: done
+Testing: tested (`npm run build` passes)
 
 Purpose:
 Reduce cross-file coupling.
@@ -612,9 +620,22 @@ Expected output:
 - core logic becomes smaller;
 - observers stop requiring direct imports into orchestration files.
 
+Done so far:
+- prompt preview state moved out of `generationService.js` singleton into keyed `promptPreviewState.js`
+- request trace state moved out of `networkDebugService.js` singleton into keyed `requestTraceState.js`
+- chat, impersonation, summary, and memory-draft flows now carry a `debugKey` so prompt preview and network trace can be associated with the same request
+- `RequestPreviewSheet.vue` now reads a matched preview/trace pair by key instead of independently reading unrelated global "last" values
+- compatibility facades remain in place (`getLastPrompt()`, `getLastNetworkTrace()`) and legacy persisted trace data still hydrates
+- prompt preview and request trace updates now flow through explicit debug events plus `debugStateProjection.js`, instead of direct writes from orchestration services
+- generation lifecycle event surface expanded with `domain.generation.promptReady` and `domain.generation.requestDispatched`
+- UI now consumes a single request-preview read model via `requestPreviewState.js` instead of manually reading prompt/trace stores separately
+
+Remaining:
+- none required for Phase 5 completion; remaining cleanup moves to Phase 7 compatibility removal and future UI subscriber cleanups
+
 ### Phase 6. Add plugin/extension API
-Status: not done
-Testing: not tested
+Status: done
+Testing: tested (`npm run build` passes)
 
 Purpose:
 Support experimental feature work safely.
@@ -630,9 +651,25 @@ Expected output:
 
 - future features can be prototyped with lower risk and lower merge pressure on core files.
 
+Done so far:
+- added `src/core/extensions/extensionRegistry.js` with explicit generation hook definitions, registration API, priority ordering, and disposable registrations
+- formalized hook mutability contracts: `beforePromptBuild` / `afterGenerationCommit` are read-only, while `afterPromptBuild`, `beforeRequestAssembly`, `beforeRequestSend`, and `afterResponseNormalize` are bounded mutating hooks
+- connected the hook runner to real architecture boundaries instead of ad-hoc call sites:
+  - `beforePromptBuild` in `generateChatResponse`
+  - `afterPromptBuild` after prepared prompt execution
+  - `beforeRequestAssembly` and `beforeRequestSend` in `executeFinalChatRequest`
+  - `afterResponseNormalize` in transport response normalization for both JSON and SSE paths
+  - `afterGenerationCommit` after chat completion persistence/UI commit
+- aligned `PipelineContext` extension-point metadata with the declared registry contract so future pipeline work uses one source of truth for hook names
+- extended the same declared hook model to summary and memory-draft request flows via shared non-chat hook helpers, so chat is no longer the only extensible generation path
+- added `src/core/extensions/appExtensions.js` and initialized it from `main.js` as the app-start registration surface for extension installers
+
+Remaining:
+- future extension author docs/examples can be added without changing the hook surface; no additional Phase 6-critical architecture work remains
+
 ### Phase 7. Remove compatibility shims and dead paths
-Status: not done
-Testing: not tested
+Status: done
+Testing: tested (`npm run build` passes)
 
 Purpose:
 Finish cleanup only after parity is proven.
@@ -643,6 +680,17 @@ Work:
 - remove temporary facade logic from `generationService.js`;
 - remove singleton debug state after keyed stores replace it;
 - remove duplicate config access paths once all callers use shared helpers.
+
+Done:
+- removed internal legacy-compatible subscription usage from `App.vue`, `DialogList.vue`, `CharacterList.vue`, and `LorebookSheet.vue`; these now subscribe directly to the app event hub where dual app-event plus window-event listening was no longer needed
+- replaced the internal sync refresh source in `syncService.js` from direct `window.dispatchEvent('sync-data-refreshed')` to `publishAppEvent(APP_EVENTS.domain.sync.dataRefreshed, ...)`
+- removed dead debug compatibility helpers `getLastPrompt()`, `getLastNetworkTrace()`, and `clearLastNetworkTrace()`; callers now read keyed/read-model state directly
+- removed the old-format persisted network-trace hydration branch and kept only keyed persisted trace hydration via `hydratePersistedRequestTrace()`
+- updated internal callers/tests to use use-case entrypoints and request preview/read-model state instead of generation-service debug facades where practical
+- removed `legacyCompatibleSubscription.js` after internal consumers stopped needing dual subscriptions
+
+Remaining:
+- the `window` event bridge itself remains intentionally as an external compatibility adapter for app-shell/legacy event consumers; the staged architecture refactor is complete without removing that bridge
 
 ---
 

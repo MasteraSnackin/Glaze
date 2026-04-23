@@ -34,10 +34,14 @@ The current roadmap is:
 
 - Branch: `feat/refactor-phase1-event-hub`
 - Base: latest stabilized `dev`
-- Scope: `REFACTOR_PLAN.md` Phases 1–3 (event hub, request ownership, composable extraction)
+- Scope: `REFACTOR_PLAN.md` Phases 1–6 in progress (event hub, request ownership, composable extraction, deterministic pipelines, projections, extension API)
 - Phase 1 status: `done`
 - Phase 2 status: `done`
 - Phase 3 status: `done`
+- Phase 4 status: `done`
+- Phase 5 status: `done`
+- Phase 6 status: `done`
+- Phase 7 status: `done`
 - Current slice testing: `tested` (`npm run build`)
 
 Phase 3 composable extractions:
@@ -52,7 +56,42 @@ Phase 3 composable extractions:
 - [done] Extract swipe/greeting navigation into `composables/chat/useSwipeNavigation.js`
 - [done] Extract message display helpers into `composables/chat/useChatMessageDisplay.js`
 - [done] ChatView.vue reduced from ~5700 to 3774 lines (33.8%)
-- [not done] Continue moving the remaining prompt/request orchestration out of `generationService.js` into use-case/pipeline files
+
+Phase 4 deterministic pipelines:
+- [done] Extract `executeImpersonationUseCase` into `core/llm/usecases/impersonationRequest.js` — fixes broken `generateChatResponse` call in `startImpersonation`
+- [done] Introduce `PipelineContext` class in `core/llm/usecases/chatPipelineContext.js` — context object with step logging, abort flags, documented forbidden reorderings
+- [done] Refactor `chatPostPromptPipeline` to use `PipelineContext` + 6 named steps in `chatPipelineSteps.js`
+- [done] Deduplicate `updateContextCutoff` authors note logic — replaced inline 16-line block with `buildGenerationAuthorsNote` call
+- [done] Route `calculateContext` through use-case facade, remove unused `executeRequest`/`generateMemoryDraft` imports from ChatView
+- [done] Extract `useGenerationAbort` composable — unifies `abortActiveChatGeneration` + `abortAnyActiveGeneration` + `abortImpersonation`, removes duplicated abort logic in `sendMessage`
+- [done] Migrate 13 `window.dispatchEvent`/`addEventListener` calls to `publishAppEvent`/`subscribeAppEvent`, add 10 new `APP_EVENTS` names, activate legacy bridge in `main.js`
+
+Phase 5 side effects and projections:
+- [done] Split prompt preview state out of `generationService.js` singleton into keyed `core/states/promptPreviewState.js`
+- [done] Split network trace state out of `networkDebugService.js` singleton into keyed `core/states/requestTraceState.js`
+- [done] Thread `debugKey` through chat, impersonation, summary, and memory-draft request flows so preview and trace belong to the same request/session
+- [done] Update `RequestPreviewSheet.vue` to read a matched prompt preview + request trace pair instead of mixing unrelated "last" globals
+- [done] Keep backward-compatible `getLastPrompt()` / `getLastNetworkTrace()` facades and legacy persisted trace hydration during migration
+- [done] Publish richer domain/debug events from pipelines and transport: `domain.generation.promptReady`, `domain.generation.requestDispatched`, and `debug.*` trace/preview events
+- [done] Move prompt preview + request trace writes behind `core/events/projections/debugStateProjection.js` subscribers instead of direct orchestration updates
+- [done] Add `core/states/requestPreviewState.js` read model so UI consumes a single request-preview snapshot instead of manually stitching prompt + trace state
+
+Phase 6 extension API:
+- [done] Add `core/extensions/extensionRegistry.js` with declared generation hook definitions, registration helpers, priority ordering, and disposer-based unregistration
+- [done] Define read-only vs mutating hook contracts for `beforePromptBuild`, `afterPromptBuild`, `beforeRequestAssembly`, `beforeRequestSend`, `afterResponseNormalize`, and `afterGenerationCommit`
+- [done] Wire chat generation to declared hooks at real use-case/transport boundaries instead of adding new ad-hoc event points
+- [done] Apply `afterResponseNormalize` to both JSON and SSE completion paths so extensions see one normalized response boundary
+- [done] Extend the same extension API coverage to summary and memory-draft request flows
+- [done] Add `core/extensions/appExtensions.js` bootstrap surface and initialize it from `main.js` for app-start extension registration
+- [done] Keep feature-local registration possible as well: `registerGenerationHook(...)` and `registerAppExtension(...)` remain directly usable where scoped registration is safer than app-wide bootstrap
+
+Phase 7 compatibility cleanup:
+- [done] Replace internal `subscribeLegacyCompatibleEvent(...)` usage with direct `subscribeAppEvent(...)` where dual listening was no longer required
+- [done] Replace internal `sync-data-refreshed` `window.dispatchEvent(...)` source with `publishAppEvent(APP_EVENTS.domain.sync.dataRefreshed, ...)`
+- [done] Remove dead debug compat helpers `getLastPrompt()`, `getLastNetworkTrace()`, and `clearLastNetworkTrace()` and switch callers to keyed state/read models
+- [done] Remove old-format persisted network trace hydration branch; keep only keyed persisted trace hydration
+- [done] Remove `core/events/legacyCompatibleSubscription.js` after internal callers were migrated off it
+- [done] Keep `window` event bridge only as an external compatibility adapter, not as an internal subscription boundary
 
 This roadmap intentionally assumes the tokenizer and current context UI are already in place and are not being redesigned again unless a new decision is made explicitly.
 
