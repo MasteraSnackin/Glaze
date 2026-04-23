@@ -1,6 +1,15 @@
+import { publishAppEvent } from '@/core/events/eventHub.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
+import {
+    runNonChatCommitHook,
+    runNonChatPromptBuildHooks,
+    runNonChatRequestHooks
+} from '@/core/llm/usecases/nonChatGenerationHooks.js';
+
 export async function executeSummaryRequest({
     history,
     prompt,
+    debugKey,
     controller,
     apiConfigOverride = null,
     deps
@@ -8,7 +17,8 @@ export async function executeSummaryRequest({
     const {
         getEffectiveApiConfig,
         buildSummaryRequestPayload,
-        executeRequest
+        executeRequest,
+        setLastPrompt
     } = deps;
 
     const effectiveConfig = {
@@ -29,23 +39,77 @@ export async function executeSummaryRequest({
         finalPrompt = `${template}\n\n${history}`;
     }
 
-    let result = '';
-
-    const { requestBody } = buildSummaryRequestPayload({
-        providerId,
-        model,
-        prompt: finalPrompt,
-        temperature: temp
+    const promptStage = await runNonChatPromptBuildHooks({
+        requestType: 'summary',
+        debugKey,
+        history,
+        prompt,
+        apiConfigOverride,
+        effectiveConfig,
+        template,
+        finalPrompt
     });
 
-    await executeRequest({
+    const effectiveTemplate = promptStage?.template === undefined ? template : promptStage.template;
+    finalPrompt = promptStage?.finalPrompt === undefined ? finalPrompt : promptStage.finalPrompt;
+
+    let result = '';
+
+    const requestEnvelope = await runNonChatRequestHooks({
+        requestType: 'summary',
+        debugKey,
         providerId,
         apiUrl,
         apiKey,
-        requestBody,
+        model,
+        buildPayload: buildSummaryRequestPayload,
+        payloadInput: {
+            prompt: finalPrompt,
+            temperature: temp
+        },
         controller,
+        extra: {
+            history,
+            prompt,
+            template: effectiveTemplate,
+            finalPrompt,
+            effectiveConfig
+        }
+    });
+
+    const { previewBody, requestBody } = requestEnvelope;
+
+    setLastPrompt?.(JSON.parse(JSON.stringify(previewBody || requestBody)));
+
+    publishAppEvent(APP_EVENTS.domain.generation.requestDispatched, {
+        debugKey,
+        requestType: 'summary',
+        messageCount: requestBody?.messages?.length || 0
+    });
+
+    await executeRequest({
+        providerId: requestEnvelope.providerId,
+        apiUrl: requestEnvelope.apiUrl,
+        apiKey: requestEnvelope.apiKey,
+        requestBody,
+        debugKey,
+        requestType: 'summary',
+        controller: requestEnvelope.controller,
+        stream: requestEnvelope.stream,
         callbacks: {
             onComplete: (text) => { result = text; }
+        }
+    });
+
+    await runNonChatCommitHook({
+        requestType: 'summary',
+        debugKey,
+        result,
+        extra: {
+            history,
+            prompt,
+            template: effectiveTemplate,
+            finalPrompt
         }
     });
 

@@ -8,10 +8,11 @@ import {
     buildPromptWorkerPayload,
     getSafeContextLimit,
     trimHistoryForContextWindow,
-    processPromptAsync
+    processPromptAsync,
+    getMemoryReserveEstimate
 } from '@/core/llm/usecases/chatPromptShared.js';
 
-export function prepareChatPromptRequest({
+export async function prepareChatPromptRequest({
     text,
     char,
     history,
@@ -46,6 +47,7 @@ export function prepareChatPromptRequest({
     const globalRegexes = loadGlobalRegexes();
     const safeContextLimit = getSafeContextLimit(contextSize, maxTokens);
     const safeHistory = trimHistoryForContextWindow(history, safeContextLimit);
+    const memoryReserve = await getMemoryReserveEstimate(char, safeContextLimit);
     const payload = buildPromptWorkerPayload({
         char,
         history: safeHistory,
@@ -57,7 +59,8 @@ export function prepareChatPromptRequest({
         guidanceType: type,
         globalRegexes,
         sessionVars,
-        apiConfig
+        apiConfig,
+        memoryReserve
     });
 
     return {
@@ -81,6 +84,7 @@ export function prepareChatPromptRequest({
         sessionVars,
         safeContextLimit,
         safeHistory,
+        memoryReserve,
         payload
     };
 }

@@ -16,7 +16,7 @@ import { attachLongPress } from '@/core/services/ui.js';
 import { estimateTokens } from '@/utils/tokenizer.js';
 import { formatDate } from '@/utils/dateFormatter.js';
 import { APP_EVENTS } from '@/core/events/eventNames.js';
-import { subscribeLegacyCompatibleEvent } from '@/core/events/legacyCompatibleSubscription.js';
+import { subscribeAppEvent } from '@/core/events/eventHub.js';
 
 const props = defineProps({
   activeCategory: {
@@ -397,11 +397,7 @@ onMounted(() => {
   loadCharacters();
   window.addEventListener('header-search', (e) => searchQuery.value = e.detail);
   window.addEventListener('character-updated', loadCharacters);
-  unsubscribeSyncDataRefreshed = subscribeLegacyCompatibleEvent({
-    appEventName: APP_EVENTS.domain.sync.dataRefreshed,
-    legacyEventName: 'sync-data-refreshed',
-    listener: loadCharacters
-  });
+  unsubscribeSyncDataRefreshed = subscribeAppEvent(APP_EVENTS.domain.sync.dataRefreshed, loadCharacters);
 });
 
 onUnmounted(() => {
@@ -587,7 +583,6 @@ const handleCharClick = (e, char) => {
 
 onUnmounted(() => {
   window.removeEventListener('character-updated', loadCharacters);
-  window.removeEventListener('sync-data-refreshed', loadCharacters);
 });
 
 defineExpose({ onAddCharacter, loadCharacters });

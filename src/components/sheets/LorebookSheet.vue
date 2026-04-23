@@ -9,7 +9,7 @@ import { saveFile } from '@/core/services/fileSaver.js';
 import HelpTip from '@/components/ui/HelpTip.vue';
 import { showToast } from '@/core/states/toastState.js';
 import { APP_EVENTS } from '@/core/events/eventNames.js';
-import { subscribeLegacyCompatibleEvent } from '@/core/events/legacyCompatibleSubscription.js';
+import { subscribeAppEvent } from '@/core/events/eventHub.js';
 
 const sheet = ref(null);
 const t = (key) => translations[currentLang.value]?.[key] || key;
@@ -473,11 +473,7 @@ onMounted(async () => {
     await initLorebookState();
     loadPickerData();
     await updateVectorReindexNotice();
-    unsubscribeSyncDataRefreshed = subscribeLegacyCompatibleEvent({
-        appEventName: APP_EVENTS.domain.sync.dataRefreshed,
-        legacyEventName: 'sync-data-refreshed',
-        listener: handleSyncDataRefreshed
-    });
+    unsubscribeSyncDataRefreshed = subscribeAppEvent(APP_EVENTS.domain.sync.dataRefreshed, handleSyncDataRefreshed);
     window.addEventListener('app-back-navigation', handleBackNavigation);
 });
 

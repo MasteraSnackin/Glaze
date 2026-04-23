@@ -74,6 +74,7 @@ export async function executePreparedChatPrompt({
         safeHistory,
         contextSize,
         maxTokens,
+        memoryReserve: preparedRequest.memoryReserve || 0,
         requestConfig: {
             providerId,
             apiUrl,

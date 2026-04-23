@@ -1,6 +1,6 @@
 import { getChatData } from '@/utils/sessions.js';
 import { db } from '@/utils/db.js';
-import { generateMemoryDraft } from '@/core/services/generationService.js';
+import { generateMemoryDraft } from '@/core/llm/usecases/generateMemoryDraft.js';
 import { showToast } from '@/core/states/toastState.js';
 import { formatError } from '@/utils/errors.js';
 import { bottomSheetState } from '@/core/states/bottomSheetState.js';
@@ -316,7 +316,13 @@ export function useMemoryAutomation({
             }
             const memoryDraftAbortController = new AbortController();
             setMemoryDraftAbortController(memoryDraftAbortController, progressDraftId);
-            const draftText = await generateMemoryDraft({ history, prompt: finalPrompt, controller: memoryDraftAbortController, apiConfigOverride });
+            const draftText = await generateMemoryDraft({
+                history,
+                prompt: finalPrompt,
+                debugKey: `memory_draft:${activeChatChar.value.id}:${activeChatChar.value.sessionId || 'default'}:${progressDraftId}`,
+                controller: memoryDraftAbortController,
+                apiConfigOverride
+            });
             console.debug('[MemoryBooks] generateMemoryDraftForMessages:request-complete', { existingDraftId, textLength: draftText?.length || 0 });
             const parsedDraft = parseMemoryDraftResponse(draftText || '', [playerName, activeChatChar.value?.name || 'Character']);
 

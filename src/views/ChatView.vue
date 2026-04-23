@@ -3,6 +3,14 @@
 let activeChatChar = null;
 let _cleanupScroll = null;
 let _msgIdCounter = 0;
+let unsubCharacterUpdated = null;
+let unsubGenerationEnded = null;
+let unsubFsEditorClosed = null;
+let unsubChatSearchToggle = null;
+let unsubRegexChanged = null;
+let unsubChatSearch = null;
+let unsubApiContextChanged = null;
+let unsubSettingsChanged = null;
 
 // Import Memory Books functions from service
 const {
@@ -53,9 +61,11 @@ import { getEffectivePersona, activePersona, allPersonas } from '@/core/states/p
 import { formatDate, formatDateSeparator } from '@/utils/dateFormatter.js';
 import { currentLang, chatPaddingLR, setChatPaddingLR, shouldUseBatterySaverUI } from '@/core/config/APPSettings.js';
 import { translations } from '@/utils/i18n.js';
-import { calculateContext, generateMemoryDraft } from '@/core/services/generationService.js';
+import { calculateContext } from '@/core/llm/usecases/calculateContext.js';
 import { executeChatGenerationUseCase, createChatGenerationServices } from '@/core/llm/usecases/generateChat.js';
-import { executeRequest } from '@/core/services/llmApi.js';
+import { executeImpersonationUseCase } from '@/core/llm/usecases/impersonationRequest.js';
+import { buildGenerationAuthorsNote } from '@/composables/chat/useGenerationPreparation.js';
+import { useGenerationAbort } from '@/composables/chat/useGenerationAbort.js';
 import { getApiConfig, getApiRuntimeStorage, getApiReasoningTags, fetchRemoteModels } from '@/core/config/APISettings.js';
 import { getActiveLLMProfile } from '@/core/config/ProviderProfiles.js';
 import { getEmbeddingConfig, isEmbeddingConfigured } from '@/core/config/embeddingSettings.js';
@@ -98,6 +108,8 @@ import { useMessageSelection } from '@/composables/chat/useMessageSelection.js';
 import { useChatSearch } from '@/composables/chat/useChatSearch.js';
 import { useMemorySheetUI } from '@/composables/chat/useMemorySheetUI.js';
 import { useSwipeNavigation } from '@/composables/chat/useSwipeNavigation.js';
+import { publishAppEvent, subscribeAppEvent } from '@/core/events/eventHub.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
 import { normalizeImgGenHtmlForEditing, prepareEditText, restoreEditText } from '@/core/utils/messageEditHelpers.js';
 
 function genMsgId() {
@@ -114,19 +126,7 @@ const {
     reindexAllMemoryEntries
 } = memoryBooksService;
 
-const chatGenerationServices = createChatGenerationServices({
-    activeChatChar,
-    isGenerating,
-    currentMessages,
-    displayMessages,
-    smartScroll,
-    scrollToBottom,
-    isItemVisible,
-    scrollToIndex,
-    genMsgId,
-    updateSessionMessage,
-    runMemoryAutomationAfterStableTurn
-});
+let chatGenerationServices = null;
 
 const isAndroid = Capacitor.getPlatform() === 'android';
 const isBatterySaverUI = computed(() => shouldUseBatterySaverUI());
@@ -171,6 +171,9 @@ const {
     buildGenerationOwnerKey,
     createGenerationRequestToken
 } = useGenerationRegistry();
+
+let abortActiveChatGeneration = async () => false;
+let abortAnyActiveGeneration = async () => false;
 const { clearTypingStateForMessage } = useTypingStateCleanup({ currentMessages, getChatData, db });
 
 // --- Component State ---
@@ -218,6 +221,13 @@ const charCardSheet = ref(null);
 const lorebookSheet = ref(null);
 const regexSheet = ref(null);
 const activeChar = ref(null);
+({ abortActiveChatGeneration, abortAnyActiveGeneration } = useGenerationAbort({
+    getGenerationState,
+    clearGenerationState,
+    isGenerating,
+    isImpersonating,
+    activeChatChar: activeChar
+}));
 const regexRevision = ref(0);
 // Initialize Memory Books composable
 const {
@@ -249,6 +259,8 @@ const {
     formatError,
     db
 });
+
+let openMemoryBooksSheet = () => {};
 
 const {
     createPendingMemoryDraft,
@@ -360,7 +372,7 @@ const {
     openMemoryGenerationSettings,
     openMemoryPromptManager,
     openMemoryPromptEditor,
-    openMemoryBooksSheet,
+    openMemoryBooksSheet: openMemoryBooksSheetImpl,
     handleMemorySearchTypeUpdate,
     handleMemoryReindexAll,
     handleMemoryScanChat,
@@ -397,6 +409,8 @@ const {
     handleMemoryQuickModelChange_impl,
     debouncedUpdateContextCutoff: () => debouncedUpdateContextCutoff()
 });
+
+openMemoryBooksSheet = openMemoryBooksSheetImpl;
 
 // --- Display Logic (Separators) ---
 const displayMessages = computed(() => {
@@ -522,35 +536,6 @@ async function loadChats() {
     }
 }
 
-async function abortActiveChatGeneration(charId, { restore = true } = {}) {
-    const state = getGenerationState(charId);
-    if (!state || state.type === 'impersonation') return false;
-
-    if (state.controller) {
-        try {
-            state.controller.abort();
-        } catch (abortErr) {
-            console.warn('[generation] Failed to abort controller:', abortErr);
-        }
-    }
-
-    if (restore && state.restoreState) {
-        try {
-            await state.restoreState();
-        } catch (restoreErr) {
-            console.error('[generation] Failed to restore state after abort:', restoreErr);
-        }
-    }
-
-    clearGenerationState(charId, state.genId);
-
-    if (activeChatChar && activeChatChar.id === charId) {
-        isGenerating.value = false;
-    }
-
-    return true;
-}
-
 async function updateContextCutoff() {
     if (!activeChatChar || !currentMessages.value) return;
 
@@ -596,20 +581,12 @@ async function updateContextCutoff() {
 
         let authorsNote = null;
         if (cutoffChatData.authorsNotes && cutoffChatData.authorsNotes[sessionId]) {
-            const storedAn = cutoffChatData.authorsNotes[sessionId];
-            let anContent = typeof storedAn === 'string' ? storedAn : storedAn.content;
-
-            const effectivePreset = getEffectivePreset(activeChatChar.id, sessionId ? `${activeChatChar.id}_${sessionId}` : null);
-            const anBlock = effectivePreset?.blocks?.find(b => b.id === 'authors_note');
-            if (anBlock && anBlock.enabled && anContent) {
-                authorsNote = {
-                    content: anContent,
-                    role: anBlock.role || 'system',
-                    enabled: true,
-                    depth: anBlock.depth !== undefined ? anBlock.depth : 0,
-                    insertion_mode: anBlock.insertion_mode || 'relative'
-                };
-            }
+            authorsNote = buildGenerationAuthorsNote({
+                getEffectivePreset,
+                charId: activeChatChar.id,
+                sessionId,
+                anContent: cutoffChatData.authorsNotes[sessionId]
+            });
         }
 
         const result = await calculateContext({
@@ -804,10 +781,9 @@ async function setupHeader(char = activeChatChar) {
     const initialSessionId = char.sessionId || (data ? data.currentId : '...');
     const sessionName = data?.sessionNames?.[initialSessionId];
 
-    window.dispatchEvent(new CustomEvent('header-setup-chat', { 
-        detail: { 
-            char, 
-            currentSessionId: initialSessionId, 
+    publishAppEvent(APP_EVENTS.ui.header.setupChat, {
+            char,
+            currentSessionId: initialSessionId,
             sessionName,
             callbacks: {
                 onActionsClick: () => openSessionsSheet(char),
@@ -815,9 +791,9 @@ async function setupHeader(char = activeChatChar) {
                     closeChat();
                     if (currentOnBack) currentOnBack();
                 }
-            } 
-        } 
-    }));
+            }
+        }
+    );
 }
 
 const onFsEditorClosed = async () => {
@@ -1209,13 +1185,11 @@ async function openChat(char, onBack, force = false) {
     const personaName = effPersona ? effPersona.name : '';
 
     if (activeLbs.length > 0 || presetName || personaName) {
-        window.dispatchEvent(new CustomEvent('header-show-lb-banner', { 
-            detail: {
+        publishAppEvent(APP_EVENTS.ui.header.showLbBanner, {
                 names: activeLbs,
                 preset: presetName,
                 persona: personaName
-            }
-        }));
+            });
     }
 
     } finally {
@@ -1302,7 +1276,7 @@ function closeChat() {
         _cleanupScroll = null;
     }
 
-    window.dispatchEvent(new CustomEvent('header-reset'));
+    publishAppEvent(APP_EVENTS.ui.header.reset);
     activeChatChar = null;
     activeChar.value = null;
     setTrackedContext(null, null);
@@ -1321,21 +1295,23 @@ function smartScroll() {
     }
 }
 
+chatGenerationServices = createChatGenerationServices({
+    activeChatChar,
+    isGenerating,
+    currentMessages,
+    displayMessages,
+    smartScroll,
+    scrollToBottom,
+    isItemVisible,
+    scrollToIndex,
+    genMsgId,
+    updateSessionMessage,
+    runMemoryAutomationAfterStableTurn
+});
+
 async function sendMessage(attachedImage = null, guidanceText = null) {
     if (isGenerating.value && activeChatChar) {
-        // Stop Generation
-        const state = getGenerationState(activeChatChar.id);
-        if (state?.type === 'impersonation') {
-            if (state.controller) state.controller.abort();
-            clearGenerationState(activeChatChar.id);
-            isGenerating.value = false;
-            isImpersonating.value = false;
-        } else if (state) {
-            await abortActiveChatGeneration(activeChatChar.id);
-        } else {
-            // Stale isGenerating flag — no active generation found, just reset
-            isGenerating.value = false;
-        }
+        await abortAnyActiveGeneration(activeChatChar.id);
         return;
     }
 
@@ -1959,69 +1935,35 @@ async function startImpersonation(guidanceText = null) {
         pendingGuidance.value = null;
     }
     if (!activeChatChar) return;
-    const charId = activeChatChar.id;
-    
-    let preset = null;
-    try {
-        const charId = activeChatChar?.id;
-        const chatId = charId && activeChatChar?.sessionId ? `${charId}_${activeChatChar.sessionId}` : null;
-        preset = getEffectivePreset(charId, chatId);
-    } catch(e) {}
 
-    const promptText = preset ? (preset.impersonationPrompt || "") : "";
-
-    if (!promptText) {
-        showBottomSheet({
-            bigInfo: {
-                icon: '<svg viewBox="0 0 24 24" style="fill:currentColor;width:100%;height:100%;"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.04.24.24.41.48.41h3.84c.24 0 .43-.17.47-.41l.36-2.54c.59-.24 1.13-.57 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>',
-                description: t('impersonation_prompt_missing') || "Impersonation prompt is empty",
-                buttonText: t('btn_configure') || "Configure",
-                onButtonClick: () => {
-                    closeBottomSheet();
-                    openApiView();
-                }
-            }
-        });
-        return;
-    }
-
-    inputValue.value = '';
-
-    isImpersonating.value = true;
-    isGenerating.value = true;
     const controller = new AbortController();
-    setGenerationState(charId, { genId: nextGenerationId(), controller, type: 'impersonation' });
 
-    // Prepare history
-    const history = currentMessages.value
-        .map((m, i) => ({ ...m, originalIndex: i }))
-        .filter(m => !m.isTyping && !m.isHidden)
-        .map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text, chatId: m.originalIndex }));
-
-    chatGenerationServices.app.notifyGenerationStarted({ charId, sessionId: activeChatChar.sessionId });
-
-    generateChatResponse({
-        text: promptText,
+    return executeImpersonationUseCase({
         char: activeChatChar,
-        history,
         guidanceText,
-        type: 'impersonation',
         controller,
-        callbacks: {
-            onUpdate: (chunk) => { inputValue.value += chunk || ""; },
-            onComplete: (response) => {
-        inputValue.value = cleanText(response);
-        isImpersonating.value = false;
-        isGenerating.value = false;
-        clearGenerationState(charId);
-        chatGenerationServices.app.notifyGenerationEnded({ charId: charId });
+        services: {
+            app: chatGenerationServices.app,
+            lifecycle: {
+                setGenerationState,
+                clearGenerationState,
+                nextGenerationId,
+                buildGenerationHistory: () => currentMessages.value
+                    .map((m, i) => ({ ...m, originalIndex: i }))
+                    .filter(m => !m.isTyping && !m.isHidden)
+                    .map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text, chatId: m.originalIndex })),
+                cleanText
             },
-            onError: (err) => {
-        console.error(err);
-        isImpersonating.value = false;
-        isGenerating.value = false;
-        clearGenerationState(charId);
-        chatGenerationServices.app.notifyGenerationEnded({ charId: charId });
+            state: {
+                inputValue,
+                isImpersonating,
+                isGenerating,
+                currentMessages,
+                activeChatChar,
+                showBottomSheet,
+                closeBottomSheet,
+                openApiView,
+                t
             }
         }
     });
@@ -2091,7 +2033,7 @@ async function deleteSession(sessionId, targetChar) {
                     _cleanupScroll();
                     _cleanupScroll = null;
                 }
-                window.dispatchEvent(new CustomEvent('header-reset'));
+                publishAppEvent(APP_EVENTS.ui.header.reset);
                 activeChatChar = null;
                 currentMessages.value = [];
                 inputValue.value = '';
@@ -2268,7 +2210,7 @@ async function openChatStatsSheet(char = activeChatChar) {
 }
 
 function openApiView() {
-    window.dispatchEvent(new CustomEvent('open-api-sheet'));
+    publishAppEvent(APP_EVENTS.nav.openApiSheet);
 }
 
 function openPresetView() {
@@ -2372,7 +2314,7 @@ const onCharacterUpdated = (e) => {
     if (activeChatChar && activeChatChar.id === e.detail.character.id) {
         activeChatChar = e.detail.character;
         activeChar.value = e.detail.character;
-        window.dispatchEvent(new CustomEvent('header-update-avatar', { detail: activeChatChar }));
+        publishAppEvent(APP_EVENTS.ui.header.updateAvatar, activeChatChar);
     }
 };
 
@@ -2481,9 +2423,9 @@ onMounted(() => {
     if (activeChatChar) {
         setupHeader(activeChatChar);
     }
-    window.addEventListener('character-updated', onCharacterUpdated);
-    window.addEventListener('chat-generation-ended', onGenerationEnded);
-    window.addEventListener('fs-editor-closed', onFsEditorClosed);
+    unsubCharacterUpdated = subscribeAppEvent(APP_EVENTS.domain.character.updated, ({ detail }) => onCharacterUpdated({ detail }));
+    unsubGenerationEnded = subscribeAppEvent(APP_EVENTS.domain.generation.ended, ({ detail }) => onGenerationEnded({ detail }));
+    unsubFsEditorClosed = subscribeAppEvent(APP_EVENTS.ui.fsEditorClosed, onFsEditorClosed);
     if (window.visualViewport) {
         window.visualViewport.addEventListener('resize', handleVisualViewport);
         window.visualViewport.addEventListener('scroll', handleVisualViewport);
@@ -2517,11 +2459,11 @@ onMounted(() => {
         updateContentPadding();
     }
     updateContextCutoff();
-    window.addEventListener('header-chat-search-toggle', onChatSearchToggle);
-    window.addEventListener('regex-scripts-changed', onRegexChanged);
-    window.addEventListener('header-chat-search', onChatSearch);
-    window.addEventListener('api-context-settings-changed', updateContextCutoff);
-    window.addEventListener('settings-changed', restartVisibleGenerationTimers);
+    unsubChatSearchToggle = subscribeAppEvent(APP_EVENTS.ui.chatSearchToggle, ({ detail }) => onChatSearchToggle({ detail }));
+    unsubRegexChanged = subscribeAppEvent(APP_EVENTS.domain.lorebook.regexScriptsChanged, onRegexChanged);
+    unsubChatSearch = subscribeAppEvent(APP_EVENTS.ui.chatSearch, ({ detail }) => onChatSearch({ detail }));
+    unsubApiContextChanged = subscribeAppEvent(APP_EVENTS.domain.settings.apiContextChanged, updateContextCutoff);
+    unsubSettingsChanged = subscribeAppEvent(APP_EVENTS.domain.settings.changed, restartVisibleGenerationTimers);
 });
 
 watch(() => currentMessages.value.length, () => {
@@ -2628,10 +2570,10 @@ onUnmounted(() => {
         // Clear registry entry to prevent stale state from blocking future generations
         clearGenerationState(charId);
     }
-    window.removeEventListener('character-updated', onCharacterUpdated);
+    if (unsubCharacterUpdated) { unsubCharacterUpdated(); unsubCharacterUpdated = null; }
     document.removeEventListener('visibilitychange', onVisibilityChange);
-    window.removeEventListener('chat-generation-ended', onGenerationEnded);
-    window.removeEventListener('fs-editor-closed', onFsEditorClosed);
+    if (unsubGenerationEnded) { unsubGenerationEnded(); unsubGenerationEnded = null; }
+    if (unsubFsEditorClosed) { unsubFsEditorClosed(); unsubFsEditorClosed = null; }
     
     if (window.visualViewport) {
         window.visualViewport.removeEventListener('resize', handleVisualViewport);
@@ -2657,11 +2599,11 @@ onUnmounted(() => {
         inputResizeObserver.disconnect();
         inputResizeObserver = null;
     }
-    window.removeEventListener('header-chat-search-toggle', onChatSearchToggle);
-    window.removeEventListener('regex-scripts-changed', onRegexChanged);
-    window.removeEventListener('header-chat-search', onChatSearch);
-    window.removeEventListener('api-context-settings-changed', updateContextCutoff);
-    window.removeEventListener('settings-changed', restartVisibleGenerationTimers);
+    if (unsubChatSearchToggle) { unsubChatSearchToggle(); unsubChatSearchToggle = null; }
+    if (unsubRegexChanged) { unsubRegexChanged(); unsubRegexChanged = null; }
+    if (unsubChatSearch) { unsubChatSearch(); unsubChatSearch = null; }
+    if (unsubApiContextChanged) { unsubApiContextChanged(); unsubApiContextChanged = null; }
+    if (unsubSettingsChanged) { unsubSettingsChanged(); unsubSettingsChanged = null; }
     if (cutoffRerunTimer) {
         clearTimeout(cutoffRerunTimer);
         cutoffRerunTimer = null;

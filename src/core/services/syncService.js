@@ -1,4 +1,6 @@
 import { syncProvider, syncStatus, SYNC_STATUS, setSyncProgress, clearSyncProgress, setSyncError, updateLastSyncTime, addConflict, clearConflicts, resetMessageCounter, PROVIDERS } from '@/core/states/syncState.js';
+import { publishAppEvent } from '@/core/events/eventHub.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
 import * as dropboxAdapter from '@/core/services/adapters/dropboxAdapter.js';
 import * as gdriveAdapter from '@/core/services/adapters/gdriveAdapter.js';
 import { pushEntities, pullEntities, detectEncryptionState, isEncryptionEnabled } from '@/core/services/syncEngine.js';
@@ -76,7 +78,7 @@ export async function fullPull() {
             syncStatus.value = SYNC_STATUS.IDLE;
         }
         clearSyncProgress();
-        window.dispatchEvent(new CustomEvent('sync-data-refreshed', { detail: result }));
+        publishAppEvent(APP_EVENTS.domain.sync.dataRefreshed, result);
         return result;
     } catch (e) {
         setSyncError(e.message);

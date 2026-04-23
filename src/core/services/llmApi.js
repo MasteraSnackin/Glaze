@@ -16,6 +16,7 @@ export async function executeRequest({
     apiKey,
     requestBody,
     stream,
+    debugKey,
     controller,
     requestReasoning,
     tagStart,
@@ -52,6 +53,7 @@ export async function executeRequest({
         requestType,
         apiUrl,
         stream,
+        debugKey,
         requestBody
     });
 
@@ -66,6 +68,7 @@ export async function executeRequest({
                 requestUrl,
                 headers: requestLifecycle.headers,
                 requestBody,
+                debugKey: requestLifecycle.debugKey,
                 connectTimeout: requestLifecycle.connectTimeout,
                 streamTimeout: requestLifecycle.streamTimeout
             });
@@ -82,6 +85,8 @@ export async function executeRequest({
                 tagEnd,
                 headerModel,
                 headerInline,
+                requestType,
+                debugKey: requestLifecycle.debugKey,
                 onComplete
             });
 
@@ -101,13 +106,17 @@ export async function executeRequest({
             tagEnd,
             headerModel,
             headerInline,
+            requestType,
+            debugKey: requestLifecycle.debugKey,
             streamAccumulator,
             onUpdate,
             onComplete
         });
     } catch (e) {
         if (e.name === 'AbortError') {
-            handleAbortOutcome({
+            await handleAbortOutcome({
+                requestType,
+                debugKey: requestLifecycle.debugKey,
                 timedOut: requestLifecycle.timedOut,
                 streamAccumulator,
                 onComplete,
@@ -117,7 +126,9 @@ export async function executeRequest({
             return;
         }
 
-        handleRequestFailure({
+        await handleRequestFailure({
+            requestType,
+            debugKey: requestLifecycle.debugKey,
             error: e,
             streamAccumulator,
             onComplete,

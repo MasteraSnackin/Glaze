@@ -2,6 +2,8 @@ import { getApiConfig, getApiRuntimeStorage } from '@/core/config/APISettings.js
 import { getEffectivePreset } from '@/core/states/presetState.js';
 import { lorebookState } from '@/core/states/lorebookState.js';
 import { getEffectivePersona } from '@/core/states/personaState.js';
+import { db } from '@/utils/db.js';
+import { estimateTokens } from '@/utils/tokenizer.js';
 
 export function getEffectiveApiConfig() {
     let config = getApiConfig();
@@ -123,7 +125,8 @@ export function buildPromptWorkerPayload({
     guidanceType,
     globalRegexes,
     sessionVars,
-    apiConfig
+    apiConfig,
+    memoryReserve = 0
 }) {
     return JSON.parse(JSON.stringify({
         char,
@@ -145,6 +148,30 @@ export function buildPromptWorkerPayload({
         activations: lorebookState.activations,
         globalRegexes,
         sessionVars,
-        apiConfig
+        apiConfig,
+        memoryReserve
     }));
+}
+
+export async function getMemoryReserveEstimate(char, safeContext) {
+    const charId = char?.id;
+    const sessionId = char?.sessionId;
+    if (!charId || !sessionId) return 0;
+    try {
+        const chatData = await db.getChat(charId);
+        const memoryBook = chatData?.memoryBooks?.[sessionId];
+        const settings = memoryBook?.settings || {};
+        const activeEntries = (Array.isArray(memoryBook?.entries) ? memoryBook.entries : [])
+            .filter(e => e && (e.status || 'active') === 'active' && (e.content || '').trim());
+        if (!settings.enabled || !activeEntries.length) return 0;
+        const maxInjected = Math.max(1, Math.min(20, settings.maxInjectedEntries || 3));
+        let totalContentLen = 0;
+        for (const entry of activeEntries.slice(0, maxInjected)) {
+            totalContentLen += (entry.content || '').trim().length;
+        }
+        const estimatedTokens = estimateTokens('M'.repeat(totalContentLen));
+        return Math.min(estimatedTokens, Math.floor(safeContext * 0.35));
+    } catch (e) {
+        return 0;
+    }
 }

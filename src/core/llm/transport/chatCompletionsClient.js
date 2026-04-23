@@ -15,6 +15,8 @@ export async function executeFetchChatCompletions({
     tagEnd,
     headerModel,
     headerInline,
+    requestType,
+    debugKey,
     streamAccumulator,
     onUpdate,
     onComplete
@@ -31,7 +33,7 @@ export async function executeFetchChatCompletions({
     requestLifecycle.throwIfAborted();
     requestLifecycle.clearConnectTimeout();
 
-    await validateFetchResponse(response);
+    await validateFetchResponse(response, debugKey);
 
     if (!stream) {
         await completeJsonResponse({
@@ -45,6 +47,8 @@ export async function executeFetchChatCompletions({
             tagEnd,
             headerModel,
             headerInline,
+            requestType,
+            debugKey,
             onComplete
         });
         return;
@@ -70,6 +74,8 @@ export async function executeFetchChatCompletions({
             tagEnd,
             headerModel,
             headerInline,
+            requestType,
+            debugKey,
             onComplete
         });
         return;
@@ -77,6 +83,7 @@ export async function executeFetchChatCompletions({
 
     await consumeStreamingSseResponse({
         responseBody: response.body,
+        debugKey,
         controller: requestLifecycle.createStreamingTimeoutController(),
         streamTimeout: requestLifecycle.streamTimeout,
         throwIfAborted: requestLifecycle.throwIfAborted,
@@ -85,7 +92,9 @@ export async function executeFetchChatCompletions({
         onUpdate
     });
 
-    finalizeStreamResponse({
+    await finalizeStreamResponse({
+        requestType,
+        debugKey,
         streamAccumulator,
         onComplete
     });

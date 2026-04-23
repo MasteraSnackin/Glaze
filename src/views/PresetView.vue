@@ -1973,6 +1973,7 @@ function openSummarySheet() {
             const summary = await generateSummary({
                 history: historyText,
                 prompt,
+                debugKey: `summary:${char.id}:${Date.now()}`,
                 apiConfigOverride: useCustomModel && customModel ? { model: customModel } : null
             });
             content.querySelector('#summary-content').value = summary;

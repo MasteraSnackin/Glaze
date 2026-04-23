@@ -1,6 +1,7 @@
 import {
     generateChatResponse
 } from '@/core/services/generationService.js';
+import { runGenerationHook } from '@/core/extensions/extensionRegistry.js';
 
 export { createGenerationAppAdapters } from '@/core/llm/usecases/chatGenerationAppAdapters.js';
 export { createChatGenerationServices } from '@/core/llm/usecases/chatGenerationServiceFactory.js';
@@ -190,6 +191,7 @@ export async function executeChatGenerationUseCase({
     };
 
     const history = buildGenerationHistory(currentMessages);
+    const debugKey = `chat:${char.id}:${sessionId}:${genId}`;
 
     return generateChatResponse({
         text,
@@ -199,6 +201,7 @@ export async function executeChatGenerationUseCase({
         summary,
         guidanceText,
         type: 'normal',
+        debugKey,
         controller,
         callbacks: {
             onPromptReady: async ({ loreEntries, memoryEntries }) => {
@@ -254,6 +257,21 @@ export async function executeChatGenerationUseCase({
                     addMessageStats,
                     addRegenerationStats,
                     triggerAutoSyncCheck
+                });
+
+                await runGenerationHook('afterGenerationCommit', {
+                    requestType: 'chat',
+                    debugKey,
+                    char,
+                    charId: char.id,
+                    sessionId,
+                    msgId,
+                    genId,
+                    response,
+                    finalReasoning,
+                    meta,
+                    guidanceText,
+                    guidanceType
                 });
             },
             onError

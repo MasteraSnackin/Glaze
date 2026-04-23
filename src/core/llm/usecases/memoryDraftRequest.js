@@ -1,6 +1,15 @@
+import { publishAppEvent } from '@/core/events/eventHub.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
+import {
+    runNonChatCommitHook,
+    runNonChatPromptBuildHooks,
+    runNonChatRequestHooks
+} from '@/core/llm/usecases/nonChatGenerationHooks.js';
+
 export async function executeMemoryDraftRequest({
     history,
     prompt,
+    debugKey,
     controller,
     apiConfigOverride = null,
     deps
@@ -49,25 +58,69 @@ export async function executeMemoryDraftRequest({
         finalPrompt = `${template}\n\n${history}`;
     }
 
-    let result = '';
-    let requestError = null;
-    const { previewBody, requestBody } = buildMemoryDraftRequestPayload({
-        providerId,
-        model,
-        prompt: finalPrompt,
-        temperature: temp,
-        maxTokens: memoryDraftMaxTokens
+    const promptStage = await runNonChatPromptBuildHooks({
+        requestType: 'memory_draft',
+        debugKey,
+        history,
+        prompt,
+        apiConfigOverride,
+        effectiveConfig,
+        template,
+        finalPrompt,
+        extra: {
+            maxTokens: memoryDraftMaxTokens
+        }
     });
 
-    setLastPrompt(JSON.parse(JSON.stringify(previewBody)));
+    const effectiveTemplate = promptStage?.template === undefined ? template : promptStage.template;
+    finalPrompt = promptStage?.finalPrompt === undefined ? finalPrompt : promptStage.finalPrompt;
 
-    await executeRequest({
+    let result = '';
+    let requestError = null;
+
+    const requestEnvelope = await runNonChatRequestHooks({
+        requestType: 'memory_draft',
+        debugKey,
         providerId,
         apiUrl,
         apiKey,
-        requestBody,
-        stream: false,
+        model,
+        buildPayload: buildMemoryDraftRequestPayload,
+        payloadInput: {
+            prompt: finalPrompt,
+            temperature: temp,
+            maxTokens: memoryDraftMaxTokens
+        },
         controller,
+        stream: false,
+        extra: {
+            history,
+            prompt,
+            template: effectiveTemplate,
+            finalPrompt,
+            effectiveConfig,
+            maxTokens: memoryDraftMaxTokens
+        }
+    });
+
+    const { previewBody, requestBody } = requestEnvelope;
+
+    setLastPrompt(JSON.parse(JSON.stringify(previewBody)));
+
+    publishAppEvent(APP_EVENTS.domain.generation.requestDispatched, {
+        debugKey,
+        requestType: 'memory_draft',
+        messageCount: requestBody?.messages?.length || 0
+    });
+
+    await executeRequest({
+        providerId: requestEnvelope.providerId,
+        apiUrl: requestEnvelope.apiUrl,
+        apiKey: requestEnvelope.apiKey,
+        requestBody,
+        stream: requestEnvelope.stream,
+        debugKey,
+        controller: requestEnvelope.controller,
         requestType: 'memory_draft',
         callbacks: {
             onUpdate: (chunk, reasoningChunk, effectiveText) => {
@@ -80,6 +133,19 @@ export async function executeMemoryDraftRequest({
     });
 
     if (requestError) throw requestError;
+
+    await runNonChatCommitHook({
+        requestType: 'memory_draft',
+        debugKey,
+        result,
+        extra: {
+            history,
+            prompt,
+            template: effectiveTemplate,
+            finalPrompt,
+            maxTokens: memoryDraftMaxTokens
+        }
+    });
 
     return result;
 }

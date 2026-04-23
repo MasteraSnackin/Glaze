@@ -7,6 +7,7 @@ export function createRequestLifecycle({
     requestType,
     apiUrl,
     stream,
+    debugKey,
     requestBody
 }) {
     const connectTimeout = parseInt(localStorage.getItem('gz_api_connect_timeout')) || 90000;
@@ -32,6 +33,7 @@ export function createRequestLifecycle({
     Object.assign(headers, provider.buildAuthHeaders(apiKey));
 
     startNetworkTrace({
+        debugKey,
         requestType,
         apiUrl,
         stream,
@@ -41,6 +43,7 @@ export function createRequestLifecycle({
 
     return {
         headers,
+        debugKey,
         connectTimeout,
         streamTimeout,
         throwIfAborted,

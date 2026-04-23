@@ -25,6 +25,8 @@ export async function completeJsonResponse({
     tagEnd,
     headerModel,
     headerInline,
+    requestType,
+    debugKey,
     onComplete
 }) {
     const resolvedData = data ?? await response.json();
@@ -40,6 +42,8 @@ export async function completeJsonResponse({
         tagEnd,
         headerModel,
         headerInline,
+        requestType,
+        debugKey,
         onComplete
     });
 }

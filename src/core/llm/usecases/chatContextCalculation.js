@@ -13,6 +13,7 @@ export async function executeChatContextCalculation({
         loadGlobalRegexes,
         getSafeContextLimit,
         trimHistoryForContextWindow,
+        getMemoryReserveEstimate,
         buildPromptWorkerPayload,
         processPromptAsync,
         buildPromptMemoryInjection,
@@ -32,6 +33,8 @@ export async function executeChatContextCalculation({
         const safeContextLimit = getSafeContextLimit(apiConfig.contextSize, apiConfig.maxTokens);
         const safeHistory = trimHistoryForContextWindow(history, safeContextLimit);
 
+        const memoryReserve = await getMemoryReserveEstimate(char, safeContextLimit);
+
         const payload = buildPromptWorkerPayload({
             char,
             history: safeHistory,
@@ -41,7 +44,8 @@ export async function executeChatContextCalculation({
             authorsNote,
             globalRegexes,
             sessionVars,
-            apiConfig
+            apiConfig,
+            memoryReserve
         });
 
         const result = await processPromptAsync(payload);
@@ -66,7 +70,8 @@ export async function executeChatContextCalculation({
 
         return buildContextCalculationResult(result, {
             vectorLoreTokens,
-            memoryTokens: memoryInjection.tokens || 0
+            memoryTokens: memoryInjection.tokens || 0,
+            memoryReserve
         });
     } catch (e) {
         console.error('Calculate context worker error', e);

@@ -1,4 +1,5 @@
 import { buildChatRequestPayload } from '@/core/llm/assemblers/requestAssemblers.js';
+import { runGenerationHook } from '@/core/extensions/extensionRegistry.js';
 import { executeRequest } from '@/core/services/llmApi.js';
 import { sendMessageNotification } from '@/core/services/notificationService.js';
 import { translations } from '@/utils/i18n.js';
@@ -22,6 +23,7 @@ export async function executeFinalChatRequest({
     reasoningEffort,
     maxTokens,
     stopString,
+    debugKey,
     controller,
     requestReasoning,
     tagStart,
@@ -30,7 +32,10 @@ export async function executeFinalChatRequest({
     onPreviewReady
 }) {
     const { onUpdate, onComplete, onError } = callbacks;
-    const { previewBody, requestBody } = buildChatRequestPayload({
+    const requestAssembly = await runGenerationHook('beforeRequestAssembly', {
+        requestType: 'chat',
+        debugKey,
+        char,
         providerId,
         model,
         messages,
@@ -42,25 +47,81 @@ export async function executeFinalChatRequest({
         stopString
     });
 
-    onPreviewReady?.(previewBody);
+    const {
+        providerId: effectiveProviderId = providerId,
+        model: effectiveModel = model,
+        messages: effectiveMessages = messages,
+        temperature: effectiveTemperature = temperature,
+        topP: effectiveTopP = topP,
+        stream: effectiveStream = stream,
+        reasoningEffort: effectiveReasoningEffort = reasoningEffort,
+        maxTokens: effectiveMaxTokens = maxTokens,
+        stopString: effectiveStopString = stopString
+    } = requestAssembly || {};
 
-    if (controller?.signal?.aborted) {
+    let { previewBody, requestBody } = buildChatRequestPayload({
+        providerId: effectiveProviderId,
+        model: effectiveModel,
+        messages: effectiveMessages,
+        temperature: effectiveTemperature,
+        topP: effectiveTopP,
+        stream: effectiveStream,
+        reasoningEffort: effectiveReasoningEffort,
+        maxTokens: effectiveMaxTokens,
+        stopString: effectiveStopString
+    });
+
+    const requestEnvelope = await runGenerationHook('beforeRequestSend', {
+        requestType: 'chat',
+        debugKey,
+        char,
+        providerId: effectiveProviderId,
+        apiUrl,
+        apiKey,
+        model: effectiveModel,
+        previewBody,
+        requestBody,
+        stream: effectiveStream,
+        controller,
+        requestReasoning,
+        tagStart,
+        tagEnd
+    });
+
+    const {
+        providerId: requestProviderId = effectiveProviderId,
+        apiUrl: requestApiUrl = apiUrl,
+        apiKey: requestApiKey = apiKey,
+        model: requestModel = effectiveModel,
+        previewBody: finalPreviewBody = previewBody,
+        requestBody: finalRequestBody = requestBody,
+        stream: requestStream = effectiveStream,
+        controller: requestController = controller,
+        requestReasoning: finalRequestReasoning = requestReasoning,
+        tagStart: finalTagStart = tagStart,
+        tagEnd: finalTagEnd = tagEnd
+    } = requestEnvelope || {};
+
+    onPreviewReady?.(finalPreviewBody);
+
+    if (requestController?.signal?.aborted) {
         if (onError) onError(new DOMException('Aborted', 'AbortError'));
         return;
     }
 
     try {
-        logger.debug('[GenerationService] Final Request:', requestBody);
+        logger.debug('[GenerationService] Final Request:', finalRequestBody);
         await executeRequest({
-            providerId,
-            apiUrl,
-            apiKey,
-            requestBody,
-            stream,
-            controller,
-            requestReasoning,
-            tagStart,
-            tagEnd,
+            providerId: requestProviderId,
+            apiUrl: requestApiUrl,
+            apiKey: requestApiKey,
+            requestBody: finalRequestBody,
+            stream: requestStream,
+            controller: requestController,
+            requestReasoning: finalRequestReasoning,
+            tagStart: finalTagStart,
+            tagEnd: finalTagEnd,
+            debugKey,
             requestType: 'chat',
             callbacks: { onUpdate, onComplete, onError }
         });

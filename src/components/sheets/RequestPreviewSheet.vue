@@ -1,8 +1,9 @@
 <script setup>
 import { ref } from 'vue';
 import SheetView from '@/components/ui/SheetView.vue';
-import { getLastPrompt } from '@/core/services/generationService.js';
-import { getLastNetworkTrace, isNetworkDebugEnabled, setNetworkDebugEnabled, clearLastNetworkTrace } from '@/core/services/networkDebugService.js';
+import { isNetworkDebugEnabled, setNetworkDebugEnabled } from '@/core/services/networkDebugService.js';
+import { getLastRequestPreviewSnapshot } from '@/core/states/requestPreviewState.js';
+import { clearRequestTrace } from '@/core/states/requestTraceState.js';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import HelpTip from '@/components/ui/HelpTip.vue';
@@ -17,9 +18,9 @@ const expandedMessages = ref(new Set());
 const debugEnabled = ref(isNetworkDebugEnabled());
 
 const open = () => {
-    const prompt = getLastPrompt();
-    previewData.value = prompt;
-    traceData.value = getLastNetworkTrace();
+    const snapshot = getLastRequestPreviewSnapshot();
+    previewData.value = snapshot.prompt;
+    traceData.value = snapshot.trace;
     debugEnabled.value = isNetworkDebugEnabled();
     expandedMessages.value.clear();
     if (sheet.value) sheet.value.open();
@@ -30,13 +31,13 @@ const toggleDebugCapture = () => {
     debugEnabled.value = next;
     setNetworkDebugEnabled(next);
     if (!next) {
-        clearLastNetworkTrace();
+        clearRequestTrace();
         traceData.value = null;
     }
 };
 
 const refreshTrace = () => {
-    traceData.value = getLastNetworkTrace();
+    traceData.value = getLastRequestPreviewSnapshot().trace;
 };
 
 const toggleMessage = (index) => {
@@ -117,7 +118,7 @@ defineExpose({ open });
                 </div>
             </div>
         </template>
-        <div class="preview-container" v-if="previewData">
+        <div class="preview-container" v-if="previewData || traceData">
             <div v-if="previewTab === 'formatted'">
                 <div v-if="traceData" class="trace-summary-card">
                     <div class="preview-section-title">Network Trace</div>
@@ -159,39 +160,43 @@ defineExpose({ open });
                     </div>
                 </div>
 
-                <div class="preview-section-title">{{ t('section_gen_params') || 'Parameters' }}</div>
-                <div class="params-grid">
-                    <div v-for="(value, key) in getParams(previewData)" :key="key" class="param-item">
-                        <div class="param-label">{{ key }}</div>
-                        <div class="param-value">{{ formatParamValue(value) }}</div>
-                    </div>
-                </div>
-                <div class="preview-section-title">{{ t('stat_messages') }} ({{ previewData.messages ? previewData.messages.length : 0 }})</div>
-                <div class="messages-list">
-                    <div v-for="(msg, index) in previewData.messages" :key="index" class="message-card">
-                        <div class="message-header" @click="toggleMessage(index)">
-                            <div class="message-header-content">
-                                <div class="message-meta-row">
-                                    <div class="message-role" :class="msg.role">{{ msg.role }}</div>
-                                    <div class="message-block-name" v-if="msg.blockName">{{ msg.blockName }}</div>
-                                </div>
-                                <div class="message-preview-text" v-if="!expandedMessages.has(index)">
-                                    {{ typeof msg.content === 'string' ? (msg.content.slice(0, 60) + (msg.content.length > 60 ? '...' : '')) : '[Complex Content]' }}
-                                </div>
-                            </div>
-                            <div class="message-toggle-icon" :class="{ rotated: expandedMessages.has(index) }">
-                                <svg viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
-                            </div>
-                        </div>
-                        <div class="message-body" v-if="expandedMessages.has(index)">
-                            <pre>{{ getMessageContent(msg) }}</pre>
+                <template v-if="previewData">
+                    <div class="preview-section-title">{{ t('section_gen_params') || 'Parameters' }}</div>
+                    <div class="params-grid">
+                        <div v-for="(value, key) in getParams(previewData)" :key="key" class="param-item">
+                            <div class="param-label">{{ key }}</div>
+                            <div class="param-value">{{ formatParamValue(value) }}</div>
                         </div>
                     </div>
-                </div>
+                    <div class="preview-section-title">{{ t('stat_messages') }} ({{ previewData.messages ? previewData.messages.length : 0 }})</div>
+                    <div class="messages-list">
+                        <div v-for="(msg, index) in previewData.messages" :key="index" class="message-card">
+                            <div class="message-header" @click="toggleMessage(index)">
+                                <div class="message-header-content">
+                                    <div class="message-meta-row">
+                                        <div class="message-role" :class="msg.role">{{ msg.role }}</div>
+                                        <div class="message-block-name" v-if="msg.blockName">{{ msg.blockName }}</div>
+                                    </div>
+                                    <div class="message-preview-text" v-if="!expandedMessages.has(index)">
+                                        {{ typeof msg.content === 'string' ? (msg.content.slice(0, 60) + (msg.content.length > 60 ? '...' : '')) : '[Complex Content]' }}
+                                    </div>
+                                </div>
+                                <div class="message-toggle-icon" :class="{ rotated: expandedMessages.has(index) }">
+                                    <svg viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
+                                </div>
+                            </div>
+                            <div class="message-body" v-if="expandedMessages.has(index)">
+                                <pre>{{ getMessageContent(msg) }}</pre>
+                            </div>
+                        </div>
+                    </div>
+                </template>
             </div>
             <div v-else class="raw-block">
-                <div class="preview-section-title">Prompt JSON</div>
-                <pre>{{ getRawJson() }}</pre>
+                <template v-if="previewData">
+                    <div class="preview-section-title">Prompt JSON</div>
+                    <pre>{{ getRawJson() }}</pre>
+                </template>
                 <template v-if="traceData">
                     <div class="preview-section-title">Request JSON</div>
                     <pre>{{ getTraceRequestJson() }}</pre>

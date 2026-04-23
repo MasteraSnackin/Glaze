@@ -11,7 +11,7 @@ import { getChatData, createNewSession, deleteSession, renameSession } from '@/u
 import { importSillyTavernChat, exportSillyTavernChat, exportGlazeChat, pickChatFile } from '@/core/services/chatImporter.js';
 import { allPersonas, loadPersonas } from '@/core/states/personaState.js';
 import { APP_EVENTS } from '@/core/events/eventNames.js';
-import { subscribeLegacyCompatibleEvent } from '@/core/events/legacyCompatibleSubscription.js';
+import { subscribeAppEvent } from '@/core/events/eventHub.js';
 
 const props = defineProps({
   activeCategory: { type: String, default: 'all' },
@@ -498,27 +498,11 @@ defineExpose({ openNewChatPicker });
 
 onMounted(() => {
     loadData();
-    unsubscribeSyncDataRefreshed = subscribeLegacyCompatibleEvent({
-        appEventName: APP_EVENTS.domain.sync.dataRefreshed,
-        legacyEventName: 'sync-data-refreshed',
-        listener: loadData
-    });
-    unsubscribeChatUpdated = subscribeLegacyCompatibleEvent({
-        appEventName: APP_EVENTS.domain.chat.updated,
-        legacyEventName: 'chat-updated',
-        listener: loadData
-    });
+    unsubscribeSyncDataRefreshed = subscribeAppEvent(APP_EVENTS.domain.sync.dataRefreshed, loadData);
+    unsubscribeChatUpdated = subscribeAppEvent(APP_EVENTS.domain.chat.updated, loadData);
     window.addEventListener('character-updated', loadData);
-    unsubscribeGenerationStarted = subscribeLegacyCompatibleEvent({
-        appEventName: APP_EVENTS.domain.generation.started,
-        legacyEventName: 'chat-generation-started',
-        listener: onGenerationStarted
-    });
-    unsubscribeGenerationEnded = subscribeLegacyCompatibleEvent({
-        appEventName: APP_EVENTS.domain.generation.ended,
-        legacyEventName: 'chat-generation-ended',
-        listener: onGenerationEnded
-    });
+    unsubscribeGenerationStarted = subscribeAppEvent(APP_EVENTS.domain.generation.started, onGenerationStarted);
+    unsubscribeGenerationEnded = subscribeAppEvent(APP_EVENTS.domain.generation.ended, onGenerationEnded);
     window.addEventListener('header-search', (e) => searchQuery.value = e.detail);
 });
 

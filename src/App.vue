@@ -58,7 +58,7 @@ import { initSyncState, syncProvider } from '@/core/states/syncState.js';
 import { fullPull, checkSyncReadiness } from '@/core/services/syncService.js';
 import { startTracking } from '@/core/services/timeTracker.js';
 import { APP_EVENTS } from '@/core/events/eventNames.js';
-import { subscribeLegacyCompatibleEvent } from '@/core/events/legacyCompatibleSubscription.js';
+import { subscribeAppEvent } from '@/core/events/eventHub.js';
 
 
 
@@ -770,19 +770,11 @@ onMounted(async () => {
     window.addEventListener('open-sync-sheet', onOpenSyncSheet);
     window.addEventListener('open-conflict-sheet', onOpenConflictSheet);
     window.addEventListener('open-preset-sheet', onOpenPresetSheet);
-    unsubscribeOpenApiSheet = subscribeLegacyCompatibleEvent({
-        appEventName: APP_EVENTS.nav.openApiSheet,
-        legacyEventName: 'open-api-sheet',
-        listener: onOpenApiSheet
-    });
+    unsubscribeOpenApiSheet = subscribeAppEvent(APP_EVENTS.nav.openApiSheet, onOpenApiSheet);
     window.addEventListener('header-setup-editor', onHeaderSetupEditor);
     window.addEventListener('header-setup-generation', onHeaderSetupGeneration);
     window.addEventListener('header-reset', onHeaderReset);
-    unsubscribeSyncDataRefreshed = subscribeLegacyCompatibleEvent({
-        appEventName: APP_EVENTS.domain.sync.dataRefreshed,
-        legacyEventName: 'sync-data-refreshed',
-        listener: onSyncDataRefreshed
-    });
+    unsubscribeSyncDataRefreshed = subscribeAppEvent(APP_EVENTS.domain.sync.dataRefreshed, onSyncDataRefreshed);
 
     window.addEventListener('open-glossary', (e) => {
         if (isDesktop.value) {

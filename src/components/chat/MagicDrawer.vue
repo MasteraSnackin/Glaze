@@ -9,7 +9,7 @@ import { estimateTokens } from '@/utils/tokenizer.js';
 import { getEffectivePersona } from '@/core/states/personaState.js';
 import { getEffectivePreset, presetState } from '@/core/states/presetState.js';
 import { db } from '@/utils/db.js';
-import { getLastPrompt } from '@/core/services/generationService.js';
+import { getLastRequestPreviewSnapshot } from '@/core/states/requestPreviewState.js';
 import { getImageGenSettings } from '@/core/services/imageGenService.js';
 import { replaceMacros } from '@/utils/macroEngine.js';
 import { normalizeBlockId } from '@/utils/presetBlockIds.js';
@@ -422,7 +422,7 @@ const personaTokens = computed(() => {
 });
 
 const generationTokens = computed(() => {
-    const prompt = getLastPrompt();
+    const prompt = getLastRequestPreviewSnapshot().prompt;
     if (!prompt || !prompt.messages) return 0;
     return prompt.messages.reduce((acc, m) => acc + estimateTokens(m.content), 0);
 });
