@@ -1917,6 +1917,7 @@ const displayMessages = computed(() => {
     
     const res = [];
     let lastDateKey = null;
+    let visibleIndex = 0;
     
     for (let i = 0; i < msgs.length; i++) {
         const msg = msgs[i];
@@ -1929,14 +1930,17 @@ const displayMessages = computed(() => {
             lastDateKey = dateKey;
         }
         
-        if (i === cutoffIndex.value && i > 0) {
-            res.push({ type: 'cutoff', id: 'context-cutoff' });
+        if (!msg.isHidden) {
+            if (visibleIndex === cutoffIndex.value && visibleIndex > 0) {
+                res.push({ type: 'cutoff', id: 'context-cutoff' });
+            }
+            visibleIndex++;
         }
         
         res.push({ type: 'message', data: msg, originalIndex: i, id: `msg_${msg.timestamp}_${i}` });
     }
     
-    if (cutoffIndex.value >= msgs.length && msgs.length > 0) {
+    if (cutoffIndex.value >= visibleIndex && visibleIndex > 0) {
         res.push({ type: 'cutoff', id: 'context-cutoff-end' });
     }
     
@@ -2371,8 +2375,9 @@ function invalidateContextCache() {
 
 async function updateSessionMessage(char, msgIndex, newMsgData) {
     let data = await getChatData(char.id);
-    if (data && data.sessions[data.currentId]) {
-        data.sessions[data.currentId][msgIndex] = newMsgData;
+    const sessionId = char.sessionId || data.currentId;
+    if (data && data.sessions[sessionId]) {
+        data.sessions[sessionId][msgIndex] = newMsgData;
         await db.saveChat(char.id, data);
     }
 }
