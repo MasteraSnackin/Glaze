@@ -818,6 +818,7 @@ self.onmessage = async function (e) {
             const staticMessages = messages.filter(m => !m.isHistory);
             const historyMessages = messages.filter(m => m.isHistory);
             const loreReserveTokens = getLorebookReserve(payload.globalSettings, safeContext);
+            const memoryReserveTokens = Math.max(0, Math.floor(payload.memoryReserve || 0));
 
             const sourceKeys = ['character', 'preset', 'summary', 'authorsNote', 'lorebook', 'vectorLore', 'history'];
             const sourceTotals = {};
@@ -847,6 +848,7 @@ self.onmessage = async function (e) {
                 lorebook: sourceTotals.lorebook,
                 vectorLore: sourceTotals.vectorLore,
                 lorebookReserve: loreReserveTokens,
+                memoryReserve: memoryReserveTokens,
                 history: 0,
                 fixedBase: 0,
                 fixedTotal: 0,
@@ -860,7 +862,7 @@ self.onmessage = async function (e) {
 
             // Lorebook and vectorLore are inside reserve, not in fixedBase
             breakdown.fixedBase = breakdown.character + breakdown.preset + breakdown.summary + breakdown.authorsNote;
-            breakdown.fixedTotal = breakdown.fixedBase + breakdown.lorebookReserve;
+            breakdown.fixedTotal = breakdown.fixedBase + breakdown.lorebookReserve + breakdown.memoryReserve;
 
             let availableForHistory = safeContext - breakdown.fixedTotal;
             breakdown.availableForHistory = Math.max(0, availableForHistory);
@@ -904,7 +906,7 @@ self.onmessage = async function (e) {
                 }
             }
 
-            breakdown.totalUsed = breakdown.fixedBase + breakdown.lorebookReserve + breakdown.history;
+            breakdown.totalUsed = breakdown.fixedBase + breakdown.lorebookReserve + breakdown.memoryReserve + breakdown.history;
             breakdown.remaining = Math.max(0, contextSize - breakdown.totalUsed);
 
             self.postMessage({

@@ -110,19 +110,22 @@ function trimHistoryForContextWindow(history, safeContextLimit) {
     return history;
 }
 
-function buildMergedContextBreakdown(contextBreakdown, { vectorLoreTokens = 0, memoryTokens = 0 } = {}) {
+function buildMergedContextBreakdown(contextBreakdown, { vectorLoreTokens = 0, memoryTokens = 0, memoryReserve = 0 } = {}) {
     if (!contextBreakdown) return null;
+
+    const actualMemory = memoryTokens || memoryReserve;
 
     return {
         ...contextBreakdown,
         memory: memoryTokens,
+        memoryReserve,
         vectorLore: (contextBreakdown.vectorLore || 0) + vectorLoreTokens,
         summaryBase: contextBreakdown.summary || 0,
-        summary: (contextBreakdown.summary || 0) + memoryTokens,
-        fixedBase: (contextBreakdown.fixedBase || 0) + memoryTokens,
-        fixedTotal: (contextBreakdown.fixedTotal || 0) + memoryTokens,
-        totalUsed: (contextBreakdown.totalUsed || 0) + memoryTokens,
-        remaining: Math.max(0, (contextBreakdown.remaining || 0) - memoryTokens)
+        summary: (contextBreakdown.summary || 0) + actualMemory,
+        fixedBase: (contextBreakdown.fixedBase || 0) + actualMemory,
+        fixedTotal: (contextBreakdown.fixedTotal || 0),
+        totalUsed: (contextBreakdown.totalUsed || 0),
+        remaining: Math.max(0, (contextBreakdown.remaining || 0))
     };
 }
 
@@ -168,7 +171,8 @@ function buildPromptWorkerPayload({
     guidanceType,
     globalRegexes,
     sessionVars,
-    apiConfig
+    apiConfig,
+    memoryReserve = 0
 }) {
     return JSON.parse(JSON.stringify({
         char,
@@ -190,8 +194,32 @@ function buildPromptWorkerPayload({
         activations: lorebookState.activations,
         globalRegexes,
         sessionVars,
-        apiConfig
+        apiConfig,
+        memoryReserve
     }));
+}
+
+async function getMemoryReserveEstimate(char, safeContext) {
+    const charId = char?.id;
+    const sessionId = char?.sessionId;
+    if (!charId || !sessionId) return 0;
+    try {
+        const chatData = await db.getChat(charId);
+        const memoryBook = chatData?.memoryBooks?.[sessionId];
+        const settings = memoryBook?.settings || {};
+        const activeEntries = (Array.isArray(memoryBook?.entries) ? memoryBook.entries : [])
+            .filter(e => e && (e.status || 'active') === 'active' && (e.content || '').trim());
+        if (!settings.enabled || !activeEntries.length) return 0;
+        const maxInjected = Math.max(1, Math.min(20, settings.maxInjectedEntries || 3));
+        let totalContentLen = 0;
+        for (const entry of activeEntries.slice(0, maxInjected)) {
+            totalContentLen += (entry.content || '').trim().length;
+        }
+        const estimatedTokens = estimateTokens('M'.repeat(totalContentLen));
+        return Math.min(estimatedTokens, Math.floor(safeContext * 0.35));
+    } catch (e) {
+        return 0;
+    }
 }
 
 function resolvePromptCutoffIndex(result) {
@@ -243,12 +271,13 @@ function estimateVectorLoreTokens(entries = []) {
     return entries.reduce((sum, entry) => sum + estimateTokens(entry?.content || ''), 0);
 }
 
-function buildContextCalculationResult(result, { vectorLoreTokens = 0, memoryTokens = 0 } = {}) {
+function buildContextCalculationResult(result, { vectorLoreTokens = 0, memoryTokens = 0, memoryReserve = 0 } = {}) {
     return {
         cutoffIndex: resolvePromptCutoffIndex(result),
         contextBreakdown: buildMergedContextBreakdown(result?.contextBreakdown, {
             vectorLoreTokens,
-            memoryTokens
+            memoryTokens,
+            memoryReserve
         })
     };
 }
@@ -324,6 +353,8 @@ export async function generateChatResponse({
         const safeContextLimit = getSafeContextLimit(contextSize, maxTokens);
         safeHistory = trimHistoryForContextWindow(history, safeContextLimit);
 
+        const memoryReserve = await getMemoryReserveEstimate(char, safeContextLimit);
+
         const payload = buildPromptWorkerPayload({
             char,
             history: safeHistory,
@@ -335,7 +366,8 @@ export async function generateChatResponse({
             guidanceType: type,
             globalRegexes,
             sessionVars,
-            apiConfig
+            apiConfig,
+            memoryReserve
         });
 
         result = await processPromptAsync(payload);
@@ -544,6 +576,8 @@ export async function calculateContext({ char, history, authorsNote, summary }) 
         const safeContextLimit = getSafeContextLimit(apiConfig.contextSize, apiConfig.maxTokens);
         const safeHistory = trimHistoryForContextWindow(history, safeContextLimit);
 
+        const memoryReserve = await getMemoryReserveEstimate(char, safeContextLimit);
+
         const payload = buildPromptWorkerPayload({
             char,
             history: safeHistory,
@@ -553,7 +587,8 @@ export async function calculateContext({ char, history, authorsNote, summary }) 
             authorsNote: anData,
             globalRegexes,
             sessionVars,
-            apiConfig
+            apiConfig,
+            memoryReserve
         });
 
         const result = await processPromptAsync(payload);
@@ -579,7 +614,8 @@ export async function calculateContext({ char, history, authorsNote, summary }) 
 
         return buildContextCalculationResult(result, {
             vectorLoreTokens,
-            memoryTokens: memoryInjection.tokens || 0
+            memoryTokens: memoryInjection.tokens || 0,
+            memoryReserve
         });
     } catch (e) {
         console.error("Calculate context worker error", e);

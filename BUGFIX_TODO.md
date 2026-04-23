@@ -55,30 +55,35 @@
 ## Medium
 
 ### BUG-4: Tokenizer cutoff index mismatch with hidden messages
-**Status:** not fixed  
+**Status:** fixed  
 **Symptom:** Tokenizer cutoff line appears at wrong position when hidden messages exist.  
-**Root cause:** `cutoffIndex` is calculated against a filtered list (`!m.isHidden`) but `displayMessages` inserts the cutoff marker while iterating the full unfiltered `currentMessages`. The index doesn't map correctly.  
-**Fix:** In `displayMessages`, track the visible-message index separately from the raw index, and compare the visible index against `cutoffIndex.value`. Or: include hidden messages in the cutoff index calculation but mark them accordingly.
+**Root cause:** `cutoffIndex` is calculated against a filtered list (`!m.isHidden`) but `displayMessages` was comparing raw index `i` against it.  
+**Fix applied:** `displayMessages` now tracks a separate `visibleIndex` counter that increments only for non-hidden messages, and compares `visibleIndex` against `cutoffIndex.value`.
 
 **Files:** `src/views/ChatView.vue`
 
 ---
 
 ### BUG-5: Memory tokens not factored into cutoff calculation
-**Status:** not fixed  
+**Status:** fixed  
 **Symptom:** Context breakdown may report more remaining space than actually available when memory injection is active.  
-**Root cause:** `updateContextCutoff` calculates cutoff before memory is injected. The post-hoc `buildMergedContextBreakdown` only adjusts `remaining` retroactively, but `cutoffIndex` and `availableForHistory` were already set by the worker without knowing about memory overhead.  
-**Fix:** Reserve memory budget upfront in the worker payload (pass estimated memory tokens as a `reservedContext` parameter) so the worker's cutoff accounts for memory space before calculating the history window.
+**Root cause:** `calculateContext` ran the worker first, then added memory tokens post-hoc. The worker's `availableForHistory` and `cutoffIndex` didn't account for memory overhead.  
+**Fix applied:**
+1. Added `getMemoryReserveEstimate()` — reads active memory entries from DB, estimates token cost, caps at 35% of safeContext
+2. Memory reserve passed to `buildPromptWorkerPayload` as `memoryReserve`
+3. Worker adds `memoryReserve` to `fixedTotal` alongside `lorebookReserve`, reducing `availableForHistory` upfront
+4. `buildMergedContextBreakdown` and `buildContextCalculationResult` include `memoryReserve` in breakdown
+5. Both `calculateContext` and `generateChatResponse` compute memory reserve before calling worker
 
-**Files:** `src/core/llm/usecases/chatContextCalculation.js`, `src/workers/generationWorker.js`, `src/core/services/generationService.js`
+**Files:** `src/core/services/generationService.js`, `src/workers/generationWorker.js`
 
 ---
 
 ### BUG-6: `updateSessionMessage` uses `data.currentId` instead of actual sessionId
-**Status:** not fixed  
+**Status:** fixed  
 **Symptom:** Message updates may be written to wrong session after session switch.  
 **Root cause:** `updateSessionMessage` reads `data.currentId` from DB, but if user navigated to a different session, `currentId` may not match `activeChatChar.sessionId`.  
-**Fix:** Pass the actual `activeChatChar.sessionId` explicitly to `updateSessionMessage` instead of relying on `data.currentId`.
+**Fix applied:** Uses `char.sessionId || data.currentId` — prefers the actual active session.
 
 **Files:** `src/views/ChatView.vue`
 
