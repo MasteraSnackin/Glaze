@@ -108,6 +108,39 @@ const getAdapter = () => {
     return null;
 };
 
+const afterConnect = async () => {
+    const adapter = getAdapter();
+    if (!adapter) return;
+
+    const hasCloudData = await cloudHasData(adapter);
+    const hasKey = await hasSyncKey();
+    if (hasKey) {
+        if (hasCloudData) {
+            try {
+                const key = await getSyncKey();
+                if (!key) throw new Error('Failed to load sync key');
+                await verifyCloudKey(adapter, key);
+            } catch (e) {
+                await deleteSyncKey();
+                localSyncStatus.value = 'no_key';
+                restoreSuccess.value = false;
+                setSyncError('Saved recovery phrase does not match the cloud backup for this account. Restore the correct phrase or skip encryption.');
+                return;
+            }
+        }
+
+        localSyncStatus.value = 'connected';
+        restoreSuccess.value = false;
+        return;
+    }
+
+    if (hasCloudData) {
+        localSyncStatus.value = 'has_cloud_data';
+    } else {
+        localSyncStatus.value = 'ready';
+    }
+};
+
 const connectDropbox = async () => {
     isConnecting.value = true;
     try {
@@ -139,39 +172,6 @@ const connectGdrive = async () => {
         alert(e.message);
     } finally {
         isConnectingGdrive.value = false;
-    }
-};
-
-const afterConnect = async () => {
-    const adapter = getAdapter();
-    if (!adapter) return;
-
-    const hasCloudData = await cloudHasData(adapter);
-    const hasKey = await hasSyncKey();
-    if (hasKey) {
-        if (hasCloudData) {
-            try {
-                const key = await getSyncKey();
-                if (!key) throw new Error('Failed to load sync key');
-                await verifyCloudKey(adapter, key);
-            } catch (e) {
-                await deleteSyncKey();
-                localSyncStatus.value = 'no_key';
-                restoreSuccess.value = false;
-                setSyncError('Saved recovery phrase does not match the cloud backup for this account. Restore the correct phrase or skip encryption.');
-                return;
-            }
-        }
-
-        localSyncStatus.value = 'connected';
-        restoreSuccess.value = false;
-        return;
-    }
-
-    if (hasCloudData) {
-        localSyncStatus.value = 'has_cloud_data';
-    } else {
-        localSyncStatus.value = 'ready';
     }
 };
 
@@ -376,7 +376,9 @@ onMounted(async () => {
             <!-- Not connected: provider selection -->
             <div v-if="!syncProvider" class="bs-sections">
                 <div class="bs-section">
-                    <div class="bs-section-title">{{ t('sync_connect_provider') || 'Connect a Cloud Provider' }}</div>
+                    <div class="bs-section-title">
+{{ t('sync_connect_provider') || 'Connect a Cloud Provider' }}
+</div>
                     
                     <button v-if="isDropboxAuthAvailable" class="bs-btn bs-connect-btn" @click="connectDropbox" :disabled="isConnecting || isConnectingGdrive">
                         <svg viewBox="0 0 24 24"><path d="M7.5 2L2 6l3.75 3L2 12l5.5 4 3.75-3 3.75 3 5.5-4-4.5-3L20.5 6 15 2l-3.75 3L7.5 2zm3.75 10L7.5 15l3.75 3 3.75-3-3.75-3zM7.5 16l-1.88 1.5L3 19l5.5 4 3.75-3-4.75-4zm9-4l1.88-1.5L21 8l-5.5-4-3.75 3L16.5 8l-1.88 1.5L11 12l5.5 4 3.75-3-4.75-4z"/></svg>
@@ -410,7 +412,9 @@ onMounted(async () => {
                 <div class="bs-separator"></div>
 
                 <div class="bs-section">
-                    <div class="bs-section-title">{{ t('sync_restore_key') || 'Restore from Recovery Phrase' }}</div>
+                    <div class="bs-section-title">
+{{ t('sync_restore_key') || 'Restore from Recovery Phrase' }}
+</div>
                     <button class="bs-btn bs-secondary-btn" @click="startRestore">
                         <svg viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 10.99h7c-.53 4.12-3.28 7.79-7 8.94V12H5V6.3l7-3.11v8.8z"/></svg>
                         <span>{{ t('sync_enter_phrase') || 'Enter Recovery Phrase' }}</span>
@@ -428,8 +432,12 @@ onMounted(async () => {
                             <span class="sync-provider-name">{{ providerLabel }}</span>
                             <span class="sync-status-dot" :class="{ connected: localSyncStatus === 'connected' && syncStatus !== SYNC_STATUS.ERROR, error: syncStatus === SYNC_STATUS.ERROR, syncing: syncStatus === SYNC_STATUS.SYNCING }"></span>
                         </div>
-                        <div class="sync-status-text" v-if="accountInfo">{{ accountInfo.email }}</div>
-                        <div class="sync-status-text">{{ statusLabel }}</div>
+                        <div class="sync-status-text" v-if="accountInfo">
+{{ accountInfo.email }}
+</div>
+                        <div class="sync-status-text">
+{{ statusLabel }}
+</div>
                     </div>
 
                     <button v-if="syncConflicts.length > 0" class="sync-resolve-btn" @click="openConflictSheet">
@@ -439,10 +447,16 @@ onMounted(async () => {
 
                     <div v-if="syncConflicts.length > 0" class="sync-conflict-banner">
                         <div class="sync-conflict-banner-copy">
-                            <div class="sync-conflict-banner-title">{{ t('sync_conflicts_title') || 'Sync Conflicts' }}</div>
-                            <div class="sync-conflict-banner-text">{{ syncConflicts.length }} {{ t('sync_conflicts_pending') || 'unresolved conflict(s)' }}</div>
+                            <div class="sync-conflict-banner-title">
+{{ t('sync_conflicts_title') || 'Sync Conflicts' }}
+</div>
+                            <div class="sync-conflict-banner-text">
+{{ syncConflicts.length }} {{ t('sync_conflicts_pending') || 'unresolved conflict(s)' }}
+</div>
                         </div>
-                        <button class="sync-inline-conflict-btn" @click="openConflictSheet">{{ t('sync_resolve') || 'Resolve' }}</button>
+                        <button class="sync-inline-conflict-btn" @click="openConflictSheet">
+{{ t('sync_resolve') || 'Resolve' }}
+</button>
                     </div>
 
                     <!-- Sync result -->
@@ -450,7 +464,9 @@ onMounted(async () => {
                         <span v-if="syncResult.type === 'push'">{{ t('sync_push_result') || 'Pushed' }}: {{ syncResult.pushed }} {{ t('sync_items') || 'items' }}<template v-if="formatSyncBreakdown(syncResult)"> ({{ formatSyncBreakdown(syncResult) }})</template></span>
                         <template v-else-if="syncResult.type === 'pull'">
                             <span>{{ t('sync_pull_result') || 'Pulled' }}: {{ syncResult.pulled }} {{ t('sync_items') || 'items' }}<template v-if="formatSyncBreakdown(syncResult)"> ({{ formatSyncBreakdown(syncResult) }})</template>, {{ syncResult.conflicts.length }} {{ t('sync_conflicts') || 'conflicts' }}</span>
-                            <button v-if="syncResult.conflicts.length > 0" class="sync-inline-conflict-btn" @click="openConflictSheet">{{ t('sync_resolve') || 'Resolve' }}</button>
+                            <button v-if="syncResult.conflicts.length > 0" class="sync-inline-conflict-btn" @click="openConflictSheet">
+{{ t('sync_resolve') || 'Resolve' }}
+</button>
                         </template>
                         <span v-else-if="syncResult.type === 'wipe'">{{ t('sync_wipe_result') || 'Deleted' }}: {{ syncResult.deleted }}/{{ syncResult.total }} {{ t('sync_items') || 'items' }}</span>
                         <span v-else>{{ t('sync_full_done') || 'Full sync complete' }}</span>
@@ -459,7 +475,9 @@ onMounted(async () => {
 
                 <!-- Progress bar -->
                 <div v-if="syncStatus === SYNC_STATUS.SYNCING && progressLabel" class="sync-progress">
-                    <div class="sync-progress-label">{{ progressLabel }}</div>
+                    <div class="sync-progress-label">
+{{ progressLabel }}
+</div>
                     <div class="sync-progress-bar-container">
                         <div class="sync-progress-bar" :style="{ width: syncProgress.total > 0 ? (syncProgress.current / syncProgress.total * 100) + '%' : '0%' }"></div>
                     </div>
@@ -467,8 +485,12 @@ onMounted(async () => {
 
                 <!-- Encryption setup (optional) -->
                 <div v-if="localSyncStatus !== 'connected'" class="bs-section">
-                    <div class="bs-section-title">{{ t('sync_encryption') || 'Encryption' }}</div>
-                    <div class="bs-hint">{{ t('sync_encryption_optional') || 'Optionally encrypt your data before uploading to the cloud. Without encryption, data is stored as plain JSON.' }}</div>
+                    <div class="bs-section-title">
+{{ t('sync_encryption') || 'Encryption' }}
+</div>
+                    <div class="bs-hint">
+{{ t('sync_encryption_optional') || 'Optionally encrypt your data before uploading to the cloud. Without encryption, data is stored as plain JSON.' }}
+</div>
                     <button class="bs-btn bs-primary-btn" @click="setupEncryption" :disabled="localSyncStatus === 'has_cloud_data'">
                         <svg viewBox="0 0 24 24"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
                         <span>{{ t('sync_setup_encryption') || 'Set Up Encryption' }}</span>
@@ -484,7 +506,9 @@ onMounted(async () => {
 
                 <!-- Push/Pull buttons (available with or without encryption) -->
                 <div v-if="localSyncStatus === 'connected' || localSyncStatus === 'ready'" class="bs-section">
-                    <div class="bs-section-title">{{ t('sync_manual') || 'Manual Sync' }}</div>
+                    <div class="bs-section-title">
+{{ t('sync_manual') || 'Manual Sync' }}
+</div>
                     <div class="sync-actions-row">
                         <button class="bs-btn bs-push-btn" @click="doPush" :disabled="isSyncing || syncStatus === SYNC_STATUS.SYNCING">
                             <svg viewBox="0 0 24 24"><path d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z"/></svg>
@@ -499,11 +523,15 @@ onMounted(async () => {
 
                 <!-- Auto-sync settings -->
                 <div v-if="localSyncStatus === 'connected' || localSyncStatus === 'ready'" class="bs-section">
-                    <div class="bs-section-title">{{ t('sync_auto_sync') || 'Auto-Sync' }}</div>
+                    <div class="bs-section-title">
+{{ t('sync_auto_sync') || 'Auto-Sync' }}
+</div>
                     <div class="settings-item-checkbox" @click="autoSyncEnabled = !autoSyncEnabled" style="cursor: pointer; padding: 8px 0;">
                         <div class="settings-text-col">
                             <label style="cursor: pointer;">{{ t('sync_enable_auto') || 'Enable Auto-Sync' }}</label>
-                            <div class="settings-desc">{{ t('sync_auto_desc') || 'Automatically sync after every N messages' }}</div>
+                            <div class="settings-desc">
+{{ t('sync_auto_desc') || 'Automatically sync after every N messages' }}
+</div>
                         </div>
                         <input type="checkbox" class="vk-switch" :checked="autoSyncEnabled" style="pointer-events: none;">
                     </div>
@@ -517,11 +545,15 @@ onMounted(async () => {
                 <div class="bs-separator"></div>
 
                 <div class="bs-section">
-                    <div class="bs-section-title">{{ t('section_sync_settings') || 'Sync Settings' }}</div>
+                    <div class="bs-section-title">
+{{ t('section_sync_settings') || 'Sync Settings' }}
+</div>
                     <div class="settings-item-checkbox" @click="syncIncludeApiKeys = !syncIncludeApiKeys">
                         <div class="settings-text-col">
                             <label>{{ t('label_sync_include_keys') || 'Include API Keys in Sync' }}</label>
-                            <div class="settings-desc">{{ t('desc_sync_include_keys') || 'Send provider API keys to cloud backup' }}</div>
+                            <div class="settings-desc">
+{{ t('desc_sync_include_keys') || 'Send provider API keys to cloud backup' }}
+</div>
                         </div>
                         <input type="checkbox" class="vk-switch" :checked="syncIncludeApiKeys" @change="syncIncludeApiKeys = $event.target.checked" style="pointer-events: none;">
                     </div>
@@ -544,8 +576,12 @@ onMounted(async () => {
             <!-- Recovery phrase modal -->
             <div v-if="showRecoveryPhrase" class="bs-overlay" @click.self="confirmRecoveryPhrase">
                 <div class="bs-modal">
-                    <div class="bs-modal-title">{{ t('sync_recovery_title') || 'Save Your Recovery Phrase' }}</div>
-                    <div class="bs-modal-desc">{{ t('sync_recovery_desc') || 'Write down these 12 words and keep them safe. You will need them to decrypt your data on a new device. This phrase will NOT be shown again.' }}</div>
+                    <div class="bs-modal-title">
+{{ t('sync_recovery_title') || 'Save Your Recovery Phrase' }}
+</div>
+                    <div class="bs-modal-desc">
+{{ t('sync_recovery_desc') || 'Write down these 12 words and keep them safe. You will need them to decrypt your data on a new device. This phrase will NOT be shown again.' }}
+</div>
                     <div class="recovery-phrase-box">
                         {{ recoveryPhrase }}
                     </div>
@@ -558,10 +594,16 @@ onMounted(async () => {
             <!-- Restore phrase modal -->
             <div v-if="showRestorePhrase" class="bs-overlay" @click.self="showRestorePhrase = false">
                 <div class="bs-modal">
-                    <div class="bs-modal-title">{{ t('sync_restore_title') || 'Enter Recovery Phrase' }}</div>
-                    <div class="bs-modal-desc">{{ t('sync_restore_desc') || 'Enter the 12-word recovery phrase from when you first set up encryption.' }}</div>
+                    <div class="bs-modal-title">
+{{ t('sync_restore_title') || 'Enter Recovery Phrase' }}
+</div>
+                    <div class="bs-modal-desc">
+{{ t('sync_restore_desc') || 'Enter the 12-word recovery phrase from when you first set up encryption.' }}
+</div>
                     <textarea v-model="restorePhraseInput" class="restore-input" placeholder="word1 word2 word3..." rows="3" @keydown.enter.prevent="doRestore"></textarea>
-                    <div v-if="restoreError" class="sync-error-msg">{{ restoreError }}</div>
+                    <div v-if="restoreError" class="sync-error-msg">
+{{ restoreError }}
+</div>
                     <button class="bs-btn bs-primary-btn" @click="doRestore" :disabled="isRestoringKey || !restorePhraseInput.trim()" style="width:100%">
                         {{ isRestoringKey ? (t('sync_restoring') || 'Restoring...') : (t('sync_restore_btn') || 'Restore Key') }}
                     </button>

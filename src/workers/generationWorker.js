@@ -165,8 +165,8 @@ function scanLorebooksPure(history, char, textToScan, chatId, lorebooks, globalS
     if (activeLorebooks.length === 0) return [];
 
     const maxInjectedEntries = Math.max(1, Math.min(100, Number(globalSettings?.maxInjectedEntries || 5)));
-    let allRelevantEntries = [];
-    let candidates = [];
+    const allRelevantEntries = [];
+    const candidates = [];
 
     activeLorebooks.forEach(lb => {
         lb.entries.forEach(entry => {
@@ -364,7 +364,7 @@ function buildPromptMessagesWorker(args) {
     let mergeSourcesBuffer = [];
     let mergeContentBuffer = [];
     let allLoreEntries = [];
-    let notifyObj = { varsChanged: false };
+    const notifyObj = { varsChanged: false };
 
     const charId = char?.id || "default";
     const sessionId = char?.sessionId || "current";
@@ -405,8 +405,8 @@ function buildPromptMessagesWorker(args) {
         return combined;
     };
 
-    let loreByPosition = { worldInfoBefore: [], worldInfoAfter: [], lorebooksMacro: [] };
-    let macroLoreEntries = [];
+    const loreByPosition = { worldInfoBefore: [], worldInfoAfter: [], lorebooksMacro: [] };
+    const macroLoreEntries = [];
     if (lorebooks) {
         // DUAL-CHANNEL FIX: Extract current user message for keyword scanning
         const lastUserMessage = history && history.length > 0
@@ -864,7 +864,7 @@ self.onmessage = async function (e) {
             breakdown.fixedBase = breakdown.character + breakdown.preset + breakdown.summary + breakdown.authorsNote;
             breakdown.fixedTotal = breakdown.fixedBase + breakdown.lorebookReserve + breakdown.memoryReserve;
 
-            let availableForHistory = safeContext - breakdown.fixedTotal;
+            const availableForHistory = safeContext - breakdown.fixedTotal;
             breakdown.availableForHistory = Math.max(0, availableForHistory);
             let finalMessages = [];
             let cutoffIndex = -1;

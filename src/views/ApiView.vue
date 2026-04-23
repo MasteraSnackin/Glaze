@@ -5,6 +5,8 @@ const props = defineProps({
     viewMode: { type: Boolean, default: false }
 });
 
+const sheet = ref(null);
+
 function handleBack() {
     if (props.viewMode) {
         window.dispatchEvent(new CustomEvent('navigate-to', { detail: 'view-tools' }));
@@ -24,8 +26,6 @@ import { showBottomSheet, closeBottomSheet, bottomSheetState } from '@/core/stat
 import SheetView from '@/components/ui/SheetView.vue';
 import HelpTip from '@/components/ui/HelpTip.vue';
 import ConnectionStatus from '@/components/ui/ConnectionStatus.vue';
-
-const sheet = ref(null);
 
 const headerState = reactive({
     title: '',
@@ -222,6 +222,10 @@ const activeApiPresetId = ref('default');
 const activeApiPreset = computed(() => {
     return apiPresets.value.find(p => p.id === activeApiPresetId.value) || apiPresets.value[0];
 });
+
+const t = (key) => {
+    return translations[currentLang.value] ? translations[currentLang.value][key] : key;
+};
 
 // --- Blacklist Warning ---
 let blacklistCountdownTimer = null;
@@ -599,11 +603,6 @@ function getPresetIcon(endpoint, isActive) {
     return `<span style="display:inline-flex;align-items:center;justify-content:center;width:100%;height:100%;"><img src="${faviconUrl}" style="width:100%;height:100%;border-radius:6px;object-fit:contain;" onerror="this.style.display='none';this.nextElementSibling.style.display='block'"><svg style="display:none;fill:currentColor;width:100%;height:100%;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="${dotColor}"/></svg></span>`;
 }
 
-// --- Helpers ---
-const t = (key) => {
-    return translations[currentLang.value] ? translations[currentLang.value][key] : key;
-};
-
 // --- Lifecycle ---
 async function open() {
     sheet.value?.open();
@@ -666,7 +665,9 @@ onBeforeUnmount(() => {
                 <template v-if="activeTab === 'llm'">
 
                 <div class="menu-group">
-                    <div class="section-header">{{ t('section_connection') || 'Connection' }} <HelpTip term="api"/></div>
+                    <div class="section-header">
+{{ t('section_connection') || 'Connection' }} <HelpTip term="api"/>
+</div>
                     <div class="settings-item">
                         <label>API Endpoint</label>
                         <input type="text" v-model="apiSettings.endpoint" @input="onApiInput('api-endpoint', $event.target.value)" placeholder="http://127.0.0.1:5000/v1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
@@ -693,14 +694,18 @@ onBeforeUnmount(() => {
                     <div class="settings-item-checkbox">
                         <div class="settings-text-col">
                             <label>{{ t('label_stream') || 'Streaming response' }} <HelpTip term="streaming"/></label>
-                            <div class="settings-desc">{{ t('desc_stream') || 'Show text as it is being generated' }}</div>
+                            <div class="settings-desc">
+{{ t('desc_stream') || 'Show text as it is being generated' }}
+</div>
                         </div>
                         <input type="checkbox" v-model="apiSettings.stream" @change="onApiInput('gz_api_stream', $event.target.checked)" class="vk-switch">
                     </div>
                 </div>
 
                 <div class="menu-group">
-                    <div class="section-header">{{ t('section_gen_params') || 'Generation Parameters' }} <HelpTip term="guided"/></div>
+                    <div class="section-header">
+{{ t('section_gen_params') || 'Generation Parameters' }} <HelpTip term="guided"/>
+</div>
                     <div class="settings-item-range">
                         <div class="range-row">
                             <label data-i18n="label_temperature">Temperature</label>
@@ -727,7 +732,9 @@ onBeforeUnmount(() => {
                     <div class="settings-item-checkbox">
                         <div class="settings-text-col">
                             <label>{{ t('label_auto_hide_images') || 'Auto-hide images' }} <HelpTip term="image-gen"/></label>
-                            <div class="settings-desc">{{ t('desc_auto_hide_images') || 'Hide images after N assistant responses' }}</div>
+                            <div class="settings-desc">
+{{ t('desc_auto_hide_images') || 'Hide images after N assistant responses' }}
+</div>
                         </div>
                         <input type="checkbox" v-model="apiSettings.autoHideImages" @change="onApiInput('gz_api_auto_hide_images', $event.target.checked)" class="vk-switch">
                     </div>
@@ -741,11 +748,15 @@ onBeforeUnmount(() => {
                 </div>
 
                 <div class="menu-group">
-                    <div class="section-header">{{ t('label_reasoning_settings') || 'Reasoning' }} <HelpTip term="preset-reasoning"/></div>
+                    <div class="section-header">
+{{ t('label_reasoning_settings') || 'Reasoning' }} <HelpTip term="preset-reasoning"/>
+</div>
                     <div class="settings-item-checkbox">
                         <div class="settings-text-col">
                             <label>{{ t('label_show_reasoning') || 'Show Native Reasoning' }}</label>
-                            <div class="settings-desc">{{ t('desc_show_reasoning') || "Shows reasoning_content. Doesn't affect model's reasoning." }}</div>
+                            <div class="settings-desc">
+{{ t('desc_show_reasoning') || "Shows reasoning_content. Doesn't affect model's reasoning." }}
+</div>
                         </div>
                         <input type="checkbox" v-model="apiSettings.reasoningEnabled" @change="onApiInput('gz_api_request_reasoning', $event.target.checked)" class="vk-switch">
                     </div>
@@ -762,11 +773,15 @@ onBeforeUnmount(() => {
                 <!-- Embeddings Tab -->
                 <template v-if="activeTab === 'embedding'">
                 <div class="menu-group">
-                    <div class="section-header">{{ t('section_embeddings') || 'Embeddings' }} <HelpTip term="embeddings"/></div>
+                    <div class="section-header">
+{{ t('section_embeddings') || 'Embeddings' }} <HelpTip term="embeddings"/>
+</div>
                     <div class="settings-item-checkbox">
                         <div class="settings-text-col">
                             <label>{{ t('label_vector_search') || 'Vector Search' }}</label>
-                            <div class="settings-desc">{{ t('desc_vector_search') || 'Enable semantic search for lorebook entries' }}</div>
+                            <div class="settings-desc">
+{{ t('desc_vector_search') || 'Enable semantic search for lorebook entries' }}
+</div>
                         </div>
                         <input type="checkbox" v-model="embeddingSettings.enabled" @change="onEmbeddingInput('gz_embedding_enabled', $event.target.checked)" class="vk-switch">
                     </div>
@@ -774,7 +789,9 @@ onBeforeUnmount(() => {
                         <div class="settings-item-checkbox">
                             <div class="settings-text-col">
                                 <label>{{ t('label_use_llm_api') || 'Use LLM API' }}</label>
-                                <div class="settings-desc">{{ t('desc_use_llm_api') || 'Use the same endpoint as LLM for embeddings' }}</div>
+                                <div class="settings-desc">
+{{ t('desc_use_llm_api') || 'Use the same endpoint as LLM for embeddings' }}
+</div>
                             </div>
                             <input type="checkbox" v-model="embeddingSettings.useSame" @change="onEmbeddingInput('gz_embedding_use_same', $event.target.checked)" class="vk-switch">
                         </div>
@@ -795,14 +812,20 @@ onBeforeUnmount(() => {
                         <div class="settings-item">
                                 <label>{{ t('label_max_chunk_tokens') || 'Max Tokens Per Chunk' }}</label>
                             <input type="number" v-model.number="embeddingSettings.maxChunkTokens" @input="onEmbeddingInput('gz_embedding_max_chunk_tokens', $event.target.value)" min="128" max="32768">
-                            <div class="settings-desc" style="margin-top:4px;">{{ t('desc_max_chunk_tokens') || 'Auto-splits long texts into chunks' }}</div>
+                            <div class="settings-desc" style="margin-top:4px;">
+{{ t('desc_max_chunk_tokens') || 'Auto-splits long texts into chunks' }}
+</div>
                         </div>
                         <div class="settings-item">
                             <button class="vk-btn-action" style="width:100%;" @click="testEmbedding" :disabled="embeddingStatus === 'connecting'">
                                 {{ embeddingStatus === 'connecting' ? (t('btn_testing') || 'Testing...') : (t('btn_test_connection') || 'Test Connection') }}
                             </button>
-                            <div v-if="embeddingStatus === 'connected'" class="settings-desc" style="margin-top:8px; color: #34c759;">{{ t('embedding_connected') || 'Connected' }} (dim: {{ embeddingDimension }})</div>
-                            <div v-if="embeddingStatus === 'failed'" class="settings-desc" style="margin-top:8px; color: #ff3b30;">{{ embeddingError || t('embedding_failed') || 'Connection failed' }}</div>
+                            <div v-if="embeddingStatus === 'connected'" class="settings-desc" style="margin-top:8px; color: #34c759;">
+{{ t('embedding_connected') || 'Connected' }} (dim: {{ embeddingDimension }})
+</div>
+                            <div v-if="embeddingStatus === 'failed'" class="settings-desc" style="margin-top:8px; color: #ff3b30;">
+{{ embeddingError || t('embedding_failed') || 'Connection failed' }}
+</div>
                         </div>
                     </template>
                 </div>
@@ -811,11 +834,15 @@ onBeforeUnmount(() => {
                 <!-- Image Gen Tab -->
                 <template v-if="activeTab === 'imagegen'">
                 <div class="menu-group">
-                    <div class="section-header">{{ t('section_image_gen') || 'Image Generation' }} <HelpTip term="image-gen"/></div>
+                    <div class="section-header">
+{{ t('section_image_gen') || 'Image Generation' }} <HelpTip term="image-gen"/>
+</div>
                     <div class="settings-item-checkbox">
                         <div class="settings-text-col">
                             <label>{{ t('label_image_gen_enabled') || 'Enable Image Generation' }}</label>
-                            <div class="settings-desc">{{ t('desc_image_gen_enabled') || 'Generate images from [IMG:GEN] tags' }}</div>
+                            <div class="settings-desc">
+{{ t('desc_image_gen_enabled') || 'Generate images from [IMG:GEN] tags' }}
+</div>
                         </div>
                         <input type="checkbox" v-model="imageGenSettings.enabled" @change="onImageGenInput('enabled', $event.target.checked)" class="vk-switch">
                     </div>
@@ -823,7 +850,9 @@ onBeforeUnmount(() => {
                         <div class="settings-item-checkbox">
                             <div class="settings-text-col">
                                 <label>{{ t('label_use_llm_api') || 'Use LLM API' }}</label>
-                                <div class="settings-desc">{{ t('desc_use_llm_api') || 'Use the same endpoint as LLM for image generation' }}</div>
+                                <div class="settings-desc">
+{{ t('desc_use_llm_api') || 'Use the same endpoint as LLM for image generation' }}
+</div>
                             </div>
                             <input type="checkbox" v-model="imageGenSettings.useSame" @change="onImageGenInput('useSame', $event.target.checked)" class="vk-switch">
                         </div>
@@ -848,11 +877,15 @@ onBeforeUnmount(() => {
                 <!-- Memory Books Provider Tab -->
                 <template v-if="activeTab === 'memory'">
                 <div class="menu-group">
-                    <div class="section-header">{{ t('section_memory_books_provider') || 'Memory Books Generation' }} <HelpTip term="memory-books"/></div>
+                    <div class="section-header">
+{{ t('section_memory_books_provider') || 'Memory Books Generation' }} <HelpTip term="memory-books"/>
+</div>
                     <div class="settings-item-checkbox">
                         <div class="settings-text-col">
                             <label>{{ t('label_use_llm_api') || 'Use LLM API' }}</label>
-                            <div class="settings-desc">{{ t('desc_use_llm_api_memory') || 'Use the same endpoint as LLM for memory book generation' }}</div>
+                            <div class="settings-desc">
+{{ t('desc_use_llm_api_memory') || 'Use the same endpoint as LLM for memory book generation' }}
+</div>
                         </div>
                         <input type="checkbox" v-model="memoryProviderSettings.useSame" @change="onMemoryProviderInput('useSame', $event.target.checked)" class="vk-switch">
                     </div>

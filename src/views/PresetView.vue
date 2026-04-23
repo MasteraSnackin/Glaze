@@ -19,17 +19,7 @@ import HelpTip from '@/components/ui/HelpTip.vue';
 import RegexSheet from '@/components/sheets/RegexSheet.vue';
 import { logger } from '../utils/logger.js';
 
-const emit = defineEmits(['open-fs']);
-
-function handleOpenFs(field, isCurrentBase = true) {
-    const val = isCurrentBase ? currentPreset.value[field] : field; // if field is the value itself
-    const onSave = (newVal) => {
-        if (isCurrentBase) {
-            currentPreset.value[field] = newVal;
-        }
-    };
-    window.dispatchEvent(new CustomEvent('open-fs-request', { detail: { value: val, onSave } }));
-}
+const emit = defineEmits(['open-fs', 'update:activeChatChar']);
 
 const sheet = ref(null);
 
@@ -42,10 +32,57 @@ const props = defineProps({
 
 const effectivePersona = computed(() => getEffectivePersona(props.activeChatChar?.id, props.activeChatChar?.sessionId));
 
+const scrollPositions = { list: 0, editor: 0, 'block-editor': 0 };
+
+// --- Editor State ---
+const editingPresetId = ref(null);
+const optimisticGlobalPresetId = ref(null);
+const isEditingBlock = ref(false);
+const editingBlockId = ref(null);
+const showStash = ref(false);
+const navDirection = ref('forward');
+
+watch([editingPresetId, isEditingBlock], ([newE, newB], [oldE, oldB]) => {
+    const getLevel = (e, b) => b ? 2 : (e ? 1 : 0);
+    const newL = getLevel(newE, newB);
+    const oldL = getLevel(oldE, oldB);
+    if (newL > oldL) navDirection.value = 'forward';
+    else if (newL < oldL) navDirection.value = 'back';
+
+    if (newE && newE !== oldE) scrollPositions.editor = 0;
+    if (newB && !oldB) scrollPositions['block-editor'] = 0;
+});
+
+const effectivePresetId = computed(() => {
+    const charId = props.activeChatChar?.id;
+    const chatId = charId && props.activeChatChar.sessionId ? `${charId}_${props.activeChatChar.sessionId}` : null;
+    const resolved = getEffectivePresetId(charId, chatId);
+    logger.debug('[GenerationView] effectivePresetId resolved to:', resolved);
+    return resolved;
+});
+
+const currentPresetId = computed(() => {
+    return editingPresetId.value || effectivePresetId.value;
+});
+
+const currentPreset = computed(() => {
+    const id = currentPresetId.value;
+    return presetState.presets[id] || presetState.presets.default_shino || Object.values(presetState.presets)[0];
+});
+
+function handleOpenFs(field, isCurrentBase = true) {
+    const val = isCurrentBase ? currentPreset.value[field] : field;
+    const onSave = (newVal) => {
+        if (isCurrentBase) {
+            currentPreset.value[field] = newVal;
+        }
+    };
+    window.dispatchEvent(new CustomEvent('open-fs-request', { detail: { value: val, onSave } }));
+}
+
 const showAdvancedSettings = ref(false);
 
 const genSheetBodyRef = ref(null);
-const scrollPositions = { list: 0, editor: 0, 'block-editor': 0 };
 
 const headerState = reactive({
     title: '',
@@ -70,6 +107,8 @@ function close() {
     sheet.value?.close();
 }
 
+const openedFromRegex = ref(false);
+
 function onSheetClose() {
     openedFromRegex.value = false;
     flushPresetSave();
@@ -77,8 +116,6 @@ function onSheetClose() {
     scrollPositions.editor = 0;
     scrollPositions['block-editor'] = 0;
 }
-
-const openedFromRegex = ref(false);
 
 async function openPreset(id, fromRegex = false) {
     await initPresetState();
@@ -147,43 +184,6 @@ function openReasoningEffortSelector() {
         items
     });
 }
-
-// --- Editor State ---
-const editingPresetId = ref(null);
-const optimisticGlobalPresetId = ref(null);
-const isEditingBlock = ref(false);
-const editingBlockId = ref(null);
-const showStash = ref(false);
-const navDirection = ref('forward');
-
-watch([editingPresetId, isEditingBlock], ([newE, newB], [oldE, oldB]) => {
-    const getLevel = (e, b) => b ? 2 : (e ? 1 : 0);
-    const newL = getLevel(newE, newB);
-    const oldL = getLevel(oldE, oldB);
-    if (newL > oldL) navDirection.value = 'forward';
-    else if (newL < oldL) navDirection.value = 'back';
-
-    // Reset scroll when opening a different preset or a different block
-    if (newE && newE !== oldE) scrollPositions.editor = 0;
-    if (newB && !oldB) scrollPositions['block-editor'] = 0;
-});
-
-const effectivePresetId = computed(() => {
-    const charId = props.activeChatChar?.id;
-    const chatId = charId && props.activeChatChar?.sessionId ? `${charId}_${props.activeChatChar.sessionId}` : null;
-    const resolved = getEffectivePresetId(charId, chatId);
-    logger.debug('[GenerationView] effectivePresetId resolved to:', resolved);
-    return resolved;
-});
-
-const currentPresetId = computed(() => {
-    return editingPresetId.value || effectivePresetId.value;
-});
-
-const currentPreset = computed(() => {
-    const id = currentPresetId.value;
-    return presetState.presets[id] || presetState.presets['default_shino'] || Object.values(presetState.presets)[0];
-});
 
 const activeBlocks = computed(() => {
     if (!currentPreset.value || !currentPreset.value.blocks) return [];
@@ -430,7 +430,7 @@ const extendedReplaceMacros = (text) => {
     return res;
 };
 
-const getPresetTokens = (preset) => {
+function getPresetTokens(preset) {
     if (!preset) return 0;
     let content = "";
     // Include Impersonation Prompt
@@ -456,12 +456,12 @@ const displayedEditingTokens = ref(0);
 
 const activePresetTokens = computed(() => {
     const id = effectivePresetId.value;
-    const preset = presetState.presets[id] || presetState.presets['default_shino'];
+    const preset = presetState.presets[id] || presetState.presets.default_shino;
     return getPresetTokens(preset);
 });
 const displayedActiveTokens = ref(0);
 
-const globalTokens = computed(() => getPresetTokens(presetState.presets[presetState.globalPresetId] || presetState.presets['default_shino']));
+const globalTokens = computed(() => getPresetTokens(presetState.presets[presetState.globalPresetId] || presetState.presets.default_shino));
 const charTokens = computed(() => {
     const charId = props.activeChatChar?.id;
     const id = charId ? presetState.connections.character[charId] : null;
@@ -528,7 +528,7 @@ const getPresetCreatedAt = (id, preset) => {
     return Number.isFinite(derived) ? derived : 0;
 };
 
-const comparePresetEntries = (a, b) => {
+function comparePresetEntries(a, b) {
     const wA = getPresetWeight(a[0], a[1]);
     const wB = getPresetWeight(b[0], b[1]);
     if (wA !== wB) return wA - wB;
@@ -1351,14 +1351,14 @@ function updateActiveBlock(newVal) {
     if (block) {
         if (block.id === 'authors_note' || block.id === 'summary') {
             if (props.activeChatChar) {
-                Object.assign(props.activeChatChar, newVal);
+                emit('update:activeChatChar', { ...props.activeChatChar, ...newVal });
             }
             // Sync settings back to preset block
             const prefix = block.id === 'authors_note' ? 'authors_note_' : 'summary_';
             if (newVal[prefix + 'role']) block.role = newVal[prefix + 'role'];
             if (newVal[prefix + 'depth'] !== undefined) block.depth = newVal[prefix + 'depth'];
             if (newVal[prefix + 'insertion_mode']) block.insertion_mode = newVal[prefix + 'insertion_mode'];
-            if (block.id === 'summary' && newVal['summary_prefix'] !== undefined) block.prefix = newVal['summary_prefix'];
+            if (block.id === 'summary' && newVal.summary_prefix !== undefined) block.prefix = newVal.summary_prefix;
         } else {
             Object.assign(block, newVal);
         }
@@ -1667,12 +1667,12 @@ const editorProxy = computed({
         if (!activeEditBlock.value || !newVal) return;
 
         if (activeEditBlock.value.id === 'authors_note') {
-            if (props.activeChatChar) props.activeChatChar.authors_note = newVal.content;
+            if (props.activeChatChar) emit('update:activeChatChar', { ...props.activeChatChar, authors_note: newVal.content });
             activeEditBlock.value.depth = newVal.depth;
             activeEditBlock.value.role = newVal.role;
             activeEditBlock.value.insertion_mode = newVal.insertion_mode;
         } else if (activeEditBlock.value.id === 'summary') {
-            if (props.activeChatChar) props.activeChatChar.summary = newVal.content;
+            if (props.activeChatChar) emit('update:activeChatChar', { ...props.activeChatChar, summary: newVal.content });
             activeEditBlock.value.depth = newVal.depth;
             activeEditBlock.value.role = newVal.role;
             activeEditBlock.value.insertion_mode = newVal.insertion_mode;
@@ -1791,7 +1791,7 @@ function openAuthorsNoteSheet() {
         block.enabled = data.enabled;
         block.role = content.querySelector('#an-role').value;
         block.insertion_mode = content.querySelector('#an-mode').value;
-        let parsedDepth = parseInt(content.querySelector('#an-depth').value);
+        const parsedDepth = parseInt(content.querySelector('#an-depth').value);
         block.depth = isNaN(parsedDepth) ? 0 : parsedDepth;
         char.authors_note = content.querySelector('#an-content').value;
     };
@@ -1894,7 +1894,7 @@ function openSummarySheet() {
     const save = () => {
         block.role = content.querySelector('#summary-role').value;
         block.insertion_mode = content.querySelector('#summary-mode').value;
-        let parsedDepth = parseInt(content.querySelector('#summary-depth').value);
+        const parsedDepth = parseInt(content.querySelector('#summary-depth').value);
         block.depth = isNaN(parsedDepth) ? 0 : parsedDepth;
         block.prefix = content.querySelector('#summary-prefix').value;
     };
@@ -2101,7 +2101,9 @@ onBeforeUnmount(() => {
                     </div>
                     <!-- Info -->
                     <div class="ps-card-info">
-                        <div class="ps-card-name" :class="{ 'ps-with-bg': !!preset.image }">{{ preset.name || 'Default' }}</div>
+                        <div class="ps-card-name" :class="{ 'ps-with-bg': !!preset.image }">
+{{ preset.name || 'Default' }}
+</div>
                         <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 4px;">
                             <div class="ps-card-badge" :class="{ 'ps-with-bg': !!preset.image }">
                                 <svg viewBox="0 0 24 24" class="ps-badge-icon"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
@@ -2148,9 +2150,13 @@ onBeforeUnmount(() => {
                         <div class="active-row-content">
                             <div class="active-name-group">
                                 <div class="active-preset-name-wrapper">
-                                    <div class="active-preset-name">{{ currentPreset.name || 'Default' }}</div>
+                                    <div class="active-preset-name">
+{{ currentPreset.name || 'Default' }}
+</div>
                                 </div>
-                                <div v-if="currentPreset.author" class="active-preset-author">by {{ currentPreset.author }}</div>
+                                <div v-if="currentPreset.author" class="active-preset-author">
+by {{ currentPreset.author }}
+</div>
                             </div>
                             
                             <!-- Consolidate Actions Top Right -->
@@ -2229,10 +2235,14 @@ onBeforeUnmount(() => {
                     </TransitionGroup>
                     
                     <div class="add-block-btn prompt-block" @click="addNewBlock">
-                        <div class="block-handle" style="opacity: 0">≡</div>
+                        <div class="block-handle" style="opacity: 0">
+≡
+</div>
                         <div class="block-content">
                             <svg viewBox="0 0 24 24" class="block-role-icon"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
-                            <div class="block-name" data-i18n="add_block">Add Block</div>
+                            <div class="block-name" data-i18n="add_block">
+Add Block
+</div>
                         </div>
                     </div>
                     </div> <!-- End prompt-blocks-area -->
@@ -2247,54 +2257,74 @@ onBeforeUnmount(() => {
                 <Transition name="expand">
                     <div v-if="showAdvancedSettings" class="advanced-settings-panel">
                         <div class="menu-group">
-                            <div class="section-header">{{ t('section_postprocessing') || 'Prompt Postprocessing' }}</div>
+                            <div class="section-header">
+{{ t('section_postprocessing') || 'Prompt Postprocessing' }}
+</div>
                             <div class="settings-item-checkbox" @click.capture="currentPreset.noAssistant ? Toast.show({ text: t('hint_merge_locked') || 'Required by NoAssistant mode — single block', duration: 'short', position: 'bottom' }) : null">
                                 <div class="settings-text-col">
                                     <label>{{ t('label_merge_prompts') || 'Merge Prompts' }} <HelpTip term="preset-merge"/></label>
-                                    <div class="settings-desc">{{ t('desc_merge_prompts') || 'Combine adjacent blocks into one message' }}</div>
+                                    <div class="settings-desc">
+{{ t('desc_merge_prompts') || 'Combine adjacent blocks into one message' }}
+</div>
                                 </div>
                                 <input type="checkbox" v-model="currentPreset.mergePrompts" class="vk-switch" :disabled="currentPreset.noAssistant">
                             </div>
                             <div class="settings-item" v-if="currentPreset.mergePrompts" @click="openMergeRoleSelector">
                                 <label>{{ t('label_merge_role') || 'Merge Role' }}</label>
-                                <div class="settings-desc">{{ currentPreset.mergeRole }}</div>
+                                <div class="settings-desc">
+{{ currentPreset.mergeRole }}
+</div>
                             </div>
                             <div class="settings-item-checkbox">
                                 <div class="settings-text-col">
                                     <label>{{ t('label_no_assistant') || 'NoAssistant' }} <HelpTip term="preset-noassistant"/></label>
-                                    <div class="settings-desc">{{ t('desc_no_assistant') || 'Send all chat history in a single block with role prefixes' }}</div>
+                                    <div class="settings-desc">
+{{ t('desc_no_assistant') || 'Send all chat history in a single block with role prefixes' }}
+</div>
                                 </div>
                                 <input type="checkbox" v-model="currentPreset.noAssistant" class="vk-switch">
                             </div>
                             <template v-if="currentPreset.noAssistant">
                                 <div class="settings-item">
                                     <label>{{ t('label_stop_string') || 'Stop String' }}</label>
-                                    <div class="settings-desc">{{ t('desc_stop_string') || 'Sent as stop parameter to the model. Leave empty to omit.' }}</div>
+                                    <div class="settings-desc">
+{{ t('desc_stop_string') || 'Sent as stop parameter to the model. Leave empty to omit.' }}
+</div>
                                     <input type="text" v-model="currentPreset.stopString" placeholder="e.g. User:">
                                 </div>
                                 <div class="settings-item">
                                     <label>{{ t('label_user_prefix') || 'User Prefix' }}</label>
-                                    <div class="settings-desc">{{ t('desc_user_prefix') || 'Prefix prepended to user messages in history block' }}</div>
+                                    <div class="settings-desc">
+{{ t('desc_user_prefix') || 'Prefix prepended to user messages in history block' }}
+</div>
                                     <input type="text" v-model="currentPreset.userPrefix" placeholder="e.g. User: ">
                                 </div>
                                 <div class="settings-item">
                                     <label>{{ t('label_char_prefix') || 'Char Prefix' }}</label>
-                                    <div class="settings-desc">{{ t('desc_char_prefix') || 'Prefix prepended to character messages in history block' }}</div>
+                                    <div class="settings-desc">
+{{ t('desc_char_prefix') || 'Prefix prepended to character messages in history block' }}
+</div>
                                     <input type="text" v-model="currentPreset.charPrefix" placeholder="e.g. Assistant: ">
                                 </div>
                                 <div class="settings-item" @click="openSquashRoleSelector">
                                     <label>{{ t('label_squash_role') || 'Squash Role' }}</label>
-                                    <div class="settings-desc">{{ t('desc_squash_role') || 'Consecutive messages from this role will be merged' }}: {{ currentPreset.squashRole }}</div>
+                                    <div class="settings-desc">
+{{ t('desc_squash_role') || 'Consecutive messages from this role will be merged' }}: {{ currentPreset.squashRole }}
+</div>
                                 </div>
                             </template>
                         </div>
 
                         <div class="menu-group">
-                            <div class="section-header">{{ t('label_reasoning_settings') || 'Reasoning' }} <HelpTip term="preset-reasoning"/></div>
+                            <div class="section-header">
+{{ t('label_reasoning_settings') || 'Reasoning' }} <HelpTip term="preset-reasoning"/>
+</div>
                             <div class="settings-item-checkbox">
                                 <div class="settings-text-col">
                                 <label>{{ t('label_parse_inline_reasoning') || 'Parse Inline Reasoning' }} <HelpTip term="preset-reasoning-inline"/></label>
-                                <div class="settings-desc">{{ t('desc_parse_inline_reasoning') || 'Extracts reasoning from the message body and inserts it into the reasoning block' }}</div>
+                                <div class="settings-desc">
+{{ t('desc_parse_inline_reasoning') || 'Extracts reasoning from the message body and inserts it into the reasoning block' }}
+</div>
                                 </div>
                                 <input type="checkbox" v-model="currentPreset.parseInlineReasoning" class="vk-switch">
                             </div>
@@ -2307,18 +2337,24 @@ onBeforeUnmount(() => {
 
                         <!-- Function Prompts -->
                         <div class="menu-group">
-                            <div class="section-header">{{ t('label_preset_prompts') || 'Function Prompts' }}</div>
+                            <div class="section-header">
+{{ t('label_preset_prompts') || 'Function Prompts' }}
+</div>
                             <div class="settings-item">
                                 <div class="label-row">
                                     <label>{{ t('label_impersonation_prompt') || 'Impersonation Prompt' }}</label>
-                                    <div class="expand-btn" @click="handleOpenFs('impersonationPrompt')"><svg viewBox="0 0 24 24"><path d="M15 3l2.3 2.3-2.89 2.87 1.42 1.42L18.7 6.7 21 9V3zM3 9l2.3-2.3 2.87 2.89 1.42-1.42L6.7 5.3 9 3H3zm6 12l-2.3-2.3 2.89-2.87-1.42-1.42L5.3 17.3 3 15v6zm12-6l-2.3 2.3-2.87-2.89-1.42 1.42 2.89 2.87L15 21h6z"/></svg></div>
+                                    <div class="expand-btn" @click="handleOpenFs('impersonationPrompt')">
+<svg viewBox="0 0 24 24"><path d="M15 3l2.3 2.3-2.89 2.87 1.42 1.42L18.7 6.7 21 9V3zM3 9l2.3-2.3 2.87 2.89 1.42-1.42L6.7 5.3 9 3H3zm6 12l-2.3-2.3 2.89-2.87-1.42-1.42L5.3 17.3 3 15v6zm12-6l-2.3 2.3-2.87-2.89-1.42 1.42 2.89 2.87L15 21h6z"/></svg>
+</div>
                                 </div>
                                 <textarea v-model="currentPreset.impersonationPrompt" rows="3" :placeholder="t('placeholder_impersonation_prompt') || 'Prompt to trigger impersonation...'"></textarea>
                             </div>
                             <div class="settings-item">
                                 <div class="label-row">
                                     <label>{{ t('label_summary_prompt') || 'Summary Prompt' }}</label>
-                                    <div class="expand-btn" @click="handleOpenFs('summaryPrompt')"><svg viewBox="0 0 24 24"><path d="M15 3l2.3 2.3-2.89 2.87 1.42 1.42L18.7 6.7 21 9V3zM3 9l2.3-2.3 2.87 2.89 1.42-1.42L6.7 5.3 9 3H3zm6 12l-2.3-2.3 2.89-2.87-1.42-1.42L5.3 17.3 3 15v6zm12-6l-2.3 2.3-2.87-2.89-1.42 1.42 2.89 2.87L15 21h6z"/></svg></div>
+                                    <div class="expand-btn" @click="handleOpenFs('summaryPrompt')">
+<svg viewBox="0 0 24 24"><path d="M15 3l2.3 2.3-2.89 2.87 1.42 1.42L18.7 6.7 21 9V3zM3 9l2.3-2.3 2.87 2.89 1.42-1.42L6.7 5.3 9 3H3zm6 12l-2.3-2.3 2.89-2.87-1.42-1.42L5.3 17.3 3 15v6zm12-6l-2.3 2.3-2.87-2.89-1.42 1.42 2.89 2.87L15 21h6z"/></svg>
+</div>
                                 </div>
                                 <textarea v-model="currentPreset.summaryPrompt" rows="3" placeholder="Summarize the following roleplay conversation... (use {{history}})"></textarea>
                             </div>

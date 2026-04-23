@@ -6,9 +6,9 @@ export function normalizeImgGenHtmlForEditing(text, iigMap) {
     const extractInstruction = (chunk) => {
         if (!chunk) return null;
         const m1 = chunk.match(/\bdata-iig-instruction='([^']*)'/i);
-        if (m1?.[1] != null) return m1[1];
+        if (m1?.[1] != null) return m1[1]; // eslint-disable-line eqeqeq
         const m2 = chunk.match(/\bdata-iig-instruction="([^"]*)"/i);
-        if (m2?.[1] != null) return m2[1];
+        if (m2?.[1] != null) return m2[1]; // eslint-disable-line eqeqeq
         return null;
     };
 

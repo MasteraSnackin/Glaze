@@ -23,6 +23,11 @@ const props = defineProps({
 
 const emit = defineEmits(['close']);
 
+const domContent = ref(null);
+const inputValue = ref('');
+const inputRef = ref(null);
+const isLocalKeyboardOpen = ref(false);
+
 function openGlossaryChip(term) {
     emit('close');
     nextTick(() => {
@@ -44,10 +49,6 @@ function close() {
     }
     emit('close');
 }
-
-const domContent = ref(null);
-const inputValue = ref('');
-const inputRef = ref(null);
 
 // When visible becomes false externally (via closeBottomSheet()), reset keyboard state
 watch(() => props.visible, (newVal) => {
@@ -119,8 +120,6 @@ function onHandleTouchEnd() {
     currentDragY.value = 0;
 }
 
-const isLocalKeyboardOpen = ref(false);
-
 function checkFocus() {
     const active = document.activeElement;
     if (!active) return;
@@ -155,7 +154,7 @@ function checkFocus() {
     }
 }
 
-let kbListeners = [];
+const kbListeners = [];
 
 function onSheetFocusIn() {
     checkFocus();
@@ -226,9 +225,17 @@ onBeforeUnmount(() => {
                     <!-- Big Info Sheet -->
                     <div v-if="bigInfo" class="sheet-big-info">
                         <div class="big-info-icon" v-html="bigInfo.icon"></div>
-                        <div class="big-info-desc">{{ bigInfo.description }}</div>
-                        <div v-if="bigInfo.glossaryChip" class="big-info-chip-line">{{ bigInfo.glossaryChip.hint }} <button class="big-info-chip" @click.stop="openGlossaryChip(bigInfo.glossaryChip.term)">{{ bigInfo.glossaryChip.label }}</button></div>
-                        <div class="sheet-big-info-btn" :class="{ disabled: bigInfo.buttonDisabled }" @click="!bigInfo.buttonDisabled && bigInfo.onButtonClick()">{{ bigInfo.buttonText }}</div>
+                        <div class="big-info-desc">
+{{ bigInfo.description }}
+</div>
+                        <div v-if="bigInfo.glossaryChip" class="big-info-chip-line">
+{{ bigInfo.glossaryChip.hint }} <button class="big-info-chip" @click.stop="openGlossaryChip(bigInfo.glossaryChip.term)">
+{{ bigInfo.glossaryChip.label }}
+</button>
+</div>
+                        <div class="sheet-big-info-btn" :class="{ disabled: bigInfo.buttonDisabled }" @click="!bigInfo.buttonDisabled && bigInfo.onButtonClick()">
+{{ bigInfo.buttonText }}
+</div>
                     </div>
 
                     <!-- List Items -->
@@ -256,15 +263,23 @@ onBeforeUnmount(() => {
                     <div v-if="sessionItems && sessionItems.length" class="sheet-list">
                         <div v-for="(item, index) in sessionItems" :key="index" class="sheet-item session-item" @click="item.onClick">
                             <div class="session-content">
-                                <div class="session-title">{{ item.title }} <span class="session-count"><svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>{{ item.count }}</span></div>
-                                <div class="session-preview">{{ item.preview }}</div>
+                                <div class="session-title">
+{{ item.title }} <span class="session-count"><svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>{{ item.count }}</span>
+</div>
+                                <div class="session-preview">
+{{ item.preview }}
+</div>
                             </div>
                             <div class="session-right">
                                 <div class="session-meta-right">
-                                    <div class="session-time">{{ item.time }}</div>
+                                    <div class="session-time">
+{{ item.time }}
+</div>
                                     <div v-if="item.isActive" class="active-dot"></div>
                                 </div>
-                                <div class="session-delete-btn" @click.stop="item.onDelete"><svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg></div>
+                                <div class="session-delete-btn" @click.stop="item.onDelete">
+<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+</div>
                             </div>
                         </div>
                     </div>
@@ -286,13 +301,17 @@ onBeforeUnmount(() => {
                             </div>
                             <div class="item-info">
                                 <div class="item-label-row">
-                                    <div class="item-label" :class="{ 'with-bg': item.image }">{{ item.label }}</div>
+                                    <div class="item-label" :class="{ 'with-bg': item.image }">
+{{ item.label }}
+</div>
                                     <div v-if="item.badge" class="item-badge" :class="{ 'with-bg': item.image }">
                                         <svg viewBox="0 0 24 24" class="badge-icon"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
                                         {{ item.badge }}
                                     </div>
                                 </div>
-                                <div v-if="item.sublabel" class="item-sublabel" :class="{ 'with-bg': item.image }">{{ item.sublabel }}</div>
+                                <div v-if="item.sublabel" class="item-sublabel" :class="{ 'with-bg': item.image }">
+{{ item.sublabel }}
+</div>
                             </div>
                             
                             <!-- Item Actions (Buttons on the right) -->
@@ -320,7 +339,9 @@ onBeforeUnmount(() => {
                             >
                         </div>
                         <div class="settings-padding" style="padding-top: 0;">
-                            <div class="btn-save" style="margin-top: 10px;" @click="onInputConfirm">{{ input.confirmLabel || 'Save' }}</div>
+                            <div class="btn-save" style="margin-top: 10px;" @click="onInputConfirm">
+{{ input.confirmLabel || 'Save' }}
+</div>
                         </div>
                     </div>
                 </div>

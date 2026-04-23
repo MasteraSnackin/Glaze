@@ -238,7 +238,7 @@ async function waitForElectronOAuth(challenge, usePlain, state, verifier) {
 
     return new Promise((resolve) => {
         let resolved = false;
-
+        let interval;
         const cleanup = () => clearInterval(interval);
 
         ipcRenderer.once('oauth-callback', (event, { code, state: returnedState, error }) => {
@@ -256,7 +256,7 @@ async function waitForElectronOAuth(challenge, usePlain, state, verifier) {
             resolve({ code, redirectUri });
         });
 
-        const interval = setInterval(() => {
+        interval = setInterval(() => {
             if (resolved) return;
             try {
                 if (win && win.closed) {
@@ -283,8 +283,15 @@ function waitForWebOAuth(authUrl, expectedState) {
         const win = window.open(authUrl, 'gdrive-auth', `width=${width},height=${height},left=${left},top=${top}`);
 
         let resolved = false;
+        let interval;
+        let onMessage;
 
-        const onMessage = (e) => {
+        const cleanup = () => {
+            clearInterval(interval);
+            window.removeEventListener('message', onMessage);
+        };
+
+        onMessage = (e) => {
             if (resolved) return;
             if (e.data?.type === 'gdrive-oauth') {
                 resolved = true;
@@ -299,7 +306,7 @@ function waitForWebOAuth(authUrl, expectedState) {
             }
         };
 
-        const interval = setInterval(() => {
+        interval = setInterval(() => {
             if (resolved) return;
             try {
                 if (win.closed) {
@@ -311,11 +318,6 @@ function waitForWebOAuth(authUrl, expectedState) {
                 resolve(null);
             }
         }, 1000);
-
-        const cleanup = () => {
-            clearInterval(interval);
-            window.removeEventListener('message', onMessage);
-        };
 
         window.addEventListener('message', onMessage);
     });

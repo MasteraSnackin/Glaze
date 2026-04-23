@@ -42,7 +42,7 @@ export function useMessageSelection(currentMessages, { getChatData, db, addDelet
                 addDeletedStats(activeChatChar.id, sid, count);
             }
 
-            let chatData = await getChatData(activeChatChar.id);
+            const chatData = await getChatData(activeChatChar.id);
             const sessionId = activeChatChar.sessionId || chatData.currentId;
             reconcileSessionMemoryState(chatData, sessionId, currentMessages.value);
             chatData.sessions[sessionId] = currentMessages.value;
@@ -64,7 +64,7 @@ export function useMessageSelection(currentMessages, { getChatData, db, addDelet
 
         const activeChatChar = getActiveChatChar ? getActiveChatChar() : null;
         if (activeChatChar) {
-            let chatData = await getChatData(activeChatChar.id);
+            const chatData = await getChatData(activeChatChar.id);
             const sessionId = activeChatChar.sessionId || chatData.currentId;
             chatData.sessions[sessionId] = currentMessages.value;
             await db.saveChat(activeChatChar.id, chatData);

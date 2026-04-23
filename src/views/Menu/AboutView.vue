@@ -66,8 +66,12 @@ defineExpose({ open });
                                 </g>
                             </svg>
                         </div>
-                        <h2 class="app-name">Glaze</h2>
-                        <p class="app-version">{{ version }}</p>
+                        <h2 class="app-name">
+Glaze
+</h2>
+                        <p class="app-version">
+{{ version }}
+</p>
                     </div>
 
                     <!-- Telegram & Donate pill buttons -->

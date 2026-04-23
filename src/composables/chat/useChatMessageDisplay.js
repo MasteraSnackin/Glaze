@@ -10,13 +10,13 @@ export function restoreVisibleSwipeState(messages = []) {
 
         let nextMsg = msg;
 
-        if (msg.reasoning == null && swipeMeta.reasoning != null) {
+        if (msg.reasoning == null && swipeMeta.reasoning != null) { // eslint-disable-line eqeqeq
             nextMsg = { ...nextMsg, reasoning: swipeMeta.reasoning };
         }
-        if (nextMsg.genTime == null && swipeMeta.genTime != null) {
+        if (nextMsg.genTime == null && swipeMeta.genTime != null) { // eslint-disable-line eqeqeq
             nextMsg = { ...nextMsg, genTime: swipeMeta.genTime };
         }
-        if ((nextMsg.tokens == null || nextMsg.tokens === 0) && swipeMeta.tokens != null) {
+        if ((nextMsg.tokens == null || nextMsg.tokens === 0) && swipeMeta.tokens != null) { // eslint-disable-line eqeqeq
             nextMsg = { ...nextMsg, tokens: swipeMeta.tokens };
         }
 

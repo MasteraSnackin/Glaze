@@ -20,7 +20,7 @@ const presetRegexCount = ref(0);
 
 const currentGlobalPreset = computed(() => {
     const id = presetState.globalPresetId || 'default_shino';
-    return presetState.presets[id] || DEFAULT_PRESETS['default_shino'] || Object.values(presetState.presets)[0] || {};
+    return presetState.presets[id] || DEFAULT_PRESETS.default_shino || Object.values(presetState.presets)[0] || {};
 });
 
 const lorebooksCount = computed(() => lorebookState.lorebooks?.length || 0);
@@ -172,13 +172,17 @@ const tools = computed(() => [
                         </div>
                     </div>
                     <div class="hero-overlay">
-                        <div class="hero-label">{{ tool.label }}</div>
+                        <div class="hero-label">
+{{ tool.label }}
+</div>
                         <div class="hero-info">
                             <div class="hero-title-row">
                                 <span class="hero-title">{{ tool.sublabel }}</span>
                                 <span v-if="tool.tokens" class="hero-badge">{{ tool.tokens }}t</span>
                             </div>
-                            <div class="hero-desc" v-if="tool.desc">{{ tool.desc }}</div>
+                            <div class="hero-desc" v-if="tool.desc">
+{{ tool.desc }}
+</div>
                         </div>
                     </div>
                 </template>
@@ -193,14 +197,18 @@ const tools = computed(() => [
                             <div class="hero-icon-box" style="background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1);">
                                 <svg class="hero-icon" viewBox="0 0 24 24"><path :d="tool.icon"/></svg>
                             </div>
-                            <div class="hero-label">{{ tool.label }}</div>
+                            <div class="hero-label">
+{{ tool.label }}
+</div>
                         </div>
                         <div class="hero-info">
                             <div class="hero-title-row">
                                 <span class="hero-title">{{ tool.sublabel }}</span>
                                 <span v-if="tool.tokens !== undefined" class="hero-badge">{{ tool.tokens }}t</span>
                             </div>
-                            <div class="hero-desc" v-if="tool.desc">{{ tool.desc }}</div>
+                            <div class="hero-desc" v-if="tool.desc">
+{{ tool.desc }}
+</div>
                         </div>
                     </div>
                 </template>
@@ -212,14 +220,18 @@ const tools = computed(() => [
                             <div class="hero-icon-box">
                                 <svg class="hero-icon" viewBox="0 0 24 24"><path :d="tool.icon"/></svg>
                             </div>
-                            <div class="hero-label">{{ tool.label }}</div>
+                            <div class="hero-label">
+{{ tool.label }}
+</div>
                         </div>
                         <div class="hero-info">
                             <div class="hero-title-row">
                                 <span class="hero-title">{{ tool.sublabel }}</span>
                                 <span v-if="tool.tokens !== undefined" class="hero-badge">{{ tool.tokens }}t</span>
                             </div>
-                            <div class="hero-desc" v-if="tool.desc">{{ tool.desc }}</div>
+                            <div class="hero-desc" v-if="tool.desc">
+{{ tool.desc }}
+</div>
                         </div>
                     </div>
                 </template>
@@ -245,8 +257,12 @@ const tools = computed(() => [
                 </div>
                 
                 <div class="tile-content">
-                    <div class="tile-label">{{ tool.label }}</div>
-                    <div class="tile-sublabel" v-if="tool.sublabel">{{ tool.sublabel }}</div>
+                    <div class="tile-label">
+{{ tool.label }}
+</div>
+                    <div class="tile-sublabel" v-if="tool.sublabel">
+{{ tool.sublabel }}
+</div>
                 </div>
             </div>
             </div>

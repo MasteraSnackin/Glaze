@@ -263,7 +263,9 @@ defineExpose({ open });
                             <div v-for="cat in categories" :key="cat.id" class="gl-cat-card"
                                 :style="{ '--gl-cat-bg': getCategoryColor(cat.id).bg, '--gl-cat-icon': getCategoryColor(cat.id).icon }"
                                 @click="selectCategory(cat)">
-                                <div class="gl-cat-icon-wrap"><svg viewBox="0 0 24 24"><path :d="getCategoryIcon(cat.id)"/></svg></div>
+                                <div class="gl-cat-icon-wrap">
+<svg viewBox="0 0 24 24"><path :d="getCategoryIcon(cat.id)"/></svg>
+</div>
                                 <div class="gl-cat-info">
                                     <span class="gl-cat-label">{{ cat.label }}</span>
                                     <span class="gl-cat-count">{{ cat.terms.length }} {{ t('glossary_terms') || 'terms' }}</span>
@@ -286,15 +288,21 @@ defineExpose({ open });
 
                 <div v-else-if="view === 'article'" :key="'article-' + selectedTerm?.id" class="gl-article">
                     <div class="gl-article-header">
-                        <h1 class="gl-article-title">{{ selectedTerm.name }}</h1>
+                        <h1 class="gl-article-title">
+{{ selectedTerm.name }}
+</h1>
                         <span v-if="selectedTerm.alt" class="gl-article-badge">{{ selectedTerm.alt }}</span>
                     </div>
                     <div class="gl-article-divider"></div>
                     <p class="gl-article-desc">
                         <template v-for="(part, i) in parsedDesc" :key="i">
                             <span v-if="part.type === 'text'">{{ part.value }}</span>
-                            <button v-else-if="part.type === 'chip'" class="gl-chip" @click="navigateToChipTerm(part.termId)">{{ part.label }}</button>
-                            <button v-else-if="part.type === 'link'" class="gl-ext-link" @click="openLink(part.url)">{{ part.label }}</button>
+                            <button v-else-if="part.type === 'chip'" class="gl-chip" @click="navigateToChipTerm(part.termId)">
+{{ part.label }}
+</button>
+                            <button v-else-if="part.type === 'link'" class="gl-ext-link" @click="openLink(part.url)">
+{{ part.label }}
+</button>
                             <span v-else-if="part.type === 'icon'" class="gl-inline-icon"><svg viewBox="0 0 24 24"><path :d="getInlineIconPath(part.id)"/></svg></span>
                         </template>
                     </p>

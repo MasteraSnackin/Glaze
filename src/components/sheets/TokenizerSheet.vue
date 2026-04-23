@@ -190,7 +190,9 @@ defineExpose({ open, close });
 
         <!-- Recommendation -->
         <div v-if="shouldRecommendHide" class="tokenizer-recommendation">
-          <div class="tokenizer-recommendation-title">History is near its limit</div>
+          <div class="tokenizer-recommendation-title">
+History is near its limit
+</div>
           <div class="tokenizer-recommendation-text">
             Hide about {{ historyHidePreview.count }} top message{{ historyHidePreview.count === 1 ? '' : 's' }} to free about {{ historyHidePreview.tokens }} tokens.
           </div>
@@ -225,10 +227,16 @@ defineExpose({ open, close });
           <label>Hide top messages (%)</label>
           <input type="number" min="1" max="95" v-model.number="localHidePercent">
         </div>
-        <p class="tokenizer-recommendation-text">Hide top messages recommendation appears when visible history reaches the configured threshold.</p>
+        <p class="tokenizer-recommendation-text">
+Hide top messages recommendation appears when visible history reaches the configured threshold.
+</p>
         <div class="tokenizer-actions">
-          <button type="button" class="tokenizer-btn tokenizer-btn-secondary" @click="showSettings = false">Back</button>
-          <button type="button" class="tokenizer-btn tokenizer-btn-primary" @click="saveSettings">Save</button>
+          <button type="button" class="tokenizer-btn tokenizer-btn-secondary" @click="showSettings = false">
+Back
+</button>
+          <button type="button" class="tokenizer-btn tokenizer-btn-primary" @click="saveSettings">
+Save
+</button>
         </div>
       </template>
     </div>

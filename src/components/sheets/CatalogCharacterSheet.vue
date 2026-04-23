@@ -39,7 +39,7 @@ function close() {
 </script>
 
 <template>
-    <SheetView ref="sheetRef" :showBack="true" @back="close" @close="close">
+    <SheetView ref="sheetRef" :show-back="true" @back="close" @close="close">
         <div v-if="charData" class="char-sheet">
 
             <!-- Hero image — pulled up behind the transparent header -->
@@ -61,7 +61,9 @@ function close() {
                     <div class="hero-tokens" v-if="item?.tokens">
                         {{ formatNum(item.tokens) }} tokens
                     </div>
-                    <div class="hero-name">{{ charData.name }}</div>
+                    <div class="hero-name">
+{{ charData.name }}
+</div>
                     <div v-if="charData.creator" class="hero-creator">
                         <a 
                             v-if="charData.creator_id" 
@@ -100,7 +102,9 @@ function close() {
 
             <!-- Description -->
             <div class="char-desc-section" v-if="desc">
-                <div class="section-label">Description</div>
+                <div class="section-label">
+Description
+</div>
                 <div class="char-desc" v-html="desc"></div>
             </div>
 

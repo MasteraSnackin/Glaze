@@ -109,11 +109,17 @@ defineExpose({ open });
                     <div class="debug-toggle" :class="{ active: debugEnabled }" @click="toggleDebugCapture">
                         {{ debugEnabled ? 'Debug Capture On' : 'Debug Capture Off' }}
                     </div>
-                    <div class="debug-action" @click="refreshTrace">Refresh</div>
+                    <div class="debug-action" @click="refreshTrace">
+Refresh
+</div>
                 </div>
                 <div class="segmented-control">
-                    <div class="sub-tab-btn" :class="{ active: previewTab === 'formatted' }" @click="previewTab = 'formatted'">{{ t('label_formatted') || 'Formatted' }}</div>
-                    <div class="sub-tab-btn" :class="{ active: previewTab === 'raw' }" @click="previewTab = 'raw'">{{ t('label_raw_json') || 'Raw JSON' }}</div>
+                    <div class="sub-tab-btn" :class="{ active: previewTab === 'formatted' }" @click="previewTab = 'formatted'">
+{{ t('label_formatted') || 'Formatted' }}
+</div>
+                    <div class="sub-tab-btn" :class="{ active: previewTab === 'raw' }" @click="previewTab = 'raw'">
+{{ t('label_raw_json') || 'Raw JSON' }}
+</div>
                     <div class="tab-glider" :style="{ width: 'calc((100% - 8px) / 2)', transform: `translateX(${previewTab === 'formatted' ? '0%' : '100%'})` }"></div>
                 </div>
             </div>
@@ -121,38 +127,62 @@ defineExpose({ open });
         <div class="preview-container" v-if="previewData || traceData">
             <div v-if="previewTab === 'formatted'">
                 <div v-if="traceData" class="trace-summary-card">
-                    <div class="preview-section-title">Network Trace</div>
+                    <div class="preview-section-title">
+Network Trace
+</div>
                     <div class="params-grid">
                         <div class="param-item">
-                            <div class="param-label">Type</div>
-                            <div class="param-value">{{ traceData.requestType || 'unknown' }}</div>
+                            <div class="param-label">
+Type
+</div>
+                            <div class="param-value">
+{{ traceData.requestType || 'unknown' }}
+</div>
                         </div>
                         <div class="param-item">
-                            <div class="param-label">Status</div>
-                            <div class="param-value">{{ traceData.responseStatus ?? 'pending' }}</div>
+                            <div class="param-label">
+Status
+</div>
+                            <div class="param-value">
+{{ traceData.responseStatus ?? 'pending' }}
+</div>
                         </div>
                         <div class="param-item">
-                            <div class="param-label">Streaming</div>
-                            <div class="param-value">{{ traceData.stream ? 'yes' : 'no' }}</div>
+                            <div class="param-label">
+Streaming
+</div>
+                            <div class="param-value">
+{{ traceData.stream ? 'yes' : 'no' }}
+</div>
                         </div>
                         <div class="param-item">
-                            <div class="param-label">Duration</div>
-                            <div class="param-value">{{ traceData.durationMs ?? 0 }} ms</div>
+                            <div class="param-label">
+Duration
+</div>
+                            <div class="param-value">
+{{ traceData.durationMs ?? 0 }} ms
+</div>
                         </div>
                     </div>
-                    <div class="preview-section-title">Parsed Response</div>
+                    <div class="preview-section-title">
+Parsed Response
+</div>
                     <div class="message-card">
                         <div class="message-body always-open">
                             <pre>{{ traceData.parsed?.text || '' }}</pre>
                         </div>
                     </div>
-                    <div v-if="traceData.parsed?.reasoning" class="preview-section-title">Parsed Reasoning</div>
+                    <div v-if="traceData.parsed?.reasoning" class="preview-section-title">
+Parsed Reasoning
+</div>
                     <div v-if="traceData.parsed?.reasoning" class="message-card">
                         <div class="message-body always-open">
                             <pre>{{ traceData.parsed?.reasoning }}</pre>
                         </div>
                     </div>
-                    <div v-if="traceData.parsed?.error" class="preview-section-title">Error</div>
+                    <div v-if="traceData.parsed?.error" class="preview-section-title">
+Error
+</div>
                     <div v-if="traceData.parsed?.error" class="message-card">
                         <div class="message-body always-open">
                             <pre>{{ traceData.parsed?.error }}</pre>
@@ -161,21 +191,33 @@ defineExpose({ open });
                 </div>
 
                 <template v-if="previewData">
-                    <div class="preview-section-title">{{ t('section_gen_params') || 'Parameters' }}</div>
+                    <div class="preview-section-title">
+{{ t('section_gen_params') || 'Parameters' }}
+</div>
                     <div class="params-grid">
                         <div v-for="(value, key) in getParams(previewData)" :key="key" class="param-item">
-                            <div class="param-label">{{ key }}</div>
-                            <div class="param-value">{{ formatParamValue(value) }}</div>
+                            <div class="param-label">
+{{ key }}
+</div>
+                            <div class="param-value">
+{{ formatParamValue(value) }}
+</div>
                         </div>
                     </div>
-                    <div class="preview-section-title">{{ t('stat_messages') }} ({{ previewData.messages ? previewData.messages.length : 0 }})</div>
+                    <div class="preview-section-title">
+{{ t('stat_messages') }} ({{ previewData.messages ? previewData.messages.length : 0 }})
+</div>
                     <div class="messages-list">
                         <div v-for="(msg, index) in previewData.messages" :key="index" class="message-card">
                             <div class="message-header" @click="toggleMessage(index)">
                                 <div class="message-header-content">
                                     <div class="message-meta-row">
-                                        <div class="message-role" :class="msg.role">{{ msg.role }}</div>
-                                        <div class="message-block-name" v-if="msg.blockName">{{ msg.blockName }}</div>
+                                        <div class="message-role" :class="msg.role">
+{{ msg.role }}
+</div>
+                                        <div class="message-block-name" v-if="msg.blockName">
+{{ msg.blockName }}
+</div>
                                     </div>
                                     <div class="message-preview-text" v-if="!expandedMessages.has(index)">
                                         {{ typeof msg.content === 'string' ? (msg.content.slice(0, 60) + (msg.content.length > 60 ? '...' : '')) : '[Complex Content]' }}
@@ -194,26 +236,40 @@ defineExpose({ open });
             </div>
             <div v-else class="raw-block">
                 <template v-if="previewData">
-                    <div class="preview-section-title">Prompt JSON</div>
+                    <div class="preview-section-title">
+Prompt JSON
+</div>
                     <pre>{{ getRawJson() }}</pre>
                 </template>
                 <template v-if="traceData">
-                    <div class="preview-section-title">Request JSON</div>
+                    <div class="preview-section-title">
+Request JSON
+</div>
                     <pre>{{ getTraceRequestJson() }}</pre>
-                    <div class="preview-section-title">Request Headers</div>
+                    <div class="preview-section-title">
+Request Headers
+</div>
                     <pre>{{ getTraceHeadersJson(traceData.requestHeaders) }}</pre>
-                    <div class="preview-section-title">Response Headers</div>
+                    <div class="preview-section-title">
+Response Headers
+</div>
                     <pre>{{ getTraceHeadersJson(traceData.responseHeaders) }}</pre>
-                    <div class="preview-section-title">Raw Response</div>
+                    <div class="preview-section-title">
+Raw Response
+</div>
                     <pre>{{ getTraceResponseJson() }}</pre>
-                    <div v-if="traceData.streamLines?.length" class="preview-section-title">Raw SSE Lines</div>
+                    <div v-if="traceData.streamLines?.length" class="preview-section-title">
+Raw SSE Lines
+</div>
                     <pre v-if="traceData.streamLines?.length">{{ getStreamLinesText() }}</pre>
                 </template>
             </div>
         </div>
         <div class="empty-state" v-else>
             <svg class="empty-state-icon" viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/></svg>
-            <div class="empty-state-text">{{ t('no_preview_available') || 'No preview available' }}</div>
+            <div class="empty-state-text">
+{{ t('no_preview_available') || 'No preview available' }}
+</div>
         </div>
     </SheetView>
 </template>

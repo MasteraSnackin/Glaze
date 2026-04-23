@@ -139,7 +139,9 @@ const totalSelectedCount = computed(() => selectedTagIds.value.size + selectedTa
 
             <!-- NSFW Toggle -->
             <div class="filter-section nsfw-row" style="margin-bottom: 5px;">
-                <div class="filter-label" style="margin: 0;">Show NSFW</div>
+                <div class="filter-label" style="margin: 0;">
+Show NSFW
+</div>
                 <label class="toggle-switch">
                     <input type="checkbox" v-model="nsfw">
                     <span class="slider"></span>
@@ -148,13 +150,17 @@ const totalSelectedCount = computed(() => selectedTagIds.value.size + selectedTa
 
             <!-- Tokens -->
             <div class="filter-section">
-                <div class="filter-label">Token Range</div>
+                <div class="filter-label">
+Token Range
+</div>
                 <div class="filter-row">
                     <div class="filter-input-wrap">
                         <span class="input-label">Min</span>
                         <input type="number" v-model.number="minTokens" class="filter-input" />
                     </div>
-                    <div class="filter-range-dash">—</div>
+                    <div class="filter-range-dash">
+—
+</div>
                     <div class="filter-input-wrap">
                         <span class="input-label">Max</span>
                         <input type="number" v-model.number="maxTokens" class="filter-input" />
@@ -165,7 +171,9 @@ const totalSelectedCount = computed(() => selectedTagIds.value.size + selectedTa
             <!-- Tag chips -->
             <div class="filter-section">
                 <div class="filter-label-row">
-                    <div class="filter-label">Tags</div>
+                    <div class="filter-label">
+Tags
+</div>
                     <button v-if="totalSelectedCount > 0" class="clear-tags-btn" @click="clearTags">
                         Clear ({{ totalSelectedCount }})
                     </button>
@@ -199,7 +207,9 @@ const totalSelectedCount = computed(() => selectedTagIds.value.size + selectedTa
                         {{ tag.name }}
                     </button>
                 </TransitionGroup>
-                <div v-if="isFetchingTags" class="fetching-tags-loader">Searching tags...</div>
+                <div v-if="isFetchingTags" class="fetching-tags-loader">
+Searching tags...
+</div>
             </div>
 
         </div>

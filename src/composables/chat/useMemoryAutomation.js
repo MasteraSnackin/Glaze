@@ -21,7 +21,8 @@ import {
     normalizeMemoryEntryShape,
     genMemoryEntryId,
     getMemoryVectorSearchEnabled,
-    buildMemoryKeysFromText
+    buildMemoryKeysFromText,
+    parseMemoryDraftResponse
 } from '@/core/services/memoryBooksService.js';
 import {
     resolveMemoryPrompt
@@ -90,52 +91,6 @@ function buildMemoryDraftSummaryExcerpt(summary) {
     }
     return '';
 }
-
-function parseMemoryDraftResponseImpl(rawText, fallbackKeys = []) {
-    const text = String(rawText || '').trim();
-    const lines = text.split(/\r?\n/);
-    const memoryLines = [];
-    let keysLine = '';
-    let inMemoryBlock = false;
-
-    for (const line of lines) {
-        if (/^memory\s*:/i.test(line)) {
-            inMemoryBlock = true;
-            const firstLine = line.replace(/^memory\s*:/i, '').trim();
-            if (firstLine) memoryLines.push(firstLine);
-            continue;
-        }
-        if (/^keys\s*:/i.test(line)) {
-            keysLine = line.replace(/^keys\s*:/i, '').trim();
-            inMemoryBlock = false;
-            continue;
-        }
-        if (inMemoryBlock) {
-            memoryLines.push(line);
-        }
-    }
-
-    let memory = memoryLines.join('\n').trim();
-
-    if (!memory) {
-        const nonMeta = lines.filter(line => !/^keys\s*:/i.test(line)).join('\n').trim();
-        memory = nonMeta.replace(/^memory\s*:/i, '').trim();
-    }
-
-    const parsedKeys = keysLine
-        ? keysLine.split(',').map(item => item.trim()).filter(Boolean)
-        : [];
-
-    const content = memory || text;
-
-    return {
-        content,
-        raw: text,
-        keys: parsedKeys.length ? parsedKeys : buildMemoryKeysFromText(content, fallbackKeys)
-    };
-}
-
-export { parseMemoryDraftResponseImpl as parseMemoryDraftResponse };
 
 export function useMemoryAutomation({
     activeChatChar,
@@ -258,7 +213,7 @@ export function useMemoryAutomation({
                 ...(settings.generationModel
                     ? { model: settings.generationModel }
                     : {}),
-                ...(settings.generationTemperature != null
+                ...(settings.generationTemperature != null // eslint-disable-line eqeqeq
                     ? { temp: settings.generationTemperature }
                     : {}),
                 ...(generationMaxTokens ? { maxTokens: generationMaxTokens } : {})

@@ -210,7 +210,7 @@ export function injectLateVectorLoreMessages({ messages, newVectorEntries, safeC
         };
     }
 
-    let remainingHistoryBudget = safeContext - staticTokens;
+    const remainingHistoryBudget = safeContext - staticTokens;
     let includedHistoryCount = 0;
     let currentHistoryTokens = 0;
 

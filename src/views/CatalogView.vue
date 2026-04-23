@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { t } from '@/utils/i18n.js';
-import { janitorTagMap } from '@/core/services/catalog/janitorProvider.js';
+import { janitorTagMap, janitorFetchCharacter, janitorSearch, janitorItemToPartialCharData } from '@/core/services/catalog/janitorProvider.js';
 import {
     catalogResults, catalogLoading, catalogError,
     catalogHasMore, catalogQuery, catalogTotal,
@@ -9,7 +9,6 @@ import {
 } from '@/core/states/catalogState.js';
 import { createNewSession } from '@/utils/sessions.js';
 import { datacatGetCharacter, datacatExtract, datacatExtractionStatus } from '@/core/services/catalog/datacatProvider.js';
-import { janitorFetchCharacter, janitorSearch, janitorItemToPartialCharData } from '@/core/services/catalog/janitorProvider.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import FiltersBottomSheet from '@/components/sheets/FiltersBottomSheet.vue';
 import CatalogCharacterSheet from '@/components/sheets/CatalogCharacterSheet.vue';
@@ -419,8 +418,8 @@ onUnmounted(() => {
         <CatalogCharacterSheet
             v-model:visible="showCharSheet"
             :item="previewItem"
-            :charData="previewCharData"
-            :avatarUrl="previewAvatarUrl"
+            :char-data="previewCharData"
+            :avatar-url="previewAvatarUrl"
             @import="onSheetImport"
         />
 
@@ -435,7 +434,9 @@ onUnmounted(() => {
         <div v-if="catalogError && catalogResults.length === 0" class="catalog-empty">
             <svg viewBox="0 0 24 24" class="empty-icon"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
             <p>{{ catalogError }}</p>
-            <button class="retry-btn" @click="searchCatalog(true)">{{ t('btn_retry') }}</button>
+            <button class="retry-btn" @click="searchCatalog(true)">
+{{ t('btn_retry') }}
+</button>
         </div>
 
         <!-- Empty State -->
@@ -481,7 +482,9 @@ onUnmounted(() => {
                     <!-- Bottom Info & Tags -->
                     <div class="card-info-bottom">
                         <div class="card-name-col">
-                            <div class="card-name">{{ item.name }}</div>
+                            <div class="card-name">
+{{ item.name }}
+</div>
                             <div class="card-desc" v-if="item.creator">
                                 <a 
                                     v-if="item.creator_id" 
@@ -492,7 +495,9 @@ onUnmounted(() => {
                                 >@{{ item.creator }}</a>
                                 <span v-else>@{{ item.creator }}</span>
                             </div>
-                            <div class="card-tokens" v-if="item.tokens">{{ formatNumber(item.tokens) }} tokens</div>
+                            <div class="card-tokens" v-if="item.tokens">
+{{ formatNumber(item.tokens) }} tokens
+</div>
                         </div>
 
                         <div class="card-actions" v-if="item.tags?.length || item.nsfw !== undefined">

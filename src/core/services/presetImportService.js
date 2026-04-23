@@ -228,7 +228,7 @@ export function convertLatexPreset(data, fileName) {
     };
 
     const normalizeTitle = (title) => {
-        const lower = (title || '').toLowerCase().replace(/[━─🏳️✏️🛑🧑‍🔧🧠🧍📜]/gu, '').trim();
+        const lower = (title || '').toLowerCase().replace(/[\u{2500}\u{2501}\u{1F6D1}\u{1F9E0}\u{1F9CD}\u{1F4C4}\u{1F3F3}\u{270F}\u{1F9D1}\u{1F527}]|\u{FE0F}|\u{200D}/gu, '').trim();
         for (const [key, blockId] of Object.entries(LATEX_TITLE_TO_BLOCK)) {
             if (lower.includes(key)) return blockId;
         }

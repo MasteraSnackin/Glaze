@@ -84,7 +84,7 @@ defineExpose({ open, close });
             show-avatar 
             avatar-field="avatar"
             @save="onSave"
-            @update:modelValue="(val) => character = val"
+            @update:model-value="(val) => character = val"
             @open-fs="handleOpenFs"
         />
     </SheetView>

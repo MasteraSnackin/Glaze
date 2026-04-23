@@ -112,6 +112,10 @@ const loadItems = () => {
 
 const items = ref(loadItems());
 
+const canAdd = computed(() => {
+    return allAvailableItems.some(i => !items.value.some(existing => existing.id === i.id));
+});
+
 const displayItems = computed(() => {
     const list = items.value
         .filter(item => !(props.sidebarMode && item.id === 'glossary'))
@@ -123,10 +127,6 @@ const displayItems = computed(() => {
         list.push({ isAddBtn: true, id: 'add-btn' });
     }
     return list;
-});
-
-const canAdd = computed(() => {
-    return allAvailableItems.some(i => !items.value.some(existing => existing.id === i.id));
 });
 
 watch(items, (newVal) => {
@@ -449,7 +449,9 @@ defineExpose({
     <Transition :name="sidebarMode ? '' : 'drawer'">
         <div v-if="visible" class="magic-drawer" :class="{ 'magic-drawer-sidebar': sidebarMode, 'icon-only': iconOnly }" @click.stop>
             <div class="drawer-header" v-show="!iconOnly">
-                <div class="drawer-title">{{ t('sheet_title_magic_drawer') || 'Magic Drawer' }}</div>
+                <div class="drawer-title">
+{{ t('sheet_title_magic_drawer') || 'Magic Drawer' }}
+</div>
                 <div class="edit-toggle" @click="toggleEdit" v-if="!sidebarMode">
                     <svg v-if="!isEditing" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
                     <svg v-else viewBox="0 0 24 24"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg>

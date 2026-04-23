@@ -104,7 +104,7 @@ export async function getEmbeddings(texts) {
     const endpoint = config.endpoint;
     const url = /\/embeddings\/?$/i.test(endpoint) ? endpoint : `${endpoint.replace(/\/+$/, '')}/embeddings`;
     const headers = { 'Content-Type': 'application/json' };
-    if (config.apiKey) headers['Authorization'] = `Bearer ${config.apiKey}`;
+    if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`;
 
     console.info('[embeddingService] requesting embeddings', {
         count: texts.length,

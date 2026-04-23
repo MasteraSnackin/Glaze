@@ -103,11 +103,17 @@ onBeforeUnmount(() => {
                 >
                     <div class="persona-avatar">
                         <img v-if="getAvatar(persona)" :src="getAvatar(persona)" />
-                        <div v-else class="avatar-placeholder">{{ getInitial(persona) }}</div>
+                        <div v-else class="avatar-placeholder">
+{{ getInitial(persona) }}
+</div>
                     </div>
                     <div class="persona-info">
-                        <div class="persona-name">{{ persona.name }}</div>
-                        <div class="persona-prompt">{{ persona.prompt || t('no_prompt') || 'No prompt' }}</div>
+                        <div class="persona-name">
+{{ persona.name }}
+</div>
+                        <div class="persona-prompt">
+{{ persona.prompt || t('no_prompt') || 'No prompt' }}
+</div>
                     </div>
                     <div class="persona-actions">
                         <button class="activation-btn" :class="getPersonaConnectionType(persona.id) || 'disabled'" @click.stop="openConnectionManager(persona)">

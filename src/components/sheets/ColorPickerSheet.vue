@@ -48,7 +48,7 @@ function hexToHsl(H) {
         r = "0x" + H[1] + H[2]; g = "0x" + H[3] + H[4]; b = "0x" + H[5] + H[6];
     }
     r /= 255; g /= 255; b /= 255;
-    let cmin = Math.min(r,g,b), cmax = Math.max(r,g,b), delta = cmax - cmin;
+    const cmin = Math.min(r,g,b), cmax = Math.max(r,g,b), delta = cmax - cmin;
     
     let hVal = 0, sVal = 0, lVal = 0;
     if (delta === 0) hVal = 0;

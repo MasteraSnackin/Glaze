@@ -440,16 +440,16 @@ function onBannerAfterLeave() {
     state.lorebookBanner.isTransitioning = false;
 }
 
-const onChangeGenerationTab = (e) => {
-    if (state.mode === 'generation') {
-        handleGenTabClick(e.detail);
-    }
-};
-
 const handleGenTabClick = (tab) => {
     state.generationTab = tab;
     if (state.onGenerationTabChange) {
         state.onGenerationTabChange(tab);
+    }
+};
+
+const onChangeGenerationTab = (e) => {
+    if (state.mode === 'generation') {
+        handleGenTabClick(e.detail);
     }
 };
 
@@ -598,9 +598,13 @@ defineExpose({ updateHeader });
                   </div>
                   <div style="display: flex; flex-direction: column; justify-content: center; margin-left: 10px; min-width: 0; flex: 1;">
                       <div style="display: flex; align-items: center;">
-                          <div class="header-name" id="chat-header-name" style="line-height: 1.2;">{{ state.chat.name }}</div>
+                          <div class="header-name" id="chat-header-name" style="line-height: 1.2;">
+{{ state.chat.name }}
+</div>
                       </div>
-                      <div id="chat-header-session" style="color: var(--text-gray); font-size: 0.8em; line-height: 1.2;">{{ state.chat.session }}</div>
+                      <div id="chat-header-session" style="color: var(--text-gray); font-size: 0.8em; line-height: 1.2;">
+{{ state.chat.session }}
+</div>
                   </div>
                   <!-- Desktop inline search -->
                   <div v-if="isDesktop" class="header-search-inline chat-search-inline-desktop">
@@ -642,8 +646,12 @@ defineExpose({ updateHeader });
                   <!-- Generation Sub-tabs -->
                   <div v-if="state.mode === 'generation'" class="header-sub-tabs" key="tabs">
                       <div class="segmented-control">
-                          <div class="sub-tab-btn" :class="{ active: state.generationTab === 'subview-api' }" @click="handleGenTabClick('subview-api')">{{ state.tabApiLabel }}</div>
-                          <div class="sub-tab-btn" :class="{ active: state.generationTab === 'subview-preset' }" @click="handleGenTabClick('subview-preset')">{{ state.tabPresetLabel }}</div>
+                          <div class="sub-tab-btn" :class="{ active: state.generationTab === 'subview-api' }" @click="handleGenTabClick('subview-api')">
+{{ state.tabApiLabel }}
+</div>
+                          <div class="sub-tab-btn" :class="{ active: state.generationTab === 'subview-preset' }" @click="handleGenTabClick('subview-preset')">
+{{ state.tabPresetLabel }}
+</div>
                       </div>
                   </div>
 
@@ -655,9 +663,11 @@ defineExpose({ updateHeader });
 
       <!-- Right Actions + Notification Bell -->
       <div v-if="!state.isChatSearchMode" id="header-actions" class="header-btn-right" @click.stop>
-          <div v-if="state.showActions" v-for="(action, idx) in state.actions" :key="idx" class="header-action-btn" :id="action.id" @click.stop="action.onClick" :style="{ color: action.color }">
+          <template v-if="state.showActions">
+          <div v-for="(action, idx) in state.actions" :key="idx" class="header-action-btn" :id="action.id" @click.stop="action.onClick" :style="{ color: action.color }">
               <span v-html="action.icon" style="display: flex; fill: currentColor;"></span>
           </div>
+          </template>
           <!-- <div class="header-action-btn notif-btn" @click.stop="openNotifications">
               <svg viewBox="0 0 24 24" fill="currentColor" style="width:22px;height:22px;"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/></svg>
               <span v-if="notificationsState.unreadCount > 0" class="notif-badge"></span>

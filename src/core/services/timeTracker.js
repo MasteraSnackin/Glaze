@@ -17,16 +17,16 @@ export const startTracking = () => {
         if (!document.hasFocus()) return;
 
         // App time
-        let appTime = parseInt(localStorage.getItem('gz_time_app') || '0', 10);
+        const appTime = parseInt(localStorage.getItem('gz_time_app') || '0', 10);
         localStorage.setItem('gz_time_app', appTime + 1);
 
         // Context time
         if (activeCharId) {
-            let charTime = parseInt(localStorage.getItem(`gz_time_char_${activeCharId}`) || '0', 10);
+            const charTime = parseInt(localStorage.getItem(`gz_time_char_${activeCharId}`) || '0', 10);
             localStorage.setItem(`gz_time_char_${activeCharId}`, charTime + 1);
 
             if (activeSessionId) {
-                let sessionTime = parseInt(localStorage.getItem(`gz_time_chat_${activeCharId}_${activeSessionId}`) || '0', 10);
+                const sessionTime = parseInt(localStorage.getItem(`gz_time_chat_${activeCharId}_${activeSessionId}`) || '0', 10);
                 localStorage.setItem(`gz_time_chat_${activeCharId}_${activeSessionId}`, sessionTime + 1);
             }
         }

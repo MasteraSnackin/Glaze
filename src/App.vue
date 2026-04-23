@@ -41,12 +41,11 @@ import { Capacitor } from '@capacitor/core';
 import { isKeyboardOpen, onKeyboardShow, onKeyboardHide } from '@/core/services/keyboardHandler.js';
 import { initSettings, applyApiRuntimeConfig } from '@/core/config/APISettings.js';
 import { initTheme, themeState } from '@/core/states/themeState.js';
-import { updateLanguage } from '@/utils/i18n.js';
+import { updateLanguage, translations } from '@/utils/i18n.js';
 import { currentLang, imageViewerMode, forceMobileLayout } from '@/core/config/APPSettings.js';
 import { initRipple, initThemeToggle, initHeaderDropdown, initBackButton, initViewportFix } from '@/core/services/ui.js';
 import { bottomSheetState, closeBottomSheet, showBottomSheet } from '@/core/states/bottomSheetState.js';
 import { db, migrateScToGz, markSyncDeletedEntry } from '@/utils/db.js';
-import { translations } from '@/utils/i18n.js';
 import { addPersona, updatePersona, deletePersona, allPersonas, loadPersonas } from '@/core/states/personaState.js';
 import { checkAndRequestNotifications, consumePendingNotificationData } from '@/core/services/notificationService.js';
 import { logger } from './utils/logger.js';
@@ -199,7 +198,7 @@ const shouldOpenPersonasOnReturn = ref(false);
 
 const isDeleting = ref(false); // Guard flag to prevent auto-save during deletion
 const isOnboarding = ref(false);
-let kbListeners = [];
+const kbListeners = [];
 
 // --- Categories ---
 const activeCategories = reactive({
@@ -222,6 +221,7 @@ const categories = {
 
 const isEditorView = computed(() => currentView.value === 'view-character-edit' || currentView.value === 'view-persona-edit');
 
+const fsEditorVisible = ref(false);
 const headerZIndex = computed(() => {
     if (fsEditorVisible.value) return 2001;
     if (isEditorView.value) return 1100;
@@ -444,7 +444,6 @@ function finishOnboarding() {
 }
 
 // Full Screen Editor Logic
-const fsEditorVisible = ref(false);
 const fsEditorValue = ref("");
 let fsEditorCallback = null;
 
@@ -899,8 +898,8 @@ watch(currentView, (newVal, oldVal) => {
           :active-categories="activeCategories"
           :is-desktop-floating="isDesktopFloating"
           :is-glossary-open="isGlossaryWindowOpen"
-          @update:currentView="currentView = $event"
-          @openChat="openChatWrapper"
+          @update:current-view="currentView = $event"
+          @open-chat="openChatWrapper"
       />
 
       <!-- Main Content Area -->
@@ -1001,7 +1000,7 @@ watch(currentView, (newVal, oldVal) => {
                 :model-value="effectiveMainView === 'view-character-edit' ? (editingCharacter || {}) : (editingPersona || {})"
                 :config="effectiveMainView === 'view-character-edit' ? characterEditorConfig : personaEditorConfig"
                 :show-avatar="true"
-                @update:modelValue="(val) => effectiveMainView === 'view-character-edit' ? editingCharacter = val : editingPersona = val"
+                @update:model-value="(val) => effectiveMainView === 'view-character-edit' ? editingCharacter = val : editingPersona = val"
                 @save="handleEditorAutoSave"
                 @close="closeEditor"
                 @open-fs="openFsEditor"
@@ -1045,10 +1044,10 @@ watch(currentView, (newVal, oldVal) => {
       <DesktopRightSidebar
           v-if="isDesktop"
           :bottom-sheet-state="bottomSheetState"
-          :sidebar-state="sidebarState"
+          :right-sidebar-state="sidebarState"
           :active-chat-char-obj="activeChatCharObj"
           :current-view="currentView"
-          @closeBottomSheet="closeBottomSheet"
+          @close-bottom-sheet="closeBottomSheet"
           @magic-notes="chatViewRef?.openAuthorsNoteSheet()"
           @magic-context="chatViewRef?.openContextSheet()"
           @magic-summary="chatViewRef?.openSummarySheet()"
@@ -1079,7 +1078,7 @@ watch(currentView, (newVal, oldVal) => {
 
     <!-- Bottom Navigation Bar (mobile only — desktop uses left sidebar) -->
     <div v-if="!isDesktop" class="footer-container" ref="footerContainer">
-        <BottomNavigation v-model:currentView="currentView" />
+        <BottomNavigation v-model:current-view="currentView" />
     </div>
 
     <!-- Global Bottom Sheet -->

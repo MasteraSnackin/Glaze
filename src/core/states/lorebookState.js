@@ -433,10 +433,10 @@ export function scanLorebooks(history = [], char = null, textToScan = "", chatId
 
     if (activeLorebooks.length === 0) return [];
 
-    let allRelevantEntries = [];
+    const allRelevantEntries = [];
 
     // 1. Get all entries from active lorebooks
-    let candidates = [];
+    const candidates = [];
     activeLorebooks.forEach(lb => {
         lb.entries.forEach(entry => {
             if (entry.enabled !== false) {

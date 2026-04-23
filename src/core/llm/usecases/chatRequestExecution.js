@@ -59,7 +59,7 @@ export async function executeFinalChatRequest({
         stopString: effectiveStopString = stopString
     } = requestAssembly || {};
 
-    let { previewBody, requestBody } = buildChatRequestPayload({
+    const { previewBody, requestBody } = buildChatRequestPayload({
         providerId: effectiveProviderId,
         model: effectiveModel,
         messages: effectiveMessages,

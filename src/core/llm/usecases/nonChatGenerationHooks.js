@@ -73,7 +73,7 @@ export async function runNonChatRequestHooks({
         ...assembledExtra
     } = requestAssembly || {};
 
-    let { previewBody: assembledPreviewBody, requestBody: assembledRequestBody } = buildPayload({
+    const { previewBody: assembledPreviewBody, requestBody: assembledRequestBody } = buildPayload({
         ...assembledPayloadInput,
         providerId: assembledProviderId,
         model: assembledModel

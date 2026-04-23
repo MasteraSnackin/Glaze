@@ -431,7 +431,9 @@ defineExpose({ open, close });
 
                 <!-- Preset Regexes -->
                 <div class="list-section" v-if="presetRegexes.length > 0">
-                    <div class="section-title">{{ t('regex_preset_scripts') || 'Preset Regexes' }}</div>
+                    <div class="section-title">
+{{ t('regex_preset_scripts') || 'Preset Regexes' }}
+</div>
                     <div class="preset-chip" @click="openPresetSheet()">
                         <svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
                         <span>{{ effectivePresetName }}</span>
@@ -440,8 +442,12 @@ defineExpose({ open, close });
                     <div class="list-container">
                         <div v-for="(script, index) in presetRegexes" :key="script.id || index" class="list-item" @click="selectScript(script, true)">
                             <div class="item-info">
-                                <div class="item-name">{{ script.name }}</div>
-                                <div class="item-meta">{{ script.regex }}</div>
+                                <div class="item-name">
+{{ script.name }}
+</div>
+                                <div class="item-meta">
+{{ script.regex }}
+</div>
                             </div>
                             <div class="item-actions">
                                 <input type="checkbox" class="vk-switch small-switch" :checked="!script.disabled" @change="script.disabled = !$event.target.checked; savePresets()" @click.stop>
@@ -455,15 +461,23 @@ defineExpose({ open, close });
 
                 <!-- Global Regexes -->
                 <div class="list-section">
-                    <div class="section-title">{{ t('regex_global_scripts') || 'Global Regexes' }}</div>
+                    <div class="section-title">
+{{ t('regex_global_scripts') || 'Global Regexes' }}
+</div>
                     <div v-if="scripts.length === 0" class="empty-state">
-                        <div class="empty-text">{{ t('no_entries_found') || 'No scripts' }}</div>
+                        <div class="empty-text">
+{{ t('no_entries_found') || 'No scripts' }}
+</div>
                     </div>
                     <div v-else class="list-container">
                         <div v-for="(script, index) in scripts" :key="script.id" class="list-item" @click="selectScript(script, false)">
                             <div class="item-info">
-                                <div class="item-name">{{ script.name }}</div>
-                                <div class="item-meta">{{ script.regex }}</div>
+                                <div class="item-name">
+{{ script.name }}
+</div>
+                                <div class="item-meta">
+{{ script.regex }}
+</div>
                             </div>
                             <div class="item-actions">
                                 <input type="checkbox" class="vk-switch small-switch" :checked="!script.disabled" @change="script.disabled = !$event.target.checked; saveScripts()" @click.stop>
@@ -479,7 +493,9 @@ defineExpose({ open, close });
             <div v-else class="edit-view">
 
                 <div class="menu-group">
-                    <div class="section-header">{{ t('regex_script_settings') || 'Script Settings' }}</div>
+                    <div class="section-header">
+{{ t('regex_script_settings') || 'Script Settings' }}
+</div>
                     <div class="settings-item">
                         <label>{{ t('regex_script_name') || 'Script Name' }}</label>
                         <input type="text" v-model="activeScript.name" :placeholder="t('regex_script_name') || 'Script Name'">
@@ -502,7 +518,9 @@ defineExpose({ open, close });
                 <div class="options-grid">
                     <div class="options-col">
                         <div class="menu-group compact">
-                            <div class="section-header">{{ t('regex_affects') || 'Affects' }} <HelpTip term="regex-placement"/></div>
+                            <div class="section-header">
+{{ t('regex_affects') || 'Affects' }} <HelpTip term="regex-placement"/>
+</div>
                             <label class="settings-item-checkbox compact" v-for="opt in placementOptions" :key="opt.value">
                                 <div class="checkbox-container">
                                     <input type="checkbox" :value="opt.value" v-model="activeScript.placement" class="native-checkbox">
@@ -525,7 +543,9 @@ defineExpose({ open, close });
 
                     <div class="options-col">
                         <div class="menu-group compact">
-                            <div class="section-header">{{ t('regex_other_options') || 'Other Options' }}</div>
+                            <div class="section-header">
+{{ t('regex_other_options') || 'Other Options' }}
+</div>
                             <label class="settings-item-checkbox compact">
                                 <div class="checkbox-container">
                                     <input type="checkbox" v-model="activeScript.runOnEdit" class="native-checkbox">
@@ -535,7 +555,9 @@ defineExpose({ open, close });
                         </div>
 
                         <div class="menu-group compact">
-                            <div class="section-header">{{ t('regex_macros_find') || 'Macros in Find Regex' }} <HelpTip term="regex-macros"/></div>
+                            <div class="section-header">
+{{ t('regex_macros_find') || 'Macros in Find Regex' }} <HelpTip term="regex-macros"/>
+</div>
                             <div class="settings-item select-item" @click="openMacroSelector">
                                 <div class="clickable-selector">
                                     <span>{{ macroOptions.find(o => o.value === activeScript.macroRules)?.label || activeScript.macroRules }}</span>
@@ -545,7 +567,9 @@ defineExpose({ open, close });
                         </div>
 
                         <div class="menu-group compact">
-                            <div class="section-header">{{ t('regex_ephemerality') || 'Ephemerality' }} <HelpTip term="regex-ephemerality"/></div>
+                            <div class="section-header">
+{{ t('regex_ephemerality') || 'Ephemerality' }} <HelpTip term="regex-ephemerality"/>
+</div>
                             <label class="settings-item-checkbox compact" v-for="opt in ephemeralityOptions" :key="opt.value">
                                 <div class="checkbox-container">
                                     <input type="checkbox" :value="opt.value" v-model="activeScript.ephemerality" class="native-checkbox">

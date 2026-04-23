@@ -2,8 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, defineAsyncComponent } from 'vue';
 
 const CatalogView = defineAsyncComponent(() => import('@/views/CatalogView.vue'));
-import { triggerCharacterImport, extractCharacterBook } from '@/utils/characterIO.js';
-import { exportCharacterAsV2Json, exportCharacterAsV2Png } from '@/utils/characterIO.js';
+import { triggerCharacterImport, extractCharacterBook, exportCharacterAsV2Json, exportCharacterAsV2Png } from '@/utils/characterIO.js';
 import { triggerChatImport } from '@/core/services/chatImporter.js';
 import { importCharacter } from '@/core/states/catalogState.js';
 import { datacatExtract, datacatExtractionStatus, datacatGetCharacter } from '@/core/services/catalog/datacatProvider.js';
@@ -73,6 +72,80 @@ const loadCharacters = async () => {
   }
 };
 
+let pollInterval = null;
+const startJanitorExtraction = async (url) => {
+    closeBottomSheet();
+    setTimeout(() => {
+        showBottomSheet({
+            noDropdown: true,
+            title: t('catalog_extracting'),
+            bigInfo: {
+                icon: `<svg viewBox="0 0 24 24" style="fill:var(--vk-blue);width:100%;height:100%"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg>`,
+                description: t('catalog_extract_progress'),
+                buttonText: t('btn_cancel'),
+                onButtonClick: () => {
+                    if (pollInterval) clearInterval(pollInterval);
+                    closeBottomSheet();
+                }
+            }
+        });
+    }, 300);
+
+    try {
+        await datacatExtract(url, true);
+        let attempts = 0;
+        const MAX = 60;
+        
+        pollInterval = setInterval(async () => {
+            attempts++;
+            if (attempts > MAX) {
+                clearInterval(pollInterval);
+                closeBottomSheet();
+                return;
+            }
+            try {
+                const status = await datacatExtractionStatus();
+                const uuidMatch = url.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+                const searchStr = uuidMatch ? uuidMatch[0] : url;
+                
+                const done = status.history?.find(h => h.url?.includes(searchStr));
+                if (done && done.characterId) {
+                    clearInterval(pollInterval);
+                    pollInterval = null;
+                    
+                    const result = await datacatGetCharacter(done.characterId);
+                    const charData = result.charData;
+                    if (!charData.id) charData.id = Date.now().toString();
+                    
+                    await importCharacter(charData, result.avatarUrl);
+                    closeBottomSheet();
+                    
+                    setTimeout(() => {
+                        const index = characters.value.findIndex(c => c.id === charData.id);
+                        if (index !== -1) {
+                            window.dispatchEvent(new CustomEvent('open-character-editor', { detail: { index } }));
+                        }
+                    }, 500);
+                }
+            } catch (e) { }
+        }, 3000);
+    } catch(e) {
+        closeBottomSheet();
+        setTimeout(() => {
+            showBottomSheet({
+                noDropdown: true,
+                title: t('title_error'),
+                bigInfo: {
+                    icon: `<svg viewBox="0 0 24 24" style="fill:#ff4444;width:100%;height:100%"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>`,
+                    description: e.message,
+                    buttonText: t('btn_ok'),
+                    onButtonClick: closeBottomSheet
+                }
+            });
+        }, 300);
+    }
+}
+
 const onAddCharacter = () => {
     showBottomSheet({
         title: t('sheet_title_char_options'),
@@ -132,81 +205,6 @@ const onAddCharacter = () => {
         ]
     });
 };
-
-let pollInterval = null;
-const startJanitorExtraction = async (url) => {
-    closeBottomSheet();
-    setTimeout(() => {
-        showBottomSheet({
-            noDropdown: true,
-            title: t('catalog_extracting'),
-            bigInfo: {
-                icon: `<svg viewBox="0 0 24 24" style="fill:var(--vk-blue);width:100%;height:100%"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg>`,
-                description: t('catalog_extract_progress'),
-                buttonText: t('btn_cancel'),
-                onButtonClick: () => {
-                    if (pollInterval) clearInterval(pollInterval);
-                    closeBottomSheet();
-                }
-            }
-        });
-    }, 300);
-
-    try {
-        await datacatExtract(url, true);
-        let attempts = 0;
-        const MAX = 60;
-        
-        pollInterval = setInterval(async () => {
-            attempts++;
-            if (attempts > MAX) {
-                clearInterval(pollInterval);
-                closeBottomSheet();
-                return;
-            }
-            try {
-                const status = await datacatExtractionStatus();
-                // Extract UUID from the provided URL, as DataCat's history URL might not contain the slug or query parameters
-                const uuidMatch = url.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
-                const searchStr = uuidMatch ? uuidMatch[0] : url;
-                
-                const done = status.history?.find(h => h.url?.includes(searchStr));
-                if (done && done.characterId) {
-                    clearInterval(pollInterval);
-                    pollInterval = null;
-                    
-                    const result = await datacatGetCharacter(done.characterId);
-                    const charData = result.charData;
-                    if (!charData.id) charData.id = Date.now().toString();
-                    
-                    await importCharacter(charData, result.avatarUrl);
-                    closeBottomSheet();
-                    
-                    setTimeout(() => {
-                        const index = characters.value.findIndex(c => c.id === charData.id);
-                        if (index !== -1) {
-                            window.dispatchEvent(new CustomEvent('open-character-editor', { detail: { index } }));
-                        }
-                    }, 500);
-                }
-            } catch (e) { }
-        }, 3000);
-    } catch(e) {
-        closeBottomSheet();
-        setTimeout(() => {
-            showBottomSheet({
-                noDropdown: true,
-                title: t('title_error'),
-                bigInfo: {
-                    icon: `<svg viewBox="0 0 24 24" style="fill:#ff4444;width:100%;height:100%"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>`,
-                    description: e.message,
-                    buttonText: t('btn_ok'),
-                    onButtonClick: closeBottomSheet
-                }
-            });
-        }, 300);
-    }
-}
 
 const onEditCharacter = (char) => {
     const index = characters.value.indexOf(char);
@@ -417,7 +415,7 @@ const vLongPress = {
 
 const openSessionsSheet = async (char) => {
     // Use raw db.get to bypass getChat's auto-session-creation
-    let rawData = await db.get(`gz_chat_${char.id}`);
+    const rawData = await db.get(`gz_chat_${char.id}`);
     
     // If no data or no sessions, show the "no sessions" empty state
     if (!rawData || !rawData.sessions || Object.keys(rawData.sessions).length === 0) {
@@ -547,7 +545,7 @@ const openSessionsSheet = async (char) => {
     });
 };
 
-const openDeleteSessionConfirm = (char, sessionId) => {
+function openDeleteSessionConfirm(char, sessionId) {
     showBottomSheet({
         title: t('confirm_delete_session'),
         items: [
@@ -642,7 +640,9 @@ defineExpose({ onAddCharacter, loadCharacters });
               </div>
               <div class="fav-ring"></div>
             </div>
-            <div class="favorite-name">{{ char.name }}</div>
+            <div class="favorite-name">
+{{ char.name }}
+</div>
           </div>
         </div>
       </div>
@@ -699,7 +699,9 @@ defineExpose({ onAddCharacter, loadCharacters });
         
         <div class="card-info">
           <div class="card-header-row">
-            <div class="card-name">{{ char.name }}</div>
+            <div class="card-name">
+{{ char.name }}
+</div>
             <div class="card-fav-icon" v-if="char.fav">
               <svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
             </div>
@@ -707,7 +709,9 @@ defineExpose({ onAddCharacter, loadCharacters });
           <div class="card-desc" v-if="char.scenario || char.description" v-html="char.scenario || char.description"></div>
           
           <div class="card-actions">
-            <div class="card-tag" v-if="char.version">v{{ char.version }}</div>
+            <div class="card-tag" v-if="char.version">
+v{{ char.version }}
+</div>
           </div>
         </div>
       </div>
@@ -715,7 +719,9 @@ defineExpose({ onAddCharacter, loadCharacters });
 
     <div v-if="!isLoading && !hasVisibleCards" class="empty-state">
       <svg class="empty-state-icon" viewBox="0 0 24 24"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
-      <div class="empty-state-text">{{ t('no_characters') }}</div>
+      <div class="empty-state-text">
+{{ t('no_characters') }}
+</div>
     </div>
     </template>
   </div>

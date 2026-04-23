@@ -34,7 +34,7 @@ export async function executeRequest({
     const hasInlineTags = !!tagStart && !!tagEnd;
     const runtimePolicy = await setupRequestRuntimePolicy({
         notificationTitle: 'Glaze',
-        notificationBody: translations[currentLang.value]['model_typing'] || 'Generating...'
+        notificationBody: translations[currentLang.value].model_typing || 'Generating...'
     });
 
     const streamAccumulator = createStreamAccumulator({

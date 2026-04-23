@@ -157,7 +157,7 @@ export async function importSTBackupFromZip(zipFile, onProgress) {
             for (const [avatarFilename, personaName] of Object.entries(personasMap)) {
                 if (!avatarFilename) continue;
 
-                let descData = descriptionsMap[avatarFilename] || {};
+                const descData = descriptionsMap[avatarFilename] || {};
 
                 // Try to load the avatar image from User Avatars/ folder
                 let avatarData = null;

@@ -257,7 +257,9 @@ defineExpose({ open });
                 </ConnectionStatus>
 
                 <div class="menu-group">
-                    <div class="section-header">{{ t('section_connection') || 'Connection' }}</div>
+                    <div class="section-header">
+{{ t('section_connection') || 'Connection' }}
+</div>
 
                     <!-- Naistera hint -->
                     <a v-if="showNaisteraOptions" href="https://naistera.org/prompt" target="_blank" class="naistera-hint-box">
@@ -293,7 +295,9 @@ defineExpose({ open });
 
                 <!-- Model & Parameters -->
                 <div class="menu-group">
-                    <div class="section-header">{{ t('imggen_model') || 'Model' }}</div>
+                    <div class="section-header">
+{{ t('imggen_model') || 'Model' }}
+</div>
 
                     <!-- Naistera model selector row -->
                     <div v-if="showNaisteraOptions" class="settings-item selector-row" @click="openNaisteraModelSelector">
@@ -386,12 +390,16 @@ defineExpose({ open });
                 <!-- Naistera references (not supported by NovelAI model) -->
                 <template v-if="showNaisteraOptions && naisteraModelSupportsReferences">
                     <div class="menu-group">
-                        <div class="section-header">{{ t('imggen_refs') || 'Reference Images' }}</div>
+                        <div class="section-header">
+{{ t('imggen_refs') || 'Reference Images' }}
+</div>
 
                         <div class="settings-item-checkbox">
                             <div class="settings-text-col">
                                 <label>{{ t('imggen_send_char_avatar') || 'Send character avatar' }}</label>
-                                <div class="settings-desc">{{ t('imggen_send_char_avatar_desc') || 'Use character\'s avatar as visual reference' }}</div>
+                                <div class="settings-desc">
+{{ t('imggen_send_char_avatar_desc') || 'Use character\'s avatar as visual reference' }}
+</div>
                             </div>
                             <input type="checkbox" v-model="settings.naisteraSendCharAvatar" class="vk-switch">
                         </div>
@@ -399,7 +407,9 @@ defineExpose({ open });
                         <div class="settings-item-checkbox">
                             <div class="settings-text-col">
                                 <label>{{ t('imggen_send_user_avatar') || 'Send persona avatar' }}</label>
-                                <div class="settings-desc">{{ t('imggen_send_user_avatar_desc') || 'Use active persona\'s avatar as visual reference' }}</div>
+                                <div class="settings-desc">
+{{ t('imggen_send_user_avatar_desc') || 'Use active persona\'s avatar as visual reference' }}
+</div>
                             </div>
                             <input type="checkbox" v-model="settings.naisteraSendUserAvatar" class="vk-switch">
                         </div>
@@ -453,12 +463,16 @@ defineExpose({ open });
 
                 <!-- Image Context -->
                 <div class="menu-group">
-                    <div class="section-header">{{ t('imggen_image_context') || 'Image Context' }}</div>
+                    <div class="section-header">
+{{ t('imggen_image_context') || 'Image Context' }}
+</div>
 
                     <div class="settings-item-checkbox">
                         <div class="settings-text-col">
                             <label>{{ t('imggen_image_context_enabled') || 'Send previous images as context' }}</label>
-                            <div class="settings-desc">{{ t('imggen_image_context_desc') || 'Include recently generated images as visual reference for new generations' }}</div>
+                            <div class="settings-desc">
+{{ t('imggen_image_context_desc') || 'Include recently generated images as visual reference for new generations' }}
+</div>
                         </div>
                         <input type="checkbox" v-model="settings.imageContextEnabled" class="vk-switch">
                     </div>
@@ -474,7 +488,9 @@ defineExpose({ open });
 
                 <!-- Tag format hint -->
                 <div class="hint-block">
-                    <p class="hint-text">{{ t('imggen_tag_hint') || 'AI must include image tags to trigger generation:' }}</p>
+                    <p class="hint-text">
+{{ t('imggen_tag_hint') || 'AI must include image tags to trigger generation:' }}
+</p>
                     <code class="hint-code">[IMG:GEN:{"prompt":"...","style":"anime"}]</code>
                 </div>
 

@@ -174,7 +174,7 @@ async function saveStateToActivePreset() {
 }
 
 export async function initTheme() {
-    let presets = (await db.get('gz_theme_presets')) || [];
+    const presets = (await db.get('gz_theme_presets')) || [];
     const hadPresets = presets.length > 0;
 
     if (!presets.find(p => p.id === 'default')) {
@@ -206,7 +206,7 @@ export async function initTheme() {
     }
 
     // Load the last custom color
-    let savedLastCustom = await db.get('gz_theme_last_custom');
+    const savedLastCustom = await db.get('gz_theme_last_custom');
     if (savedLastCustom) {
         themeState.lastCustomColor = savedLastCustom;
     } else if (!PRESET_COLORS.some(c => c.toLowerCase() === themeState.accentColor.toLowerCase())) {
@@ -259,7 +259,7 @@ export async function initTheme() {
     if (savedElemBlur !== undefined) themeState.elementBlur = parseInt(savedElemBlur);
 
     // Load UI color
-    let savedUiColor = await db.get('gz_theme_ui_color');
+    const savedUiColor = await db.get('gz_theme_ui_color');
     if (savedUiColor) {
         setUiColor(savedUiColor);
     }

@@ -88,14 +88,7 @@ export async function searchCatalog(reset = false) {
 
         const query = catalogQuery.value.trim();
         const page = catalogPage.value;
-        let result;
-
-        try {
-            result = await janitorHampterSearch({ query, page, filters: catalogFilters.value });
-        } catch (e) {
-            // Fallback in case of some weird network error if needed, but hampter usually works
-            throw e;
-        }
+        const result = await janitorHampterSearch({ query, page, filters: catalogFilters.value });
 
         const items = result.characters || [];
         catalogResults.value = reset ? items : [...catalogResults.value, ...items];

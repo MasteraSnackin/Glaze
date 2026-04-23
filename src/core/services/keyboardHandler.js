@@ -221,7 +221,7 @@ export function attachKeyboardFocusHandler(contentRef, callbacks = {}) {
         }
     }
 
-    let kbListeners = [];
+    const kbListeners = [];
 
     function onFocusIn() {
         updateFocusState();

@@ -38,7 +38,7 @@ function assertKnownHook(hookName) {
 }
 
 function clonePayload(payload) {
-    if (payload == null) return payload;
+    if (payload == null) return payload; // eslint-disable-line eqeqeq
     if (typeof structuredClone === 'function') {
         try {
             return structuredClone(payload);

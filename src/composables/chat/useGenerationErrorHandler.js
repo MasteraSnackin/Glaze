@@ -12,6 +12,7 @@ export async function handleGenerationError({
     currentMessages,
     getGenerationState,
     clearGenerationState,
+    clearPersistedGeneration,
     restoreState,
     clearBackgroundUpdateTimer,
     clearTypingStateForMessage,

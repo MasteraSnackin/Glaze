@@ -68,14 +68,14 @@ const toggleGuidanceMode = () => {
     }
 };
 
+const attachedImage = ref(null);
+const imageInput = ref(null);
+
 const currentAction = computed(() => {
     if (props.isGenerating) return 'stop';
     if ((props.modelValue && props.modelValue.trim()) || attachedImage.value) return 'send';
     return 'impersonate';
 });
-
-const attachedImage = ref(null);
-const imageInput = ref(null);
 
 const triggerImageUpload = () => {
     if (imageInput.value) imageInput.value.click();
@@ -437,7 +437,9 @@ defineExpose({
                     <div class="input-wrapper" ref="inputWrapper" v-show="!isSelectionMode" :class="{ 'with-guidance': isGuidanceMode && guidanceType === 'send' }">
                         <div v-if="isGuidanceMode && guidanceType === 'send'" class="guidance-input-container" :class="{ 'dimmed': isMainFocused }">
                             <div class="guidance-main">
-                                <div class="guidance-header">{{ t('guided_generation') || 'GUIDED GENERATION' }}</div>
+                                <div class="guidance-header">
+{{ t('guided_generation') || 'GUIDED GENERATION' }}
+</div>
                                 <textarea
                                     class="guidance-editable"
                                     v-model="guidanceText"
@@ -469,7 +471,9 @@ defineExpose({
                         </template>
                         <div v-else-if="isGuidanceMode && guidanceType === 'impersonate'" class="impersonate-inline-container" :class="{ 'dimmed': isMainFocused }">
                             <div class="guidance-main" style="width: 100%;">
-                                <div class="guidance-header">{{ t('guided_impersonation') || 'GUIDED IMPERSONATION' }}</div>
+                                <div class="guidance-header">
+{{ t('guided_impersonation') || 'GUIDED IMPERSONATION' }}
+</div>
                                 <textarea
                                     class="guidance-editable"
                                     v-model="guidanceText"
@@ -489,7 +493,9 @@ defineExpose({
                         </div>
                         <template v-else>
                             <div id="chat-input" ref="chatInput" class="chat-input-editable" :class="{'dimmed': isGuidanceMode && !isMainFocused}" :contenteditable="!isImpersonating" role="textbox" aria-multiline="true" enterkeyhint="enter" :data-placeholder="isImpersonating ? '' : t('chat_placeholder')" @input="onInput" @keydown="onKeyDown" @focus="onFocus" @blur="onBlur" @paste="onPaste" @compositionstart="isComposing = true" @compositionend="(e) => { isComposing = false; onInput(e); }"></div>
-                            <div v-if="isImpersonating && !modelValue" class="impersonation-overlay" style="padding-left: 18px;"><svg class="typing-icon" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg><span>{{ t('impersonating') }}</span></div>
+                            <div v-if="isImpersonating && !modelValue" class="impersonation-overlay" style="padding-left: 18px;">
+<svg class="typing-icon" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg><span>{{ t('impersonating') }}</span>
+</div>
                         </template>
                     </div>
                 </div>

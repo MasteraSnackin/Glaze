@@ -5,12 +5,11 @@ import { formatText } from '@/utils/textFormatter.js';
 import { replaceMacros } from '@/utils/macroEngine.js';
 import ShadowContent from '@/components/ui/ShadowContent.vue';
 import { translations } from '@/utils/i18n.js';
-import { currentLang, disableSwipeRegeneration, shouldUseBatterySaverUI } from '@/core/config/APPSettings.js';
+import { currentLang, disableSwipeRegeneration, shouldUseBatterySaverUI, hideMessageId, hideGenerationTime, hideTokenCount } from '@/core/config/APPSettings.js';
 import { themeState } from '@/core/states/themeState.js';
 import { getAllGreetings } from '@/utils/sessions.js';
 import { getEffectivePersona, allPersonas } from '@/core/states/personaState.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
-import { hideMessageId, hideGenerationTime, hideTokenCount } from '@/core/config/APPSettings.js';
 import RollingNumber from '@/components/ui/RollingNumber.vue';
 import SheetView from '@/components/ui/SheetView.vue';
 import { getBlacklistedProvider, getApiRuntimeStorage } from '@/core/config/APISettings.js';
@@ -34,8 +33,13 @@ const props = defineProps({
 const emit = defineEmits([
     'swipe', 'change-greeting', 'regenerate', 'edit', 'save-edit', 'cancel-edit',
     'open-actions', 'open-avatar', 'delete', 'toggle-selection', 'toggle-image-hidden',
-    'save-guidance', 'regenerate-image', 'open-memory-coverage'
+    'save-guidance', 'regenerate-image', 'open-memory-coverage', 'update:editText'
 ]);
+
+const localEditText = computed({
+    get: () => props.message.editText ?? '',
+    set: (val) => emit('update:editText', val)
+});
 
 const triggeredItemsSheet = ref(null);
 const t = (key) => translations[currentLang.value]?.[key] || key;
@@ -66,6 +70,33 @@ const submitGuidedSwipe = () => {
 const isGuidanceEditing = ref(false);
 const guidanceEditText = ref('');
 
+const currentGuidance = computed(() => {
+    if (props.message.role === 'char') {
+        const meta = props.message.swipesMeta?.[props.message.swipeId || 0];
+        if (meta && meta.guidanceText && meta.guidanceType === 'SWIPE') {
+            return {
+                text: meta.guidanceText,
+                type: 'SWIPE'
+            };
+        }
+        if (props.message.isTyping && props.message.guidanceText && props.message.guidanceType === 'SWIPE') {
+            return {
+                text: props.message.guidanceText,
+                type: 'SWIPE'
+            };
+        }
+        return null;
+    }
+
+    if (props.message.role === 'user' && props.message.guidanceText) {
+        return {
+            text: props.message.guidanceText,
+            type: props.message.guidanceType || 'GENERATION'
+        };
+    }
+    return null;
+});
+
 const startGuidanceEdit = () => {
     guidanceEditText.value = currentGuidance.value?.text || '';
     isGuidanceEditing.value = true;
@@ -79,36 +110,6 @@ const saveGuidanceEdit = () => {
     emit('save-guidance', guidanceEditText.value.trim() || null);
     isGuidanceEditing.value = false;
 };
-
-const currentGuidance = computed(() => {
-    // If it's a character message, ONLY show if it's explicitly a SWIPE
-    if (props.message.role === 'char') {
-        const meta = props.message.swipesMeta?.[props.message.swipeId || 0];
-        if (meta && meta.guidanceText && meta.guidanceType === 'SWIPE') {
-            return {
-                text: meta.guidanceText,
-                type: 'SWIPE'
-            };
-        }
-        // Fallback for typing/initial swipe state
-        if (props.message.isTyping && props.message.guidanceText && props.message.guidanceType === 'SWIPE') {
-            return {
-                text: props.message.guidanceText,
-                type: 'SWIPE'
-            };
-        }
-        return null; // Don't show redundant headers for GENERATION or IMPERSONATION on bot side
-    }
-
-    // User message: Show if it has any guidance
-    if (props.message.role === 'user' && props.message.guidanceText) {
-        return {
-            text: props.message.guidanceText,
-            type: props.message.guidanceType || 'GENERATION'
-        };
-    }
-    return null;
-});
 
 // --- Helpers ---
 const getAvatar = () => {
@@ -157,7 +158,7 @@ const formatMessageText = (text, regexTracking = undefined) => {
     const effPersona = getEffectivePersona(props.activeChatChar?.id, props.activeChatChar?.sessionId);
     text = replaceMacros(text, props.activeChatChar, effPersona);
     // Fix: Clean artifacts and trim leading whitespace immediately
-    let clean = text.replace(/^\s+/, '')
+    const clean = text.replace(/^\s+/, '')
                     .replace(/&gt;/gi, '>')
                     .replace(/&lt;/gi, '<')
                     .replace(/&amp;/gi, '&')
@@ -344,6 +345,8 @@ const handleMessageClick = () => {
     
     emit('toggle-selection');
 };
+
+const layoutMode = computed(() => themeState.chatLayout);
 
 const handleBubbleClick = (e) => {
     if (layoutMode.value !== 'bubble') return;
@@ -552,7 +555,6 @@ const handleContentClick = (e) => {
 
     handleBubbleClick(e);
 };
-const layoutMode = computed(() => themeState.chatLayout);
 const showFooter = computed(() => {
     // In bubble layout, meta and actions are hidden, so we only show footer if there are actual controls
     if (layoutMode.value === 'bubble') {
@@ -683,7 +685,9 @@ onUnmounted(() => {
                     </div>
                 </div>
             </div>
-            <div v-else class="guidance-content">{{ currentGuidance.text }}</div>
+            <div v-else class="guidance-content">
+{{ currentGuidance.text }}
+</div>
         </div>
 
         <!-- Reasoning Block -->
@@ -711,7 +715,7 @@ onUnmounted(() => {
                 <!-- Edit Mode -->
                 <div class="msg-body" v-if="message.isEditing" key="edit">
                     <textarea 
-                        v-model="message.editText" 
+                        v-model="localEditText" 
                         class="edit-textarea" 
                         rows="1" 
                         @vue:mounted="({ el }) => focusAndResize(el)"
@@ -891,7 +895,9 @@ onUnmounted(() => {
 
         <div class="guided-swipe-container" v-if="isGuidedSwipeOpen">
             <div class="guidance-main">
-                <div class="guidance-header">{{ t('guided_swipe') || 'GUIDED SWIPE' }}</div>
+                <div class="guidance-header">
+{{ t('guided_swipe') || 'GUIDED SWIPE' }}
+</div>
                 <textarea 
                     class="guided-swipe-textarea"
                     v-model="guidedSwipeText"
@@ -915,7 +921,9 @@ onUnmounted(() => {
     <SheetView ref="triggeredItemsSheet" fit-content :title="t('sheet_triggered_items') || 'Triggered Items'">
         <div class="triggered-items-list">
             <div v-if="message.triggeredLorebooks?.length" class="triggered-group">
-                <div class="triggered-group-title">{{ t('menu_lorebooks') || 'World Info' }}</div>
+                <div class="triggered-group-title">
+{{ t('menu_lorebooks') || 'World Info' }}
+</div>
                 <div v-for="lb in message.triggeredLorebooks" :key="lb.id" class="triggered-item-card" @click="openLorebookEntry(lb)">
                     <div class="item-icon">
                         <svg viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9H9V9h10v2zm-4 4H9v-2h6v2zm4-8H9V5h10v2z"/></svg>
@@ -926,33 +934,47 @@ onUnmounted(() => {
                             <span v-if="lb._source === 'keyword'" class="retrieval-badge keyword-badge">keyword</span>
                             <span v-else-if="lb._source === 'vector'" class="retrieval-badge vector-badge">vector</span>
                         </div>
-                        <div class="item-sublabel">{{ lb.lorebookName }}</div>
+                        <div class="item-sublabel">
+{{ lb.lorebookName }}
+</div>
                     </div>
                 </div>
             </div>
 
             <div v-if="message.triggeredMemories?.length" class="triggered-group">
-                <div class="triggered-group-title">Memory Books</div>
+                <div class="triggered-group-title">
+Memory Books
+</div>
                 <div v-for="mem in message.triggeredMemories" :key="mem.id" class="triggered-item-card static">
                     <div class="item-icon">
                         <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 14H7v-2h10v2zm0-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
                     </div>
                     <div class="item-info">
-                        <div class="item-label">{{ mem.name }}</div>
-                        <div class="item-sublabel">Memory entry</div>
+                        <div class="item-label">
+{{ mem.name }}
+</div>
+                        <div class="item-sublabel">
+Memory entry
+</div>
                     </div>
                 </div>
             </div>
             
             <div v-if="combinedMessageData.regexes?.length" class="triggered-group">
-                <div class="triggered-group-title">{{ t('menu_regex') || 'Regex Extensions' }}</div>
+                <div class="triggered-group-title">
+{{ t('menu_regex') || 'Regex Extensions' }}
+</div>
                 <div v-for="(r, idx) in combinedMessageData.regexes" :key="idx" class="triggered-item-card static">
                     <div class="item-icon">
                         <svg viewBox="0 0 24 24"><path d="M14.6 16.6l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4m-5.2 0L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4z"/></svg>
                     </div>
                     <div class="item-info">
-                        <div class="item-label">{{ r.name || 'Unnamed Script' }}</div>
-                        <div class="item-sublabel">{{ r.regex ? `/${r.regex}/` : 'Trim Out' }}</div>
+                        <div class="item-label">
+{{ r.name || 'Unnamed Script' }}
+</div>
+                        <div class="item-sublabel">
+{{ r.regex ? `/${r.regex}/` : 'Trim Out' }}
+</div>
                     </div>
                 </div>
             </div>

@@ -12,6 +12,8 @@ let unsubChatSearch = null;
 let unsubApiContextChanged = null;
 let unsubSettingsChanged = null;
 
+import * as memoryBooksService from '@/core/services/memoryBooksService.js';
+
 // Import Memory Books functions from service
 const {
     createEmptyMemoryCoverage,
@@ -64,7 +66,7 @@ import { translations } from '@/utils/i18n.js';
 import { calculateContext } from '@/core/llm/usecases/calculateContext.js';
 import { executeChatGenerationUseCase, createChatGenerationServices } from '@/core/llm/usecases/generateChat.js';
 import { executeImpersonationUseCase } from '@/core/llm/usecases/impersonationRequest.js';
-import { buildGenerationAuthorsNote } from '@/composables/chat/useGenerationPreparation.js';
+import { buildGenerationAuthorsNote, resolveGenerationSessionContext } from '@/composables/chat/useGenerationPreparation.js';
 import { useGenerationAbort } from '@/composables/chat/useGenerationAbort.js';
 import { getApiConfig, getApiRuntimeStorage, getApiReasoningTags, fetchRemoteModels } from '@/core/config/APISettings.js';
 import { getActiveLLMProfile } from '@/core/config/ProviderProfiles.js';
@@ -116,7 +118,6 @@ function genMsgId() {
     return `msg_${Date.now()}_${++_msgIdCounter}`;
 }
 import { getMemoryPromptOptions, getMemoryPromptLabel, getMemoryPromptLabelByKey, getNormalizedMemoryGenerationState } from '@/core/services/memoryPromptPresets.js';
-import * as memoryBooksService from '@/core/services/memoryBooksService.js';
 import * as contextService from '@/core/services/contextService.js';
 
 // Import additional memory service functions needed locally
@@ -137,6 +138,20 @@ const formatGenerationElapsed = (startTime) => {
         : elapsedSeconds.toFixed(1) + 's';
 };
 const getGenerationTimerInterval = () => isBatterySaverUI.value ? 1000 : 100;
+const currentMessages = ref([]);
+const {
+    nextGenerationId,
+    listGeneratingCharIds,
+    getGenerationState,
+    hasGenerationState,
+    setGenerationState,
+    isGenerationStateCurrent,
+    clearGenerationState,
+    markGenerationPersisted,
+    clearPersistedGeneration,
+    buildGenerationOwnerKey,
+    createGenerationRequestToken
+} = useGenerationRegistry();
 const restartVisibleGenerationTimers = () => {
     if (!activeChatChar) return;
 
@@ -157,20 +172,6 @@ const restartVisibleGenerationTimers = () => {
         }
     }, getGenerationTimerInterval());
 };
-const currentMessages = ref([]);
-const {
-    nextGenerationId,
-    listGeneratingCharIds,
-    getGenerationState,
-    hasGenerationState,
-    setGenerationState,
-    isGenerationStateCurrent,
-    clearGenerationState,
-    markGenerationPersisted,
-    clearPersistedGeneration,
-    buildGenerationOwnerKey,
-    createGenerationRequestToken
-} = useGenerationRegistry();
 
 let abortActiveChatGeneration = async () => false;
 let abortAnyActiveGeneration = async () => false;
@@ -352,14 +353,6 @@ const {
     getActiveChatChar: () => activeChatChar
 });
 
-watch([isSearchMode, isSelectionMode], () => {
-    ignoreScrollAdjustment = true;
-    if (ignoreScrollAdjustmentTimer) clearTimeout(ignoreScrollAdjustmentTimer);
-    ignoreScrollAdjustmentTimer = setTimeout(() => {
-        ignoreScrollAdjustment = false;
-    }, 400); // Wait for transition animations
-});
-
 
 const {
     openMemoryEntryEditor,
@@ -455,6 +448,20 @@ const { visibleItems, paddingTop, paddingBottom, refresh: refreshVirtualScroll, 
     estimateHeight: 100
 });
 
+// --- Search Logic ---
+const {
+    isSearchMode,
+    searchQuery,
+    searchResults,
+    currentSearchIndex,
+    searchMatchState,
+    scrollToSearchResult,
+    nextSearchResult,
+    prevSearchResult,
+    onChatSearchToggle,
+    onChatSearch
+} = useChatSearch({ currentMessages, scrollToIndex, displayMessages });
+
 const onScroll = (e) => {
     const el = e.target;
     if (isSearchMode.value) {
@@ -471,19 +478,13 @@ window.forceScrollToBottom = () => { vsScrollToBottom('auto') };
 // Helper to access translations
 const t = (key) => translations[currentLang.value]?.[key] || key;
 
-// --- Search Logic ---
-const {
-    isSearchMode,
-    searchQuery,
-    searchResults,
-    currentSearchIndex,
-    searchMatchState,
-    scrollToSearchResult,
-    nextSearchResult,
-    prevSearchResult,
-    onChatSearchToggle,
-    onChatSearch
-} = useChatSearch({ currentMessages, scrollToIndex, displayMessages });
+watch([isSearchMode, isSelectionMode], () => {
+    ignoreScrollAdjustment = true;
+    if (ignoreScrollAdjustmentTimer) clearTimeout(ignoreScrollAdjustmentTimer);
+    ignoreScrollAdjustmentTimer = setTimeout(() => {
+        ignoreScrollAdjustment = false;
+    }, 400);
+});
 
 // --- Data Management ---
 
@@ -633,7 +634,7 @@ function invalidateContextCache() {
 }
 
 async function updateSessionMessage(char, msgIndex, newMsgData) {
-    let data = await getChatData(char.id);
+    const data = await getChatData(char.id);
     const sessionId = char.sessionId || data.currentId;
     if (data && data.sessions[sessionId]) {
         data.sessions[sessionId][msgIndex] = newMsgData;
@@ -744,11 +745,11 @@ async function openContextSheet() {
     // Always recalculate to ensure vector lorebooks are included
     if (activeChatChar) {
         const calculatePromise = updateContextCutoff();
-        const timeoutPromise = new Promise(resolve => setTimeout(resolve, 5000));
+        const timeoutPromise = new Promise(resolve => { setTimeout(resolve, 5000) });
         await Promise.race([calculatePromise, timeoutPromise]);
 
         if (isCalculatingCutoff) {
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            await new Promise(resolve => { setTimeout(resolve, 1000) });
         }
     }
 
@@ -800,6 +801,41 @@ const onFsEditorClosed = async () => {
     if (activeChatChar) {
         // Restore chat header when FS editor is closed
         await setupHeader(activeChatChar);
+    }
+};
+
+const applyImageAutoHide = () => {
+    const autoHide = localStorage.getItem('gz_api_auto_hide_images') === 'true';
+    const threshold = parseInt(localStorage.getItem('gz_api_auto_hide_images_n') || '1', 10);
+    
+    if (!autoHide || threshold <= 0 || !activeChatChar) return;
+
+    let changed = false;
+    let assistantCount = 0;
+    
+    // Iterate backwards to count assistant responses after user images
+    for (let i = currentMessages.value.length - 1; i >= 0; i--) {
+        const msg = currentMessages.value[i];
+        if (msg.role === 'char' || msg.role === 'assistant') {
+            assistantCount++;
+        } else if (msg.role === 'user' && msg.image) {
+            if (assistantCount >= threshold && !msg.imageHidden) {
+                msg.imageHidden = true;
+                changed = true;
+            }
+        }
+    }
+
+    if (changed) {
+        const charId = activeChatChar.id;
+        const sessionId = activeChatChar.sessionId;
+        const messageSnapshot = currentMessages.value;
+        getChatData(activeChatChar.id).then(data => {
+            if (data && sessionId && data.sessions?.[sessionId]) {
+                data.sessions[sessionId] = messageSnapshot;
+                db.saveChat(charId, data);
+            }
+        });
     }
 };
 
@@ -892,7 +928,7 @@ async function openChat(char, onBack, force = false) {
     isGenerating.value = hasGenerationState(char.id);
 
     // Clear unread
-    let unread = (await db.get('gz_unread')) || {};
+    const unread = (await db.get('gz_unread')) || {};
     if (unread[char.id]) {
         delete unread[char.id];
         await db.set('gz_unread', unread);
@@ -1772,7 +1808,7 @@ function openMessageActions(msg, index) {
     }
 
     // 6. Delete (only allow deleting the last message)
-    if (index === currentMessages.value.length - 1) items.push({
+    if (index === currentMessages.value.length - 1) {items.push({
         label: t('action_delete_msg'),
         icon: '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>',
         iconColor: '#ff4444',
@@ -1803,9 +1839,9 @@ function openMessageActions(msg, index) {
                 currentMessages.value.splice(index, 1);
                 if (activeChatChar) {
                     const sid = activeChatChar.sessionId || '1';
-                    let cDel = parseInt(localStorage.getItem(`gz_deleted_char_${activeChatChar.id}`) || '0', 10);
+                    const cDel = parseInt(localStorage.getItem(`gz_deleted_char_${activeChatChar.id}`) || '0', 10);
                     localStorage.setItem(`gz_deleted_char_${activeChatChar.id}`, cDel + 1);
-                    let sDel = parseInt(localStorage.getItem(`gz_deleted_chat_${activeChatChar.id}_${sid}`) || '0', 10);
+                    const sDel = parseInt(localStorage.getItem(`gz_deleted_chat_${activeChatChar.id}_${sid}`) || '0', 10);
                     localStorage.setItem(`gz_deleted_chat_${activeChatChar.id}_${sid}`, sDel + 1);
                 }
                 getChatData(activeChatChar.id).then(data => {
@@ -1820,7 +1856,7 @@ function openMessageActions(msg, index) {
             }
             closeBottomSheet();
         }
-    });
+    });}
 
     showBottomSheet({ title: t('sheet_title_msg_actions'), items });
 }
@@ -2237,41 +2273,6 @@ function openRegexSheet() {
     regexSheet.value?.open();
 }
 
-const applyImageAutoHide = () => {
-    const autoHide = localStorage.getItem('gz_api_auto_hide_images') === 'true';
-    const threshold = parseInt(localStorage.getItem('gz_api_auto_hide_images_n') || '1', 10);
-    
-    if (!autoHide || threshold <= 0 || !activeChatChar) return;
-
-    let changed = false;
-    let assistantCount = 0;
-    
-    // Iterate backwards to count assistant responses after user images
-    for (let i = currentMessages.value.length - 1; i >= 0; i--) {
-        const msg = currentMessages.value[i];
-        if (msg.role === 'char' || msg.role === 'assistant') {
-            assistantCount++;
-        } else if (msg.role === 'user' && msg.image) {
-            if (assistantCount >= threshold && !msg.imageHidden) {
-                msg.imageHidden = true;
-                changed = true;
-            }
-        }
-    }
-
-    if (changed) {
-        const charId = activeChatChar.id;
-        const sessionId = activeChatChar.sessionId;
-        const messageSnapshot = currentMessages.value;
-        getChatData(activeChatChar.id).then(data => {
-            if (data && sessionId && data.sessions?.[sessionId]) {
-                data.sessions[sessionId] = messageSnapshot;
-                db.saveChat(charId, data);
-            }
-        });
-    }
-};
-
 const restoreHeader = () => {
     if (activeChatChar) setupHeader(activeChatChar);
 };
@@ -2363,7 +2364,7 @@ const updateContentPadding = () => {
         el._lastFullHeight = currentFullHeight;
         const diffScroll = currentFullHeight - prevFullHeight;
 
-        let targetPadding = currentFullHeight;
+        const targetPadding = currentFullHeight;
 
         const currentPadding = parseFloat(el.style.paddingBottom) || 0;
         const paddingDiff = targetPadding - currentPadding;
@@ -2497,7 +2498,7 @@ watch(activeChar, async (newVal) => {
     if (newVal.authors_note !== undefined) {
         if (!chatData.authorsNotes) chatData.authorsNotes = {};
         const storedAn = chatData.authorsNotes[sessionId];
-        let currentAN = typeof storedAn === 'string' ? storedAn : storedAn?.content || '';
+        const currentAN = typeof storedAn === 'string' ? storedAn : storedAn?.content || '';
         if (currentAN !== newVal.authors_note) {
             chatData.authorsNotes[sessionId] = newVal.authors_note;
             changed = true;
@@ -2659,6 +2660,7 @@ onUnmounted(() => {
                     @edit="() => enterEditMode(vItem.item.data)"
                     @save-edit="saveEdit(vItem.item.data, vItem.item.originalIndex)"
                     @cancel-edit="cancelEdit(vItem.item.data)"
+                    @update:edit-text="(val) => { vItem.item.data.editText = val }"
                     @save-guidance="(text) => saveGuidance(vItem.item.data, vItem.item.originalIndex, text)"
                     @open-actions="openMessageActions(vItem.item.data, vItem.item.originalIndex)"
                     @open-avatar="openAvatar(vItem.item.data)"
@@ -2718,7 +2720,7 @@ onUnmounted(() => {
         </div>
 
         <div style="display: none;"></div>
-        <PresetView ref="presetView" :active-chat-char="activeChar" :chat-history="currentMessages" :is-generating="isGenerating" />
+        <PresetView ref="presetView" :active-chat-char="activeChar" :chat-history="currentMessages" :is-generating="isGenerating" @update:active-chat-char="val => { if (activeChar) Object.assign(activeChar, val) }" />
         <CharacterCardSheet ref="charCardSheet" />
         <LorebookSheet ref="lorebookSheet" />
         <RegexSheet ref="regexSheet" :active-chat-char="activeChar" />

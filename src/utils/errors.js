@@ -74,7 +74,7 @@ export function initGlobalErrorHandling() {
             if (saved) lang = saved;
             else if ((navigator.language || 'en').startsWith('ru')) lang = 'ru';
         } catch (e) { }
-        const t = translations[lang] || translations['en'];
+        const t = translations[lang] || translations.en;
 
         // Ensure body is visible if error occurs during loading
         if (document.body) {

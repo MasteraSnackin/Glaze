@@ -66,8 +66,12 @@ watch(
                     <!-- Big Info Block -->
                     <div v-if="desktopDropdownState.bigInfo" class="dd-big-info">
                         <div v-if="desktopDropdownState.bigInfo.icon" class="dd-big-info-icon" v-html="desktopDropdownState.bigInfo.icon"></div>
-                        <div class="dd-big-info-label" v-if="desktopDropdownState.bigInfo.label">{{ desktopDropdownState.bigInfo.label }}</div>
-                        <div class="dd-big-info-desc" v-if="desktopDropdownState.bigInfo.description">{{ desktopDropdownState.bigInfo.description }}</div>
+                        <div class="dd-big-info-label" v-if="desktopDropdownState.bigInfo.label">
+{{ desktopDropdownState.bigInfo.label }}
+</div>
+                        <div class="dd-big-info-desc" v-if="desktopDropdownState.bigInfo.description">
+{{ desktopDropdownState.bigInfo.description }}
+</div>
                         <div v-if="desktopDropdownState.bigInfo.buttonText" class="dd-big-info-btn" @click="desktopDropdownState.bigInfo.onButtonClick">
                             {{ desktopDropdownState.bigInfo.buttonText }}
                         </div>
@@ -89,7 +93,9 @@ watch(
                         @click="!item.disabled && (item.onClick?.(), closeDesktopDropdown())"
                     >
                         <div v-if="item.image" class="dd-card-overlay"></div>
-                        <div v-if="item.isFeatured" class="dd-featured-badge">FEATURED</div>
+                        <div v-if="item.isFeatured" class="dd-featured-badge">
+FEATURED
+</div>
 
                         <!-- Icon slot -->
                         <span

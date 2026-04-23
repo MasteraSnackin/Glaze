@@ -1,11 +1,10 @@
-import { getAllGreetings } from '@/utils/sessions.js';
+import { getAllGreetings, getChatData } from '@/utils/sessions.js';
 import { estimateTokens } from '@/utils/tokenizer.js';
 import { activePersona } from '@/core/states/personaState.js';
-import { getChatData } from '@/utils/sessions.js';
 import { db } from '@/utils/db.js';
 
 async function updateSessionMessage(char, msgIndex, newMsgData) {
-    let data = await getChatData(char.id);
+    const data = await getChatData(char.id);
     if (data && data.sessions[data.currentId]) {
         data.sessions[data.currentId][msgIndex] = newMsgData;
         await db.saveChat(char.id, data);
@@ -53,7 +52,7 @@ export function useSwipeNavigation({ currentMessages, isGenerating, getActiveCha
 
         if (!msg.swipes || msg.swipes.length <= 1) return;
 
-        let newIndex = (msg.swipeId || 0) + dir;
+        const newIndex = (msg.swipeId || 0) + dir;
 
         const isLastMsg = msgIndex === currentMessages.value.length - 1;
         if (dir > 0 && newIndex >= msg.swipes.length && isLastMsg) {

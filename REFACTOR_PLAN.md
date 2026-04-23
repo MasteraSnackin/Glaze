@@ -692,6 +692,195 @@ Done:
 Remaining:
 - the `window` event bridge itself remains intentionally as an external compatibility adapter for app-shell/legacy event consumers; the staged architecture refactor is complete without removing that bridge
 
+### Phase 8. Decompose ChatView into thin coordinator
+Status: not done
+Testing: not tested
+
+Purpose:
+Make the main chat screen a readable UI composition layer, not a half-service.
+
+Work:
+
+- classify every `const` / `function` / `computed` in `ChatView.vue` by ownership zone:
+  - UI orchestration (belongs here)
+  - generation flow (move to composables / use cases)
+  - memory automation (already partially extracted, finish)
+  - sheet/dialog actions (move to dedicated composable)
+  - message interaction (swipe, edit, delete, selection — partially extracted, consolidate)
+- for each zone that is not UI orchestration, extract into a composable that the view calls with a stable surface
+- ensure extracted composables do not reach back into the view's template refs or reactive bag
+- target: `ChatView.vue` reads as a list of composable calls and template bindings, not as a logic hub
+
+Expected output:
+
+- `ChatView.vue` drops below 2000 lines
+- each extracted zone has a clear composable entry with documented inputs/outputs
+- no TDZ-sensitive initialization order inside setup
+
+### Phase 9. Clarify state ownership boundaries
+Status: not done
+Testing: not tested
+
+Purpose:
+Make it obvious what is UI state, what is derived/projection state, and what is transient request state.
+
+Work:
+
+- audit all reactive state modules in `src/core/states/` and composables
+- classify each piece of state as one of:
+  - **UI state** — component-scoped, only matters for rendering (open/closed, scroll position, active tab)
+  - **projection state** — derived from domain events, read-model for views (preview, trace, generation status)
+  - **transient request state** — exists only during a generation lifecycle, cleared on finalization
+- enforce that:
+  - UI state never leaks into use-case or pipeline code
+  - projection state is updated only through event subscriptions or explicit projection calls, never by direct mutation from orchestration
+  - transient request state is owned by a single generation token and auto-cleaned
+- rename or reorganize state modules to make the category obvious from the file name or export name
+
+Expected output:
+
+- state category is visible from naming / directory
+- no ambiguous "this reactive ref is sometimes UI, sometimes domain, sometimes debug"
+- fewer hidden reactivity chains
+
+### Phase 10. Reduce compatibility layer footprint
+Status: not done
+Testing: not tested
+
+Purpose:
+Ensure new code never needs to know about `window` events or legacy bridges.
+
+Work:
+
+- audit every remaining `window.dispatchEvent` / `window.addEventListener` call outside the bridge itself
+- move each remaining internal usage to `publishAppEvent` / `subscribeAppEvent`
+- verify that `windowEventBridge` is the only place that touches `window` for app events
+- document the bridge as an external adapter, not an internal dependency
+- add a lint/convention rule: new code must not import from the bridge or touch `window` for app signaling
+
+Expected output:
+
+- `windowEventBridge` is genuinely an external adapter
+- no new code will ever need to import it
+- existing internal callers have been migrated off
+
+### Phase 11. Organize orchestration by scenario, not by technique
+Status: not done
+Testing: not tested
+
+Purpose:
+Make file names correspond to user-facing scenarios instead of technical layer labels.
+
+Work:
+
+- review `src/core/llm/usecases/` and ensure each file maps to a clear user scenario:
+  - chat generation
+  - summary generation
+  - memory draft generation
+  - impersonation
+  - context calculation
+- review shared helpers and ensure they are named after the shared scenario concern, not after the sharing technique
+- if any "utility" file in usecases has grown past its original scope, split by scenario
+- ensure pipeline steps in `src/core/llm/pipeline/` (or current step files) are named after what they decide, not after where they sit in the stack
+
+Expected output:
+
+- a developer can find the code for any generation scenario by name without grep
+- shared code is clearly labeled as shared infrastructure, not as ambiguous catch-alls
+
+### Phase 12. Strengthen use-case and pipeline testability
+Status: not done
+Testing: not tested
+
+Purpose:
+Gain confidence for future simplification by testing the stable boundaries first.
+
+Work:
+
+- add unit tests for each use-case entrypoint (`generateChat`, `generateSummary`, `generateMemoryDraft`, `calculateContext`)
+- add unit tests for key pipeline steps (context resolution, prompt preparation, request assembly)
+- add tests for event/projection reactions (debug state projection, sync refresh reaction)
+- tests should not mount Vue components — they exercise pure JS logic and event wiring
+- where mocking is needed, mock at the boundary (transport, config), not internally
+
+Expected output:
+
+- regression safety net for the architecture that was just built
+- confidence to simplify further without fear
+- future refactors can be verified by test, not just by build + manual check
+
+### Phase 13. Final legacy cleanup pass
+Status: not done
+Testing: not tested
+
+Purpose:
+Remove the last 10-15% of old bypasses and shortcuts that survived the main migration.
+
+Work:
+
+- search for remaining `TODO` / `FIXME` / `HACK` / `LEGACY` comments related to the refactor
+- search for remaining direct imports from `generationService.js` that could use use-case entrypoints instead
+- search for remaining singleton patterns that could use keyed state
+- clean up each only after verifying no external consumer depends on the old path
+- remove any compatibility facades that have zero callers
+
+Expected output:
+
+- no orphaned compatibility shims
+- no dead code left from the migration
+- import graph is clean: views → composables → use cases → pipelines / transport, with no shortcut bypasses
+
+### Phase 14. Harden initialization order
+Status: not done
+Testing: not tested
+
+Purpose:
+Eliminate TDZ-sensitive and order-dependent initialization inside Vue setup functions.
+
+Work:
+
+- audit all composables used by `ChatView.vue` and other large views for initialization-order dependencies
+- replace manual ordering with lazy initialization or deferred binding where possible
+- ensure every composable can be instantiated in any order (or document the required order explicitly at the call site)
+- prefer factory / builder patterns for services that need late-bound dependencies over placeholder-then-reassign
+
+Expected output:
+
+- no more "Cannot access X before initialization" errors possible
+- composables are safe to reorder in setup
+- any remaining ordering requirements are documented and enforced by the composable API itself
+
+---
+
+## Phase Difficulty Estimate
+
+Phases 1-7 were the hardest kind of refactor: **build new boundaries while keeping old code running**, with dual paths, compatibility shims, and constant parity verification.
+
+Phases 8-14 should be **significantly easier** because:
+
+- the skeleton and boundaries already exist
+- patterns are proven (event hub, use cases, projections, extension registry)
+- less "new structure alongside old" and more "move code across existing boundaries"
+- build verification is faster because the architecture is more modular
+
+The one exception is **Phase 8** (ChatView decomposition). A large reactive Vue component with many template refs is inherently fiddly — composable extraction can break reactivity chains in ways that only show at runtime. This phase deserves extra caution and incremental commits.
+
+Rough time estimate relative to Phases 1-7:
+
+| Phase | Relative effort | Risk | Notes |
+|-------|----------------|------|-------|
+| 8  | **high** (0.6× of total 1-7) | medium | ChatView is large and reactive; extraction must preserve template bindings |
+| 9  | low (0.15×) | low | mostly audit + rename + reorganize; no logic changes |
+| 10 | low (0.15×) | low | mechanical migration of remaining window calls |
+| 11 | low (0.1×) | low | naming + file organization; no logic changes |
+| 12 | medium (0.3×) | low | writing tests is straightforward but time-consuming |
+| 13 | low (0.15×) | low | search + delete; verify nothing depends on old paths |
+| 14 | medium (0.25×) | medium | composable API redesign can affect callers; needs careful testing |
+
+**Total 8-14 is roughly 1.7× of a single average phase from 1-7, or about 0.25× of the total 1-7 effort.**
+
+In other words: the hard structural migration is done. What remains is mostly cleanup, reorganization, and test coverage — safer and more predictable work.
+
 ---
 
 ## Safety Rules For Every Phase

@@ -6,7 +6,7 @@ import { db } from '@/utils/db.js';
 import { estimateTokens } from '@/utils/tokenizer.js';
 
 export function getEffectiveApiConfig() {
-    let config = getApiConfig();
+    const config = getApiConfig();
     const runtime = getApiRuntimeStorage();
     let { maxTokens, contextSize } = config;
 

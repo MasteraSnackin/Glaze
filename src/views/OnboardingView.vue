@@ -382,7 +382,9 @@ async function finish() {
                         <!-- Welcome / Features Slide -->
                         <div v-if="slides[currentSlide].type === 'welcome' || slides[currentSlide].type === 'features'" class="welcome-slide">
                             <div class="welcome-header">
-                                <h1 class="welcome-title">{{ slides[currentSlide].title }}</h1>
+                                <h1 class="welcome-title">
+{{ slides[currentSlide].title }}
+</h1>
                             </div>
                             
                             <div class="intro-blocks-container">
@@ -399,8 +401,12 @@ async function finish() {
                         <!-- Standard Slides -->
                         <div v-else class="standard-slide">
                             <div class="icon-wrapper" v-if="slides[currentSlide].icon && slides[currentSlide].type !== 'persona'" v-html="slides[currentSlide].icon"></div>
-                            <h1 class="title">{{ slides[currentSlide].title }}</h1>
-                            <p class="description">{{ slides[currentSlide].desc }}</p>
+                            <h1 class="title">
+{{ slides[currentSlide].title }}
+</h1>
+                            <p class="description">
+{{ slides[currentSlide].desc }}
+</p>
                         </div>
 
                         <!-- API Setup Slide -->
@@ -441,17 +447,25 @@ async function finish() {
                                 <!-- Avatar Card inside menu-group -->
                                 <div class="avatar-card" @click="triggerAvatarUpload">
                                     <div class="avatar-wrapper">
-                                        <div class="avatar-header-overlay">{{ t('avatar') || 'Avatar' }}</div>
+                                        <div class="avatar-header-overlay">
+{{ t('avatar') || 'Avatar' }}
+</div>
                                         <img v-if="personaConfig.avatar" :src="personaConfig.avatar" class="avatar-img">
                                         <div v-else class="avatar-placeholder">
                                             {{ personaConfig.name ? personaConfig.name[0].toUpperCase() : '?' }}
                                         </div>
-                                        <div class="avatar-overlay-hint">{{ t('hint_change_avatar') || 'Tap to change' }}</div>
+                                        <div class="avatar-overlay-hint">
+{{ t('hint_change_avatar') || 'Tap to change' }}
+</div>
                                     </div>
                                     <input type="file" ref="avatarInput" accept="image/*" style="display: none;" @change="handleAvatarChange">
                                 </div>
-                                <div class="settings-item"><label>{{ t('onboarding_label_name') }}</label><input type="text" v-model="personaConfig.name" :placeholder="t('onboarding_placeholder_name')"></div>
-                                <div class="settings-item" style="border-bottom: none;"><label>{{ t('onboarding_label_desc') }}</label><textarea v-model="personaConfig.desc" :placeholder="t('onboarding_placeholder_desc')" rows="3"></textarea></div>
+                                <div class="settings-item">
+<label>{{ t('onboarding_label_name') }}</label><input type="text" v-model="personaConfig.name" :placeholder="t('onboarding_placeholder_name')">
+</div>
+                                <div class="settings-item" style="border-bottom: none;">
+<label>{{ t('onboarding_label_desc') }}</label><textarea v-model="personaConfig.desc" :placeholder="t('onboarding_placeholder_desc')" rows="3"></textarea>
+</div>
                             </div>
                         </div>
 
@@ -473,10 +487,16 @@ async function finish() {
 
                                     <!-- Info -->
                                     <div class="ps-card-info">
-                                        <div class="ps-card-name" :class="{ 'ps-with-bg': !!preset.image }">{{ preset.name || 'Default' }}</div>
+                                        <div class="ps-card-name" :class="{ 'ps-with-bg': !!preset.image }">
+{{ preset.name || 'Default' }}
+</div>
                                         <div class="ps-card-meta" :class="{ 'ps-with-bg': !!preset.image }">
-                                            <div v-if="preset.author" class="ps-author-line">by {{ preset.author }}</div>
-                                            <div v-if="preset.descriptionKey" class="ps-desc-line">{{ t(preset.descriptionKey) }}</div>
+                                            <div v-if="preset.author" class="ps-author-line">
+by {{ preset.author }}
+</div>
+                                            <div v-if="preset.descriptionKey" class="ps-desc-line">
+{{ t(preset.descriptionKey) }}
+</div>
                                         </div>
                                     </div>
                                 </div>

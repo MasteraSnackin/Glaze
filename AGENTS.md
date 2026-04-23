@@ -85,7 +85,7 @@ git checkout -b feat/memorybook-ui feat/multi-vector
 - Check `git branch --show-current` — make sure you're on the right branch.
 - Sync `origin/dev` with upstream: `git fetch upstream && git push origin upstream/dev:refs/heads/dev`
 - Create feature branch from `origin/dev`: `git checkout -b feat/xxx origin/dev`
-- Run `npm run build` before committing to verify no build errors.
+- Run `npm run lint && npm run build` before committing to verify no lint or build errors.
 
 ## Roadmap Maintenance
 

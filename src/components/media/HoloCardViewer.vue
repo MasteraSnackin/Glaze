@@ -11,7 +11,9 @@
                             <div class="holo-card-border"></div>
                             <div class="holo-card-gradient"></div>
                             <div class="holo-card-info" ref="cardInfo">
-                                <h2 class="holo-card-name">{{ name }}</h2>
+                                <h2 class="holo-card-name">
+{{ name }}
+</h2>
                                 <div class="holo-card-meta">
                                     <!-- <span class="holo-card-class">ULTRA RARE</span> -->
                                 </div>
@@ -152,11 +154,11 @@ const onDeviceOrientation = (e) => {
     const limit = 30;
     const drift = 0.05; // Speed of calibration shift
 
-    let rawX = lastGamma - calGamma;
+    const rawX = lastGamma - calGamma;
     if (rawX > limit) calGamma += (rawX - limit) * drift;
     else if (rawX < -limit) calGamma += (rawX + limit) * drift;
 
-    let rawY = lastBeta - calBeta;
+    const rawY = lastBeta - calBeta;
     if (rawY > limit) calBeta += (rawY - limit) * drift;
     else if (rawY < -limit) calBeta += (rawY + limit) * drift;
 

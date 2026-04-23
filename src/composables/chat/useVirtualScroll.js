@@ -27,7 +27,7 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
 
     let observer = null;
     let realObserver = null;
-    let resizeObserver = null;
+    const resizeObserver = null;
 
     // Computed slice of items to render
     // We wrap them to preserve original index
@@ -89,6 +89,21 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
             renderEnd.value = newEnd;
             updateSpacers();
         }
+    };
+
+    const observeItems = () => {
+        if (!containerRef.value) return;
+        // Disconnect and reinitialize observers to clear stale element references
+        // This prevents unbounded growth of observed elements across item updates
+        if (observer) observer.disconnect();
+        if (realObserver) realObserver.disconnect();
+
+        const children = containerRef.value.querySelectorAll('[data-index]');
+        if (!observer || !realObserver) return;
+        children.forEach(el => {
+            observer.observe(el);
+            realObserver.observe(el);
+        });
     };
 
     // Handle programmatic or fast scrolling
@@ -412,21 +427,6 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
         // Observe all rendered items
         nextTick(() => {
             observeItems();
-        });
-    };
-
-    const observeItems = () => {
-        if (!containerRef.value) return;
-        // Disconnect and reinitialize observers to clear stale element references
-        // This prevents unbounded growth of observed elements across item updates
-        if (observer) observer.disconnect();
-        if (realObserver) realObserver.disconnect();
-
-        const children = containerRef.value.querySelectorAll('[data-index]');
-        if (!observer || !realObserver) return;
-        children.forEach(el => {
-            observer.observe(el);
-            realObserver.observe(el);
         });
     };
 

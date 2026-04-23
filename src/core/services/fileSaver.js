@@ -22,8 +22,8 @@ export async function saveFile(filename, content, mimeType = 'application/json',
     if (Capacitor.isNativePlatform()) {
         try {
             const platform = Capacitor.getPlatform();
-            let directory = platform === 'android' ? Directory.ExternalStorage : Directory.Documents;
-            let rootFolder = platform === 'android' ? 'Download/Glaze' : '';
+            const directory = platform === 'android' ? Directory.ExternalStorage : Directory.Documents;
+            const rootFolder = platform === 'android' ? 'Download/Glaze' : '';
 
             // Combine root folder with subfolder
             let folder = rootFolder;

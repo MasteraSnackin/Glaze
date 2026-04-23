@@ -443,7 +443,7 @@ export const db = {
             const getLegacyReq = store.get('gz_chats');
             getLegacyReq.onsuccess = () => {
                 const legacyChats = getLegacyReq.result;
-                let hasLegacy = legacyChats && Object.keys(legacyChats).length > 0;
+                const hasLegacy = legacyChats && Object.keys(legacyChats).length > 0;
 
                 // Fetch all granular chats
                 const allChatsMap = {};
@@ -461,8 +461,8 @@ export const db = {
                         // Cursor iteration finished
                         if (hasLegacy) {
                             // Perform Migration
-                            let migratedCount = 0;
-                            let keysToMigrate = Object.keys(legacyChats);
+                            const migratedCount = 0;
+                            const keysToMigrate = Object.keys(legacyChats);
 
                             // If there are legacy chats, migrate them to granular keys if they don't exist yet
                             for (const charId of keysToMigrate) {
@@ -555,13 +555,13 @@ export const db = {
         return nextId;
     },
     deleteSession: async (charId, sessionId) => {
-        let data = await db.getChat(charId);
+        const data = await db.getChat(charId);
         if (!data || !data.sessions) return;
 
         delete data.sessions[sessionId];
 
         // If current session deleted, switch to another or create new
-        if (data.currentId == sessionId) {
+        if (data.currentId === sessionId) {
             const ids = Object.keys(data.sessions).map(Number);
             if (ids.length > 0) {
                 data.currentId = Math.max(...ids);
