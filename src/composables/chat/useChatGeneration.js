@@ -6,6 +6,7 @@ import { replaceMacros } from '@/utils/macroEngine.js';
 import { estimateTokens } from '@/utils/tokenizer.js';
 import { getApiRuntimeStorage } from '@/core/config/APISettings.js';
 import { executeChatGenerationUseCase } from '@/core/llm/usecases/generateChat.js';
+import { executeImpersonationUseCase } from '@/core/llm/usecases/impersonationRequest.js';
 import { resolveGenerationSessionContext } from '@/composables/chat/useGenerationPreparation.js';
 import { activePersona } from '@/core/states/personaState.js';
 import { addMessageStats } from '@/core/services/statsService.js';
@@ -33,6 +34,11 @@ export function useChatGeneration(deps) {
         scrollToBottom,
         openApiView,
         memoryDraftState,
+        isImpersonating,
+        setGenerationState,
+        clearGenerationState,
+        cleanText,
+        activeChar,
         t
     } = deps;
 
@@ -211,9 +217,52 @@ export function useChatGeneration(deps) {
         }
     }
 
+    async function startImpersonation(guidanceText = null) {
+        if (guidanceText) {
+            pendingGuidance.value = { text: guidanceText, type: 'IMPERSONATION' };
+        } else {
+            pendingGuidance.value = null;
+        }
+        const activeChatChar = getActiveChatChar();
+        if (!activeChatChar) return;
+
+        const controller = new AbortController();
+
+        return executeImpersonationUseCase({
+            char: activeChatChar,
+            guidanceText,
+            controller,
+            services: {
+                app: getChatGenerationServices().app,
+                lifecycle: {
+                    setGenerationState,
+                    clearGenerationState,
+                    nextGenerationId,
+                    buildGenerationHistory: () => currentMessages.value
+                        .map((m, i) => ({ ...m, originalIndex: i }))
+                        .filter(m => !m.isTyping && !m.isHidden)
+                        .map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text, chatId: m.originalIndex })),
+                    cleanText
+                },
+                state: {
+                    inputValue,
+                    isImpersonating,
+                    isGenerating,
+                    currentMessages,
+                    activeChatChar: activeChar,
+                    showBottomSheet,
+                    closeBottomSheet,
+                    openApiView,
+                    t
+                }
+            }
+        });
+    }
+
     return {
         sendMessage,
         startGeneration,
-        handleImageRegenerate
+        handleImageRegenerate,
+        startImpersonation
     };
 }

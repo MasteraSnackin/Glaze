@@ -35,7 +35,7 @@ const {
 </script>
 
 <script setup>
-import { ref, nextTick, onMounted, onUnmounted, watch, computed, onBeforeUnmount } from 'vue';
+import { ref, nextTick, onMounted, onUnmounted, watch, computed } from 'vue';
 import { Capacitor } from '@capacitor/core';
 import { App } from '@capacitor/app';
 import { keyboardOverlap } from '@/core/services/keyboardHandler.js';
@@ -45,12 +45,8 @@ import { getEffectivePersona, activePersona, allPersonas } from '@/core/states/p
 import { formatDate, formatDateSeparator } from '@/utils/dateFormatter.js';
 import { currentLang, chatPaddingLR, setChatPaddingLR, shouldUseBatterySaverUI } from '@/core/config/APPSettings.js';
 import { translations } from '@/utils/i18n.js';
-import { calculateContext } from '@/core/llm/usecases/calculateContext.js';
 import { createChatGenerationServices } from '@/core/llm/usecases/generateChat.js';
-import { executeImpersonationUseCase } from '@/core/llm/usecases/impersonationRequest.js';
-import { buildGenerationAuthorsNote } from '@/composables/chat/useGenerationPreparation.js';
 import { useGenerationAbort } from '@/composables/chat/useGenerationAbort.js';
-import { getApiRuntimeStorage } from '@/core/config/APISettings.js';
 import { getActiveLLMProfile } from '@/core/config/ProviderProfiles.js';
 import { getEmbeddingConfig, isEmbeddingConfigured } from '@/core/config/embeddingSettings.js';
 import { animateTextChange, updateAppColors, initHeaderScroll, initRipple } from '@/core/services/ui.js';
@@ -85,7 +81,6 @@ import { triggerAutoSyncCheck } from '@/composables/chat/useAutoSync.js';
 import { useMemoryBooks } from '@/composables/chat/useMemoryBooks.js';
 import { useMemoryAutomation } from '@/composables/chat/useMemoryAutomation.js';
 import { useChatMessageDisplay, restoreVisibleSwipeState } from '@/composables/chat/useChatMessageDisplay.js';
-import { useContextBreakdown } from '@/composables/chat/useContextBreakdown.js';
 import { useMessageSelection } from '@/composables/chat/useMessageSelection.js';
 import { useChatSearch } from '@/composables/chat/useChatSearch.js';
 import { useMemorySheetUI } from '@/composables/chat/useMemorySheetUI.js';
@@ -93,14 +88,15 @@ import { useSwipeNavigation } from '@/composables/chat/useSwipeNavigation.js';
 import { useSessionManagement } from '@/composables/chat/useSessionManagement.js';
 import { useMessageActions } from '@/composables/chat/useMessageActions.js';
 import { useChatGeneration } from '@/composables/chat/useChatGeneration.js';
+import { useContextCutoff } from '@/composables/chat/useContextCutoff.js';
 import { publishAppEvent, subscribeAppEvent } from '@/core/events/eventHub.js';
 import { APP_EVENTS } from '@/core/events/eventNames.js';
+import { useSessionPersistence } from '@/composables/chat/useSessionPersistence.js';
 
 function genMsgId() {
     return `msg_${Date.now()}_${++_msgIdCounter}`;
 }
 import { getMemoryPromptOptions, getMemoryPromptLabel, getMemoryPromptLabelByKey, getNormalizedMemoryGenerationState } from '@/core/services/memoryPromptPresets.js';
-import * as contextService from '@/core/services/contextService.js';
 
 // Import additional memory service functions needed locally
 const {
@@ -192,7 +188,6 @@ const showScrollButton = ref(false);
 const isLoading = ref(false);
 let currentOnBack = null;
 let inputResizeObserver = null;
-const cutoffIndex = ref(-1);
 const apiView = ref(null);
 const statsSheet = ref(null);
 const tokenizerSheet = ref(null);
@@ -285,33 +280,50 @@ const {
 } = useChatMessageDisplay(activeChatChar, allPersonas);
 
 const onRegexChanged = () => { regexRevision.value++; };
-const contextBreakdown = ref(null);
-// Import context settings from service
-const { fillThreshold: initialFillThreshold, hidePercent: initialHidePercent } = contextService.loadHistoryContextSettings();
-const historyFillThreshold = ref(initialFillThreshold);
-const historyHidePercent = ref(initialHidePercent);
+
+let isOpeningChat = false;
 
 const {
+    cutoffIndex,
+    contextBreakdown,
     contextSegments,
     contextBreakdownItems,
     contextLegendItems,
     visibleHistoryMessages,
     historyUsagePercent,
     historyHidePreview,
-    shouldRecommendHide
-} = useContextBreakdown({
-    contextBreakdown,
-    currentMessages,
+    shouldRecommendHide,
     historyFillThreshold,
-    historyHidePercent
+    historyHidePercent,
+    saveCurrentMessages,
+    updateContextCutoff,
+    debouncedUpdateContextCutoff,
+    invalidateContextCache,
+    handleSaveContextSettings,
+    hideTopMessagesNow,
+    confirmHideTopMessages,
+    unhideAllMessages,
+    openContextSheet,
+    resetCutoffState,
+    clearCutoffTimers,
+    consumePendingCutoffRecalc,
+    getIsCalculatingCutoff,
+    setPendingCutoffRecalc
+} = useContextCutoff({
+    getActiveChatChar: () => activeChatChar,
+    currentMessages,
+    isOpeningChat: () => isOpeningChat,
+    isBatterySaverUI,
+    getChatData,
+    db,
+    getEffectivePreset,
+    showBottomSheet,
+    closeBottomSheet,
+    showToast,
+    tokenizerSheet,
+    presetView
 });
 
-let isCalculatingCutoff = false;
-let pendingCutoffRecalc = false;
-let isOpeningChat = false;
-let cutoffRerunTimer = null;
-let cutoffDebounceTimer = null;
-let contextCutoffCache = null; // { charId, sessionId, messageCount, hash, result }
 const pendingGuidance = ref(null); // { text, type }
 
 let ignoreScrollAdjustment = false;
@@ -408,7 +420,7 @@ const {
     getChatGenerationServices: () => chatGenerationServices,
     loadChats,
     openChat,
-    asyncSaveCurrentSessionState,
+    asyncSaveCurrentSessionState: () => asyncSaveCurrentSessionState(),
     getCleanupScroll: () => _cleanupScroll,
     setCleanupScroll: (v) => { _cleanupScroll = v; },
     t
@@ -470,6 +482,22 @@ const {
     onChatSearchToggle,
     onChatSearch
 } = useChatSearch({ currentMessages, scrollToIndex, displayMessages });
+
+const {
+    asyncSaveCurrentSessionState,
+    applyImageAutoHide,
+    onVisibilityChange
+} = useSessionPersistence({
+    getActiveChatChar: () => activeChatChar,
+    activeChar,
+    currentMessages,
+    inputValue,
+    messagesContainer,
+    db,
+    getChatData,
+    getScrollAnchor,
+    clearMessageNotifications
+});
 
 const onScroll = (e) => {
     const el = e.target;
@@ -543,102 +571,6 @@ async function loadChats() {
     }
 }
 
-async function updateContextCutoff() {
-    if (!activeChatChar || !currentMessages.value) return;
-
-    console.time('[updateContextCutoff] total');
-
-    if (isOpeningChat) {
-        pendingCutoffRecalc = true;
-        return;
-    }
-
-    if (isCalculatingCutoff) {
-        pendingCutoffRecalc = true;
-        return;
-    }
-
-    // Set guard BEFORE any await to prevent concurrent executions from bypassing it
-    isCalculatingCutoff = true;
-
-    const currentCharId = activeChatChar.id;
-    const visibleMessages = currentMessages.value.filter(m => m && !m.isTyping && !m.isHidden);
-    const messageCount = visibleMessages.length;
-
-    try {
-        const cutoffChatData = await getChatData(activeChatChar.id);
-        const sessionId = cutoffChatData.currentId;
-
-        // Cache key includes context settings so changes to context size bust the cache
-        const runtime = getApiRuntimeStorage();
-        const contextSize = String(runtime.contextSize || 32000);
-        const maxTokens = String(runtime.maxTokens || 8000);
-        const cacheKey = `${currentCharId}_${sessionId}_${messageCount}_${contextSize}_${maxTokens}`;
-
-        if (contextCutoffCache && contextCutoffCache.hash === cacheKey) {
-            cutoffIndex.value = contextCutoffCache.result?.cutoffIndex ?? 0;
-            contextBreakdown.value = contextCutoffCache.result?.contextBreakdown || null;
-            return;
-        }
-
-        const history = visibleMessages
-            .map((m, i) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text || "", originalIndex: i }));
-
-        const summary = cutoffChatData.summaries?.[sessionId];
-
-        let authorsNote = null;
-        if (cutoffChatData.authorsNotes && cutoffChatData.authorsNotes[sessionId]) {
-            authorsNote = buildGenerationAuthorsNote({
-                getEffectivePreset,
-                charId: activeChatChar.id,
-                sessionId,
-                anContent: cutoffChatData.authorsNotes[sessionId]
-            });
-        }
-
-        const result = await calculateContext({
-            char: activeChatChar,
-            history,
-            authorsNote,
-            summary
-        });
-
-        if (activeChatChar && activeChatChar.id === currentCharId) {
-            cutoffIndex.value = result?.cutoffIndex ?? 0;
-            contextBreakdown.value = result?.contextBreakdown || null;
-            contextCutoffCache = {
-                hash: cacheKey,
-                charId: currentCharId,
-                sessionId,
-                messageCount,
-                result
-            };
-        }
-    } finally {
-        console.timeEnd('[updateContextCutoff] total');
-        isCalculatingCutoff = false;
-        if (pendingCutoffRecalc) {
-            pendingCutoffRecalc = false;
-            if (cutoffRerunTimer) clearTimeout(cutoffRerunTimer);
-            cutoffRerunTimer = setTimeout(() => {
-                updateContextCutoff();
-            }, 0);
-        }
-    }
-}
-
-function debouncedUpdateContextCutoff(delay = 300) {
-    const effectiveDelay = isBatterySaverUI.value ? Math.max(delay, 700) : delay;
-    if (cutoffDebounceTimer) clearTimeout(cutoffDebounceTimer);
-    cutoffDebounceTimer = setTimeout(() => {
-        updateContextCutoff();
-    }, effectiveDelay);
-}
-
-function invalidateContextCache() {
-    contextCutoffCache = null;
-}
-
 async function updateSessionMessage(char, msgIndex, newMsgData) {
     const data = await getChatData(char.id);
     const sessionId = char.sessionId || data.currentId;
@@ -648,135 +580,7 @@ async function updateSessionMessage(char, msgIndex, newMsgData) {
     }
 }
 
-// Use context service functions
-const { clampHistoryFillThreshold, clampHistoryHidePercent } = contextService;
-
-function persistHistoryContextSettings(fillThreshold, hidePercent) {
-    const clamped = contextService.persistHistoryContextSettings(fillThreshold, hidePercent);
-    historyFillThreshold.value = clamped.fillThreshold;
-    historyHidePercent.value = clamped.hidePercent;
-}
-
-async function saveCurrentMessages() {
-    if (!activeChatChar) return;
-    const data = await getChatData(activeChatChar.id);
-    if (!data) return;
-    const sessionId = activeChatChar.sessionId || data.currentId;
-    data.sessions[sessionId] = currentMessages.value;
-    await db.saveChat(activeChatChar.id, data);
-}
-
-function handleSaveContextSettings({ fillThreshold, hidePercent }) {
-    persistHistoryContextSettings(fillThreshold, hidePercent);
-}
-
-async function hideTopMessagesNow() {
-    const count = historyHidePreview.value.count;
-    if (!count || !activeChatChar) return;
-
-    let hidden = 0;
-    for (const msg of currentMessages.value) {
-        if (!msg || msg.isTyping || msg.isHidden) continue;
-        msg.isHidden = true;
-        hidden += 1;
-        if (hidden >= count) break;
-    }
-
-    if (!hidden) return;
-
-    await saveCurrentMessages();
-    await updateContextCutoff();
-    closeBottomSheet();
-    showToast(`Hidden ${hidden} top message${hidden === 1 ? '' : 's'}`);
-}
-
-function confirmHideTopMessages() {
-    const preview = historyHidePreview.value;
-    if (!preview.count) return;
-
-    showBottomSheet({
-        title: 'Hide Top Messages',
-        items: [
-            {
-                label: 'Open Summary',
-                hint: 'Review or generate a summary first',
-                icon: '<svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 14H7v-2h10v2zm0-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>',
-                onClick: () => {
-                    closeBottomSheet();
-                    setTimeout(() => presetView.value?.openSummarySheet(), 250);
-                }
-            },
-            {
-                label: `Hide ${preview.count} message${preview.count === 1 ? '' : 's'} now`,
-                hint: `Free about ${preview.tokens} tokens`,
-                icon: '<svg viewBox="0 0 24 24"><path d="M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.43-4.75-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46C3.08 8.3 1.78 10.02 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27z"/></svg>',
-                onClick: () => {
-                    hideTopMessagesNow();
-                }
-            },
-            {
-                label: 'Cancel',
-                onClick: () => {
-                    closeBottomSheet();
-                    // Return to Tokenizer sheet
-                    setTimeout(() => {
-                        isCalculatingCutoff = false; // ensure loader doesn't stick
-                        tokenizerSheet.value?.open();
-                    }, 50);
-                }
-            }
-        ]
-    });
-}
-
-async function unhideAllMessages() {
-    if (!activeChatChar) return;
-
-    let changed = 0;
-    for (const msg of currentMessages.value) {
-        if (!msg || msg.isTyping || !msg.isHidden) continue;
-        msg.isHidden = false;
-        changed += 1;
-    }
-
-    if (!changed) return;
-
-    await saveCurrentMessages();
-    await updateContextCutoff();
-    closeBottomSheet();
-    showToast(`Unhid ${changed} message${changed === 1 ? '' : 's'}`);
-}
-
-async function openContextSheet() {
-    // Always recalculate to ensure vector lorebooks are included
-    if (activeChatChar) {
-        const calculatePromise = updateContextCutoff();
-        const timeoutPromise = new Promise(resolve => { setTimeout(resolve, 5000) });
-        await Promise.race([calculatePromise, timeoutPromise]);
-
-        if (isCalculatingCutoff) {
-            await new Promise(resolve => { setTimeout(resolve, 1000) });
-        }
-    }
-
-    if (!contextBreakdown.value) {
-        showBottomSheet({
-            title: 'Context',
-            bigInfo: {
-                icon: '<svg viewBox="0 0 24 24" style="fill:currentColor;width:100%;height:100%;"><path d="M11 17h2v-6h-2v6zm0-8h2V7h-2v2zm1-7C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/></svg>',
-                description: 'Context calculation is taking longer than expected. Please check that your API settings are configured correctly and try again.',
-                buttonText: 'Close',
-                onButtonClick: () => closeBottomSheet()
-            }
-        });
-        return;
-    }
-
-    tokenizerSheet.value?.open();
-}
-
 function handleSheetBack() {
-    // Close current sheet and open MagicDrawer
     tokenizerSheet.value?.close();
     memoryBooksSheet.value?.close();
     chatInputRef.value?.openMagicDrawer();
@@ -807,41 +611,6 @@ const onFsEditorClosed = async () => {
     if (activeChatChar) {
         // Restore chat header when FS editor is closed
         await setupHeader(activeChatChar);
-    }
-};
-
-const applyImageAutoHide = () => {
-    const autoHide = localStorage.getItem('gz_api_auto_hide_images') === 'true';
-    const threshold = parseInt(localStorage.getItem('gz_api_auto_hide_images_n') || '1', 10);
-    
-    if (!autoHide || threshold <= 0 || !activeChatChar) return;
-
-    let changed = false;
-    let assistantCount = 0;
-    
-    // Iterate backwards to count assistant responses after user images
-    for (let i = currentMessages.value.length - 1; i >= 0; i--) {
-        const msg = currentMessages.value[i];
-        if (msg.role === 'char' || msg.role === 'assistant') {
-            assistantCount++;
-        } else if (msg.role === 'user' && msg.image) {
-            if (assistantCount >= threshold && !msg.imageHidden) {
-                msg.imageHidden = true;
-                changed = true;
-            }
-        }
-    }
-
-    if (changed) {
-        const charId = activeChatChar.id;
-        const sessionId = activeChatChar.sessionId;
-        const messageSnapshot = currentMessages.value;
-        getChatData(activeChatChar.id).then(data => {
-            if (data && sessionId && data.sessions?.[sessionId]) {
-                data.sessions[sessionId] = messageSnapshot;
-                db.saveChat(charId, data);
-            }
-        });
     }
 };
 
@@ -884,8 +653,7 @@ async function openChat(char, onBack, force = false) {
 
     isOpeningChat = true;
     isLoading.value = true;
-    cutoffIndex.value = -1;
-    contextBreakdown.value = null;
+    resetCutoffState();
 
     try {
     // Attempt to migrate legacy stats locally
@@ -1117,7 +885,7 @@ async function openChat(char, onBack, force = false) {
 
     // Restore draft
     inputValue.value = chatData.draft || '';
-    pendingCutoffRecalc = true;
+    setPendingCutoffRecalc(true);
 
     // Reset virtual scroll (defaults to bottom)
     refreshVirtualScroll();
@@ -1237,72 +1005,11 @@ async function openChat(char, onBack, force = false) {
     } finally {
         isLoading.value = false;
         isOpeningChat = false;
-        if (pendingCutoffRecalc) {
-            pendingCutoffRecalc = false;
+        if (consumePendingCutoffRecalc()) {
             updateContextCutoff();
         }
         // Update pending memory indicators
         updatePendingMemoryMessageIds(activeChatChar);
-    }
-}
-
-function asyncSaveCurrentSessionState() {
-    if (activeChatChar && messagesContainer.value) {
-        const charContext = activeChatChar;
-        const sessionId = charContext.sessionId;
-        const inputValueDraft = inputValue.value;
-        const currentAnchor = getScrollAnchor();
-
-        db.patchChatData(charContext.id, (data) => {
-            data.lastScrollAnchor = currentAnchor;
-            data.draft = inputValueDraft;
-
-            if (sessionId && data.sessions && data.sessions[sessionId]) {
-                const msgs = data.sessions[sessionId];
-                for (let i = msgs.length - 1; i >= 0; i--) {
-                    const msg = msgs[i];
-                    if (msg.isEditing) {
-                        msg.isEditing = false;
-                        delete msg.editText;
-                    }
-
-                    if (msg.isError) {
-                        if (msg.swipes && msg.swipes.length > 1) {
-                            const errorSwipeId = msg.swipeId || 0;
-                            msg.swipes.splice(errorSwipeId, 1);
-                            if (msg.swipesMeta) msg.swipesMeta.splice(errorSwipeId, 1);
-
-                            let newSwipeId = errorSwipeId - 1;
-                            if (newSwipeId < 0) newSwipeId = 0;
-
-                            msg.swipeId = newSwipeId;
-                            msg.text = msg.swipes[newSwipeId] || "";
-                            msg.isError = false;
-
-                            if (msg.swipesMeta && msg.swipesMeta[newSwipeId]) {
-                                msg.reasoning = msg.swipesMeta[newSwipeId].reasoning;
-                                msg.genTime = msg.swipesMeta[newSwipeId].genTime;
-                            } else {
-                                msg.reasoning = null;
-                                msg.genTime = null;
-                            }
-                        } else {
-                            msgs.splice(i, 1);
-                        }
-                    }
-                }
-                data.sessions[sessionId] = msgs;
-            }
-
-            if (charContext.authors_note !== undefined) {
-                if (!data.authorsNotes) data.authorsNotes = {};
-                data.authorsNotes[sessionId] = charContext.authors_note;
-            }
-            if (charContext.summary !== undefined) {
-                if (!data.summaries) data.summaries = {};
-                data.summaries[sessionId] = charContext.summary;
-            }
-        });
     }
 }
 
@@ -1354,7 +1061,8 @@ chatGenerationServices = createChatGenerationServices({
 const {
     sendMessage,
     startGeneration,
-    handleImageRegenerate
+    handleImageRegenerate,
+    startImpersonation
 } = useChatGeneration({
     getActiveChatChar: () => activeChatChar,
     currentMessages,
@@ -1374,6 +1082,11 @@ const {
     scrollToBottom,
     openApiView,
     memoryDraftState,
+    isImpersonating,
+    setGenerationState,
+    clearGenerationState,
+    cleanText,
+    activeChar,
     t
 });
 
@@ -1417,49 +1130,6 @@ const {
     getActiveChatChar: () => activeChatChar,
     regenerateMessage: (msgIndex, mode, guidanceText) => regenerateMessage(msgIndex, mode, guidanceText)
 });
-
-// --- Magic Menu ---
-
-async function startImpersonation(guidanceText = null) {
-    if (guidanceText) {
-        pendingGuidance.value = { text: guidanceText, type: 'IMPERSONATION' };
-    } else {
-        pendingGuidance.value = null;
-    }
-    if (!activeChatChar) return;
-
-    const controller = new AbortController();
-
-    return executeImpersonationUseCase({
-        char: activeChatChar,
-        guidanceText,
-        controller,
-        services: {
-            app: chatGenerationServices.app,
-            lifecycle: {
-                setGenerationState,
-                clearGenerationState,
-                nextGenerationId,
-                buildGenerationHistory: () => currentMessages.value
-                    .map((m, i) => ({ ...m, originalIndex: i }))
-                    .filter(m => !m.isTyping && !m.isHidden)
-                    .map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text, chatId: m.originalIndex })),
-                cleanText
-            },
-            state: {
-                inputValue,
-                isImpersonating,
-                isGenerating,
-                currentMessages,
-                activeChatChar: activeChar,
-                showBottomSheet,
-                closeBottomSheet,
-                openApiView,
-                t
-            }
-        }
-    });
-}
 
 // --- Utils ---
 
@@ -1544,33 +1214,6 @@ const onCharacterUpdated = (e) => {
         activeChatChar = e.detail.character;
         activeChar.value = e.detail.character;
         publishAppEvent(APP_EVENTS.ui.header.updateAvatar, activeChatChar);
-    }
-};
-
-const onVisibilityChange = () => {
-    if (document.visibilityState === 'hidden' && activeChatChar) {
-        const charId = activeChatChar.id;
-        const sessionId = activeChatChar.sessionId;
-        const messagesSnapshot = currentMessages.value;
-        const draft = inputValue.value;
-        const authorsNote = activeChatChar.authors_note;
-        const summary = activeChatChar.summary;
-        db.patchChatData(charId, (data) => {
-            if (sessionId && messagesSnapshot.length > 0) {
-                data.sessions[sessionId] = messagesSnapshot;
-            }
-            data.draft = draft;
-            if (authorsNote !== undefined) {
-                if (!data.authorsNotes) data.authorsNotes = {};
-                data.authorsNotes[sessionId] = authorsNote;
-            }
-            if (summary !== undefined) {
-                if (!data.summaries) data.summaries = {};
-                data.summaries[sessionId] = summary;
-            }
-        });
-    } else if (document.visibilityState === 'visible' && activeChatChar) {
-        clearMessageNotifications(activeChatChar.id);
     }
 };
 
@@ -1699,70 +1342,6 @@ watch(() => currentMessages.value.length, () => {
     updateContextCutoff();
 });
 
-watch(activeChar, async (newVal) => {
-    if (!newVal) return;
-    
-    const chatData = await getChatData(newVal.id);
-    if (!chatData) return;
-    const sessionId = chatData.currentId;
-    let changed = false;
-
-    // Sync Summary Content
-    if (newVal.summary !== undefined) {
-        if (!chatData.summaries) chatData.summaries = {};
-        let currentSum = chatData.summaries[sessionId];
-        if (typeof currentSum === 'string') {
-            currentSum = { content: currentSum, depth: 4, role: 'system', insertion_mode: 'relative', prefix: 'Summary: ' };
-        } else if (!currentSum) {
-            currentSum = { content: '', depth: 4, role: 'system', insertion_mode: 'relative', prefix: 'Summary: ' };
-        }
-        if (currentSum.content !== newVal.summary) {
-            chatData.summaries[sessionId] = { ...currentSum, content: newVal.summary };
-            changed = true;
-        }
-    }
-
-    // Sync Author's Note Content
-    if (newVal.authors_note !== undefined) {
-        if (!chatData.authorsNotes) chatData.authorsNotes = {};
-        const storedAn = chatData.authorsNotes[sessionId];
-        const currentAN = typeof storedAn === 'string' ? storedAn : storedAn?.content || '';
-        if (currentAN !== newVal.authors_note) {
-            chatData.authorsNotes[sessionId] = newVal.authors_note;
-            changed = true;
-        }
-    }
-
-    if (changed) await db.saveChat(newVal.id, chatData);
-}, { deep: true });
-
-onBeforeUnmount(() => {
-    if (activeChatChar && messagesContainer.value) {
-        const charId = activeChatChar.id;
-        const sessionId = activeChatChar.sessionId;
-        const currentAnchor = getScrollAnchor();
-        const draft = inputValue.value;
-        const messagesSnapshot = currentMessages.value;
-        const authorsNote = activeChatChar.authors_note;
-        const summary = activeChatChar.summary;
-        db.patchChatData(charId, (data) => {
-            data.lastScrollAnchor = currentAnchor;
-            data.draft = draft;
-            if (sessionId && messagesSnapshot.length > 0) {
-                data.sessions[sessionId] = messagesSnapshot;
-            }
-            if (authorsNote !== undefined) {
-                if (!data.authorsNotes) data.authorsNotes = {};
-                data.authorsNotes[sessionId] = authorsNote;
-            }
-            if (summary !== undefined) {
-                if (!data.summaries) data.summaries = {};
-                data.summaries[sessionId] = summary;
-            }
-        });
-    }
-});
-
 onUnmounted(() => {
     setScrollLock(false);
     stopMemoryDraftProgress();
@@ -1833,10 +1412,7 @@ onUnmounted(() => {
     if (unsubChatSearch) { unsubChatSearch(); unsubChatSearch = null; }
     if (unsubApiContextChanged) { unsubApiContextChanged(); unsubApiContextChanged = null; }
     if (unsubSettingsChanged) { unsubSettingsChanged(); unsubSettingsChanged = null; }
-    if (cutoffRerunTimer) {
-        clearTimeout(cutoffRerunTimer);
-        cutoffRerunTimer = null;
-    }
+    clearCutoffTimers();
 
     // Reset chatViewRoot height to prevent stale inline style leaking to next mount
     if (chatViewRoot.value) {
@@ -1964,7 +1540,7 @@ onUnmounted(() => {
             :should-recommend-hide="shouldRecommendHide"
             :history-fill-threshold="historyFillThreshold"
             :history-hide-percent="historyHidePercent"
-            :is-calculating="isCalculatingCutoff"
+            :is-calculating="getIsCalculatingCutoff()"
             @hide-messages="confirmHideTopMessages"
             @save-settings="handleSaveContextSettings"
             @back="handleSheetBack"
