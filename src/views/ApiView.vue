@@ -12,7 +12,7 @@ function handleBack() {
         sheet.value?.close();
     }
 }
-import { normalizeEndpoint, fetchRemoteModels, getApiPresets, saveApiPresets, getApiConfig, getApiProviderId, getApiRuntimeStorage, saveApiRuntimeSetting, applyApiRuntimeConfig, getBlacklistedProvider, getApiReasoningTags } from '@/core/config/APISettings.js';
+import { normalizeEndpoint, fetchRemoteModels, getApiPresets, saveApiPresets, getApiConfig, getApiProviderId, getApiRuntimeStorage, saveApiRuntimeSetting, applyApiRuntimeConfig, getBlacklistedProvider } from '@/core/config/APISettings.js';
 import { getEmbeddingConfig, saveEmbeddingSetting, isEmbeddingConfigured } from '@/core/config/embeddingSettings.js';
 import { testEmbeddingConnection } from '@/core/services/embeddingService.js';
 import { getImageGenSettings, saveImageGenSettings } from '@/core/services/imageGenService.js';
@@ -71,9 +71,7 @@ const apiSettings = reactive({
     autoHideImages: false,
     autoHideImagesN: 1,
     reasoningEnabled: false,
-    reasoningEffort: 'medium',
-    reasoningStart: '',
-    reasoningEnd: ''
+    reasoningEffort: 'medium'
 });
 
 const showApiKey = ref(false);
@@ -225,9 +223,6 @@ const activeApiPreset = computed(() => {
     return apiPresets.value.find(p => p.id === activeApiPresetId.value) || apiPresets.value[0];
 });
 
-const startTagPlaceholder = computed(() => getApiReasoningTags().start);
-const endTagPlaceholder = computed(() => getApiReasoningTags().end);
-
 // --- Blacklist Warning ---
 let blacklistCountdownTimer = null;
 
@@ -275,8 +270,6 @@ function loadApiSettings() {
     apiSettings.autoHideImagesN = runtime.autoHideImagesN;
     apiSettings.reasoningEnabled = runtime.requestReasoning;
     apiSettings.reasoningEffort = runtime.reasoningEffort;
-    apiSettings.reasoningStart = runtime.reasoningTags.start;
-    apiSettings.reasoningEnd = runtime.reasoningTags.end;
     loadEmbeddingSettings();
     loadImageGenSettings();
     loadMemoryProviderSettings();
@@ -299,9 +292,7 @@ function saveApiSetting(key, value) {
             'gz_api_auto_hide_images': 'auto_hide_images',
             'gz_api_auto_hide_images_n': 'auto_hide_images_n',
             'gz_api_request_reasoning': 'reasoning_enabled',
-            'gz_api_reasoning_effort': 'reasoning_effort',
-            'gz_api_reasoning_start': 'reasoning_start',
-            'gz_api_reasoning_end': 'reasoning_end'
+            'gz_api_reasoning_effort': 'reasoning_effort'
         };
         if (map[key]) {
             activeApiPreset.value[map[key]] = value;
@@ -414,9 +405,7 @@ function createNewApiPreset() {
                     auto_hide_images: apiSettings.autoHideImages,
                     auto_hide_images_n: apiSettings.autoHideImagesN,
                     reasoning_enabled: apiSettings.reasoningEnabled,
-                    reasoning_effort: apiSettings.reasoningEffort,
-                    reasoning_start: apiSettings.reasoningStart,
-                    reasoning_end: apiSettings.reasoningEnd
+                    reasoning_effort: apiSettings.reasoningEffort
                 };
 
                 apiPresets.value.push(newPreset);
@@ -446,9 +435,7 @@ function applyApiPreset(p) {
         autoHideImages: (p.auto_hide_images === true || p.auto_hide_images === 'true'),
         autoHideImagesN: parseInt(p.auto_hide_images_n || '1', 10),
         requestReasoning: (p.reasoning_enabled === true || p.reasoning_enabled === 'true'),
-        reasoningEffort: p.reasoning_effort || 'medium',
-        reasoningStart: p.reasoning_start || '',
-        reasoningEnd: p.reasoning_end || ''
+        reasoningEffort: p.reasoning_effort || 'medium'
     });
     
     apiSettings.endpoint = p.endpoint;
@@ -464,8 +451,6 @@ function applyApiPreset(p) {
     apiSettings.autoHideImagesN = parseInt(p.auto_hide_images_n || '1', 10);
     apiSettings.reasoningEnabled = (p.reasoning_enabled === true || p.reasoning_enabled === 'true');
     apiSettings.reasoningEffort = p.reasoning_effort || 'medium';
-    apiSettings.reasoningStart = p.reasoning_start || '';
-    apiSettings.reasoningEnd = p.reasoning_end || '';
     
     checkConnection();
 }
@@ -770,12 +755,6 @@ onBeforeUnmount(() => {
                             <span>{{ t('reasoning_effort_' + apiSettings.reasoningEffort) || apiSettings.reasoningEffort }}</span>
                             <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
                         </div>
-                    </div>
-                    <div class="settings-item">
-                        <label>{{ t('label_reasoning_tags') || 'Reasoning Tags' }}</label>
-                        <div class="settings-desc">{{ t('desc_reasoning_tags') || 'Used by reasoning macros and inline reasoning parsing' }}</div>
-                        <input type="text" v-model="apiSettings.reasoningStart" @input="onApiInput('gz_api_reasoning_start', $event.target.value)" :placeholder="startTagPlaceholder" style="margin-bottom: 5px;">
-                        <input type="text" v-model="apiSettings.reasoningEnd" @input="onApiInput('gz_api_reasoning_end', $event.target.value)" :placeholder="endTagPlaceholder">
                     </div>
                 </div>
                 </template>
