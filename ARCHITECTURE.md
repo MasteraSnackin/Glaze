@@ -128,7 +128,7 @@ Why this slice is safe:
 - Later refactor slices can migrate listeners and side effects incrementally instead of forcing a one-shot rewrite.
 
 What has **not** changed yet:
-- `ChatView.vue` is significantly thinner (4664 lines, down from ~5700), but still injects some state into the chat use case via the `createChatGenerationServices` factory.
+- `ChatView.vue` is significantly thinner (2995 lines, down from ~5700), but still injects some state into the chat use case via the `createChatGenerationServices` factory.
 - Late enrichment and final request assembly still live inside `generationService.js`.
 - Memory-book retrieval heuristics are now extracted out of `generationService.js`, but they are still deterministic helper logic rather than a final dedicated domain service boundary.
 - The next safe extraction step is to move those remaining deterministic stages under the use-case/pipeline layer without changing ordering.
@@ -494,8 +494,11 @@ MemorySettings: {
 ### Current Responsibility Split
 
 **UI / Session Lifecycle:**
-- `ChatView.vue` owns top-level chat session orchestration and UI glue. Detailed generation lifecycle, memory automation, context breakdown, message selection, and message display logic are extracted into focused composables.
+- `ChatView.vue` owns top-level chat session orchestration and UI glue. Detailed generation lifecycle, memory automation, context breakdown, message selection, message display, session management, message actions, and chat generation logic are extracted into focused composables.
 - `useGenerationPreparation.js`, `useGenerationStateSetup.js`, `useGenerationStreamUpdate.js`, `useGenerationPromptReady.js`, `useGenerationCompleteHandler.js`, `useGenerationErrorHandler.js`, and `useGenerationStateRestore.js` now own the detailed generation subpaths.
+- `useSessionManagement.js` owns session create/switch/delete, session name editing, and session data persistence.
+- `useMessageActions.js` owns message delete/hide, edit save/cancel, branch creation, image regeneration, and guidance text patching.
+- `useChatGeneration.js` owns `sendMessage`, `startGeneration`, `handleImageRegenerate`, generation preflight checks, and image-gen lifecycle.
 - `RequestPreviewSheet.vue` owns display of the last built prompt and the last stored network trace.
 - `ApiView.vue` owns API settings editing, preset CRUD, and `/models` connectivity UX.
 
@@ -584,7 +587,7 @@ Native-only scope retained:
 - Keep trace capture non-blocking; generation success must never depend on diagnostics state
 
 ### Current Design Problems
-- `ChatView.vue` is significantly thinner now (4664 lines), but still owns some chat lifecycle glue. Most detailed generation lifecycle, memory automation, context breakdown, and message selection are now in dedicated composables.
+- `ChatView.vue` is significantly thinner now (2995 lines), but still owns some chat lifecycle glue including `openChat()`. Most detailed generation lifecycle, memory automation, context breakdown, message selection, session management, message actions, and chat generation are now in dedicated composables.
 - `generationService.js` mixes use-case orchestration, prompt enrichment, config resolution, debug preview state, and transport dispatch.
 - `llmApi.js` is much thinner now, but transport side effects are still callback-driven and spread across multiple helpers rather than an explicit event contract.
 - Runtime config has multiple owners: `localStorage`, IndexedDB API presets, reactive `ApiView.vue` state, onboarding writes, and direct reads in feature views.
@@ -660,6 +663,11 @@ This is intentionally small and compatibility-first: the current request flow st
 
 These composables now cover placeholder setup, stream UI application, prompt metadata rollback, background persistence throttling, abort/error restore, and completion finalization.
 
+**ChatView Decomposition Composables (Phase 8):**
+- `src/composables/chat/useSessionManagement.js` — session creation, switching, deletion, session name editing, session data persistence
+- `src/composables/chat/useMessageActions.js` — message delete/hide, edit save/cancel, branch creation, image regeneration, guidance text patching
+- `src/composables/chat/useChatGeneration.js` — `sendMessage`, `startGeneration`, `handleImageRegenerate`, generation preflight checks, image-gen lifecycle
+
 **Additional UI/State Extraction Layer:**
 - `src/composables/chat/useAutoSync.js` — auto-sync trigger logic
 - `src/composables/chat/useMemoryAutomation.js` — memory automation functions (batch generate, quick model change, etc.)
@@ -671,6 +679,9 @@ These composables now cover placeholder setup, stream UI application, prompt met
 - `src/composables/chat/useMemoryBooks.js` — reactive memory book state and UI handlers
 - `src/core/services/contextService.js` — context/tokenizer settings utilities
 - `src/core/utils/messageEditHelpers.js` — message editing utilities (normalize, prepare, restore)
+- `src/composables/chat/useSessionManagement.js` — session CRUD and persistence
+- `src/composables/chat/useMessageActions.js` — message interaction actions (delete, hide, edit, branch, regenerate)
+- `src/composables/chat/useChatGeneration.js` — chat generation orchestration (sendMessage, startGeneration, image regen)
 
 **Debug / Observability:**
 - `src/core/llm/debug/requestTraceStore.js` — raw request/response traces keyed by generation
@@ -683,7 +694,7 @@ These composables now cover placeholder setup, stream UI application, prompt met
 2. Split `llmApi.js` into smaller transport-focused modules without changing external behavior.
    Status: mostly done; transport execution, lifecycle, SSE parsing, one-shot handling, and abort/failure outcomes are extracted. `llmApi.js` remains as the compatibility entrypoint.
 3. Extract chat/session lifecycle code out of `ChatView.vue` into a dedicated generation-session composable.
-   Status: largely done through multiple focused composables instead of one monolithic generation-session composable.
+   Status: largely done through multiple focused composables instead of one monolithic generation-session composable. `openChat()` (~400 lines) remains in ChatView due to high dependency count.
 4. Separate prompt preview state from transport trace state, then store traces per generation/message instead of globally.
    Status: not done. Trace state is still singleton/global.
 5. Promote explicit request use cases (`chat`, `summary`, `memory_draft`, `model_discovery`) with a shared normalized transport result shape.

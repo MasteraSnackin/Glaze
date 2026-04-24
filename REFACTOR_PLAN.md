@@ -567,7 +567,7 @@ Done:
 - Swipe/greeting navigation extracted into `useSwipeNavigation.js`
 - Auto-sync extracted into `useAutoSync.js`
 - Message display helpers extracted into `useChatMessageDisplay.js`
-- ChatView.vue reduced from ~5700 to 3774 lines (33.8%)
+- ChatView.vue reduced from ~5700 to 2995 lines (47.5%)
 
 Expected output:
 
@@ -693,8 +693,8 @@ Remaining:
 - the `window` event bridge itself remains intentionally as an external compatibility adapter for app-shell/legacy event consumers; the staged architecture refactor is complete without removing that bridge
 
 ### Phase 8. Decompose ChatView into thin coordinator
-Status: not done
-Testing: not tested
+Status: partially done
+Testing: tested (`npm run build` passes)
 
 Purpose:
 Make the main chat screen a readable UI composition layer, not a half-service.
@@ -711,11 +711,26 @@ Work:
 - ensure extracted composables do not reach back into the view's template refs or reactive bag
 - target: `ChatView.vue` reads as a list of composable calls and template bindings, not as a logic hub
 
+Done:
+- `src/composables/chat/useSessionManagement.js` — session creation, switching, deletion, session name editing, session data persistence (~203 lines extracted)
+- `src/composables/chat/useMessageActions.js` — message delete/hide, edit save/cancel, branch creation, image regeneration, guidance text patching (~194 lines extracted)
+- `src/composables/chat/useChatGeneration.js` — `sendMessage`, `startGeneration`, `handleImageRegenerate`, generation preflight checks, image-gen lifecycle (~152 lines extracted)
+- Cleaned up unused imports after extraction (executeChatGenerationUseCase, replaceMacros, resolveGenerationSessionContext, getApiConfig, fetchRemoteModels, addMessageStats, addRegenerationStats, generateImage, makeLoadingHtml, makeErrorHtml, makeResultHtml, startGenerationNotification, stopGenerationNotification, addNotification, ensureSessionMemoryBook, createMemoryAutomationState, memoryBooksHasAutomationState)
+- `activeChatChar` (plain `let`) passed via `getActiveChatChar()`/`setActiveChatChar()` callbacks
+- `chatGenerationServices` (lazy `let`) passed via `getChatGenerationServices()` factory
+- `_cleanupScroll` (let) passed via `getCleanupScroll()`/`setCleanupScroll()` callbacks
+- ChatView.vue reduced from 3767 → 2995 lines (-772 lines, -20.5%)
+
+Not done (deferred):
+- `openChat()` (~400 lines) extraction into composable — deferred due to ~30+ dependency injections required (activeChatChar, activeChar, isGenerating, cutoffIndex, contextBreakdown, inputValue, currentMessages, _cleanupScroll, pendingCutoffRecalc, isOpeningChat, currentOnBack, isLoading, etc.); marginal ROI for the interface complexity
+- Context/tokenizer sheet actions (~32 lines) — too small for a dedicated composable
+- ChatView.vue is still above 2000 lines but significantly closer to the target; further reduction requires `openChat` decomposition or template extraction
+
 Expected output:
 
-- `ChatView.vue` drops below 2000 lines
-- each extracted zone has a clear composable entry with documented inputs/outputs
-- no TDZ-sensitive initialization order inside setup
+- `ChatView.vue` drops below 2000 lines — NOT YET (currently 2995)
+- each extracted zone has a clear composable entry with documented inputs/outputs — DONE for 3 zones
+- no TDZ-sensitive initialization order inside setup — DONE
 
 ### Phase 9. Clarify state ownership boundaries
 Status: not done
@@ -998,11 +1013,11 @@ Deliverables:
 
 - `ChatView.vue` calls a dedicated use case rather than owning orchestration details; ✅
 - `generationService.js` reduced to a compatibility facade or prompt-domain helper; ⏳ (still owns late enrichment and request dispatch)
-- ChatView.vue reduced from ~5700 to 3774 lines through extraction of composables, services, and utils.
+- ChatView.vue reduced from ~5700 to 2995 lines through extraction of composables, services, and utils.
 
 ### Candidate 4. Split prompt preview from network trace state
-Status: not done
-Testing: not tested
+Status: done
+Testing: tested (`npm run build` passes)
 
 Deliverables:
 

@@ -42,6 +42,7 @@ The current roadmap is:
 - Phase 5 status: `done`
 - Phase 6 status: `done`
 - Phase 7 status: `done`
+- Phase 8 status: `partially done` (3 composables extracted, openChat deferred)
 - Current slice testing: `tested` (`npm run build`)
 
 ### Bugs Found & Fixed on This Branch
@@ -267,6 +268,18 @@ Phase 7 compatibility cleanup:
 - [done] Remove old-format persisted network trace hydration branch; keep only keyed persisted trace hydration
 - [done] Remove `core/events/legacyCompatibleSubscription.js` after internal callers were migrated off it
 - [done] Keep `window` event bridge only as an external compatibility adapter, not as an internal subscription boundary
+
+Phase 8 ChatView decomposition:
+- [done] Extract session management into `composables/chat/useSessionManagement.js` — session create/switch/delete, session name editing, session data persistence (~203 lines)
+- [done] Extract message actions into `composables/chat/useMessageActions.js` — message delete/hide, edit save/cancel, branch creation, image regeneration, guidance text patching (~194 lines)
+- [done] Extract chat generation into `composables/chat/useChatGeneration.js` — sendMessage, startGeneration, handleImageRegenerate, generation preflight checks, image-gen lifecycle (~152 lines)
+- [done] Clean up unused imports after extraction (15+ unused import references removed)
+- [done] `activeChatChar` plain `let` passed via `getActiveChatChar()`/`setActiveChatChar()` callbacks instead of direct capture
+- [done] `chatGenerationServices` lazy `let` passed via `getChatGenerationServices()` factory
+- [done] `_cleanupScroll` let passed via `getCleanupScroll()`/`setCleanupScroll()` callbacks
+- [not done] Extract `openChat()` (~400 lines) into composable — deferred: ~30+ dependency injections, marginal ROI
+- [not done] Extract context/tokenizer sheet actions (~32 lines) — too small for dedicated composable
+- [done] ChatView.vue reduced from 3767 → 2995 lines (-772 lines, -20.5%)
 
 This roadmap intentionally assumes the tokenizer and current context UI are already in place and are not being redesigned again unless a new decision is made explicitly.
 

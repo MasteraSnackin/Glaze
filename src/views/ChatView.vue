@@ -18,23 +18,6 @@ import * as memoryBooksService from '@/core/services/memoryBooksService.js';
 const {
     createEmptyMemoryCoverage,
     createBaseMessageMeta,
-    ensureSessionMemoryBook,
-    createMemoryAutomationState,
-    memoryBooksHasAutomationState,
-    ensureMemoryAutomationState,
-    getStableVisibleMessages,
-    countStableConversationMessages,
-    getLastStableConversationRole,
-    computeDelayedWaitExchanges,
-    countCompletedExchangesSince,
-    normalizeAutoCreateInterval,
-    resolvePendingTriggerMessages,
-    buildBootstrapSegments,
-    arraysEqual,
-    calculateMessageOverlapRatio,
-    findConflictingMemoryEntry,
-    normalizeEntryMessageIds,
-    reconcileMemoryBookForMessages,
     reconcileSessionMemoryState,
     runMemoryMaintenancePass,
     formatElapsedSeconds,
@@ -57,18 +40,17 @@ import { Capacitor } from '@capacitor/core';
 import { App } from '@capacitor/app';
 import { keyboardOverlap } from '@/core/services/keyboardHandler.js';
 import { estimateTokens } from '@/utils/tokenizer.js';
-import { formatText, cleanText } from '@/utils/textFormatter.js';
-import { replaceMacros } from '@/utils/macroEngine.js';
+import { cleanText } from '@/utils/textFormatter.js';
 import { getEffectivePersona, activePersona, allPersonas } from '@/core/states/personaState.js';
 import { formatDate, formatDateSeparator } from '@/utils/dateFormatter.js';
 import { currentLang, chatPaddingLR, setChatPaddingLR, shouldUseBatterySaverUI } from '@/core/config/APPSettings.js';
 import { translations } from '@/utils/i18n.js';
 import { calculateContext } from '@/core/llm/usecases/calculateContext.js';
-import { executeChatGenerationUseCase, createChatGenerationServices } from '@/core/llm/usecases/generateChat.js';
+import { createChatGenerationServices } from '@/core/llm/usecases/generateChat.js';
 import { executeImpersonationUseCase } from '@/core/llm/usecases/impersonationRequest.js';
-import { buildGenerationAuthorsNote, resolveGenerationSessionContext } from '@/composables/chat/useGenerationPreparation.js';
+import { buildGenerationAuthorsNote } from '@/composables/chat/useGenerationPreparation.js';
 import { useGenerationAbort } from '@/composables/chat/useGenerationAbort.js';
-import { getApiConfig, getApiRuntimeStorage, getApiReasoningTags, fetchRemoteModels } from '@/core/config/APISettings.js';
+import { getApiRuntimeStorage } from '@/core/config/APISettings.js';
 import { getActiveLLMProfile } from '@/core/config/ProviderProfiles.js';
 import { getEmbeddingConfig, isEmbeddingConfigured } from '@/core/config/embeddingSettings.js';
 import { animateTextChange, updateAppColors, initHeaderScroll, initRipple } from '@/core/services/ui.js';
@@ -81,8 +63,7 @@ import { useVirtualScroll } from '@/composables/chat/useVirtualScroll.js';
 import { useGenerationRegistry } from '@/composables/chat/useGenerationRegistry.js';
 import { useTypingStateCleanup } from '@/composables/chat/useTypingStateCleanup.js';
 import { useSidebarResizer } from '@/composables/ui/useSidebarResizer.js';
-import { sendMessageNotification, clearMessageNotifications, startGenerationNotification, stopGenerationNotification } from '@/core/services/notificationService.js';
-import { addNotification } from '@/core/states/notificationsState.js';
+import { sendMessageNotification, clearMessageNotifications } from '@/core/services/notificationService.js';
 import { formatError } from '@/utils/errors.js';
 import { themeState } from '@/core/states/themeState.js';
 import { triggerChatImport } from '@/core/services/chatImporter.js';
@@ -98,8 +79,7 @@ import TokenizerSheet from '@/components/sheets/TokenizerSheet.vue';
 import ImageGenSheet from '@/components/sheets/ImageGenSheet.vue';
 import GlossarySheet from '@/components/sheets/GlossarySheet.vue';
 import MemoryBooksSheet from '@/components/sheets/MemoryBooksSheet.vue';
-import { addMessageStats, addDeletedStats, addRegenerationStats, migrateStatsIfNeeded } from '@/core/services/statsService.js';
-import { processMessageImages, generateImage, makeLoadingHtml, makeErrorHtml, makeResultHtml } from '@/core/services/imageGenService.js';
+import { addDeletedStats, migrateStatsIfNeeded } from '@/core/services/statsService.js';
 import { showToast } from '@/core/states/toastState.js';
 import { triggerAutoSyncCheck } from '@/composables/chat/useAutoSync.js';
 import { useMemoryBooks } from '@/composables/chat/useMemoryBooks.js';
@@ -110,9 +90,11 @@ import { useMessageSelection } from '@/composables/chat/useMessageSelection.js';
 import { useChatSearch } from '@/composables/chat/useChatSearch.js';
 import { useMemorySheetUI } from '@/composables/chat/useMemorySheetUI.js';
 import { useSwipeNavigation } from '@/composables/chat/useSwipeNavigation.js';
+import { useSessionManagement } from '@/composables/chat/useSessionManagement.js';
+import { useMessageActions } from '@/composables/chat/useMessageActions.js';
+import { useChatGeneration } from '@/composables/chat/useChatGeneration.js';
 import { publishAppEvent, subscribeAppEvent } from '@/core/events/eventHub.js';
 import { APP_EVENTS } from '@/core/events/eventNames.js';
-import { normalizeImgGenHtmlForEditing, prepareEditText, restoreEditText } from '@/core/utils/messageEditHelpers.js';
 
 function genMsgId() {
     return `msg_${Date.now()}_${++_msgIdCounter}`;
@@ -128,6 +110,8 @@ const {
 } = memoryBooksService;
 
 let chatGenerationServices = null;
+
+const t = (key) => translations[currentLang.value]?.[key] || key;
 
 const isAndroid = Capacitor.getPlatform() === 'android';
 const isBatterySaverUI = computed(() => shouldUseBatterySaverUI());
@@ -405,6 +389,31 @@ const {
 
 openMemoryBooksSheet = openMemoryBooksSheetImpl;
 
+const {
+    deleteSession,
+    openSessionsSheet,
+    openDeleteSessionConfirm,
+    createNewSession
+} = useSessionManagement({
+    activeChar,
+    getActiveChatChar: () => activeChatChar,
+    setActiveChatChar: (v) => { activeChatChar = v; },
+    currentMessages,
+    inputValue,
+    isGenerating,
+    hasGenerationState,
+    getGenerationState,
+    clearGenerationState,
+    abortActiveChatGeneration,
+    getChatGenerationServices: () => chatGenerationServices,
+    loadChats,
+    openChat,
+    asyncSaveCurrentSessionState,
+    getCleanupScroll: () => _cleanupScroll,
+    setCleanupScroll: (v) => { _cleanupScroll = v; },
+    t
+});
+
 // --- Display Logic (Separators) ---
 const displayMessages = computed(() => {
     const msgs = currentMessages.value;
@@ -474,9 +483,6 @@ const onScroll = (e) => {
 
 // Expose vsScrollToBottom
 window.forceScrollToBottom = () => { vsScrollToBottom('auto') };
-
-// Helper to access translations
-const t = (key) => translations[currentLang.value]?.[key] || key;
 
 watch([isSearchMode, isSelectionMode], () => {
     ignoreScrollAdjustment = true;
@@ -1345,313 +1351,62 @@ chatGenerationServices = createChatGenerationServices({
     runMemoryAutomationAfterStableTurn
 });
 
-async function sendMessage(attachedImage = null, guidanceText = null) {
-    if (isGenerating.value && activeChatChar) {
-        await abortAnyActiveGeneration(activeChatChar.id);
-        return;
-    }
+const {
+    sendMessage,
+    startGeneration,
+    handleImageRegenerate
+} = useChatGeneration({
+    getActiveChatChar: () => activeChatChar,
+    currentMessages,
+    inputValue,
+    isGenerating,
+    pendingGuidance,
+    hasGenerationState,
+    getGenerationState,
+    abortAnyActiveGeneration,
+    getChatGenerationServices: () => chatGenerationServices,
+    genMsgId,
+    createBaseMessageMeta,
+    nextGenerationId,
+    createGenerationRequestToken,
+    buildGenerationOwnerKey,
+    updateSessionMessage,
+    scrollToBottom,
+    openApiView,
+    memoryDraftState,
+    t
+});
 
-    let effectiveGuidance = guidanceText;
-    let effectiveGuidanceType = 'GENERATION';
-
-    if (!effectiveGuidance && pendingGuidance.value) {
-        effectiveGuidance = pendingGuidance.value.text;
-        effectiveGuidanceType = pendingGuidance.value.type;
-        pendingGuidance.value = null;
-    }
-
-    const text = inputValue.value.trim();
-    const hasImage = typeof attachedImage === 'string';
-    if (text || hasImage || effectiveGuidance) {
-
-        const now = new Date();
-        const time = now.getHours() + ':' + String(now.getMinutes()).padStart(2, '0');
-        
-        const persona = activePersona.value;
-        
-        const processedText = replaceMacros(text, activeChatChar, persona);
-        
-        inputValue.value = '';
-
-        const msgData = { 
-            id: genMsgId(),
-            role: 'user', 
-            text: processedText, 
-            time: time, 
-            timestamp: now.getTime(),
-            image: attachedImage, 
-            tokens: estimateTokens(processedText),
-            persona: { ...activePersona.value },
-            guidanceText: effectiveGuidance,
-            guidanceType: effectiveGuidanceType,
-            ...createBaseMessageMeta()
-        };
-        currentMessages.value.push(msgData);
-        if (activeChatChar) {
-            const currentSessionId = activeChatChar.sessionId || (await getChatData(activeChatChar.id))?.currentId;
-            addMessageStats(activeChatChar.id, currentSessionId, msgData.tokens, processedText.length, msgData.timestamp);
-            const data = await getChatData(activeChatChar.id);
-            if (data && currentSessionId && data.sessions?.[currentSessionId]) {
-                data.sessions[currentSessionId] = currentMessages.value;
-                await db.saveChat(activeChatChar.id, data);
-            }
-        }
-        
-        // Wait for vue to render the new item then force scroll to bottom
-        nextTick(() => {
-            scrollToBottom(false);
-            if (window.forceScrollToBottom) {
-                setTimeout(window.forceScrollToBottom, 100);
-            }
-        });
-        
-        if (activeChatChar) {
-            startGeneration(activeChatChar, null, -1, null, effectiveGuidance, effectiveGuidanceType);
-        }
-    }
-}
-
-// --- Generation Logic ---
-
-function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guidanceText = null, guidanceType = 'GENERATION') {
-    // Check API Configuration
-    const runtime = getApiRuntimeStorage();
-    const model = runtime.model;
-    const endpoint = runtime.normalizedEndpoint;
-    const existingState = getGenerationState(char.id);
-
-    if (existingState && existingState.type !== 'impersonation') {
-        console.warn('[generation] Ignoring overlapping startGeneration call for active chat request', {
-            charId: char.id,
-            existingGenId: existingState.genId
-        });
-        return;
-    }
-
-    if (memoryDraftState.value?.active && char.id === activeChatChar?.id) {
-        console.warn('[generation] Ignoring startGeneration while memory draft is active', {
-            charId: char.id
-        });
-        showToast(t('stop_memory_draft_first') || 'Stop the memory draft before generating a response');
-        return;
-    }
-    
-    if (!model || !endpoint) {
-        showBottomSheet({
-            bigInfo: {
-                icon: '<svg viewBox="0 0 24 24" style="fill:currentColor;width:100%;height:100%;"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.04.24.24.41.48.41h3.84c.24 0 .43-.17.47-.41l.36-2.54c.59-.24 1.13-.57 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>',
-                description: t('api_not_configured') || "API Not Configured",
-                buttonText: t('btn_configure') || "Configure",
-                onButtonClick: () => {
-                    closeBottomSheet();
-                    openApiView();
-                }
-            }
-        });
-        return;
-    }
-
-    const genId = nextGenerationId();
-    const controller = new AbortController();
-    const startTime = Date.now();
-    const rawStreamRef = ref(text || '');
-    resolveGenerationSessionContext({ char, db }).then(context => {
-        continueGeneration(context);
-    }).catch(e => {
-        console.error('Failed to load chat for generation:', e);
-        isGenerating.value = false;
-    });
-
-    async function continueGeneration({ sessionId, summary, anContent }) {
-        const ownerKey = buildGenerationOwnerKey(char.id, sessionId, 'chat');
-        const requestToken = createGenerationRequestToken(ownerKey, genId);
-
-        await executeChatGenerationUseCase({
-            char,
-            text,
-            existingMsgIndex,
-            guidanceText,
-            guidanceType,
-            onAbort,
-            resolvedContext: { sessionId, summary, anContent },
-            request: {
-                genId,
-                controller,
-                startTime,
-                ownerKey,
-                requestToken,
-                rawStreamRef
-            },
-            services: chatGenerationServices
-        });
-    }
-}
-
-async function handleImageRegenerate(msgIndex, { instruction, id }) {
-    const char = activeChatChar;
-    if (!char || !currentMessages.value[msgIndex]) return;
-    const msg = currentMessages.value[msgIndex];
-
-    const idEsc = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const loadingHtml = makeLoadingHtml(instruction, id);
-    const toLoading = (text) => text
-        .replace(new RegExp(`<span[^>]+class="[^"]*imggen-error[^"]*"[^>]+data-iig-id="${idEsc}"[^>]*>[\\s\\S]*?<\\/button><\\/span>`, 'g'), loadingHtml)
-        .replace(new RegExp(`<span[^>]+class="[^"]*imggen-result-wrapper[^"]*"[^>]*>[\\s\\S]*?data-iig-id="${idEsc}"[\\s\\S]*?<\\/span>`, 'g'), loadingHtml);
-
-    msg.text = toLoading(msg.text);
-    msg.swipes[msg.swipeId || 0] = msg.text;
-    updateSessionMessage(char, msgIndex, msg);
-
-    const loadingRe = new RegExp(`<span[^>]+class="[^"]*imggen-loading[^"]*"[^>]+data-iig-id="${idEsc}"[^>]*>(?:<span[^>]*>[\\s\\S]*?<\\/span>)*<\\/span>`, 'g');
-    const context = { charAvatar: char.avatar || null, userAvatar: activePersona.value?.avatar || null };
-
-    startGenerationNotification(t('imggen_notification_title') || 'Glaze', t('imggen_notification_body') || 'Generating image...');
-    addNotification(t('imggen_notification_body') || 'Generating image...', 'info');
-
-    try {
-        const dataUrl = await generateImage(instruction, context);
-        const latest = currentMessages.value[msgIndex]?.text || msg.text;
-        msg.text = latest.replace(loadingRe, makeResultHtml(instruction, id, dataUrl));
-        msg.swipes[msg.swipeId || 0] = msg.text;
-        updateSessionMessage(char, msgIndex, msg);
-    } catch (err) {
-        const latest = currentMessages.value[msgIndex]?.text || msg.text;
-        msg.text = latest.replace(loadingRe, makeErrorHtml(instruction, id, err.message));
-        msg.swipes[msg.swipeId || 0] = msg.text;
-        updateSessionMessage(char, msgIndex, msg);
-    } finally {
-        stopGenerationNotification();
-    }
-}
-
-function regenerateMessage(msgIndex, mode = 'normal', guidanceText = null) {
-    if (msgIndex === -1) return;
-    const msg = currentMessages.value[msgIndex];
-    const isUser = msg.role === 'user';
-    const isLast = msgIndex === currentMessages.value.length - 1;
-
-    if (msg.isError) {
-        msg.isError = false;
-        msg.text = "";
-        msg.reasoning = null;
-        msg.isTyping = true;
-        if (msg.swipes && msg.swipes.length > 0) {
-            msg.swipes[msg.swipeId || 0] = "";
-        }
-        updateSessionMessage(activeChatChar, msgIndex, msg);
-        startGeneration(activeChatChar, null, msgIndex, null, guidanceText, 'SWIPE');
-        return;
-    }
-
-    if (mode === 'magic' && isUser) {
-        // Inherit guidance from the user message if it exists
-        startGeneration(activeChatChar, null, -1, null, msg.guidanceText, 'GENERATION');
-        return;
-    }
-
-    if (!isUser && isLast && mode === 'normal') {
-        mode = 'new_variant';
-    }
-
-    if ((mode === 'new_variant' || mode === 'guided') && !isUser) {
-        // Add new swipe
-        const newSwipeIndex = (msg.swipes?.length || 0);
-        if (!msg.swipes) msg.swipes = [msg.text];
-        msg.swipes.push(""); // Placeholder
-        msg.swipeId = newSwipeIndex;
-        msg.text = "";
-        msg.reasoning = null;
-        msg.isTyping = true;
-        
-        let effectiveGuidance = null;
-        let effectiveType = 'GENERATION';
-        
-        if (mode === 'guided') {
-            effectiveGuidance = guidanceText;
-            effectiveType = 'SWIPE';
-        }
-        
-        startGeneration(activeChatChar, null, msgIndex, null, effectiveGuidance, effectiveType);
-    } else {
-        // Delete and regen (simplified for Vue: remove subsequent, then regen)
-        // In Vue we just slice the array
-        const deleted = currentMessages.value.splice(msgIndex);
-        // Update DB
-        const charId = activeChatChar.id;
-        const sessionId = activeChatChar.sessionId;
-        const messageSnapshot = currentMessages.value;
-        getChatData(activeChatChar.id).then(data => {
-            if (data && sessionId && data.sessions?.[sessionId]) {
-                data.sessions[sessionId] = messageSnapshot; // Save truncated
-                db.saveChat(charId, data);
-            }
-        });
-        
-        startGeneration(activeChatChar, null, -1, null, guidanceText, 'GENERATION');
-    }
-}
-
-async function branchSession(msgIndex) {
-    if (!activeChatChar) return;
-
-    if (isGenerating.value && hasGenerationState(activeChatChar.id)) {
-        const state = getGenerationState(activeChatChar.id);
-        if (state?.type === 'impersonation') {
-            if (state.controller) state.controller.abort();
-            clearGenerationState(activeChatChar.id);
-            isGenerating.value = false;
-        } else {
-            await abortActiveChatGeneration(activeChatChar.id);
-        }
-    }
-
-    const data = await getChatData(activeChatChar.id);
-    const currentMsgs = data.sessions[data.currentId] || [];
-    // Deep copy to avoid reference issues between sessions
-    const newHistory = JSON.parse(JSON.stringify(currentMsgs.slice(0, msgIndex + 1)));
-    
-    // Capture old session ID and notes
-    const oldSessionId = data.currentId;
-    const oldAuthorsNote = data.authorsNotes?.[oldSessionId] ? JSON.parse(JSON.stringify(data.authorsNotes[oldSessionId])) : null;
-    
-    // Create new session directly (updates DB)
-    await dbCreateSession(activeChatChar.id);
-    await loadChats(); // Reload to get new ID
-    
-    const newData = await getChatData(activeChatChar.id);
-    newData.sessions[newData.currentId] = newHistory;
-    const newSessionId = newData.currentId;
-    const oldMemoryBook = data.memoryBooks?.[oldSessionId]
-        ? JSON.parse(JSON.stringify(data.memoryBooks[oldSessionId]))
-        : null;
-    if (oldMemoryBook) {
-        if (!newData.memoryBooks) newData.memoryBooks = {};
-        newData.memoryBooks[newSessionId] = oldMemoryBook;
-    }
-    reconcileSessionMemoryState(newData, newSessionId, newHistory);
-    
-    // Copy authors note
-    if (oldAuthorsNote) {
-        if (!newData.authorsNotes) newData.authorsNotes = {};
-        newData.authorsNotes[newData.currentId] = oldAuthorsNote;
-    }
-    // Copy session variables for macros
-    const oldVarsKey = `gz_vars_${activeChatChar.id}_${oldSessionId}`;
-    const oldVars = localStorage.getItem(oldVarsKey);
-    if (oldVars) {
-        const newVarsKey = `gz_vars_${activeChatChar.id}_${newData.currentId}`;
-        localStorage.setItem(newVarsKey, oldVars);
-    }
-
-    await db.saveChat(activeChatChar.id, newData);
-    
-    // Reload UI
-    const charObj = { ...activeChatChar };
-    delete charObj.sessionId;
-    await openChat(charObj, null, true);
-}
 
 // --- Message Actions ---
+
+const {
+    openMessageActions,
+    regenerateMessage,
+    branchSession,
+    enterEditMode,
+    saveEdit,
+    cancelEdit,
+    saveGuidance,
+    toggleImageHidden
+} = useMessageActions({
+    activeChar,
+    getActiveChatChar: () => activeChatChar,
+    currentMessages,
+    isGenerating,
+    hasGenerationState,
+    getGenerationState,
+    clearGenerationState,
+    abortActiveChatGeneration,
+    startGeneration,
+    updateSessionMessage,
+    updateContextCutoff,
+    unhideAllMessages,
+    toggleSelection,
+    loadChats,
+    openChat,
+    t
+});
 
 const {
     changeSwipe,
@@ -1662,305 +1417,6 @@ const {
     getActiveChatChar: () => activeChatChar,
     regenerateMessage: (msgIndex, mode, guidanceText) => regenerateMessage(msgIndex, mode, guidanceText)
 });
-
-function getReasoningTags() {
-    let { start, end } = getApiReasoningTags();
-
-    try {
-        const charId = activeChatChar?.id;
-        const chatId = charId && activeChatChar?.sessionId ? `${charId}_${activeChatChar.sessionId}` : null;
-        const activePreset = getEffectivePreset(charId, chatId);
-        if (activePreset) {
-            if (activePreset.reasoningStart) start = activePreset.reasoningStart;
-            if (activePreset.reasoningEnd) end = activePreset.reasoningEnd;
-        }
-    } catch (e) {}
-    
-    return { start, end };
-}
-
-function openMessageActions(msg, index) {
-    if (msg.isTyping) {
-        showBottomSheet({
-            title: t('sheet_title_msg_actions'),
-            items: [{
-                label: "Stop generation",
-                icon: '<svg viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg>',
-                iconColor: '#ff4444',
-                onClick: () => {
-                    if (activeChatChar && hasGenerationState(activeChatChar.id)) {
-                        const state = getGenerationState(activeChatChar.id);
-                        if (state?.type === 'impersonation') {
-                            if (state.controller) state.controller.abort();
-                            clearGenerationState(activeChatChar.id);
-                            isGenerating.value = false;
-                        } else {
-                            abortActiveChatGeneration(activeChatChar.id);
-                        }
-                    } else {
-                        currentMessages.value.splice(index, 1);
-                        if (activeChatChar) {
-                            const charId = activeChatChar.id;
-                            const sessionId = activeChatChar.sessionId;
-                            const messageSnapshot = currentMessages.value;
-                            getChatData(activeChatChar.id).then(data => {
-                                if (data && sessionId && data.sessions?.[sessionId]) {
-                                    data.sessions[sessionId] = messageSnapshot;
-                                    db.saveChat(charId, data);
-                                }
-                            });
-                        }
-                    }
-                    closeBottomSheet();
-                }
-            }]
-        });
-        return;
-    }
-
-    const items = [];
-
-    // 1. Regenerate (for char messages or errors)
-    if ((msg.role === 'char' && index > 0) || msg.isError) {
-        items.push({
-            label: t('action_regenerate'),
-            icon: '<svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>',
-            onClick: () => {
-                closeBottomSheet();
-                regenerateMessage(index);
-            }
-        });
-    }
-
-    // 2. Edit
-    if (!msg.isError) {
-        items.push({
-            label: t('action_edit'),
-            icon: '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>',
-            onClick: () => {
-                closeBottomSheet();
-                enterEditMode(msg);
-            }
-        });
-    }
-
-    // 3. Copy
-    items.push({
-        label: t('action_copy'),
-        icon: '<svg viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>',
-        onClick: () => {
-            let text = msg.text;
-            if (msg.isError) {
-                const div = document.createElement('div');
-                div.innerHTML = text.replace(/<br\s*\/?>/gi, '\n');
-                text = div.textContent || div.innerText || text;
-                text = text.trim();
-            }
-            navigator.clipboard.writeText(text);
-            closeBottomSheet();
-        }
-    });
-
-    items.push({
-        label: t('action_select') || 'Select',
-        icon: '<svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-9 14l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>',
-        onClick: () => {
-            toggleSelection(msg.id);
-            closeBottomSheet();
-        }
-    });
-
-    // 4. Branch
-    if (!msg.isError) {
-        items.push({
-            label: t('action_branch'),
-            icon: '<svg viewBox="0 0 24 24"><path d="M17.5 4C15.57 4 14 5.57 14 7.5C14 8.55 14.46 9.49 15.2 10.15L11.2 14.15C10.46 13.46 9.55 13 8.5 13C7.57 13 6.72 13.36 6.08 13.96L6 6.5C6.55 6.23 7 5.69 7 5C7 3.9 6.1 3 5 3C3.9 3 3 3.9 3 5C3 5.69 3.45 6.23 4 6.5L4.08 16.04C3.44 16.64 3 17.43 3 18.5C3 20.43 4.57 22 6.5 22C8.43 22 10 20.43 10 18.5C10 17.55 9.54 16.71 8.8 16.05L12.8 12.05C13.54 12.74 14.45 13.2 15.5 13.2C17.43 13.2 19 11.63 19 9.7C19 7.77 17.43 6.2 15.5 6.2C15.5 6.2 15.5 6.2 15.5 6.2L17.5 4Z"/></svg>',
-            onClick: () => {
-                closeBottomSheet();
-                branchSession(index);
-            }
-        });
-    }
-
-    // 5. Hide/Unhide
-    items.push({
-        label: msg.isHidden ? (t('action_unhide_msg') || 'Unhide') : (t('action_hide_msg') || 'Hide'),
-        icon: msg.isHidden
-            ? '<svg viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>'
-            : '<svg viewBox="0 0 24 24"><path d="M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.43-4.75-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46C3.08 8.3 1.78 10.02 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3 .22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53-2.76 0-5-2.24-5-5 0-.79.2-1.53.53-2.2zm4.31-.78l3.15 3.15.02-.16c0-1.66-1.34-3-3-3l-.17.01z"/></svg>',
-        onClick: () => {
-            msg.isHidden = !msg.isHidden;
-            updateSessionMessage(activeChatChar, index, msg);
-            updateContextCutoff();
-            closeBottomSheet();
-        }
-    });
-
-    const hiddenCount = currentMessages.value.filter(m => m && !m.isTyping && m.isHidden).length;
-    if (hiddenCount > 0) {
-        items.push({
-            label: `Unhide All (${hiddenCount})`,
-            icon: '<svg viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5 2.29 0 4.42-.65 6.22-1.78l-1.46-1.46A9.44 9.44 0 0 1 12 17.5c-3.73 0-6.96-2.1-8.56-5.5C5.04 8.6 8.27 6.5 12 6.5c1.41 0 2.75.3 3.96.85l1.53-1.53A11.4 11.4 0 0 0 12 4.5zm8.78 1.72-17 17 1.41 1.41 2.68-2.68A11.79 11.79 0 0 0 12 19.5c5 0 9.27-3.11 11-7.5a11.81 11.81 0 0 0-3.09-4.47l2.28-2.28-1.41-1.41z"/></svg>',
-            onClick: () => {
-                unhideAllMessages();
-            }
-        });
-    }
-
-    // 6. Delete (only allow deleting the last message)
-    if (index === currentMessages.value.length - 1) {items.push({
-        label: t('action_delete_msg'),
-        icon: '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>',
-        iconColor: '#ff4444',
-        isDestructive: true,
-        onClick: () => {
-            const msg = currentMessages.value[index];
-            if (msg.isError && msg.swipes && msg.swipes.length > 1) {
-                const currentSwipeId = msg.swipeId || 0;
-                msg.swipes.splice(currentSwipeId, 1);
-                if (msg.swipesMeta) msg.swipesMeta.splice(currentSwipeId, 1);
-                
-                let newSwipeId = currentSwipeId - 1;
-                if (newSwipeId < 0) newSwipeId = 0;
-                
-                msg.swipeId = newSwipeId;
-                msg.text = msg.swipes[newSwipeId] || "";
-                msg.isError = false;
-                
-                if (msg.swipesMeta && msg.swipesMeta[newSwipeId]) {
-                    msg.reasoning = msg.swipesMeta[newSwipeId].reasoning;
-                    msg.genTime = msg.swipesMeta[newSwipeId].genTime;
-                } else {
-                    msg.reasoning = null;
-                    msg.genTime = null;
-                }
-                updateSessionMessage(activeChatChar, index, msg);
-            } else {
-                currentMessages.value.splice(index, 1);
-                if (activeChatChar) {
-                    const sid = activeChatChar.sessionId || '1';
-                    const cDel = parseInt(localStorage.getItem(`gz_deleted_char_${activeChatChar.id}`) || '0', 10);
-                    localStorage.setItem(`gz_deleted_char_${activeChatChar.id}`, cDel + 1);
-                    const sDel = parseInt(localStorage.getItem(`gz_deleted_chat_${activeChatChar.id}_${sid}`) || '0', 10);
-                    localStorage.setItem(`gz_deleted_chat_${activeChatChar.id}_${sid}`, sDel + 1);
-                }
-                getChatData(activeChatChar.id).then(data => {
-                    const charId = activeChatChar.id;
-                    const sessionId = activeChatChar.sessionId;
-                    const messageSnapshot = currentMessages.value;
-                    if (data && sessionId && data.sessions?.[sessionId]) {
-                        data.sessions[sessionId] = messageSnapshot;
-                        db.saveChat(charId, data);
-                    }
-                });
-            }
-            closeBottomSheet();
-        }
-    });}
-
-    showBottomSheet({ title: t('sheet_title_msg_actions'), items });
-}
-
-function enterEditMode(msg) {
-    msg._iigMap = msg._iigMap || {};
-    const { text, map } = prepareEditText(msg?.text || '', msg._iigMap);
-    msg.editText = text;
-    msg._base64Map = map;
-    msg.isEditing = true;
-}
-
-function saveEdit(msg, index) {
-    let newText = restoreEditText(msg.editText || "", msg._base64Map);
-    delete msg._base64Map;
-    
-    const iigMap = msg._iigMap || {};
-    newText = newText.replace(
-        /<img\b[^>]*?(?:data-iig-instruction='([^']*)'[^>]*?src="\[IMG:GEN\]"|src="\[IMG:GEN\]"[^>]*?data-iig-instruction='([^']*?)')[^>]*?>/g,
-        (match, inst1, inst2) => {
-            const raw = inst1 ?? inst2 ?? '{}';
-            if (iigMap[raw]) {
-                const { dataUrl, id } = iigMap[raw];
-                let instrObj = {};
-                try {
-                     instrObj = JSON.parse(raw.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&'));
-                } catch(e) { }
-                return makeResultHtml(instrObj, id, dataUrl);
-            }
-            return match;
-        }
-    );
-    delete msg._iigMap;
-
-    let newReasoning = msg.reasoning;
-
-    const { start: tagStart, end: tagEnd } = getReasoningTags();
-
-    if (tagStart && tagEnd) {
-        const startIndex = newText.indexOf(tagStart);
-        if (startIndex !== -1) {
-            const endIndex = newText.indexOf(tagEnd, startIndex);
-            if (endIndex !== -1) {
-                newReasoning = newText.substring(startIndex + tagStart.length, endIndex).trim();
-                newText = newText.substring(0, startIndex) + newText.substring(endIndex + tagEnd.length);
-            }
-        }
-    }
-
-    newText = cleanText(newText);
-    msg.text = newText;
-    msg.reasoning = newReasoning;
-    msg.tokens = estimateTokens(newText);
-    if (msg.swipes) msg.swipes[msg.swipeId || 0] = newText;
-    if (msg.swipesMeta && msg.swipesMeta[msg.swipeId || 0]) {
-        msg.swipesMeta[msg.swipeId || 0].reasoning = newReasoning;
-        msg.swipesMeta[msg.swipeId || 0].tokens = msg.tokens;
-    }
-    msg.isEditing = false;
-    updateSessionMessage(activeChatChar, index, msg);
-    delete msg.editText;
-
-    if (newText.includes('[IMG:GEN]')) {
-        processMessageImages(msg.text, (updatedText) => {
-            const mIdx = currentMessages.value.findIndex(m => m.id === msg.id);
-            if (mIdx !== -1) {
-                const currentMsg = currentMessages.value[mIdx];
-                currentMsg.text = updatedText;
-                if (currentMsg.swipes) currentMsg.swipes[currentMsg.swipeId || 0] = updatedText;
-                updateSessionMessage(activeChatChar, mIdx, currentMsg);
-            }
-        }, {
-            messages: currentMessages.value,
-            currentMsgIndex: index
-        }).catch(e => console.error('[ImageGen] processMessageImages failed:', e));
-    }
-}
-
-function cancelEdit(msg) {
-    msg.isEditing = false;
-    delete msg.editText;
-    delete msg._base64Map;
-    delete msg._iigMap;
-}
-
-function saveGuidance(msg, index, newGuidance) {
-    if (msg.role === 'char') {
-        if (msg.swipesMeta && msg.swipesMeta[msg.swipeId || 0] && msg.swipesMeta[msg.swipeId || 0].guidanceType === 'SWIPE') {
-            msg.swipesMeta[msg.swipeId || 0].guidanceText = newGuidance;
-        }
-        if (msg.guidanceType === 'SWIPE') {
-            msg.guidanceText = newGuidance;
-        }
-    } else if (msg.role === 'user') {
-        msg.guidanceText = newGuidance;
-    }
-    updateSessionMessage(activeChatChar, index, msg);
-}
-
-function toggleImageHidden(msg, index) {
-    msg.imageHidden = !msg.imageHidden;
-    updateSessionMessage(activeChatChar, index, msg);
-    showToast(msg.imageHidden ? 'Изображение скрыто из контекста' : 'Изображение добавлено в контекст');
-}
 
 // --- Magic Menu ---
 
@@ -2006,234 +1462,6 @@ async function startImpersonation(guidanceText = null) {
 }
 
 // --- Utils ---
-
-async function deleteSession(sessionId, targetChar) {
-    const char = targetChar || activeChatChar;
-
-    if (char && hasGenerationState(char.id)) {
-        const state = getGenerationState(char.id);
-        if (state?.type === 'impersonation') {
-            if (state.controller) state.controller.abort();
-            clearGenerationState(char.id);
-            if (activeChatChar && activeChatChar.id === char.id) {
-                isGenerating.value = false;
-            }
-        } else {
-            await abortActiveChatGeneration(char.id);
-        }
-    }
-
-    if (char) {
-        // Check if last session to prevent auto-creation
-        const data = await getChatData(char.id);
-        let isLast = false;
-        if (data) {
-             if (data.sessions) {
-                 if (Object.keys(data.sessions).length <= 1 && data.sessions[sessionId]) isLast = true;
-             } else if (Array.isArray(data)) {
-                 isLast = true;
-             }
-        }
-
-        if (isLast) {
-            let deletedCount = 0;
-            if (Array.isArray(data)) {
-                deletedCount = data.length;
-                await db.saveChat(char.id, { currentId: 1, sessions: {} });
-            }
-            else if (data.sessions) {
-                if (data.sessions[sessionId]) deletedCount = data.sessions[sessionId].length;
-                delete data.sessions[sessionId];
-                await db.saveChat(char.id, data);
-            }
-            if (deletedCount > 0) addDeletedStats(char.id, sessionId, deletedCount);
-        } else {
-            let deletedCount = 0;
-            if (data.sessions && data.sessions[sessionId]) deletedCount = data.sessions[sessionId].length;
-            await dbDeleteSession(char.id, sessionId);
-            if (deletedCount > 0) addDeletedStats(char.id, sessionId, deletedCount);
-        }
-
-        await loadChats(); // Reload local state
-        
-        if (activeChatChar && activeChatChar.id === char.id) {
-            // Fetch raw DB state to bypass getChat's auto-creation
-            const currentData = await db.get(`gz_chat_${char.id}`);
-            // Check if there are any sessions left
-            if (!currentData || !currentData.sessions || Object.keys(currentData.sessions).length === 0) {
-                // No sessions left, close chat manually to avoid creating a new empty one
-                const onBack = currentOnBack;
-                
-                updateAppColors(true);
-                if (_cleanupScroll) {
-                    _cleanupScroll();
-                    _cleanupScroll = null;
-                }
-                publishAppEvent(APP_EVENTS.ui.header.reset);
-                activeChatChar = null;
-                currentMessages.value = [];
-                inputValue.value = '';
-                
-                if (onBack) onBack();
-            } else {
-                // Reload chat
-                const charObj = { ...activeChatChar };
-                delete charObj.sessionId; // Ensure we load the new currentId
-                openChat(charObj, null, true);
-            }
-        }
-        
-        // Notify other components
-        chatGenerationServices.app.notifyChatUpdated();
-    }
-}
-
-async function openSessionsSheet(char) {
-    const data = await getChatData(char.id);
-    if (!data) return;
-    const sessions = data.sessions || {};
-    
-    // Sort by timestamp desc
-    const ids = Object.keys(sessions).map(Number).sort((a,b) => {
-        const lastA = sessions[a][sessions[a].length-1]?.timestamp || 0;
-        const lastB = sessions[b][sessions[b].length-1]?.timestamp || 0;
-        return lastB - lastA;
-    });
-
-    const currentSessionId = data.currentId;
-
-    const cardItems = ids.map(sid => {
-        const msgs = sessions[sid] || [];
-        const lastMsg = msgs[msgs.length - 1];
-        const preview = lastMsg ? (lastMsg.text.length > 40 ? lastMsg.text.substring(0, 40) + '...' : lastMsg.text) : 'Empty session';
-        const dateFormatted = lastMsg ? formatDate(lastMsg.timestamp, 'short') : '';
-        const isCurrent = sid === currentSessionId;
-        
-        return {
-            label: `Session #${sid}`,
-            sublabel: preview,
-            badge: `${msgs.length} msgs${dateFormatted ? ' · ' + dateFormatted : ''}`,
-            isActive: isCurrent,
-            onClick: async () => {
-                if (sid !== currentSessionId) {
-                    asyncSaveCurrentSessionState();
-                    await dbSwitchSession(char.id, sid);
-                    await loadChats();
-                    // Pass char without sessionId so openChat uses the currentId from DB
-                    openChat({ ...char, sessionId: sid }, null, true);
-                }
-                closeBottomSheet();
-            },
-            actions: [
-                {
-                    icon: '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>',
-                    color: '#ff4444',
-                    onClick: () => {
-                        openDeleteSessionConfirm(char, sid, true);
-                    }
-                }
-            ]
-        };
-    });
-
-    showBottomSheet({
-        title: t('history_title') + ' ',
-        helpTip: 'sessions',
-        cardItems: cardItems,
-        isSolid: true,
-        headerAction: {
-            icon: '<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>',
-            onClick: () => {
-                closeBottomSheet();
-                setTimeout(() => {
-                    showBottomSheet({
-                        title: t('history_title') + ' ',
-                        helpTip: 'sessions',
-                        items: [
-                            {
-                                label: t('action_create_new') || 'Create New',
-                                icon: '<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>',
-                                onClick: () => {
-                                    closeBottomSheet();
-                                    createNewSession(char);
-                                }
-                            },
-                            {
-                                label: t('action_import') || 'Import from file',
-                                icon: '<svg viewBox="0 0 24 24"><path d="M4 15h2v3h12v-3h2v3c0 1.1-.9 2-2 2H6c-1.1 0-2-.9-2-2v-3zm4.41-6.59L11 5.83V17h2V5.83l2.59 2.58L17 7l-5-5-5 5 1.41 1.41z"/></svg>',
-                                onClick: () => {
-                                    closeBottomSheet();
-                                    triggerChatImport(char.id, null, async (result) => {
-                                        await loadChats();
-                                        // Mark imported session as fully processed so auto-draft doesn't trigger
-                                        if (result?.sessionId) {
-                                            const importedData = await getChatData(char.id);
-                                            if (importedData?.sessions?.[result.sessionId]) {
-                                                const mb = ensureSessionMemoryBook(importedData, result.sessionId);
-                                                const auto = ensureMemoryAutomationState(mb);
-                                                const stableCount = getStableVisibleMessages(importedData.sessions[result.sessionId])
-                                                    .filter(m => m.role === 'user' || m.role === 'char').length;
-                                                auto.lastProcessedMessageCount = stableCount;
-                                                auto.pendingTrigger = null;
-                                                mb.updatedAt = Date.now();
-                                                await db.saveChat(char.id, importedData);
-                                            }
-                                        }
-                                        const charObj = { ...char, sessionId: result?.sessionId || char.sessionId };
-                                        openChat(charObj, null, true);
-                                    });
-                                }
-                            }
-                        ]
-                    });
-                }, 300);
-            }
-        }
-    });
-}
-
-function openDeleteSessionConfirm(char, sessionId, returnToSessions = false) {
-    showBottomSheet({
-        title: t('confirm_delete_session'),
-        items: [
-            {
-                label: t('btn_yes'),
-                icon: '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>',
-                iconColor: '#ff4444',
-                isDestructive: true,
-                onClick: async () => {
-                    await deleteSession(sessionId, char);
-                    closeBottomSheet();
-                    if (returnToSessions) {
-                        const currentData = await db.get(`gz_chat_${char.id}`);
-                        if (currentData && currentData.sessions && Object.keys(currentData.sessions).length > 0) {
-                            setTimeout(() => openSessionsSheet(char), 300);
-                        }
-                    }
-                }
-            },
-            {
-                label: t('btn_no'),
-                icon: '<svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>',
-                onClick: () => {
-                    closeBottomSheet();
-                    if (returnToSessions) setTimeout(() => openSessionsSheet(char), 300);
-                }
-            }
-        ]
-    });
-}
-
-async function createNewSession(char) {
-    asyncSaveCurrentSessionState();
-    await dbCreateSession(char.id);
-    await loadChats(); // Reload local state to get new session
-    
-    // Open chat with the new currentId (by removing sessionId from char object)
-    const charObj = { ...char };
-    delete charObj.sessionId;
-    openChat(charObj, null, true);
-}
 
 async function openCharCard() {
     if (!activeChatChar) return;
