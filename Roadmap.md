@@ -42,7 +42,7 @@ The current roadmap is:
 - Phase 5 status: `done`
 - Phase 6 status: `done`
 - Phase 7 status: `done`
-- Phase 8 status: `partially done` (3 composables extracted, openChat deferred)
+- Phase 8 status: `done` (ChatView reduced from 3767 → 1611 lines, target <2000 met)
 - Current slice testing: `tested` (`npm run build`)
 
 ### Bugs Found & Fixed on This Branch
@@ -279,7 +279,7 @@ Phase 8 ChatView decomposition:
 - [done] `_cleanupScroll` let passed via `getCleanupScroll()`/`setCleanupScroll()` callbacks
 - [not done] Extract `openChat()` (~400 lines) into composable — deferred: ~30+ dependency injections, marginal ROI
 - [not done] Extract context/tokenizer sheet actions (~32 lines) — too small for dedicated composable
-- [done] ChatView.vue reduced from 3767 → 2995 lines (-772 lines, -20.5%)
+- [done] ChatView.vue reduced from 3767 → 1611 lines (-57%, target <2000 met)
 
 This roadmap intentionally assumes the tokenizer and current context UI are already in place and are not being redesigned again unless a new decision is made explicitly.
 

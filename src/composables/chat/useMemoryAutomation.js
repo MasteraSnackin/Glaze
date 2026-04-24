@@ -3,7 +3,6 @@ import { db } from '@/utils/db.js';
 import { generateMemoryDraft } from '@/core/llm/usecases/generateMemoryDraft.js';
 import { showToast } from '@/core/states/toastState.js';
 import { formatError } from '@/utils/errors.js';
-import { bottomSheetState } from '@/core/states/bottomSheetState.js';
 import {
     ensureSessionMemoryBook,
     ensureMemoryAutomationState,
@@ -330,7 +329,7 @@ export function useMemoryAutomation({
             await updatePendingMemoryMessageIds(activeChatChar.value);
             await loadCurrentMemoryBook(activeChatChar.value);
             showToast(latestExistingDraft ? 'Draft updated' : 'Memory draft created');
-            if (openSheet && (!bottomSheetState.isOpen || bottomSheetState.title !== 'Memory Books')) {
+            if (openSheet) {
                 openMemoryBooksSheet();
             }
             return true;

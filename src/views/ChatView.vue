@@ -401,31 +401,6 @@ const {
 
 openMemoryBooksSheet = openMemoryBooksSheetImpl;
 
-const {
-    deleteSession,
-    openSessionsSheet,
-    openDeleteSessionConfirm,
-    createNewSession
-} = useSessionManagement({
-    activeChar,
-    getActiveChatChar: () => activeChatChar,
-    setActiveChatChar: (v) => { activeChatChar = v; },
-    currentMessages,
-    inputValue,
-    isGenerating,
-    hasGenerationState,
-    getGenerationState,
-    clearGenerationState,
-    abortActiveChatGeneration,
-    getChatGenerationServices: () => chatGenerationServices,
-    loadChats,
-    openChat,
-    asyncSaveCurrentSessionState: () => asyncSaveCurrentSessionState(),
-    getCleanupScroll: () => _cleanupScroll,
-    setCleanupScroll: (v) => { _cleanupScroll = v; },
-    t
-});
-
 // --- Display Logic (Separators) ---
 const displayMessages = computed(() => {
     const msgs = currentMessages.value;
@@ -469,20 +444,6 @@ const { visibleItems, paddingTop, paddingBottom, refresh: refreshVirtualScroll, 
     estimateHeight: 100
 });
 
-// --- Search Logic ---
-const {
-    isSearchMode,
-    searchQuery,
-    searchResults,
-    currentSearchIndex,
-    searchMatchState,
-    scrollToSearchResult,
-    nextSearchResult,
-    prevSearchResult,
-    onChatSearchToggle,
-    onChatSearch
-} = useChatSearch({ currentMessages, scrollToIndex, displayMessages });
-
 const {
     asyncSaveCurrentSessionState,
     applyImageAutoHide,
@@ -498,6 +459,45 @@ const {
     getScrollAnchor,
     clearMessageNotifications
 });
+
+const {
+    deleteSession,
+    openSessionsSheet,
+    openDeleteSessionConfirm,
+    createNewSession
+} = useSessionManagement({
+    activeChar,
+    getActiveChatChar: () => activeChatChar,
+    setActiveChatChar: (v) => { activeChatChar = v; },
+    currentMessages,
+    inputValue,
+    isGenerating,
+    hasGenerationState,
+    getGenerationState,
+    clearGenerationState,
+    abortActiveChatGeneration,
+    getChatGenerationServices: () => chatGenerationServices,
+    loadChats,
+    openChat,
+    asyncSaveCurrentSessionState: () => asyncSaveCurrentSessionState(),
+    getCleanupScroll: () => _cleanupScroll,
+    setCleanupScroll: (v) => { _cleanupScroll = v; },
+    t
+});
+
+// --- Search Logic ---
+const {
+    isSearchMode,
+    searchQuery,
+    searchResults,
+    currentSearchIndex,
+    searchMatchState,
+    scrollToSearchResult,
+    nextSearchResult,
+    prevSearchResult,
+    onChatSearchToggle,
+    onChatSearch
+} = useChatSearch({ currentMessages, scrollToIndex, displayMessages });
 
 const onScroll = (e) => {
     const el = e.target;

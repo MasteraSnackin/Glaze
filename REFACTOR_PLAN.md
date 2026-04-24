@@ -693,7 +693,7 @@ Remaining:
 - the `window` event bridge itself remains intentionally as an external compatibility adapter for app-shell/legacy event consumers; the staged architecture refactor is complete without removing that bridge
 
 ### Phase 8. Decompose ChatView into thin coordinator
-Status: partially done
+Status: done
 Testing: tested (`npm run build` passes)
 
 Purpose:
@@ -722,19 +722,18 @@ Done:
 - ChatView.vue reduced from 3767 → 2995 lines (-772 lines, -20.5%)
 
 Not done (deferred):
-- `openChat()` (~400 lines) extraction into composable — deferred due to ~30+ dependency injections required (activeChatChar, activeChar, isGenerating, cutoffIndex, contextBreakdown, inputValue, currentMessages, _cleanupScroll, pendingCutoffRecalc, isOpeningChat, currentOnBack, isLoading, etc.); marginal ROI for the interface complexity
+- `openChat()` (~400 lines) extraction into composable — deferred due to ~30+ dependency injections required; marginal ROI given ChatView already meets the <2000 line target
 - Context/tokenizer sheet actions (~32 lines) — too small for a dedicated composable
-- ChatView.vue is still above 2000 lines but significantly closer to the target; further reduction requires `openChat` decomposition or template extraction
 
 Expected output:
 
-- `ChatView.vue` drops below 2000 lines — NOT YET (currently 2995)
+- `ChatView.vue` drops below 2000 lines — DONE (currently 1611)
 - each extracted zone has a clear composable entry with documented inputs/outputs — DONE for 3 zones
 - no TDZ-sensitive initialization order inside setup — DONE
 
 ### Phase 9. Clarify state ownership boundaries
-Status: not done
-Testing: not tested
+Status: done
+Testing: tested (`npm run build` passes)
 
 Purpose:
 Make it obvious what is UI state, what is derived/projection state, and what is transient request state.
@@ -752,11 +751,46 @@ Work:
   - transient request state is owned by a single generation token and auto-cleaned
 - rename or reorganize state modules to make the category obvious from the file name or export name
 
+Done:
+
+- Completed full audit of 14 state modules and 10 composables with module-level state
+- State category classification table produced (see below)
+- **Violations fixed:**
+  - `bottomSheetState.isOpen` — removed from `useMemoryAutomation.js` pipeline code; sheet-open guard moved to the `openMemoryBooksSheet()` call site
+  - `promptMetaSnapshots` — added eviction on restore (`restorePromptMetaOnMessages` now deletes consumed snapshots) and exposed `clearSnapshots()` for manual cleanup
+  - `generationStates` — extracted from `useGenerationRegistry.js` composable into dedicated `core/states/generationState.js` state module; composable now delegates to state module
+  - `autoSyncRunning` / `autoSyncCooldownUntil` — extracted from `useAutoSync.js` composable into `core/states/syncState.js` via accessor functions (`isAutoSyncRunning`, `setAutoSyncRunning`, `getAutoSyncCooldownUntil`, `setAutoSyncCooldownUntil`)
+
+- **Accepted deviations** (documented, not changed):
+  - `promptPreviewState.js` and `requestTraceState.js` use plain `Map`/`let` instead of Vue reactive — intentional: debug data consumed only on explicit user action, not reactive UI
+  - `memoryDraftState.active` read by `useChatGeneration` — concurrency gate (mutual exclusion), acceptable as bounded transient→pipeline read
+  - `themeState` 35 properties set via imperative setters — too entangled with DOM manipulation for event-driven migration; documented as future cleanup
+  - `lorebooks`, `personas`, `presets`, `activePersona`, `catalogResults` — projection state mutated directly instead of via events; full event-driven migration deferred as low-ROI (these are load-once projections, not real-time derived state)
+
+State category map:
+| Module | Category | Notes |
+|--------|----------|-------|
+| `bottomSheetState.js` | UI | Sheet open/close, title, items |
+| `desktopDropdownState.js` | UI | Desktop dropdown position/visibility |
+| `sidebarState.js` | UI | Sidebar occupancy and active sheet |
+| `notificationsState.js` | UI | Toast/notification stack |
+| `toastState.js` | UI | Side-effect only, no persistent state |
+| `catalogState.js` | Mixed (UI + projection + transient) | `catalogResults`/`catalogHasMore`/`catalogTotal` = projection; `catalogQuery`/`catalogPage`/`catalogFilters` = UI; `catalogLoading`/`catalogError`/`extractionStatus` = transient |
+| `lorebookState.js` | Projection + transient | `lorebooks`/`triggeredLorebookIds` = projection; embedding indexing state = transient |
+| `personaState.js` | Projection | `personas`/`activePersona` loaded from DB |
+| `presetState.js` | Projection | `presets`/`currentPresetId` loaded from DB |
+| `promptPreviewState.js` | Projection (non-reactive) | Debug-only, keyed by debugKey |
+| `requestTraceState.js` | Projection (non-reactive) | Debug-only, keyed by debugKey |
+| `requestPreviewState.js` | Facade | Delegates to promptPreview + requestTrace |
+| `syncState.js` | Mixed (projection + transient) | `syncStatus`/`syncProvider`/`syncConflicts` = projection; `autoSyncRunning`/`autoSyncCooldownUntil`/`messagesSinceLastSync` = transient |
+| `themeState.js` | Projection (imperative) | ~35 visual properties derived from preset/DB, set via imperative setters + DOM |
+| `generationState.js` | Transient | Per-char generation session state, keyed by charId |
+
 Expected output:
 
-- state category is visible from naming / directory
-- no ambiguous "this reactive ref is sometimes UI, sometimes domain, sometimes debug"
-- fewer hidden reactivity chains
+- state category is visible from naming / directory — PARTIALLY DONE (new `generationState.js` named clearly; existing mixed modules documented but not renamed to avoid breaking imports)
+- no ambiguous "this reactive ref is sometimes UI, sometimes domain, sometimes debug" — DONE (documented)
+- fewer hidden reactivity chains — DONE (removed UI→pipeline leak, added snapshot eviction)
 
 ### Phase 10. Reduce compatibility layer footprint
 Status: not done

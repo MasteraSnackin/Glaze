@@ -34,6 +34,8 @@ export const syncSettings = reactive({
 });
 
 let messagesSinceLastSync = 0;
+let autoSyncRunning = false;
+let autoSyncCooldownUntil = 0;
 
 export const accountInfo = ref(null);
 
@@ -67,6 +69,22 @@ export function shouldAutoSync() {
     return syncSettings.autoSyncEnabled
         && syncProvider.value !== null
         && messagesSinceLastSync >= syncSettings.autoSyncMessageCount;
+}
+
+export function isAutoSyncRunning() {
+    return autoSyncRunning;
+}
+
+export function setAutoSyncRunning(val) {
+    autoSyncRunning = !!val;
+}
+
+export function getAutoSyncCooldownUntil() {
+    return autoSyncCooldownUntil;
+}
+
+export function setAutoSyncCooldownUntil(val) {
+    autoSyncCooldownUntil = val;
 }
 
 export function setSyncProgress(phase, current, total) {
