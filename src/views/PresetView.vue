@@ -1,7 +1,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
 import { updateLanguage, translations, t } from '@/utils/i18n.js';
-import { initRipple } from '@/core/services/ui.js';
+import { initRipple } from '@/core/services/interactionEffects.js';
 import Editor from '@/components/editors/GenericEditor.vue';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import { estimateTokens } from '@/utils/tokenizer.js';

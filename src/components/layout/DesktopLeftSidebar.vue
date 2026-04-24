@@ -3,7 +3,7 @@ import DialogList from '@/views/DialogList.vue';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { translations } from '@/utils/i18n.js';
 import { useSidebarResizer } from '@/composables/ui/useSidebarResizer.js';
-import { attachHoverGlow } from '@/core/services/ui.js';
+import { attachRipple } from '@/core/services/interactionEffects.js';
 
 const props = defineProps({
     currentView: String,
@@ -24,7 +24,7 @@ const { width: leftSidebarWidth, collapsed, startResize: startLeftResize } = use
 
 const vHoverGlow = {
     mounted: (el) => {
-        attachHoverGlow(el);
+        attachRipple(el);
     }
 };
 </script>

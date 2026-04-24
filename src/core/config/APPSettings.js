@@ -81,8 +81,14 @@ export function setDialogGrouping(value) {
     localStorage.setItem('gz_dialog_grouping', value);
 }
 
-export const chatPaddingLR = ref(parseInt(localStorage.getItem('gz_chat_padding_lr') || '0', 10));
-export function setChatPaddingLR(value) {
-    chatPaddingLR.value = value;
-    localStorage.setItem('gz_chat_padding_lr', value);
+export const chatMaxWidth = ref(parseInt(localStorage.getItem('gz_chat_max_width') || '0', 10));
+export function setChatMaxWidth(value) {
+    chatMaxWidth.value = value;
+    localStorage.setItem('gz_chat_max_width', value);
+}
+
+export const appToastPosition = ref(localStorage.getItem('gz_app_toast_position') === 'top' ? 'top' : 'bottom');
+export function setAppToastPosition(value) {
+    appToastPosition.value = value === 'top' ? 'top' : 'bottom';
+    localStorage.setItem('gz_app_toast_position', appToastPosition.value);
 }

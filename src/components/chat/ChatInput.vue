@@ -7,7 +7,7 @@ import { translations } from '@/utils/i18n.js';
 import { currentLang, enterToSubmit } from '@/core/config/APPSettings.js';
 import { hideKeyboard, onKeyboardShow, onKeyboardHide, isNativeKeyboard } from '@/core/services/keyboardHandler.js';
 import { Capacitor } from '@capacitor/core';
-import { attachRipple } from '@/core/services/ui.js';
+import { attachRipple } from '@/core/services/interactionEffects.js';
 
 const props = defineProps({
     modelValue: { type: String, default: '' },

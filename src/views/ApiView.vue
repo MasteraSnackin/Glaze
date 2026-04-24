@@ -18,7 +18,7 @@ import { testEmbeddingConnection } from '@/core/services/embeddingService.js';
 import { getImageGenSettings, saveImageGenSettings } from '@/core/services/imageGenService.js';
 import { getProviderProfiles, getActiveLLMProfile, setActiveLLMProfile, getServiceEffectiveProfile, getServiceProfileId, setServiceProfile, isServiceUsingLLMProfile, saveProviderProfile, createProviderProfile, SERVICE_NAMES } from '@/core/config/ProviderProfiles.js';
 import { updateLanguage, translations } from '@/utils/i18n.js';
-import { initRipple } from '@/core/services/ui.js';
+import { initRipple } from '@/core/services/interactionEffects.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { showBottomSheet, closeBottomSheet, bottomSheetState } from '@/core/states/bottomSheetState.js';
 import SheetView from '@/components/ui/SheetView.vue';

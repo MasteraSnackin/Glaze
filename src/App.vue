@@ -43,7 +43,8 @@ import { initSettings, applyApiRuntimeConfig } from '@/core/config/APISettings.j
 import { initTheme, themeState } from '@/core/states/themeState.js';
 import { updateLanguage } from '@/utils/i18n.js';
 import { currentLang, imageViewerMode, forceMobileLayout } from '@/core/config/APPSettings.js';
-import { initRipple, initThemeToggle, initHeaderDropdown, initBackButton, initViewportFix } from '@/core/services/ui.js';
+import { initThemeToggle, initHeaderDropdown, initBackButton, initViewportFix } from '@/core/services/ui.js';
+import { initRipple } from '@/core/services/interactionEffects.js';
 import { bottomSheetState, closeBottomSheet, showBottomSheet } from '@/core/states/bottomSheetState.js';
 import { db, migrateScToGz, markSyncDeletedEntry } from '@/utils/db.js';
 import { translations } from '@/utils/i18n.js';

@@ -845,6 +845,14 @@ Active branch: `fast-fixes`
 - Never create branches from dev that contain multiple unmerged features
 - All PRs target `upstream/dev`, never `main`
 
+### Header Layout Safety (mobile polish)
+- [done] Added shared left/right safe spacing in `src/components/layout/AppHeader.vue` so mobile header content truncates before back/action buttons instead of rendering underneath them.
+- [done] Moved chat title/session text into dedicated CSS classes with ellipsis handling so long character names and session labels stay inside the safe content area across shared header views.
+
+Manual Verification:
+- [not done] Verify on a narrow mobile viewport that long chat character names, session names, and lorebook/preset/persona banner text do not overlap the back button or right-side action button.
+- [not done] Verify non-chat views with long localized titles still truncate cleanly after the new safe-area padding.
+
 ## Provider / Network Refactor (Active)
 
 Branch: `feat/network-architecture-refactor`

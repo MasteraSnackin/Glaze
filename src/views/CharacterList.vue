@@ -549,6 +549,7 @@ const openDeleteSessionConfirm = (char, sessionId) => {
                 isDestructive: true,
                 onClick: async () => {
                     await dbDeleteSession(char.id, sessionId);
+                    window.dispatchEvent(new CustomEvent('chat-updated'));
                     closeBottomSheet();
                     // Reopen the sheet right after deleting to show updated list
                     setTimeout(() => openSessionsSheet(char), 300);

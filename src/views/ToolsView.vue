@@ -1,7 +1,7 @@
 <script setup>
 import { onMounted, ref, computed } from 'vue';
 import { t, updateLanguage } from '@/utils/i18n.js';
-import { initRipple } from '@/core/services/ui.js';
+import { initRipple } from '@/core/services/interactionEffects.js';
 
 import { getApiPresets, fetchRemoteModels, getApiRuntimeStorage } from '@/core/config/APISettings.js';
 import { presetState, DEFAULT_PRESETS } from '@/core/states/presetState.js';
