@@ -25,6 +25,10 @@ function applyCompletionToMessage({
         msg.partialErrorMsg = meta.partialError;
     }
 
+    if (meta?.allReasoning) {
+        msg.isAllReasoning = true;
+    }
+
     if (!msg.swipes) msg.swipes = [];
     if (!msg.swipesMeta) msg.swipesMeta = [];
 
@@ -92,7 +96,8 @@ export async function handleGenerationComplete({
     runMemoryAutomationAfterStableTurn,
     addMessageStats,
     addRegenerationStats,
-    triggerAutoSyncCheck
+    triggerAutoSyncCheck,
+    addNotification
 }) {
     const ensureCleanup = () => {
         const currentState = getGenerationState(char.id);
@@ -284,7 +289,11 @@ export async function handleGenerationComplete({
                     await runMemoryAutomationAfterStableTurn(bgData, sessionId, bgData.sessions[sessionId], { allowImmediate: true });
                 }
 
-                sendMessageNotification(char.name, cleanedResponse, char.avatar, char.id, sessionId, msgId);
+            sendMessageNotification(char.name, cleanedResponse, char.avatar, char.id, sessionId, msgId);
+
+            if (meta?.allReasoning && addNotification) {
+                addNotification('The entire response went into the reasoning block', 'warning');
+            }
 
                 db.get('gz_unread').then(unread => {
                     const newUnread = unread || {};
