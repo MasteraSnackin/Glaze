@@ -1,9 +1,11 @@
 <script setup>
 import { hideHelpTips } from '@/core/config/APPSettings.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
+import { publishAppEvent } from '@/core/events/eventHub.js';
 
 const props = defineProps({ term: { type: String, required: true } });
 function click() {
-    window.dispatchEvent(new CustomEvent('open-glossary', { detail: { term: props.term } }));
+    publishAppEvent(APP_EVENTS.nav.openGlossary, { term: props.term });
 }
 </script>
 

@@ -793,8 +793,8 @@ Expected output:
 - fewer hidden reactivity chains — DONE (removed UI→pipeline leak, added snapshot eviction)
 
 ### Phase 10. Reduce compatibility layer footprint
-Status: not done
-Testing: not tested
+Status: done
+Testing: tested (`npm run lint` 0 errors, `npm run build` passes)
 
 Purpose:
 Ensure new code never needs to know about `window` events or legacy bridges.
@@ -807,11 +807,41 @@ Work:
 - document the bridge as an external adapter, not an internal dependency
 - add a lint/convention rule: new code must not import from the bridge or touch `window` for app signaling
 
+Done:
+
+- Completed full audit: identified 33 custom app event names and ~100 raw `window.dispatchEvent`/`window.addEventListener` call sites across 30+ files
+- Added 33 new `APP_EVENTS` constants to `eventNames.js` covering all custom events:
+  - `nav.*`: navigateTo, openCharacterEditor, openChat, openOnboarding, openBackupSheet, openSyncSheet, openConflictSheet, openConnections, openFsRequest, openGlossary, openHolocards, openImageViewer, openItemEditor, openLorebookEntry, openNotificationsSheet, openPersonaEditor, openPresetSheet, triggerOpenImage
+  - `domain.settings.languageChanged`
+  - `debug.vueError`
+  - `ui.header.*`: setupEditor, setupGeneration, setupSubmenu, updateSession, scrollHidden, forceUpdate, viewChanged
+  - `ui.backNavigation`, `ui.glossary.*` (back, headerUpdate, toggle), `ui.headerSearch`, `ui.changeGenerationTab`
+- Added 33 corresponding `LEGACY_WINDOW_EVENT_MAP` entries in `eventNames.js`
+- Migrated all ~42 `window.dispatchEvent(new CustomEvent/Event(...))` calls to `publishAppEvent(...)` across:
+  - App.vue, AppHeader.vue, ChatInput.vue, ChatMessage.vue, GenericEditor.vue, DesktopLeftSidebar.vue, BottomSheet.vue, DragDropOverlay.vue, HelpTip.vue, CharacterCardSheet.vue, GlossarySheet.vue, LorebookSheet.vue, RegexSheet.vue, SyncSheet.vue, NotificationsSheet.vue
+  - ApiView.vue, CatalogView.vue, CharacterList.vue, DialogList.vue, PersonasView.vue, PresetView.vue, ToolsView.vue, MenuView.vue, SettingsView.vue
+  - ui.js (header-scroll-hidden), notificationService.js, APISettings.js, catalogState.js, characterIO.js, main.js, useChatMessageDisplay.js
+- Migrated all ~30 `window.addEventListener('custom-event', ...)` calls to `subscribeAppEvent(...)` with proper cleanup (unsubs collected and called in `onBeforeUnmount`)
+- Adapted handler signatures from `(e) => handler(e.detail)` to `({ detail }) => handler(detail)` where needed
+- Replaced `useViewer()` parameterized event listener in ImageViewer.vue and HoloCardViewer.vue with direct `subscribeAppEvent`
+- **Exception: cancelable `app-back-navigation` pattern** — `ui.js:462` still uses `window.dispatchEvent(new CustomEvent('app-back-navigation', { cancelable: true }))` with `event.defaultPrevented` check. This cannot be migrated because the event hub does not support cancelable events. Left as-is with TODO comment. This is the ONLY remaining raw `window.dispatchEvent` for a custom app event outside the bridge.
+
+Dead code identified (listeners with no dispatches found):
+- `header-setup-generation` — AppHeader + App still subscribe but no source dispatches
+- `header-update-session` — AppHeader subscribes but no source dispatches
+- `change-generation-tab` — AppHeader subscribes but no source dispatches
+- `open-item-editor` — App subscribes but no source dispatches
+- `open-holocards` — HoloCardViewer subscribes but no source dispatches
+
+These were NOT removed to avoid breaking changes if dispatches are added dynamically. They should be cleaned up in a future pass.
+
+Remaining `window.addEventListener` calls are ALL native browser events (resize, keydown, mousedown, touchstart, click, message, load, error, drag*, mousemove, mouseup, deviceorientation, change, input) — correctly left untouched.
+
 Expected output:
 
-- `windowEventBridge` is genuinely an external adapter
-- no new code will ever need to import it
-- existing internal callers have been migrated off
+- `windowEventBridge` is genuinely an external adapter — DONE (bridge only converts app events → legacy window events for backward compat)
+- no new code will ever need to import it — DONE (all internal callers use publishAppEvent/subscribeAppEvent)
+- existing internal callers have been migrated off — DONE (except cancelable back-nav pattern)
 
 ### Phase 11. Organize orchestration by scenario, not by technique
 Status: not done

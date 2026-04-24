@@ -1,5 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
+import { publishAppEvent, subscribeAppEvent } from '@/core/events/eventHub.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
 import { allPersonas, activePersona, setActivePersona, loadPersonas, personaConnections } from '@/core/states/personaState.js';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
@@ -15,7 +17,7 @@ const props = defineProps({
 
 function handleBack() {
     if (props.viewMode) {
-        window.dispatchEvent(new CustomEvent('navigate-to', { detail: 'view-tools' }));
+        publishAppEvent(APP_EVENTS.nav.navigateTo, 'view-tools');
     } else {
         sheet.value?.close();
     }
@@ -44,16 +46,14 @@ function getPersonaConnectionType(personaId) {
 }
 
 const openEditor = (index) => {
-    window.dispatchEvent(new CustomEvent('open-persona-editor', {
-        detail: {
-            index: index,
-            persona: index === -1 ? null : allPersonas.value[index]
-        }
-    }));
+    publishAppEvent(APP_EVENTS.nav.openPersonaEditor, {
+        index: index,
+        persona: index === -1 ? null : allPersonas.value[index]
+    });
 };
 
 const openConnectionManager = (persona) => {
-    window.dispatchEvent(new CustomEvent('open-connections', { detail: { type: 'persona', id: persona.id, name: persona.name } }));
+    publishAppEvent(APP_EVENTS.nav.openConnections, { type: 'persona', id: persona.id, name: persona.name });
 };
 
 const selectPersona = (index) => {
@@ -74,13 +74,15 @@ const close = () => sheet.value?.close();
 
 defineExpose({ open, close });
 
+const unsubs = [];
+
 onMounted(() => {
     loadPersonas();
-    window.addEventListener('app-back-navigation', handleBackNavigation);
+    unsubs.push(subscribeAppEvent(APP_EVENTS.ui.backNavigation, handleBackNavigation));
 });
 
 onBeforeUnmount(() => {
-    window.removeEventListener('app-back-navigation', handleBackNavigation);
+    unsubs.forEach(unsub => unsub());
 });
 </script>
 

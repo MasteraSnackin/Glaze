@@ -57,7 +57,7 @@ import { initSyncState, syncProvider } from '@/core/states/syncState.js';
 import { fullPull, checkSyncReadiness } from '@/core/services/syncService.js';
 import { startTracking } from '@/core/services/timeTracker.js';
 import { APP_EVENTS } from '@/core/events/eventNames.js';
-import { subscribeAppEvent } from '@/core/events/eventHub.js';
+import { publishAppEvent, subscribeAppEvent } from '@/core/events/eventHub.js';
 
 
 
@@ -103,12 +103,12 @@ const isDesktopGlossary = computed(() => isDesktop.value && isGlossaryWindowOpen
 const glossaryPopupTitle = ref('');
 const glossaryCanGoBack = ref(false);
 
-function onGlossaryHeaderUpdate(e) {
-    if (e.detail?.title !== undefined) glossaryPopupTitle.value = e.detail.title;
-    if (e.detail?.canGoBack !== undefined) glossaryCanGoBack.value = e.detail.canGoBack;
+function onGlossaryHeaderUpdate(detail) {
+    if (detail?.title !== undefined) glossaryPopupTitle.value = detail.title;
+    if (detail?.canGoBack !== undefined) glossaryCanGoBack.value = detail.canGoBack;
 }
 function onGlossaryBack() {
-    window.dispatchEvent(new CustomEvent('gl-back'));
+    publishAppEvent(APP_EVENTS.ui.glossary.back);
 }
 
 const glossaryPos = reactive({ x: 0, y: 0 });
@@ -127,8 +127,7 @@ const glossaryStyle = computed(() => {
 let isDraggingGlossary = false;
 let glossaryDragStartX = 0, glossaryDragStartY = 0;
 let glossaryInitialX = 0, glossaryInitialY = 0;
-let unsubscribeOpenApiSheet = null;
-let unsubscribeSyncDataRefreshed = null;
+const appEventUnsubs = [];
 
 function startGlossaryDrag(e) {
     if (e.target.closest('button')) return;
@@ -483,19 +482,17 @@ const mainStyle = computed(() => {
 
 watch(fsEditorVisible, (val) => {
     if (val) {
-        window.dispatchEvent(new CustomEvent('header-setup-editor', {
-            detail: {
-                title: translations[currentLang.value]?.header_editor || 'Editor',
-                onBack: () => { fsEditorVisible.value = false; },
-                actions: [{
-                    icon: '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>',
-                    onClick: closeAndSaveFsEditor
-                }]
-            }
-        }));
+        publishAppEvent(APP_EVENTS.ui.header.setupEditor, {
+            title: translations[currentLang.value]?.header_editor || 'Editor',
+            onBack: () => { fsEditorVisible.value = false; },
+            actions: [{
+                icon: '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>',
+                onClick: closeAndSaveFsEditor
+            }]
+        });
     } else {
         if (headerRef.value) headerRef.value.updateHeader();
-        window.dispatchEvent(new CustomEvent('fs-editor-closed'));
+        publishAppEvent(APP_EVENTS.ui.fsEditorClosed);
     }
 });
 
@@ -578,43 +575,41 @@ const updateLayoutMetrics = () => {
 
 let layoutObserver = null;
 
-const onOpenCharacterEditor = (e) => { openCharacterEditor(e.detail.index); };
+const onOpenCharacterEditor = (detail) => { openCharacterEditor(detail.index); };
 
-const onOpenPersonaEditor = (e) => {
+const onOpenPersonaEditor = (detail) => {
     previousViewForEditor.value = currentView.value;
     if (currentView.value === 'view-chat') {
         shouldOpenPersonasOnReturn.value = true;
     }
     isDeleting.value = false;
-    editingPersonaIndex.value = e.detail.index;
-    editingPersona.value = e.detail.persona ? JSON.parse(JSON.stringify(e.detail.persona)) : { name: '', description: '', avatar: '' };
+    editingPersonaIndex.value = detail.index;
+    editingPersona.value = detail.persona ? JSON.parse(JSON.stringify(detail.persona)) : { name: '', description: '', avatar: '' };
     currentView.value = 'view-persona-edit';
 };
 
-const onNavigateTo = (e) => { currentView.value = e.detail; };
+const onNavigateTo = (detail) => { currentView.value = detail; };
 
 const onOpenOnboarding = () => { isOnboarding.value = true; };
 
-const onTriggerOpenImage = (e) => {
-    const { src, name, description, onCloseCallback } = e.detail;
+const onTriggerOpenImage = (detail) => {
+    const { src, name, description, onCloseCallback } = detail;
     logger.debug('[App] trigger-open-image. Current Mode:', imageViewerMode.value);
     logger.debug('[App] trigger-open-image. Always using default viewer.');
-    window.dispatchEvent(new CustomEvent('open-image-viewer', {
-        detail: { src, description, onCloseCallback }
-    }));
+    publishAppEvent(APP_EVENTS.nav.openImageViewer, { src, description, onCloseCallback });
 };
 
-const onOpenFsRequest = (e) => { openFsEditor(e.detail); };
+const onOpenFsRequest = (detail) => { openFsEditor(detail); };
 
-const onOpenConnections = (e) => {
-    const { type, id, name } = e.detail || {};
+const onOpenConnections = (detail) => {
+    const { type, id, name } = detail || {};
     waitForComponent(connectionsSheetRef, (comp) => {
         comp.open(type, id, name, activeChatCharObj.value);
     });
 };
 
-const onOpenItemEditor = (e) => {
-    const { type, id } = e.detail;
+const onOpenItemEditor = (detail) => {
+    const { type, id } = detail;
     if (type === 'lorebook') {
         waitForComponent(lorebookSheetRef, (comp) => {
             comp.openLorebook(id);
@@ -627,13 +622,13 @@ const onOpenItemEditor = (e) => {
         const index = allPersonas.value.findIndex(p => p.id === id);
         if (index !== -1) {
             const persona = allPersonas.value[index];
-            window.dispatchEvent(new CustomEvent('open-persona-editor', { detail: { index, persona } }));
+            publishAppEvent(APP_EVENTS.nav.openPersonaEditor, { index, persona });
         }
     }
 };
 
-const onOpenLorebookEntry = (e) => {
-    const { lorebookId, entryId } = e.detail;
+const onOpenLorebookEntry = (detail) => {
+    const { lorebookId, entryId } = detail;
     if (currentView.value === 'view-chat') {
         waitForComponent(chatViewRef, (comp) => {
             comp.openLorebookEntry(lorebookId, entryId);
@@ -659,9 +654,9 @@ const onOpenConflictSheet = () => {
     });
 };
 
-const onOpenPresetSheet = (e) => {
+const onOpenPresetSheet = (detail) => {
     waitForComponent(presetViewRef, (comp) => {
-        const presetId = e?.detail?.presetId;
+        const presetId = detail?.presetId;
         if (presetId) {
             comp.openPreset(presetId, true);
         } else {
@@ -700,9 +695,9 @@ const onSyncDataRefreshed = async () => {
     await reloadSyncedData();
 };
 
-const handleOpenChatEvent = async (e) => {
-    logger.debug("[App] Received open-chat event:", e.detail);
-    const data = e.detail;
+const handleOpenChatEvent = async (detail) => {
+    logger.debug("[App] Received open-chat event:", detail);
+    const data = detail;
     // Handle both object (new) and string (legacy/fallback) formats
     const charId = typeof data === 'object' ? data.charId : data;
     const sessionId = typeof data === 'object' ? data.sessionId : null;
@@ -757,43 +752,43 @@ onMounted(async () => {
 
     
     // Listen for editor events
-    window.addEventListener('open-character-editor', onOpenCharacterEditor);
-    window.addEventListener('open-persona-editor', onOpenPersonaEditor);
-    window.addEventListener('navigate-to', onNavigateTo);
-    window.addEventListener('language-changed', onLanguageChanged);
-    window.addEventListener('open-chat', handleOpenChatEvent);
-    window.addEventListener('open-onboarding', onOpenOnboarding);
+    appEventUnsubs.push(subscribeAppEvent(APP_EVENTS.nav.openCharacterEditor, ({ detail }) => onOpenCharacterEditor(detail)));
+    appEventUnsubs.push(subscribeAppEvent(APP_EVENTS.nav.openPersonaEditor, ({ detail }) => onOpenPersonaEditor(detail)));
+    appEventUnsubs.push(subscribeAppEvent(APP_EVENTS.nav.navigateTo, ({ detail }) => onNavigateTo(detail)));
+    appEventUnsubs.push(subscribeAppEvent(APP_EVENTS.domain.settings.languageChanged, onLanguageChanged));
+    appEventUnsubs.push(subscribeAppEvent(APP_EVENTS.nav.openChat, ({ detail }) => handleOpenChatEvent(detail)));
+    appEventUnsubs.push(subscribeAppEvent(APP_EVENTS.nav.openOnboarding, onOpenOnboarding));
 
     const pendingData = consumePendingNotificationData();
     if (pendingData) {
-        handleOpenChatEvent({ detail: pendingData });
+        handleOpenChatEvent(pendingData);
     }
 
-    window.addEventListener('trigger-open-image', onTriggerOpenImage);
-    window.addEventListener('open-fs-request', onOpenFsRequest);
-    window.addEventListener('open-connections', onOpenConnections);
-    window.addEventListener('open-item-editor', onOpenItemEditor);
-    window.addEventListener('open-lorebook-entry', onOpenLorebookEntry);
-    window.addEventListener('open-backup-sheet', onOpenBackupSheet);
-    window.addEventListener('open-sync-sheet', onOpenSyncSheet);
-    window.addEventListener('open-conflict-sheet', onOpenConflictSheet);
-    window.addEventListener('open-preset-sheet', onOpenPresetSheet);
-    unsubscribeOpenApiSheet = subscribeAppEvent(APP_EVENTS.nav.openApiSheet, onOpenApiSheet);
-    window.addEventListener('header-setup-editor', onHeaderSetupEditor);
-    window.addEventListener('header-setup-generation', onHeaderSetupGeneration);
-    window.addEventListener('header-reset', onHeaderReset);
-    unsubscribeSyncDataRefreshed = subscribeAppEvent(APP_EVENTS.domain.sync.dataRefreshed, onSyncDataRefreshed);
+    appEventUnsubs.push(subscribeAppEvent(APP_EVENTS.nav.triggerOpenImage, ({ detail }) => onTriggerOpenImage(detail)));
+    appEventUnsubs.push(subscribeAppEvent(APP_EVENTS.nav.openFsRequest, ({ detail }) => onOpenFsRequest(detail)));
+    appEventUnsubs.push(subscribeAppEvent(APP_EVENTS.nav.openConnections, ({ detail }) => onOpenConnections(detail)));
+    appEventUnsubs.push(subscribeAppEvent(APP_EVENTS.nav.openItemEditor, ({ detail }) => onOpenItemEditor(detail)));
+    appEventUnsubs.push(subscribeAppEvent(APP_EVENTS.nav.openLorebookEntry, ({ detail }) => onOpenLorebookEntry(detail)));
+    appEventUnsubs.push(subscribeAppEvent(APP_EVENTS.nav.openBackupSheet, onOpenBackupSheet));
+    appEventUnsubs.push(subscribeAppEvent(APP_EVENTS.nav.openSyncSheet, onOpenSyncSheet));
+    appEventUnsubs.push(subscribeAppEvent(APP_EVENTS.nav.openConflictSheet, onOpenConflictSheet));
+    appEventUnsubs.push(subscribeAppEvent(APP_EVENTS.nav.openPresetSheet, ({ detail }) => onOpenPresetSheet(detail)));
+    appEventUnsubs.push(subscribeAppEvent(APP_EVENTS.nav.openApiSheet, onOpenApiSheet));
+    appEventUnsubs.push(subscribeAppEvent(APP_EVENTS.ui.header.setupEditor, onHeaderSetupEditor));
+    appEventUnsubs.push(subscribeAppEvent(APP_EVENTS.ui.header.setupGeneration, onHeaderSetupGeneration));
+    appEventUnsubs.push(subscribeAppEvent(APP_EVENTS.ui.header.reset, onHeaderReset));
+    appEventUnsubs.push(subscribeAppEvent(APP_EVENTS.domain.sync.dataRefreshed, onSyncDataRefreshed));
 
-    window.addEventListener('open-glossary', (e) => {
+    appEventUnsubs.push(subscribeAppEvent(APP_EVENTS.nav.openGlossary, () => {
         if (isDesktop.value) {
             isGlossaryWindowOpen.value = true;
         }
-    });
-    window.addEventListener('toggle-glossary', () => {
+    }));
+    appEventUnsubs.push(subscribeAppEvent(APP_EVENTS.ui.glossary.toggle, () => {
         if (isDesktop.value) {
             isGlossaryWindowOpen.value = !isGlossaryWindowOpen.value;
         }
-    });
+    }));
 
     // Initialize ResizeObserver for layout metrics
     layoutObserver = new ResizeObserver(() => {
@@ -812,7 +807,7 @@ onMounted(async () => {
 
     checkDesktop();
     window.addEventListener('resize', checkDesktop);
-    window.addEventListener('gl-header-update', onGlossaryHeaderUpdate);
+    appEventUnsubs.push(subscribeAppEvent(APP_EVENTS.ui.glossary.headerUpdate, ({ detail }) => onGlossaryHeaderUpdate(detail)));
 
     setTimeout(() => {
         document.body.classList.remove('preload');
@@ -830,29 +825,8 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
     if (layoutObserver) layoutObserver.disconnect();
-    window.removeEventListener('open-character-editor', onOpenCharacterEditor);
-    window.removeEventListener('open-persona-editor', onOpenPersonaEditor);
-    window.removeEventListener('navigate-to', onNavigateTo);
-    window.removeEventListener('language-changed', onLanguageChanged);
-    window.removeEventListener('open-chat', handleOpenChatEvent);
-    window.removeEventListener('open-onboarding', onOpenOnboarding);
-    window.removeEventListener('trigger-open-image', onTriggerOpenImage);
-    window.removeEventListener('open-fs-request', onOpenFsRequest);
-    window.removeEventListener('open-connections', onOpenConnections);
-    window.removeEventListener('open-item-editor', onOpenItemEditor);
-    window.removeEventListener('open-lorebook-entry', onOpenLorebookEntry);
-    window.removeEventListener('open-backup-sheet', onOpenBackupSheet);
-    window.removeEventListener('open-sync-sheet', onOpenSyncSheet);
-    window.removeEventListener('open-conflict-sheet', onOpenConflictSheet);
-    window.removeEventListener('open-preset-sheet', onOpenPresetSheet);
-    unsubscribeOpenApiSheet?.();
-    unsubscribeOpenApiSheet = null;
-    window.removeEventListener('header-setup-editor', onHeaderSetupEditor);
-    window.removeEventListener('header-setup-generation', onHeaderSetupGeneration);
-    window.removeEventListener('header-reset', onHeaderReset);
-    unsubscribeSyncDataRefreshed?.();
-    unsubscribeSyncDataRefreshed = null;
-    window.removeEventListener('gl-header-update', onGlossaryHeaderUpdate);
+    appEventUnsubs.forEach(unsub => unsub());
+    appEventUnsubs.length = 0;
     stopGlossaryDrag();
     kbListeners.forEach(l => l.remove());
     window.removeEventListener('resize', checkDesktop);

@@ -5,6 +5,8 @@ import { hideKeyboard, showKeyboard, applyKeyboardOverlap, onKeyboardShow, onKey
 import { translations, t } from '@/utils/i18n.js';
 import HelpTip from '@/components/ui/HelpTip.vue';
 import { bottomSheetState } from '@/core/states/bottomSheetState.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
+import { publishAppEvent } from '@/core/events/eventHub.js';
 const props = defineProps({
     visible: Boolean,
     locked: { type: Boolean, default: false }, // when true, prevents backdrop/drag dismiss
@@ -31,7 +33,7 @@ const isLocalKeyboardOpen = ref(false);
 function openGlossaryChip(term) {
     emit('close');
     nextTick(() => {
-        window.dispatchEvent(new CustomEvent('open-glossary', { detail: { term } }));
+        publishAppEvent(APP_EVENTS.nav.openGlossary, { term });
     });
 }
 

@@ -15,7 +15,7 @@ import { attachLongPress } from '@/core/services/ui.js';
 import { estimateTokens } from '@/utils/tokenizer.js';
 import { formatDate } from '@/utils/dateFormatter.js';
 import { APP_EVENTS } from '@/core/events/eventNames.js';
-import { subscribeAppEvent } from '@/core/events/eventHub.js';
+import { subscribeAppEvent, publishAppEvent } from '@/core/events/eventHub.js';
 
 const props = defineProps({
   activeCategory: {
@@ -123,7 +123,7 @@ const startJanitorExtraction = async (url) => {
                     setTimeout(() => {
                         const index = characters.value.findIndex(c => c.id === charData.id);
                         if (index !== -1) {
-                            window.dispatchEvent(new CustomEvent('open-character-editor', { detail: { index } }));
+                            publishAppEvent(APP_EVENTS.nav.openCharacterEditor, { index });
                         }
                     }, 500);
                 }
@@ -156,7 +156,7 @@ const onAddCharacter = () => {
                 icon: '<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>',
                 onClick: () => {
                     closeBottomSheet();
-                    window.dispatchEvent(new CustomEvent('open-character-editor', { detail: { index: -1 } }));
+                    publishAppEvent(APP_EVENTS.nav.openCharacterEditor, { index: -1 });
                 }
             },
             {
@@ -209,7 +209,7 @@ const onAddCharacter = () => {
 const onEditCharacter = (char) => {
     const index = characters.value.indexOf(char);
     if (index !== -1) {
-        window.dispatchEvent(new CustomEvent('open-character-editor', { detail: { index } }));
+        publishAppEvent(APP_EVENTS.nav.openCharacterEditor, { index });
     }
 };
 
@@ -391,15 +391,17 @@ const favorites = computed(() => {
   return characters.value.filter(char => char.fav === true);
 });
 
+const unsubs = [];
+
 onMounted(() => {
   loadCharacters();
-  window.addEventListener('header-search', (e) => searchQuery.value = e.detail);
-  window.addEventListener('character-updated', loadCharacters);
+  unsubs.push(subscribeAppEvent(APP_EVENTS.ui.headerSearch, ({ detail }) => searchQuery.value = detail));
+  unsubs.push(subscribeAppEvent(APP_EVENTS.domain.character.updated, loadCharacters));
   unsubscribeSyncDataRefreshed = subscribeAppEvent(APP_EVENTS.domain.sync.dataRefreshed, loadCharacters);
 });
 
 onUnmounted(() => {
-  window.removeEventListener('character-updated', loadCharacters);
+  unsubs.forEach(unsub => unsub());
   unsubscribeSyncDataRefreshed?.();
   unsubscribeSyncDataRefreshed = null;
 });
@@ -578,10 +580,6 @@ const handleCharClick = (e, char) => {
   if (e.currentTarget._checkLongPress && e.currentTarget._checkLongPress()) return;
   openSessionsSheet(char);
 };
-
-onUnmounted(() => {
-  window.removeEventListener('character-updated', loadCharacters);
-});
 
 defineExpose({ onAddCharacter, loadCharacters });
 </script>

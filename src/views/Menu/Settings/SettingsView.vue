@@ -1,5 +1,7 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue';
+import { publishAppEvent, subscribeAppEvent } from '@/core/events/eventHub.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
 import { updateLanguage, translations } from '@/utils/i18n.js';
 import { currentLang, setLanguage, imageViewerMode, setImageViewerMode, disableSwipeRegeneration, setDisableSwipeRegeneration, hideMessageId, setHideMessageId, hideGenerationTime, setHideGenerationTime, hideTokenCount, setHideTokenCount, hideHelpTips, setHideHelpTips, dialogGrouping, setDialogGrouping, enterToSubmit, setEnterToSubmit, chatPaddingLR, setChatPaddingLR, forceMobileLayout, setForceMobileLayout, batterySaverUI, setBatterySaverUI } from '@/core/config/APPSettings.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
@@ -15,14 +17,12 @@ const currentScreen = ref('main');
 
 watch(currentScreen, (newVal) => {
     if (newVal === 'interface') {
-        window.dispatchEvent(new CustomEvent('header-setup-submenu', {
-            detail: {
-                title: t('menu_interface_settings') || 'Interface Settings',
-                onBack: () => { currentScreen.value = 'main'; }
-            }
-        }));
+        publishAppEvent(APP_EVENTS.ui.header.setupSubmenu, {
+            title: t('menu_interface_settings') || 'Interface Settings',
+            onBack: () => { currentScreen.value = 'main'; }
+        });
     } else {
-        window.dispatchEvent(new CustomEvent('header-force-update'));
+        publishAppEvent(APP_EVENTS.ui.header.forceUpdate);
     }
 });
 const hideMsgId = ref(hideMessageId.value);
@@ -33,7 +33,7 @@ const enterSubmitMode = ref(enterToSubmit.value);
 const toggleEnterToSubmit = () => {
     enterSubmitMode.value = !enterSubmitMode.value;
     setEnterToSubmit(enterSubmitMode.value);
-    window.dispatchEvent(new CustomEvent('settings-changed'));
+    publishAppEvent(APP_EVENTS.domain.settings.changed);
 };
 
 const forceMobile = ref(forceMobileLayout.value);
@@ -42,12 +42,12 @@ const batterySaverMode = ref(batterySaverUI.value);
 const toggleForceMobile = () => {
     forceMobile.value = !forceMobile.value;
     setForceMobileLayout(forceMobile.value);
-    window.dispatchEvent(new CustomEvent('settings-changed'));
+    publishAppEvent(APP_EVENTS.domain.settings.changed);
 };
 const toggleBatterySaverMode = () => {
     batterySaverMode.value = !batterySaverMode.value;
     setBatterySaverUI(batterySaverMode.value);
-    window.dispatchEvent(new CustomEvent('settings-changed'));
+    publishAppEvent(APP_EVENTS.domain.settings.changed);
 };
 const hideHTips = ref(hideHelpTips.value);
 const dialogGrouped = ref(dialogGrouping.value);
@@ -56,37 +56,37 @@ const toggleDisableSwipeRegen = () => {
     const newValue = !disableSwipeRegen.value;
     disableSwipeRegen.value = newValue;
     setDisableSwipeRegeneration(newValue);
-    window.dispatchEvent(new CustomEvent('settings-changed'));
+    publishAppEvent(APP_EVENTS.domain.settings.changed);
 };
 
 const toggleHideMsgId = () => {
     hideMsgId.value = !hideMsgId.value;
     setHideMessageId(hideMsgId.value);
-    window.dispatchEvent(new CustomEvent('settings-changed'));
+    publishAppEvent(APP_EVENTS.domain.settings.changed);
 };
 
 const toggleHideGenTime = () => {
     hideGenTime.value = !hideGenTime.value;
     setHideGenerationTime(hideGenTime.value);
-    window.dispatchEvent(new CustomEvent('settings-changed'));
+    publishAppEvent(APP_EVENTS.domain.settings.changed);
 };
 
 const toggleHideTokenCnt = () => {
     hideTokenCnt.value = !hideTokenCnt.value;
     setHideTokenCount(hideTokenCnt.value);
-    window.dispatchEvent(new CustomEvent('settings-changed'));
+    publishAppEvent(APP_EVENTS.domain.settings.changed);
 };
 
 const toggleHideHTips = () => {
     hideHTips.value = !hideHTips.value;
     setHideHelpTips(hideHTips.value);
-    window.dispatchEvent(new CustomEvent('settings-changed'));
+    publishAppEvent(APP_EVENTS.domain.settings.changed);
 };
 
 const toggleDialogGrouped = () => {
     dialogGrouped.value = !dialogGrouped.value;
     setDialogGrouping(dialogGrouped.value);
-    window.dispatchEvent(new CustomEvent('settings-changed'));
+    publishAppEvent(APP_EVENTS.domain.settings.changed);
 };
 
 const chatPadLR = ref(chatPaddingLR.value);
@@ -136,14 +136,14 @@ const openChatLayoutSelector = () => {
 };
 
 const openThemeSettings = () => {
-    window.dispatchEvent(new CustomEvent('navigate-to', { detail: 'view-theme-settings' }));
+    publishAppEvent(APP_EVENTS.nav.navigateTo, 'view-theme-settings');
 };
 
 const changeLang = (lang) => {
     setLanguage(lang);
     updateLanguage();
     localLang.value = lang;
-    window.dispatchEvent(new CustomEvent('language-changed'));
+    publishAppEvent(APP_EVENTS.domain.settings.languageChanged);
     closeBottomSheet();
 };
 
@@ -178,10 +178,14 @@ const onLangChange = () => {
     localLang.value = currentLang.value;
 };
 
+const unsubs = [];
+
 onMounted(() => {
-    window.addEventListener('language-changed', onLangChange);
+    unsubs.push(subscribeAppEvent(APP_EVENTS.domain.settings.languageChanged, onLangChange));
 });
-onUnmounted(() => window.removeEventListener('language-changed', onLangChange));
+onBeforeUnmount(() => {
+    unsubs.forEach(unsub => unsub());
+});
 </script>
 
 <template>

@@ -1,5 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { publishAppEvent, subscribeAppEvent } from '@/core/events/eventHub.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
 import { t } from '@/utils/i18n.js';
 import { janitorTagMap, janitorFetchCharacter, janitorSearch, janitorItemToPartialCharData } from '@/core/services/catalog/janitorProvider.js';
 import {
@@ -16,10 +18,11 @@ import CatalogCharacterSheet from '@/components/sheets/CatalogCharacterSheet.vue
 // ─── Search ───────────────────────────────────────────────────────────────────
 
 let searchDebounce = null;
+const unsubs = [];
 
-function onHeaderSearch(e) {
+function onHeaderSearch({ detail }) {
     // Only search if catalog tab is active, but since catalogQuery is global to catalogState it's safe to update
-    catalogQuery.value = e.detail;
+    catalogQuery.value = detail;
     clearTimeout(searchDebounce);
     searchDebounce = setTimeout(() => searchCatalog(true), 400);
 }
@@ -158,7 +161,7 @@ async function doImport(item, charData, avatarUrl) {
                 onButtonClick: async () => {
                     closeBottomSheet();
                     await createNewSession(charId);
-                    window.dispatchEvent(new CustomEvent('open-chat', { detail: { charId } }));
+                    publishAppEvent(APP_EVENTS.nav.openChat, { charId });
                 }
             }
         });
@@ -364,7 +367,7 @@ onMounted(() => {
     if (catalogResults.value.length === 0) {
         searchCatalog(true);
     }
-    window.addEventListener('header-search', onHeaderSearch);
+    unsubs.push(subscribeAppEvent(APP_EVENTS.ui.headerSearch, onHeaderSearch));
     
     scrollObserver = new IntersectionObserver((entries) => {
         if (entries[0].isIntersecting && !catalogLoading.value && catalogHasMore.value) {
@@ -378,7 +381,7 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
-    window.removeEventListener('header-search', onHeaderSearch);
+    unsubs.forEach(unsub => unsub());
     if (scrollObserver) {
         scrollObserver.disconnect();
     }

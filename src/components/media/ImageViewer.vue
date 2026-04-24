@@ -1,8 +1,38 @@
 <script setup>
-import { ref, computed, nextTick, watch } from 'vue';
-import { useViewer } from '@/composables/media/useViewer.js';
+import { ref, computed, nextTick, watch, onMounted, onBeforeUnmount } from 'vue';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
+import { subscribeAppEvent } from '@/core/events/eventHub.js';
 
-const { visible, src: imgSrc, description, close, onAfterLeave } = useViewer('open-image-viewer');
+const visible = ref(false);
+const imgSrc = ref('');
+const description = ref('');
+let onCloseCallback = null;
+
+const close = () => {
+    visible.value = false;
+};
+
+const onAfterLeave = () => {
+    if (onCloseCallback) onCloseCallback();
+    onCloseCallback = null;
+    imgSrc.value = '';
+    description.value = '';
+};
+
+const openViewer = (detail) => {
+    imgSrc.value = detail.src;
+    description.value = detail.description || '';
+    onCloseCallback = detail.onCloseCallback;
+    visible.value = true;
+};
+
+let unsubImageViewer;
+onMounted(() => {
+    unsubImageViewer = subscribeAppEvent(APP_EVENTS.nav.openImageViewer, ({ detail }) => openViewer(detail));
+});
+onBeforeUnmount(() => {
+    unsubImageViewer?.();
+});
 const containerRef = ref(null);
 const imgRef = ref(null);
 

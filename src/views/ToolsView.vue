@@ -1,5 +1,7 @@
 <script setup>
 import { onMounted, ref, computed } from 'vue';
+import { publishAppEvent } from '@/core/events/eventHub.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
 import { t, updateLanguage } from '@/utils/i18n.js';
 import { initRipple } from '@/core/services/ui.js';
 
@@ -86,7 +88,7 @@ const openView = (viewId) => {
     if (props.sidebarMode) {
         emit('tool-select', viewId);
     } else {
-        window.dispatchEvent(new CustomEvent('navigate-to', { detail: viewId }));
+        publishAppEvent(APP_EVENTS.nav.navigateTo, viewId);
     }
 };
 

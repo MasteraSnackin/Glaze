@@ -10,6 +10,8 @@ import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetStat
 import { themeState, getPresets, applyPreset } from '@/core/states/themeState.js';
 import { ref } from 'vue';
 import { logger } from '../../utils/logger.js';
+import { publishAppEvent } from '@/core/events/eventHub.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
 import { isKeyboardOpen, initKeyboard, hideKeyboard } from './keyboardHandler.js';
 
 // --- Long-press background guard ---
@@ -456,6 +458,7 @@ export function initBackButton() {
     let lastBackPress = 0;
     const handleBackButton = async () => {
         // --- Hierarchical Back Navigation Dispatch ---
+        // TODO: migrate cancelable pattern to event hub
         const backNavEvent = new CustomEvent('app-back-navigation', { cancelable: true });
         window.dispatchEvent(backNavEvent);
         if (backNavEvent.defaultPrevented) return;
@@ -658,12 +661,12 @@ export function initHeaderScroll(messagesContainer, initialScrollTop, isGenerati
 
         if (st > lastScrollTop + 3 && st > 50) {
             if (!isHidden) {
-                window.dispatchEvent(new CustomEvent('header-scroll-hidden', { detail: true }));
+                publishAppEvent(APP_EVENTS.ui.header.scrollHidden, true);
                 isHidden = true;
             }
         } else if (st < lastScrollTop - 3) {
             if (isHidden) {
-                window.dispatchEvent(new CustomEvent('header-scroll-hidden', { detail: false }));
+                publishAppEvent(APP_EVENTS.ui.header.scrollHidden, false);
                 isHidden = false;
             }
         }

@@ -8,6 +8,8 @@ import { getEffectivePreset, getEffectivePresetId, savePresets } from '@/core/st
 import { exportSTRegex } from '@/core/services/regexService.js';
 import { saveFile } from '@/core/services/fileSaver.js';
 import HelpTip from '@/components/ui/HelpTip.vue';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
+import { publishAppEvent, subscribeAppEvent } from '@/core/events/eventHub.js';
 
 
 const props = defineProps({
@@ -63,7 +65,7 @@ const saveScripts = () => {
     } else {
         localStorage.setItem('regex_scripts', JSON.stringify(scripts.value));
     }
-    window.dispatchEvent(new CustomEvent('regex-scripts-changed'));
+    publishAppEvent(APP_EVENTS.domain.lorebook.regexScriptsChanged);
 };
 
 let saveTimeout = null;
@@ -104,16 +106,15 @@ function goBack() {
         activeScript.value = null;
         isPresetScript.value = false;
     } else if (props.viewMode) {
-        window.dispatchEvent(new CustomEvent('navigate-to', { detail: 'view-tools' }));
+        publishAppEvent(APP_EVENTS.nav.navigateTo, 'view-tools');
     } else {
         close();
     }
 }
 
-function handleBackNavigation(e) {
+function handleBackNavigation() {
     if (!sheet.value?.isVisible) return;
     if (currentView.value !== 'list') {
-        e.preventDefault();
         goBack();
     }
 }
@@ -403,16 +404,17 @@ function openPresetSheet() {
         const sessionId = props.activeChatChar?.sessionId;
         const chatId = charId && sessionId ? `${charId}_${sessionId}` : null;
         const presetId = getEffectivePresetId(charId, chatId);
-        window.dispatchEvent(new CustomEvent('open-preset-sheet', { detail: { presetId } }));
+        publishAppEvent(APP_EVENTS.nav.openPresetSheet, { presetId });
     }
 }
 
+const unsubs = [];
 onMounted(() => {
-    window.addEventListener('app-back-navigation', handleBackNavigation);
+    unsubs.push(subscribeAppEvent(APP_EVENTS.ui.backNavigation, handleBackNavigation));
 });
 
 onBeforeUnmount(() => {
-    window.removeEventListener('app-back-navigation', handleBackNavigation);
+    unsubs.forEach(fn => fn?.());
 });
 
 defineExpose({ open, close });

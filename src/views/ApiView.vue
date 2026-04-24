@@ -1,5 +1,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue';
+import { publishAppEvent, subscribeAppEvent } from '@/core/events/eventHub.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
 
 const props = defineProps({
     viewMode: { type: Boolean, default: false }
@@ -9,7 +11,7 @@ const sheet = ref(null);
 
 function handleBack() {
     if (props.viewMode) {
-        window.dispatchEvent(new CustomEvent('navigate-to', { detail: 'view-tools' }));
+        publishAppEvent(APP_EVENTS.nav.navigateTo, 'view-tools');
     } else {
         sheet.value?.close();
     }
@@ -613,6 +615,8 @@ function close() {
     sheet.value?.close();
 }
 
+const unsubs = [];
+
 defineExpose({ open, close });
 
 const handleBackNavigation = () => {
@@ -630,13 +634,13 @@ onMounted(async () => {
     checkConnection();
     updateLanguage();
     headerState.title = t('tab_api') || 'API';
-    window.addEventListener('app-back-navigation', handleBackNavigation);
+    unsubs.push(subscribeAppEvent(APP_EVENTS.ui.backNavigation, handleBackNavigation));
 });
 
 onBeforeUnmount(() => {
     flushApiDebounce();
     if (blacklistCountdownTimer) clearInterval(blacklistCountdownTimer);
-    window.removeEventListener('app-back-navigation', handleBackNavigation);
+    unsubs.forEach(unsub => unsub());
 });
 </script>
 

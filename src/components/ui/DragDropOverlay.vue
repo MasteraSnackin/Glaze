@@ -5,6 +5,8 @@ import { db } from '@/utils/db.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
+import { publishAppEvent } from '@/core/events/eventHub.js';
 
 const isDragging = ref(false);
 const isProcessing = ref(false);
@@ -111,7 +113,7 @@ const onDrop = async (e) => {
                         });
                     });
                     localStorage.setItem('regex_scripts', JSON.stringify(scripts));
-                    window.dispatchEvent(new CustomEvent('regex-scripts-changed'));
+                    publishAppEvent(APP_EVENTS.domain.lorebook.regexScriptsChanged);
                     showSuccess('Import Successful', 'Successfully imported regex scripts.');
                     isProcessing.value = false;
                     return;
@@ -152,7 +154,7 @@ const onDrop = async (e) => {
                 await db.saveCharacter(charData, -1);
                 
                 // Notify UI to update
-                window.dispatchEvent(new Event('character-updated'));
+                publishAppEvent(APP_EVENTS.domain.character.updated);
                 
                 const lang = currentLang.value;
                 showSuccess(

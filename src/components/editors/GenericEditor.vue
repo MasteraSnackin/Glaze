@@ -4,6 +4,8 @@ import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import HelpTip from '@/components/ui/HelpTip.vue';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
+import { publishAppEvent } from '@/core/events/eventHub.js';
 
 const props = defineProps({
     modelValue: { type: Object, required: true },
@@ -215,7 +217,7 @@ function openFsEditor(field, index = -1) {
     emit('open-fs', payload);
     
     // Dispatch global event for App.vue to catch
-    window.dispatchEvent(new CustomEvent('open-fs-request', { detail: payload }));
+    publishAppEvent(APP_EVENTS.nav.openFsRequest, payload);
 }
 
 function openSelectSelector(field) {

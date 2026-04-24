@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, nextTick, watch, onMounted, onUnmounted } from 'vue';
+import { ref, computed, nextTick, watch, onMounted, onBeforeUnmount } from 'vue';
 import { Capacitor } from '@capacitor/core';
 import { formatText } from '@/utils/textFormatter.js';
 import { replaceMacros } from '@/utils/macroEngine.js';
@@ -14,6 +14,8 @@ import RollingNumber from '@/components/ui/RollingNumber.vue';
 import SheetView from '@/components/ui/SheetView.vue';
 import { getBlacklistedProvider, getApiRuntimeStorage } from '@/core/config/APISettings.js';
 import { saveFile } from '@/core/services/fileSaver.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
+import { publishAppEvent, subscribeAppEvent } from '@/core/events/eventHub.js';
 
 const props = defineProps({
     message: { type: Object, required: true },
@@ -402,9 +404,7 @@ const openTriggeredSheet = () => {
 
 const openLorebookEntry = (lb) => {
     triggeredItemsSheet.value?.close();
-    window.dispatchEvent(new CustomEvent('open-lorebook-entry', {
-        detail: { lorebookId: lb.lorebookId, entryId: lb.id }
-    }));
+    publishAppEvent(APP_EVENTS.nav.openLorebookEntry, { lorebookId: lb.lorebookId, entryId: lb.id });
 };
 const copyErrorText = (text) => {
     if (!text) return;
@@ -417,9 +417,7 @@ const copyErrorText = (text) => {
 
 const openImage = (src, instruction = null) => {
     if (!src) return;
-    window.dispatchEvent(new CustomEvent('trigger-open-image', {
-        detail: { src, name: 'Attachment', description: instruction?.prompt || '' }
-    }));
+    publishAppEvent(APP_EVENTS.nav.triggerOpenImage, { src, name: 'Attachment', description: instruction?.prompt || '' });
 };
 
 const parseIIGInstruction = (el) => {
@@ -615,12 +613,13 @@ const onSettingsChanged = () => {
     uiHideTokenCnt.value = hideTokenCount.value;
 };
 
+const unsubs = [];
 onMounted(() => {
-    window.addEventListener('settings-changed', onSettingsChanged);
+    unsubs.push(subscribeAppEvent(APP_EVENTS.domain.settings.changed, onSettingsChanged));
 });
 
-onUnmounted(() => {
-    window.removeEventListener('settings-changed', onSettingsChanged);
+onBeforeUnmount(() => {
+    unsubs.forEach(fn => fn?.());
 });
 </script>
 

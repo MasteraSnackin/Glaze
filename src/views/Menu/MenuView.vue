@@ -1,5 +1,7 @@
 <script setup>
 import { onMounted, ref } from 'vue';
+import { publishAppEvent } from '@/core/events/eventHub.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
 import { initRipple } from '@/core/services/ui.js';
 import { updateLanguage, translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
@@ -25,19 +27,19 @@ onMounted(() => {
 const t = (key) => translations[currentLang.value]?.[key] || key;
 
 const openBackupSheet = () => {
-    window.dispatchEvent(new CustomEvent('open-backup-sheet'));
+    publishAppEvent(APP_EVENTS.nav.openBackupSheet);
 };
 
 const openSyncSheet = () => {
-    window.dispatchEvent(new CustomEvent('open-sync-sheet'));
+    publishAppEvent(APP_EVENTS.nav.openSyncSheet);
 };
 
 const openSettings = () => {
-    window.dispatchEvent(new CustomEvent('navigate-to', { detail: 'view-settings' }));
+    publishAppEvent(APP_EVENTS.nav.navigateTo, 'view-settings');
 };
 
 const replayOnboarding = () => {
-    window.dispatchEvent(new CustomEvent('open-onboarding'));
+    publishAppEvent(APP_EVENTS.nav.openOnboarding);
 };
 </script>
 

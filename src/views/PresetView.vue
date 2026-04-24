@@ -1,5 +1,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
+import { publishAppEvent, subscribeAppEvent } from '@/core/events/eventHub.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
 import { updateLanguage, translations, t } from '@/utils/i18n.js';
 import { initRipple } from '@/core/services/ui.js';
 import Editor from '@/components/editors/GenericEditor.vue';
@@ -77,7 +79,7 @@ function handleOpenFs(field, isCurrentBase = true) {
             currentPreset.value[field] = newVal;
         }
     };
-    window.dispatchEvent(new CustomEvent('open-fs-request', { detail: { value: val, onSave } }));
+    publishAppEvent(APP_EVENTS.nav.openFsRequest, { value: val, onSave });
 }
 
 const showAdvancedSettings = ref(false);
@@ -571,7 +573,7 @@ function openPresetConnections(presetId, event) {
     event.stopPropagation();
     const preset = presetState.presets[presetId];
     if (preset) {
-        window.dispatchEvent(new CustomEvent('open-connections', { detail: { type: 'preset', id: presetId, name: preset.name } }));
+        publishAppEvent(APP_EVENTS.nav.openConnections, { type: 'preset', id: presetId, name: preset.name });
     }
 }
 
@@ -782,7 +784,7 @@ function openPresetSelector() {
 function openPresetConnectionManager() {
     const preset = currentPreset.value;
     if (preset) {
-        window.dispatchEvent(new CustomEvent('open-connections', { detail: { type: 'preset', id: preset.id, name: preset.name } }));
+        publishAppEvent(APP_EVENTS.nav.openConnections, { type: 'preset', id: preset.id, name: preset.name });
     }
 }
 
@@ -1200,16 +1202,15 @@ function goBackFromEditor() {
         editingPresetId.value = null;
         updateHeaderState();
     } else if (props.viewMode) {
-        window.dispatchEvent(new CustomEvent('navigate-to', { detail: 'view-tools' }));
+        publishAppEvent(APP_EVENTS.nav.navigateTo, 'view-tools');
     } else {
         close();
     }
 }
 
-function handleBackNavigation(e) {
+function handleBackNavigation() {
     if (!sheet.value?.isVisible) return;
     if (isEditingBlock.value || editingPresetId.value) {
-        e.preventDefault();
         goBackFromEditor();
     }
 }
@@ -1783,7 +1784,7 @@ function openAuthorsNoteSheet() {
     content.querySelectorAll('.help-tip').forEach(btn => {
         btn.onclick = (e) => {
             e.stopPropagation();
-            window.dispatchEvent(new CustomEvent('open-glossary', { detail: { term: btn.dataset.term } }));
+            publishAppEvent(APP_EVENTS.nav.openGlossary, { term: btn.dataset.term });
         };
     });
 
@@ -1888,7 +1889,7 @@ function openSummarySheet() {
     content.querySelectorAll('.help-tip').forEach(btn => {
         btn.onclick = (e) => {
             e.stopPropagation();
-            window.dispatchEvent(new CustomEvent('open-glossary', { detail: { term: btn.dataset.term } }));
+            publishAppEvent(APP_EVENTS.nav.openGlossary, { term: btn.dataset.term });
         };
     });
 
@@ -2026,18 +2027,20 @@ const onFsEditorClosed = () => {
     }
 };
 
+const unsubs = [];
+
 onMounted(async () => {
     initRipple();
     await initPresetState();
     await loadPresets();
-    window.addEventListener('app-back-navigation', handleBackNavigation);
+    unsubs.push(subscribeAppEvent(APP_EVENTS.ui.backNavigation, handleBackNavigation));
     if (currentPreset.value) {
         localStorage.setItem('gz_api_request_reasoning', currentPreset.value.reasoningEnabled);
     }
 
     updateLanguage();
 
-    window.addEventListener('fs-editor-closed', onFsEditorClosed);
+    unsubs.push(subscribeAppEvent(APP_EVENTS.ui.fsEditorClosed, onFsEditorClosed));
     updateHeaderState();
 });
 
@@ -2071,8 +2074,7 @@ function confirmDeleteStashedBlock(blockId) {
 }
 
 onBeforeUnmount(() => {
-    window.removeEventListener('fs-editor-closed', onFsEditorClosed);
-    window.removeEventListener('app-back-navigation', handleBackNavigation);
+    unsubs.forEach(unsub => unsub());
 });
 </script>
 

@@ -1,3 +1,6 @@
+import { publishAppEvent } from '@/core/events/eventHub.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
+
 export function restoreVisibleSwipeState(messages = []) {
     if (!Array.isArray(messages)) return [];
 
@@ -56,9 +59,7 @@ export function useChatMessageDisplay(activeChatChar, allPersonas) {
         if (src) {
             const name = getDisplayName(msg);
             const description = "";
-            window.dispatchEvent(new CustomEvent('trigger-open-image', {
-                detail: { src, name, description, onCloseCallback: null }
-            }));
+            publishAppEvent(APP_EVENTS.nav.triggerOpenImage, { src, name, description, onCloseCallback: null });
         }
     }
 

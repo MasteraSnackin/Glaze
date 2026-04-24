@@ -9,7 +9,7 @@ import { saveFile } from '@/core/services/fileSaver.js';
 import HelpTip from '@/components/ui/HelpTip.vue';
 import { showToast } from '@/core/states/toastState.js';
 import { APP_EVENTS } from '@/core/events/eventNames.js';
-import { subscribeAppEvent } from '@/core/events/eventHub.js';
+import { subscribeAppEvent, publishAppEvent } from '@/core/events/eventHub.js';
 
 const sheet = ref(null);
 const t = (key) => translations[currentLang.value]?.[key] || key;
@@ -25,6 +25,7 @@ const activeEntryIndex = ref(-1);
 const searchQuery = ref('');
 const failedEntryMap = ref(new Map());
 let unsubscribeSyncDataRefreshed = null;
+const unsubs = [];
 
 
 
@@ -274,7 +275,7 @@ function getActivationState(lb) {
 }
 
 function openConnectionManager(lb) {
-    window.dispatchEvent(new CustomEvent('open-connections', { detail: { type: 'lorebook', id: lb.id, name: lb.name } }));
+    publishAppEvent(APP_EVENTS.nav.openConnections, { type: 'lorebook', id: lb.id, name: lb.name });
 }
 
 function getLorebookConnectionCounts(lbId) {
@@ -502,13 +503,13 @@ onMounted(async () => {
     loadPickerData();
     await updateVectorReindexNotice();
     unsubscribeSyncDataRefreshed = subscribeAppEvent(APP_EVENTS.domain.sync.dataRefreshed, handleSyncDataRefreshed);
-    window.addEventListener('app-back-navigation', handleBackNavigation);
+    unsubs.push(subscribeAppEvent(APP_EVENTS.ui.backNavigation, handleBackNavigation));
 });
 
 onUnmounted(() => {
     unsubscribeSyncDataRefreshed?.();
     unsubscribeSyncDataRefreshed = null;
-    window.removeEventListener('app-back-navigation', handleBackNavigation);
+    unsubs.forEach(fn => fn?.());
 });
 
 // --- Navigation ---
@@ -563,16 +564,15 @@ function goBack() {
         currentView.value = 'list';
         activeLorebook.value = null;
     } else if (props.viewMode) {
-        window.dispatchEvent(new CustomEvent('navigate-to', { detail: 'view-tools' }));
+        publishAppEvent(APP_EVENTS.nav.navigateTo, 'view-tools');
     } else {
         close();
     }
 }
 
-function handleBackNavigation(e) {
+function handleBackNavigation() {
     if (!props.viewMode && !sheet.value?.isVisible) return;
     if (currentView.value !== 'list') {
-        e.preventDefault();
         goBack();
     }
 }

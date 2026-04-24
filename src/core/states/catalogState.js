@@ -8,6 +8,8 @@ import { extractCharacterBook, generateThumbnail } from '@/utils/characterIO.js'
 import { datacatBrowse, datacatSearch, datacatGetCharacter, datacatEnsureSession, datacatFresh } from '@/core/services/catalog/datacatProvider.js';
 import { janitorSearch, janitorHampterSearch, fetchJanitorTags } from '@/core/services/catalog/janitorProvider.js';
 import { Capacitor } from '@capacitor/core';
+import { publishAppEvent } from '@/core/events/eventHub.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
@@ -148,7 +150,7 @@ export async function importCharacter(charData, avatarUrl) {
     await db.saveCharacter(charData, -1);
 
     // Notify CharacterList to refresh
-    window.dispatchEvent(new Event('character-updated'));
+    publishAppEvent(APP_EVENTS.domain.character.updated);
 
     return charData.id;
 }

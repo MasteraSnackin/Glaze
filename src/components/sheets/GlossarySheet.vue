@@ -3,6 +3,8 @@ import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import SheetView from '@/components/ui/SheetView.vue';
 import { translations, t } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
+import { publishAppEvent, subscribeAppEvent } from '@/core/events/eventHub.js';
 
 const props = defineProps({
     viewMode: { type: Boolean, default: false },
@@ -149,14 +151,14 @@ async function open(termId) {
 }
 
 
-function handleGlossaryEvent(e) {
-    open(e.detail?.term);
+function handleGlossaryEvent(detail) {
+    open(detail?.term);
 }
 
 function handleGlBack() {
     if (!props.viewMode) return;
     if (view.value === 'categories' || (openedViaHelptip.value && navStack.value.length === 0)) {
-        window.dispatchEvent(new CustomEvent('navigate-to', { detail: 'view-menu' }));
+        publishAppEvent(APP_EVENTS.nav.navigateTo, 'view-menu');
     } else {
         goBack();
     }
@@ -165,21 +167,19 @@ function handleGlBack() {
 // Sync header title when navigating inside viewMode (watches sheetTitle and view to catch chip-to-chip article nav)
 watch([sheetTitle, view], () => {
     if (!props.viewMode) return;
-    window.dispatchEvent(new CustomEvent('gl-header-update', { detail: { title: sheetTitle.value, canGoBack: view.value !== 'categories' } }));
+    publishAppEvent(APP_EVENTS.ui.glossary.headerUpdate, { title: sheetTitle.value, canGoBack: view.value !== 'categories' });
 });
 
+const unsubs = [];
 onMounted(() => {
-    window.addEventListener('open-glossary', handleGlossaryEvent);
-    window.addEventListener('gl-back', handleGlBack);
+    unsubs.push(subscribeAppEvent(APP_EVENTS.nav.openGlossary, ({ detail }) => handleGlossaryEvent(detail)));
+    unsubs.push(subscribeAppEvent(APP_EVENTS.ui.glossary.back, handleGlBack));
     if (props.viewMode) {
-        window.dispatchEvent(new CustomEvent('gl-header-update', {
-            detail: { title: sheetTitle.value, canGoBack: view.value !== 'categories' }
-        }));
+        publishAppEvent(APP_EVENTS.ui.glossary.headerUpdate, { title: sheetTitle.value, canGoBack: view.value !== 'categories' });
     }
 });
 onBeforeUnmount(() => {
-    window.removeEventListener('open-glossary', handleGlossaryEvent);
-    window.removeEventListener('gl-back', handleGlBack);
+    unsubs.forEach(fn => fn?.());
 });
 
 const INLINE_ICONS = {

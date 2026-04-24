@@ -20,6 +20,8 @@ import { fullPush, fullPull, fullSync, checkSyncReadiness } from '@/core/service
 import { cloudHasData, verifyCloudKey, wipeCloudData } from '@/core/services/syncEngine.js';
 import { isSyncIncludingApiKeys, setSyncIncludeApiKeys } from '@/core/config/ProviderProfiles.js';
 import { db } from '@/utils/db.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
+import { publishAppEvent } from '@/core/events/eventHub.js';
 
 const sheet = ref(null);
 defineProps({ zIndex: { type: Number, default: 1005 } });
@@ -291,7 +293,7 @@ const doPull = async () => {
         const result = await fullPull();
         syncResult.value = { type: 'pull', ...result };
         if (syncConflicts.value.length > 0) {
-            window.dispatchEvent(new CustomEvent('open-conflict-sheet'));
+            publishAppEvent(APP_EVENTS.nav.openConflictSheet);
         }
     } catch (e) {
         console.error('[SyncSheet] Pull failed:', e);
@@ -343,7 +345,7 @@ const doWipe = async () => {
 };
 
 const openConflictSheet = () => {
-    window.dispatchEvent(new CustomEvent('open-conflict-sheet'));
+    publishAppEvent(APP_EVENTS.nav.openConflictSheet);
 };
 
 const open = async () => {

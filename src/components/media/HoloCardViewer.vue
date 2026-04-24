@@ -42,9 +42,36 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue';
-import { useViewer } from '@/composables/media/useViewer.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
+import { subscribeAppEvent } from '@/core/events/eventHub.js';
 
-const { visible, src, name, description, close, onAfterLeave } = useViewer('open-holocards');
+const visible = ref(false);
+const src = ref('');
+const name = ref('');
+const description = ref('');
+let onCloseCallback = null;
+
+const close = () => {
+    visible.value = false;
+};
+
+const onAfterLeave = () => {
+    if (onCloseCallback) onCloseCallback();
+    onCloseCallback = null;
+    src.value = '';
+    name.value = '';
+    description.value = '';
+};
+
+const openViewer = (detail) => {
+    src.value = detail.src;
+    name.value = detail.name || '';
+    description.value = detail.description || '';
+    onCloseCallback = detail.onCloseCallback;
+    visible.value = true;
+};
+
+let unsubHolocards;
 
 // Refs for DOM elements
 const cardContainer = ref(null);
@@ -184,11 +211,13 @@ watch(visible, (newVal) => {
 });
 
 onMounted(() => {
+    unsubHolocards = subscribeAppEvent(APP_EVENTS.nav.openHolocards, ({ detail }) => openViewer(detail));
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('deviceorientation', onDeviceOrientation);
 });
 
 onUnmounted(() => {
+    unsubHolocards?.();
     window.removeEventListener('mousemove', onMouseMove);
     window.removeEventListener('deviceorientation', onDeviceOrientation);
 });

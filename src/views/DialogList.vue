@@ -11,7 +11,7 @@ import { getChatData, createNewSession, deleteSession, renameSession } from '@/u
 import { importSillyTavernChat, exportSillyTavernChat, exportGlazeChat, pickChatFile } from '@/core/services/chatImporter.js';
 import { allPersonas, loadPersonas } from '@/core/states/personaState.js';
 import { APP_EVENTS } from '@/core/events/eventNames.js';
-import { subscribeAppEvent } from '@/core/events/eventHub.js';
+import { subscribeAppEvent, publishAppEvent } from '@/core/events/eventHub.js';
 
 const props = defineProps({
   activeCategory: { type: String, default: 'all' },
@@ -29,6 +29,8 @@ let unsubscribeSyncDataRefreshed = null;
 let unsubscribeChatUpdated = null;
 let unsubscribeGenerationStarted = null;
 let unsubscribeGenerationEnded = null;
+let unsubscribeCharUpdated = null;
+let unsubscribeHeaderSearch = null;
 
 const loadData = async () => {
     try {
@@ -189,7 +191,7 @@ const openActions = (chat, mode = 'flat') => {
                 onClick: () => {
                     const charIndex = characters.value.findIndex(c => c.id === chat.id);
                     if (charIndex !== -1) {
-                        window.dispatchEvent(new CustomEvent('open-character-editor', { detail: { index: charIndex } }));
+                         publishAppEvent(APP_EVENTS.nav.openCharacterEditor, { index: charIndex });
                     }
                     closeBottomSheet();
                 }
@@ -500,10 +502,10 @@ onMounted(() => {
     loadData();
     unsubscribeSyncDataRefreshed = subscribeAppEvent(APP_EVENTS.domain.sync.dataRefreshed, loadData);
     unsubscribeChatUpdated = subscribeAppEvent(APP_EVENTS.domain.chat.updated, loadData);
-    window.addEventListener('character-updated', loadData);
+    unsubscribeCharUpdated = subscribeAppEvent(APP_EVENTS.domain.character.updated, loadData);
     unsubscribeGenerationStarted = subscribeAppEvent(APP_EVENTS.domain.generation.started, onGenerationStarted);
     unsubscribeGenerationEnded = subscribeAppEvent(APP_EVENTS.domain.generation.ended, onGenerationEnded);
-    window.addEventListener('header-search', (e) => searchQuery.value = e.detail);
+    unsubscribeHeaderSearch = subscribeAppEvent(APP_EVENTS.ui.headerSearch, ({ detail }) => searchQuery.value = detail);
 });
 
 onUnmounted(() => {
@@ -511,12 +513,14 @@ onUnmounted(() => {
     unsubscribeSyncDataRefreshed = null;
     unsubscribeChatUpdated?.();
     unsubscribeChatUpdated = null;
-    window.removeEventListener('character-updated', loadData);
+    unsubscribeCharUpdated?.();
+    unsubscribeCharUpdated = null;
     unsubscribeGenerationStarted?.();
     unsubscribeGenerationStarted = null;
     unsubscribeGenerationEnded?.();
     unsubscribeGenerationEnded = null;
-    // Note: anonymous listener for header-search is fine as component is unmounted
+    unsubscribeHeaderSearch?.();
+    unsubscribeHeaderSearch = null;
 });
 </script>
 

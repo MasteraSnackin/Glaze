@@ -8,6 +8,8 @@ import { currentLang, enterToSubmit } from '@/core/config/APPSettings.js';
 import { hideKeyboard, onKeyboardShow, onKeyboardHide, isNativeKeyboard } from '@/core/services/keyboardHandler.js';
 import { Capacitor } from '@capacitor/core';
 import { attachRipple } from '@/core/services/ui.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
+import { publishAppEvent } from '@/core/events/eventHub.js';
 
 const props = defineProps({
     modelValue: { type: String, default: '' },
@@ -359,14 +361,12 @@ const openFullScreenEditor = async () => {
     if (isKeyboardOpen.value || document.body.classList.contains('keyboard-open')) {
         await hideKeyboard();
     }
-    window.dispatchEvent(new CustomEvent('open-fs-request', {
-        detail: {
-            value: props.modelValue,
-            onSave: (newVal) => {
-                emit('update:modelValue', newVal);
-            }
+    publishAppEvent(APP_EVENTS.nav.openFsRequest, {
+        value: props.modelValue,
+        onSave: (newVal) => {
+            emit('update:modelValue', newVal);
         }
-    }));
+    });
 };
 onMounted(async () => {
     window.addEventListener('click', closeMagicMenu);

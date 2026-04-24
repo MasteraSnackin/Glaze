@@ -2,6 +2,8 @@
 import { ref, onMounted, onBeforeUnmount } from 'vue';
 import SheetView from '@/components/ui/SheetView.vue';
 import { notificationsState } from '@/core/states/notificationsState.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
+import { subscribeAppEvent } from '@/core/events/eventHub.js';
 
 const sheet = ref(null);
 
@@ -19,8 +21,13 @@ function formatTime(ts) {
 
 const onOpen = () => open();
 
-onMounted(() => window.addEventListener('open-notifications-sheet', onOpen));
-onBeforeUnmount(() => window.removeEventListener('open-notifications-sheet', onOpen));
+const unsubs = [];
+onMounted(() => {
+    unsubs.push(subscribeAppEvent(APP_EVENTS.nav.openNotificationsSheet, onOpen));
+});
+onBeforeUnmount(() => {
+    unsubs.forEach(fn => fn?.());
+});
 
 defineExpose({ open });
 </script>
