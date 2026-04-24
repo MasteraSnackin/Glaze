@@ -99,7 +99,7 @@ export function createChatGenerationServices({
             smartScroll,
             formatError,
             sendMessageNotification,
-            get userAvatar() { return activeChatChar.value?.avatar || null; },
+            get userAvatar() { return activeChatChar?.value?.avatar || null; },
             isItemVisible,
             scrollToIndex
         },

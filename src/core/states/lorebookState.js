@@ -3,6 +3,7 @@ import { db } from '@/utils/db.js';
 import { getEmbeddings } from '@/core/services/embeddingService.js';
 import { getEmbeddingConfig, isEmbeddingConfigured } from '@/core/config/embeddingSettings.js';
 import { findTopK, findTopKMulti, cosineSimilarity } from '@/utils/vectorMath.js';
+import { estimateTokens } from '@/utils/tokenizer.js';
 
 function escapeRegex(string) {
     return string.replace(/[/\-\\^$*+?.()|[\]{}]/g, '\\$&');
@@ -54,6 +55,40 @@ function uniqueStrings(values = [], limit = 32) {
         if (result.length >= limit) break;
     }
     return result;
+}
+
+function htmlToPlainText(text) {
+    if (typeof document === 'undefined') {
+        return text.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, ' ');
+    }
+
+    const div = document.createElement('div');
+    div.innerHTML = text.replace(/<br\s*\/?>/gi, '\n');
+    return div.textContent || div.innerText || text;
+}
+
+function sanitizeVectorQueryText(text = '') {
+    if (!text) return '';
+
+    const withoutHeavyBlocks = String(text)
+        .replace(/<style[\s\S]*?(?:<\/style>|$)/gi, ' ')
+        .replace(/<script[\s\S]*?(?:<\/script>|$)/gi, ' ')
+        .replace(/<svg[\s\S]*?(?:<\/svg>|$)/gi, ' ')
+        .replace(/<figure[\s\S]*?(?:<\/figure>|$)/gi, ' ')
+        .replace(/<img\b[^>]*>/gi, ' ')
+        .replace(/!\[[^\]]*\]\((?:data:image[^)]*|https?:\/\/[^)\s]+\.(?:png|jpe?g|gif|webp|bmp|svg)(?:\?[^)]*)?)\)/gi, ' ')
+        .replace(/data:image\/[a-zA-Z0-9.+-]+;base64,[a-zA-Z0-9+/=\s_-]+/g, ' ')
+        .replace(/https?:\/\/\S+\.(?:png|jpe?g|gif|webp|bmp|svg)(?:\?\S*)?/gi, ' ')
+        .replace(/\bimggen-(?:loading|result|error|disabled|options-btn|result-wrapper)\b/gi, ' ');
+
+    const plainText = htmlToPlainText(withoutHeavyBlocks);
+
+    return plainText
+        .replace(/<think>[\s\S]*?<\/think>/gi, ' ')
+        .replace(/\[image omitted\]/gi, ' ')
+        .replace(/[\t\r ]+/g, ' ')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
 }
 
 function extractRetrievalHints(entry) {
@@ -143,7 +178,16 @@ function classifyIndexingError(error) {
         return getIndexingErrorDetails('config_model', message || 'Embedding model not configured');
     }
     if (lower.includes('embedding api error')) {
+        if (error?.status === 429 || lower.includes('429') || lower.includes('rate limit')) {
+            return getIndexingErrorDetails('rate_limit', message || 'Provider rate limit reached (429)');
+        }
         return getIndexingErrorDetails('api_error', message || 'Embedding API request failed');
+    }
+    if (lower.includes('embedding provider error')) {
+        return getIndexingErrorDetails('api_error', message || 'Embedding provider request failed');
+    }
+    if (error?.name === 'RateLimitError' || error?.status === 429) {
+        return getIndexingErrorDetails('rate_limit', message || 'Provider rate limit reached (429)');
     }
     if (lower.includes('failed to fetch') || lower.includes('networkerror') || lower.includes('network error')) {
         return getIndexingErrorDetails('network_error', message || 'Network error while requesting embeddings');
@@ -863,7 +907,7 @@ export async function indexLorebookEntries(lorebookId, onProgress, options = {})
         const existing = await db.getEmbedding(entry.id);
         // Skip if already indexed with same text AND already using multi-vector format
         const isLegacyFormat = existing && existing.vector && !existing.vectors;
-        if (existing && existing.textHash === textHash && !isLegacyFormat) {
+        if (existing && existing.textHash === textHash && !isLegacyFormat && !existing.error) {
             console.log('[indexLorebookEntries] skipping (already indexed)', {
                 entryId: entry.id,
                 comment: entry.comment?.substring(0, 50),
@@ -908,6 +952,20 @@ export async function indexLorebookEntries(lorebookId, onProgress, options = {})
             await saveEmbeddingError(entry, lb.id, textHash, error);
             failures.push({ entryId: entry.id, comment: entry.comment || '', keys: entry.keys || [], error });
             failed++;
+            if (error.type === 'rate_limit') {
+                const retryAfter = e.retryAfter || 60;
+                for (let j = i + 1; j < processedEntries.length; j++) {
+                    const skippedEntry = processedEntries[j];
+                    const skippedText = getEntryIndexingText(skippedEntry, target);
+                    const skippedHash = await computeTextHash(buildEmbeddingFingerprint(skippedEntry, skippedText));
+                    const skipError = getIndexingErrorDetails('rate_limit', `Skipped due to rate limit (retry after ${retryAfter}s)`);
+                    skipError.retryAfter = retryAfter;
+                    await saveEmbeddingError(skippedEntry, lb.id, skippedHash, skipError);
+                    failures.push({ entryId: skippedEntry.id, comment: skippedEntry.comment || '', keys: skippedEntry.keys || [], error: skipError });
+                    failed++;
+                }
+                return { indexed, skipped, failed, total: processedEntries.length, failures, retriedFailedOnly: retryFailedOnly, rateLimited: true, retryAfter };
+            }
         }
 
         if (onProgress) onProgress(i + 1, processedEntries.length);
@@ -916,15 +974,61 @@ export async function indexLorebookEntries(lorebookId, onProgress, options = {})
     return { indexed, skipped, failed, total: processedEntries.length, failures, retriedFailedOnly: retryFailedOnly };
 }
 
-export async function getEmbeddingStatus(entryId) {
+export async function getEmbeddingRecord(entryId) {
+    return db.getEmbedding(entryId);
+}
+
+function buildBoundedQueryText(parts, {
+    maxTokens = 1536,
+    maxChars = 12000,
+    trimEachPartToChars = 4000
+} = {}) {
+    const normalizedParts = [];
+
+    for (let i = parts.length - 1; i >= 0; i--) {
+        const raw = String(parts[i] || '').trim();
+        if (!raw) continue;
+
+        const trimmedPart = raw.length > trimEachPartToChars
+            ? raw.slice(-trimEachPartToChars)
+            : raw;
+
+        normalizedParts.unshift(trimmedPart);
+
+        const candidate = normalizedParts.join('\n');
+        if (candidate.length > maxChars || estimateTokens(candidate) > maxTokens) {
+            normalizedParts.shift();
+            break;
+        }
+    }
+
+    return normalizedParts.join('\n');
+}
+
+export async function isLorebookEmbeddingFresh(entry) {
+    if (!entry?.id) return false;
+    const record = await db.getEmbedding(entry.id);
+    if (!record || record.error) return false;
+
+    const config = getEmbeddingConfig();
+    const target = lorebookState.globalSettings.embeddingTarget || config.target || 'content';
+    const text = getEntryIndexingText(entry, target);
+    const textHash = await computeTextHash(buildEmbeddingFingerprint(entry, text));
+    return record.textHash === textHash;
+}
+
+export async function getEmbeddingStatus(entryOrId) {
+    const entryId = typeof entryOrId === 'string' ? entryOrId : entryOrId?.id;
     const record = await db.getEmbedding(entryId);
     if (!record) return 'none';
     if (record.error) return 'error';
-    return 'indexed';
-}
 
-export async function getEmbeddingRecord(entryId) {
-    return db.getEmbedding(entryId);
+    if (typeof entryOrId === 'object' && entryOrId) {
+        const isFresh = await isLorebookEmbeddingFresh(entryOrId);
+        return isFresh ? 'indexed' : 'stale';
+    }
+
+    return 'indexed';
 }
 
 export async function deleteLorebookEntryEmbedding(entryId) {
@@ -975,6 +1079,15 @@ export async function vectorSearchLorebooks(history = [], currentText = '', char
     activeLorebooks.forEach(lb => {
         lb.entries.forEach(entry => {
             if (entry.enabled !== false && entry.vectorSearch) {
+                if (char && entry.characterFilter) {
+                    const { isExclude, names } = entry.characterFilter;
+                    if (names && names.length > 0) {
+                        const charName = (char.name || "").toLowerCase();
+                        const isInCategory = names.some(n => charName.includes(n.toLowerCase()));
+                        if (isExclude && isInCategory) return;
+                        if (!isExclude && !isInCategory) return;
+                    }
+                }
                 vectorEntries.push({ ...entry, lorebookName: lb.name, lorebookId: lb.id });
             }
         });
@@ -992,10 +1105,16 @@ export async function vectorSearchLorebooks(history = [], currentText = '', char
 
     const candidates = [];
     const missingEmbeddings = [];
+    const target = lorebookState.globalSettings.embeddingTarget || config.target || 'content';
     for (const entry of vectorEntries) {
         const emb = embeddingMap.get(entry.id);
-        // NEW: Support both multi-vector (vectors) and legacy (vector)
-        if (emb && (emb.vectors || emb.vector)) {
+        const currentText = getEntryIndexingText(entry, target);
+        const currentHash = await computeTextHash(buildEmbeddingFingerprint(entry, currentText));
+        const isFresh = emb?.textHash === currentHash;
+
+        // Support both multi-vector (vectors) and legacy (vector), but only if
+        // the stored embedding still matches the current entry fingerprint.
+        if (emb && isFresh && (emb.vectors || emb.vector)) {
             const candidate = { ...entry, retrievalHints: emb.retrievalHints || [] };
             if (emb.vectors) {
                 candidate.vectors = emb.vectors;  // Multi-vector
@@ -1008,8 +1127,10 @@ export async function vectorSearchLorebooks(history = [], currentText = '', char
                 id: entry.id,
                 comment: entry.comment,
                 hasEmb: !!emb,
+                isFresh,
                 hasVectors: emb?.vectors ? true : false,
-                hasVector: emb?.vector ? true : false
+                hasVector: emb?.vector ? true : false,
+                reason: emb ? 'stale_or_invalid' : 'missing'
             });
         }
     }
@@ -1045,9 +1166,19 @@ export async function vectorSearchLorebooks(history = [], currentText = '', char
         fallbackQueryParts.push(currentTextTrimmed);
     }
 
-    const focusedQueryText = focusedQueryParts.join('\n');
-    const fallbackQueryText = fallbackQueryParts.join('\n');
-    const queryText = (focusedQueryParts.length > 0 ? focusedQueryParts : fallbackQueryParts).join('\n');
+    const embeddingConfig = getEmbeddingConfig();
+    const queryChunkTokens = Math.max(embeddingConfig.maxChunkTokens || 512, 128);
+    const focusedQueryText = buildBoundedQueryText(focusedQueryParts, {
+        maxTokens: Math.min(queryChunkTokens * 2, 1024),
+        maxChars: 6000,
+        trimEachPartToChars: 3000
+    });
+    const fallbackQueryText = buildBoundedQueryText(fallbackQueryParts, {
+        maxTokens: Math.min(queryChunkTokens * 3, 1536),
+        maxChars: 10000,
+        trimEachPartToChars: 4000
+    });
+    const queryText = focusedQueryText || fallbackQueryText;
     if (!queryText.trim()) {
         console.info('[vectorSearchLorebooks] skipped: empty query text', {
             historyMessages: history.length,
@@ -1068,6 +1199,8 @@ export async function vectorSearchLorebooks(history = [], currentText = '', char
         indexedCandidates: candidates.length,
         historyMessages: history.length,
         userMessagesUsed: recentUserParts.length,
+        rawFocusedParts: focusedQueryParts.length,
+        rawFallbackParts: fallbackQueryParts.length,
         focusedQueryLength: focusedQueryText.length,
         fallbackQueryLength: fallbackQueryText.length,
         hasCurrentText: !!(currentText && currentText.trim()),
@@ -1086,7 +1219,11 @@ export async function vectorSearchLorebooks(history = [], currentText = '', char
 
         const runSearch = async (text, label) => {
             if (!text || !text.trim()) return [];
-            const cleanText = stripOOC(text);
+            const cleanText = sanitizeVectorQueryText(stripOOC(text));
+            if (!cleanText) {
+                console.info('[vectorSearchLorebooks] skipped: sanitized query became empty', { label });
+                return [];
+            }
             console.info('[vectorSearchLorebooks] embedding query', {
                 label,
                 queryLength: cleanText.length,
@@ -1140,7 +1277,7 @@ export async function vectorSearchLorebooks(history = [], currentText = '', char
 
         const focusedResults = await runSearch(focusedQueryText, 'focused');
         let fallbackResults = [];
-        if (fallbackQueryParts.length > focusedQueryParts.length) {
+        if (fallbackQueryText && fallbackQueryText !== focusedQueryText) {
             console.info('[vectorSearchLorebooks] retrying with fallback query');
             fallbackResults = await runSearch(fallbackQueryText, 'fallback');
         }

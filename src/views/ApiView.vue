@@ -616,6 +616,7 @@ function close() {
 defineExpose({ open, close });
 
 const handleBackNavigation = () => {
+    if (!props.viewMode && !sheet.value?.isVisible) return;
     handleBack();
 };
 

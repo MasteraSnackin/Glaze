@@ -1207,6 +1207,7 @@ function goBackFromEditor() {
 }
 
 function handleBackNavigation(e) {
+    if (!sheet.value?.isVisible) return;
     if (isEditingBlock.value || editingPresetId.value) {
         e.preventDefault();
         goBackFromEditor();

@@ -5,12 +5,12 @@ import { fullSync } from '@/core/services/syncService.js';
 let autoSyncRunning = false;
 let autoSyncCooldownUntil = 0;
 
-export async function triggerAutoSyncCheck({ isGenerating }) {
+export async function triggerAutoSyncCheck({ isGenerating } = {}) {
     incrementMessageCounter();
     if (!shouldAutoSync()) return;
     if (autoSyncRunning) return;
     if (Capacitor.isNativePlatform() && Date.now() < autoSyncCooldownUntil) return;
-    if (Capacitor.isNativePlatform() && (isGenerating.value || document.visibilityState !== 'visible')) return;
+    if (Capacitor.isNativePlatform() && (isGenerating?.value || document.visibilityState !== 'visible')) return;
     autoSyncRunning = true;
     resetMessageCounter();
     try {

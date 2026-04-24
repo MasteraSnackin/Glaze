@@ -319,6 +319,28 @@ const t = (key) => translations[currentLang.value]?.[key] || key;
 
 // Event Handlers
 const handleBack = () => {
+    logger.debug('[AppHeader] handleBack called. currentView:', props.currentView, 'showBack:', state.showBack, 'onBack:', !!state.onBack, 'mode:', state.mode);
+
+    // Editor headers have a fixed close action. Route directly to the parent
+    // instead of relying on mutable header state or global back listeners.
+    if (props.currentView === 'view-character-edit' || props.currentView === 'view-persona-edit') {
+        emit('action-close');
+        return;
+    }
+
+    // Settings screens own their back behavior through explicit header state.
+    // Let that run before broadcasting global back events from unrelated views.
+    if (state.onBack && (props.currentView === 'view-settings' || props.currentView === 'view-theme-settings')) {
+        state.onBack();
+        return;
+    }
+
+    // For submenu views, if we have an explicit onBack, use it directly too.
+    if (state.onBack && ['view-api', 'view-presets', 'view-lorebook', 'view-regex', 'view-personas', 'view-tools'].includes(props.currentView)) {
+        state.onBack();
+        return;
+    }
+
     const backNavEvent = new CustomEvent('app-back-navigation', { cancelable: true });
     window.dispatchEvent(backNavEvent);
     if (backNavEvent.defaultPrevented) return;
@@ -762,7 +784,7 @@ defineExpose({ updateHeader });
     cursor: pointer;
     fill: var(--vk-blue);
     transition: fill var(--transition-speed) ease;
-    z-index: 2;
+    z-index: 10;
 }
 
 .header-logo {

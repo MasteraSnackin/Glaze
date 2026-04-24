@@ -22,6 +22,7 @@ function handleBack() {
 }
 
 const handleBackNavigation = () => {
+    if (!props.viewMode && !sheet.value?.isVisible) return;
     handleBack();
 };
 

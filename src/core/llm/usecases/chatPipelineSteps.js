@@ -18,6 +18,7 @@ export async function stepVectorSearch(ctx, deps) {
         );
         if (vectorResults.length > 0) {
             ({ vectorEntries: newVectorEntries } = mergeLateVectorLoreEntries(ctx.result, vectorResults));
+            ctx.loreEntries = Array.isArray(ctx.result?.loreEntries) ? ctx.result.loreEntries : ctx.loreEntries;
         }
     } catch (e) {
         ctx._vectorSearchError = e;
@@ -89,7 +90,7 @@ export function stepContextLimitGuard(ctx, deps) {
     }
 }
 
-export function stepPromptReady(ctx, deps) {
+export async function stepPromptReady(ctx, deps) {
     const { buildMergedContextBreakdown } = deps;
     ctx.logStep('promptReady');
 
@@ -103,7 +104,7 @@ export function stepPromptReady(ctx, deps) {
 
     const { onPromptReady } = ctx.callbacks;
     if (onPromptReady) {
-        onPromptReady({
+        await onPromptReady({
             loreEntries: ctx.loreEntries,
             memoryEntries: ctx.memoryEntries,
             contextBreakdown: ctx.contextBreakdown

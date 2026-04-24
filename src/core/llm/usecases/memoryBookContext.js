@@ -258,7 +258,7 @@ export async function buildMemoryInjection({ char, history, summary, safeContext
     const topEntries = scoredEntries
         .filter(item => item.score > 0)
         .sort((a, b) => b.score - a.score)
-        .slice(0, Math.max(1, Math.min(5, settings.maxInjectedEntries || 3)))
+        .slice(0, Math.max(1, settings.maxInjectedEntries || 3))
         .map(item => item.entry);
 
     if (!topEntries.length) {

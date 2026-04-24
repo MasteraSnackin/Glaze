@@ -852,6 +852,7 @@
     "btn_indexing": "Indexing...",
     "btn_index_all": "Index All",
     "btn_retry_failed": "Retry Failed",
+    "btn_rate_limited": "Rate limited ({seconds}s)",
     "btn_enable_vector_all": "Enable Vector All",
     "btn_disable_vector_all": "Disable Vector All",
     "entry_indexed": "Indexed",

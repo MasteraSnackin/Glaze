@@ -517,14 +517,16 @@ export const db = {
     },
     saveChat: (charId, chatData) => {
         const normalized = normalizeChatData(chatData);
-        return queueDbWrite(() => db.set(`gz_chat_${charId}`, normalized));
+        const snapshot = toPlain(normalized);
+        return queueDbWrite(() => db.set(`gz_chat_${charId}`, snapshot));
     },
     patchChatData: async (charId, patchFn) => {
         const data = await db.getChat(charId);
         if (!data) return;
         patchFn(data);
         const normalized = normalizeChatData(data);
-        await queueDbWrite(() => db.set(`gz_chat_${charId}`, normalized));
+        const snapshot = toPlain(normalized);
+        await queueDbWrite(() => db.set(`gz_chat_${charId}`, snapshot));
     },
     createSession: async (charId) => {
         let data = await db.get(`gz_chat_${charId}`);

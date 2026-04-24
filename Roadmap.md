@@ -77,6 +77,148 @@ The current roadmap is:
    - Issue: `getPartial()` returned `fullText` (raw accumulated text without reasoning tag stripping) and `accumulatedReasoning` (raw reasoning buffer) instead of the effective (display-ready) text and reasoning. This meant partial results sent during abort/timeout paths contained unprocessed `<reasoning>` tags and duplicate content.
    - Fix: `getPartial()` now returns `previousEffectiveText` (processed text) and `latestEffectiveReasoning` (processed reasoning) with correct fallback.
 
+### Vector / Embedding Fixes (on This Branch)
+
+5. **Fix: vector search queries contained raw HTML, images, base64 data, and reasoning tags**
+   - Status: `done`
+   - Files: `src/core/states/lorebookState.js`
+   - Issue: Query text assembled from chat messages for embedding included unprocessed HTML tags, `<style>`/`<script>`/`<svg>` blocks, base64-encoded images, `<think>...</think>` reasoning blocks, and `imggen-loading` class names. These bloated the query token count, degraded embedding quality, and could exceed embedding model context limits.
+   - Fix: Added `sanitizeVectorQueryText()` that strips heavy HTML blocks, converts remaining HTML to plain text via `htmlToPlainText()`, removes reasoning tags, collapses whitespace. Applied in `vectorSearchLorebooks()` before embedding queries.
+
+6. **Fix: vector query text was unbounded — could exceed embedding model context**
+   - Status: `done`
+   - Files: `src/core/states/lorebookState.js`
+   - Issue: `focusedQueryParts` and `fallbackQueryParts` were joined with `\n` and sent directly to the embedding API without any token/length limit. Long chats could produce query text well over 8K tokens, causing API errors or truncated embeddings.
+   - Fix: Added `buildBoundedQueryText()` that iterates parts from most recent backward, trims each part to a char limit, and stops when total tokens or chars exceed configurable thresholds. `focusedQuery` capped at 1024 tokens / 6000 chars, `fallbackQuery` at 1536 tokens / 10000 chars.
+
+7. **Fix: stale embeddings used for vector search — no hash check at query time**
+   - Status: `done`
+   - Files: `src/core/states/lorebookState.js`
+   - Issue: `vectorSearchLorebooks()` checked that an embedding record existed (`emb && (emb.vectors || emb.vector)`) but never verified that the stored `textHash` still matched the current entry content. If a lorebook entry was edited after indexing, the stale (incorrect) embedding was still used for retrieval, producing wrong results.
+   - Fix: Added per-candidate hash check at query time — compute current `buildEmbeddingFingerprint` hash, compare with `emb.textHash`. Only fresh embeddings participate in search. Stale ones are reported in `missingEmbeddings` with `reason: 'stale_or_invalid'`.
+
+8. **Fix: stale embedding detection in UI — `getEmbeddingStatus` always returned 'indexed' for existing records**
+   - Status: `done`
+   - Files: `src/core/states/lorebookState.js`
+   - Issue: `getEmbeddingStatus(entryId)` checked if a DB record existed and had no error, but never compared the stored hash with current entry content. Edited entries showed "indexed" status even though the embedding was stale.
+   - Fix: `getEmbeddingStatus` now accepts entry object, computes current hash, and returns `'stale'` when hash differs. Added `isLorebookEmbeddingFresh()` helper. LorebookSheet uses the new signature everywhere.
+
+9. **Fix: no rate limit (429) handling for embedding API**
+   - Status: `done`
+   - Files: `src/core/services/embeddingService.js`, `src/core/states/lorebookState.js`, `src/core/services/memoryBooksService.js`, `src/composables/chat/useMemoryBooks.js`, `src/components/sheets/LorebookSheet.vue`, `src/locales/en/index.json`, `src/locales/ru/index.json`
+   - Issue: Embedding API calls had no 429 handling. When a provider rate-limited bulk indexing, every subsequent request also failed with an unhandled error, and the UI showed no feedback. Users would see "Index All" spin forever or fail silently.
+   - Fix:
+     - Added `RateLimitError` class in `embeddingService.js` with `retryAfter` from `Retry-After` header.
+     - Both native (CapacitorHttp) and web (fetch) paths now detect 429 and throw `RateLimitError`.
+     - `indexLorebookEntries` catches `RateLimitError`, marks all remaining entries as rate-limited errors, returns `{ rateLimited: true, retryAfter }`.
+     - `reindexAllMemoryEntries` catches `RateLimitError` and returns `{ rateLimited: true, retryAfter }` instead of crashing.
+     - LorebookSheet shows cooldown timer on "Index All" / "Retry Failed" buttons during rate limit.
+     - Memory Books reindex shows toast with retry countdown on rate limit.
+     - Added 200ms delay between chunked embedding requests to reduce rate limit risk.
+     - i18n keys: `btn_rate_limited` (en/ru).
+
+10. **Fix: entries with embedding errors were skipped during "Index All" instead of re-indexed**
+    - Status: `done`
+    - Files: `src/core/states/lorebookState.js`
+    - Issue: `indexLorebookEntries` skipped entries where `existing.textHash === textHash` even when `existing.error` was set. Previously failed entries were never retried during normal "Index All" — only the separate "Retry Failed" path would catch them.
+    - Fix: Added `&& !existing.error` condition — entries with errors are always re-indexed regardless of hash match.
+
+11. **Fix: deleting a lorebook entry did not delete its embedding from IndexedDB**
+    - Status: `done`
+    - Files: `src/components/sheets/LorebookSheet.vue`
+    - Issue: `handleDeleteEntry()` spliced the entry from the array but left the orphaned embedding record in IndexedDB, wasting storage and potentially appearing in vector search.
+    - Fix: `handleDeleteEntry` now calls `deleteLorebookEntryEmbedding(entry.id)` before removing the entry, then refreshes vector status.
+
+12. **Fix: vector search did not respect `characterFilter` on entries**
+    - Status: `done`
+    - Files: `src/core/states/lorebookState.js`
+    - Issue: `vectorSearchLorebooks()` collected all entries with `vectorSearch: true` without checking `characterFilter`. Entries intended for specific characters were matched for all characters.
+    - Fix: Added character filter check in vector entry collection — respects `isExclude` and `names` from `entry.characterFilter`.
+
+13. **Fix: vector search failure blocked entire generation**
+    - Status: `done`
+    - Files: `src/core/llm/usecases/chatPostPromptPipeline.js`
+    - Issue: When vector search failed (provider down, config error, etc.), `runChatPostPromptPipeline` showed an error bottom sheet and called `onError`, aborting the entire generation. Users couldn't generate at all if the embedding endpoint was down, even though keyword lorebook retrieval was unaffected.
+    - Fix: Vector search failure now degrades gracefully — generation continues without vector lorebook results. Warning is logged but no error popup and no generation abort.
+
+14. **Fix: `ctx.loreEntries` lost after vector merge in pipeline**
+    - Status: `done`
+    - Files: `src/core/llm/usecases/chatPipelineSteps.js`
+    - Issue: After `mergeLateVectorLoreEntries` in `stepVectorSearch`, `ctx.loreEntries` was overwritten with the merge result but the original `ctx.result.loreEntries` was not propagated back. Subsequent pipeline steps could see empty `loreEntries`.
+    - Fix: After merge, `ctx.loreEntries` is restored from `ctx.result.loreEntries` if available.
+
+15. **Fix: `stepPromptReady` was synchronous but `onPromptReady` callback is async**
+    - Status: `done`
+    - Files: `src/core/llm/usecases/chatPipelineSteps.js`
+    - Issue: `stepPromptReady` called `onPromptReady(...)` without `await`, so the prompt-ready handler (which persists lore/memory refs to messages) could race with the generation request dispatch.
+    - Fix: Made `stepPromptReady` async and added `await` on `onPromptReady`.
+
+16. **Fix: `maxInjectedEntries` capped at 5 regardless of user setting**
+    - Status: `done`
+    - Files: `src/core/llm/usecases/memoryBookContext.js`
+    - Issue: `buildMemoryInjection` used `.slice(0, Math.max(1, Math.min(5, settings.maxInjectedEntries || 3)))`, which clamped `maxInjectedEntries` to 5 even if the user configured a higher value.
+    - Fix: Removed the `Math.min(5, ...)` cap — now uses `Math.max(1, settings.maxInjectedEntries || 3)`.
+
+17. **Fix: `userAvatar` getter crash when `activeChatChar` ref is null**
+    - Status: `done`
+    - Files: `src/core/llm/usecases/chatGenerationServiceFactory.js`
+    - Issue: After passing `activeChar` ref (from the stale-capture fix), the getter `activeChatChar.value?.avatar` would crash when `activeChar.value === null` because `null.value` is undefined access on a non-ref.
+    - Fix: Changed to `activeChatChar?.value?.avatar` — optional chaining on the ref itself.
+
+### Memory Automation Fixes (on This Branch)
+
+18. **Fix: `runMemoryAutomationAfterStableTurn` crashed for background characters**
+    - Status: `done`
+    - Files: `src/composables/chat/useMemoryAutomation.js`
+    - Issue: `runMemoryAutomationAfterStableTurn` used `activeChatChar.value.id` for DB saves and UI sync. When called for a background character (e.g. from `handleGenerationComplete` background path where `activeChatChar.value` is a different character), it saved data under the wrong character ID and updated the wrong UI.
+    - Fix: Added `charId` and `syncUi` parameters. Uses `targetCharId` (from param or `activeChatChar.value?.id`) for all DB writes. Only calls `updatePendingMemoryMessageIds` when `syncUi && activeChatChar.value?.id === targetCharId`.
+
+### Database Fixes (on This Branch)
+
+19. **Fix: Vue reactive proxies persisted to IndexedDB**
+    - Status: `done`
+    - Files: `src/utils/db.js`
+    - Issue: `saveChat` and `patchChatData` stored `normalizeChatData(chatData)` directly, which could contain Vue reactive Proxy objects. IndexedDB serialization of Proxies can produce incomplete or incorrect data (missing properties, getter side effects). This could cause data loss or corruption on reload.
+    - Fix: Added `toPlain()` deep snapshot before writing — strips all Proxy layers, producing a plain object for IndexedDB.
+
+### Navigation / UI Fixes (on This Branch)
+
+20. **Fix: editor close used stale `currentView` after resetting state**
+    - Status: `done`
+    - Files: `src/App.vue`
+    - Issue: `closeEditor()` read `currentView.value` after already setting `previousViewForEditor.value = null` and changing `currentView.value`. The view check for `view-character-edit` vs `view-persona-edit` could match the new view instead of the closing one. Editing indices were not reset, causing stale editor state on next open.
+    - Fix: Capture `closingView` before resetting state. Reset `isHeaderEditorMode`, `editingCharacterIndex`, and `editingPersonaIndex` explicitly. Pass `currentView` (not `effectiveMainView`) to AppHeader so it sees the real view name.
+
+21. **Fix: AppHeader back button didn't route to correct close action for editors/settings**
+    - Status: `done`
+    - Files: `src/components/layout/AppHeader.vue`
+    - Issue: `handleBack()` always dispatched a global `app-back-navigation` event. For editor headers (character edit, persona edit) and nested settings views, the global listener could be from a different view, causing incorrect navigation (e.g. closing the whole app instead of the editor).
+    - Fix: Added explicit routing in `handleBack()`: editor views emit `action-close` directly; settings/submenu views call `state.onBack()` directly; only falls through to global event for standard views.
+
+22. **Fix: back navigation fired on hidden/closed sheets**
+    - Status: `done`
+    - Files: `src/components/sheets/LorebookSheet.vue`, `src/components/sheets/RegexSheet.vue`, `src/views/ApiView.vue`, `src/views/PersonasView.vue`, `src/views/PresetView.vue`
+    - Issue: `handleBackNavigation` event listeners on sheets fired even when the sheet was closed or not visible. This caused spurious `preventDefault()` calls that blocked normal Android hardware back button behavior (navigating between views).
+    - Fix: Added visibility guard — `handleBackNavigation` returns early if `!sheet.value?.isVisible`.
+
+23. **Fix: LorebookSheet/RegexSheet close didn't reset internal view state**
+    - Status: `done`
+    - Files: `src/components/sheets/LorebookSheet.vue`, `src/components/sheets/RegexSheet.vue`
+    - Issue: `close()` called `sheet.value?.close()` but left `currentView` on the detail/edit sub-view. Next time the sheet opened, it showed the previous detail view instead of the list.
+    - Fix: `close()` now sets `currentView.value = 'list'` before closing the sheet.
+
+24. **Fix: null-safe key array access in LorebookSheet**
+    - Status: `done`
+    - Files: `src/components/sheets/LorebookSheet.vue`
+    - Issue: Several template bindings accessed `entry.keys.join(...)`, `activeEntry.secondary_keys?.join(...)`, `activeEntry.characterFilter?.names.join(...)` without null guards. Entries with missing/undefined `keys` arrays crashed the template renderer.
+    - Fix: Added `|| []` fallbacks and `?.join?.()` optional chaining on all key/array accesses in template.
+
+25. **Fix: `triggerAutoSyncCheck` crash when `isGenerating` not passed**
+    - Status: `done`
+    - Files: `src/composables/chat/useAutoSync.js`
+    - Issue: `triggerAutoSyncCheck({ isGenerating })` required `isGenerating` but some callers didn't pass it. Accessing `isGenerating.value` on undefined crashed.
+    - Fix: Default destructuring to `{ isGenerating } = {}`, use optional chaining `isGenerating?.value`.
+
 Phase 3 composable extractions:
 - [done] Extract `triggerAutoSyncCheck` into `composables/chat/useAutoSync.js`
 - [done] Extract memory automation functions into `composables/chat/useMemoryAutomation.js`

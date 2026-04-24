@@ -465,17 +465,38 @@ export async function deleteMemoryEntryIndexIfPresent(entryId) {
 }
 
 export async function reindexMemoryEntry(entry, charId, sessionId) {
-    await deleteMemoryEntryIndexIfPresent(entry.id);
     await indexMemoryEntryIfNeeded(entry, charId, sessionId);
 }
 
 export async function reindexAllMemoryEntries(memoryBook, charId, sessionId) {
-    if (!memoryBook || !Array.isArray(memoryBook.entries)) return;
+    if (!memoryBook || !Array.isArray(memoryBook.entries)) return { rateLimited: false };
+    const { RateLimitError } = await import('@/core/services/embeddingService.js');
+    const errors = [];
+    let rateLimited = false;
+    let retryAfter = 60;
     for (const entry of memoryBook.entries) {
         if (entry.vectorSearch) {
-            await reindexMemoryEntry(entry, charId, sessionId);
+            try {
+                await reindexMemoryEntry(entry, charId, sessionId);
+            } catch (err) {
+                if (err instanceof RateLimitError || err.status === 429) {
+                    rateLimited = true;
+                    retryAfter = err.retryAfter || 60;
+                    errors.push({ entryId: entry.id, error: err.message, rateLimited: true });
+                    break;
+                }
+                console.error('[reindexAllMemoryEntries] failed for entry', entry.id, err);
+                errors.push({ entryId: entry.id, error: err.message });
+            }
         }
     }
+    if (rateLimited) {
+        return { rateLimited: true, retryAfter, failedCount: errors.length };
+    }
+    if (errors.length > 0) {
+        throw new Error(`${errors.length} entries failed: ${errors.map(e => e.error).join('; ')}`);
+    }
+    return { rateLimited: false };
 }
 
 // ============================================================================

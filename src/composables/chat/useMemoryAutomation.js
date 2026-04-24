@@ -350,7 +350,10 @@ export function useMemoryAutomation({
         }
     }
 
-    async function runMemoryAutomationAfterStableTurn(chatData, sessionId, messages, { allowImmediate = true } = {}) {
+    async function runMemoryAutomationAfterStableTurn(chatData, sessionId, messages, { allowImmediate = true, charId = null, syncUi = true } = {}) {
+        const targetCharId = charId || activeChatChar.value?.id;
+        if (!targetCharId) return false;
+
         const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
         const automation = ensureMemoryAutomationState(memoryBook);
         const autoCreateEnabled = memoryBook.settings?.autoCreateEnabled !== false;
@@ -360,12 +363,13 @@ export function useMemoryAutomation({
         const interval = normalizeAutoCreateInterval(memoryBook);
         const delayed = memoryBook.settings?.useDelayedAutomation !== false;
         const lastRole = getLastStableConversationRole(stableMessages);
+        const shouldSyncUi = syncUi && activeChatChar.value?.id === targetCharId;
 
         if (!autoCreateEnabled) {
             automation.pendingTrigger = null;
             automation.lastProcessedMessageCount = Math.max(automation.lastProcessedMessageCount || 0, stableCount);
             memoryBook.updatedAt = Date.now();
-            await db.saveChat(activeChatChar.value.id, chatData);
+            await db.saveChat(targetCharId, chatData);
             return false;
         }
 
@@ -383,8 +387,10 @@ export function useMemoryAutomation({
                 automation.lastProcessedMessageCount = stableCount;
                 automation.pendingTrigger = null;
                 memoryBook.updatedAt = Date.now();
-                await db.saveChat(activeChatChar.value.id, chatData);
-                await updatePendingMemoryMessageIds(activeChatChar.value);
+                await db.saveChat(targetCharId, chatData);
+                if (shouldSyncUi) {
+                    await updatePendingMemoryMessageIds(activeChatChar.value);
+                }
                 if (!pendingDraft) return false;
                 if (!autoGenerateEnabled) return true;
                 return await generateMemoryDraftForMessages(selected, {
@@ -393,14 +399,14 @@ export function useMemoryAutomation({
                 });
             }
             memoryBook.updatedAt = Date.now();
-            await db.saveChat(activeChatChar.value.id, chatData);
+            await db.saveChat(targetCharId, chatData);
             return false;
         }
 
         if (!allowImmediate || automation.isGeneratingDraft || stableCount < interval) {
             automation.lastProcessedMessageCount = Math.max(automation.lastProcessedMessageCount, stableCount);
             memoryBook.updatedAt = Date.now();
-            await db.saveChat(activeChatChar.value.id, chatData);
+            await db.saveChat(targetCharId, chatData);
             return false;
         }
 
@@ -408,7 +414,7 @@ export function useMemoryAutomation({
         if (nextThreshold <= 0 || nextThreshold <= automation.lastProcessedMessageCount) {
             automation.lastProcessedMessageCount = Math.max(automation.lastProcessedMessageCount, stableCount);
             memoryBook.updatedAt = Date.now();
-            await db.saveChat(activeChatChar.value.id, chatData);
+            await db.saveChat(targetCharId, chatData);
             return false;
         }
 
@@ -426,7 +432,7 @@ export function useMemoryAutomation({
                 createdAt: Date.now()
             };
             memoryBook.updatedAt = Date.now();
-            await db.saveChat(activeChatChar.value.id, chatData);
+            await db.saveChat(targetCharId, chatData);
             return false;
         }
 
@@ -434,8 +440,10 @@ export function useMemoryAutomation({
         const pendingDraft = createPendingMemoryDraft(memoryBook, selected, { source: 'auto_immediate' });
         automation.lastProcessedMessageCount = stableCount;
         memoryBook.updatedAt = Date.now();
-        await db.saveChat(activeChatChar.value.id, chatData);
-        await updatePendingMemoryMessageIds(activeChatChar.value);
+        await db.saveChat(targetCharId, chatData);
+        if (shouldSyncUi) {
+            await updatePendingMemoryMessageIds(activeChatChar.value);
+        }
         if (!pendingDraft) return false;
         if (!autoGenerateEnabled) return true;
         return await generateMemoryDraftForMessages(selected, {

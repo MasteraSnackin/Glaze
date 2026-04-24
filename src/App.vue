@@ -393,13 +393,22 @@ async function handleHeaderDelete() {
 }
 
 async function closeEditor() {
+    const closingView = currentView.value;
     const prev = previousViewForEditor.value;
     previousViewForEditor.value = null;
     const prevSessionId = previousSessionIdForEditor.value;
     previousSessionIdForEditor.value = null;
+    isHeaderEditorMode.value = false;
+
+    if (closingView === 'view-character-edit') {
+        editingCharacterIndex.value = -1;
+    }
+    if (closingView === 'view-persona-edit') {
+        editingPersonaIndex.value = -1;
+    }
 
     if (prev === 'view-chat') {
-        const isEditingChar = currentView.value === 'view-character-edit';
+        const isEditingChar = closingView === 'view-character-edit';
         currentView.value = 'view-chat';
         
         waitForComponent(chatViewRef, async (comp) => {
@@ -430,7 +439,7 @@ async function closeEditor() {
         currentView.value = prev;
     } else {
         // Fallback if previousView was not set
-        if (currentView.value === 'view-persona-edit') {
+        if (closingView === 'view-persona-edit') {
             currentView.value = 'view-menu';
         } else {
             currentView.value = 'view-characters';
@@ -879,7 +888,7 @@ watch(currentView, (newVal, oldVal) => {
     <div class="header-container" ref="headerContainer" :style="{ zIndex: headerZIndex }">
         <AppHeader
             ref="headerRef"
-            :current-view="effectiveMainView"
+            :current-view="currentView"
             :categories="categories"
             :editing-index="headerEditingIndex"
             @action-save="handleHeaderSave"

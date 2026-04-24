@@ -84,6 +84,7 @@ function open() {
 }
 
 function close() {
+    currentView.value = 'list';
     sheet.value?.close();
 }
 
@@ -110,6 +111,7 @@ function goBack() {
 }
 
 function handleBackNavigation(e) {
+    if (!sheet.value?.isVisible) return;
     if (currentView.value !== 'list') {
         e.preventDefault();
         goBack();
