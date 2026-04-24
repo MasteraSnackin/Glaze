@@ -844,8 +844,8 @@ Expected output:
 - existing internal callers have been migrated off — DONE (except cancelable back-nav pattern)
 
 ### Phase 11. Organize orchestration by scenario, not by technique
-Status: in progress — audit complete, implementation pending
-Testing: not tested
+Status: done (11a–11c complete; 11d partial — generateSummary/generateMemoryDraft promoted to real entrypoints, calculateContext still hollow wrapper, generateChat still delegates to generationService.js as middleman; remaining 11d items deferred to Phase 14)
+Testing: tested (`npm run build` passes)
 
 Purpose:
 Make file names correspond to user-facing scenarios instead of technical layer labels.
@@ -993,7 +993,7 @@ Expected output:
 - future refactors can be verified by test, not just by build + manual check
 
 ### Phase 13. Shell and large component decomposition
-Status: done (13a–13e all complete)
+Status: done (13a–13l complete)
 Testing: tested (`npm run build` passes, `npm run lint` 0 new errors)
 
 Purpose:
@@ -1052,27 +1052,57 @@ Work:
 - Extract `useContentEditable.js` (128 lines) — getCaretIndex, setCaretPosition, getTextFromContentEditable, updateInputPreview (reusable contenteditable utilities)
 - Extract `useInputActions.js` (168 lines) — handleSend, guidance mode, image attach/clear, magic drawer toggle/close, fullscreen editor, focus/blur handlers
 
-**13c. lorebookState.js decomposition (~1320 → ~400 state, ~900 service)**
-- Extract `lorebookSearchService.js` — keyword scan, vector search (findTopK, cosineSimilarity), hybrid scoring, scanDepth logic, ~400 lines
-- Extract `lorebookEmbeddingService.js` — embedding orchestration, reindex, vectorSearch flag handling, ~200 lines
-- lorebookState.js retains: reactive state, watchers, CRUD operations, DB persistence only
-
-**13d. ChatMessage.vue decomposition (~1986 → ~1200)**
-- Extract `useMessageActions.js` composable — context menu items, actions menu, swipe handlers, export, regeneration trigger, ~400 lines
-- ChatMessage.vue retains: template rendering, formatting, badges, search highlighting
-
-**13e. ChatInput.vue decomposition (~1156 → ~700)**
-- Extract `useChatInputActions.js` — selection toolbar, swipe actions, request preview trigger, ~200 lines
-- Extract keyboard handling into existing `keyboardHandler.js` (move platform-specific logic out of component), ~100 lines
+**13c–13e completed above — duplicated draft sections removed**
 
 Expected output:
 
 - App.vue: thin shell, 622 lines ✅
 - PresetView.vue: template + composable wiring, 279 lines script ✅
-- lorebookState.js: reactive state only, ~400 lines; search logic in dedicated service
-- ChatMessage.vue: template + rendering, ~1200 lines
-- ChatInput.vue: template + input handling, ~700 lines
-- All extracted composables/services testable in isolation
+- lorebookState.js: reactive state only, ~400 lines; search logic in dedicated service ✅
+- ChatMessage.vue: template + rendering, ~1200 lines ✅
+- ChatInput.vue: template + input handling, ~700 lines ✅
+- All extracted composables/services testable in isolation ✅
+
+**13f. LorebookSheet.vue decomposition** ✅ done
+- Extract `useLorebookEntries.js` (157 lines) — entry CRUD, reorder, search/filter, selectEntry, saveEntry, deleteEntry, duplicateEntry, batch vector toggle
+- LorebookSheet.vue script: 725 → 385 lines
+
+**13g. LorebookSheet.vue decomposition — indexing pass** ✅ done
+- Extract `useLorebookIndexing.js` (93 lines) — indexAllEntries, indexSingleEntry, retryFailedEmbeddings, getVectorStatusCounts
+- LorebookSheet.vue script: 385 → 290 lines
+
+**13h. ApiView.vue decomposition** ✅ done
+- Extract `useApiSettings.js` (237 lines) — API state/presets/connection/blacklist/debounce/model selector/reasoning
+- ApiView.vue script: 645 → 140 lines
+
+**13i. ApiView.vue decomposition — service providers** ✅ done
+- Extract `useServiceProviders.js` (128 lines) — embedding/imageGen/memory provider settings, load/test
+- ApiView.vue script: remains 140 lines
+
+**13j. CharacterList.vue decomposition** ✅ done
+- Extract `useCharacterActions.js` (179 lines) — onAddCharacter, onEditCharacter, openActions, janitor extraction + polling
+- CharacterList.vue script: 585 → 175 lines
+
+**13k. CharacterList.vue decomposition — sessions** ✅ done
+- Extract `useSessionSheet.js` (168 lines) — openSessionsSheet, deleteSession confirm, session list building, chat import
+- CharacterList.vue script: remains 175 lines
+
+**13l. ThemeSettingsView.vue decomposition** ✅ done
+- Extract `useThemePresets.js` (267 lines) — preset CRUD/apply/export/import/options/selector/bgImage/file import
+- ThemeSettingsView.vue script: 495 → 236 lines
+
+**Not decomposing** (script under 400 or already thin):
+- MemoryBooksSheet.vue (script 352, mostly emit-forwarding)
+- SyncSheet.vue (script 373, tightly coupled sync logic, extraction not worth fragmentation)
+
+Expected final output for 13f–13l:
+
+| File | Script before | Script after | Composables |
+|------|--------------|-------------|-------------|
+| LorebookSheet.vue | 725 | 290 | useLorebookEntries (157), useLorebookIndexing (93) |
+| ApiView.vue | 645 | 140 | useApiSettings (237), useServiceProviders (128) |
+| CharacterList.vue | 585 | 175 | useCharacterActions (179), useSessionSheet (168) |
+| ThemeSettingsView.vue | 495 | 236 | useThemePresets (267) |
 
 ### Phase 14. Final legacy cleanup pass
 Status: not done

@@ -68,7 +68,7 @@ git checkout -b feat/memorybook-ui feat/multi-vector
 | Branch | Purpose | PR |
 |--------|---------|----|
 | `origin/dev` | Local mirror of upstream integration branch | No PR |
-| `feat/refactor-phase1-event-hub` | Phase 1–13e structural refactor (event hub, request ownership, composable extraction, transport split, use-case re-architecture, App.vue decomposition, PresetView.vue decomposition, lorebookState.js decomposition, ChatMessage.vue decomposition, ChatInput.vue decomposition) | Not yet |
+| `feat/refactor-phase1-event-hub` | Phase 1–13l structural refactor (event hub, request ownership, composable extraction, transport split, use-case re-architecture, App.vue/PresetView/lorebookState/ChatMessage/ChatInput/LorebookSheet/ApiView/CharacterList/ThemeSettingsView decomposition) | Not yet |
 
 ### Historical (merged & deleted)
 - `feat/cloud-sync` → merged via PR #20
@@ -86,6 +86,16 @@ git checkout -b feat/memorybook-ui feat/multi-vector
 - Sync `origin/dev` with upstream: `git fetch upstream && git push origin upstream/dev:refs/heads/dev`
 - Create feature branch from `origin/dev`: `git checkout -b feat/xxx origin/dev`
 - Run `npm run lint && npm run build` before committing to verify no lint or build errors.
+
+## Anti-God-Object Guard Rails
+
+- **400-line script hard limit** — if `<script setup>` exceeds 400 lines, extract a composable first
+- **One concern per composable** — no "and" in composable names; split instead
+- **State ≠ service** — `*State.js` files contain state + CRUD only; search/embedding/orchestration goes in a service
+- **Sheet trap** — Sheets mix UI + CRUD + validation + status; extract business logic into composables before script hits 400
+- **Settings trap** — Settings views with multiple sub-domains (API, embedding, image gen) get composables per domain
+- **No circular service delegation** — use-cases must not delegate to a service that imports back from use-cases
+- **Template ≠ logic** — never extract sub-components just for line count if it requires prop-drilling
 
 ## Roadmap Maintenance
 

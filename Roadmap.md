@@ -50,6 +50,13 @@ The current roadmap is:
 - Phase 13c status: `done` (lorebookState.js decomposition — 1319 → 326 lines state+CRUD. Extracted: lorebookSearchService.js (182), lorebookVectorSearch.js (431), lorebookEmbeddingService.js (352). Re-exports from lorebookState.js for backward compatibility)
 - Phase 13d status: `done` (ChatMessage.vue decomposition — 1985 → 1621 lines. Extracted: useMessageSwipe.js (262 — touch/swipe/long-press/guided swipe/guidance editing), useMessageImageGen.js (149 — image gen click handler/parseIIG/openImage). Script reduced from 624 → 334 lines)
 - Phase 13e status: `done` (ChatInput.vue decomposition — 1155 → 905 lines. Extracted: useContentEditable.js (128 — getCaretIndex/setCaretPosition/getText/updatePreview), useInputActions.js (168 — send/guidance/image/magic drawer/fullscreen editor). Script reduced from 420 → 170 lines)
+- Phase 13f status: `done` (LorebookSheet.vue decomposition — extracted useLorebookEntries.js (157 — entry CRUD, reorder, search/filter, selectEntry, saveEntry, deleteEntry, duplicateEntry, batch vector toggle). Script reduced from 572 → 385 lines)
+- Phase 13g status: `done` (LorebookSheet.vue decomposition — extracted useLorebookIndexing.js (93 — indexAllEntries, indexSingleEntry, retryFailedEmbeddings, getVectorStatusCounts). Script reduced from 385 → 290 lines)
+- Phase 13h status: `done` (ApiView.vue decomposition — extracted useApiSettings.js (237 — API state/presets/connection/blacklist/debounce/model selector/reasoning). Script reduced from ~645 → 140 lines)
+- Phase 13i status: `done` (ApiView.vue decomposition — extracted useServiceProviders.js (128 — embedding/imageGen/memory provider settings, load/test). Script remains 140 lines)
+- Phase 13j status: `done` (CharacterList.vue decomposition — extracted useCharacterActions.js (179 — add/import/janitor extract, edit, export PNG/JSON, favorite, delete). Script reduced from 585 → 175 lines)
+- Phase 13k status: `done` (CharacterList.vue decomposition — extracted useSessionSheet.js (168 — session list/CRUD, import chat, delete session confirm). Script remains 175 lines)
+- Phase 13l status: `done` (ThemeSettingsView.vue decomposition — extracted useThemePresets.js (267 — preset CRUD/apply/export/import/options/selector/bgImage/file import). Script reduced from 495 → 236 lines)
 - Current slice testing: `tested` (`npm run build` + `npm run lint`)
 
 ### Bugs Found & Fixed on This Branch

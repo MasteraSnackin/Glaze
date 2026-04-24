@@ -971,6 +971,26 @@ These composables now cover placeholder setup, stream UI application, prompt met
 
 ---
 
+## Anti-God-Object Guard Rails
+
+These rules prevent the gradual re-accumulation of responsibilities that motivated Phases 8–13.
+
+1. **Hard limit 400 lines script** — if `<script setup>` exceeds 400 lines, extract a composable before adding more logic. Template lines do not count toward this limit.
+
+2. **One concern per composable** — if a composable name contains "and" (e.g., `useFooAndBar`), split it. A composable should be namable by a single noun phrase.
+
+3. **State separate from services** — a reactive state module (`*State.js`) should contain state + simple CRUD. Search, embedding, and orchestration logic belongs in a dedicated service or composable, not in the state module itself.
+
+4. **Sheet pattern** — Sheet components are the most common god-object trap. A Sheet typically mixes UI rendering + CRUD actions + validation + status tracking. Extract business logic into a composable before the sheet script exceeds 400 lines.
+
+5. **Settings view pattern** — Settings views tend to accumulate sub-settings tabs (API, embedding, image gen, memory). Each sub-settings domain should be its own composable if the total script exceeds 400 lines.
+
+6. **No circular imports via services** — Use-case files must not delegate to a service that imports back from use-cases. If a service is a middleman between a use-case and lower layers, inline the service or invert the dependency.
+
+7. **Template is not logic** — 1000+ lines of template is acceptable for complex UI. The decomposition target is script logic, not HTML structure. Never extract a sub-component solely to reduce line count if it requires excessive prop-drilling.
+
+---
+
 ## Testing Checklist
 
 ### Tokenizer
