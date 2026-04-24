@@ -46,6 +46,10 @@ The current roadmap is:
 - Phase 11 status: `done` (use-case layer re-architecture — pipeline dir, split scope-creep files, fix naming, eliminate hollow entrypoints)
 - Phase 12 status: `done` (transport split, legacy cleanup, dead param removal)
 - Phase 13a status: `done` (App.vue decomposition — 1229 → 622 lines script + 5 composables: useAppNavigation, useEditorController, useAppEventSubscriptions, useGlossaryPopup, useAppInit)
+- Phase 13b status: `done` (PresetView.vue decomposition — usePresetEditor.js god-object (2080 lines) → 11 focused composables (max 177 lines each) + 279 lines glue in PresetView.vue script. Deleted usePresetEditor.js. New composables: usePresetNavigation (107), usePresetLoader (89), usePresetConnections (33), usePresetCRUD (173), usePresetSelectors (171), usePresetImage (40), useBlockManager (141), useBlockEditor (94), useAuthorsNoteSheet (73), useSummarySheet (126), usePresetTokenPreview (177))
+- Phase 13c status: `done` (lorebookState.js decomposition — 1319 → 326 lines state+CRUD. Extracted: lorebookSearchService.js (182), lorebookVectorSearch.js (431), lorebookEmbeddingService.js (352). Re-exports from lorebookState.js for backward compatibility)
+- Phase 13d status: `done` (ChatMessage.vue decomposition — 1985 → 1621 lines. Extracted: useMessageSwipe.js (262 — touch/swipe/long-press/guided swipe/guidance editing), useMessageImageGen.js (149 — image gen click handler/parseIIG/openImage). Script reduced from 624 → 334 lines)
+- Phase 13e status: `done` (ChatInput.vue decomposition — 1155 → 905 lines. Extracted: useContentEditable.js (128 — getCaretIndex/setCaretPosition/getText/updatePreview), useInputActions.js (168 — send/guidance/image/magic drawer/fullscreen editor). Script reduced from 420 → 170 lines)
 - Current slice testing: `tested` (`npm run build` + `npm run lint`)
 
 ### Bugs Found & Fixed on This Branch
@@ -1236,11 +1240,12 @@ Files changed:
 - New: 5 composables in `src/composables/app/`
 - Trimmed: `App.vue` (1229 → 622 lines)
 
-Remaining 13b–13e:
-- [not done] 13b: PresetView.vue decomposition (3858 lines)
-- [not done] 13c: lorebookState.js decomposition (1320 lines)
-- [not done] 13d: ChatMessage.vue decomposition (1986 lines)
-- [not done] 13e: ChatInput.vue decomposition (1156 lines)
+All 13a–13e complete:
+- [done] 13a: App.vue decomposition
+- [done] 13b: PresetView.vue decomposition
+- [done] 13c: lorebookState.js decomposition
+- [done] 13d: ChatMessage.vue decomposition
+- [done] 13e: ChatInput.vue decomposition
 
 ## Refactoring Phase — Tokenizer, Memory Books, Vectors/Lorebooks (Active)
 

@@ -1,21 +1,21 @@
 <script setup>
-import { ref, computed, nextTick, watch, onMounted, onBeforeUnmount } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import { Capacitor } from '@capacitor/core';
 import { formatText } from '@/utils/textFormatter.js';
 import { replaceMacros } from '@/utils/macroEngine.js';
 import ShadowContent from '@/components/ui/ShadowContent.vue';
 import { translations } from '@/utils/i18n.js';
-import { currentLang, disableSwipeRegeneration, shouldUseBatterySaverUI, hideMessageId, hideGenerationTime, hideTokenCount } from '@/core/config/APPSettings.js';
+import { currentLang, hideMessageId, hideGenerationTime, hideTokenCount } from '@/core/config/APPSettings.js';
 import { themeState } from '@/core/states/themeState.js';
 import { getAllGreetings } from '@/utils/sessions.js';
 import { getEffectivePersona, allPersonas } from '@/core/states/personaState.js';
-import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import RollingNumber from '@/components/ui/RollingNumber.vue';
 import SheetView from '@/components/ui/SheetView.vue';
 import { getBlacklistedProvider, getApiRuntimeStorage } from '@/core/config/APISettings.js';
-import { saveFile } from '@/core/services/fileSaver.js';
 import { APP_EVENTS } from '@/core/events/eventNames.js';
 import { publishAppEvent, subscribeAppEvent } from '@/core/events/eventHub.js';
+import { useMessageSwipe } from '@/composables/chat/useMessageSwipe.js';
+import { useMessageImageGen } from '@/composables/chat/useMessageImageGen.js';
 
 const props = defineProps({
     message: { type: Object, required: true },
@@ -45,73 +45,22 @@ const localEditText = computed({
 
 const triggeredItemsSheet = ref(null);
 const t = (key) => translations[currentLang.value]?.[key] || key;
-const isNativePlatform = Capacitor.isNativePlatform();
-const useLiteNativeRenderer = computed(() => shouldUseBatterySaverUI());
-const swipeTransitionName = computed(() => useLiteNativeRenderer.value ? 'transition-none' : (props.message.swipeDirection || 'slide-next'));
-const fadeTransitionName = computed(() => useLiteNativeRenderer.value ? 'transition-none' : 'fade');
+const _isNativePlatform = Capacitor.isNativePlatform();
 
-const isGuidedSwipeOpen = ref(false);
-const guidedSwipeText = ref('');
-const guidedSwipeInput = ref(null);
+const {
+    isGuidedSwipeOpen, guidedSwipeText, guidedSwipeInput,
+    useLiteNativeRenderer, swipeTransitionName, fadeTransitionName,
+    toggleGuidedSwipe, submitGuidedSwipe,
+    isGuidanceEditing, guidanceEditText, currentGuidance,
+    startGuidanceEdit, cancelGuidanceEdit, saveGuidanceEdit,
+    handleTouchStart, handleTouchMove, handleTouchEnd,
+    handleMessageClick,
+} = useMessageSwipe(props, emit);
 
-const toggleGuidedSwipe = () => {
-    isGuidedSwipeOpen.value = !isGuidedSwipeOpen.value;
-    if (isGuidedSwipeOpen.value) {
-        nextTick(() => { if (guidedSwipeInput.value) guidedSwipeInput.value.focus(); });
-    } else {
-        guidedSwipeText.value = '';
-    }
-};
-
-const submitGuidedSwipe = () => {
-    emit('regenerate', 'guided', guidedSwipeText.value);
-    isGuidedSwipeOpen.value = false;
-    guidedSwipeText.value = '';
-};
-
-const isGuidanceEditing = ref(false);
-const guidanceEditText = ref('');
-
-const currentGuidance = computed(() => {
-    if (props.message.role === 'char') {
-        const meta = props.message.swipesMeta?.[props.message.swipeId || 0];
-        if (meta && meta.guidanceText && meta.guidanceType === 'SWIPE') {
-            return {
-                text: meta.guidanceText,
-                type: 'SWIPE'
-            };
-        }
-        if (props.message.isTyping && props.message.guidanceText && props.message.guidanceType === 'SWIPE') {
-            return {
-                text: props.message.guidanceText,
-                type: 'SWIPE'
-            };
-        }
-        return null;
-    }
-
-    if (props.message.role === 'user' && props.message.guidanceText) {
-        return {
-            text: props.message.guidanceText,
-            type: props.message.guidanceType || 'GENERATION'
-        };
-    }
-    return null;
-});
-
-const startGuidanceEdit = () => {
-    guidanceEditText.value = currentGuidance.value?.text || '';
-    isGuidanceEditing.value = true;
-};
-
-const cancelGuidanceEdit = () => {
-    isGuidanceEditing.value = false;
-};
-
-const saveGuidanceEdit = () => {
-    emit('save-guidance', guidanceEditText.value.trim() || null);
-    isGuidanceEditing.value = false;
-};
+const {
+    handleContentClick: imgGenContentClick,
+    openImage,
+} = useMessageImageGen(emit);
 
 // --- Helpers ---
 const getAvatar = () => {
@@ -159,7 +108,6 @@ const formatMessageText = (text, regexTracking = undefined) => {
     if (!text) return '';
     const effPersona = getEffectivePersona(props.activeChatChar?.id, props.activeChatChar?.sessionId);
     text = replaceMacros(text, props.activeChatChar, effPersona);
-    // Fix: Clean artifacts and trim leading whitespace immediately
     const clean = text.replace(/^\s+/, '')
                     .replace(/&gt;/gi, '>')
                     .replace(/&lt;/gi, '<')
@@ -176,178 +124,6 @@ const formatMessageText = (text, regexTracking = undefined) => {
     });
 };
 
-// --- Swipe & Long Press Logic ---
-let swipeStartX = 0;
-let swipeStartY = 0;
-let isSwipeScrolling = false;
-let currentSwipeElement = null;
-let longPressTimer = null;
-let isLongPressTriggered = false;
-
-let hadSelectionOnStart = false;
- 
-function handleTouchStart(e) {
-    hadSelectionOnStart = false;
-    const sel = window.getSelection();
-    if (sel && sel.toString().trim().length > 0) {
-        hadSelectionOnStart = true;
-    }
-
-    if (props.isSelectionMode) return;
-    if (props.message.role !== 'char' || props.message.isEditing || props.isGenerating) {
-        // Still allow long press for selection on user messages or non-editing states
-        if (props.message.isEditing || props.isGenerating) return;
-    } else {
-        swipeStartX = e.touches[0].clientX;
-        swipeStartY = e.touches[0].clientY;
-        isSwipeScrolling = false;
-        
-        const section = e.currentTarget;
-        const body = section.querySelector('.msg-body');
-        if (body) {
-            body.style.transition = 'none';
-            currentSwipeElement = body;
-        }
-    }
-
-    // Long press logic
-    isLongPressTriggered = false;
-    longPressTimer = setTimeout(() => {
-        isLongPressTriggered = true;
-        emit('toggle-selection');
-        if (currentSwipeElement) {
-            currentSwipeElement.style.transform = '';
-            currentSwipeElement = null;
-        }
-    }, 500);
-}
-
-function handleTouchMove(e) {
-    if (isLongPressTriggered) return;
-    
-    const dX = e.touches[0].clientX - (swipeStartX || e.touches[0].clientX);
-    const dY = e.touches[0].clientY - (swipeStartY || e.touches[0].clientY);
-
-    // If moved significantly, cancel long press
-    if (Math.abs(dX) > 10 || Math.abs(dY) > 10) {
-        if (longPressTimer) {
-            clearTimeout(longPressTimer);
-            longPressTimer = null;
-        }
-    }
-
-    if (!currentSwipeElement || props.message.role !== 'char' || props.message.isEditing) return;
-    if (isSwipeScrolling) return;
-
-    const deltaX = e.touches[0].clientX - swipeStartX;
-    const deltaY = e.touches[0].clientY - swipeStartY;
-
-    if (Math.abs(deltaY) > Math.abs(deltaX)) {
-        isSwipeScrolling = true;
-        return;
-    }
-
-    if (e.cancelable) e.preventDefault();
-
-    const isFirstMsg = props.index === 0;
-    const canSwitchGreeting = isFirstMsg && getAllGreetings(props.activeChatChar).length > 1;
-    
-    if (deltaX < 0) { // Left (Next)
-        if (!canSwitchGreeting) {
-            if (!props.isLast && (props.message.swipeId || 0) >= (props.message.swipes?.length || 1) - 1) return;
-        }
-    } else if (deltaX > 0) { // Right (Prev)
-        if (!canSwitchGreeting) {
-            if ((props.message.swipeId || 0) <= 0) return;
-        }
-    }
-
-    currentSwipeElement.style.transform = `translateX(${deltaX}px)`;
-}
-
-function handleTouchEnd(e) {
-    if (longPressTimer) {
-        clearTimeout(longPressTimer);
-        longPressTimer = null;
-    }
-
-    if (isLongPressTriggered) {
-        isLongPressTriggered = false;
-        return;
-    }
-
-    if (!currentSwipeElement) return;
-    
-    const deltaX = e.changedTouches[0].clientX - swipeStartX;
-    const body = currentSwipeElement;
-    currentSwipeElement = null;
-    
-    if (isSwipeScrolling) {
-        body.style.transform = '';
-        return;
-    }
-
-    const isFirstMsg = props.index === 0;
-    const canSwitchGreeting = isFirstMsg && getAllGreetings(props.activeChatChar).length > 1;
-
-    const resetStyle = () => {
-        body.style.transition = 'transform 0.3s ease';
-        body.style.transform = '';
-    };
-
-    const animateChange = (callback) => {
-        body.style.opacity = '0';
-        callback();
-        nextTick(() => {
-            body.style.transform = '';
-            setTimeout(() => {
-                body.style.transition = 'opacity 0.2s ease';
-                body.style.opacity = '1';
-                setTimeout(() => { body.style.transition = ''; }, 200);
-            }, 50);
-        });
-    };
-
-    if (canSwitchGreeting) {
-        if (deltaX < -100) animateChange(() => emit('change-greeting', 1));
-        else if (deltaX > 100) animateChange(() => emit('change-greeting', -1));
-        else resetStyle();
-        return;
-    }
-
-    if (deltaX < -100) {
-        if ((props.message.swipeId || 0) < (props.message.swipes?.length || 1) - 1) {
-            animateChange(() => emit('swipe', 1));
-        } else if (props.isLast && !disableSwipeRegeneration.value) {
-            body.style.transition = 'transform 0.1s';
-            body.style.transform = `translateX(-20px)`;
-            setTimeout(() => { 
-                body.style.transform = ''; 
-                emit('regenerate', 'new_variant');
-            }, 100);
-        } else {
-            resetStyle();
-        }
-    } else if (deltaX > 100) {
-        if ((props.message.swipeId || 0) > 0) animateChange(() => emit('swipe', -1));
-        else resetStyle();
-    } else {
-        resetStyle();
-    }
-}
- 
-const handleMessageClick = () => {
-    if (!props.isSelectionMode) return;
-    
-    if (hadSelectionOnStart) {
-        hadSelectionOnStart = false;
-        window.getSelection()?.removeAllRanges();
-        return;
-    }
-    
-    emit('toggle-selection');
-};
-
 const layoutMode = computed(() => themeState.chatLayout);
 
 const handleBubbleClick = (e) => {
@@ -359,8 +135,6 @@ const handleBubbleClick = (e) => {
     
     emit('open-actions');
 };
-
-
 
 const focusAndResize = (el) => {
     if (!el) return;
@@ -374,7 +148,6 @@ const copyText = (text) => {
 };
 
 const combinedMessageData = computed(() => {
-    // Adding regexRevision as a dependency to trigger re-render
     const _rev = props.regexRevision;
     const triggeredRegexes = [];
     let html = formatMessageText(props.message.text, triggeredRegexes);
@@ -398,6 +171,11 @@ const combinedMessageData = computed(() => {
     return { html, regexes: triggeredRegexes };
 });
 
+const onContentClick = (e) => {
+    const handled = imgGenContentClick(e, layoutMode, props.isSelectionMode);
+    if (handled === true) handleBubbleClick(e);
+};
+
 const openTriggeredSheet = () => {
     triggeredItemsSheet.value?.open();
 };
@@ -406,155 +184,16 @@ const openLorebookEntry = (lb) => {
     triggeredItemsSheet.value?.close();
     publishAppEvent(APP_EVENTS.nav.openLorebookEntry, { lorebookId: lb.lorebookId, entryId: lb.id });
 };
+
 const copyErrorText = (text) => {
     if (!text) return;
     const div = document.createElement('div');
-    // Convert <br> to newlines before stripping tags
     div.innerHTML = text.replace(/<br\s*\/?>/gi, '\n');
     const cleanText = div.textContent || div.innerText || text;
     copyText(cleanText.trim());
 };
 
-const openImage = (src, instruction = null) => {
-    if (!src) return;
-    publishAppEvent(APP_EVENTS.nav.triggerOpenImage, { src, name: 'Attachment', description: instruction?.prompt || '' });
-};
-
-const parseIIGInstruction = (el) => {
-    if (!el?.dataset?.iigInstruction) return null;
-    try {
-        return JSON.parse(el.dataset.iigInstruction
-            .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&'));
-    } catch { return null; }
-};
-
-const handleContentClick = (e) => {
-    const path = e.composedPath();
-
-    // Loading block — tap to expand/collapse prompt text
-    const loadingBlock = path.find(el => el?.classList?.contains('imggen-loading'));
-    if (loadingBlock) {
-        e.stopPropagation();
-        loadingBlock.classList.toggle('expanded');
-        return;
-    }
-
-    // Options button on janitor image → bottom sheet with 2 actions
-    const janitorOptionsBtn = path.find(el => el?.classList?.contains('janitor-options-btn'));
-    if (janitorOptionsBtn) {
-        e.stopPropagation();
-        const wrapper = path.find(el => el?.classList?.contains('janitor-img-wrapper'));
-        const img = wrapper?.querySelector?.('img.janitor-img');
-        if (!img) return;
-        const src = img.src;
-        showBottomSheet({
-            items: [
-                {
-                    label: t('imggen_expand_image') || 'Expand image',
-                    hint: t('expand_image_hint') || 'Открыть картинку в полноэкранном режиме',
-                    icon: '<svg viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zm0 12.5c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>',
-                    onClick: () => { closeBottomSheet(); openImage(src); }
-                },
-                {
-                    label: t('action_save_image') || 'Save image',
-                    hint: t('imggen_save_hint') || 'Сохранить картинку на устройство',
-                    icon: '<svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>',
-                    onClick: async () => {
-                        closeBottomSheet();
-                        try {
-                            const response = await fetch(src);
-                            const blob = await response.blob();
-                            await saveFile(`Image_${Date.now()}.png`, blob, 'image/png');
-                        } catch (err) {
-                            console.error('Failed to save image:', err);
-                        }
-                    }
-                },
-            ]
-        });
-        return;
-    }
-
-    // Options button on generated image → bottom sheet with 3 actions
-    const optionsBtn = path.find(el => el?.classList?.contains('imggen-options-btn'));
-    if (optionsBtn) {
-        e.stopPropagation();
-        const wrapper = path.find(el => el?.classList?.contains('imggen-result-wrapper'));
-        const img = wrapper?.querySelector?.('img.imggen-result');
-        if (!img) return;
-        const instr = parseIIGInstruction(img);
-        const id = img.dataset?.iigId;
-        const src = img.src;
-        showBottomSheet({
-            items: [
-                {
-                    label: t('imggen_expand_image') || 'Expand image',
-                    hint: t('imggen_expand_image_hint') || 'Открыть картинку в полноэкранном режиме и посмотреть промпт',
-                    icon: '<svg viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zm0 12.5c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>',
-                    onClick: () => { closeBottomSheet(); openImage(src, instr); }
-                },
-                {
-                    label: t('action_save_image') || 'Save image',
-                    hint: t('imggen_save_hint') || 'Сохранить картинку на устройство',
-                    icon: '<svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>',
-                    onClick: async () => {
-                        closeBottomSheet();
-                        try {
-                            const response = await fetch(src);
-                            const blob = await response.blob();
-                            await saveFile(`Image_${Date.now()}.png`, blob, 'image/png');
-                        } catch (err) {
-                            console.error('Failed to save image:', err);
-                        }
-                    }
-                },
-                {
-                    label: t('action_regenerate') || 'Regenerate',
-                    hint: t('imggen_regenerate_hint') || 'Повторно сгенерировать картинку',
-                    icon: '<svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>',
-                    onClick: () => { closeBottomSheet(); if (instr && id) emit('regenerate-image', { instruction: instr, id }); }
-                },
-            ]
-        });
-        return;
-    }
-
-    // Error retry button
-    const retryBtn = path.find(el => el?.classList?.contains('imggen-error-retry'));
-    if (retryBtn) {
-        e.stopPropagation();
-        const errorBlock = path.find(el => el?.classList?.contains('imggen-error'));
-        if (errorBlock) {
-            const instr = parseIIGInstruction(errorBlock);
-            const id = errorBlock.dataset?.iigId;
-            if (instr && id) emit('regenerate-image', { instruction: instr, id });
-        }
-        return;
-    }
-
-    // Enable and generate button
-    const enableBtn = path.find(el => el?.classList?.contains('imggen-enable-retry'));
-    if (enableBtn) {
-        e.stopPropagation();
-        const disabledBlock = path.find(el => el?.classList?.contains('imggen-disabled'));
-        if (disabledBlock) {
-            import('@/core/services/imageGenService.js').then(module => {
-                const settings = module.getImageGenSettings();
-                settings.enabled = true;
-                module.saveImageGenSettings(settings);
-                
-                const instr = parseIIGInstruction(disabledBlock);
-                const id = disabledBlock.dataset?.iigId;
-                if (instr && id) emit('regenerate-image', { instruction: instr, id });
-            });
-        }
-        return;
-    }
-
-    handleBubbleClick(e);
-};
 const showFooter = computed(() => {
-    // In bubble layout, meta and actions are hidden, so we only show footer if there are actual controls
     if (layoutMode.value === 'bubble') {
         const hasSwipes = props.message.role === 'char' && props.message.swipes?.length > 1;
         const hasGreetings = props.index === 0 && props.message.role === 'char' && getAllGreetings(props.activeChatChar).length > 1;
@@ -562,7 +201,7 @@ const showFooter = computed(() => {
         const hasTriggeredItems = props.message.triggeredLorebooks?.length || props.message.triggeredMemories?.length || combinedMessageData.value.regexes?.length;
         return hasSwipes || hasGreetings || hasRegenerate || props.message.isEditing || hasTriggeredItems;
     }
-    return true; // Always show in other layouts for meta/actions
+    return true;
 });
 
 const blacklistedErrorProvider = computed(() => {
@@ -577,9 +216,7 @@ const tokenCount = computed(() => {
 
 const memoryBadge = computed(() => {
     const coverage = props.message.memoryCoverage;
-    // Check coverage states in priority order
     if (!coverage || typeof coverage !== 'object') {
-        // No coverage object — check draft/pending states
         if (props.isPendingMemory) return { label: 'PENDING', className: 'pending' };
         if (props.isDraftMemory) return { label: 'DRAFT', className: 'draft-memory' };
         return null;
@@ -589,7 +226,6 @@ const memoryBadge = computed(() => {
     if (Array.isArray(coverage.entryIds) && coverage.entryIds.length > 0) {
         return { label: 'MEM', className: 'covered' };
     }
-    // No approved entries — check draft/pending
     if (props.isPendingMemory) return { label: 'PENDING', className: 'pending' };
     if (props.isDraftMemory) return { label: 'DRAFT', className: 'draft-memory' };
     return null;
@@ -726,7 +362,7 @@ onBeforeUnmount(() => {
                     class="msg-body" 
                     v-else-if="message.text || (!message.isTyping && !message.text)" 
                     :key="(message.swipeId || 0) + '-' + (message.greetingIndex || 0)"
-                    @click="handleContentClick"
+                    @click="onContentClick"
                 >
                     <div v-if="message.isError" class="error-window">
                         <div class="error-header">

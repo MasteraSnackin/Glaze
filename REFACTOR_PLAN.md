@@ -993,15 +993,15 @@ Expected output:
 - future refactors can be verified by test, not just by build + manual check
 
 ### Phase 13. Shell and large component decomposition
-Status: in progress (13a done)
-Testing: tested (`npm run build` passes, `npm run lint` 0 errors)
+Status: done (13a–13e all complete)
+Testing: tested (`npm run build` passes, `npm run lint` 0 new errors)
 
 Purpose:
 Decompose the remaining large files that mix business logic with UI — the biggest maintainability blockers outside ChatView.
 
 **App.vue (1229 lines)** is currently router + layout shell + editor controller + event dispatcher + sync refresh handler. It should be a thin shell that wires composables, not a 1200-line god object.
 
-**PresetView.vue (3858 lines)** is the single largest file in the codebase. It mixes preset CRUD, block editing, import/export, token estimation, macro preview, and UI navigation. Most logic belongs in a service + composable.
+**PresetView.vue (3858 lines)** was the single largest file in the codebase. Its god-object composable `usePresetEditor.js` (2080 lines) mixed preset CRUD, block editing, navigation, selectors, image handling, token estimation, import/export, authors note sheet, and summary sheet. Now decomposed into 11 focused composables.
 
 **lorebookState.js (1320 lines)** mixes reactive state with vector search, keyword matching, embedding orchestration, and token estimation. It is both a state container and a service — the same problem generationService.js had before Phase 7.
 
@@ -1019,11 +1019,38 @@ Work:
 - Extract `useAppInit.js` (108 lines) — onMounted initialization sequence (theme, lorebooks, presets, sync, thumbnails, notifications, keyboard), ResizeObserver, cleanup
 - App.vue: 622 lines — template (362) + composable wiring + categories + FAB + layout metrics
 
-**13b. PresetView.vue decomposition (~3858 → ~1500)**
-- Extract `usePresetEditor.js` composable — preset CRUD, block editing state, navigation, save/flush, ~500 lines
-- Extract `presetImportService.js` enhancements — import/export flows already partially exist, move remaining import logic from view, ~200 lines
-- Extract `usePresetTokenPreview.js` — token estimation + macro preview for blocks, ~150 lines
-- PresetView.vue becomes: template + composable wiring + SheetView integration
+**13b. PresetView.vue decomposition (usePresetEditor.js 2080 lines → 11 composables + 279 lines glue)** ✅ done
+- Deleted `usePresetEditor.js` (2080-line god-object composable that mixed all preset concerns)
+- Extract `usePresetNavigation.js` (107 lines) — preset switching, currentPresetId, preset list, drag reorder
+- Extract `usePresetLoader.js` (89 lines) — preset loading from DB, cache, flush save, effective preset resolution
+- Extract `usePresetConnections.js` (33 lines) — chat/character/global preset connection queries
+- Extract `usePresetCRUD.js` (173 lines) — preset create, delete, duplicate, rename, import, export
+- Extract `usePresetSelectors.js` (171 lines) — bottom-sheet selectors (preset selector, options menu, add preset, merge/squash role, reasoning effort)
+- Extract `usePresetImage.js` (40 lines) — preset image selection, compression, file picking
+- Extract `useBlockManager.js` (141 lines) — block CRUD, stash/unstash, reorder, delete, token estimation helpers
+- Extract `useBlockEditor.js` (94 lines) — CodeMirror editor lifecycle, open/close, config
+- Extract `useAuthorsNoteSheet.js` (73 lines) — authors note bottom sheet
+- Extract `useSummarySheet.js` (126 lines) — summary advanced sheet, section generation, prompts
+- Extract `usePresetTokenPreview.js` (177 lines) — token estimation, macro preview, context breakdown
+- PresetView.vue script: 279 lines — composable wiring + template-bound computed refs + local event handlers
+
+**13c. lorebookState.js decomposition (1319 → 326 lines + 3 services)** ✅ done
+- `lorebookState.js` reduced from 1319 → 326 lines (reactive state, init/save/flush, CRUD, activation, import/export + re-exports for backward compat)
+- Extract `lorebookSearchService.js` (182 lines) — keyword scan logic (scanLorebooks + escapeRegex + GLAZE_BOUNDARIES)
+- Extract `lorebookVectorSearch.js` (431 lines) — vector search (vectorSearchLorebooks), hybrid/descriptor scoring, query sanitization, bounded query builder
+- Extract `lorebookEmbeddingService.js` (352 lines) — embedding orchestration (indexEntry/Entries, hash, fingerprint, status, delete embeddings, error classification)
+- All callers continue importing from `lorebookState.js` via re-exports; no caller changes needed
+
+**13d. ChatMessage.vue decomposition (1985 → 1621 lines + 2 composables)** ✅ done
+- `ChatMessage.vue` script reduced from 624 → 334 lines (display helpers, computed, event subscriptions remain)
+- Extract `useMessageSwipe.js` (262 lines) — touch handlers (3), swipe navigation, long-press selection, guided swipe, guidance editing
+- Extract `useMessageImageGen.js` (149 lines) — handleContentClick (5 click targets), parseIIGInstruction, openImage
+- Template updated: `handleContentClick` → `onContentClick` (delegates to composable, falls through to `handleBubbleClick`)
+
+**13e. ChatInput.vue decomposition (1155 → 905 lines + 2 composables)** ✅ done
+- `ChatInput.vue` script reduced from 420 → 170 lines (-60%)
+- Extract `useContentEditable.js` (128 lines) — getCaretIndex, setCaretPosition, getTextFromContentEditable, updateInputPreview (reusable contenteditable utilities)
+- Extract `useInputActions.js` (168 lines) — handleSend, guidance mode, image attach/clear, magic drawer toggle/close, fullscreen editor, focus/blur handlers
 
 **13c. lorebookState.js decomposition (~1320 → ~400 state, ~900 service)**
 - Extract `lorebookSearchService.js` — keyword scan, vector search (findTopK, cosineSimilarity), hybrid scoring, scanDepth logic, ~400 lines
@@ -1041,7 +1068,7 @@ Work:
 Expected output:
 
 - App.vue: thin shell, 622 lines ✅
-- PresetView.vue: template + composable, ~1500 lines
+- PresetView.vue: template + composable wiring, 279 lines script ✅
 - lorebookState.js: reactive state only, ~400 lines; search logic in dedicated service
 - ChatMessage.vue: template + rendering, ~1200 lines
 - ChatInput.vue: template + input handling, ~700 lines

@@ -93,6 +93,29 @@ What has **not** changed yet:
 - Cancelable `app-back-navigation` dispatch pattern in `ui.js` still uses raw `window.dispatchEvent`.
 - Dead event subscriptions (5 events with listeners but no dispatches) have not been cleaned up.
 
+### Phase 13b PresetView Decomposition
+
+Deleted:
+- `src/composables/app/usePresetEditor.js` (2080-line god-object composable — mixed all preset concerns)
+
+Files added (all in `src/composables/app/`):
+- `usePresetNavigation.js` (107 lines) — preset switching, currentPresetId, preset list, drag reorder
+- `usePresetLoader.js` (89 lines) — preset loading from DB, cache, flush save, effective preset resolution
+- `usePresetConnections.js` (33 lines) — chat/character/global preset connection queries
+- `usePresetCRUD.js` (173 lines) — preset create, delete, duplicate, rename, import, export
+- `usePresetSelectors.js` (171 lines) — bottom-sheet selectors (preset selector, options menu, add preset, merge/squash role, reasoning effort)
+- `usePresetImage.js` (40 lines) — preset image selection, compression, file picking
+- `useBlockManager.js` (141 lines) — block CRUD, stash/unstash, reorder, delete, token estimation helpers
+- `useBlockEditor.js` (94 lines) — CodeMirror editor lifecycle, open/close, config
+- `useAuthorsNoteSheet.js` (73 lines) — authors note bottom sheet
+- `useSummarySheet.js` (126 lines) — summary advanced sheet, section generation, prompts
+- `usePresetTokenPreview.js` (177 lines) — token estimation, macro preview, context breakdown
+
+Result:
+- `PresetView.vue` script: 279 lines (composable wiring + template-bound computed refs + local event handlers)
+- `PresetView.vue` total: 2057 lines (279 script + 332 template + 1448 style)
+- Each composable has a single responsibility; max 177 lines vs original 2080-line god-object
+
 ### Phase 2 Request Ownership Safety Slice
 
 Current behavior:
@@ -229,14 +252,17 @@ What has **not** changed yet:
 - `src/utils/vectorMath.js` — Vector math operations
 - `src/core/services/embeddingService.js` — Embedding API calls
 - `src/core/config/embeddingSettings.js` — Embedding connection config (endpoint, key, model)
-- `src/core/states/lorebookState.js` — Vector indexing, search, and search settings
+- `src/core/states/lorebookState.js` — Reactive state, CRUD, activation, import/export (326 lines; re-exports search/embedding for backward compat)
+- `src/core/services/lorebookSearchService.js` — Keyword scan logic (182 lines)
+- `src/core/services/lorebookVectorSearch.js` — Vector search, hybrid/descriptor scoring, query sanitization (431 lines)
+- `src/core/services/lorebookEmbeddingService.js` — Embedding orchestration, hash, status, error classification (352 lines)
 - `src/utils/db.js` — IndexedDB storage for embeddings
 - `src/workers/generationWorker.js` — Dual-channel retrieval integration
 - `src/core/services/generationService.js` — Vector search execution
 
 ### Structure
 
-**Search Type System (`lorebookState.js`):**
+**Search Type System (split across `lorebookState.js` + services):**
 - `searchType` — `'keys'` | `'vector'` | `'both'` (was `vectorSearchEnabled` + `keySearchEnabled`)
 - `'keys'` — Keyword-only matching (default)
 - `'vector'` — Vector-only semantic search
@@ -269,7 +295,7 @@ What has **not** changed yet:
 - Schema v8: `{ id, sourceType, sourceId, vectors[], textHash, retrievalHints, updatedAt }`
 - Legacy support: single `vector` field
 
-**Lorebook State (`lorebookState.js`):**
+**Lorebook State (`lorebookState.js` + extracted services):**
 - `indexLorebookEntry(entry, lorebookId)` — Single entry indexing with hash check
 - `indexLorebookEntries(lorebookId)` — Bulk indexing with progress
 - `vectorSearchLorebooks(queryChunks, options)` — Dual-channel search (vector + keyword)
@@ -437,7 +463,7 @@ MemorySettings: {
 - `src/core/services/llmApi.js` — Reasoning extraction from API response
 - `src/core/services/generationService.js` — Reasoning settings resolution
 - `src/views/ApiView.vue` — User-facing reasoning toggle
-- `src/views/PresetView.vue` — Preset reasoning settings
+- `src/views/PresetView.vue` — Preset reasoning settings (now thin shell wiring 11 composables)
 
 ### Logic
 
@@ -647,6 +673,7 @@ Native-only scope retained:
 - Request types are implicit instead of modeled as separate use cases with a shared transport contract.
 - Worker/service boundaries are not documented clearly: keyword lore lives in the worker, vector retrieval and memory injection happen later in the service layer.
 - Callback signatures are flexible but brittle across chat, summary, and memory-draft flows.
+- `PresetView.vue` is now decomposed (279 lines script + 11 focused composables). `usePresetEditor.js` god-object deleted.
 
 ### Better Target Structure
 
@@ -734,6 +761,26 @@ These composables now cover placeholder setup, stream UI application, prompt met
 - `src/composables/chat/useSessionManagement.js` — session CRUD and persistence
 - `src/composables/chat/useMessageActions.js` — message interaction actions (delete, hide, edit, branch, regenerate)
 - `src/composables/chat/useChatGeneration.js` — chat generation orchestration (sendMessage, startGeneration, image regen)
+
+**App.vue Decomposition Composables (Phase 13a):**
+- `src/composables/app/useAppNavigation.js` — view routing, desktop/mobile detection, effectiveMainView, floating menu state
+- `src/composables/app/useEditorController.js` — character/persona editor lifecycle
+- `src/composables/app/useAppEventSubscriptions.js` — all 25+ subscribeAppEvent calls + cleanup
+- `src/composables/app/useGlossaryPopup.js` — desktop glossary drag popup
+- `src/composables/app/useAppInit.js` — onMounted initialization sequence
+
+**PresetView Decomposition Composables (Phase 13b):**
+- `src/composables/app/usePresetNavigation.js` (107 lines) — preset switching, currentPresetId, preset list, drag reorder
+- `src/composables/app/usePresetLoader.js` (89 lines) — preset loading from DB, cache, flush save, effective preset resolution
+- `src/composables/app/usePresetConnections.js` (33 lines) — chat/character/global preset connection queries
+- `src/composables/app/usePresetCRUD.js` (173 lines) — preset create, delete, duplicate, rename, import, export
+- `src/composables/app/usePresetSelectors.js` (171 lines) — bottom-sheet selectors
+- `src/composables/app/usePresetImage.js` (40 lines) — preset image selection, compression, file picking
+- `src/composables/app/useBlockManager.js` (141 lines) — block CRUD, stash/unstash, reorder
+- `src/composables/app/useBlockEditor.js` (94 lines) — CodeMirror editor lifecycle
+- `src/composables/app/useAuthorsNoteSheet.js` (73 lines) — authors note bottom sheet
+- `src/composables/app/useSummarySheet.js` (126 lines) — summary advanced sheet
+- `src/composables/app/usePresetTokenPreview.js` (177 lines) — token estimation, macro preview
 
 **Debug / Observability:**
 - `src/core/llm/debug/requestTraceStore.js` — raw request/response traces keyed by generation
@@ -852,7 +899,7 @@ These composables now cover placeholder setup, stream UI application, prompt met
 
 ### Vectorization ↔ MemoryBooks
 - Memory entries use same `sourceType: 'memory_entry'` in embeddings
-- `lorebookState.js` handles both lorebook and memory vector operations
+- `lorebookState.js` reactive state owns lorebook data, settings, activations; `lorebookSearchService.js` owns keyword scan; `lorebookVectorSearch.js` owns vector search; `lorebookEmbeddingService.js` owns embedding orchestration
 - Reindex shared via `reindexMemoryEntry()`
 
 ### MemoryBooks ↔ Generation

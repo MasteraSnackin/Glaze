@@ -445,3 +445,21 @@ export function exportSTPreset(preset) {
 
     return data;
 }
+
+export function processImportedPreset(data, defaultName) {
+    const format = detectPresetFormat(data);
+    let preset;
+
+    if (format === 'latex') {
+        preset = convertLatexPreset(data, defaultName);
+    } else if (format === 'sillytavern') {
+        preset = convertSTPreset(data, defaultName);
+    } else if (format === 'glaze') {
+        preset = data;
+    } else {
+        return { error: 'Unknown preset format. Expected SillyTavern, LaTeX, or Glaze JSON.' };
+    }
+
+    preset = finalizeImportedPreset(preset);
+    return { preset };
+}

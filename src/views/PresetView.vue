@@ -1,25 +1,30 @@
 <script setup>
-import { ref, reactive, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import { publishAppEvent, subscribeAppEvent } from '@/core/events/eventHub.js';
 import { APP_EVENTS } from '@/core/events/eventNames.js';
-import { updateLanguage, translations, t } from '@/utils/i18n.js';
+import { translations, t, updateLanguage } from '@/utils/i18n.js';
 import { initRipple } from '@/core/services/ui.js';
 import Editor from '@/components/editors/GenericEditor.vue';
-import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
-import { estimateTokens } from '@/utils/tokenizer.js';
-import { replaceMacros } from '@/utils/macroEngine.js';
-import { normalizeBlockId } from '@/utils/presetBlockIds.js';
-import { getEffectivePersona } from '@/core/states/personaState.js';
-import { convertSTPreset, convertLatexPreset, exportSTPreset, detectPresetFormat, finalizeImportedPreset, mandatoryBlocks } from '@/core/services/presetImportService.js';
-import { generateSummary } from '@/core/llm/usecases/generateSummary.js';
-import { presetState, initPresetState, setPresetConnection, getEffectivePresetId, DEFAULT_PRESETS, flushPresetSave } from '@/core/states/presetState.js';
-import { Browser } from '@capacitor/browser';
-import { Toast } from '@capacitor/toast';
-import { saveFile } from '@/core/services/fileSaver.js';
+import { presetState, initPresetState, getEffectivePresetId, flushPresetSave } from '@/core/states/presetState.js';
 import SheetView from '@/components/ui/SheetView.vue';
 import HelpTip from '@/components/ui/HelpTip.vue';
 import RegexSheet from '@/components/sheets/RegexSheet.vue';
-import { logger } from '../utils/logger.js';
+import { logger } from '@/utils/logger.js';
+import { getEffectivePersona } from '@/core/states/personaState.js';
+import { normalizeBlockId } from '@/utils/presetBlockIds.js';
+import { Toast } from '@capacitor/toast';
+
+import { usePresetNavigation } from '@/composables/app/usePresetNavigation.js';
+import { usePresetLoader } from '@/composables/app/usePresetLoader.js';
+import { usePresetConnections } from '@/composables/app/usePresetConnections.js';
+import { usePresetCRUD } from '@/composables/app/usePresetCRUD.js';
+import { usePresetSelectors } from '@/composables/app/usePresetSelectors.js';
+import { usePresetImage } from '@/composables/app/usePresetImage.js';
+import { useBlockManager } from '@/composables/app/useBlockManager.js';
+import { useBlockEditor } from '@/composables/app/useBlockEditor.js';
+import { useAuthorsNoteSheet } from '@/composables/app/useAuthorsNoteSheet.js';
+import { useSummarySheet } from '@/composables/app/useSummarySheet.js';
+import { usePresetTokenPreview } from '@/composables/app/usePresetTokenPreview.js';
 
 const emit = defineEmits(['open-fs', 'update:activeChatChar']);
 
@@ -34,89 +39,199 @@ const props = defineProps({
 
 const effectivePersona = computed(() => getEffectivePersona(props.activeChatChar?.id, props.activeChatChar?.sessionId));
 
-const scrollPositions = { list: 0, editor: 0, 'block-editor': 0 };
+// --- 1. Navigation ---
+const {
+    scrollPositions, editingPresetId, optimisticGlobalPresetId,
+    isEditingBlock, editingBlockId, showStash, navDirection,
+    showAdvancedSettings, genSheetBodyRef, headerState,
+    updateHeaderState, goBackFromEditor, openBlockEditor, closeBlockEditor,
+    onTransitionBeforeLeave, onTransitionBeforeEnter
+} = usePresetNavigation({ sheet, props });
 
-// --- Editor State ---
-const editingPresetId = ref(null);
-const optimisticGlobalPresetId = ref(null);
-const isEditingBlock = ref(false);
-const editingBlockId = ref(null);
-const showStash = ref(false);
-const navDirection = ref('forward');
-
-watch([editingPresetId, isEditingBlock], ([newE, newB], [oldE, oldB]) => {
-    const getLevel = (e, b) => b ? 2 : (e ? 1 : 0);
-    const newL = getLevel(newE, newB);
-    const oldL = getLevel(oldE, oldB);
-    if (newL > oldL) navDirection.value = 'forward';
-    else if (newL < oldL) navDirection.value = 'back';
-
-    if (newE && newE !== oldE) scrollPositions.editor = 0;
-    if (newB && !oldB) scrollPositions['block-editor'] = 0;
+// --- Shared computed (glue between composables) ---
+const effectivePresetId = computed(() => getEffectivePresetId(props.activeChatChar?.id, props.activeChatChar?.sessionId));
+const currentPresetId = computed(() => editingPresetId.value || effectivePresetId.value);
+const currentPreset = computed(() => presetState.presets[currentPresetId.value] || presetState.presets.default_shino);
+const activeBlocks = computed(() => (currentPreset.value?.blocks || []).filter(b => !b.isStashed));
+const stashedBlocks = computed(() => (currentPreset.value?.blocks || []).filter(b => b.isStashed));
+const activeEditBlock = computed(() => {
+    if (!editingBlockId.value || !currentPreset.value?.blocks) return null;
+    return currentPreset.value.blocks.find(b => b.id === editingBlockId.value) || null;
 });
 
-const effectivePresetId = computed(() => {
+const activePresetName = computed(() => presetState.presets[effectivePresetId.value]?.name || '');
+const activePresetType = computed(() => {
     const charId = props.activeChatChar?.id;
-    const chatId = charId && props.activeChatChar.sessionId ? `${charId}_${props.activeChatChar.sessionId}` : null;
-    const resolved = getEffectivePresetId(charId, chatId);
-    logger.debug('[GenerationView] effectivePresetId resolved to:', resolved);
-    return resolved;
+    const chatId = charId && props.activeChatChar?.sessionId ? `${charId}_${props.activeChatChar.sessionId}` : null;
+    if (chatId && presetState.connections.chat[chatId] === effectivePresetId.value) return 'chat';
+    if (charId && presetState.connections.character[charId] === effectivePresetId.value) return 'character';
+    return 'global';
+});
+const activePresetReason = computed(() => {
+    if (activePresetType.value === 'chat') return t('preset_this_chat') || 'This Chat';
+    if (activePresetType.value === 'character') return t('preset_this_char') || 'This Character';
+    return t('preset_global_default') || 'Global Default';
+});
+const chatPresetName = computed(() => {
+    const charId = props.activeChatChar?.id;
+    const chatId = charId && props.activeChatChar?.sessionId ? `${charId}_${props.activeChatChar.sessionId}` : null;
+    const id = chatId ? presetState.connections.chat[chatId] : null;
+    return id ? presetState.presets[id]?.name : '';
+});
+const charPresetName = computed(() => {
+    const charId = props.activeChatChar?.id;
+    const id = charId ? presetState.connections.character[charId] : null;
+    return id ? presetState.presets[id]?.name : '';
+});
+const globalPresetName = computed(() => {
+    const id = presetState.globalPresetId;
+    return id ? presetState.presets[id]?.name : '';
 });
 
-const currentPresetId = computed(() => {
-    return editingPresetId.value || effectivePresetId.value;
+// --- 2. Loader ---
+const { loadPresets, setupPersistenceWatchers } = usePresetLoader({ currentPreset });
+
+// --- 3. Connections ---
+const { getPresetConnectionType, openPresetConnections, activatePreset } = usePresetConnections({ optimisticGlobalPresetId, props });
+
+// --- Helper functions needed by multiple composables ---
+function getBlockIcon(block) {
+    if (normalizeBlockId(block.id) === 'chat_history') return '<path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/>';
+    return getRoleIcon(block.role);
+}
+
+function getRoleIcon(role) {
+    switch (role) {
+        case 'user': return '<path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>';
+        case 'assistant': return '<path d="M20 9V7c0-1.1-.9-2-2-2h-3c0-1.66-1.34-3-3-3S9 3.34 9 5H6c-1.1 0-2 .9-2 2v2c-1.66 0-3 1.34-3 3s1.34 3 3 3v4c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-4c1.66 0 3-1.34 3-3s-1.34-3-3-3zM7.5 11.5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5S9.83 13 9 13s-1.5-.67-1.5-1.5zM16 17H8v-2h8v2zm-1.5-4c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/>';
+        case 'system':
+        default: return '<path d="M20 13H4c-.55 0-1 .45-1 1v6c0 .55.45 1 1 1h16c.55 0 1-.45 1-1v-6c0-.55-.45-1-1-1zM7 19c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zM20 3H4c-.55 0-1 .45-1 1v6c0 .55.45 1 1 1h16c.55 0 1-.45 1-1V4c0-.55-.45-1-1-1zM7 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"/>';
+    }
+}
+
+function hasMacro(block, macroName) {
+    let content = '';
+    if (block.id === 'authors_note') content = props.activeChatChar?.authors_note || '';
+    else if (block.id === 'summary') content = props.activeChatChar?.summary || '';
+    else content = block.content || '';
+    if (macroName === 'setvar') return content.includes('{{setvar::');
+    if (macroName === 'getvar') return content.includes('{{getvar::');
+    return false;
+}
+
+function isBlockLocked() { return false; }
+
+function getPresetWeight(id, preset) {
+    if (preset.isFeatured) return 0;
+    const type = getPresetConnectionType(id);
+    if (type === 'chat') return 1;
+    if (type === 'character') return 2;
+    if (type === 'global') return 3;
+    return 4;
+}
+
+function comparePresetEntries(a, b) {
+    const [idA, pA] = a; const [idB, pB] = b;
+    const wA = getPresetWeight(idA, pA); const wB = getPresetWeight(idB, pB);
+    if (wA !== wB) return wA - wB;
+    const cA = pA.createdAt || 0; const cB = pB.createdAt || 0;
+    if (cA !== cB) return cA - cB;
+    return pA.name.localeCompare(pB.name);
+}
+
+// --- 4. Token Preview ---
+const {
+    resolveBlockContent, isChatSpecific, shouldShowTokens, extendedReplaceMacros,
+    getPresetTokens, editingPresetTokens, displayedEditingTokens,
+    activePresetTokens, displayedActiveTokens,
+    globalTokens, charTokens, chatTokens,
+    getBlockTokens, presetTokenCache
+} = usePresetTokenPreview({
+    currentPreset, editingPresetId, editingBlockId, effectivePresetId,
+    activeChatChar: computed(() => props.activeChatChar),
+    chatHistory: computed(() => props.chatHistory),
+    effectivePersona,
+    isGenerating: computed(() => props.isGenerating)
 });
 
-const currentPreset = computed(() => {
-    const id = currentPresetId.value;
-    return presetState.presets[id] || presetState.presets.default_shino || Object.values(presetState.presets)[0];
+// --- 5. CRUD ---
+const {
+    createNewPreset, cloneCurrentPreset, renameCurrentPreset, editCurrentAuthor,
+    triggerExportST, confirmDeletePreset, confirmResetPreset,
+    triggerImport, onFileSelected, openAddPresetSheet
+} = usePresetCRUD({ currentPreset, currentPresetId, editingPresetId, updateHeaderState });
+
+// --- 6. Selectors ---
+const {
+    getPresetCreatedAt, sortedPresetEntries,
+    openPresetSelector, openPresetConnectionManager,
+    openMergeRoleSelector, openSquashRoleSelector, openReasoningEffortSelector,
+    openPresetOptionsMenu: openPresetOptionsMenuRaw
+} = usePresetSelectors({
+    currentPreset, currentPresetId, editingPresetId,
+    activeChatChar: computed(() => props.activeChatChar),
+    getPresetTokens, getPresetWeight, comparePresetEntries,
+    updateHeaderState, openAddPresetSheet
 });
 
+function openPresetOptionsMenu() {
+    openPresetOptionsMenuRaw({
+        cloneCurrentPreset, triggerExportST, renameCurrentPreset,
+        editCurrentAuthor, triggerImageUpload, confirmDeletePreset, confirmResetPreset
+    });
+}
+
+// --- 7. Image ---
+const { triggerImageUpload, compressImage, onImageSelected } = usePresetImage({ currentPreset });
+
+// --- 8. Block Manager ---
+const {
+    dragSrcIndex, addNewBlock, openCopyBlockPresetPicker, openCopyBlockPicker,
+    stashActiveBlock, unstashBlock, openStashSheet,
+    deleteActiveBlock, confirmDeleteStashedBlock,
+    onDragStart, onDragEnter, onDragEnd, onTouchStart, onTouchMove, onTouchEnd
+} = useBlockManager({
+    currentPreset, editingBlockId, isEditingBlock, activeEditBlock, stashedBlocks,
+    getBlockIcon, getPresetTokens, getPresetWeight, comparePresetEntries, closeBlockEditor
+});
+
+// --- 9. Block Editor ---
+const { getMagicBlockFields, editorConfig, editorProxy, updateActiveBlock } = useBlockEditor({
+    currentPreset, activeEditBlock, activeChatChar: computed(() => props.activeChatChar), emit
+});
+
+// --- 10. Authors Note Sheet ---
+const { openAuthorsNoteSheet } = useAuthorsNoteSheet({
+    currentPreset, activeChatChar: computed(() => props.activeChatChar)
+});
+
+// --- 11. Summary Sheet ---
+const { openSummarySheet } = useSummarySheet({
+    currentPreset, activeChatChar: computed(() => props.activeChatChar), chatHistory: computed(() => props.chatHistory)
+});
+
+// --- Local component functions ---
 function handleOpenFs(field, isCurrentBase = true) {
     const val = isCurrentBase ? currentPreset.value[field] : field;
-    const onSave = (newVal) => {
-        if (isCurrentBase) {
-            currentPreset.value[field] = newVal;
-        }
-    };
+    const onSave = (newVal) => { if (isCurrentBase) currentPreset.value[field] = newVal; };
     publishAppEvent(APP_EVENTS.nav.openFsRequest, { value: val, onSave });
-}
-
-const showAdvancedSettings = ref(false);
-
-const genSheetBodyRef = ref(null);
-
-const headerState = reactive({
-    title: '',
-    showBack: false,
-    actions: []
-});
-
-
-
-async function open() {
-    await initPresetState();
-    await loadPresets();
-    if (!sheet.value?.isVisible && !editingPresetId.value) {
-        // If it's a completely fresh open and no preset is currently edited, make sure we don't open the editor.
-        // However, if editingPresetId.value is set from a previous session, we leave it as is to restore the view.
-    }
-    sheet.value?.open();
-    updateHeaderState();
-}
-
-function close() {
-    sheet.value?.close();
 }
 
 const openedFromRegex = ref(false);
 
+async function open() {
+    await initPresetState();
+    await loadPresets();
+    sheet.value?.open();
+    updateHeaderState();
+}
+
+function close() { sheet.value?.close(); }
+
 function onSheetClose() {
     openedFromRegex.value = false;
     flushPresetSave();
-    scrollPositions.list = 0;
-    scrollPositions.editor = 0;
-    scrollPositions['block-editor'] = 0;
+    scrollPositions.list = 0; scrollPositions.editor = 0; scrollPositions['block-editor'] = 0;
 }
 
 async function openPreset(id, fromRegex = false) {
@@ -130,1954 +245,38 @@ async function openPreset(id, fromRegex = false) {
 
 defineExpose({ open, close, openAuthorsNoteSheet, openSummarySheet, openPreset });
 
-
-
-function openMergeRoleSelector() {
-    const roles = ['system', 'user', 'assistant'];
-    const items = roles.map(r => ({
-        label: r.charAt(0).toUpperCase() + r.slice(1),
-        icon: currentPreset.value.mergeRole === r ? '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>' : null,
-        onClick: () => {
-            currentPreset.value.mergeRole = r;
-            closeBottomSheet();
-        }
-    }));
-    showBottomSheet({
-        title: t('label_role') || 'Role',
-        items: items
-    });
-}
-
-function openSquashRoleSelector() {
-    const options = ['user', 'system', 'assistant'];
-    const items = options.map(r => ({
-        label: r.charAt(0).toUpperCase() + r.slice(1),
-        icon: currentPreset.value.squashRole === r ? '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>' : null,
-        onClick: () => {
-            currentPreset.value.squashRole = r;
-            closeBottomSheet();
-        }
-    }));
-    showBottomSheet({
-        title: t('label_squash_role') || 'Squash Role',
-        items: items
-    });
-}
-
-function openReasoningEffortSelector() {
-    const options = [
-        { value: 'auto', label: t('reasoning_effort_auto') || 'Auto' },
-        { value: 'low', label: t('reasoning_effort_low') || 'Low' },
-        { value: 'medium', label: t('reasoning_effort_medium') || 'Medium' },
-        { value: 'high', label: t('reasoning_effort_high') || 'High' }
-    ];
-
-    const items = options.map(opt => ({
-        label: opt.label,
-        icon: currentPreset.value.reasoningEffort === opt.value ? '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>' : null,
-        onClick: () => {
-            currentPreset.value.reasoningEffort = opt.value;
-            closeBottomSheet();
-        }
-    }));
-
-    showBottomSheet({
-        title: t('label_reasoning_effort') || 'Reasoning Effort',
-        items
-    });
-}
-
-const activeBlocks = computed(() => {
-    if (!currentPreset.value || !currentPreset.value.blocks) return [];
-    return currentPreset.value.blocks.filter(b => !b.isStashed);
-});
-
-const stashedBlocks = computed(() => {
-    if (!currentPreset.value || !currentPreset.value.blocks) return [];
-    return currentPreset.value.blocks.filter(b => b.isStashed);
-});
-
 const regexSheetRef = ref(null);
 const presetRegexCount = computed(() => currentPreset.value?.regexes?.length || 0);
+
 function openRegexSheetFromPreset() {
-    if (openedFromRegex.value) {
-        close();
-    } else {
-        regexSheetRef.value?.open();
-    }
+    if (openedFromRegex.value) close();
+    else regexSheetRef.value?.open();
 }
 
-// --- Other Computed ---
-
-const activePresetName = computed(() => {
-    const id = effectivePresetId.value;
-    const name = presetState.presets[id]?.name || 'Default';
-    logger.debug('[GenerationView] activePresetName resolved to:', name, 'for ID:', id);
-    return name;
-});
-
-const activePresetType = computed(() => {
-    const charId = props.activeChatChar?.id;
-    const chatId = charId && props.activeChatChar?.sessionId ? `${charId}_${props.activeChatChar.sessionId}` : null;
-    
-    if (chatId && presetState.connections.chat[chatId]) return 'chat';
-    if (charId && presetState.connections.character[charId]) return 'character';
-    return 'global';
-});
-
-const activePresetReason = computed(() => {
-    switch(activePresetType.value) {
-        case 'chat': return t('connection_chat') || 'Chat Connection';
-        case 'character': return t('connection_character') || 'Character Connection';
-        default: return t('connection_global') || 'Global Preset';
-    }
-});
-
-const chatPresetName = computed(() => {
-    const charId = props.activeChatChar?.id;
-    const chatId = charId && props.activeChatChar?.sessionId ? `${charId}_${props.activeChatChar.sessionId}` : null;
-    const id = chatId ? presetState.connections.chat[chatId] : null;
-    return id ? (presetState.presets[id]?.name || id) : null;
-});
-
-const charPresetName = computed(() => {
-    const charId = props.activeChatChar?.id;
-    const id = charId ? presetState.connections.character[charId] : null;
-    return id ? (presetState.presets[id]?.name || id) : null;
-});
-
-const globalPresetName = computed(() => {
-    const id = presetState.globalPresetId;
-    return presetState.presets[id]?.name || 'Default';
-});
-
-function openLevelSelector(level) {
-    const charId = props.activeChatChar?.id;
-    const chatId = charId && props.activeChatChar?.sessionId ? `${charId}_${props.activeChatChar.sessionId}` : null;
-    
-    let currentId = null;
-    if (level === 'global') currentId = presetState.globalPresetId;
-    else if (level === 'character') currentId = charId ? presetState.connections.character[charId] : null;
-    else if (level === 'chat') currentId = chatId ? presetState.connections.chat[chatId] : null;
-
-    const cardItems = [];
-    
-    if (level !== 'global') {
-        cardItems.push({
-            label: '(' + (t('label_none') || 'Default / None') + ')',
-            icon: !currentId ? '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>' : '<svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.42 0-8-3.58-8-8 0-1.85.63-3.55 1.69-4.9l11.21 11.21C15.55 19.37 13.85 20 12 20zm6.31-3.1L7.1 5.69C8.45 4.63 10.15 4 12 4c4.42 0 8 3.58 8 8 0 1.85-.63 3.55-1.69 4.9z"/></svg>',
-            onClick: () => {
-                if (level === 'character') setPresetConnection('character', charId, null);
-                else if (level === 'chat') setPresetConnection('chat', chatId, null);
-                editingPresetId.value = null;
-                closeBottomSheet();
-            }
-        });
-    }
-
-    const entries = Object.entries(presetState.presets).sort(comparePresetEntries);
-
-    entries.forEach(([id, preset]) => {
-        const tokens = getPresetTokens(preset);
-        const subtitleParts = [];
-        if (id === currentId) subtitleParts.push(t('preset_selected') || 'Selected');
-        if (preset.author) subtitleParts.push(`by ${preset.author}`);
-        if (preset.descriptionKey) subtitleParts.push(t(preset.descriptionKey));
-
-        cardItems.push({
-            label: preset.name,
-            sublabel: subtitleParts.join(' • '),
-            badge: `${tokens}`,
-            isFeatured: preset.isFeatured,
-            image: preset.image || null,
-            icon: !preset.image ? '<svg viewBox="0 0 24 24" style="fill:currentColor;"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>' : null,
-            onClick: () => {
-                if (level === 'global') setPresetConnection('global', null, id);
-                else if (level === 'character') setPresetConnection('character', charId, id);
-                else if (level === 'chat') setPresetConnection('chat', chatId, id);
-                editingPresetId.value = id;
-                closeBottomSheet();
-            }
-        });
-    });
-
-    const titleMap = {
-        'global': t('level_global') || 'Global Preset',
-        'character': t('level_character') || 'Character Preset',
-        'chat': t('level_chat') || 'Chat Preset'
-    };
-
-    showBottomSheet({
-        title: (t('action_select') || 'Select') + ': ' + titleMap[level],
-        cardItems: cardItems
-    });
-}
-
-function openPresetEditorSelector() {
-    const entries = Object.entries(presetState.presets).sort(comparePresetEntries);
-
-    const cardItems = entries.map(([id, preset]) => {
-        const tokens = getPresetTokens(preset);
-        const subtitleParts = [];
-        if (id === currentPresetId.value) subtitleParts.push(t('preset_selected') || 'Selected');
-        if (preset.author) subtitleParts.push(`by ${preset.author}`);
-        if (preset.descriptionKey) subtitleParts.push(t(preset.descriptionKey));
-
-        const item = {
-            label: preset.name,
-            sublabel: subtitleParts.join(' • '),
-            badge: `${tokens}`,
-            isFeatured: preset.isFeatured,
-            image: preset.image || null,
-            icon: !preset.image ? '<svg viewBox="0 0 24 24" style="fill:currentColor;width:24px;height:24px;"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>' : null,
-            onClick: () => {
-                editingPresetId.value = id;
-                closeBottomSheet();
-                updateHeaderState();
-            }
-        };
-
-        if (!DEFAULT_PRESETS[id]) {
-            item.actions = [{
-                icon: '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>',
-                color: '#ff4444',
-                onClick: (e) => {
-                    e.stopPropagation();
-                    closeBottomSheet();
-                    confirmDeletePreset(id);
-                }
-            }];
-        }
-
-        return item;
-    });
-
-    cardItems.push({
-        label: t('btn_add') || 'Add / Import',
-        sublabel: t('preset_create_import_desc') || 'Create or import a new preset',
-        icon: '<svg viewBox="0 0 24 24" style="fill:currentColor;"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>',
-        onClick: () => {
-            closeBottomSheet();
-            openAddPresetSheet();
-        }
-    });
-
-    showBottomSheet({
-        title: t('sheet_title_presets') || 'Presets',
-        cardItems: cardItems
-    });
-}
-
-watch(() => props.activeChatChar?.id, () => {
-    editingPresetId.value = null;
-});
-
-const activeEditBlock = computed(() => {
-    if (!editingBlockId.value) return null;
-    return currentPreset.value.blocks.find(b => b.id === editingBlockId.value);
-});
-
-const resolveBlockContent = (block) => {
-    if (!block) return '';
-    const blockId = normalizeBlockId(block.id);
-    
-    if (blockId === 'chat_history') {
-        if (!props.chatHistory || props.chatHistory.length === 0) return '';
-        return props.chatHistory.map(m => `${m.role === 'user' ? (m.persona?.name || 'User') : (props.activeChatChar?.name || 'Char')}: ${m.text}`).join('\n');
-    }
-    
-    if (blockId === 'guided_generation') return block.content || '[System Note: {{guidance}}]';
-    if (blockId === 'authors_note') return props.activeChatChar?.authors_note || '';
-    if (blockId === 'summary') return props.activeChatChar?.summary || '';
-    
-    if (blockId === 'user_persona') return effectivePersona.value?.prompt || '';
-    if (blockId === 'char_card') return props.activeChatChar?.description || props.activeChatChar?.desc || '';
-    if (blockId === 'char_personality' || blockId === 'char_persona') return props.activeChatChar?.personality || '';
-    if (blockId === 'scenario') return props.activeChatChar?.scenario || '';
-    if (blockId === 'example_dialogue') return props.activeChatChar?.mes_example || '';
-    if (blockId === 'first_message') return props.activeChatChar?.first_mes || '';
-
-    return block.content || '';
-};
-
-const isChatSpecific = (block) => {
-    const id = normalizeBlockId(block.id);
-    return ['chat_history', 'guided_generation', 'authors_note', 'summary', 'char_card', 'scenario', 'char_personality', 'char_persona', 'example_dialogue', 'first_message'].includes(id);
-};
-
-const shouldShowTokens = (block) => {
-    const id = normalizeBlockId(block.id);
-    // World Info tokens are technically zero in PresetView as they are injected separately, 
-    // but we hide them at all times as per user request to avoid clutter.
-    if (['worldInfoBefore', 'worldInfoAfter', 'wi_before', 'wi_after'].includes(id)) return false;
-    // For chat-specific blocks, only show tokens if a chat is actually attached.
-    if (isChatSpecific(block)) return !!props.activeChatChar;
-    return true;
-};
-
-const extendedReplaceMacros = (text) => {
-    if (!text) return '';
-    let res = replaceMacros(text, props.activeChatChar, effectivePersona.value);
-    
-    if (props.activeChatChar) {
-        res = res.replace(/{{scenario}}/gi, props.activeChatChar.scenario || '')
-                 .replace(/{{personality}}/gi, props.activeChatChar.personality || '')
-                 .replace(/{{description}}/gi, props.activeChatChar.description || '')
-                 .replace(/{{char_description}}/gi, props.activeChatChar.description || '')
-                 .replace(/{{char_personality}}/gi, props.activeChatChar.personality || '');
-    }
-    if (effectivePersona.value) {
-        res = res.replace(/{{persona}}/gi, effectivePersona.value.prompt || '');
-    }
-    return res;
-};
-
-function getPresetTokens(preset) {
-    if (!preset) return 0;
-    let content = "";
-    // Include Impersonation Prompt
-    if (preset.impersonationPrompt) {
-        content += preset.impersonationPrompt + "\n";
-    }
-    // Include Enabled Blocks
-    if (preset.blocks) {
-        preset.blocks.forEach(b => {
-            if (b.enabled && !b.isStashed) {
-                const blockContent = resolveBlockContent(b);
-                if (blockContent) {
-                    content += blockContent + "\n";
-                }
-            }
-        });
-    }
-    return estimateTokens(extendedReplaceMacros(content));
-};
-
-const editingPresetTokens = computed(() => getPresetTokens(currentPreset.value));
-const displayedEditingTokens = ref(0);
-
-const activePresetTokens = computed(() => {
-    const id = effectivePresetId.value;
-    const preset = presetState.presets[id] || presetState.presets.default_shino;
-    return getPresetTokens(preset);
-});
-const displayedActiveTokens = ref(0);
-
-const globalTokens = computed(() => getPresetTokens(presetState.presets[presetState.globalPresetId] || presetState.presets.default_shino));
-const charTokens = computed(() => {
-    const charId = props.activeChatChar?.id;
-    const id = charId ? presetState.connections.character[charId] : null;
-    return id ? getPresetTokens(presetState.presets[id]) : 0;
-});
-const chatTokens = computed(() => {
-    const charId = props.activeChatChar?.id;
-    const chatId = charId && props.activeChatChar?.sessionId ? `${charId}_${props.activeChatChar.sessionId}` : null;
-    const id = chatId ? presetState.connections.chat[chatId] : null;
-    return id ? getPresetTokens(presetState.presets[id]) : 0;
-});
-
-function setupAnimateTokens(targetComputed, targetRef) {
-    watch(targetComputed, (newVal, oldVal) => {
-        if (props.isGenerating) return; // Pause recalculation animation during streaming
-        if (oldVal === undefined) {
-            targetRef.value = newVal;
-            return;
-        }
-        const start = targetRef.value;
-        const end = newVal;
-        const duration = 300;
-        const startTime = performance.now();
-        const animate = (currentTime) => {
-            const elapsed = currentTime - startTime;
-            const progress = Math.min(elapsed / duration, 1);
-            const ease = 1 - Math.pow(1 - progress, 3);
-            targetRef.value = Math.round(start + (end - start) * ease);
-            if (progress < 1) requestAnimationFrame(animate);
-        };
-        requestAnimationFrame(animate);
-    }, { immediate: true });
-}
-
-setupAnimateTokens(activePresetTokens, displayedActiveTokens);
-setupAnimateTokens(editingPresetTokens, displayedEditingTokens);
-
-const getBlockTokens = (blockOrContent) => {
-    // Handle direct content string (legacy)
-    if (typeof blockOrContent === 'string') {
-        return estimateTokens(extendedReplaceMacros(blockOrContent));
-    }
-    
-    const block = blockOrContent;
-    if (!block) return 0;
-
-    const content = resolveBlockContent(block);
-    if (!content) return 0;
-    return estimateTokens(extendedReplaceMacros(content));
-};
-
-const getPresetWeight = (id, preset) => {
-    if (preset.isFeatured) return -3;
-    if (id === 'default_shino') return -2;
-    if (DEFAULT_PRESETS[id]) return -1;
-    return 0;
-};
-
-const getPresetCreatedAt = (id, preset) => {
-    if (!preset) return 0;
-    if (typeof preset.createdAt === 'number' && Number.isFinite(preset.createdAt)) return preset.createdAt;
-
-    const derived = Number.parseInt(String(id), 36);
-    return Number.isFinite(derived) ? derived : 0;
-};
-
-function comparePresetEntries(a, b) {
-    const wA = getPresetWeight(a[0], a[1]);
-    const wB = getPresetWeight(b[0], b[1]);
-    if (wA !== wB) return wA - wB;
-
-    const tA = getPresetCreatedAt(a[0], a[1]);
-    const tB = getPresetCreatedAt(b[0], b[1]);
-    if (tA !== tB) return tA - tB; // oldest first
-
-    return (a[1]?.name || '').localeCompare(b[1]?.name || '');
-};
-
-// Sorted preset entries for the selector list
-const sortedPresetEntries = computed(() => {
-    return Object.entries(presetState.presets)
-        .sort(comparePresetEntries);
-});
-
-// Pre-computed token cache for the preset list — avoids calling getPresetTokens per card on every render
-const presetTokenCache = computed(() => {
-    const cache = {};
-    for (const [id, preset] of Object.entries(presetState.presets)) {
-        cache[id] = getPresetTokens(preset);
-    }
-    return cache;
-});
-
-// Get connection type for a preset relative to current char/chat
-function getPresetConnectionType(presetId) {
-    const charId = props.activeChatChar?.id;
-    const chatId = charId && props.activeChatChar?.sessionId ? `${charId}_${props.activeChatChar.sessionId}` : null;
-    if (chatId && presetState.connections.chat[chatId] === presetId) return 'chat';
-    if (charId && presetState.connections.character[charId] === presetId) return 'character';
-    
-    if (optimisticGlobalPresetId.value === presetId) return 'global';
-    if (!optimisticGlobalPresetId.value && presetState.globalPresetId === presetId) return 'global';
-    return null;
-}
-
-function openPresetConnections(presetId, event) {
-    event.stopPropagation();
-    const preset = presetState.presets[presetId];
-    if (preset) {
-        publishAppEvent(APP_EVENTS.nav.openConnections, { type: 'preset', id: presetId, name: preset.name });
-    }
-}
-
-function activatePreset(presetId) {
-    optimisticGlobalPresetId.value = presetId;
-    setTimeout(() => {
-        setPresetConnection('global', null, presetId);
-        optimisticGlobalPresetId.value = null;
-    }, 10);
-}
-
-// --- Helpers ---
-
-// --- Methods ---
-async function loadPresets() {
-    await initPresetState();
-    
-    // Ensure ALL mandatory blocks exist for all presets
-    logger.debug('[GenerationView] loadPresets: Checking commands for', Object.keys(presetState.presets).length, 'presets');
-    for (const key in presetState.presets) {
-        const preset = presetState.presets[key];
-        if (preset.reasoningEnabled === undefined) preset.reasoningEnabled = false;
-        if (preset.reasoningEffort === undefined) preset.reasoningEffort = 'medium';
-        if (preset.parseInlineReasoning === undefined) preset.parseInlineReasoning = false;
-        if (preset.mergePrompts === undefined) preset.mergePrompts = false;
-        if (preset.mergeRole === undefined) preset.mergeRole = 'system';
-        if (preset.noAssistant === undefined) preset.noAssistant = false;
-        if (preset.stopString === undefined) preset.stopString = '';
-        if (preset.userPrefix === undefined) preset.userPrefix = '';
-        if (preset.charPrefix === undefined) preset.charPrefix = '';
-        if (preset.squashRole === undefined || preset.squashRole === '') preset.squashRole = 'assistant';
-        if (preset.author === undefined) preset.author = '';
-        if (preset.image === undefined) preset.image = '';
-        if (preset.summaryPrompt === undefined) {
-            preset.summaryPrompt = 'Summarize the following roleplay conversation concisely, focusing on the current situation and key events:\n\n{{history}}\n\nSummary:';
-        }
-        if (preset.guidedGenerationPrompt === undefined) preset.guidedGenerationPrompt = '[Generate your next reply according to these instructions: {{guidance}}]';
-        if (preset.guidedImpersonationPrompt === undefined) preset.guidedImpersonationPrompt = '[Instead of replying for {{char}}, impersonate {{user}} according to these instructions: {{guidance}}]';
-
-        const blocks = preset.blocks;
-        if (!blocks) continue;
-
-        mandatoryBlocks.forEach(mb => {
-            if (!blocks.find(b => b.id === mb.id)) {
-                if (mb.id === 'chat_history') {
-                     blocks.push({ ...mb });
-                } else {
-                     let insertIndex = blocks.length;
-                     const myIndex = mandatoryBlocks.findIndex(m => m.id === mb.id);
-                     if (myIndex > 0) {
-                         const prevId = mandatoryBlocks[myIndex-1].id;
-                         const prevIdxInPreset = blocks.findIndex(b => b.id === prevId);
-                         if (prevIdxInPreset !== -1) insertIndex = prevIdxInPreset + 1;
-                     } else {
-                         // First mandatory block — find next existing mandatory and insert before it
-                         for (let i = myIndex + 1; i < mandatoryBlocks.length; i++) {
-                             const nextIdx = blocks.findIndex(b => b.id === mandatoryBlocks[i].id);
-                             if (nextIdx !== -1) { insertIndex = nextIdx; break; }
-                         }
-                     }
-                     blocks.splice(insertIndex, 0, { ...mb });
-                }
-            }
-        });
-
-        if (!blocks.find(b => b.id === 'summary')) {
-            const historyIdx = blocks.findIndex(b => b.id === 'chat_history');
-            const insertIdx = historyIdx !== -1 ? historyIdx : blocks.length;
-            blocks.splice(insertIdx, 0, { id: 'summary', name: 'Summary', role: 'system', content: '', enabled: true, isStatic: true, i18n: 'magic_summary', depth: 4, insertion_mode: 'relative', prefix: 'Summary: ' });
-        }
-        if (!blocks.find(b => b.id === 'authors_note')) {
-            const historyIdx = blocks.findIndex(b => b.id === 'chat_history');
-            const insertIdx = historyIdx !== -1 ? historyIdx + 1 : blocks.length;
-            blocks.splice(insertIdx, 0, { id: 'authors_note', name: "Author's Note", role: 'system', content: '', enabled: true, isStatic: true, i18n: 'magic_authors_notes', insertion_mode: 'relative' });
-        }
-        if (!blocks.find(b => b.id === 'guided_generation')) {
-            const authorsIdx = blocks.findIndex(b => b.id === 'authors_note');
-            const historyIdx = blocks.findIndex(b => b.id === 'chat_history');
-            const insertIdx = authorsIdx !== -1 ? authorsIdx + 1 : (historyIdx !== -1 ? historyIdx + 1 : blocks.length);
-            blocks.splice(insertIdx, 0, { id: 'guided_generation', name: 'Guided Generation', role: 'system', content: '[System Note: {{guidance}}]', enabled: true, isStatic: true, i18n: 'block_guided_generation', insertion_mode: 'relative' });
-        }
-    }
-}
-
-function savePresets() {
-    // Logic moved to presetState.js auto-watcher, but we can keep trigger if needed
-}
-
-// Watch for changes to save automatically
-watch(() => presetState, () => {}, { deep: true });
-
-watch(() => currentPreset.value?.noAssistant, (val) => {
-    if (val && currentPreset.value) {
-        currentPreset.value.mergePrompts = true;
-    }
-});
-
-watch(() => currentPreset.value?.reasoningEnabled, (val) => {
-    localStorage.setItem('gz_api_request_reasoning', val);
-});
-
-function createNewPreset() {
-    showBottomSheet({
-        title: t('new_preset') || 'New Preset',
-        input: {
-            placeholder: t('placeholder_preset_name') || 'Enter preset name',
-            value: '',
-            confirmLabel: t('btn_create') || 'Create',
-            onConfirm: (name) => {
-                const id = Date.now().toString(36);
-                presetState.presets[id] = {
-                    id: id,
-                    createdAt: Date.now(),
-                    name: name,
-                    blocks: [],
-                    author: '',
-                    image: '',
-                    impersonationPrompt: '',
-                    reasoningEnabled: false,
-                    reasoningEffort: 'medium',
-                    parseInlineReasoning: false,
-                    reasoningStart: '<think>',
-                    reasoningEnd: '</think>',
-                    mergePrompts: false,
-                    mergeRole: 'system',
-                    noAssistant: false,
-                    stopString: '',
-                    userPrefix: '',
-                    charPrefix: '',
-                    squashRole: 'assistant',
-                    summaryPrompt: 'Summarize the following roleplay conversation concisely, focusing on the current situation and key events:\n\n{{history}}\n\nSummary:',
-                    guidedGenerationPrompt: '[Generate your next reply according to these instructions: {{guidance}}]',
-                    guidedImpersonationPrompt: '[Instead of replying for {{char}}, impersonate {{user}} according to these instructions: {{guidance}}]'
-                };
-                // Ensure mandatory blocks are present
-                presetState.presets[id].blocks = [
-                    { id: 'sys1', name: 'Main System', role: 'system', content: 'You are a helpful AI assistant.', enabled: true },
-                    ...mandatoryBlocks.filter(b => b.id !== 'chat_history' && b.id !== 'guided_generation').map(b => ({...b})),
-                    { id: 'summary', name: 'Summary', role: 'system', content: '', enabled: true, isStatic: true, i18n: 'magic_summary', depth: 4, insertion_mode: 'relative', prefix: 'Summary: ' },
-                    { id: 'authors_note', name: "Author's Note", role: 'system', content: '', enabled: true, isStatic: true, i18n: 'magic_authors_notes', insertion_mode: 'relative' },
-                    { ...mandatoryBlocks.find(b => b.id === 'chat_history') },
-                    { ...mandatoryBlocks.find(b => b.id === 'guided_generation') },
-                ];
-                setPresetConnection('global', null, id);
-                editingPresetId.value = id;
-                closeBottomSheet();
-                updateHeaderState();
-            }
-        }
-    });
-}
-
-function openPresetSelector() {
-    const cardItems = [];
-    const charId = props.activeChatChar?.id;
-    const chatId = charId && props.activeChatChar?.sessionId ? `${charId}_${props.activeChatChar.sessionId}` : null;
-    
-    const entries = Object.entries(presetState.presets).sort(comparePresetEntries);
-
-    entries.forEach(([id, preset]) => {
-        const tokens = getPresetTokens(preset);
-        const isGlobal = presetState.globalPresetId === id;
-        const isChar = charId && presetState.connections.character[charId] === id;
-        const isChat = chatId && presetState.connections.chat[chatId] === id;
-        const isActive = currentPresetId.value === id;
-
-        const subtitleParts = [];
-        if (preset.author) subtitleParts.push(`by ${preset.author}`);
-        if (preset.descriptionKey) subtitleParts.push(t(preset.descriptionKey));
-        if (isActive) subtitleParts.push(t('preset_selected') || 'Selected');
-        if (isChat) subtitleParts.push(t('preset_this_chat') || 'This Chat');
-        if (isChar) subtitleParts.push(t('preset_this_char') || 'This Character');
-        if (isGlobal) subtitleParts.push(t('preset_global_default') || 'Global Default');
-
-        const item = {
-            label: preset.name,
-            sublabel: subtitleParts.join(' • ') || (t('preset_saved') || 'Saved Preset'),
-            badge: `${tokens}`,
-            isFeatured: preset.isFeatured,
-            image: preset.image || null,
-            icon: !preset.image ? '<svg viewBox="0 0 24 24" style="fill:currentColor;"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>' : null,
-            onClick: () => {
-                editingPresetId.value = id;
-                closeBottomSheet();
-                updateHeaderState();
-            }
-        };
-
-        cardItems.push(item);
-    });
-
-    cardItems.push({
-        label: t('btn_add') || 'Add / Import',
-        sublabel: t('preset_create_import_desc') || 'Create or import a new preset',
-        icon: '<svg viewBox="0 0 24 24" style="fill:currentColor;width:24px;height:24px;"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>',
-        onClick: () => {
-            closeBottomSheet();
-            openAddPresetSheet();
-        }
-    });
-
-    showBottomSheet({
-        title: t('sheet_title_presets') || 'Presets',
-        cardItems: cardItems
-    });
-}
-
-function openPresetConnectionManager() {
-    const preset = currentPreset.value;
-    if (preset) {
-        publishAppEvent(APP_EVENTS.nav.openConnections, { type: 'preset', id: preset.id, name: preset.name });
-    }
-}
-
-function openPresetOptionsMenu() {
-    const isDefault = !!DEFAULT_PRESETS[currentPresetId.value];
-    const items = [];
-
-    let authorLinkResolved = currentPreset.value.authorLink;
-    if (!authorLinkResolved) {
-        const authorName = (currentPreset.value.author || '').toLowerCase();
-        if (authorName === 'microcot') authorLinkResolved = 'https://t.me/sillytavern1';
-        else if (authorName === 'fawn1e' || authorName === 'fawnie') authorLinkResolved = 'https://t.me/dearfawwn';
-    }
-
-    if (authorLinkResolved) {
-        items.push({
-            label: t('author_link') || 'Author link',
-            icon: '<svg viewBox="0 0 24 24"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"/></svg>',
-            onClick: async () => {
-                closeBottomSheet();
-                await Browser.open({ url: authorLinkResolved });
-            }
-        });
-    }
-
-    // Clone preset (available for all presets)
-    items.push({
-        label: t('action_clone') || 'Clone Preset',
-        icon: '<svg viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>',
-        onClick: () => {
-            closeBottomSheet();
-            cloneCurrentPreset();
-        }
-    });
-
-    items.push({
-        label: t('action_export_st') || 'Export as ST Preset',
-        icon: '<svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>',
-        onClick: () => {
-            closeBottomSheet();
-            triggerExportST();
-        }
-    });
-
-    if (!isDefault) {
-        items.push(
-            {
-                label: t('action_edit_name') || 'Change Name',
-                icon: '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>',
-                onClick: () => {
-                    renameCurrentPreset();
-                }
-            },
-            {
-                label: t('change_author') || 'Change Author',
-                icon: '<svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>',
-                onClick: () => {
-                    editCurrentAuthor();
-                }
-            },
-            {
-                label: t('change_image') || 'Change Image',
-                icon: '<svg viewBox="0 0 24 24"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>',
-                onClick: () => {
-                    closeBottomSheet();
-                    triggerImageUpload();
-                }
-            }
-        );
-    } else {
-        items.push({
-            label: t('action_reset') || 'Reset to Default',
-            icon: '<svg viewBox="0 0 24 24"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>',
-            onClick: () => {
-                closeBottomSheet();
-                confirmResetPreset(currentPresetId.value);
-            }
-        });
-    }
-
-    if (!isDefault) {
-        items.push({
-            label: t('btn_delete') || 'Delete Preset',
-            icon: '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>',
-            iconColor: '#ff4444',
-            isDestructive: true,
-            onClick: () => {
-                closeBottomSheet();
-                confirmDeletePreset(currentPreset.value.id);
-            }
-        });
-    }
-
-    showBottomSheet({
-        title: t('preset_options') || 'Preset Options',
-        items
-    });
-}
-
-function cloneCurrentPreset() {
-    const source = currentPreset.value;
-    const newId = Date.now().toString(36) + Math.random().toString(36).substr(2, 4);
-    const clone = JSON.parse(JSON.stringify(source));
-    clone.id = newId;
-    clone.name = (source.name || 'Preset') + ' (copy)';
-    clone.isFeatured = false;
-    // Regenerate block IDs to avoid conflicts
-    if (clone.blocks) {
-        clone.blocks.forEach(b => {
-            if (!b.isStatic && !mandatoryBlocks.find(mb => mb.id === b.id)) {
-                b.id = Date.now().toString(36) + Math.random().toString(36).substr(2, 6);
-            }
-        });
-    }
-    presetState.presets[newId] = clone;
-    setPresetConnection('global', null, newId);
-    editingPresetId.value = newId;
-    updateHeaderState();
-}
-
-function renameCurrentPreset() {
-    showBottomSheet({
-        title: t('action_edit_name') || 'Change Name',
-        input: {
-            placeholder: t('placeholder_preset_name') || 'Enter preset name',
-            value: currentPreset.value.name,
-            confirmLabel: t('btn_save') || 'Save',
-            onConfirm: (newName) => {
-                if (newName) currentPreset.value.name = newName;
-                closeBottomSheet();
-            }
-        }
-    });
-}
-
-async function triggerExportST() {
-    try {
-        const exportedData = exportSTPreset(currentPreset.value);
-        const fileName = (currentPreset.value.name || 'Preset').replace(/[^a-z0-9а-яё]/gi, '_').toLowerCase();
-        const filename = `${fileName}.json`;
-        
-        await saveFile(filename, JSON.stringify(exportedData, null, 4), 'application/json', 'presets');
-    } catch (e) {
-        console.error("Export ST Preset failed", e);
-        alert("Export failed: " + e.message);
-    }
-}
-
-function editCurrentAuthor() {
-    showBottomSheet({
-        title: t('change_author') || 'Change Author',
-        input: {
-            placeholder: t('placeholder_author_name') || 'Enter author name',
-            value: currentPreset.value.author,
-            confirmLabel: t('btn_save') || 'Save',
-            onConfirm: (newAuthor) => {
-                currentPreset.value.author = newAuthor;
-                closeBottomSheet();
-            }
-        }
-    });
-}
-
-function triggerImageUpload() {
-    document.getElementById('preset-image-input').click();
-}
-
-async function compressImage(base64Str, maxWidth = 1200, maxHeight = 800, quality = 0.7) {
-    return new Promise((resolve) => {
-        const img = new Image();
-        img.src = base64Str;
-        img.onload = () => {
-            const canvas = document.createElement('canvas');
-            let width = img.width;
-            let height = img.height;
-
-            if (width > height) {
-                if (width > maxWidth) {
-                    height *= maxWidth / width;
-                    width = maxWidth;
-                }
-            } else {
-                if (height > maxHeight) {
-                    width *= maxHeight / height;
-                    height = maxHeight;
-                }
-            }
-
-            canvas.width = width;
-            canvas.height = height;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(img, 0, 0, width, height);
-            resolve(canvas.toDataURL('image/jpeg', quality));
-        };
-    });
-}
-
-function onImageSelected(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-        const compressed = await compressImage(e.target.result);
-        currentPreset.value.image = compressed;
-    };
-    reader.readAsDataURL(file);
-}
-
-function openAddPresetSheet() {
-    const items = [
-        {
-            label: t('action_create_new') || 'Create New',
-            icon: '<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>',
-            onClick: () => {
-                closeBottomSheet();
-                createNewPreset();
-            }
-        },
-        {
-            label: t('action_import') || 'Import from file',
-            icon: '<svg viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>',
-            onClick: () => {
-                closeBottomSheet();
-                triggerImport();
-            }
-        }
-    ];
-
-    showBottomSheet({
-        title: t('sheet_title_presets') || 'Presets',
-        items: items
-    });
-}
-
-function confirmDeletePreset(id) {
-    const presetName = presetState.presets[id]?.name;
-    showBottomSheet({
-        title: `${t('confirm_delete_preset')} "${presetName}"?`,
-        items: [
-            {
-                label: t('btn_yes') || 'Yes',
-                icon: '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>',
-                iconColor: '#ff4444',
-                isDestructive: true,
-                onClick: () => {
-                    if (DEFAULT_PRESETS[id]) {
-                        closeBottomSheet();
-                        return;
-                    }
-
-                    delete presetState.presets[id];
-
-                    // Clean up connections
-                    Object.keys(presetState.connections.character).forEach(k => {
-                        if (presetState.connections.character[k] === id) delete presetState.connections.character[k];
-                    });
-                    Object.keys(presetState.connections.chat).forEach(k => {
-                        if (presetState.connections.chat[k] === id) delete presetState.connections.chat[k];
-                    });
-
-                    if (presetState.globalPresetId === id) {
-                        setPresetConnection('global', null, null);
-                    }
-                    
-                    closeBottomSheet();
-                    if (editingPresetId.value === id) {
-                        editingPresetId.value = null;
-                        updateHeaderState();
-                    }
-
-                    flushPresetSave();
-                }
-            },
-            {
-                label: t('btn_no') || 'No',
-                icon: '<svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>',
-                onClick: () => closeBottomSheet()
-            }
-        ]
-    });
-}
-
-function confirmResetPreset(id) {
-    const presetName = presetState.presets[id]?.name;
-    showBottomSheet({
-        title: `${t('confirm_reset_preset') || 'Reset to default:'} "${presetName}"?`,
-        items: [
-            {
-                label: t('btn_yes') || 'Yes',
-                icon: '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>',
-                iconColor: 'var(--vk-blue)',
-                onClick: () => {
-                    if (!DEFAULT_PRESETS[id]) return;
-                    presetState.presets[id] = JSON.parse(JSON.stringify(DEFAULT_PRESETS[id]));
-                    closeBottomSheet();
-                }
-            },
-            {
-                label: t('btn_no') || 'No',
-                icon: '<svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>',
-                onClick: () => closeBottomSheet()
-            }
-        ]
-    });
-}
-
-// Block Management
-function addNewBlock() {
-    showBottomSheet({
-        title: t('add_block') || 'Add Block',
-        items: [
-            {
-                label: t('action_create_new') || 'Create New',
-                icon: '<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>',
-                onClick: () => {
-                    const newBlock = {
-                        id: Date.now().toString(36) + Math.random().toString(36).substr(2),
-                        name: t('new_block') || 'New Block',
-                        role: 'system',
-                        content: '',
-                        enabled: true,
-                        insertion_mode: 'relative'
-                    };
-                    currentPreset.value.blocks.push(newBlock);
-                    closeBottomSheet();
-                }
-            },
-            {
-                label: t('action_copy_from_preset') || 'Copy from Preset',
-                icon: '<svg viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>',
-                onClick: () => {
-                    closeBottomSheet();
-                    openCopyBlockPresetPicker();
-                }
-            }
-        ]
-    });
-}
-
-function openCopyBlockPresetPicker() {
-    const entries = Object.entries(presetState.presets).sort((a, b) => {
-        const wA = getPresetWeight(a[0], a[1]);
-        const wB = getPresetWeight(b[0], b[1]);
-        if (wA !== wB) return wA - wB;
-        return a[1].name.localeCompare(b[1].name);
-    });
-
-    const cardItems = entries.map(([id, preset]) => ({
-        label: preset.name,
-        sublabel: preset.author ? `by ${preset.author}` : '',
-        image: preset.image || null,
-        isFeatured: preset.isFeatured,
-        icon: !preset.image ? '<svg viewBox="0 0 24 24" style="fill:currentColor;"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>' : null,
-        onClick: () => {
-            closeBottomSheet();
-            openCopyBlockPicker(id, preset);
-        }
-    }));
-
-    showBottomSheet({
-        title: t('action_select_preset') || 'Select Preset',
-        cardItems
-    });
-}
-
-function openCopyBlockPicker(presetId, preset) {
-    if (!preset.blocks || preset.blocks.length === 0) {
-        showBottomSheet({
-            title: preset.name,
-            items: [{
-                label: t('label_no_blocks') || 'No blocks available',
-                onClick: () => closeBottomSheet()
-            }]
-        });
-        return;
-    }
-
-    const items = preset.blocks
-        .filter(b => !b.isStashed)
-        .map(block => ({
-            label: block.i18n ? t(block.i18n) : block.name,
-            icon: '<svg viewBox="0 0 24 24">' + getBlockIcon(block) + '</svg>',
-            onClick: () => {
-                const clone = JSON.parse(JSON.stringify(block));
-                clone.id = Date.now().toString(36) + Math.random().toString(36).substr(2, 6);
-                clone.name = (block.i18n ? t(block.i18n) : block.name) + ' (copy)';
-                clone.isStatic = false;
-                clone.i18n = undefined;
-                currentPreset.value.blocks.push(clone);
-                closeBottomSheet();
-            }
-        }));
-
-    showBottomSheet({
-        title: preset.name + ' — ' + (t('label_blocks') || 'Blocks'),
-        items
-    });
-}
-
-function updateHeaderState() {
-    headerState.title = t('sheet_title_presets') || 'Presets';
-    if (isEditingBlock.value || editingPresetId.value) {
-        headerState.showBack = true;
-    } else {
-        headerState.showBack = false;
-    }
-    headerState.actions = [];
-}
-
-function goBackFromEditor() {
-    if (isEditingBlock.value) {
-        closeBlockEditor();
-    } else if (editingPresetId.value) {
-        editingPresetId.value = null;
-        updateHeaderState();
-    } else if (props.viewMode) {
-        publishAppEvent(APP_EVENTS.nav.navigateTo, 'view-tools');
-    } else {
-        close();
-    }
-}
+// --- Lifecycle ---
+const unsubs = [];
 
 function handleBackNavigation() {
     if (!sheet.value?.isVisible) return;
-    if (isEditingBlock.value || editingPresetId.value) {
-        goBackFromEditor();
-    }
+    if (isEditingBlock.value || editingPresetId.value) goBackFromEditor();
 }
-
-function stashActiveBlock() {
-    if (activeEditBlock.value) {
-        activeEditBlock.value.isStashed = true;
-        activeEditBlock.value.enabled = false;
-        closeBlockEditor();
-    }
-}
-
-function unstashBlock(blockId) {
-    const block = currentPreset.value.blocks.find(b => b.id === blockId);
-    if (block) {
-        block.isStashed = false;
-        block.enabled = true;
-    }
-}
-
-function openStashSheet() {
-    if (stashedBlocks.value.length === 0) return;
-
-    const items = stashedBlocks.value.map(block => ({
-        label: block.i18n ? t(block.i18n) : block.name,
-        icon: getBlockIcon(block),
-        onClick: null, // Click on the item does nothing now
-        actions: [
-            {
-                // Restore icon (unarchive)
-                icon: '<svg viewBox="0 0 24 24"><path d="M20.55 5.22l-1.39-1.68C18.88 3.21 18.47 3 18 3H6c-.47 0-.88.21-1.15.55L3.46 5.22C3.17 5.57 3 6.01 3 6.5V19c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6.5c0-.49-.17-.93-.45-1.28zM5.12 5l.82-1h12.11l.83 1H5.12zM12 17.5L6.5 12H10v-4h4v4h3.5L12 17.5z"/></svg>',
-                color: 'var(--vk-blue)',
-                onClick: (e) => {
-                    e.stopPropagation();
-                    unstashBlock(block.id);
-                    if (stashedBlocks.value.length > 0) {
-                        openStashSheet();
-                    } else {
-                        closeBottomSheet();
-                    }
-                }
-            },
-            {
-                icon: '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>',
-                color: '#ff4444',
-                onClick: (e) => {
-                    e.stopPropagation();
-                    confirmDeleteStashedBlock(block.id);
-                }
-            }
-        ]
-    }));
-
-    showBottomSheet({
-        title: t('stash') || 'Stash',
-        items: items
-    });
-}
-
-function openBlockEditor(blockId) {
-    logger.debug('[GenerationView] openBlockEditor', blockId);
-    
-    editingBlockId.value = blockId;
-    
-    const block = currentPreset.value.blocks.find(b => b.id === blockId);
-    if (block && block.id !== 'authors_note' && block.id !== 'summary' && !block.insertion_mode) {
-        block.insertion_mode = 'relative';
-    }
-
-    isEditingBlock.value = true;
-    
-    nextTick(() => {
-        updateHeaderState();
-    });
-}
-
-function closeBlockEditor() {
-    logger.debug('[GenerationView] closeBlockEditor');
-    isEditingBlock.value = false;
-    editingBlockId.value = null;
-    nextTick(() => {
-        updateHeaderState();
-    });
-}
-
-function onTransitionBeforeLeave(el) {
-    const key = el.getAttribute('data-scroll-key');
-    const scroller = genSheetBodyRef.value?.closest('.sheet-view-body');
-    if (key && scroller) {
-        scrollPositions[key] = scroller.scrollTop || 0;
-    }
-}
-
-function onTransitionBeforeEnter(el) {
-    const key = el.getAttribute('data-scroll-key');
-    if (key && scrollPositions[key] !== undefined) {
-        const scroller = genSheetBodyRef.value?.closest('.sheet-view-body');
-        if (scroller) {
-            scroller.scrollTop = scrollPositions[key];
-            nextTick(() => { scroller.scrollTop = scrollPositions[key]; });
-        }
-    }
-}
-
-function deleteActiveBlock() {
-    if (activeEditBlock.value && activeEditBlock.value.isStatic) {
-        alert(t('msg_cannot_delete_static') || 'Cannot delete static block');
-        return;
-    }
-    if (editingBlockId.value) {
-        showBottomSheet({
-            title: t('confirm_delete_block') || 'Delete block?',
-            items: [
-                {
-                    label: t('btn_delete') || 'Delete',
-                    icon: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>',
-                    iconColor: '#ff4444',
-                    isDestructive: true,
-                    onClick: () => {
-                        const idx = currentPreset.value.blocks.findIndex(b => b.id === editingBlockId.value);
-                        if (idx !== -1) {
-                            currentPreset.value.blocks.splice(idx, 1);
-                        }
-                        closeBottomSheet();
-                        closeBlockEditor();
-                    }
-                },
-                {
-                    label: t('btn_cancel') || 'Cancel',
-                    icon: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>',
-                    onClick: closeBottomSheet
-                }
-            ]
-        });
-    }
-}
-
-function updateActiveBlock(newVal) {
-    const block = activeEditBlock.value;
-    if (block) {
-        if (block.id === 'authors_note' || block.id === 'summary') {
-            if (props.activeChatChar) {
-                emit('update:activeChatChar', { ...props.activeChatChar, ...newVal });
-            }
-            // Sync settings back to preset block
-            const prefix = block.id === 'authors_note' ? 'authors_note_' : 'summary_';
-            if (newVal[prefix + 'role']) block.role = newVal[prefix + 'role'];
-            if (newVal[prefix + 'depth'] !== undefined) block.depth = newVal[prefix + 'depth'];
-            if (newVal[prefix + 'insertion_mode']) block.insertion_mode = newVal[prefix + 'insertion_mode'];
-            if (block.id === 'summary' && newVal.summary_prefix !== undefined) block.prefix = newVal.summary_prefix;
-        } else {
-            Object.assign(block, newVal);
-        }
-    }
-}
-
-// Drag and Drop
-const dragSrcIndex = ref(-1);
-
-function onDragStart(event, blockId) {
-    const index = currentPreset.value.blocks.findIndex(b => b.id === blockId);
-    if (index === -1) return;
-    dragSrcIndex.value = index;
-    event.dataTransfer.effectAllowed = 'move';
-    event.dataTransfer.dropEffect = 'move';
-    
-    // Hide default ghost image
-    const img = new Image();
-    img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
-    event.dataTransfer.setDragImage(img, 0, 0);
-    
-    event.target.classList.add('dragging');
-}
-
-function onDragEnter(event, blockId) {
-    const index = currentPreset.value.blocks.findIndex(b => b.id === blockId);
-    if (index === -1) return;
-    if (dragSrcIndex.value !== -1 && dragSrcIndex.value !== index) {
-        const blocks = currentPreset.value.blocks;
-        const item = blocks.splice(dragSrcIndex.value, 1)[0];
-        blocks.splice(index, 0, item);
-        dragSrcIndex.value = index;
-    }
-}
-
-function onDragEnd(event) {
-    event.target.classList.remove('dragging');
-    dragSrcIndex.value = -1;
-}
-
-function onTouchStart(event, blockId) {
-    const index = currentPreset.value.blocks.findIndex(b => b.id === blockId);
-    if (index === -1) return;
-    dragSrcIndex.value = index;
-    const block = event.target.closest('.prompt-block');
-    if (block) block.classList.add('dragging');
-    document.body.style.overflow = 'hidden';
-}
-
-function onTouchMove(event) {
-    if (dragSrcIndex.value === -1) return;
-    event.preventDefault();
-    const touch = event.touches[0];
-    const target = document.elementFromPoint(touch.clientX, touch.clientY);
-    const block = target?.closest('.prompt-block');
-    
-    if (block && block.dataset.id !== undefined) {
-        const targetId = block.dataset.id;
-        const targetIndex = currentPreset.value.blocks.findIndex(b => b.id === targetId);
-        if (targetIndex !== -1 && targetIndex !== dragSrcIndex.value) {
-            const blocks = currentPreset.value.blocks;
-            const item = blocks.splice(dragSrcIndex.value, 1)[0];
-            blocks.splice(targetIndex, 0, item);
-            dragSrcIndex.value = targetIndex;
-        }
-    }
-}
-
-function onTouchEnd(event) {
-    const block = event.target.closest('.prompt-block');
-    if (block) block.classList.remove('dragging');
-    document.querySelectorAll('.prompt-block.dragging').forEach(el => el.classList.remove('dragging'));
-    dragSrcIndex.value = -1;
-    document.body.style.overflow = '';
-}
-
-// --- Import Logic ---
-function triggerImport() {
-    document.getElementById('preset-file-input').click();
-}
-
-function onFileSelected(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-        try {
-            const json = JSON.parse(e.target.result);
-            processImportedPreset(json, file.name.replace(/\.json$/i, ''));
-        } catch (err) {
-            console.error("Error parsing JSON:", err);
-            alert("Invalid JSON file");
-        }
-        event.target.value = '';
-    };
-    reader.readAsText(file);
-}
-
-function processImportedPreset(data, defaultName) {
-    const format = detectPresetFormat(data);
-    let preset;
-
-    if (format === 'latex') {
-        preset = convertLatexPreset(data, defaultName);
-    } else if (format === 'sillytavern') {
-        preset = convertSTPreset(data, defaultName);
-    } else if (format === 'glaze') {
-        preset = data;
-    } else {
-        alert("Unknown preset format. Expected SillyTavern, LaTeX, or Glaze JSON.");
-        return;
-    }
-
-    preset = finalizeImportedPreset(preset);
-    presetState.presets[preset.id] = preset;
-    editingPresetId.value = preset.id;
-    updateHeaderState();
-}
-
-// Helper to generate fields for magic blocks (Author's Note, Summary)
-function getMagicBlockFields(blockId) {
-    const block = currentPreset.value.blocks.find(b => b.id === blockId);
-    if (!block) return [];
-
-    const fields = [];
-    const mode = block.insertion_mode || 'relative';
-
-    fields.push({ 
-        key: 'role', label: 'label_role', type: 'select', 
-        options: [
-            { value: 'system', label: 'role_system' },
-            { value: 'user', label: 'role_user' },
-            { value: 'assistant', label: 'role_assistant' }
-        ]
-    });
-
-    fields.push({
-        key: 'insertion_mode', label: 'label_injection_point', type: 'select',
-        options: [
-            { value: 'relative', label: 'injection_relative' },
-            { value: 'depth', label: 'injection_depth' }
-        ]
-    });
-    
-    if (mode === 'depth') {
-        fields.push({ key: 'depth', label: t('label_depth') || 'Depth', type: 'number', placeholder: '4' });
-    }
-
-    if (blockId === 'summary') {
-        fields.push({ key: 'prefix', label: t('label_prefix') || 'Prefix', type: 'text', placeholder: 'Summary: ' });
-    }
-    
-    if (blockId === 'authors_note') {
-        fields.push({ key: 'info', label: '', type: 'info', text: t('unique_for_chat') || 'Content is unique for each chat' });
-    }
-    
-    fields.push({ key: 'content', label: t('label_content') || 'Content', type: 'textarea', rows: 5, expandable: true });
-
-    return fields;
-}
-
-// --- Editor Config ---
-const editorConfig = computed(() => {
-    if (activeEditBlock.value?.id === 'authors_note') {
-        const fields = getMagicBlockFields('authors_note');
-        return [{
-            title: t('magic_authors_notes') || "Author's Note",
-            fields: fields
-        }];
-    }
-    if (activeEditBlock.value?.id === 'summary') {
-        const fields = getMagicBlockFields('summary');
-        return [{
-            title: t('magic_summary') || "Summary",
-            fields: fields
-        }];
-    }
-    if (activeEditBlock.value?.id === 'guided_generation') {
-        const block = activeEditBlock.value;
-        const mode = block.insertion_mode || 'relative';
-        const fields = [
-            { key: 'role', label: 'label_role', type: 'select', helpTerm: 'preset-role', options: [
-                { value: 'system', label: 'role_system' },
-                { value: 'user', label: 'role_user' },
-                { value: 'assistant', label: 'role_assistant' }
-            ]},
-            { key: 'insertion_mode', label: 'label_injection_point', type: 'select', helpTerm: 'preset-injection', options: [
-                { value: 'relative', label: 'injection_relative' },
-                { value: 'depth', label: 'injection_depth' }
-            ]},
-            ...(mode === 'depth' ? [{ key: 'depth', label: t('label_depth') || 'Depth', type: 'number', placeholder: '0' }] : []),
-            { key: 'info', label: '', type: 'info', text: t('guided_generation_block_hint') || 'This prompt is sent only when Guided Generation is active.\n{{guidance}} — user instruction.' },
-            { key: 'guidedGenerationPrompt', label: t('label_guided_generation_prompt') || 'Generation Prompt', type: 'textarea', rows: 2, expandable: true },
-            { key: 'guidedImpersonationPrompt', label: t('label_guided_impersonation_prompt') || 'Impersonation Prompt', type: 'textarea', rows: 2, expandable: true }
-        ];
-        return [{ title: t('block_guided_generation') || 'Guided Generation', fields }];
-    }
-
-    if (activeEditBlock.value?.isStatic) {
-        const blockName = activeEditBlock.value.i18n ? t(activeEditBlock.value.i18n) : activeEditBlock.value.name;
-        const fields = [];
-        
-        if (activeEditBlock.value.id !== 'chat_history') {
-            fields.push({ 
-                key: 'role', label: 'label_role', type: 'select', helpTerm: 'preset-role',
-                options: [
-                    { value: 'system', label: 'role_system' },
-                    { value: 'user', label: 'role_user' },
-                    { value: 'assistant', label: 'role_assistant' }
-                ]
-            });
-        }
-
-        fields.push({
-            key: 'insertion_mode', label: 'label_injection_point', type: 'select', helpTerm: 'preset-injection',
-            options: [
-                { value: 'relative', label: 'injection_relative' },
-                { value: 'depth', label: 'injection_depth' }
-            ]
-        });
-        if (activeEditBlock.value.insertion_mode === 'depth') {
-            fields.push({ key: 'depth', label: 'label_depth', type: 'number', placeholder: '4' });
-        }
-        
-        fields.push({ 
-            key: 'content', label: '', type: 'info', 
-            text: `${t('msg_block_managed_by')} "${blockName}"`
-        });
-
-        return [
-            {
-                title: '',
-                fields: fields
-            }
-        ];
-    }
-
-    const genericFields = [
-        { key: 'name', label: 'label_block_name', type: 'text' },
-        { 
-            key: 'role', label: 'label_role', type: 'select', helpTerm: 'preset-role',
-            options: [
-                { value: 'system', label: 'role_system' },
-                { value: 'user', label: 'role_user' },
-                { value: 'assistant', label: 'role_assistant' }
-            ]
-        },
-        {
-            key: 'insertion_mode', label: 'label_injection_point', type: 'select', helpTerm: 'preset-injection',
-            options: [
-                { value: 'relative', label: 'injection_relative' },
-                { value: 'depth', label: 'injection_depth' }
-            ]
-        }
-    ];
-
-    if (activeEditBlock.value?.insertion_mode === 'depth') {
-        genericFields.push({ key: 'depth', label: 'label_depth', type: 'number', placeholder: '4' });
-    }
-
-    genericFields.push({ key: 'content', label: 'label_content', type: 'textarea', rows: 10, expandable: true });
-
-    return [
-        {
-            title: '',
-            fields: genericFields
-        }
-    ];
-});
-
-const editorProxy = computed({
-    get() {
-        if (!activeEditBlock.value) return null;
-        
-        if (activeEditBlock.value.id === 'authors_note') {
-            return {
-                content: props.activeChatChar?.authors_note || '',
-                depth: activeEditBlock.value.depth !== undefined ? activeEditBlock.value.depth : 0,
-                role: activeEditBlock.value.role || 'system',
-                insertion_mode: activeEditBlock.value.insertion_mode || 'relative'
-            };
-        }
-        if (activeEditBlock.value.id === 'summary') {
-            return {
-                content: props.activeChatChar?.summary || '',
-                depth: activeEditBlock.value.depth !== undefined ? activeEditBlock.value.depth : 4,
-                role: activeEditBlock.value.role || 'system',
-                insertion_mode: activeEditBlock.value.insertion_mode || 'relative',
-                prefix: activeEditBlock.value.prefix || 'Summary: '
-            };
-        }
-        if (activeEditBlock.value.id === 'guided_generation') {
-            return {
-                role: activeEditBlock.value.role || 'system',
-                insertion_mode: activeEditBlock.value.insertion_mode || 'relative',
-                depth: activeEditBlock.value.depth !== undefined ? activeEditBlock.value.depth : 0,
-                guidedGenerationPrompt: currentPreset.value.guidedGenerationPrompt || '',
-                guidedImpersonationPrompt: currentPreset.value.guidedImpersonationPrompt || ''
-            };
-        }
-
-        return activeEditBlock.value;
-    },
-    set(newVal) {
-        if (!activeEditBlock.value || !newVal) return;
-
-        if (activeEditBlock.value.id === 'authors_note') {
-            if (props.activeChatChar) emit('update:activeChatChar', { ...props.activeChatChar, authors_note: newVal.content });
-            activeEditBlock.value.depth = newVal.depth;
-            activeEditBlock.value.role = newVal.role;
-            activeEditBlock.value.insertion_mode = newVal.insertion_mode;
-        } else if (activeEditBlock.value.id === 'summary') {
-            if (props.activeChatChar) emit('update:activeChatChar', { ...props.activeChatChar, summary: newVal.content });
-            activeEditBlock.value.depth = newVal.depth;
-            activeEditBlock.value.role = newVal.role;
-            activeEditBlock.value.insertion_mode = newVal.insertion_mode;
-            activeEditBlock.value.prefix = newVal.prefix;
-        } else if (activeEditBlock.value.id === 'guided_generation') {
-            activeEditBlock.value.role = newVal.role;
-            activeEditBlock.value.insertion_mode = newVal.insertion_mode;
-            activeEditBlock.value.depth = newVal.depth;
-            currentPreset.value.guidedGenerationPrompt = newVal.guidedGenerationPrompt;
-            currentPreset.value.guidedImpersonationPrompt = newVal.guidedImpersonationPrompt;
-        } else {
-            // Standard block - manual copy to maintain reference or replace properties
-            Object.assign(activeEditBlock.value, newVal);
-        }
-    }
-});
-
-function getBlockIcon(block) {
-    if (normalizeBlockId(block.id) === 'chat_history') {
-        return '<path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/>';
-    }
-    return getRoleIcon(block.role);
-}
-
-function hasMacro(block, macroName) {
-    let content = "";
-    if (block.id === 'authors_note') {
-        content = props.activeChatChar?.authors_note || "";
-    } else if (block.id === 'summary') {
-        content = props.activeChatChar?.summary || "";
-    } else {
-        content = block.content || "";
-    }
-    
-    if (macroName === 'setvar') return content.includes('{{setvar::');
-    if (macroName === 'getvar') return content.includes('{{getvar::');
-    return false;
-}
-
-function getRoleIcon(role) {
-    switch(role) {
-        case 'user': return '<path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/>';
-        case 'assistant': return '<path d="M20 9V7c0-1.1-.9-2-2-2h-3c0-1.66-1.34-3-3-3S9 3.34 9 5H6c-1.1 0-2 .9-2 2v2c-1.66 0-3 1.34-3 3s1.34 3 3 3v4c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-4c1.66 0 3-1.34 3-3s-1.34-3-3-3zM7.5 11.5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5S9.83 13 9 13s-1.5-.67-1.5-1.5zM16 17H8v-2h8v2zm-1.5-4c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5z"/>';
-        case 'system': 
-        default: return '<path d="M20 13H4c-.55 0-1 .45-1 1v6c0 .55.45 1 1 1h16c.55 0 1-.45 1-1v-6c0-.55-.45-1-1-1zM7 19c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zM20 3H4c-.55 0-1 .45-1 1v6c0 .55.45 1 1 1h16c.55 0 1-.45 1-1V4c0-.55-.45-1-1-1zM7 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"/>';
-    }
-}
-
-function isBlockLocked(block) {
-    return false; // Blocks are fundamentally no longer locked by depth
-}
-
-function openAuthorsNoteSheet() {
-    if (!props.activeChatChar) return;
-    const char = props.activeChatChar;
-    const block = currentPreset.value.blocks.find(b => b.id === 'authors_note');
-    if (!block) return;
-    
-    const data = {
-        enabled: block.enabled !== undefined ? block.enabled : true,
-        role: block.role || 'system',
-        insertion_mode: block.insertion_mode || 'relative',
-        depth: block.depth !== undefined ? block.depth : 0,
-        content: char.authors_note || ''
-    };
-
-    const getToggleIcon = (enabled) => {
-        return `<input type="checkbox" class="vk-switch" ${enabled ? 'checked' : ''} style="pointer-events: none;">`;
-    };
-
-    const helpTipHtml = (term) => `
-        <button class="help-tip" data-term="${term}" type="button" tabindex="-1" style="width:20px;height:20px;padding:0;border:none;background:none;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;opacity:0.4;color:var(--text-gray);vertical-align:middle;margin-left:4px;">
-            <svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:currentColor;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25z"/></svg>
-        </button>
-    `;
-
-    const content = document.createElement('div');
-    content.innerHTML = `
-        <div class="settings-item">
-            <label>${t('label_role')}${helpTipHtml('preset-role')}</label>
-            <select id="an-role" class="settings-select">
-                <option value="system" ${data.role === 'system' ? 'selected' : ''}>${t('role_system')}</option>
-                <option value="user" ${data.role === 'user' ? 'selected' : ''}>${t('role_user')}</option>
-                <option value="assistant" ${data.role === 'assistant' ? 'selected' : ''}>${t('role_assistant')}</option>
-            </select>
-        </div>
-        <div class="settings-item">
-            <label>${t('label_injection_point')}${helpTipHtml('preset-injection')}</label>
-            <select id="an-mode" class="settings-select">
-                <option value="relative" ${data.insertion_mode === 'relative' ? 'selected' : ''}>${t('injection_relative')}</option>
-                <option value="depth" ${data.insertion_mode === 'depth' ? 'selected' : ''}>${t('injection_depth')}</option>
-            </select>
-        </div>
-        <div class="settings-item" id="an-depth-container" style="${data.insertion_mode === 'depth' ? '' : 'display:none'}">
-            <label>${t('label_depth')}</label>
-            <input type="number" id="an-depth" value="${data.depth}" placeholder="${t('placeholder_depth')}">
-        </div>
-        <div class="settings-item" style="color: var(--text-gray); font-size: 12px; text-align: center; justify-content: center; opacity: 0.8; margin-top: -4px;">
-            ${t('unique_for_chat') || 'Content is unique for each chat'}
-        </div>
-        <div class="settings-item">
-            <label>${t('label_content')}</label>
-            <textarea id="an-content" rows="5">${data.content}</textarea>
-        </div>
-    `;
-
-    content.querySelectorAll('.help-tip').forEach(btn => {
-        btn.onclick = (e) => {
-            e.stopPropagation();
-            publishAppEvent(APP_EVENTS.nav.openGlossary, { term: btn.dataset.term });
-        };
-    });
-
-    let debounceTimer = null;
-    const save = () => {
-        block.enabled = data.enabled;
-        block.role = content.querySelector('#an-role').value;
-        block.insertion_mode = content.querySelector('#an-mode').value;
-        const parsedDepth = parseInt(content.querySelector('#an-depth').value);
-        block.depth = isNaN(parsedDepth) ? 0 : parsedDepth;
-        char.authors_note = content.querySelector('#an-content').value;
-    };
-
-    const debouncedSave = () => {
-        if (debounceTimer) clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(save, 500);
-    };
-
-    content.querySelector('#an-role')?.addEventListener('change', save);
-    content.querySelector('#an-mode')?.addEventListener('change', (e) => {
-        const depthContainer = content.querySelector('#an-depth-container');
-        depthContainer.style.display = e.target.value === 'depth' ? 'block' : 'none';
-        save();
-    });
-    content.querySelector('#an-depth')?.addEventListener('input', save);
-    content.querySelector('#an-content')?.addEventListener('input', debouncedSave);
-
-    const toggleAction = (e) => {
-        data.enabled = !data.enabled;
-        save();
-        if (e && e.currentTarget) {
-            const input = e.currentTarget.querySelector('input');
-            if (input) input.checked = data.enabled;
-        }
-    };
-
-    showBottomSheet({
-        title: t('magic_authors_notes'),
-        helpTip: 'authornote',
-        content: content,
-        isSolid: true,
-        headerAction: { icon: getToggleIcon(data.enabled), onClick: toggleAction },
-        onClose: () => {
-            if (debounceTimer) clearTimeout(debounceTimer);
-            save();
-        }
-    });
-}
-
-function openSummarySheet() {
-    if (!props.activeChatChar) return;
-    const char = props.activeChatChar;
-    const block = currentPreset.value.blocks.find(b => b.id === 'summary');
-    if (!block) return;
-
-    const SUMMARY_CUSTOM_MODEL_ENABLED_KEY = 'gz_summary_custom_model_enabled';
-    const SUMMARY_CUSTOM_MODEL_KEY = 'gz_summary_custom_model';
-    
-    const data = {
-        role: block.role || 'system',
-        insertion_mode: block.insertion_mode || 'relative',
-        depth: block.depth !== undefined ? block.depth : 4,
-        savedContent: char.summary || '',
-        draftContent: char.summary || '',
-        prefix: block.prefix || 'Summary: '
-    };
-    let isGenerating = false;
-    let debounceTimer = null;
-    let useCustomModel = localStorage.getItem(SUMMARY_CUSTOM_MODEL_ENABLED_KEY) === 'true';
-    let customModel = localStorage.getItem(SUMMARY_CUSTOM_MODEL_KEY) || '';
-    
-    const helpTipHtml = (term) => `
-        <button class="help-tip" data-term="${term}" type="button" tabindex="-1" style="width:20px;height:20px;padding:0;border:none;background:none;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;opacity:0.4;color:var(--text-gray);vertical-align:middle;margin-left:4px;">
-            <svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:currentColor;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25z"/></svg>
-        </button>
-    `;
-
-    const content = document.createElement('div');
-    content.className = 'summary-sheet';
-    content.innerHTML = `
-        <div class="settings-item"><label>${t('label_role')}${helpTipHtml('preset-role')}</label><select id="summary-role" class="settings-select"><option value="system" ${data.role === 'system' ? 'selected' : ''}>${t('role_system') || 'System'}</option><option value="user" ${data.role === 'user' ? 'selected' : ''}>${t('role_user') || 'User'}</option><option value="assistant" ${data.role === 'assistant' ? 'selected' : ''}>${t('role_assistant') || 'Assistant'}</option></select></div>
-        <div class="settings-item"><label>${t('label_injection_point')}${helpTipHtml('preset-injection')}</label><select id="summary-mode" class="settings-select"><option value="relative" ${data.insertion_mode === 'relative' ? 'selected' : ''}>${t('injection_relative')}</option><option value="depth" ${data.insertion_mode === 'depth' ? 'selected' : ''}>${t('injection_depth')}</option></select></div>
-        <div class="settings-item" id="summary-depth-container" style="${data.insertion_mode === 'depth' ? '' : 'display:none'}"><label>${t('label_depth')}</label><input type="number" id="summary-depth" value="${data.depth}" placeholder="${t('placeholder_depth')}"></div>
-        <div class="settings-item"><label>${t('label_prefix') || 'Prefix'}</label><input type="text" id="summary-prefix" value="${data.prefix}" placeholder="Summary: "></div>
-        <div class="settings-item-checkbox">
-            <label>${t('label_custom_model') || 'Custom summary model'}</label>
-            <input type="checkbox" id="summary-custom-model-enabled" class="vk-switch" ${useCustomModel ? 'checked' : ''}>
-        </div>
-        <div class="settings-item" id="summary-custom-model-row" style="${useCustomModel ? '' : 'display:none'}"><label>${t('label_model') || 'Model'}</label><input type="text" id="summary-custom-model" value="${customModel}" placeholder="${t('label_model') || 'Model'}"></div>
-        <div class="summary-status-row">
-            <div class="summary-status-badge" id="summary-status-badge">${data.savedContent ? 'Saved summary present' : 'No saved summary yet'}</div>
-            <div class="summary-status-text" id="summary-status-text">Draft editing is separate until you press Save.</div>
-        </div>
-        <div class="settings-item"><label>${t('label_content')}</label><textarea id="summary-content" rows="8" placeholder="${t('summary_placeholder')}">${data.draftContent}</textarea></div>
-        <div class="summary-action-grid">
-            <button id="btn-summary-generate" class="btn-save summary-action-btn summary-action-secondary">Generate Draft</button>
-            <button id="btn-summary-update" class="btn-save summary-action-btn summary-action-secondary">Update Draft</button>
-            <button id="btn-summary-save" class="btn-save summary-action-btn">Save</button>
-        </div>
-    `;
-
-    content.querySelectorAll('.help-tip').forEach(btn => {
-        btn.onclick = (e) => {
-            e.stopPropagation();
-            publishAppEvent(APP_EVENTS.nav.openGlossary, { term: btn.dataset.term });
-        };
-    });
-
-    const save = () => {
-        block.role = content.querySelector('#summary-role').value;
-        block.insertion_mode = content.querySelector('#summary-mode').value;
-        const parsedDepth = parseInt(content.querySelector('#summary-depth').value);
-        block.depth = isNaN(parsedDepth) ? 0 : parsedDepth;
-        block.prefix = content.querySelector('#summary-prefix').value;
-    };
-
-    const persistSummaryModelSettings = () => {
-        useCustomModel = !!content.querySelector('#summary-custom-model-enabled')?.checked;
-        customModel = content.querySelector('#summary-custom-model')?.value?.trim() || '';
-        localStorage.setItem(SUMMARY_CUSTOM_MODEL_ENABLED_KEY, String(useCustomModel));
-        localStorage.setItem(SUMMARY_CUSTOM_MODEL_KEY, customModel);
-    };
-
-    const updateDraftState = (text) => {
-        data.draftContent = text;
-        const isDirty = data.draftContent !== data.savedContent;
-        const statusBadge = content.querySelector('#summary-status-badge');
-        const statusText = content.querySelector('#summary-status-text');
-        if (statusBadge) {
-            statusBadge.textContent = isDirty
-                ? 'Draft has unsaved changes'
-                : (data.savedContent ? 'Draft matches saved summary' : 'No saved summary yet');
-        }
-        if (statusText) {
-            statusText.textContent = isDirty
-                ? 'Press Save to apply this summary to the chat.'
-                : 'Draft editing is separate until you press Save.';
-        }
-    };
-
-    const debouncedSave = () => {
-        if (debounceTimer) clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(save, 500);
-    };
-
-    content.querySelector('#summary-role')?.addEventListener('change', save);
-    content.querySelector('#summary-mode')?.addEventListener('change', (e) => {
-        const depthContainer = content.querySelector('#summary-depth-container');
-        if (depthContainer) depthContainer.style.display = e.target.value === 'depth' ? 'block' : 'none';
-        save();
-    });
-    content.querySelector('#summary-depth')?.addEventListener('input', save);
-    content.querySelector('#summary-prefix')?.addEventListener('input', save);
-    content.querySelector('#summary-content')?.addEventListener('input', (e) => {
-        updateDraftState(e.target.value);
-        debouncedSave();
-    });
-    content.querySelector('#summary-custom-model-enabled')?.addEventListener('change', (e) => {
-        const modelRow = content.querySelector('#summary-custom-model-row');
-        if (modelRow) modelRow.style.display = e.target.checked ? 'block' : 'none';
-        persistSummaryModelSettings();
-    });
-    content.querySelector('#summary-custom-model')?.addEventListener('input', persistSummaryModelSettings);
-
-    const runSummaryGeneration = async (mode) => {
-        if (isGenerating) return;
-        isGenerating = true;
-        const generateBtn = content.querySelector('#btn-summary-generate');
-        const updateBtn = content.querySelector('#btn-summary-update');
-        const saveBtn = content.querySelector('#btn-summary-save');
-        const originalGenerateHtml = generateBtn.innerHTML;
-        const originalUpdateHtml = updateBtn.innerHTML;
-        generateBtn.disabled = true;
-        updateBtn.disabled = true;
-        saveBtn.disabled = true;
-        if (mode === 'generate') {
-            generateBtn.innerHTML = `<div class="app-loader-spinner" style="width:20px;height:20px;border-width:2px;"></div>`;
-        } else {
-            updateBtn.innerHTML = `<div class="app-loader-spinner" style="width:20px;height:20px;border-width:2px;"></div>`;
-        }
-        try {
-            const historyText = props.chatHistory.filter(m => !m.isHidden && !m.isTyping).slice(-50).map(m => `${m.role === 'user' ? (m.persona?.name || 'User') : char.name}: ${m.text}`).join('\n');
-            const currentDraft = content.querySelector('#summary-content').value.trim();
-            const promptBase = currentPreset.value.summaryPrompt;
-            const prompt = mode === 'update' && currentDraft
-                ? `${promptBase}\n\nCurrent summary draft:\n${currentDraft}\n\nUpdate the draft summary to reflect the conversation more accurately.`
-                : promptBase;
-            const summary = await generateSummary({
-                history: historyText,
-                prompt,
-                debugKey: `summary:${char.id}:${Date.now()}`,
-                apiConfigOverride: useCustomModel && customModel ? { model: customModel } : null
-            });
-            content.querySelector('#summary-content').value = summary;
-            updateDraftState(summary);
-        } catch (e) {
-            console.error(e);
-        } finally {
-            isGenerating = false;
-            generateBtn.disabled = false;
-            updateBtn.disabled = false;
-            saveBtn.disabled = false;
-            generateBtn.innerHTML = originalGenerateHtml;
-            updateBtn.innerHTML = originalUpdateHtml;
-        }
-    };
-
-    content.querySelector('#btn-summary-generate')?.addEventListener('click', () => {
-        runSummaryGeneration('generate');
-    });
-    content.querySelector('#btn-summary-update')?.addEventListener('click', () => {
-        runSummaryGeneration('update');
-    });
-    content.querySelector('#btn-summary-save')?.addEventListener('click', () => {
-        save();
-        data.savedContent = content.querySelector('#summary-content').value;
-        char.summary = data.savedContent;
-        updateDraftState(data.savedContent);
-        closeBottomSheet();
-    });
-    updateDraftState(data.draftContent);
-
-    showBottomSheet({ 
-        title: t('magic_summary'), 
-        helpTip: 'summary',
-        content: content,
-        isSolid: true,
-        onClose: () => {
-            if (debounceTimer) clearTimeout(debounceTimer);
-            save();
-        }
-    });
-}
-
-// Depths are no longer visually enforced
-
-const onFsEditorClosed = () => {
-    if (isEditingBlock.value) {
-        setTimeout(() => updateHeaderState(), 50);
-    }
-};
-
-const unsubs = [];
 
 onMounted(async () => {
     initRipple();
     await initPresetState();
     await loadPresets();
     unsubs.push(subscribeAppEvent(APP_EVENTS.ui.backNavigation, handleBackNavigation));
-    if (currentPreset.value) {
-        localStorage.setItem('gz_api_request_reasoning', currentPreset.value.reasoningEnabled);
-    }
-
+    if (currentPreset.value) localStorage.setItem('gz_api_request_reasoning', currentPreset.value.reasoningEnabled);
     updateLanguage();
-
-    unsubs.push(subscribeAppEvent(APP_EVENTS.ui.fsEditorClosed, onFsEditorClosed));
+    unsubs.push(subscribeAppEvent(APP_EVENTS.ui.fsEditorClosed, () => {
+        if (isEditingBlock.value) setTimeout(() => updateHeaderState(), 50);
+    }));
     updateHeaderState();
+    setupPersistenceWatchers();
 });
 
-// Watchers for enforcing depth visually have been removed
-function confirmDeleteStashedBlock(blockId) {
-    const block = currentPreset.value.blocks.find(b => b.id === blockId);
-    if (!block) return;
-
-    showBottomSheet({
-        title: `${t('confirm_delete_block') || 'Delete block?'} "${block.name}"`,
-        items: [
-            {
-                label: t('btn_delete') || 'Delete',
-                icon: '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>',
-                iconColor: '#ff4444',
-                isDestructive: true,
-                onClick: () => {
-                    const idx = currentPreset.value.blocks.findIndex(b => b.id === blockId);
-                    if (idx !== -1) {
-                        currentPreset.value.blocks.splice(idx, 1);
-                    }
-                    closeBottomSheet();
-                }
-            },
-            {
-                label: t('btn_cancel') || 'Cancel',
-                onClick: () => closeBottomSheet()
-            }
-        ]
-    });
-}
-
-onBeforeUnmount(() => {
-    unsubs.forEach(unsub => unsub());
-});
+onBeforeUnmount(() => { unsubs.forEach(unsub => unsub()); });
 </script>
-
 <template>
     <div class="preset-view-root">
 
