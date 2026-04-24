@@ -12,7 +12,7 @@ import { datacatGetCharacter, datacatExtract, datacatExtractionStatus } from '@/
 import { janitorFetchCharacter, janitorSearch, janitorItemToPartialCharData } from '@/core/services/catalog/janitorProvider.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import FiltersBottomSheet from '@/components/sheets/FiltersBottomSheet.vue';
-import CatalogCharacterSheet from '@/components/sheets/CatalogCharacterSheet.vue';
+import CharacterCardSheet from '@/components/sheets/CharacterCardSheet.vue';
 
 // ─── Search ───────────────────────────────────────────────────────────────────
 
@@ -416,11 +416,12 @@ onUnmounted(() => {
         </div>
 
         <FiltersBottomSheet v-model:visible="showFiltersSheet" @apply="onFiltersApply" />
-        <CatalogCharacterSheet
+        <CharacterCardSheet
             v-model:visible="showCharSheet"
             :item="previewItem"
             :charData="previewCharData"
             :avatarUrl="previewAvatarUrl"
+            :import-enabled="true"
             @import="onSheetImport"
         />
 

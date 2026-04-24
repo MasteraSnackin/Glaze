@@ -63,7 +63,7 @@ const headerClasses = computed(() => {
     if (state.scrollHidden && !state.isChatSearchMode && state.mode !== 'editor') classes.push('scroll-hidden');
     if (state.mode === 'chat') classes.push('fixed-header');
     if (state.showActions && !state.isChatSearchMode) classes.push('has-right-actions');
-    if (state.showSearch && state.mode !== 'chat') classes.push('has-search-toggle');
+    if (state.showSearch && state.mode !== 'chat' && !isDesktop.value) classes.push('has-search-toggle');
     if (['generation', 'more'].includes(state.mode) || state.hasSubheader || state.lorebookBanner.show || state.lorebookBanner.isTransitioning) {
         classes.push('header-wrap');
     }
@@ -337,7 +337,7 @@ const handleActionsClick = (e) => {
 };
 
 function toggleDefaultSearch(forceExpanded) {
-    if (!state.showSearch || state.mode === 'chat') return;
+    if (!state.showSearch || state.mode === 'chat' || isDesktop.value) return;
 
     const nextExpanded = typeof forceExpanded === 'boolean'
         ? forceExpanded
@@ -636,6 +636,14 @@ defineExpose({ updateHeader });
                   <div v-if="isDesktop" class="header-search-inline chat-search-inline-desktop">
                       <div class="search-field-wrapper">
                           <input type="text" v-model="state.searchQuery" :placeholder="t('search_messages') || 'Search messages'">
+                          <button
+                              v-if="state.searchQuery"
+                              type="button"
+                              class="header-search-clear-btn"
+                              @click="state.searchQuery = ''"
+                          >
+                              <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                          </button>
                       </div>
                   </div>
               </template>
@@ -644,9 +652,9 @@ defineExpose({ updateHeader });
           <!-- Default Mode (Title + Bottom Content) -->
           <div v-else class="header-default-group" key="default">
               <div class="header-top-row">
-                  <div class="header-content" :class="{ 'header-content--search-expanded': state.isSearchExpanded }" id="header-content-default">
+                  <div class="header-content" :class="{ 'header-content--search-expanded': state.isSearchExpanded && !isDesktop }" id="header-content-default">
                       <Transition name="search-swap" mode="out-in">
-                          <div v-if="state.showSearch && state.isSearchExpanded" key="search" class="header-search-expand">
+                          <div v-if="state.showSearch && state.isSearchExpanded && !isDesktop" key="search" class="header-search-expand">
                               <div class="search-field-wrapper search-field-wrapper--expanded">
                                   <input
                                       ref="defaultSearchInputEl"
@@ -666,6 +674,21 @@ defineExpose({ updateHeader });
                           </div>
                           <span v-else :key="state.title" :id="isDesktop ? 'header-title' : 'header-title-mobile'">{{ state.title }}</span>
                       </Transition>
+                  </div>
+
+                  <!-- Desktop inline search for default mode -->
+                  <div v-if="isDesktop && state.showSearch" class="header-search-inline default-search-inline-desktop">
+                      <div class="search-field-wrapper">
+                          <input type="text" v-model="state.searchQuery" :placeholder="state.searchPlaceholder">
+                          <button
+                              v-if="state.searchQuery"
+                              type="button"
+                              class="header-search-clear-btn"
+                              @click="state.searchQuery = ''"
+                          >
+                              <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                          </button>
+                      </div>
                   </div>
               </div>
 
@@ -695,7 +718,7 @@ defineExpose({ updateHeader });
       <!-- Right Actions + Notification Bell -->
       <div v-if="!state.isChatSearchMode" id="header-actions" class="header-btn-right" @click.stop>
           <button
-              v-if="state.showSearch && state.mode !== 'chat' && !state.isSearchExpanded"
+              v-if="state.showSearch && state.mode !== 'chat' && !state.isSearchExpanded && !isDesktop"
               type="button"
               class="header-action-btn header-search-toggle-btn"
               :class="{ 'header-search-toggle-btn--active': state.isSearchExpanded }"
@@ -1023,7 +1046,6 @@ defineExpose({ updateHeader });
 .header-search-expand input {
     width: 100%;
     height: 100%;
-    padding: 0 40px 0 12px;
     border: none;
     background-color: var(--bg-gray);
     font-size: 14px;

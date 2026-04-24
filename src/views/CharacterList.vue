@@ -15,6 +15,7 @@ import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetStat
 import { attachLongPress } from '@/core/services/ui.js';
 import { estimateTokens } from '@/utils/tokenizer.js';
 import { formatDate } from '@/utils/dateFormatter.js';
+import CharacterCardSheet from '@/components/sheets/CharacterCardSheet.vue';
 
 const props = defineProps({
   activeCategory: {
@@ -24,6 +25,7 @@ const props = defineProps({
 });
 
 const activeTab = ref('characters');
+const charCardSheet = ref(null);
 
 const emit = defineEmits(['open-chat']);
 
@@ -219,14 +221,22 @@ const openActions = (char) => {
         : t('action_add_fav');
     
     const favIcon = isFav 
-        ? '<svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/><line x1="4" y1="4" x2="20" y2="20" stroke="#ff4444" stroke-width="2" /></svg>'
+        ? '<svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/><line x1="4" y1="4" x2="20" y2="20" stroke="#ff6b6b" stroke-width="2" /></svg>'
         : '<svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>';
     
-    const favColor = isFav ? '#ff4444' : 'var(--text-gray)';
+    const favColor = isFav ? '#ff6b6b' : 'var(--text-gray)';
 
     showBottomSheet({
         title: char.name,
         items: [
+            {
+                label: t('action_edit'),
+                icon: '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>',
+                onClick: () => {
+                    closeBottomSheet();
+                    onEditCharacter(char);
+                }
+            },
             {
                 label: t('action_export_st'),
                 icon: '<svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>',
@@ -349,6 +359,10 @@ const sortedCharacters = computed(() => {
 
   // Sorting
   chars = [...chars].sort((a, b) => {
+    // Favorites always on top
+    if (a.fav && !b.fav) return -1;
+    if (!a.fav && b.fav) return 1;
+
     if (sortType.value === 'name') {
       const nameA = (a.name || '').toLowerCase();
       const nameB = (b.name || '').toLowerCase();
@@ -385,10 +399,6 @@ const hasVisibleCards = computed(() => {
   return filteredCharacters.value.length > 0;
 });
 
-
-const favorites = computed(() => {
-  return characters.value.filter(char => char.fav === true);
-});
 
 onMounted(() => {
   loadCharacters();
@@ -567,10 +577,8 @@ const openDeleteSessionConfirm = (char, sessionId) => {
     });
 };
 
-// Click handler wrapper to prevent click if long press occurred
-const handleCharClick = (e, char) => {
-  if (e.currentTarget._checkLongPress && e.currentTarget._checkLongPress()) return;
-  openSessionsSheet(char);
+const handleCharClick = (char) => {
+  charCardSheet.value?.open(char, { importEnabled: false });
 };
 
 onUnmounted(() => {
@@ -609,37 +617,7 @@ defineExpose({ onAddCharacter, loadCharacters });
 
     <!-- Characters Tab -->
     <template v-else>
-    <!-- Favorites List -->
-    <!-- Favorites List -->
-    <div class="menu-group" v-if="favorites.length > 0 && !searchQuery">
-      <div class="favorites-section">
-        <div class="section-title">
-          <svg viewBox="0 0 24 24" class="section-icon"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
-          <span>{{ t('section_favorites') }}</span>
-        </div>
-        <div class="favorites-scroll-container">
-          <div 
-            v-for="char in favorites" 
-            :key="char.id || char.name" 
-            class="favorite-item"
-            @click="handleCharClick($event, char)"
-            v-long-press="() => openActions(char)"
-            @contextmenu.prevent="openActions(char)"
-          >
-            <div class="favorite-avatar-wrapper">
-              <div class="favorite-avatar">
-                <img v-if="char.thumbnail || char.avatar" :src="getAvatarUrl(char.thumbnail || char.avatar)" :alt="char.name" loading="lazy">
-                <div v-else class="avatar-placeholder" :style="{ backgroundColor: char.color || '#66ccff' }">
-                  {{ (char.name && char.name[0]) ? char.name[0].toUpperCase() : '?' }}
-                </div>
-              </div>
-              <div class="fav-ring"></div>
-            </div>
-            <div class="favorite-name">{{ char.name }}</div>
-          </div>
-        </div>
-      </div>
-    </div>
+
 
     <!-- Sort controls -->
     <div class="sort-controls" v-if="characters.length > 0">
@@ -671,16 +649,15 @@ defineExpose({ onAddCharacter, loadCharacters });
         :class="{
           favorite: char.fav
         }"
-        @click="handleCharClick($event, char)"
-        v-long-press="() => openActions(char)"
+        @click="handleCharClick(char)"
         @contextmenu.prevent="openActions(char)"
       >
         <div class="card-token-badge">
           <svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
           <span>{{ getCharTokens(char) }}</span>
         </div>
-        <div class="card-edit-btn" @click.stop="onEditCharacter(char)">
-          <svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+        <div class="card-edit-btn" @click.stop="openActions(char)">
+          <svg viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>
         </div>
         <div class="card-image-wrapper">
           <img v-if="char.thumbnail || char.avatar" :src="getAvatarUrl(char.thumbnail || char.avatar)" :alt="char.name" loading="lazy" class="card-image">
@@ -691,11 +668,11 @@ defineExpose({ onAddCharacter, loadCharacters });
         </div>
         
         <div class="card-info">
-          <div class="card-header-row">
-            <div class="card-name">{{ char.name }}</div>
+          <div class="card-header-row" :class="{ 'is-favorite': char.fav }">
             <div class="card-fav-icon" v-if="char.fav">
               <svg viewBox="0 0 24 24"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></svg>
             </div>
+            <div class="card-name">{{ char.name }}</div>
           </div>
           <div class="card-desc" v-if="char.scenario || char.description" v-html="char.scenario || char.description"></div>
           
@@ -711,6 +688,7 @@ defineExpose({ onAddCharacter, loadCharacters });
       <div class="empty-state-text">{{ t('no_characters') }}</div>
     </div>
     </template>
+    <CharacterCardSheet ref="charCardSheet" />
   </div>
 </template>
 
@@ -952,126 +930,7 @@ defineExpose({ onAddCharacter, loadCharacters });
 /* Styles */
 
 
-/* Favorites Section */
-.favorites-section {
-  padding: 14px 0;
-}
 
-.section-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 16px;
-  margin-bottom: 12px;
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text-dark-gray);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  opacity: 0.8;
-}
-
-.section-icon {
-  width: 14px;
-  height: 14px;
-  fill: #ff4444; /* Heart icon red */
-}
-
-/* count removed */
-
-.favorites-scroll-container {
-  display: flex;
-  overflow-x: auto;
-  padding: 8px 16px;
-  gap: 16px;
-  scrollbar-width: none;
-  scroll-behavior: smooth;
-  -webkit-overflow-scrolling: touch;
-}
-
-.favorites-scroll-container::-webkit-scrollbar {
-  display: none;
-}
-
-.favorite-item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-  width: 72px;
-  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
-}
-
-.favorite-item:active {
-  transform: scale(0.92);
-}
-
-@media (hover: hover) {
-  .favorite-item:hover {
-    transform: translateY(-2px);
-  }
-  
-  .favorite-item:hover .favorite-avatar {
-    transform: scale(1.05);
-    box-shadow: 0 6px 16px rgba(0,0,0,0.25);
-  }
-  
-  .favorite-item:hover .favorite-name {
-    color: var(--vk-blue);
-  }
-}
-
-.favorite-avatar-wrapper {
-  position: relative;
-  width: 56px;
-  height: 56px;
-}
-
-.favorite-avatar {
-  width: 100%;
-  height: 100%;
-  border-radius: 50%;
-  overflow: hidden;
-  background-color: var(--bg-color-light, #f0f0f0);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  position: relative;
-  z-index: 2;
-  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease;
-}
-
-.favorite-avatar img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.fav-ring {
-  position: absolute;
-  top: -3px;
-  left: -3px;
-  right: -3px;
-  bottom: -3px;
-  border-radius: 50%;
-  border: 2px solid var(--vk-blue); /* VK Blue ring */
-  opacity: 0.8;
-  z-index: 1;
-}
-
-.favorite-name {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-dark-gray);
-  text-align: center;
-  width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  transition: color 0.2s ease;
-}
 
 /* TransitionGroup Animations */
 .list-enter-active,
@@ -1114,7 +973,7 @@ defineExpose({ onAddCharacter, loadCharacters });
   box-shadow: 0 4px 6px rgba(0,0,0,0.1);
   transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease, border-color 0.3s ease;
   cursor: pointer;
-  border: 1px solid rgba(255,255,255,0.05);
+  border: 2px solid rgba(255,255,255,0.05);
 }
 
 .character-card:active {
@@ -1128,8 +987,8 @@ defineExpose({ onAddCharacter, loadCharacters });
   }
 
   .character-card.favorite:hover {
-    box-shadow: 0 12px 24px rgba(var(--vk-blue-rgb, 81, 129, 184), 0.25);
-    border-color: rgba(var(--vk-blue-rgb, 81, 129, 184), 0.8);
+    box-shadow: 0 12px 24px rgba(255, 107, 107, 0.25);
+    border-color: #ff6b6b;
   }
 
   .character-card:hover .card-edit-btn {
@@ -1148,7 +1007,7 @@ defineExpose({ onAddCharacter, loadCharacters });
 }
 
 .character-card.favorite {
-  border: 1px solid rgba(var(--vk-blue-rgb, 81, 129, 184), 0.5);
+  border: 2px solid #ff6b6b;
 }
 
 .card-image-wrapper {
@@ -1207,6 +1066,11 @@ defineExpose({ onAddCharacter, loadCharacters });
   align-items: flex-start;
 }
 
+.card-header-row.is-favorite {
+  justify-content: flex-start;
+  gap: 6px;
+}
+
 .card-name {
   font-weight: 700;
   font-size: 1.1em;
@@ -1218,14 +1082,23 @@ defineExpose({ onAddCharacter, loadCharacters });
   line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  transition: color 0.3s ease;
+}
+
+.character-card.favorite .card-name {
+  color: #ff6b6b;
 }
 
 .card-fav-icon {
   flex-shrink: 0;
-  width: 16px;
-  height: 16px;
-  fill: #ff4444;
+  width: 14px;
+  height: 14px;
+  fill: #ff6b6b;
   filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5));
+}
+
+.character-card.favorite .card-fav-icon {
+  margin-top: 3px;
 }
 
 .card-desc {

@@ -4347,7 +4347,7 @@ async function createNewSession(char) {
 
 async function openCharCard() {
     if (!activeChatChar) return;
-    charCardSheet.value?.open(activeChatChar);
+    charCardSheet.value?.open(activeChatChar, { importEnabled: false });
 }
 
 async function openChatStatsSheet(char = activeChatChar) {
