@@ -37,7 +37,6 @@ function combineReasoningSections(modelReasoning, inlineReasoning, headerModel, 
 }
 
 export function createStreamAccumulator({
-    requestReasoning,
     tagStart,
     tagEnd,
     hasInlineTags,

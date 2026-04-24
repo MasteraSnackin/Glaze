@@ -8,7 +8,6 @@ export async function consumeStreamingSseResponse({
     controller,
     streamTimeout,
     throwIfAborted,
-    requestReasoning,
     streamAccumulator,
     onUpdate
 }) {

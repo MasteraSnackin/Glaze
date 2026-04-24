@@ -44,6 +44,8 @@ The current roadmap is:
 - Phase 7 status: `done`
 - Phase 8 status: `done` (ChatView reduced from 3767 → 1611 lines, target <2000 met)
 - Phase 11 status: `done` (use-case layer re-architecture — pipeline dir, split scope-creep files, fix naming, eliminate hollow entrypoints)
+- Phase 12 status: `done` (transport split, legacy cleanup, dead param removal)
+- Phase 13a status: `done` (App.vue decomposition — 1229 → 622 lines script + 5 composables: useAppNavigation, useEditorController, useAppEventSubscriptions, useGlossaryPopup, useAppInit)
 - Current slice testing: `tested` (`npm run build` + `npm run lint`)
 
 ### Bugs Found & Fixed on This Branch
@@ -576,7 +578,7 @@ Current implementation status notes:
 - [done] Memory Books now expose a user-facing session-level retrieved-entry cap (`maxInjectedEntries`) as the "количество мемори в памяти" control.
 - [done] Memory generation prompts now ask for both memory text and optional retrieval keys in a simple text format (`Memory:` / `Keys:`), avoiding JSON-only contracts.
 - [done] Draft parsing now supports vector-first usage: if the model leaves `Keys:` empty, fallback keys are generated automatically while vector retrieval can still dominate when configured.
-- [not done] Replace the temporary bottom-sheet implementation with a dedicated polished memory sheet component before considering the UI complete.
+- [done] Replace the temporary bottom-sheet implementation with a dedicated polished memory sheet component before considering the UI complete. — **Done in Phase 6.** `MemoryBooksSheet.vue` created.
 - [done] Add an explicit session setting for "раз в сколько сообщений создается мемори" so automation/bootstrap can use a user-configurable interval instead of a hardcoded threshold.
 - [done] Add an explicit session setting for memory injection target selection: `{{summary}}` macro slot vs dedicated chat summary block injection.
 - [done] Batch 3 persistence hardening: Memory Generation now preserves unsaved modal state across prompt preview/reopen flows, and DB normalization now keeps `autoCreateInterval`, `useDelayedAutomation`, `injectionTarget`, and the current Memory Books key-match defaults aligned during reload/save paths.
@@ -1149,15 +1151,15 @@ Tested status:
 - [done] `npm run build`
 
 Still not done:
-- [not done] Split `llmApi.js` into smaller transport modules (`chatCompletionsClient`, `sseParser`, runtime policy pieces) while preserving the current callback contract.
 - [not done] Move more remaining direct runtime API config access behind `APISettings.js` helpers, especially lower-priority UI code and legacy toggles.
 - [not done] Extract generation session lifecycle out of `ChatView.vue` into a dedicated composable/service.
-- [not done] Separate prompt preview storage from network trace storage and stop relying on singleton global last-trace state.
+- [done] Separate prompt preview storage from network trace storage and stop relying on singleton global last-trace state. — **Done as Candidate 4.** Prompt preview keyed by generation/session, trace history keyed by request.
 - [done] Promote explicit request use cases (`generateChat`, `generateSummary`, `generateMemoryDraft`, `calculateContext`) instead of keeping orchestration concentrated in `generationService.js`. — **Done in Phase 11.** `calculateContext.js`, `generateSummary.js`, `generateMemoryDraft.js` now own their dependency assembly locally. `generationService.js` reduced from 267 → 172 lines, only exports `generateChatResponse`.
+- [done] Split `llmApi.js` into transport modules — **Done in Phase 12a.** `llmApi.js` moved to `transport/requestOrchestrator.js`, i18n coupling extracted to `reasoningHeaders.js`, dead `requestReasoning` param removed from `streamAccumulator` and `streamingSse`.
 
 Immediate next refactor step:
 - [done] Extracted SSE parsing and stream normalization out of `llmApi.js` first, because that was the highest-complexity remaining transport logic and the biggest blocker to finishing the provider/network split cleanly.
-- [not done] Continue splitting the remaining `llmApi.js` orchestration path into a dedicated transport client boundary once the SSE slice is stabilized.
+- [done] Moved remaining `llmApi.js` orchestration path into `transport/requestOrchestrator.js`, removed i18n coupling from transport layer, removed dead params. Transport split complete.
 
 ### Phase 11: Use-Case Layer Re-architecture (2026-04-24)
 
@@ -1196,6 +1198,49 @@ Files changed:
 - Rewritten: `calculateContext.js`, `generateSummary.js`, `generateMemoryDraft.js` (now real entrypoints)
 - Trimmed: `generationService.js` (267 → 172 lines)
 - Updated: `ARCHITECTURE.md` (Phase 11 section + updated "not changed yet")
+
+### Phase 12: Transport Split & Legacy Cleanup (2026-04-24)
+
+Branch: `feat/refactor-phase1-event-hub`
+Status: `done`
+Testing: `tested` (`npm run build` + `npm run lint`, 0 errors)
+
+Tasks:
+- [done] **12a. Transport extraction** — `llmApi.js` moved to `transport/requestOrchestrator.js`, i18n coupling extracted to `reasoningHeaders.js`, dead `requestReasoning` param removed
+- [done] **12b. Naming & organization** — `chatCompletionsClient.js` → `completionsClient.js`, pipeline files renamed, dead exports removed
+- [done] **12c. Dead parameter cleanup** — removed unused params from `streamAccumulator`, `streamingSse`, and transport chain
+
+Files changed:
+- Moved: `llmApi.js` → `transport/requestOrchestrator.js`
+- Renamed: `chatCompletionsClient.js` → `completionsClient.js`
+- Trimmed: `generationService.js` (172 → 173 lines)
+- New: `transport/reasoningHeaders.js`
+
+### Phase 13a: App.vue Decomposition (2026-04-24)
+
+Branch: `feat/refactor-phase1-event-hub`
+Status: `done`
+Testing: `tested` (`npm run build` + `npm run lint`, 0 errors)
+
+Goal: Break App.vue from 1229-line god object into thin shell wiring 5 composables.
+
+Tasks:
+- [done] Extract `composables/app/useAppNavigation.js` (101 lines) — view routing, desktop/mobile detection, effectiveMainView, floating menu, FAB, layout metrics
+- [done] Extract `composables/app/useEditorController.js` (304 lines) — character/persona editor lifecycle, editor configs, save/auto-save/delete, FS editor, close-and-return-to-chat
+- [done] Extract `composables/app/useGlossaryPopup.js` (99 lines) — desktop glossary drag popup, position state, header event handlers
+- [done] Extract `composables/app/useAppEventSubscriptions.js` (190 lines) — all 25+ subscribeAppEvent calls, sync refresh, open-chat routing, sheet openers, cleanup
+- [done] Extract `composables/app/useAppInit.js` (108 lines) — onMounted init (theme, lorebooks, presets, sync, thumbnails, notifications, keyboard, ResizeObserver), onBeforeUnmount cleanup
+- [done] Wire composables into App.vue, fix template ref unwrapping bug (inline `chatViewRef` was unwrapped by Vue template compiler → `openChatFromTemplate` wrapper)
+
+Files changed:
+- New: 5 composables in `src/composables/app/`
+- Trimmed: `App.vue` (1229 → 622 lines)
+
+Remaining 13b–13e:
+- [not done] 13b: PresetView.vue decomposition (3858 lines)
+- [not done] 13c: lorebookState.js decomposition (1320 lines)
+- [not done] 13d: ChatMessage.vue decomposition (1986 lines)
+- [not done] 13e: ChatInput.vue decomposition (1156 lines)
 
 ## Refactoring Phase — Tokenizer, Memory Books, Vectors/Lorebooks (Active)
 
@@ -1301,12 +1346,7 @@ Status: `partially done | ready for testing` (Commits: b5857d0, 78be7ed)
    - Reference: https://github.com/aikohanasaki/SillyTavern-MemoryBooks
 
 **Remaining Tasks**:
-1. [not done] **Extract memory books UI into dedicated component**
-   - Create `src/components/sheets/MemoryBooksSheet.vue`
-   - Move logic from ChatView.vue:1684-2070 (openMemoryBooksSheet)
-   - Move settings from ChatView.vue:1300-1551 (openMemoryGenerationSettings)
-   - Move prompt manager from ChatView.vue:1553-1629 (openMemoryPromptManager)
-   - Deferred: Technical debt, not blocking users
+1. [done] **Extract memory books UI into dedicated component** — Done in Phase 6. `MemoryBooksSheet.vue` created (1176 lines).
    
 2. [not done] **Fix: Memory menu in chat doesn't persist settings state**
    - Settings from main Memory Books sheet should sync with in-chat memory UI
@@ -1493,7 +1533,7 @@ PR: #34
 
 **MEDIUM Priority:**
 - [ ] Memory Books settings sync (main ↔ in-chat menu)
-- [ ] Extract Memory Books UI to dedicated component (reduce ChatView ~1000 lines)
+- [x] Extract Memory Books UI to dedicated component (MemoryBooksSheet.vue, done in Phase 6)
 - [ ] Separate menus for injection types (vector/keyword/memory)
 
 **LOW Priority:**
@@ -1505,9 +1545,7 @@ PR: #34
 
 **Goal:** Reduce ChatView.vue complexity by extracting large UI sections into dedicated SheetView-based components.
 
-**Status:** `in progress`
-
-**Branch:** `feat/component-extraction` (from `origin/dev` at `1434aa3`)
+**Status:** `done`
 
 **Motivation:**
 - ChatView.vue is ~7000 lines, making it difficult to maintain and navigate

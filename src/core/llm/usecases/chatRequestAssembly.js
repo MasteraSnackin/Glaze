@@ -1,7 +1,8 @@
 import { buildChatRequestPayload } from '@/core/llm/assemblers/requestAssemblers.js';
 import { runGenerationHook } from '@/core/extensions/extensionRegistry.js';
-import { executeRequest } from '@/core/services/llmApi.js';
+import { executeRequest } from '@/core/llm/transport/requestOrchestrator.js';
 import { sendMessageNotification } from '@/core/services/notificationService.js';
+import { buildReasoningHeaders, getNotificationBody } from '@/core/llm/usecases/reasoningHeaders.js';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { logger } from '@/utils/logger.js';
@@ -110,6 +111,7 @@ export async function executeFinalChatRequest({
     }
 
     try {
+        const reasoningHeaders = buildReasoningHeaders();
         logger.debug('[GenerationService] Final Request:', finalRequestBody);
         await executeRequest({
             providerId: requestProviderId,
@@ -123,6 +125,9 @@ export async function executeFinalChatRequest({
             tagEnd: finalTagEnd,
             debugKey,
             requestType: 'chat',
+            headerModel: reasoningHeaders.headerModel,
+            headerInline: reasoningHeaders.headerInline,
+            notificationBody: getNotificationBody(),
             callbacks: { onUpdate, onComplete, onError }
         });
     } catch (error) {

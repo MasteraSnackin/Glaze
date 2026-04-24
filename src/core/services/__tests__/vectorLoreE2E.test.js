@@ -26,7 +26,7 @@ vi.mock('@/utils/db.js', () => ({
     }
 }));
 
-vi.mock('@/core/services/llmApi.js', () => ({
+vi.mock('@/core/llm/transport/requestOrchestrator.js', () => ({
     executeRequest: (...args) => mockExecuteRequest(...args)
 }));
 

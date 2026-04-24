@@ -952,7 +952,26 @@ Expected output:
 - a developer can find the code for any generation scenario by name without grep
 - shared code is clearly labeled as shared infrastructure, not as ambiguous catch-alls
 
-### Phase 12. Strengthen use-case and pipeline testability
+### Phase 12. Transport layer completion
+Status: done
+Testing: tested (`npm run lint` 0 errors, `npm run build` passes)
+
+Purpose:
+Finish the transport split — move the last orchestration file out of `services/`, remove i18n coupling from transport, remove dead parameters.
+
+Done:
+- Moved `src/core/services/llmApi.js` → `src/core/llm/transport/requestOrchestrator.js` — all transport code now lives in `transport/`
+- Extracted i18n coupling: `buildReasoningHeaders()` and `getNotificationBody()` moved to `src/core/llm/usecases/reasoningHeaders.js`; transport layer no longer imports `translations` or `currentLang`
+- Added `headerModel`, `headerInline`, `notificationBody` as explicit parameters to `executeRequest()` — callers build UI strings, transport receives them
+- Removed dead `requestReasoning` parameter from `streamAccumulator.js` and `streamingSse.js` (it was in signatures but never used in their bodies; still needed in `responseNormalizer.js` and `completeJsonResponse`)
+- Replaced `[llmApi]` console.warn prefix with `[transport]` in `completionsClient.js`
+- Updated all callers: `chatRequestAssembly.js`, `generateSummary.js`, `generateMemoryDraft.js`, `summaryRequest.js`, `memoryDraftRequest.js`
+- Updated test mock path in `vectorLoreE2E.test.js`
+- Lint warnings reduced from 322 → 320 (2 dead-param warnings eliminated)
+
+Result: transport layer is now fully self-contained in `src/core/llm/transport/` with zero i18n imports
+
+### Phase 12b. Strengthen use-case and pipeline testability
 Status: not done
 Testing: not tested
 
@@ -973,7 +992,62 @@ Expected output:
 - confidence to simplify further without fear
 - future refactors can be verified by test, not just by build + manual check
 
-### Phase 13. Final legacy cleanup pass
+### Phase 13. Shell and large component decomposition
+Status: in progress (13a done)
+Testing: tested (`npm run build` passes, `npm run lint` 0 errors)
+
+Purpose:
+Decompose the remaining large files that mix business logic with UI — the biggest maintainability blockers outside ChatView.
+
+**App.vue (1229 lines)** is currently router + layout shell + editor controller + event dispatcher + sync refresh handler. It should be a thin shell that wires composables, not a 1200-line god object.
+
+**PresetView.vue (3858 lines)** is the single largest file in the codebase. It mixes preset CRUD, block editing, import/export, token estimation, macro preview, and UI navigation. Most logic belongs in a service + composable.
+
+**lorebookState.js (1320 lines)** mixes reactive state with vector search, keyword matching, embedding orchestration, and token estimation. It is both a state container and a service — the same problem generationService.js had before Phase 7.
+
+**ChatMessage.vue (1986 lines)** renders a single message but also handles context menus, swipes, actions menus, swipe regeneration, export, and search highlighting. Template-heavy, but the action handlers should be in a composable.
+
+**ChatInput.vue (1156 lines)** mixes input handling, keyboard management, request preview, selection toolbar, and MagicDrawer integration.
+
+Work:
+
+**13a. App.vue decomposition (1229 → 622 script + 802 in composables)** ✅ done
+- Extract `useAppNavigation.js` (101 lines) — view routing, desktop/mobile detection, effectiveMainView, floating menu state
+- Extract `useEditorController.js` (304 lines) — character/persona editor lifecycle (open, save, auto-save, delete, close, return-to-chat), editor configs
+- Extract `useAppEventSubscriptions.js` (190 lines) — all 25+ subscribeAppEvent calls + cleanup, sync refresh handler, open-chat routing
+- Extract `useGlossaryPopup.js` (99 lines) — desktop glossary drag popup logic, position state, header events
+- Extract `useAppInit.js` (108 lines) — onMounted initialization sequence (theme, lorebooks, presets, sync, thumbnails, notifications, keyboard), ResizeObserver, cleanup
+- App.vue: 622 lines — template (362) + composable wiring + categories + FAB + layout metrics
+
+**13b. PresetView.vue decomposition (~3858 → ~1500)**
+- Extract `usePresetEditor.js` composable — preset CRUD, block editing state, navigation, save/flush, ~500 lines
+- Extract `presetImportService.js` enhancements — import/export flows already partially exist, move remaining import logic from view, ~200 lines
+- Extract `usePresetTokenPreview.js` — token estimation + macro preview for blocks, ~150 lines
+- PresetView.vue becomes: template + composable wiring + SheetView integration
+
+**13c. lorebookState.js decomposition (~1320 → ~400 state, ~900 service)**
+- Extract `lorebookSearchService.js` — keyword scan, vector search (findTopK, cosineSimilarity), hybrid scoring, scanDepth logic, ~400 lines
+- Extract `lorebookEmbeddingService.js` — embedding orchestration, reindex, vectorSearch flag handling, ~200 lines
+- lorebookState.js retains: reactive state, watchers, CRUD operations, DB persistence only
+
+**13d. ChatMessage.vue decomposition (~1986 → ~1200)**
+- Extract `useMessageActions.js` composable — context menu items, actions menu, swipe handlers, export, regeneration trigger, ~400 lines
+- ChatMessage.vue retains: template rendering, formatting, badges, search highlighting
+
+**13e. ChatInput.vue decomposition (~1156 → ~700)**
+- Extract `useChatInputActions.js` — selection toolbar, swipe actions, request preview trigger, ~200 lines
+- Extract keyboard handling into existing `keyboardHandler.js` (move platform-specific logic out of component), ~100 lines
+
+Expected output:
+
+- App.vue: thin shell, 622 lines ✅
+- PresetView.vue: template + composable, ~1500 lines
+- lorebookState.js: reactive state only, ~400 lines; search logic in dedicated service
+- ChatMessage.vue: template + rendering, ~1200 lines
+- ChatInput.vue: template + input handling, ~700 lines
+- All extracted composables/services testable in isolation
+
+### Phase 14. Final legacy cleanup pass
 Status: not done
 Testing: not tested
 
@@ -994,7 +1068,7 @@ Expected output:
 - no dead code left from the migration
 - import graph is clean: views → composables → use cases → pipelines / transport, with no shortcut bypasses
 
-### Phase 14. Harden initialization order
+### Phase 15. Harden initialization order
 Status: not done
 Testing: not tested
 
@@ -1020,7 +1094,7 @@ Expected output:
 
 Phases 1-7 were the hardest kind of refactor: **build new boundaries while keeping old code running**, with dual paths, compatibility shims, and constant parity verification.
 
-Phases 8-14 should be **significantly easier** because:
+Phases 8-15 should be **significantly easier** because:
 
 - the skeleton and boundaries already exist
 - patterns are proven (event hub, use cases, projections, extension registry)
@@ -1037,11 +1111,13 @@ Rough time estimate relative to Phases 1-7:
 | 9  | low (0.15×) | low | mostly audit + rename + reorganize; no logic changes |
 | 10 | low (0.15×) | low | mechanical migration of remaining window calls |
 | 11 | low (0.1×) | low | naming + file organization; no logic changes |
-| 12 | medium (0.3×) | low | writing tests is straightforward but time-consuming |
-| 13 | low (0.15×) | low | search + delete; verify nothing depends on old paths |
-| 14 | medium (0.25×) | medium | composable API redesign can affect callers; needs careful testing |
+| 12 | low (0.1×) | low | transport move + dead param removal; no logic changes |
+| 12b | medium (0.3×) | low | writing tests is straightforward but time-consuming |
+| 13 | **high** (0.5×) | medium | App.vue + PresetView + lorebookState decomposition; reactive extraction must preserve template bindings |
+| 14 | low (0.15×) | low | search + delete; verify nothing depends on old paths |
+| 15 | medium (0.25×) | medium | composable API redesign can affect callers; needs careful testing |
 
-**Total 8-14 is roughly 1.7× of a single average phase from 1-7, or about 0.25× of the total 1-7 effort.**
+**Total 8-15 is roughly 2.3× of a single average phase from 1-7, or about 0.35× of the total 1-7 effort.**
 
 In other words: the hard structural migration is done. What remains is mostly cleanup, reorganization, and test coverage — safer and more predictable work.
 
@@ -1161,8 +1237,8 @@ Testing: tested (`npm run build` passes)
 Deliverables:
 
 - `ChatView.vue` calls a dedicated use case rather than owning orchestration details; ✅
-- `generationService.js` reduced to a compatibility facade or prompt-domain helper; ⏳ (still owns late enrichment and request dispatch)
-- ChatView.vue reduced from ~5700 to 2995 lines through extraction of composables, services, and utils.
+- `generationService.js` reduced to a compatibility facade or prompt-domain helper; ✅ (172 → 173 lines, only exports `generateChatResponse`)
+- ChatView.vue reduced from ~5700 to 1614 lines through extraction of composables, services, and utils.
 
 ### Candidate 4. Split prompt preview from network trace state
 Status: done

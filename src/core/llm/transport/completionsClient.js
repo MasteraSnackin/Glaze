@@ -60,9 +60,9 @@ export async function executeFetchChatCompletions({
 
     if (!canStreamSse) {
         if (!supportsStreamingBody) {
-            console.warn('[llmApi] Streaming body is unavailable on this platform/runtime, falling back to non-streaming response handling.');
+            console.warn('[transport] Streaming body is unavailable on this platform/runtime, falling back to non-streaming response handling.');
         } else {
-            console.warn('[llmApi] Stream requested but provider returned a non-SSE response, falling back to non-streaming handling.', { contentType });
+            console.warn('[transport] Stream requested but provider returned a non-SSE response, falling back to non-streaming handling.', { contentType });
         }
 
         await completeJsonResponse({
@@ -90,7 +90,6 @@ export async function executeFetchChatCompletions({
         controller: requestLifecycle.createStreamingTimeoutController(),
         streamTimeout: requestLifecycle.streamTimeout,
         throwIfAborted: requestLifecycle.throwIfAborted,
-        requestReasoning,
         streamAccumulator,
         onUpdate
     });

@@ -1,5 +1,3 @@
-import { translations } from '@/utils/i18n.js';
-import { currentLang } from '@/core/config/APPSettings.js';
 import { getProviderById } from '@/core/llm/providers/providerRegistry.js';
 import { completeStructuredResponse, handleAbortOutcome, handleRequestFailure } from '@/core/llm/transport/requestOutcome.js';
 import { executeNativeNonStreamingRequest, shouldUseNativeNonStreamingRequest } from '@/core/llm/transport/requestExecution.js';
@@ -8,7 +6,7 @@ import { createRequestLifecycle } from '@/core/llm/transport/requestLifecycle.js
 import { completeJsonResponse } from '@/core/llm/transport/responseHandling.js';
 import { setupRequestRuntimePolicy } from '@/core/llm/transport/requestRuntimePolicy.js';
 import { createStreamAccumulator } from '@/core/llm/transport/streamAccumulator.js';
-import { logger } from '../../utils/logger.js';
+import { logger } from '@/utils/logger.js';
 
 export async function executeRequest({
     providerId,
@@ -22,23 +20,22 @@ export async function executeRequest({
     tagStart,
     tagEnd,
     requestType,
+    headerModel,
+    headerInline,
+    notificationBody,
     callbacks
 }) {
     const { onUpdate, onComplete, onError } = callbacks;
-    const t = (key) => translations[currentLang.value]?.[key] || key;
-    const headerModel = `<span style="color: var(--vk-blue); font-weight: 700; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.5px;">${t('reasoning_model')}</span>`;
-    const headerInline = `<span style="color: var(--vk-blue); font-weight: 700; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.5px;">${t('reasoning_inline')}</span>`;
     const provider = getProviderById(providerId);
     const requestUrl = provider.buildChatCompletionsUrl(apiUrl);
 
     const hasInlineTags = !!tagStart && !!tagEnd;
     const runtimePolicy = await setupRequestRuntimePolicy({
         notificationTitle: 'Glaze',
-        notificationBody: translations[currentLang.value].model_typing || 'Generating...'
+        notificationBody: notificationBody || 'Generating...'
     });
 
     const streamAccumulator = createStreamAccumulator({
-        requestReasoning,
         tagStart,
         tagEnd,
         hasInlineTags,

@@ -18,6 +18,9 @@ export async function executeSummaryRequest({
         getEffectiveApiConfig,
         buildSummaryRequestPayload,
         executeRequest,
+        headerModel,
+        headerInline,
+        notificationBody,
         setLastPrompt
     } = deps;
 
@@ -96,6 +99,9 @@ export async function executeSummaryRequest({
         requestType: 'summary',
         controller: requestEnvelope.controller,
         stream: requestEnvelope.stream,
+        headerModel,
+        headerInline,
+        notificationBody,
         callbacks: {
             onComplete: (text) => { result = text; }
         }

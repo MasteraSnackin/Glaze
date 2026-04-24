@@ -18,6 +18,9 @@ export async function executeMemoryDraftRequest({
         getEffectiveApiConfig,
         buildMemoryDraftRequestPayload,
         executeRequest,
+        headerModel,
+        headerInline,
+        notificationBody,
         setLastPrompt
     } = deps;
 
@@ -122,6 +125,9 @@ export async function executeMemoryDraftRequest({
         debugKey,
         controller: requestEnvelope.controller,
         requestType: 'memory_draft',
+        headerModel,
+        headerInline,
+        notificationBody,
         callbacks: {
             onUpdate: (chunk, reasoningChunk, effectiveText) => {
                 if (effectiveText) result = effectiveText;
