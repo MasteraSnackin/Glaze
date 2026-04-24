@@ -87,7 +87,8 @@ export async function executeRequest({
                 headerInline,
                 requestType,
                 debugKey: requestLifecycle.debugKey,
-                onComplete
+                onComplete,
+                onError
             });
 
             // Exit function, finally block will still run for cleanup
@@ -110,7 +111,8 @@ export async function executeRequest({
             debugKey: requestLifecycle.debugKey,
             streamAccumulator,
             onUpdate,
-            onComplete
+            onComplete,
+            onError
         });
     } catch (e) {
         if (e.name === 'AbortError') {

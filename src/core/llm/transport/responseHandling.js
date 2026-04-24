@@ -27,12 +27,13 @@ export async function completeJsonResponse({
     headerInline,
     requestType,
     debugKey,
-    onComplete
+    onComplete,
+    onError
 }) {
     const resolvedData = data ?? await response.json();
     throwIfAborted();
 
-    completeStructuredResponse({
+    await completeStructuredResponse({
         data: resolvedData,
         contextLabel,
         logLabel,
@@ -44,6 +45,7 @@ export async function completeJsonResponse({
         headerInline,
         requestType,
         debugKey,
-        onComplete
+        onComplete,
+        onError
     });
 }

@@ -72,6 +72,8 @@ export function setupGenerationState({
     const flushPendingUIUpdate = () => {
         streamFlushTimer = null;
 
+        if (pendingText === null && pendingReasoning === null && pendingTyping === null && pendingTextDelta === null) return;
+
         const idx = currentMessages.value.findIndex(message => message.id === msgId);
         if (idx === -1) {
             pendingText = null;
@@ -132,7 +134,7 @@ export function setupGenerationState({
         generationTimer = setTimeout(() => {
             generationTimer = null;
 
-            if (activeChatChar && activeChatChar.id === char.id) {
+            if (activeChatChar?.value && activeChatChar.value.id === char.id) {
                 const idx = currentMessages.value.findIndex(message => message.id === msgId);
                 if (idx !== -1) {
                     currentMessages.value[idx].genTime = formatGenerationElapsed(startTime);

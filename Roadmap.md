@@ -44,6 +44,39 @@ The current roadmap is:
 - Phase 7 status: `done`
 - Current slice testing: `tested` (`npm run build`)
 
+### Bugs Found & Fixed on This Branch
+
+1. **Fix: missing `await` on `completeStructuredResponse` in `completeJsonResponse`**
+   - Status: `done`
+   - File: `src/core/llm/transport/responseHandling.js:30`
+   - Issue: `completeJsonResponse()` called `completeStructuredResponse()` without `await`. Since `completeStructuredResponse` is async, the caller returned before the completion path finished processing, creating a race condition. `finalizeStreamResponse` could execute before `onComplete` fired, or errors in the completion path could escape unhandled.
+   - Fix: Added `await` before `completeStructuredResponse(...)` call.
+
+2. **Fix: missing `onError` propagation and try/catch in `completeStructuredResponse` / `finalizeStreamResponse`**
+   - Status: `done`
+   - Files: `src/core/llm/transport/requestOutcome.js`, `src/core/llm/transport/chatCompletionsClient.js`, `src/core/llm/transport/responseHandling.js`, `src/core/services/llmApi.js`
+   - Issue: `completeStructuredResponse` and `finalizeStreamResponse` had no try/catch. If `extractOpenAiMessage` or `streamAccumulator.finalize()` threw (e.g. malformed API response), the exception propagated uncaught, breaking the callback contract — neither `onComplete` nor `onError` would fire, leaving `isTyping` stuck forever. The `onError` callback was also not threaded through from `executeRequest` → `chatCompletionsClient` → `completeJsonResponse` → `completeStructuredResponse`.
+   - Fix:
+     - Added `onError` parameter propagation through the full call chain: `llmApi.js` → `chatCompletionsClient.js` → `responseHandling.js` → `requestOutcome.js`.
+     - Wrapped `extractOpenAiMessage()` in try/catch in `completeStructuredResponse` — on failure, calls `onError` instead of crashing.
+     - Wrapped `streamAccumulator.finalize()` in try/catch in `finalizeStreamResponse` — on failure, calls `onError` instead of crashing.
+     - Added `await` on all `onComplete`/`onError` calls in `requestOutcome.js` (they were fire-and-forget, now properly awaited).
+
+3. **Fix: stale `activeChatChar` capture in generation services — foreground path never executed**
+   - Status: `done`
+   - Files: `src/views/ChatView.vue`, `src/composables/chat/useGenerationCompleteHandler.js`, `src/composables/chat/useGenerationFinalization.js`, `src/composables/chat/useGenerationStateSetup.js`
+   - Issue: `createChatGenerationServices()` in ChatView.vue (line 1335) received `activeChatChar` — a module-level `let` variable initialized as `null` at `<script>` load time. The value `null` was captured once and never updated. All generation handlers (`handleGenerationComplete`, `finalizeGenerationState`, `setupGenerationState`) received `activeChatChar = null`, causing:
+     - `isGenerating.value = false` never set by handlers (condition `activeChatChar && activeChatChar.id === char.id` always false). The stop button only disappeared via the `onGenerationEnded` event listener which used the live module-level `activeChatChar`.
+     - Foreground completion path in `handleGenerationComplete` (line 190) never executed — always fell through to background path which only updates `msg.isTyping = false` in DB, not in `currentMessages.value`.
+     - Messages stayed with `isTyping: true` permanently in the reactive UI after generation completed.
+   - Fix: Pass `activeChar` (a `ref` that stays synchronized with `activeChatChar` via `activeChar.value = activeChatChar`) instead of the stale `let`. Updated all handler checks from `activeChatChar && activeChatChar.id` to `activeChatChar?.value && activeChatChar.value.id`.
+
+4. **Fix: `streamAccumulator.getPartial()` returned raw text instead of effective text during reasoning**
+   - Status: `done`
+   - File: `src/core/llm/transport/streamAccumulator.js`
+   - Issue: `getPartial()` returned `fullText` (raw accumulated text without reasoning tag stripping) and `accumulatedReasoning` (raw reasoning buffer) instead of the effective (display-ready) text and reasoning. This meant partial results sent during abort/timeout paths contained unprocessed `<reasoning>` tags and duplicate content.
+   - Fix: `getPartial()` now returns `previousEffectiveText` (processed text) and `latestEffectiveReasoning` (processed reasoning) with correct fallback.
+
 Phase 3 composable extractions:
 - [done] Extract `triggerAutoSyncCheck` into `composables/chat/useAutoSync.js`
 - [done] Extract memory automation functions into `composables/chat/useMemoryAutomation.js`

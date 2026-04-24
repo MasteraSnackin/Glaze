@@ -59,6 +59,19 @@ function applyCompletionToMessage({
     }
 }
 
+function resolveFinalResponse(cleanedResponse, existingText) {
+    if (cleanedResponse && cleanedResponse.trim()) {
+        return cleanedResponse;
+    }
+
+    if (existingText && existingText.trim()) {
+        console.warn('[onComplete] Preserving streamed text because final response was empty');
+        return existingText;
+    }
+
+    return cleanedResponse;
+}
+
 export async function handleGenerationComplete({
     response,
     finalReasoning,
@@ -167,19 +180,20 @@ export async function handleGenerationComplete({
         }
 
         clearGenerationState(char.id);
-        if (activeChatChar && activeChatChar.id === char.id) isGenerating.value = false;
+        if (activeChatChar?.value && activeChatChar.value.id === char.id) isGenerating.value = false;
 
         const now = new Date();
         const cleanedResponse = cleanText(response);
         const time = now.getHours() + ':' + String(now.getMinutes()).padStart(2, '0');
         const duration = ((Date.now() - startTime) / 1000).toFixed(2) + 's';
 
-        if (activeChatChar && activeChatChar.id === char.id && foundIndex !== -1) {
+        if (activeChatChar?.value && activeChatChar.value.id === char.id && foundIndex !== -1) {
             const msg = currentMessages.value[foundIndex];
+            const finalResponse = resolveFinalResponse(cleanedResponse, msg.text);
             msg.time = time;
             applyCompletionToMessage({
                 msg,
-                response: cleanedResponse,
+                response: finalResponse,
                 finalReasoning,
                 duration,
                 meta,
@@ -194,7 +208,7 @@ export async function handleGenerationComplete({
                 includeInitialGuidanceMeta: true
             });
 
-            updateSessionMessage(char, foundIndex, msg);
+            await updateSessionMessage(char, foundIndex, msg);
 
             processMessageImages(msg.text, (updatedText) => {
                 msg.text = updatedText;
@@ -221,14 +235,18 @@ export async function handleGenerationComplete({
                 smartScroll();
             }
 
-            sendMessageNotification(char.name, cleanedResponse, char.avatar, char.id, sessionId, msgId);
+            sendMessageNotification(char.name, finalResponse, char.avatar, char.id, sessionId, msgId);
 
             if (guidanceType === 'GENERATION') {
                 const autoData = await getChatData(char.id);
                 if (autoData) {
                     const autoSessionId = char.sessionId || autoData.currentId;
                     autoData.sessions[autoSessionId] = currentMessages.value;
-                    await runMemoryAutomationAfterStableTurn(autoData, autoSessionId, currentMessages.value, { allowImmediate: true });
+                    await runMemoryAutomationAfterStableTurn(autoData, autoSessionId, currentMessages.value, {
+                        allowImmediate: true,
+                        charId: char.id,
+                        syncUi: true
+                    });
                 }
             }
 
@@ -241,10 +259,11 @@ export async function handleGenerationComplete({
             const bIdx = bgData.sessions[sessionId].findIndex(m => m.id === msgId);
             if (bIdx !== -1) {
                 const msg = bgData.sessions[sessionId][bIdx];
+                const finalResponse = resolveFinalResponse(cleanedResponse, msg.text);
                 msg.time = time;
                 applyCompletionToMessage({
                     msg,
-                    response: cleanedResponse,
+                    response: finalResponse,
                     finalReasoning,
                     duration,
                     meta,
@@ -259,7 +278,7 @@ export async function handleGenerationComplete({
                 includeInitialGuidanceMeta: false
             });
 
-                processMessageImages(cleanedResponse, (updatedText) => {
+                processMessageImages(finalResponse, (updatedText) => {
                     msg.text = updatedText;
                     msg.swipes[msg.swipeId || 0] = updatedText;
                     if (!updatedText.includes('imggen-loading')) {
@@ -281,10 +300,14 @@ export async function handleGenerationComplete({
                 await db.saveChat(char.id, bgData);
 
                 if (guidanceType === 'GENERATION') {
-                    await runMemoryAutomationAfterStableTurn(bgData, sessionId, bgData.sessions[sessionId], { allowImmediate: true });
+                    await runMemoryAutomationAfterStableTurn(bgData, sessionId, bgData.sessions[sessionId], {
+                        allowImmediate: true,
+                        charId: char.id,
+                        syncUi: false
+                    });
                 }
 
-                sendMessageNotification(char.name, cleanedResponse, char.avatar, char.id, sessionId, msgId);
+                sendMessageNotification(char.name, finalResponse, char.avatar, char.id, sessionId, msgId);
 
                 db.get('gz_unread').then(unread => {
                     const newUnread = unread || {};

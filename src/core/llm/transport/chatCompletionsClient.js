@@ -19,7 +19,8 @@ export async function executeFetchChatCompletions({
     debugKey,
     streamAccumulator,
     onUpdate,
-    onComplete
+    onComplete,
+    onError
 }) {
     requestLifecycle.startConnectTimeout();
 
@@ -49,7 +50,8 @@ export async function executeFetchChatCompletions({
             headerInline,
             requestType,
             debugKey,
-            onComplete
+            onComplete,
+            onError
         });
         return;
     }
@@ -76,7 +78,8 @@ export async function executeFetchChatCompletions({
             headerInline,
             requestType,
             debugKey,
-            onComplete
+            onComplete,
+            onError
         });
         return;
     }
@@ -96,6 +99,7 @@ export async function executeFetchChatCompletions({
         requestType,
         debugKey,
         streamAccumulator,
-        onComplete
+        onComplete,
+        onError
     });
 }

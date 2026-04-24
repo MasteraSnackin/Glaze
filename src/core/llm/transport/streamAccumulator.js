@@ -48,6 +48,7 @@ export function createStreamAccumulator({
     let rawAccumulated = '';
     let accumulatedReasoning = '';
     let previousEffectiveText = '';
+    let latestEffectiveReasoning = null;
 
     return {
         consumeDelta({ content = '', reasoning = '' }) {
@@ -75,6 +76,7 @@ export function createStreamAccumulator({
                 textDelta = effectiveText.substring(previousEffectiveText.length);
             }
             previousEffectiveText = effectiveText;
+            latestEffectiveReasoning = effectiveReasoning || null;
 
             return {
                 effectiveText,
@@ -98,8 +100,8 @@ export function createStreamAccumulator({
 
         getPartial() {
             return {
-                text: fullText,
-                reasoning: requestReasoning ? accumulatedReasoning : null
+                text: previousEffectiveText || fullText,
+                reasoning: latestEffectiveReasoning ?? (requestReasoning ? accumulatedReasoning : null)
             };
         }
     };

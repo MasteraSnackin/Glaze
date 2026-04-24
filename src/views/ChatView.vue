@@ -1332,7 +1332,7 @@ function smartScroll() {
 }
 
 chatGenerationServices = createChatGenerationServices({
-    activeChatChar,
+    activeChatChar: activeChar,
     isGenerating,
     currentMessages,
     displayMessages,
@@ -1995,7 +1995,7 @@ async function startImpersonation(guidanceText = null) {
                 isImpersonating,
                 isGenerating,
                 currentMessages,
-                activeChatChar,
+                activeChatChar: activeChar,
                 showBottomSheet,
                 closeBottomSheet,
                 openApiView,

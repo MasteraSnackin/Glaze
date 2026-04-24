@@ -45,11 +45,19 @@ export async function completeStructuredResponse({
     headerInline,
     requestType,
     debugKey,
-    onComplete
+    onComplete,
+    onError
 }) {
     logger.debug(logLabel, data);
 
-    const { content, reasoningContent } = extractOpenAiMessage(data, contextLabel);
+    let content, reasoningContent;
+    try {
+        ({ content, reasoningContent } = extractOpenAiMessage(data, contextLabel));
+    } catch (extractErr) {
+        finishNetworkTrace({ debugKey, rawResponse: data, error: extractErr.message });
+        if (onError) await onError(extractErr);
+        return;
+    }
     const normalized = normalizeReasoningOutput({
         content,
         requestReasoning,
@@ -71,11 +79,19 @@ export async function completeStructuredResponse({
 
     const cleanedText = cleanText(extended.text || '');
     finishNetworkTrace({ debugKey, rawResponse: extended.rawResponse, text: cleanedText, reasoning: extended.reasoning });
-    if (onComplete) onComplete(cleanedText, extended.reasoning, extended.meta);
+    if (onComplete) await onComplete(cleanedText, extended.reasoning, extended.meta);
 }
 
-export async function finalizeStreamResponse({ requestType, debugKey, streamAccumulator, onComplete }) {
-    const finalResult = streamAccumulator.finalize();
+export async function finalizeStreamResponse({ requestType, debugKey, streamAccumulator, onComplete, onError }) {
+    let finalResult;
+    try {
+        finalResult = streamAccumulator.finalize();
+    } catch (finalizeErr) {
+        finishNetworkTrace({ debugKey, error: finalizeErr.message });
+        if (onError) await onError(finalizeErr);
+        return;
+    }
+
     const extended = await applyNormalizedResponseExtensions({
         requestType,
         debugKey,
@@ -97,7 +113,7 @@ export async function finalizeStreamResponse({ requestType, debugKey, streamAccu
         reasoning: extended.reasoning
     });
 
-    if (onComplete) onComplete(finalText, extended.reasoning, extended.meta);
+    if (onComplete) await onComplete(finalText, extended.reasoning, extended.meta);
 }
 
 export async function handleAbortOutcome({ requestType, debugKey, timedOut, streamAccumulator, onComplete, onError, abortError }) {
@@ -114,10 +130,10 @@ export async function handleAbortOutcome({ requestType, debugKey, timedOut, stre
             });
             const partialText = cleanText(extended.text || '');
             finishNetworkTrace({ debugKey, text: partialText, reasoning: extended.reasoning, error: 'Generation timed out' });
-            if (onComplete) onComplete(partialText, extended.reasoning, extended.meta);
+            if (onComplete) await onComplete(partialText, extended.reasoning, extended.meta);
         } else {
             finishNetworkTrace({ debugKey, error: 'Generation timed out - no response from server' });
-            if (onError) onError(new Error('Generation timed out - no response from server'));
+            if (onError) await onError(new Error('Generation timed out - no response from server'));
         }
         return;
     }
@@ -131,12 +147,12 @@ export async function handleAbortOutcome({ requestType, debugKey, timedOut, stre
         });
         const partialText = cleanText(extended.text || '');
         finishNetworkTrace({ debugKey, text: partialText, reasoning: extended.reasoning, error: 'Generation aborted' });
-        if (onComplete) onComplete(partialText, extended.reasoning, extended.meta);
+        if (onComplete) await onComplete(partialText, extended.reasoning, extended.meta);
         return;
     }
 
     finishNetworkTrace({ debugKey, error: abortError });
-    if (onError) onError(abortError);
+    if (onError) await onError(abortError);
 }
 
 export async function handleRequestFailure({ requestType, debugKey, error, streamAccumulator, onComplete, onError }) {
@@ -153,10 +169,10 @@ export async function handleRequestFailure({ requestType, debugKey, error, strea
         });
         const partialText = cleanText(extended.text || '');
         finishNetworkTrace({ debugKey, text: partialText, reasoning: extended.reasoning, error: errorMsg });
-        if (onComplete) onComplete(partialText, extended.reasoning, extended.meta);
+        if (onComplete) await onComplete(partialText, extended.reasoning, extended.meta);
         return;
     }
 
     finishNetworkTrace({ debugKey, error });
-    if (onError) onError(error);
+    if (onError) await onError(error);
 }

@@ -27,7 +27,7 @@ export function finalizeGenerationState({
     }
     clearPersistedGeneration(charId, sessionId);
     clearGenerationState(charId, expectedGenId);
-    if (activeChatChar && activeChatChar.id === charId) {
+    if (activeChatChar?.value && activeChatChar.value.id === charId) {
         isGenerating.value = false;
     }
 }
