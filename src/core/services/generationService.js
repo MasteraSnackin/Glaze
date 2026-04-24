@@ -4,37 +4,19 @@ import { runGenerationHook } from '@/core/extensions/extensionRegistry.js';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
-import { executeRequest } from '@/core/services/llmApi.js';
 import { vectorSearchLorebooks } from '@/core/states/lorebookState.js';
-import { buildSummaryRequestPayload, buildMemoryDraftRequestPayload } from '@/core/llm/assemblers/requestAssemblers.js';
-import { executeFinalChatRequest } from '@/core/llm/usecases/chatRequestExecution.js';
-import {
-    getEffectiveApiConfig,
-    loadActivePreset,
-    loadSessionVars,
-    loadGlobalRegexes,
-    getPromptWorkerOptions,
-    buildPromptWorkerPayload,
-    getSafeContextLimit,
-    trimHistoryForContextWindow,
-    processPromptAsync,
-    getMemoryReserveEstimate
-} from '@/core/llm/usecases/chatPromptShared.js';
-import { prepareChatPromptRequest } from '@/core/llm/usecases/chatPreparation.js';
+import { executeFinalChatRequest } from '@/core/llm/usecases/chatRequestAssembly.js';
 import {
     mergeLateVectorLoreEntries,
-    estimateVectorLoreTokens,
-    injectMemoryMessages,
     injectLateVectorLoreMessages
-} from '@/core/llm/usecases/chatLateEnrichment.js';
-import { runChatPostPromptPipeline } from '@/core/llm/usecases/chatPostPromptPipeline.js';
+} from '@/core/llm/usecases/vectorLoreInjection.js';
+import { injectMemoryMessages } from '@/core/llm/usecases/memoryMessageInjection.js';
+import { runChatPostPromptPipeline } from '@/core/llm/pipeline/postPromptOrchestrator.js';
 import { executePreparedChatPrompt } from '@/core/llm/usecases/chatPreparedPromptExecution.js';
-import { executeChatContextCalculation } from '@/core/llm/usecases/chatContextCalculation.js';
-import { executeSummaryRequest } from '@/core/llm/usecases/summaryRequest.js';
-import { executeMemoryDraftRequest } from '@/core/llm/usecases/memoryDraftRequest.js';
+import { prepareChatPromptRequest } from '@/core/llm/usecases/chatPreparation.js';
 import {
     buildMemoryInjection
-} from '@/core/llm/usecases/memoryBookContext.js';
+} from '@/core/llm/usecases/memoryContextInjection.js';
 
 function buildDebugKey(prefix, ...parts) {
     return [prefix, ...parts.filter(Boolean), Date.now(), Math.random().toString(36).slice(2, 8)].join(':');
@@ -76,17 +58,6 @@ async function buildPromptMemoryInjection({ char, history, summary, safeContext,
         safeContext,
         cutoffOriginalIndex: resolvePromptCutoffIndex(result)
     });
-}
-
-function buildContextCalculationResult(result, { vectorLoreTokens = 0, memoryTokens = 0, memoryReserve = 0 } = {}) {
-    return {
-        cutoffIndex: resolvePromptCutoffIndex(result),
-        contextBreakdown: buildMergedContextBreakdown(result?.contextBreakdown, {
-            vectorLoreTokens,
-            memoryTokens,
-            memoryReserve
-        })
-    };
 }
 
 export async function generateChatResponse({
@@ -195,70 +166,6 @@ export async function generateChatResponse({
             executeFinalChatRequest,
             setLastPrompt: (prompt) => {
                 publishAppEvent(APP_EVENTS.debug.promptPreviewUpdated, { debugKey, prompt });
-            }
-        }
-    });
-}
-
-export async function calculateContext({ char, history, authorsNote, summary }) {
-    return executeChatContextCalculation({
-        char,
-        history,
-        authorsNote,
-        summary,
-        deps: {
-            getEffectiveApiConfig,
-            loadActivePreset,
-            getPromptWorkerOptions,
-            loadSessionVars,
-            loadGlobalRegexes,
-            getSafeContextLimit,
-            trimHistoryForContextWindow,
-            getMemoryReserveEstimate,
-            buildPromptWorkerPayload,
-            processPromptAsync,
-            buildPromptMemoryInjection,
-            vectorSearchLorebooks,
-            mergeLateVectorLoreEntries,
-            estimateVectorLoreTokens,
-            buildContextCalculationResult
-        }
-    });
-}
-
-export async function generateSummary({ history, prompt, debugKey: providedDebugKey, controller, apiConfigOverride = null }) {
-    const debugKey = providedDebugKey || buildDebugKey('summary');
-    return executeSummaryRequest({
-        history,
-        prompt,
-        debugKey,
-        controller,
-        apiConfigOverride,
-        deps: {
-            getEffectiveApiConfig,
-            buildSummaryRequestPayload,
-            executeRequest,
-            setLastPrompt: (promptBody) => {
-                publishAppEvent(APP_EVENTS.debug.promptPreviewUpdated, { debugKey, prompt: promptBody });
-            }
-        }
-    });
-}
-
-export async function generateMemoryDraft({ history, prompt, debugKey: providedDebugKey, controller, apiConfigOverride = null }) {
-    const debugKey = providedDebugKey || buildDebugKey('memory_draft');
-    return executeMemoryDraftRequest({
-        history,
-        prompt,
-        debugKey,
-        controller,
-        apiConfigOverride,
-        deps: {
-            getEffectiveApiConfig,
-            buildMemoryDraftRequestPayload,
-            executeRequest,
-            setLastPrompt: (promptBody) => {
-                publishAppEvent(APP_EVENTS.debug.promptPreviewUpdated, { debugKey, prompt: promptBody });
             }
         }
     });

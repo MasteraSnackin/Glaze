@@ -4,13 +4,15 @@ import {
     loadActivePreset,
     loadSessionVars,
     loadGlobalRegexes,
+    getSafeContextLimit,
+    trimHistoryForContextWindow
+} from '@/core/llm/usecases/promptConfigReaders.js';
+import {
     getPromptWorkerOptions,
     buildPromptWorkerPayload,
-    getSafeContextLimit,
-    trimHistoryForContextWindow,
-    processPromptAsync,
     getMemoryReserveEstimate
-} from '@/core/llm/usecases/chatPromptShared.js';
+} from '@/core/llm/usecases/promptPayloadBuilder.js';
+import { processPromptAsync } from '@/core/llm/usecases/promptWorkerLifecycle.js';
 
 export async function prepareChatPromptRequest({
     text,

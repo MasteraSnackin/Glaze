@@ -46,39 +46,52 @@ Files added:
 - `src/core/events/bridges/windowEventBridge.js`
 
 Current behavior:
-- Internal canonical event names now exist for a small safe subset of events.
+- Internal canonical event names exist for ALL custom app events (48 total across nav, domain, debug, ui namespaces).
 - `main.js` initializes a bridge from internal app events to the existing legacy `window` events.
 - Existing legacy listeners still work because the bridge republishes the legacy browser events.
-- A few existing emitters now publish canonical app events first:
-  - generation started/ended
-  - chat updated
-  - sync data refreshed
-  - API context settings changed
-  - open API sheet
-- A first listener subset now subscribes through `subscribeLegacyCompatibleEvent(...)` instead of raw `window.addEventListener(...)` for those same canonical events.
+- ALL internal emitters now publish canonical app events through `publishAppEvent()` first. The bridge handles backward-compatible legacy `window` event dispatch automatically.
+- ALL internal listeners now subscribe through `subscribeAppEvent()` instead of raw `window.addEventListener()`. Unsubscriptions are collected and called in `onBeforeUnmount` (Vue) or persist for app lifetime (services/utils).
+- `windowEventBridge.js` is the ONLY place that touches `window` for app event dispatch. It is a pure external adapter for backward compatibility — no internal code imports it or calls it.
 
-Current listener subset migrated:
-- `App.vue`
-  - open API sheet
-  - sync data refreshed
-- `ChatView.vue`
-  - generation ended
-  - API context settings changed
-- `DialogList.vue`
-  - sync data refreshed
-  - chat updated
-  - generation started
-  - generation ended
-- `LorebookSheet.vue`
-  - sync data refreshed
-- `CharacterList.vue`
-  - sync data refreshed
+**Event catalog (48 events, 5 namespaces):**
+
+`nav.*` (19 events):
+- `openApiSheet`, `navigateTo`, `openCharacterEditor`, `openChat`, `openOnboarding`, `openBackupSheet`, `openSyncSheet`, `openConflictSheet`, `openConnections`, `openFsRequest`, `openGlossary`, `openHolocards`, `openImageViewer`, `openItemEditor`, `openLorebookEntry`, `openNotificationsSheet`, `openPersonaEditor`, `openPresetSheet`, `triggerOpenImage`
+
+`domain.*` (8 events):
+- `chat.updated`, `character.updated`, `generation.{started,ended,promptReady,requestDispatched}`, `lorebook.regexScriptsChanged`, `sync.dataRefreshed`, `settings.{apiContextChanged,changed,languageChanged}`
+
+`debug.*` (6 events):
+- `promptPreviewUpdated`, `requestTrace{Started,Updated,LineAppended,Finished}`, `vueError`
+
+`ui.*` (15 events):
+- `header.{setupChat,setupEditor,setupGeneration,setupSubmenu,showLbBanner,reset,updateAvatar,updateSession,scrollHidden,forceUpdate,viewChanged}`, `chatSearchToggle`, `chatSearch`, `fsEditorClosed`, `backNavigation`, `glossary.{back,headerUpdate,toggle}`, `headerSearch`, `changeGenerationTab`
+
+**Remaining exception:**
+- `ui.js:462` still uses `window.dispatchEvent(new CustomEvent('app-back-navigation', { cancelable: true }))` with `event.defaultPrevented` check. The event hub does not support cancelable events, so this cancelable dispatch pattern cannot be migrated. This is the ONLY raw `window.dispatchEvent` for a custom app event outside the bridge.
+
+**Dead code events (listeners with no dispatches found):**
+- `header-setup-generation` — AppHeader + App still subscribe but no source dispatches
+- `header-update-session` — AppHeader subscribes but no source dispatches
+- `change-generation-tab` — AppHeader subscribes but no source dispatches
+- `open-item-editor` — App subscribes but no source dispatches
+- `open-holocards` — HoloCardViewer subscribes but no source dispatches
+
+These were NOT removed to avoid breaking changes if dispatches are added dynamically. They should be cleaned up in a future pass.
+
+**Files fully migrated to `publishAppEvent`/`subscribeAppEvent` (Phase 10):**
+- Components: App.vue, AppHeader.vue, ChatInput.vue, ChatMessage.vue, GenericEditor.vue, DesktopLeftSidebar.vue, BottomSheet.vue, DragDropOverlay.vue, HelpTip.vue, CharacterCardSheet.vue, GlossarySheet.vue, LorebookSheet.vue, RegexSheet.vue, SyncSheet.vue, NotificationsSheet.vue, ImageViewer.vue, HoloCardViewer.vue
+- Views: ApiView.vue, CatalogView.vue, CharacterList.vue, DialogList.vue, PersonasView.vue, PresetView.vue, ToolsView.vue, MenuView.vue, SettingsView.vue
+- Core: ui.js, notificationService.js, APISettings.js, catalogState.js, main.js
+- Utils: characterIO.js, errors.js
+- Composables: useChatMessageDisplay.js
 
 What has **not** changed yet:
-- Most listeners still subscribe to `window` events.
-- `ChatView.vue` is still a large orchestration surface.
+- `ChatView.vue` is still a large orchestration surface (but significantly thinner than before).
 - `generationService.js` is still a large orchestration surface.
 - Full request ownership separation is not finished yet.
+- Cancelable `app-back-navigation` dispatch pattern in `ui.js` still uses raw `window.dispatchEvent`.
+- Dead event subscriptions (5 events with listeners but no dispatches) have not been cleaned up.
 
 ### Phase 2 Request Ownership Safety Slice
 
@@ -97,6 +110,19 @@ What this does **not** do yet:
 - It does not yet introduce automated overlap tests for abort/regenerate races.
 - It does not yet unify all generation-like flows under one final lifecycle contract.
 
+### Phase 9 State Ownership Boundaries
+
+Files added:
+- `src/core/states/generationState.js` — explicit generation state module with clear ownership API
+- `src/core/states/syncState.js` — already existed, now documented as state boundary
+
+Current behavior:
+- Generation state (`isGenerating`, `hasGenerationState`, `getGenerationState`, `clearGenerationState`, `abortActiveChatGeneration`) is now accessed through a module with explicit ownership boundaries instead of being scattered across ChatView.vue reactive refs.
+- `useGenerationRegistry.js` composable registers generation state per-session with ownership tokens.
+- `useAutoSync.js` now depends on `syncState` for sync-readiness checks instead of importing from ChatView.
+- `usePromptMetadataSnapshots.js` stores/restores prompt metadata snapshots for rollback on abort/error.
+- ChatView.vue TDZ bug fixed: `getScrollAnchor` (from `useVirtualScroll`) was used by `useSessionPersistence` before being defined. Reordered to: `displayMessages` → `useVirtualScroll` → `useSessionPersistence` → `useSessionManagement`.
+
 ### Initial Use-Case Entrypoint Layer
 
 Files added:
@@ -112,6 +138,31 @@ Current behavior:
 - Vue-owned state, UI callbacks, and persistence helpers are still injected from `ChatView.vue`, so behavior remains unchanged while the dependency boundary becomes real.
 - `generationService.js` still owns late enrichment and final request execution, and acts as the compatibility layer under that use case.
 - Memory-book retrieval/index maintenance now lives in `src/core/llm/usecases/memoryBookContext.js` and is consumed both by chat/context flows and by `memoryBooksService.js`.
+
+### Phase 11 Use-Case Layer Re-architecture
+
+Files moved/renamed:
+- `src/core/llm/usecases/chatPipelineContext.js` → `src/core/llm/pipeline/pipelineContext.js`
+- `src/core/llm/usecases/chatPipelineSteps.js` → `src/core/llm/pipeline/steps.js`
+- `src/core/llm/usecases/chatPostPromptPipeline.js` → `src/core/llm/pipeline/postPromptOrchestrator.js`
+- `src/core/llm/usecases/chatContextCalculation.js` → `src/core/llm/usecases/contextCalculation.js`
+- `src/core/llm/usecases/chatRequestExecution.js` → `src/core/llm/usecases/chatRequestAssembly.js`
+- `src/core/llm/usecases/nonChatGenerationHooks.js` → `src/core/llm/usecases/sharedRequestHooks.js`
+- `src/core/llm/transport/chatCompletionsClient.js` → `src/core/llm/transport/completionsClient.js`
+
+Files split:
+- `chatLateEnrichment.js` → `vectorLoreInjection.js` + `memoryMessageInjection.js`
+- `chatPromptShared.js` → `promptConfigReaders.js` + `promptWorkerLifecycle.js` + `promptPayloadBuilder.js`
+- `memoryBookContext.js` → `memoryEmbeddingIndex.js` + `memoryKeyMatching.js` + `memoryContextInjection.js`
+
+Hollow entrypoints eliminated:
+- `calculateContext.js`, `generateSummary.js`, `generateMemoryDraft.js` now own their dependency assembly locally instead of proxying to `generationService.js`.
+- `generationService.js` reduced from 267 → 172 lines; only exports `generateChatResponse` (chat generation orchestration).
+
+UI leak sites remaining (for Phase 12):
+- `generationService.js` imports `translations`/`currentLang` (i18n) and `showBottomSheet`/`closeBottomSheet` (UI state) — these are passed as `t` and sheet callbacks into `executePreparedChatPrompt` and `runChatPostPromptPipeline`.
+- `pipeline/steps.js` `stepContextLimitGuard` receives `showBottomSheet`/`closeBottomSheet` as deps — this is UI notification from pipeline step.
+- These should become callback-style dep injection or event-driven in Phase 12.
 - `ChatView.vue` no longer dispatches raw `window` events for generation/chat lifecycle; it uses `createGenerationAppAdapters()` which publishes canonical app events through the event hub, with the bridge handling legacy compatibility.
 - `ChatView.vue` no longer manually assembles the ~30-function service injection bundle for `executeChatGenerationUseCase`. The `createChatGenerationServices` factory in `src/core/llm/usecases/chatGenerationServiceFactory.js` imports and wires all composable/service dependencies, taking only genuinely Vue-own state refs as arguments.
 - Memory automation functions (`runMemoryAutomationAfterStableTurn`, `generateMemoryDraftForMessages`, `createPendingMemoryDraft`, `bootstrapImportedMemoryDrafts`, etc.) are extracted from `ChatView.vue` into `composables/chat/useMemoryAutomation.js`, a dedicated composable that accepts only the Vue refs and callbacks it needs.
@@ -123,15 +174,16 @@ Current behavior:
 
 Why this slice is safe:
 - It adds a new internal boundary without removing the legacy one.
-- Runtime behavior stays compatible because `window` remains the active compatibility surface.
-- Migrated listeners still observe legacy browser events from non-migrated emitters and ignore bridged duplicates from migrated emitters.
-- Later refactor slices can migrate listeners and side effects incrementally instead of forcing a one-shot rewrite.
+- Runtime behavior stays compatible because `windowEventBridge` automatically republishes all app events as legacy `window` events for any code that still listens via `window.addEventListener`.
+- Migrated listeners use `subscribeAppEvent()` which receives events from both migrated emitters (via event hub) and legacy emitters (via bridge forward).
+- Later refactor slices can remove the bridge entirely once all legacy consumers are confirmed migrated.
 
 What has **not** changed yet:
 - `ChatView.vue` is significantly thinner (2995 lines, down from ~5700), but still injects some state into the chat use case via the `createChatGenerationServices` factory.
-- Late enrichment and final request assembly still live inside `generationService.js`.
-- Memory-book retrieval heuristics are now extracted out of `generationService.js`, but they are still deterministic helper logic rather than a final dedicated domain service boundary.
-- The next safe extraction step is to move those remaining deterministic stages under the use-case/pipeline layer without changing ordering.
+- `generationService.js` still imports UI dependencies (`showBottomSheet`, `translations`/`currentLang`) — these leak UI into the orchestration layer and should be injected as callbacks in Phase 12.
+- `pipeline/steps.js` `stepContextLimitGuard` still calls `showBottomSheet` via deps — UI notification from a pipeline step.
+- Event hub bridge (`windowEventBridge`) still publishes legacy `window` events for backward compatibility. Can be removed once all consumers are confirmed on `subscribeAppEvent`.
+- Cancelable event pattern (`app-back-navigation`) cannot migrate to event hub — needs design for cancelable semantics.
 
 ## 1. Tokenizer
 
@@ -814,7 +866,7 @@ These composables now cover placeholder setup, stream UI application, prompt met
 
 ### Cloud Sync ↔ Local Data
 - `syncEngine.js` serializes characters, personas, chats, presets, and selected local storage state
-- Pull dispatches `sync-data-refreshed` so live UI can reload synced entities
+- Pull publishes `APP_EVENTS.domain.sync.dataRefreshed` via event hub (bridge forwards as legacy `sync-data-refreshed` window event)
 
 ### Cloud Sync ↔ Encryption
 - `syncService.js` decides whether to request a sync key based on `detectEncryptionState()`

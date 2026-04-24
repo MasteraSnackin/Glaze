@@ -1,6 +1,6 @@
 import { publishAppEvent } from '@/core/events/eventHub.js';
 import { APP_EVENTS } from '@/core/events/eventNames.js';
-import { PipelineContext } from './chatPipelineContext.js';
+import { PipelineContext } from './pipelineContext.js';
 
 export async function stepVectorSearch(ctx, deps) {
     const { vectorSearchLorebooks, mergeLateVectorLoreEntries } = deps;

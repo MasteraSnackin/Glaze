@@ -3,7 +3,7 @@ import { currentLang } from '@/core/config/APPSettings.js';
 import { getProviderById } from '@/core/llm/providers/providerRegistry.js';
 import { completeStructuredResponse, handleAbortOutcome, handleRequestFailure } from '@/core/llm/transport/requestOutcome.js';
 import { executeNativeNonStreamingRequest, shouldUseNativeNonStreamingRequest } from '@/core/llm/transport/requestExecution.js';
-import { executeFetchChatCompletions } from '@/core/llm/transport/chatCompletionsClient.js';
+import { executeFetchChatCompletions } from '@/core/llm/transport/completionsClient.js';
 import { createRequestLifecycle } from '@/core/llm/transport/requestLifecycle.js';
 import { completeJsonResponse } from '@/core/llm/transport/responseHandling.js';
 import { setupRequestRuntimePolicy } from '@/core/llm/transport/requestRuntimePolicy.js';

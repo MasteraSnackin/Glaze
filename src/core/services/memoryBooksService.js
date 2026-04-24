@@ -13,12 +13,12 @@
  * - Coverage reconciliation
  */
 
-import { generateMemoryDraft } from './generationService.js';
+import { generateMemoryDraft } from '@/core/llm/usecases/generateMemoryDraft.js';
 import { db } from '@/utils/db.js';
 import {
     indexMemoryEntryForSession,
     deleteMemoryEntryIndex
-} from '@/core/llm/usecases/memoryBookContext.js';
+} from '@/core/llm/usecases/memoryEmbeddingIndex.js';
 
 // ============================================================================
 // INITIALIZATION & STATE CREATION

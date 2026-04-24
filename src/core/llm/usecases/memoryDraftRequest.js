@@ -4,7 +4,7 @@ import {
     runNonChatCommitHook,
     runNonChatPromptBuildHooks,
     runNonChatRequestHooks
-} from '@/core/llm/usecases/nonChatGenerationHooks.js';
+} from '@/core/llm/usecases/sharedRequestHooks.js';
 
 export async function executeMemoryDraftRequest({
     history,

@@ -3,95 +3,7 @@ import { db } from '@/utils/db.js';
 import { getEmbeddings } from '@/core/services/embeddingService.js';
 import { getEmbeddingConfig, isEmbeddingConfigured } from '@/core/config/embeddingSettings.js';
 import { findTopK } from '@/utils/vectorMath.js';
-
-function normalizeMessageIdList(entry) {
-    if (!entry || typeof entry !== 'object') return [];
-    if (Array.isArray(entry.messageIds)) return [...new Set(entry.messageIds.filter(Boolean))];
-    const ids = [];
-    if (entry.messageRange?.startMessageId) ids.push(entry.messageRange.startMessageId);
-    if (entry.messageRange?.endMessageId && entry.messageRange.endMessageId !== entry.messageRange.startMessageId) ids.push(entry.messageRange.endMessageId);
-    return [...new Set(ids.filter(Boolean))];
-}
-
-function buildSummaryExcerpt(summary) {
-    if (!summary) return '';
-    if (typeof summary === 'string') return summary.trim().slice(0, 800);
-    if (typeof summary === 'object') {
-        if (typeof summary.content === 'string') return summary.content.trim().slice(0, 800);
-        return ['timeline', 'characterArcs', 'conflictsThreads', 'notHappenedYet', 'notes']
-            .map(key => summary[key])
-            .filter(value => typeof value === 'string' && value.trim())
-            .join('\n\n')
-            .slice(0, 800);
-    }
-    return '';
-}
-
-function escapeRegex(string) {
-    return String(string || '').replace(/[/\\-\\^$*+?.()|[\]{}]/g, '\\$&');
-}
-
-const GLAZE_BOUNDARIES = '[\\s.,!?;:"\'\u201C\u201D\u2018\u2019\u00AB\u00BB(){}\\[\\]\u2014\u2013]';
-
-function tryCreateRegex(pattern, flags = 'g') {
-    try {
-        return new RegExp(pattern, flags);
-    } catch {
-        return null;
-    }
-}
-
-function normalizeHybridText(text = '') {
-    return String(text || '')
-        .toLowerCase()
-        .replace(/[^\p{L}\p{N}\s-]+/gu, ' ')
-        .replace(/\s+/g, ' ')
-        .trim();
-}
-
-function uniqueStrings(values = [], limit = 32) {
-    const seen = new Set();
-    const result = [];
-    for (const value of values) {
-        const raw = String(value || '').trim();
-        const normalized = normalizeHybridText(raw);
-        if (!normalized || seen.has(normalized)) continue;
-        seen.add(normalized);
-        result.push(raw);
-        if (result.length >= limit) break;
-    }
-    return result;
-}
-
-function extractMemoryRetrievalHints(entry) {
-    const hints = [];
-    if (entry?.title) hints.push(String(entry.title));
-    if (Array.isArray(entry?.keys)) hints.push(...entry.keys.map(v => String(v)));
-    if (Array.isArray(entry?.glazeKeys)) hints.push(...entry.glazeKeys.map(v => String(v)));
-    const content = String(entry?.content || '');
-    if (content) {
-        const lines = content.split(/\r?\n/).map(line => line.trim()).filter(Boolean).slice(0, 8);
-        hints.push(...lines);
-    }
-    return uniqueStrings(hints, 32);
-}
-
-function checkKeyMatch(key, text, { glaze = false, caseSensitive = false } = {}) {
-    if (!key || !text) return false;
-    const sourceText = String(text || '');
-    const sourceKey = String(key || '');
-    const flags = caseSensitive ? '' : 'i';
-    if (glaze) {
-        const escaped = escapeRegex(sourceKey);
-        const regex = tryCreateRegex(`(?:^|${GLAZE_BOUNDARIES})${escaped}(?:$|${GLAZE_BOUNDARIES})`, flags);
-        return regex ? regex.test(sourceText) : false;
-    }
-    const regex = tryCreateRegex(`\\b${escapeRegex(sourceKey)}\\b`, flags);
-    if (regex && regex.test(sourceText)) return true;
-    const haystack = caseSensitive ? sourceText : sourceText.toLowerCase();
-    const needle = caseSensitive ? sourceKey : sourceKey.toLowerCase();
-    return haystack.includes(needle);
-}
+import { checkKeyMatch, normalizeMessageIdList, buildSummaryExcerpt } from './memoryKeyMatching.js';
 
 async function vectorSearchMemoryEntries(entries, history = [], currentText = '') {
     const config = getEmbeddingConfig();
@@ -132,41 +44,6 @@ async function vectorSearchMemoryEntries(entries, history = [], currentText = ''
         .filter(result => result.score >= (config.threshold || 0.6))
         .slice(0, config.topK || 5)
         .map(result => ({ ...result, vectorScore: result.score, vector: undefined }));
-}
-
-async function ensureMemoryEntryEmbedding(entry, charId, sessionId) {
-    if (!entry?.id || !entry.vectorSearch || !isEmbeddingConfigured()) return;
-    const config = getEmbeddingConfig();
-    if (!config.enabled) return;
-    const text = (config.target === 'keys'
-        ? [...(entry.keys || []), ...(entry.glazeKeys || [])].join(', ')
-        : String(entry.content || '')).trim();
-    if (!text) return;
-    const existing = await db.getEmbedding(entry.id);
-    const retrievalHints = extractMemoryRetrievalHints(entry);
-    const textHash = JSON.stringify({ text, retrievalHints });
-    if (existing && existing.textHash === textHash) return;
-    const vectorsData = await getEmbeddings([text]);
-    if (!vectorsData || !vectorsData[0]) return;
-    await db.saveEmbedding({
-        id: entry.id,
-        sourceType: 'memory_entry',
-        sourceId: `memorybook_${charId}_${sessionId}`,
-        vectors: vectorsData[0],
-        vector: null,
-        textHash,
-        retrievalHints,
-        updatedAt: Date.now()
-    });
-}
-
-export async function indexMemoryEntryForSession(entry, charId, sessionId) {
-    await ensureMemoryEntryEmbedding(entry, charId, sessionId);
-}
-
-export async function deleteMemoryEntryIndex(entryId) {
-    if (!entryId) return;
-    await db.deleteEmbedding(entryId);
 }
 
 export async function buildMemoryInjection({ char, history, summary, safeContext, cutoffOriginalIndex = -1 }) {

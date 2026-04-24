@@ -43,7 +43,8 @@ The current roadmap is:
 - Phase 6 status: `done`
 - Phase 7 status: `done`
 - Phase 8 status: `done` (ChatView reduced from 3767 → 1611 lines, target <2000 met)
-- Current slice testing: `tested` (`npm run build`)
+- Phase 11 status: `done` (use-case layer re-architecture — pipeline dir, split scope-creep files, fix naming, eliminate hollow entrypoints)
+- Current slice testing: `tested` (`npm run build` + `npm run lint`)
 
 ### Bugs Found & Fixed on This Branch
 
@@ -1152,11 +1153,49 @@ Still not done:
 - [not done] Move more remaining direct runtime API config access behind `APISettings.js` helpers, especially lower-priority UI code and legacy toggles.
 - [not done] Extract generation session lifecycle out of `ChatView.vue` into a dedicated composable/service.
 - [not done] Separate prompt preview storage from network trace storage and stop relying on singleton global last-trace state.
-- [not done] Promote explicit request use cases (`generateChat`, `generateSummary`, `generateMemoryDraft`, `calculateContext`) instead of keeping orchestration concentrated in `generationService.js`.
+- [done] Promote explicit request use cases (`generateChat`, `generateSummary`, `generateMemoryDraft`, `calculateContext`) instead of keeping orchestration concentrated in `generationService.js`. — **Done in Phase 11.** `calculateContext.js`, `generateSummary.js`, `generateMemoryDraft.js` now own their dependency assembly locally. `generationService.js` reduced from 267 → 172 lines, only exports `generateChatResponse`.
 
 Immediate next refactor step:
 - [done] Extracted SSE parsing and stream normalization out of `llmApi.js` first, because that was the highest-complexity remaining transport logic and the biggest blocker to finishing the provider/network split cleanly.
 - [not done] Continue splitting the remaining `llmApi.js` orchestration path into a dedicated transport client boundary once the SSE slice is stabilized.
+
+### Phase 11: Use-Case Layer Re-architecture (2026-04-24)
+
+Branch: `feat/refactor-phase1-event-hub`
+Status: `done`
+Testing: `tested` (`npm run build` + `npm run lint`, 0 errors)
+
+Goal: Clean up the use-case/pipeline layer — relocate pipeline files, split scope-creep files, fix naming, eliminate hollow entrypoints, document remaining UI leak sites.
+
+Tasks:
+- [done] **11a. Pipeline directory** — Created `src/core/llm/pipeline/`, moved 3 files:
+  - `chatPipelineContext.js` → `pipeline/pipelineContext.js`
+  - `chatPipelineSteps.js` → `pipeline/steps.js`
+  - `chatPostPromptPipeline.js` → `pipeline/postPromptOrchestrator.js`
+- [done] **11b. Split scope-creep files** — 3 files split into 7:
+  - `chatLateEnrichment.js` → `vectorLoreInjection.js` + `memoryMessageInjection.js`
+  - `chatPromptShared.js` → `promptConfigReaders.js` + `promptWorkerLifecycle.js` + `promptPayloadBuilder.js`
+  - `memoryBookContext.js` → `memoryEmbeddingIndex.js` + `memoryKeyMatching.js` + `memoryContextInjection.js`
+- [done] **11c. Fix naming** — 4 files renamed:
+  - `chatContextCalculation.js` → `contextCalculation.js`
+  - `chatRequestExecution.js` → `chatRequestAssembly.js`
+  - `nonChatGenerationHooks.js` → `sharedRequestHooks.js`
+  - `transport/chatCompletionsClient.js` → `transport/completionsClient.js`
+- [done] **11d. Eliminate hollow entrypoints**:
+  - `calculateContext.js`, `generateSummary.js`, `generateMemoryDraft.js` now own dependency assembly locally instead of proxying to `generationService.js`.
+  - `generationService.js` reduced from 267 → 172 lines; only exports `generateChatResponse`.
+  - Removed dead exports and unused imports from `generationService.js`.
+- [done] **11e. Document UI leak sites** for Phase 12:
+  - `generationService.js` imports `translations`/`currentLang` (i18n) and `showBottomSheet`/`closeBottomSheet` (UI state) — passed as `t` and sheet callbacks into pipeline.
+  - `pipeline/steps.js` `stepContextLimitGuard` receives `showBottomSheet`/`closeBottomSheet` via deps — UI notification from pipeline step.
+  - These should become callback-style dep injection or event-driven in Phase 12.
+
+Files changed:
+- Moved/renamed: 7 files
+- Split: 3 → 7 files (3 new files added)
+- Rewritten: `calculateContext.js`, `generateSummary.js`, `generateMemoryDraft.js` (now real entrypoints)
+- Trimmed: `generationService.js` (267 → 172 lines)
+- Updated: `ARCHITECTURE.md` (Phase 11 section + updated "not changed yet")
 
 ## Refactoring Phase — Tokenizer, Memory Books, Vectors/Lorebooks (Active)
 

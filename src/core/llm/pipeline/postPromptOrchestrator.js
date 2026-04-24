@@ -1,5 +1,5 @@
-import { PipelineContext, validateStepOrder } from './chatPipelineContext.js';
-import { PIPELINE_STEPS, stepVectorSearch } from './chatPipelineSteps.js';
+import { PipelineContext, validateStepOrder } from './pipelineContext.js';
+import { PIPELINE_STEPS, stepVectorSearch } from './steps.js';
 
 export { PipelineContext };
 
@@ -69,8 +69,6 @@ export async function runChatPostPromptPipeline({
     if (ctx._vectorSearchError) {
         const e = ctx._vectorSearchError;
         console.warn('[generateChatResponse] Vector search failed:', e);
-        // Degrade gracefully: generation can continue without vector lorebook
-        // results when the embedding provider is temporarily unavailable.
     }
 
     if (ctx._aborted && ctx.stepLog.some(s => s.step === 'contextLimitGuard')) {

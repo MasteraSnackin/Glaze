@@ -844,7 +844,7 @@ Expected output:
 - existing internal callers have been migrated off — DONE (except cancelable back-nav pattern)
 
 ### Phase 11. Organize orchestration by scenario, not by technique
-Status: not done
+Status: in progress — audit complete, implementation pending
 Testing: not tested
 
 Purpose:
@@ -861,6 +861,91 @@ Work:
 - review shared helpers and ensure they are named after the shared scenario concern, not after the sharing technique
 - if any "utility" file in usecases has grown past its original scope, split by scenario
 - ensure pipeline steps in `src/core/llm/pipeline/` (or current step files) are named after what they decide, not after where they sit in the stack
+
+Audit findings (20 files in `usecases/`, 10 in `transport/`):
+
+**Top 10 issues identified:**
+
+1. **Hollow entrypoints**: `generateChat.js`, `generateSummary.js`, `generateMemoryDraft.js`, `calculateContext.js` are 10-line passthroughs to `generationService.js`. They create an illusion of clean entrypoints while the real entrypoint lives in `src/core/services/generationService.js`. Either make them real entrypoints or eliminate the indirection.
+
+2. **Circular delegation**: `usecases/` files delegate to `generationService.js` (in `services/`), which imports back from `usecases/`. This makes the dependency graph circular:
+   ```
+   generateChat.js --> generationService.js --> chatPreparation.js
+                     <--                      --> chatPostPromptPipeline.js
+                                              --> chatContextCalculation.js
+                                              --> summaryRequest.js
+                                              --> memoryDraftRequest.js
+   ```
+
+3. **Pipeline code in usecases**: `chatPipelineContext.js`, `chatPipelineSteps.js`, `chatPostPromptPipeline.js` are pipeline infrastructure, not use cases. No `pipeline/` subdirectory exists. They should be moved to `src/core/llm/pipeline/`.
+
+4. **"chat" prefix on shared code**: `chatContextCalculation.js`, `chatLateEnrichment.js`, `chatPromptShared.js` all use "chat" prefix but serve context calculation (a separate scenario) or are genuinely shared. The prefix misleads about scope.
+
+5. **Scope creep in `chatLateEnrichment.js`** (234 lines, 5 exports): combines vector lore injection (one concern) with memory message injection (another). These are distinct enrichment stages and should be separate files.
+
+6. **Scope creep in `chatPromptShared.js`** (177 lines, 10 exports): mixes (a) pure config readers (`getEffectiveApiConfig`, `loadSessionVars`), (b) web worker lifecycle management (`processPromptAsync`, `getWorker`), and (c) domain logic (`buildPromptWorkerPayload`, `getMemoryReserveEstimate`). Worker management should be its own file.
+
+7. **Scope creep in `memoryBookContext.js`** (309 lines, 3 exports): handles embedding indexing, keyword matching, vector search, scoring, and injection building. At least 3 distinct concerns: indexing, matching/scoring, injection-building.
+
+8. **UI leaks in use cases**: `chatPreparedPromptExecution.js` shows bottom sheet on missing config, `chatPipelineSteps.js` `stepContextLimitGuard` calls `showBottomSheet`, `impersonationRequest.js` mutates Vue refs (`inputValue`, `isImpersonating`). Use cases should return structured results, not call UI.
+
+9. **Name collision**: `usecases/chatRequestExecution.js` vs `transport/requestExecution.js` — same concept name at different layers. The usecases version should be renamed to `chatRequestAssembly.js` or `chatRequestOrchestration.js`.
+
+10. **Negative-space naming**: `nonChatGenerationHooks.js` — named by what it is NOT. Fragile as scenarios grow. Should be `sharedGenerationHooks.js` or `nonStreamingRequestHooks.js`.
+
+**Per-file audit table:**
+
+| File | Scenario | Entrypoint? | Issues |
+|------|----------|-------------|--------|
+| `calculateContext.js` | Context calc | Hollow (delegates to generationService) | Double indirection |
+| `chatContextCalculation.js` | Context calc | Helper (real logic) | "chat" prefix misleading |
+| `chatGenerationAppAdapters.js` | Chat gen | Helper (3 event publishers) | 16 lines, could be inlined |
+| `chatGenerationServiceFactory.js` | Chat gen | Helper (DI container, 116 lines) | Scope creep — is a composition root, not a use case |
+| `chatLateEnrichment.js` | Shared (chat+ctx) | Helper | Combines vector lore + memory injection |
+| `chatPipelineContext.js` | Chat gen | Infrastructure | Misplaced — belongs in `pipeline/` |
+| `chatPipelineSteps.js` | Chat gen | Infrastructure | Misplaced + UI leak in `stepContextLimitGuard` |
+| `chatPostPromptPipeline.js` | Chat gen | Orchestrator | Misplaced — belongs in `pipeline/` |
+| `chatPreparation.js` | Chat gen | Helper | Clean, but tightly coupled to web worker |
+| `chatPreparedPromptExecution.js` | Chat gen | Helper | UI leak (shows bottom sheet) |
+| `chatPromptShared.js` | Shared infra | Helper | 3 concerns mixed (config, worker, domain) |
+| `chatRequestExecution.js` | Chat gen | Helper | Name collision with transport/ |
+| `generateChat.js` | Chat gen | Hollow entrypoint | Circular delegation via generationService |
+| `generateMemoryDraft.js` | Memory draft | Hollow entrypoint | Same double indirection |
+| `generateSummary.js` | Summary | Hollow entrypoint | Same double indirection |
+| `impersonationRequest.js` | Impersonation | Real entrypoint | UI leak (mutates Vue refs) |
+| `memoryBookContext.js` | Shared (chat+memory) | Helper | 3 concerns: indexing, matching, injection |
+| `memoryDraftRequest.js` | Memory draft | Real LLM entrypoint | Clean and well-structured |
+| `nonChatGenerationHooks.js` | Shared (summary+memory) | Helper | Negative-space naming |
+| `summaryRequest.js` | Summary | Real LLM entrypoint | Clean and well-structured |
+
+**Transport directory** (`src/core/llm/transport/`, 10 files) — mostly clean. One issue: `chatCompletionsClient.js` says "chat" but serves all request types. Should be `completionsClient.js`.
+
+**Proposed restructuring plan:**
+
+Sub-step 11a — Create `src/core/llm/pipeline/` and move pipeline files:
+- `chatPipelineContext.js` → `pipeline/pipelineContext.js`
+- `chatPipelineSteps.js` → `pipeline/steps.js`
+- `chatPostPromptPipeline.js` → `pipeline/postPromptOrchestrator.js`
+
+Sub-step 11b — Split scope-creep files:
+- `chatLateEnrichment.js` → `vectorLoreInjection.js` + `memoryMessageInjection.js`
+- `chatPromptShared.js` → `promptConfigReaders.js` + `promptWorkerLifecycle.js` + `promptPayloadBuilder.js`
+- `memoryBookContext.js` → `memoryEmbeddingIndex.js` + `memoryKeyMatching.js` + `memoryContextInjection.js`
+
+Sub-step 11c — Fix naming:
+- `chatContextCalculation.js` → `contextCalculation.js` (remove "chat" prefix)
+- `chatRequestExecution.js` → `chatRequestAssembly.js` (avoid collision with transport/)
+- `nonChatGenerationHooks.js` → `sharedRequestHooks.js`
+- `chatCompletionsClient.js` → `completionsClient.js`
+
+Sub-step 11d — Eliminate hollow entrypoints:
+- Merge `calculateContext.js` logic into `contextCalculation.js` as the real entrypoint
+- Merge `generateChat.js`, `generateSummary.js`, `generateMemoryDraft.js` real orchestration into themselves, bypassing `generationService.js` as middleman (or invert: make generationService import from usecases, not the other way around)
+
+Sub-step 11e — Document UI leak sites for Phase 12 cleanup:
+- `chatPreparedPromptExecution.js` — bottom sheet on missing config
+- `chatPipelineSteps.js` `stepContextLimitGuard` — bottom sheet
+- `impersonationRequest.js` — Vue ref mutation
 
 Expected output:
 
