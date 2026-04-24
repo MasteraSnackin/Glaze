@@ -12,7 +12,7 @@ function handleBack() {
         sheet.value?.close();
     }
 }
-import { normalizeEndpoint, fetchRemoteModels, getApiPresets, saveApiPresets, getApiConfig, getApiProviderId, getApiRuntimeStorage, saveApiRuntimeSetting, applyApiRuntimeConfig, getBlacklistedProvider } from '@/core/config/APISettings.js';
+import { normalizeEndpoint, fetchRemoteModels, getApiPresets, saveApiPresets, getApiConfig, getApiProviderId, getApiRuntimeStorage, saveApiRuntimeSetting, applyApiRuntimeConfig, getBlacklistedProvider, getApiReasoningTags } from '@/core/config/APISettings.js';
 import { getEmbeddingConfig, saveEmbeddingSetting, isEmbeddingConfigured } from '@/core/config/embeddingSettings.js';
 import { testEmbeddingConnection } from '@/core/services/embeddingService.js';
 import { getImageGenSettings, saveImageGenSettings } from '@/core/services/imageGenService.js';
