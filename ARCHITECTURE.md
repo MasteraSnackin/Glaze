@@ -5,8 +5,8 @@
 ### Current Refactor Slice
 - Branch: `feat/refactor-phase1-event-hub`
 - Base: latest `dev` state plus refactor-only commits
-- Status: Phase 1 skeleton plus first listener migration slice
-- Testing: `npm run build` passed
+- Status: Phases 1–14 complete
+- Testing: `npm run build` passes, `npm run lint` 0 new errors
 
 ### Before Refactor
 
@@ -46,29 +46,28 @@ Files added:
 - `src/core/events/bridges/windowEventBridge.js`
 
 Current behavior:
-- Internal canonical event names exist for ALL custom app events (48 total across nav, domain, debug, ui namespaces).
+- Internal canonical event names exist for ALL custom app events (56 total across nav, domain, debug, ui namespaces).
 - `main.js` initializes a bridge from internal app events to the existing legacy `window` events.
 - Existing legacy listeners still work because the bridge republishes the legacy browser events.
 - ALL internal emitters now publish canonical app events through `publishAppEvent()` first. The bridge handles backward-compatible legacy `window` event dispatch automatically.
 - ALL internal listeners now subscribe through `subscribeAppEvent()` instead of raw `window.addEventListener()`. Unsubscriptions are collected and called in `onBeforeUnmount` (Vue) or persist for app lifetime (services/utils).
 - `windowEventBridge.js` is the ONLY place that touches `window` for app event dispatch. It is a pure external adapter for backward compatibility — no internal code imports it or calls it.
 
-**Event catalog (48 events, 5 namespaces):**
+**Event catalog (56 events, 4 namespaces):**
 
 `nav.*` (19 events):
 - `openApiSheet`, `navigateTo`, `openCharacterEditor`, `openChat`, `openOnboarding`, `openBackupSheet`, `openSyncSheet`, `openConflictSheet`, `openConnections`, `openFsRequest`, `openGlossary`, `openHolocards`, `openImageViewer`, `openItemEditor`, `openLorebookEntry`, `openNotificationsSheet`, `openPersonaEditor`, `openPresetSheet`, `triggerOpenImage`
 
-`domain.*` (8 events):
+`domain.*` (11 events):
 - `chat.updated`, `character.updated`, `generation.{started,ended,promptReady,requestDispatched}`, `lorebook.regexScriptsChanged`, `sync.dataRefreshed`, `settings.{apiContextChanged,changed,languageChanged}`
 
 `debug.*` (6 events):
 - `promptPreviewUpdated`, `requestTrace{Started,Updated,LineAppended,Finished}`, `vueError`
 
-`ui.*` (15 events):
+`ui.*` (20 events):
 - `header.{setupChat,setupEditor,setupGeneration,setupSubmenu,showLbBanner,reset,updateAvatar,updateSession,scrollHidden,forceUpdate,viewChanged}`, `chatSearchToggle`, `chatSearch`, `fsEditorClosed`, `backNavigation`, `glossary.{back,headerUpdate,toggle}`, `headerSearch`, `changeGenerationTab`
 
-**Remaining exception:**
-- `ui.js:462` still uses `window.dispatchEvent(new CustomEvent('app-back-navigation', { cancelable: true }))` with `event.defaultPrevented` check. The event hub does not support cancelable events, so this cancelable dispatch pattern cannot be migrated. This is the ONLY raw `window.dispatchEvent` for a custom app event outside the bridge.
+**No remaining exceptions.** All app-level custom events, including the cancelable `app-back-navigation` pattern, are now routed through `publishAppEvent` / `publishCancelableAppEvent`. The event hub supports both regular and cancelable events (with `preventDefault()`/`defaultPrevented` semantics).
 
 **Dead code events (listeners with no dispatches found):**
 - `header-setup-generation` — AppHeader + App still subscribe but no source dispatches
@@ -81,17 +80,14 @@ These were NOT removed to avoid breaking changes if dispatches are added dynamic
 
 **Files fully migrated to `publishAppEvent`/`subscribeAppEvent` (Phase 10):**
 - Components: App.vue, AppHeader.vue, ChatInput.vue, ChatMessage.vue, GenericEditor.vue, DesktopLeftSidebar.vue, BottomSheet.vue, DragDropOverlay.vue, HelpTip.vue, CharacterCardSheet.vue, GlossarySheet.vue, LorebookSheet.vue, RegexSheet.vue, SyncSheet.vue, NotificationsSheet.vue, ImageViewer.vue, HoloCardViewer.vue
-- Views: ApiView.vue, CatalogView.vue, CharacterList.vue, DialogList.vue, PersonasView.vue, PresetView.vue, ToolsView.vue, MenuView.vue, SettingsView.vue
+- Views: ApiView.vue, CatalogView.vue, CharacterList.vue, DialogList.vue, PersonasView.vue, PresetView.vue, ToolsView.vue, Menu/MenuView.vue, Menu/Settings/SettingsView.vue, Menu/Settings/ThemeSettingsView.vue, Menu/AboutView.vue, OnboardingView.vue
 - Core: ui.js, notificationService.js, APISettings.js, catalogState.js, main.js
 - Utils: characterIO.js, errors.js
 - Composables: useChatMessageDisplay.js
 
 What has **not** changed yet:
-- `ChatView.vue` is still a large orchestration surface (but significantly thinner than before).
-- `generationService.js` is still a large orchestration surface.
-- Full request ownership separation is not finished yet.
-- Cancelable `app-back-navigation` dispatch pattern in `ui.js` still uses raw `window.dispatchEvent`.
 - Dead event subscriptions (5 events with listeners but no dispatches) have not been cleaned up.
+- `ChatView.vue` is a large composable-wiring surface (~1390 script lines, known exception to 400-line rule — see Guard Rails).
 
 ### Phase 13b PresetView Decomposition
 
@@ -113,7 +109,7 @@ Files added (all in `src/composables/app/`):
 
 Result:
 - `PresetView.vue` script: 279 lines (composable wiring + template-bound computed refs + local event handlers)
-- `PresetView.vue` total: 2057 lines (279 script + 332 template + 1448 style)
+- `PresetView.vue` total: ~1820 lines (279 script + 238 template + 1446 style)
 - Each composable has a single responsibility; max 177 lines vs original 2080-line god-object
 
 ### Phase 2 Request Ownership Safety Slice
@@ -180,7 +176,7 @@ Files split:
 
 Hollow entrypoints eliminated:
 - `calculateContext.js`, `generateSummary.js`, `generateMemoryDraft.js` now own their dependency assembly locally instead of proxying to `generationService.js`.
-- `generationService.js` reduced from 267 → 172 lines; only exports `generateChatResponse` (chat generation orchestration).
+- `generationService.js` reduced from 267 → 158 lines; only exports `generateChatResponse` (chat generation orchestration).
 
 UI leak sites remaining (for Phase 12):
 - `generationService.js` imports `translations`/`currentLang` (i18n) and `showBottomSheet`/`closeBottomSheet` (UI state) — these are passed as `t` and sheet callbacks into `executePreparedChatPrompt` and `runChatPostPromptPipeline`.
@@ -202,11 +198,7 @@ Why this slice is safe:
 - Later refactor slices can remove the bridge entirely once all legacy consumers are confirmed migrated.
 
 What has **not** changed yet:
-- `ChatView.vue` is significantly thinner (2995 lines, down from ~5700), but still injects some state into the chat use case via the `createChatGenerationServices` factory.
-- `generationService.js` still imports UI dependencies (`showBottomSheet`, `translations`/`currentLang`) — these leak UI into the orchestration layer and should be injected as callbacks in Phase 12.
-- `pipeline/steps.js` `stepContextLimitGuard` still calls `showBottomSheet` via deps — UI notification from a pipeline step.
-- Event hub bridge (`windowEventBridge`) still publishes legacy `window` events for backward compatibility. Can be removed once all consumers are confirmed on `subscribeAppEvent`.
-- Cancelable event pattern (`app-back-navigation`) cannot migrate to event hub — needs design for cancelable semantics.
+- Event hub bridge (`windowEventBridge`) still publishes legacy `window` events for backward compatibility. Can be removed once all external consumers are confirmed on `subscribeAppEvent`.
 
 ## 1. Tokenizer
 
@@ -460,7 +452,7 @@ MemorySettings: {
 ## 5. Reasoning System
 
 ### Files
-- `src/core/services/llmApi.js` — Reasoning extraction from API response
+- `src/core/llm/transport/responseNormalizer.js` — Reasoning extraction from API response
 - `src/core/services/generationService.js` — Reasoning settings resolution
 - `src/views/ApiView.vue` — User-facing reasoning toggle
 - `src/views/PresetView.vue` — Preset reasoning settings (now thin shell wiring 11 composables)
@@ -473,7 +465,7 @@ MemorySettings: {
 3. Preset `reasoningEnabled: false` does NOT disable user's choice
 4. `reasoningEffort` — `'auto'` | `'low'` | `'medium'` | `'high'` (auto = not sent to API)
 
-**Extraction (llmApi.js):**
+**Extraction (responseNormalizer.js):**
 1. `reasoning_content` field from API response → `finalReasoning`
 2. Inline tags (`reasoningStart`...`reasoningEnd`) in content → `inlineReasoning`
 3. Both combined and displayed to user
@@ -493,8 +485,8 @@ MemorySettings: {
 - `src/core/config/APISettings.js` — Runtime API config reads, endpoint normalization, provider blacklist checks, and `/models` discovery
 - `src/core/services/generationService.js` — Prompt orchestration, late enrichment, request assembly, and direct `executeRequest()` callers
 - `src/workers/generationWorker.js` — Prompt assembly, macro/regex application, keyword lore scan, and token accounting
-- `src/core/services/llmApi.js` — Thin request entrypoint that wires transport modules together
-- `src/core/llm/transport/chatCompletionsClient.js` — Fetch-based `/chat/completions` execution
+- `src/core/llm/transport/requestOrchestrator.js` — Transport entrypoint that resolves provider, wires runtime policy, and dispatches to execution path
+- `src/core/llm/transport/completionsClient.js` — Fetch-based `/chat/completions` execution
 - `src/core/llm/transport/requestLifecycle.js` — Timeouts, abort guards, request headers, trace start
 - `src/core/llm/transport/requestExecution.js` — Native non-stream vs fetch execution split
 - `src/core/llm/transport/streamingSse.js` — SSE stream consumption and delta dispatch
@@ -502,7 +494,9 @@ MemorySettings: {
 - `src/core/llm/transport/requestOutcome.js` — Abort/timeout/failure completion policy
 - `src/core/llm/transport/requestRuntimePolicy.js` — Wake lock / foreground-runtime behavior
 - `src/core/llm/transport/streamAccumulator.js` — Shared text/reasoning accumulation across transport paths
-- `src/core/services/networkDebugService.js` — Stores the last captured request/response trace for on-device inspection with debounced persistence
+- `src/core/llm/transport/responseNormalizer.js` — Shared final-response extraction for OpenAI-like one-shot/native/fallback responses
+- `src/core/llm/transport/sseParser.js` — SSE line parsing only
+- `src/core/services/networkDebugService.js` — Publishes debug events via event hub for on-device trace inspection
 - `src/composables/chat/useGenerationPreparation.js` — Placeholder/session context preparation
 - `src/composables/chat/useGenerationStateSetup.js` — Generation state registration and stream UI setup
 - `src/composables/chat/useGenerationStreamUpdate.js` — Background persistence throttling for streaming updates
@@ -541,8 +535,8 @@ MemorySettings: {
    - context breakdown assembly
    - request-body creation and sanitization
    - `lastPrompt` snapshot for request preview UI
-5. `generationService.js` calls `llmApi.js:executeRequest()` with transport config, reasoning config, request type, abort controller, and callbacks.
-6. `llmApi.js` builds a transport stack from `requestLifecycle`, `requestExecution`, `chatCompletionsClient`, `streamingSse`, `responseHandling`, and `requestOutcome`.
+  5. `generationService.js` calls `chatRequestAssembly.js:executeFinalChatRequest()` which calls `requestOrchestrator.js:executeRequest()` with transport config, reasoning config, request type, abort controller, and callbacks.
+  6. `requestOrchestrator.js` resolves the provider from `providerRegistry.js`, sets up `requestRuntimePolicy`, `streamAccumulator`, and `requestLifecycle`, then dispatches through either `completionsClient.js` (fetch streaming) or `requestExecution.js` (native non-stream).
 7. The transport executes `/chat/completions` using either:
    - `CapacitorHttp.post()` for native non-stream local HTTP requests
    - `fetch()` for web and streaming requests
@@ -560,9 +554,9 @@ MemorySettings: {
 
 **Summary + Memory Draft Requests:**
 1. `PresetView.vue` or `ChatView.vue` call `generateSummary()` / `generateMemoryDraft()`.
-2. `generationService.js` builds a simpler single-message request body.
-3. Both still reuse `llmApi.js:executeRequest()`.
-4. Request preview and network trace are still global, so these requests can overwrite the last visible chat debug payload.
+2. Each use case owns its own dependency assembly and calls `requestOrchestrator.js:executeRequest()`.
+3. Both use `sharedRequestHooks.js` for extension hook integration.
+4. Prompt preview and network trace are now per-generation (keyed by `debugKey`), so these requests do not overwrite each other's debug state.
 
 **Model Discovery:**
 1. `ApiView.vue` normalizes the endpoint and calls `fetchRemoteModels()`.
@@ -585,10 +579,10 @@ MemorySettings: {
 - `generationService.js` enriches worker output with vector lore and MemoryBook injection, computes final request payloads, and exposes generation entry points.
 
 **Transport / Runtime:**
-- `llmApi.js` is now the compatibility entrypoint, not the full transport implementation.
-- `requestLifecycle.js`, `requestExecution.js`, `chatCompletionsClient.js`, `streamingSse.js`, `responseHandling.js`, and `requestOutcome.js` own the concrete transport flow.
+- `requestOrchestrator.js` is the transport entrypoint — resolves provider, wires runtime policy, and dispatches.
+- `requestLifecycle.js`, `requestExecution.js`, `completionsClient.js`, `streamingSse.js`, `responseHandling.js`, and `requestOutcome.js` own the concrete transport flow.
 - `requestRuntimePolicy.js` owns wake-lock / foreground-runtime behavior.
-- `networkDebugService.js` owns the persisted "last trace" singleton.
+- `networkDebugService.js` publishes debug events via event hub; actual trace storage is in `requestTraceState.js`.
 
 **Config / Storage:**
 - `APISettings.js` reads runtime API values from `localStorage` and API presets from IndexedDB.
@@ -611,8 +605,8 @@ MemorySettings: {
 ### Temporary Network Trace Debugging
 
 **Files:**
-- `src/core/services/networkDebugService.js` — Stores the last captured request/response trace in localStorage
-- `src/core/services/llmApi.js` — Starts/updates/completes capture during chat + memory draft requests
+- `src/core/services/networkDebugService.js` — Publishes debug events via event hub during chat + memory draft requests
+- `src/core/llm/transport/requestOrchestrator.js` — Starts/updates/completes trace capture during transport
 - `src/core/services/generationService.js` — Tags captures by request type and exposes the last request body for preview
 - `src/components/sheets/RequestPreviewSheet.vue` — On-device viewer/toggle for the last captured trace
 
@@ -655,117 +649,128 @@ Native-only scope retained:
 - `requestRuntimePolicy.js`, wake-lock/background-mode activation, notification-backed foreground runtime behavior, and generation auto-sync cooldown/background guards remain native-only runtime behavior and are not controlled by the battery-saver UI toggle.
 
 **Current Limitation:**
-- Trace storage is global and single-entry. A summary or memory draft request can overwrite the last chat trace.
+- Trace storage is per-generation (keyed by `debugKey`, up to 10 concurrent traces). This was previously a singleton but has been resolved.
 
 **Safe Removal Path:**
 - Remove `networkDebugService.js`
-- Remove its imports/calls from `llmApi.js`
 - Remove trace UI/toggle from `RequestPreviewSheet.vue`
 - Keep `generationService.js:getLastPrompt()` and prompt preview JSON unless request preview itself is being removed
 - Keep trace capture non-blocking; generation success must never depend on diagnostics state
 
 ### Current Design Problems
-- `ChatView.vue` is significantly thinner now (2995 lines), but still owns some chat lifecycle glue including `openChat()`. Most detailed generation lifecycle, memory automation, context breakdown, message selection, session management, message actions, and chat generation are now in dedicated composables.
-- `generationService.js` mixes use-case orchestration, prompt enrichment, config resolution, debug preview state, and transport dispatch.
-- `llmApi.js` is much thinner now, but transport side effects are still callback-driven and spread across multiple helpers rather than an explicit event contract.
+- `ChatView.vue` is a large composable-wiring surface (~1390 script lines). It is a known exception to the 400-line guard rail because further extraction would cause prop-drilling (see Guard Rails). `openChat()` (~400 lines) remains due to high dependency count.
 - Runtime config has multiple owners: `localStorage`, IndexedDB API presets, reactive `ApiView.vue` state, onboarding writes, and direct reads in feature views.
-- Debug state is global singleton state (`lastPrompt`, `lastNetworkTrace`) rather than per-generation or per-message state.
-- Request types are implicit instead of modeled as separate use cases with a shared transport contract.
 - Worker/service boundaries are not documented clearly: keyword lore lives in the worker, vector retrieval and memory injection happen later in the service layer.
 - Callback signatures are flexible but brittle across chat, summary, and memory-draft flows.
-- `PresetView.vue` is now decomposed (279 lines script + 11 focused composables). `usePresetEditor.js` god-object deleted.
 
-### Better Target Structure
+### Actual Architecture (Landed)
 
-**Current Foundation Added In This Branch:**
-- `src/core/llm/contracts/providerContracts.js` introduces provider IDs, request kinds, and baseline capability flags
-- `src/core/llm/providers/providerRegistry.js` introduces a registry boundary instead of hard-coding all provider behavior into settings/transport files
-- `src/core/llm/providers/openaiCompatibleProvider.js` wraps the current OpenAI-like endpoint normalization, auth header strategy, `/models` discovery, and chat completion URL building as the first adapter
+**Provider / Contracts Layer:**
+- `src/core/llm/contracts/providerContracts.js` — provider IDs, request kinds, baseline capability flags
+- `src/core/llm/providers/providerRegistry.js` — registry boundary for provider adapters
+- `src/core/llm/providers/openaiCompatibleProvider.js` — OpenAI-like endpoint normalization, auth, `/models` discovery, chat completion URL building
 
-This is intentionally small and compatibility-first: the current request flow still behaves as before, but provider-specific behavior now has an explicit place to live. At this stage, model discovery and chat transport setup already route through the provider boundary, while parsing and response normalization still live in `llmApi.js`.
+**Config Layer (actual locations):**
+- `src/core/config/APISettings.js` — runtime API config reads/writes, endpoint normalization, provider blacklist, `/models` discovery, shared runtime-config boundary
+- `src/core/config/APPSettings.js` — app-wide settings (currentLang, imageViewerMode, etc.)
+- `src/core/config/embeddingSettings.js` — embedding connection config
+- `src/core/config/ProviderProfiles.js` — provider profile CRUD, migration, sync key settings
+- `src/core/config/syncConfig.js` — build-time sync provider availability
 
-**Additional Progress Already Landed On The Refactor Branch:**
-- `APISettings.js` now owns a shared runtime-config boundary via `getApiRuntimeStorage()`, `saveApiRuntimeSetting()`, `applyApiRuntimeConfig()`, and `getApiReasoningTags()`
-- `ApiView.vue`, `OnboardingView.vue`, `ToolsView.vue`, `ChatView.vue`, `generationService.js`, `macroEngine.js`, and `ChatMessage.vue` have started moving off ad-hoc raw runtime config reads/writes toward those helpers
-- the refactor branch has also re-applied the merged regression safeguards from the bugfix chain, so late vector lore limits and prompt-metadata rollback still hold while refactor work continues
+**Transport Layer (all in `src/core/llm/transport/`):**
+- `requestOrchestrator.js` — Transport entrypoint: resolves provider, wires runtime policy, dispatches
+- `completionsClient.js` — Fetch-based `/chat/completions` execution
+- `requestLifecycle.js` — Timeout setup, abort guards, request headers
+- `requestExecution.js` — Native non-stream vs fetch execution branching
+- `streamingSse.js` — SSE stream consumption and delta dispatch
+- `sseParser.js` — SSE line parsing
+- `responseHandling.js` — One-shot/native completion shaping
+- `requestOutcome.js` — Abort/timeout/failure completion policy
+- `requestRuntimePolicy.js` — Wake lock, background mode, native/web branching rules
+- `streamAccumulator.js` — Shared text/reasoning accumulation
+- `responseNormalizer.js` — Unified final-response extraction for one-shot/native/fallback
 
-**Config Layer:**
-- `src/core/llm/config/apiConfigStore.js` — read/write active runtime config without raw localStorage access in views
-- `src/core/llm/config/apiPresetStore.js` — preset CRUD only
-- `src/core/llm/config/endpointUtils.js` — endpoint normalization and blacklist helpers
+**Assembler Layer (all in `src/core/llm/assemblers/`):**
+- `requestIntents.js` — app-level request intents for `chat`, `summary`, and `memory_draft`
+- `payloadBuilderRegistry.js` — boundary for provider-specific payload builders
+- `requestAssemblers.js` — bridges use cases to provider payload builders
 
-**Transport Layer:**
-- `src/core/llm/transport/chatCompletionsClient.js` — POST `/chat/completions`
-- `src/core/llm/transport/modelDiscoveryClient.js` — GET `/models`
-- `src/core/llm/transport/sseParser.js` — SSE line parsing only
-- `src/core/llm/transport/responseNormalizer.js` — unify streaming and non-stream outputs into one shape
-- `src/core/llm/transport/runtimePolicy.js` — wake lock, background mode, and native/web branching rules
+**Pipeline Layer (all in `src/core/llm/pipeline/`):**
+- `pipelineContext.js` — shared pipeline context construction
+- `steps.js` — pipeline step definitions (context limit guard, etc.)
+- `postPromptOrchestrator.js` — post-prompt orchestration (late enrichment, request assembly)
 
-**Transport Extraction Landed In This Branch:**
-- `src/core/llm/transport/requestLifecycle.js` owns timeout setup, abort guards, request headers, and trace start
-- `src/core/llm/transport/requestExecution.js` owns native non-stream vs fetch execution branching
-- `src/core/llm/transport/chatCompletionsClient.js` owns fetch-based `/chat/completions` execution
-- `src/core/llm/transport/streamingSse.js` owns SSE stream consumption and delta fanout
-- `src/core/llm/transport/responseHandling.js` owns one-shot/native completion shaping
-- `src/core/llm/transport/requestOutcome.js` owns abort/timeout/failure completion policy
-- `src/core/llm/transport/responseNormalizer.js` owns shared final-response extraction for OpenAI-like one-shot/native/fallback responses
-- `llmApi.js` is now primarily an entrypoint that wires those modules together
+**Prompt/Config helpers (in `src/core/llm/usecases/`):**
+- `promptConfigReaders.js` — config reading for prompt building
+- `promptPayloadBuilder.js` — prompt payload construction
+- `promptWorkerLifecycle.js` — worker orchestration
 
-**Prompt Layer:**
-- `src/core/llm/prompt/promptBuilderService.js` — wraps `generationWorker.js`
-- `src/core/llm/prompt/promptEnrichmentService.js` — vector lore + memory injection + rebudgeting
-- `src/core/llm/prompt/promptPreviewStore.js` — preview payloads separate from raw network traces
+**Use Cases (all in `src/core/llm/usecases/`):**
+- `generateChat.js` — chat generation entrypoint
+- `generateSummary.js` — summary generation entrypoint
+- `generateMemoryDraft.js` — memory draft generation entrypoint
+- `calculateContext.js` — context token calculation
+- `contextCalculation.js` — context calculation logic
+- `chatPreparation.js` — chat prompt preparation
+- `chatPreparedPromptExecution.js` — validates API config, runs prompt worker, extracts request config
+- `chatRequestAssembly.js` — assembles and dispatches final chat request
+- `impersonationRequest.js` — impersonation generation use case
+- `summaryRequest.js` — summary request execution
+- `memoryDraftRequest.js` — memory draft request execution
+- `sharedRequestHooks.js` — shared extension hooks for non-chat requests
+- `reasoningHeaders.js` — reasoning header configuration
+- `chatGenerationAppAdapters.js` — notification adapters for generation lifecycle
+- `chatGenerationServiceFactory.js` — factory wiring all service deps for `executeChatGenerationUseCase`
 
-**Assembler Layer Started In This Branch:**
-- `src/core/llm/assemblers/requestIntents.js` defines app-level request intents for `chat`, `summary`, and `memory_draft`
-- `src/core/llm/assemblers/payloadBuilderRegistry.js` is the first explicit boundary for provider-specific payload builders
-- `src/core/llm/assemblers/requestAssemblers.js` now bridges use cases to provider payload builders without keeping payload-shape details inline in `generationService.js`
-- `generationService.js` still decides what semantic request should be sent, but the OpenAI-like payload assembly no longer lives inline in every use case
-- this is the bridge toward future provider-specific payload builders without changing current prompt semantics
+**Extension System (all in `src/core/extensions/`):**
+- `extensionRegistry.js` (188 lines) — 6 generation hook points with readonly/mutating modes, priority ordering, `runGenerationHook()`
+  - Hooks: `beforePromptBuild`, `afterPromptBuild`, `beforeRequestAssembly`, `beforeRequestSend`, `afterResponseNormalize`, `afterGenerationCommit`
+  - Readonly hooks receive a deep-frozen snapshot; mutating hooks can transform payload and pass it to the next handler
+- `appExtensions.js` (45 lines) — extension installer lifecycle (`registerAppExtensionInstaller`, `initAppExtensions`)
 
-**Use Cases:**
-- `src/core/llm/usecases/generateChat.js`
-- `src/core/llm/usecases/generateSummary.js`
-- `src/core/llm/usecases/generateMemoryDraft.js`
-- `src/core/llm/usecases/calculateContext.js`
-
-**UI Session Layer Landed In This Branch:**
-- `src/composables/chat/useGenerationPreparation.js`
-- `src/composables/chat/useGenerationStateSetup.js`
-- `src/composables/chat/useGenerationStreamUpdate.js`
-- `src/composables/chat/useGenerationPromptReady.js`
-- `src/composables/chat/useGenerationCompleteHandler.js`
-- `src/composables/chat/useGenerationErrorHandler.js`
-- `src/composables/chat/useGenerationStateRestore.js`
-- `src/composables/chat/usePromptMetadataSnapshots.js`
-- `src/composables/chat/useTypingStateCleanup.js`
-
-These composables now cover placeholder setup, stream UI application, prompt metadata rollback, background persistence throttling, abort/error restore, and completion finalization.
+**Debug / Observability (actual locations):**
+- `src/core/states/requestTraceState.js` — raw request/response traces keyed by `debugKey` (up to 10 concurrent)
+- `src/core/states/promptPreviewState.js` — prompt previews keyed by `debugKey` (up to 10 concurrent)
+- `src/core/states/requestPreviewState.js` — joins prompt preview + request trace for UI
+- `src/core/events/projections/debugStateProjection.js` — event→state projection: subscribes to debug events, routes to trace/preview state modules
 
 **ChatView Decomposition Composables (Phase 8):**
 - `src/composables/chat/useSessionManagement.js` — session creation, switching, deletion, session name editing, session data persistence
 - `src/composables/chat/useMessageActions.js` — message delete/hide, edit save/cancel, branch creation, image regeneration, guidance text patching
 - `src/composables/chat/useChatGeneration.js` — `sendMessage`, `startGeneration`, `handleImageRegenerate`, generation preflight checks, image-gen lifecycle
-
-**Additional UI/State Extraction Layer:**
 - `src/composables/chat/useAutoSync.js` — auto-sync trigger logic
-- `src/composables/chat/useMemoryAutomation.js` — memory automation functions (batch generate, quick model change, etc.)
-- `src/composables/chat/useChatMessageDisplay.js` — message display helpers (avatar, name, color, swipe state)
-- `src/composables/chat/useContextBreakdown.js` — context breakdown computed properties (segments, legend, usage percent, hide preview)
+- `src/composables/chat/useMemoryAutomation.js` — memory automation functions
+- `src/composables/chat/useChatMessageDisplay.js` — message display helpers
+- `src/composables/chat/useContextBreakdown.js` — context breakdown computed properties
 - `src/composables/chat/useMessageSelection.js` — message selection state and helpers
-- `src/core/services/memoryPromptPresets.js` — built-in memory prompt presets and prompt resolution
-- `src/core/services/memoryBooksService.js` — pure memory book business logic
 - `src/composables/chat/useMemoryBooks.js` — reactive memory book state and UI handlers
-- `src/core/services/contextService.js` — context/tokenizer settings utilities
-- `src/core/utils/messageEditHelpers.js` — message editing utilities (normalize, prepare, restore)
-- `src/composables/chat/useSessionManagement.js` — session CRUD and persistence
-- `src/composables/chat/useMessageActions.js` — message interaction actions (delete, hide, edit, branch, regenerate)
-- `src/composables/chat/useChatGeneration.js` — chat generation orchestration (sendMessage, startGeneration, image regen)
+- `src/composables/chat/useGenerationPreparation.js` — placeholder/session context preparation
+- `src/composables/chat/useGenerationStateSetup.js` — generation state registration
+- `src/composables/chat/useGenerationStreamUpdate.js` — background persistence throttling
+- `src/composables/chat/useGenerationPromptReady.js` — prompt metadata assignment
+- `src/composables/chat/useGenerationCompleteHandler.js` — completion/finalization
+- `src/composables/chat/useGenerationErrorHandler.js` — error path handling
+- `src/composables/chat/useGenerationStateRestore.js` — abort/rollback restore
+- `src/composables/chat/usePromptMetadataSnapshots.js` — prompt metadata rollback snapshots
+- `src/composables/chat/useTypingStateCleanup.js` — stale typing cleanup
+- `src/composables/chat/useChatSearch.js` — search in chat
+- `src/composables/chat/useContentEditable.js` — content-editable input handling
+- `src/composables/chat/useContextCutoff.js` — context cutoff management
+- `src/composables/chat/useGenerationAbort.js` — generation abort handling
+- `src/composables/chat/useGenerationFinalization.js` — generation finalization
+- `src/composables/chat/useGenerationRegistry.js` — generation registry
+- `src/composables/chat/useInputActions.js` — chat input actions
+- `src/composables/chat/useMemorySheetUI.js` — memory sheet UI
+- `src/composables/chat/useMessageImageGen.js` — image generation from messages
+- `src/composables/chat/useMessageSwipe.js` — message swipe actions
+- `src/composables/chat/useSessionPersistence.js` — session persistence
+- `src/composables/chat/useSwipeNavigation.js` — swipe navigation
+- `src/composables/chat/useVirtualScroll.js` — virtual scrolling
 
 **App.vue Decomposition Composables (Phase 13a):**
 - `src/composables/app/useAppNavigation.js` — view routing, desktop/mobile detection, effectiveMainView, floating menu state
 - `src/composables/app/useEditorController.js` — character/persona editor lifecycle
-- `src/composables/app/useAppEventSubscriptions.js` — all 25+ subscribeAppEvent calls + cleanup
+- `src/composables/app/useAppEventSubscriptions.js` — all 23 subscribeAppEvent calls + cleanup
 - `src/composables/app/useGlossaryPopup.js` — desktop glossary drag popup
 - `src/composables/app/useAppInit.js` — onMounted initialization sequence
 
@@ -782,22 +787,44 @@ These composables now cover placeholder setup, stream UI application, prompt met
 - `src/composables/app/useSummarySheet.js` (126 lines) — summary advanced sheet
 - `src/composables/app/usePresetTokenPreview.js` (177 lines) — token estimation, macro preview
 
-**Debug / Observability:**
-- `src/core/llm/debug/requestTraceStore.js` — raw request/response traces keyed by generation
-- `src/core/llm/debug/requestHistoryStore.js` — last N traces instead of a single global trace
-- `src/core/llm/debug/previewAssembler.js` — joins prompt preview with request traces for the UI
+**LorebookSheet Decomposition Composables (Phase 13f–13g):**
+- `src/composables/lorebook/useLorebookEntries.js` (157 lines) — entry CRUD, reorder, search/filter, select/duplicate, batch vector toggle
+- `src/composables/lorebook/useLorebookIndexing.js` (93 lines) — index all/single entries, retry failed, vector status counts
+
+**ApiView Decomposition Composables (Phase 13h–13i):**
+- `src/composables/api/useApiSettings.js` (237 lines) — API state/presets/connection/blacklist/debounce/model selector/reasoning
+- `src/composables/api/useServiceProviders.js` (128 lines) — embedding/imageGen/memory provider settings, load/test
+
+**CharacterList Decomposition Composables (Phase 13j–13k):**
+- `src/composables/character/useCharacterActions.js` (179 lines) — add/edit character, open actions, janitor extraction + polling
+- `src/composables/character/useSessionSheet.js` (168 lines) — open sessions sheet, delete session, chat import
+
+**ThemeSettingsView Decomposition Composables (Phase 13l):**
+- `src/composables/theme/useThemePresets.js` (267 lines) — preset CRUD/apply/export/import/options/selector/bgImage/file import
+
+**ChatMessage Decomposition Composables (Phase 13d):**
+- `src/composables/chat/useMessageSwipe.js` (262 lines) — touch handlers, swipe navigation, long-press selection
+- `src/composables/chat/useMessageImageGen.js` (149 lines) — handleContentClick, parseIIGInstruction
+
+**ChatInput Decomposition Composables (Phase 13e):**
+- `src/composables/chat/useContentEditable.js` (128 lines) — getCaretIndex, setCaretPosition, text preview
+- `src/composables/chat/useInputActions.js` (168 lines) — handleSend, guidance mode, image attach, fullscreen editor
+
+**UI Composables:**
+- `src/composables/ui/useSidebarResizer.js` — desktop sidebar resize logic
+- `src/composables/ui/useSheetGestures.js` — sheet gesture handling
 
 ### Recommended Refactor Sequence
 1. Centralize runtime API config reads/writes so feature views stop reading localStorage keys directly.
-   Status: partially done in this branch via `APISettings.js` helpers; remaining callers should be migrated incrementally.
+   Status: partially done via `APISettings.js` helpers; remaining callers should be migrated incrementally.
 2. Split `llmApi.js` into smaller transport-focused modules without changing external behavior.
-   Status: mostly done; transport execution, lifecycle, SSE parsing, one-shot handling, and abort/failure outcomes are extracted. `llmApi.js` remains as the compatibility entrypoint.
-3. Extract chat/session lifecycle code out of `ChatView.vue` into a dedicated generation-session composable.
-   Status: largely done through multiple focused composables instead of one monolithic generation-session composable. `openChat()` (~400 lines) remains in ChatView due to high dependency count.
+   Status: **done**. `llmApi.js` fully replaced by `requestOrchestrator.js` + transport modules.
+3. Extract chat/session lifecycle code out of `ChatView.vue` into dedicated composables.
+   Status: **done** through ~30 focused composables. `openChat()` remains in ChatView as a known exception.
 4. Separate prompt preview state from transport trace state, then store traces per generation/message instead of globally.
-   Status: not done. Trace state is still singleton/global.
-5. Promote explicit request use cases (`chat`, `summary`, `memory_draft`, `model_discovery`) with a shared normalized transport result shape.
-   Status: partially done through request intents, payload builder registry, and normalized transport helpers.
+   Status: **done**. Both `requestTraceState.js` and `promptPreviewState.js` use Map-based storage keyed by `debugKey` (up to 10 concurrent). Populated via `debugStateProjection.js` (event→state projection).
+5. Promote explicit request use cases (`chat`, `summary`, `memory_draft`) with a shared normalized transport result shape.
+   Status: **done**. Each use case owns its dependency assembly. `impersonationRequest.js` added as fourth type. `model_discovery` uses provider directly.
 6. Document the worker/service split so future prompt and retrieval changes have a stable boundary.
    Status: partially done in this document; should be kept current as retrieval/prompt work continues.
 
@@ -935,12 +962,14 @@ These composables now cover placeholder setup, stream UI application, prompt met
 ### API Settings ↔ Network Requests
 - `ApiView.vue` edits runtime request settings and connection presets
 - `APISettings.js` normalizes endpoints and serves as the current read boundary for generation requests
-- `ChatView.vue`, `generationService.js`, and `llmApi.js` still depend on those settings directly or indirectly during request setup
+- `ChatView.vue`, `generationService.js`, and the transport layer still depend on those settings directly or indirectly during request setup
 
 ### Prompt Preview ↔ Network Trace
 - `generationService.js:getLastPrompt()` stores the last built request body before transport sanitization is sent
-- `networkDebugService.js` stores the last raw request/response trace after transport begins
-- `RequestPreviewSheet.vue` combines both views, which is useful for debugging but currently couples unrelated request types through shared singleton state
+- `networkDebugService.js` publishes debug events via event hub during transport execution
+- `debugStateProjection.js` subscribes to those events and routes them to `requestTraceState.js` and `promptPreviewState.js` (both keyed by `debugKey`)
+- `requestPreviewState.js` joins prompt preview + request trace for UI consumption
+- `RequestPreviewSheet.vue` combines both views, now per-generation instead of global singleton
 
 ---
 
@@ -976,6 +1005,7 @@ These composables now cover placeholder setup, stream UI application, prompt met
 These rules prevent the gradual re-accumulation of responsibilities that motivated Phases 8–13.
 
 1. **Hard limit 400 lines script** — if `<script setup>` exceeds 400 lines, extract a composable before adding more logic. Template lines do not count toward this limit.
+   - **Known exception:** `ChatView.vue` (~1390 script lines) is a composable-wiring surface that coordinates ~30 composables. Further extraction would cause prop-drilling and violate Guard Rail #7. This is accepted as a permanent exception.
 
 2. **One concern per composable** — if a composable name contains "and" (e.g., `useFooAndBar`), split it. A composable should be namable by a single noun phrase.
 

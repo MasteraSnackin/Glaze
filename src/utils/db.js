@@ -1,3 +1,5 @@
+import { ensureSessionMemoryBook } from '@/core/services/memorySchema.js';
+
 const DB_NAME = 'SillyCradleDB';
 const DB_VERSION = 8;
 const STORE_KEYVALUE = 'keyvalue';
@@ -38,22 +40,6 @@ function ensureMessageMetadata(message) {
     return message;
 }
 
-function ensureMemoryBookSessionData(chatData) {
-    if (!chatData || typeof chatData !== 'object') return chatData;
-    if (!chatData.memoryBooks || typeof chatData.memoryBooks !== 'object') {
-        chatData.memoryBooks = {};
-    }
-    return chatData;
-}
-
-function ensureMemoryEntry(entry) {
-    if (!entry || typeof entry !== 'object') return entry;
-    if (!Array.isArray(entry.keys)) entry.keys = [];
-    if (!Array.isArray(entry.glazeKeys)) entry.glazeKeys = [];
-    if (typeof entry.vectorSearch !== 'boolean') entry.vectorSearch = false;
-    return entry;
-}
-
 function normalizeChatData(chatData) {
     if (!chatData || typeof chatData !== 'object') {
         return { currentId: 1, sessions: { 1: [] }, memoryBooks: {} };
@@ -69,74 +55,12 @@ function normalizeChatData(chatData) {
         chatData.sessions[sessionId] = safeMessages;
     }
 
-    ensureMemoryBookSessionData(chatData);
+    if (!chatData.memoryBooks || typeof chatData.memoryBooks !== 'object') {
+        chatData.memoryBooks = {};
+    }
 
     for (const sessionId of Object.keys(chatData.sessions)) {
-        if (!chatData.memoryBooks[sessionId] || typeof chatData.memoryBooks[sessionId] !== 'object') {
-            chatData.memoryBooks[sessionId] = {
-                id: `memorybook_${sessionId}`,
-                entries: [],
-                pendingDrafts: [],
-                settings: {
-                    enabled: true,
-                    autoCreateEnabled: true,
-                    autoGenerateEnabled: false,
-                    maxInjectedEntries: 3,
-                    autoCreateInterval: 12,
-                    useDelayedAutomation: true,
-                    injectionTarget: 'summary_block',
-                    batchSize: 1,
-                    parallelJobs: 1,
-                    vectorSearchEnabled: false,
-                    keyMatchMode: 'glaze',
-                    generationSource: 'current',
-                    generationModel: '',
-                    generationUseCurrentModelOverride: false,
-                    generationEndpoint: '',
-                    generationApiKey: '',
-                    generationTemperature: null,
-                    generationMaxTokens: null,
-                    promptPreset: 'detailed_beats',
-                    customPrompts: []
-                },
-                updatedAt: 0
-            };
-        } else {
-            const memoryBook = chatData.memoryBooks[sessionId];
-            if (!memoryBook.id) memoryBook.id = `memorybook_${sessionId}`;
-            if (!Array.isArray(memoryBook.entries)) memoryBook.entries = [];
-            if (!Array.isArray(memoryBook.pendingDrafts)) memoryBook.pendingDrafts = [];
-            memoryBook.entries.forEach(ensureMemoryEntry);
-            memoryBook.pendingDrafts.forEach(ensureMemoryEntry);
-            if (!memoryBook.settings || typeof memoryBook.settings !== 'object') {
-                memoryBook.settings = {};
-            }
-            if (typeof memoryBook.settings.enabled !== 'boolean') memoryBook.settings.enabled = true;
-            if (typeof memoryBook.settings.autoCreateEnabled !== 'boolean') memoryBook.settings.autoCreateEnabled = true;
-            if (typeof memoryBook.settings.autoGenerateEnabled !== 'boolean') memoryBook.settings.autoGenerateEnabled = false;
-            if (!Number.isFinite(memoryBook.settings.maxInjectedEntries)) memoryBook.settings.maxInjectedEntries = 3;
-            if (!Number.isFinite(memoryBook.settings.autoCreateInterval) || memoryBook.settings.autoCreateInterval <= 0) memoryBook.settings.autoCreateInterval = 12;
-            if (typeof memoryBook.settings.useDelayedAutomation !== 'boolean') memoryBook.settings.useDelayedAutomation = true;
-            memoryBook.settings.injectionTarget = memoryBook.settings.injectionTarget === 'summary_macro' ? 'summary_macro' : 'summary_block';
-            if (!Number.isFinite(memoryBook.settings.batchSize)) memoryBook.settings.batchSize = 1;
-            if (!Number.isFinite(memoryBook.settings.parallelJobs)) memoryBook.settings.parallelJobs = 1;
-            if (typeof memoryBook.settings.vectorSearchEnabled !== 'boolean') memoryBook.settings.vectorSearchEnabled = false;
-            if (!['plain', 'glaze', 'both'].includes(memoryBook.settings.keyMatchMode)) memoryBook.settings.keyMatchMode = 'glaze';
-            if (!memoryBook.settings.generationSource) memoryBook.settings.generationSource = 'current';
-            if (typeof memoryBook.settings.generationModel !== 'string') memoryBook.settings.generationModel = '';
-            if (typeof memoryBook.settings.generationUseCurrentModelOverride !== 'boolean') memoryBook.settings.generationUseCurrentModelOverride = false;
-            if (typeof memoryBook.settings.generationEndpoint !== 'string') memoryBook.settings.generationEndpoint = '';
-            if (typeof memoryBook.settings.generationApiKey !== 'string') memoryBook.settings.generationApiKey = '';
-            if (!(memoryBook.settings.generationTemperature === null || Number.isFinite(memoryBook.settings.generationTemperature))) {
-                memoryBook.settings.generationTemperature = null;
-            }
-            if (!(memoryBook.settings.generationMaxTokens === null || Number.isFinite(memoryBook.settings.generationMaxTokens))) {
-                memoryBook.settings.generationMaxTokens = null;
-            }
-            if (typeof memoryBook.settings.promptPreset !== 'string') memoryBook.settings.promptPreset = 'detailed_beats';
-            if (!Array.isArray(memoryBook.settings.customPrompts)) memoryBook.settings.customPrompts = [];
-            if (!Number.isFinite(memoryBook.updatedAt)) memoryBook.updatedAt = 0;
-        }
+        ensureSessionMemoryBook(chatData, sessionId);
     }
 
     return chatData;

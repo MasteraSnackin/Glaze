@@ -824,7 +824,7 @@ Done:
 - Migrated all ~30 `window.addEventListener('custom-event', ...)` calls to `subscribeAppEvent(...)` with proper cleanup (unsubs collected and called in `onBeforeUnmount`)
 - Adapted handler signatures from `(e) => handler(e.detail)` to `({ detail }) => handler(detail)` where needed
 - Replaced `useViewer()` parameterized event listener in ImageViewer.vue and HoloCardViewer.vue with direct `subscribeAppEvent`
-- **Exception: cancelable `app-back-navigation` pattern** — `ui.js:462` still uses `window.dispatchEvent(new CustomEvent('app-back-navigation', { cancelable: true }))` with `event.defaultPrevented` check. This cannot be migrated because the event hub does not support cancelable events. Left as-is with TODO comment. This is the ONLY remaining raw `window.dispatchEvent` for a custom app event outside the bridge.
+- **Cancelable `app-back-navigation` pattern** — migrated to `publishCancelableAppEvent(APP_EVENTS.ui.backNavigation)` in Phase 14. The event hub now supports cancelable semantics via `preventDefault()`/`defaultPrevented`. No raw `window.dispatchEvent` for custom app events remains outside the bridge.
 
 Dead code identified (listeners with no dispatches found):
 - `header-setup-generation` — AppHeader + App still subscribe but no source dispatches
@@ -1144,6 +1144,56 @@ Expected output:
 - composables are safe to reorder in setup
 - any remaining ordering requirements are documented and enforced by the composable API itself
 
+### Phase 16. Remaining high-ROI deduplication and decomposition
+Status: not done
+Testing: not tested
+
+Purpose:
+Fix the three remaining high-value refactoring targets: duplicate normalization logic (bug source), god-object themeState (maintainability blocker), and stale Phase 10 cancelable-event text.
+
+**16a. Deduplicate memory normalization (db.js, chatImporter.js, memoryBooksService.js)**
+
+Problem: Three independent implementations of the same normalization schema:
+- `db.js:normalizeChatData` normalizes memory book settings with the same defaults as `memoryBooksService.js:ensureSessionMemoryBook`
+- `chatImporter.js` has its own private `createEmptyMemoryCoverage` instead of importing from `memoryBooksService.js`
+- `db.js:ensureMessageMetadata` does what `memoryBooksService.js` does for message meta
+- The schema has already drifted: `db.js` defaults `vectorSearchEnabled: false` while `memoryBooksService.js` checks `!== false` (defaulting to true). Every new setting requires updating 2-3 places.
+
+Fix:
+- Consolidate all memory book normalization into `memoryBooksService.js`
+- Import from `memoryBooksService.js` in `db.js` and `chatImporter.js` instead of duplicating
+- Fix the `vectorSearchEnabled` default desync
+
+Effort: low
+Risk: low
+
+**16b. Split themeState.js (1224 lines) into state/persistence/renderer/migration**
+
+Problem: `themeState.js` is the worst god-object remaining. It mixes:
+- ~40 reactive state properties
+- CSS DOM injection (applyBackgroundImage, applyUiFont, applyChatFont, updateThemeStyles)
+- Font file management (FileReader, data URLs, @font-face injection)
+- Full preset CRUD (createPreset, deletePreset, updatePresetMeta, switchPreset, applyPreset, getPresets)
+- DB persistence logic (scheduleSave, saveStateToActivePreset)
+- localStorage migration logic (~50 lines of legacy migration in initTheme)
+- Color conversion utilities (hexToRgb)
+
+Extraction:
+1. `themeState.js` — reactive state + setter actions only (target <200 lines)
+2. `themePersistence.js` — preset CRUD, scheduleSave, saveStateToActivePreset, DB interactions
+3. `themeRenderer.js` — DOM/CSS injection (applyBackgroundImage, applyUiFont, applyChatFont, updateThemeStyles)
+4. `themeMigration.js` — initTheme's localStorage migration paths, hexToRgb utility
+
+Effort: medium
+Risk: low — extraction boundaries are clean; `themeRenderer` reads from `themeState` but nothing imports back
+
+**16c. Update Phase 10 stale text in this document**
+
+The Phase 10 section still says `ui.js:462` uses `window.dispatchEvent` for cancelable `app-back-navigation` and that "the event hub does not support cancelable events." Both are now false — `publishCancelableAppEvent` exists and `ui.js` uses it. Update the Phase 10 description to reflect current state.
+
+Effort: trivial
+Risk: none
+
 ---
 
 ## Phase Difficulty Estimate
@@ -1172,8 +1222,9 @@ Rough time estimate relative to Phases 1-7:
 | 13 | **high** (0.5×) | medium | App.vue + PresetView + lorebookState decomposition; reactive extraction must preserve template bindings |
 | 14 | low (0.15×) | low | search + delete; verify nothing depends on old paths |
 | 15 | medium (0.25×) | medium | composable API redesign can affect callers; needs careful testing |
+| 16 | low (0.2×) | low | dedup is mechanical; themeState split has clean boundaries |
 
-**Total 8-15 is roughly 2.3× of a single average phase from 1-7, or about 0.35× of the total 1-7 effort.**
+**Total 8-16 is roughly 2.5× of a single average phase from 1-7, or about 0.38× of the total 1-7 effort.**
 
 In other words: the hard structural migration is done. What remains is mostly cleanup, reorganization, and test coverage — safer and more predictable work.
 

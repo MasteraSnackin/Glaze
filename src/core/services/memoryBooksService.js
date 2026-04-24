@@ -14,116 +14,33 @@
  */
 
 import { generateMemoryDraft } from '@/core/llm/usecases/generateMemoryDraft.js';
-import { db } from '@/utils/db.js';
 import {
     indexMemoryEntryForSession,
     deleteMemoryEntryIndex
 } from '@/core/llm/usecases/memoryEmbeddingIndex.js';
+import {
+    createEmptyMemoryCoverage,
+    createBaseMessageMeta,
+    createMemoryAutomationState,
+    memoryBooksHasAutomationState,
+    ensureMemoryAutomationState,
+    createDefaultMemorySettings,
+    normalizeMemorySettings,
+    normalizeMemoryEntryInPlace,
+    ensureSessionMemoryBook
+} from '@/core/services/memorySchema.js';
 
-// ============================================================================
-// INITIALIZATION & STATE CREATION
-// ============================================================================
-
-export function createEmptyMemoryCoverage() {
-    return {
-        entryIds: [],
-        needsRebuild: false,
-        stale: false
-    };
-}
-
-export function createBaseMessageMeta() {
-    return {
-        contextRefs: [],
-        memoryCoverage: createEmptyMemoryCoverage()
-    };
-}
-
-export function createMemoryAutomationState() {
-    return {
-        lastProcessedMessageCount: 0,
-        pendingTrigger: null,
-        isGeneratingDraft: false
-    };
-}
-
-export function memoryBooksHasAutomationState(memoryBook) {
-    return !!(memoryBook && typeof memoryBook.automation === 'object');
-}
-
-export function ensureMemoryAutomationState(memoryBook) {
-    if (!memoryBooksHasAutomationState(memoryBook)) {
-        memoryBook.automation = createMemoryAutomationState();
-    }
-    if (!Number.isFinite(Number(memoryBook.automation.lastProcessedMessageCount)) || Number(memoryBook.automation.lastProcessedMessageCount) < 0) {
-        memoryBook.automation.lastProcessedMessageCount = 0;
-    }
-    if (typeof memoryBook.automation.isGeneratingDraft !== 'boolean') {
-        memoryBook.automation.isGeneratingDraft = false;
-    }
-    if (memoryBook.automation.pendingTrigger && typeof memoryBook.automation.pendingTrigger !== 'object') {
-        memoryBook.automation.pendingTrigger = null;
-    }
-    return memoryBook.automation;
-}
-
-export function ensureSessionMemoryBook(chatData, sessionId) {
-    if (!chatData.memoryBooks) chatData.memoryBooks = {};
-    if (!chatData.memoryBooks[sessionId]) {
-        chatData.memoryBooks[sessionId] = {
-            id: `memorybook_${sessionId}`,
-            entries: [],
-            pendingDrafts: [],
-            settings: {
-                enabled: true,
-                autoCreateEnabled: true,
-                autoGenerateEnabled: false,
-                maxInjectedEntries: 3,
-                autoCreateInterval: 12,
-                useDelayedAutomation: true,
-                injectionTarget: 'summary_block',
-                batchSize: 1,
-                parallelJobs: 1,
-                generationSource: 'current',
-                generationModel: '',
-                generationUseCurrentModelOverride: false,
-                generationEndpoint: '',
-                generationApiKey: '',
-                generationTemperature: null,
-                generationMaxTokens: null,
-                promptPreset: 'detailed_beats',
-                customPrompts: []
-            },
-            updatedAt: 0
-        };
-    }
-    if (!chatData.memoryBooks[sessionId].settings || typeof chatData.memoryBooks[sessionId].settings !== 'object') {
-        chatData.memoryBooks[sessionId].settings = {};
-    }
-    const settings = chatData.memoryBooks[sessionId].settings;
-    if (typeof settings.enabled !== 'boolean') settings.enabled = true;
-    if (typeof settings.autoCreateEnabled !== 'boolean') settings.autoCreateEnabled = true;
-    if (typeof settings.autoGenerateEnabled !== 'boolean') settings.autoGenerateEnabled = false;
-    if (!Number.isFinite(Number(settings.maxInjectedEntries)) || Number(settings.maxInjectedEntries) <= 0) settings.maxInjectedEntries = 3;
-    if (!Number.isFinite(Number(settings.autoCreateInterval)) || Number(settings.autoCreateInterval) <= 0) settings.autoCreateInterval = 12;
-    if (typeof settings.useDelayedAutomation !== 'boolean') settings.useDelayedAutomation = true;
-    settings.injectionTarget = settings.injectionTarget === 'summary_macro' ? 'summary_macro' : 'summary_block';
-    if (!Number.isFinite(Number(settings.batchSize)) || Number(settings.batchSize) <= 0) settings.batchSize = 1;
-    if (!Number.isFinite(Number(settings.parallelJobs)) || Number(settings.parallelJobs) <= 0) settings.parallelJobs = 1;
-    settings.generationSource = settings.generationSource === 'custom' ? 'custom' : 'current';
-    if (typeof settings.generationModel !== 'string') settings.generationModel = '';
-    if (typeof settings.generationUseCurrentModelOverride !== 'boolean') settings.generationUseCurrentModelOverride = false;
-    if (typeof settings.generationEndpoint !== 'string') settings.generationEndpoint = '';
-    if (typeof settings.generationApiKey !== 'string') settings.generationApiKey = '';
-    if (settings.generationTemperature !== null && !Number.isFinite(Number(settings.generationTemperature))) settings.generationTemperature = null;
-    if (settings.generationMaxTokens !== null && !Number.isFinite(Number(settings.generationMaxTokens))) settings.generationMaxTokens = null;
-    if (typeof settings.promptPreset !== 'string' || !settings.promptPreset) settings.promptPreset = 'detailed_beats';
-    if (!Array.isArray(settings.customPrompts)) settings.customPrompts = [];
-    if (!memoryBooksHasAutomationState(chatData.memoryBooks[sessionId])) {
-        chatData.memoryBooks[sessionId].automation = createMemoryAutomationState();
-    }
-    return chatData.memoryBooks[sessionId];
-}
+export {
+    createEmptyMemoryCoverage,
+    createBaseMessageMeta,
+    createMemoryAutomationState,
+    memoryBooksHasAutomationState,
+    ensureMemoryAutomationState,
+    createDefaultMemorySettings,
+    normalizeMemorySettings,
+    normalizeMemoryEntryInPlace,
+    ensureSessionMemoryBook
+};
 
 // ============================================================================
 // MESSAGE UTILITIES
