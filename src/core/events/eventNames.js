@@ -127,7 +127,6 @@ export const LEGACY_WINDOW_EVENT_MAP = {
     [APP_EVENTS.ui.chatSearchToggle]: 'header-chat-search-toggle',
     [APP_EVENTS.ui.chatSearch]: 'header-chat-search',
     [APP_EVENTS.ui.fsEditorClosed]: 'fs-editor-closed',
-    [APP_EVENTS.ui.backNavigation]: 'app-back-navigation',
     [APP_EVENTS.ui.glossary.back]: 'gl-back',
     [APP_EVENTS.ui.glossary.headerUpdate]: 'gl-header-update',
     [APP_EVENTS.ui.glossary.toggle]: 'toggle-glossary',

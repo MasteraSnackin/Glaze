@@ -10,7 +10,7 @@ import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetStat
 import { themeState, getPresets, applyPreset } from '@/core/states/themeState.js';
 import { ref } from 'vue';
 import { logger } from '../../utils/logger.js';
-import { publishAppEvent } from '@/core/events/eventHub.js';
+import { publishAppEvent, publishCancelableAppEvent } from '@/core/events/eventHub.js';
 import { APP_EVENTS } from '@/core/events/eventNames.js';
 import { isKeyboardOpen, initKeyboard, hideKeyboard } from './keyboardHandler.js';
 
@@ -458,9 +458,7 @@ export function initBackButton() {
     let lastBackPress = 0;
     const handleBackButton = async () => {
         // --- Hierarchical Back Navigation Dispatch ---
-        // TODO: migrate cancelable pattern to event hub
-        const backNavEvent = new CustomEvent('app-back-navigation', { cancelable: true });
-        window.dispatchEvent(backNavEvent);
+        const backNavEvent = publishCancelableAppEvent(APP_EVENTS.ui.backNavigation);
         if (backNavEvent.defaultPrevented) return;
 
         // 0. If keyboard is open — dismiss it

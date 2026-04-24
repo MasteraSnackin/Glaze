@@ -57,6 +57,7 @@ The current roadmap is:
 - Phase 13j status: `done` (CharacterList.vue decomposition — extracted useCharacterActions.js (179 — add/import/janitor extract, edit, export PNG/JSON, favorite, delete). Script reduced from 585 → 175 lines)
 - Phase 13k status: `done` (CharacterList.vue decomposition — extracted useSessionSheet.js (168 — session list/CRUD, import chat, delete session confirm). Script remains 175 lines)
 - Phase 13l status: `done` (ThemeSettingsView.vue decomposition — extracted useThemePresets.js (267 — preset CRUD/apply/export/import/options/selector/bgImage/file import). Script reduced from 495 → 236 lines)
+- Phase 14 status: `done` (final legacy cleanup — deleted 7 dead re-export shims + dead useViewer composable, removed dead re-export from generateChat.js, migrated app-back-navigation from window.dispatchEvent to publishCancelableAppEvent, removed dead getLegacyApiConfig/getLegacyEmbeddingConfig + emitLegacyCompatibleEvent, removed app-back-navigation from LEGACY_WINDOW_EVENT_MAP)
 - Current slice testing: `tested` (`npm run build` + `npm run lint`)
 
 ### Bugs Found & Fixed on This Branch

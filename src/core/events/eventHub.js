@@ -33,6 +33,33 @@ export function publishAppEvent(eventName, detail) {
 }
 
 /**
+ * Publish a cancelable application event.
+ * Listeners can call event.preventDefault() to signal the action should be cancelled.
+ *
+ * @param {string} eventName
+ * @param {any} [detail]
+ * @returns {{ name: string, detail: any, defaultPrevented: boolean, preventDefault: () => void }}
+ */
+export function publishCancelableAppEvent(eventName, detail) {
+    const event = { name: eventName, detail, defaultPrevented: false, preventDefault() { event.defaultPrevented = true; } };
+    const listeners = listenersByEvent.get(eventName);
+    if (!listeners || listeners.size === 0) {
+        return event;
+    }
+
+    for (const listener of [...listeners]) {
+        try {
+            listener(event);
+            if (event.defaultPrevented) break;
+        } catch (error) {
+            console.error(`[eventHub] listener failed for ${eventName}`, error);
+        }
+    }
+
+    return event;
+}
+
+/**
  * Subscribe to an internal application event.
  *
  * @param {string} eventName

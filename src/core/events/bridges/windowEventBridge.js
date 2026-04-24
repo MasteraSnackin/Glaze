@@ -33,7 +33,3 @@ export function initWindowEventBridge() {
 
     return bridgeCleanup;
 }
-
-export function emitLegacyCompatibleEvent(eventName, detail) {
-    return publishAppEvent(eventName, detail);
-}

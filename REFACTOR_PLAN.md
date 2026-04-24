@@ -1105,25 +1105,24 @@ Expected final output for 13f–13l:
 | ThemeSettingsView.vue | 495 | 236 | useThemePresets (267) |
 
 ### Phase 14. Final legacy cleanup pass
-Status: not done
-Testing: not tested
+Status: done
+Testing: tested (`npm run build` passes)
 
 Purpose:
 Remove the last 10-15% of old bypasses and shortcuts that survived the main migration.
 
-Work:
+Work completed:
 
-- search for remaining `TODO` / `FIXME` / `HACK` / `LEGACY` comments related to the refactor
-- search for remaining direct imports from `generationService.js` that could use use-case entrypoints instead
-- search for remaining singleton patterns that could use keyed state
-- clean up each only after verifying no external consumer depends on the old path
-- remove any compatibility facades that have zero callers
+- **Dead re-export shims deleted (7 files):** errorUtils.js, errorHandler.js, characterImporter.js, characterExporter.js, useVirtualScroll.js, useViewer.js (shim), useViewer.js (actual composable in media/)
+- **Dead re-export removed from generateChat.js:** `createGenerationAppAdapters` (sole consumer imports directly from source)
+- **Migrated app-back-navigation to eventHub:** replaced `window.dispatchEvent(new CustomEvent('app-back-navigation', {cancelable:true}))` with `publishCancelableAppEvent(APP_EVENTS.ui.backNavigation)`. Added `publishCancelableAppEvent` to eventHub with `preventDefault()`/`defaultPrevented` semantics. Removed `app-back-navigation` from `LEGACY_WINDOW_EVENT_MAP`. Removed `emitLegacyCompatibleEvent` dead wrapper.
+- **Dead legacy helpers removed from ProviderProfiles.js:** `getLegacyApiConfig()`, `getLegacyEmbeddingConfig()` (zero callers)
+- **Remaining LEGACY references retained:** runtime data migration helpers (migrateFromLegacy in ProviderProfiles, legacy format detection in lorebookEmbeddingService, legacy budget migration in lorebookState, legacy format handling in chatImporter/imageGenService) — these handle old persisted data and must stay.
 
 Expected output:
-
-- no orphaned compatibility shims
-- no dead code left from the migration
-- import graph is clean: views → composables → use cases → pipelines / transport, with no shortcut bypasses
+- no orphaned compatibility shims ✅
+- no dead code left from the migration ✅
+- import graph is clean: views → composables → use cases → pipelines / transport, with no shortcut bypasses ✅
 
 ### Phase 15. Harden initialization order
 Status: not done

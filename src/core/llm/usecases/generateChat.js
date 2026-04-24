@@ -3,7 +3,6 @@ import {
 } from '@/core/services/generationService.js';
 import { runGenerationHook } from '@/core/extensions/extensionRegistry.js';
 
-export { createGenerationAppAdapters } from '@/core/llm/usecases/chatGenerationAppAdapters.js';
 export { createChatGenerationServices } from '@/core/llm/usecases/chatGenerationServiceFactory.js';
 
 export async function generateChat(input) {
