@@ -59,7 +59,7 @@ export function createStreamAccumulator({
             const extracted = extractInlineReasoning(rawAccumulated, tagStart, tagEnd, hasInlineTags);
             let effectiveText = decodeHtmlEntities(extracted.text.replace(/^\s+/, ''));
             const effectiveReasoning = combineReasoningSections(
-                requestReasoning ? accumulatedReasoning : '',
+                accumulatedReasoning,
                 extracted.inlineReasoning,
                 headerModel,
                 headerInline
@@ -87,21 +87,24 @@ export function createStreamAccumulator({
 
         finalize() {
             const extracted = extractInlineReasoning(fullText, tagStart, tagEnd, hasInlineTags);
+            const finalReasoning = combineReasoningSections(
+                accumulatedReasoning,
+                extracted.inlineReasoning,
+                headerModel,
+                headerInline
+            ) || null;
+            const allReasoning = !extracted.text.trim() && !!accumulatedReasoning.trim();
             return {
                 text: extracted.text,
-                reasoning: combineReasoningSections(
-                    requestReasoning ? accumulatedReasoning : '',
-                    extracted.inlineReasoning,
-                    headerModel,
-                    headerInline
-                ) || null
+                reasoning: finalReasoning,
+                allReasoning
             };
         },
 
         getPartial() {
             return {
                 text: previousEffectiveText || fullText,
-                reasoning: latestEffectiveReasoning ?? (requestReasoning ? accumulatedReasoning : null)
+                reasoning: latestEffectiveReasoning ?? (accumulatedReasoning || null)
             };
         }
     };

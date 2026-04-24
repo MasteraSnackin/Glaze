@@ -55,7 +55,7 @@ export async function consumeStreamingSseResponse({
                     const delta = json.choices[0].delta;
                     if (delta && (delta.content || delta.reasoning_content)) {
                         const content = delta.content || '';
-                        const reasoning = (requestReasoning && delta.reasoning_content) || null;
+                        const reasoning = delta.reasoning_content || null;
 
                         if (content) logger.debug(content);
 

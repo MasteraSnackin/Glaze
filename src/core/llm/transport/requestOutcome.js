@@ -74,6 +74,7 @@ export async function completeStructuredResponse({
         debugKey,
         text: normalized.text,
         reasoning: normalized.reasoning,
+        meta: { allReasoning: normalized.allReasoning },
         rawResponse: data
     });
 
@@ -113,20 +114,22 @@ export async function finalizeStreamResponse({ requestType, debugKey, streamAccu
         reasoning: extended.reasoning
     });
 
-    if (onComplete) await onComplete(finalText, extended.reasoning, extended.meta);
+    if (onComplete) await onComplete(finalText, extended.reasoning, { ...extended.meta, allReasoning: finalResult.allReasoning });
 }
 
 export async function handleAbortOutcome({ requestType, debugKey, timedOut, streamAccumulator, onComplete, onError, abortError }) {
     const partial = streamAccumulator.getPartial();
+    const hasPartialContent = partial.text.length > 0 || (partial.reasoning && partial.reasoning.length > 0);
+    const allReasoning = !partial.text.trim() && !!partial.reasoning?.trim();
 
     if (timedOut) {
-        if (partial.text.length > 0) {
+        if (hasPartialContent) {
             const extended = await applyNormalizedResponseExtensions({
                 requestType,
                 debugKey,
                 text: partial.text,
                 reasoning: partial.reasoning,
-                meta: { partialError: 'Generation timed out' }
+                meta: { partialError: 'Generation timed out', allReasoning }
             });
             const partialText = cleanText(extended.text || '');
             finishNetworkTrace({ debugKey, text: partialText, reasoning: extended.reasoning, error: 'Generation timed out' });
@@ -138,12 +141,13 @@ export async function handleAbortOutcome({ requestType, debugKey, timedOut, stre
         return;
     }
 
-    if (partial.text.length > 0) {
+    if (hasPartialContent) {
         const extended = await applyNormalizedResponseExtensions({
             requestType,
             debugKey,
             text: partial.text,
-            reasoning: partial.reasoning
+            reasoning: partial.reasoning,
+            meta: { allReasoning }
         });
         const partialText = cleanText(extended.text || '');
         finishNetworkTrace({ debugKey, text: partialText, reasoning: extended.reasoning, error: 'Generation aborted' });
@@ -157,7 +161,10 @@ export async function handleAbortOutcome({ requestType, debugKey, timedOut, stre
 
 export async function handleRequestFailure({ requestType, debugKey, error, streamAccumulator, onComplete, onError }) {
     const partial = streamAccumulator.getPartial();
-    if (partial.text.length > 0) {
+    const hasPartialContent = partial.text.length > 0 || (partial.reasoning && partial.reasoning.length > 0);
+    const allReasoning = !partial.text.trim() && !!partial.reasoning?.trim();
+
+    if (hasPartialContent) {
         console.warn('Network error during stream, saving partial response:', error);
         const errorMsg = error.message || 'Stream Error';
         const extended = await applyNormalizedResponseExtensions({
@@ -165,7 +172,7 @@ export async function handleRequestFailure({ requestType, debugKey, error, strea
             debugKey,
             text: partial.text,
             reasoning: partial.reasoning,
-            meta: { partialError: errorMsg }
+            meta: { partialError: errorMsg, allReasoning }
         });
         const partialText = cleanText(extended.text || '');
         finishNetworkTrace({ debugKey, text: partialText, reasoning: extended.reasoning, error: errorMsg });

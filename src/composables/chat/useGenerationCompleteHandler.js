@@ -27,6 +27,10 @@ function applyCompletionToMessage({
         msg.partialErrorMsg = meta.partialError;
     }
 
+    if (meta?.allReasoning) {
+        msg.isAllReasoning = true;
+    }
+
     if (!msg.swipes) msg.swipes = [];
     if (!msg.swipesMeta) msg.swipesMeta = [];
 
@@ -107,7 +111,8 @@ export async function handleGenerationComplete({
     runMemoryAutomationAfterStableTurn,
     addMessageStats,
     addRegenerationStats,
-    triggerAutoSyncCheck
+    triggerAutoSyncCheck,
+    addNotification
 }) {
     const { getChatData, db } = persistence;
     const { notifyGenerationEnded, notifyChatUpdated } = app;
@@ -308,6 +313,10 @@ export async function handleGenerationComplete({
                 }
 
                 sendMessageNotification(char.name, finalResponse, char.avatar, char.id, sessionId, msgId);
+
+                if (meta?.allReasoning && addNotification) {
+                    addNotification('The entire response went into the reasoning block', 'warning');
+                }
 
                 db.get('gz_unread').then(unread => {
                     const newUnread = unread || {};
