@@ -88,7 +88,9 @@ export function applyApiRuntimeConfig({
     autoHideImages,
     autoHideImagesN,
     requestReasoning,
-    reasoningEffort
+    reasoningEffort,
+    reasoningStart,
+    reasoningEnd
 } = {}) {
     if (providerId !== undefined) localStorage.setItem('gz_api_provider', providerId);
     if (endpoint !== undefined) saveApiRuntimeSetting('api-endpoint', endpoint);
@@ -103,6 +105,8 @@ export function applyApiRuntimeConfig({
     if (autoHideImagesN !== undefined) saveApiRuntimeSetting('gz_api_auto_hide_images_n', String(autoHideImagesN));
     if (requestReasoning !== undefined) saveApiRuntimeSetting('gz_api_request_reasoning', String(requestReasoning));
     if (reasoningEffort !== undefined) saveApiRuntimeSetting('gz_api_reasoning_effort', String(reasoningEffort));
+    if (reasoningStart !== undefined) saveApiRuntimeSetting('gz_api_reasoning_start', String(reasoningStart));
+    if (reasoningEnd !== undefined) saveApiRuntimeSetting('gz_api_reasoning_end', String(reasoningEnd));
 }
 
 export function getApiConfig() {

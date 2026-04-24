@@ -41,6 +41,15 @@ export function replaceMacros(text, char, persona, sessionVarsIn = null, notifyO
     const sessionVars = ownVars ? _getSessionVars(charId, sessionId) : sessionVarsIn;
     let varsChanged = false;
 
+    // {{reasoningPrefix}} / {{reasoningSuffix}} - expand BEFORE setvar/setglobalvar
+    // so that nested {{reasoningPrefix}} inside {{setvar::...}} doesn't break the regex
+    result = result.replace(/\{\{reasoningPrefix\}\}/gi, () => {
+        return sessionVars.reasoningPrefix || getApiReasoningTags().start;
+    });
+    result = result.replace(/\{\{reasoningSuffix\}\}/gi, () => {
+        return sessionVars.reasoningSuffix || getApiReasoningTags().end;
+    });
+
     // {{setvar::name::value}}
     result = result.replace(/{{setvar::([\s\S]*?)::([\s\S]*?)}}/gi, (match, name, value) => {
         sessionVars[name] = value;
@@ -98,13 +107,7 @@ export function replaceMacros(text, char, persona, sessionVarsIn = null, notifyO
     result = result.replace(/\{\{time\}\}/gi, () => now.toLocaleTimeString());
     result = result.replace(/\{\{weekday\}\}/gi, () => now.toLocaleDateString('en-US', { weekday: 'long' }));
 
-    // {{reasoningPrefix}} / {{reasoningSuffix}} - reasoning tags from sessionVars or localStorage
-    result = result.replace(/\{\{reasoningPrefix\}\}/gi, () => {
-        return sessionVars.reasoningPrefix || getApiReasoningTags().start;
-    });
-    result = result.replace(/\{\{reasoningSuffix\}\}/gi, () => {
-        return sessionVars.reasoningSuffix || getApiReasoningTags().end;
-    });
+
 
     // --- Escaping: \{\{ → {{ and \}\} → }} ---
     result = result.replace(/\\\{/g, '{').replace(/\\\}/g, '}');
