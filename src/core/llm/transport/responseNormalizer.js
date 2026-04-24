@@ -11,8 +11,9 @@ export function extractOpenAiMessage(data, contextLabel = 'API response structur
 
 export function normalizeReasoningOutput({ content, requestReasoning, rawReasoning, hasInlineTags, tagStart, tagEnd, headerModel, headerInline }) {
     let finalText = content || '';
-    let finalReasoning = requestReasoning ? (rawReasoning || '') : '';
+    let finalReasoning = rawReasoning || '';
     let inlineReasoning = '';
+    const allReasoning = !finalText.trim() && !!finalReasoning.trim();
 
     if (hasInlineTags && content && content.includes(tagStart)) {
         const startIndex = content.indexOf(tagStart);
@@ -29,8 +30,21 @@ export function normalizeReasoningOutput({ content, requestReasoning, rawReasoni
         finalReasoning = inlineReasoning;
     }
 
+    if (requestReasoning) {
+        finalReasoning = `${headerModel}\n${finalReasoning}`;
+    }
+
+    if (allReasoning) {
+        return {
+            text: finalText,
+            reasoning: finalReasoning,
+            allReasoning: true
+        };
+    }
+
     return {
         text: finalText,
-        reasoning: finalReasoning || null
+        reasoning: finalReasoning || null,
+        allReasoning: false
     };
 }

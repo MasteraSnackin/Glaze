@@ -3333,7 +3333,8 @@ function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guid
                     runMemoryAutomationAfterStableTurn,
                     addMessageStats,
                     addRegenerationStats,
-                    triggerAutoSyncCheck
+                    triggerAutoSyncCheck,
+                    addNotification
                 });
             },
             onError
