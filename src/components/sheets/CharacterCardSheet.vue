@@ -34,10 +34,18 @@ const instance = getCurrentInstance();
 
 const isControlled = computed(() => {
     const rawProps = instance?.vnode.props || {};
-    return Object.prototype.hasOwnProperty.call(rawProps, 'visible')
-        || Object.prototype.hasOwnProperty.call(rawProps, 'onUpdate:visible');
+    return Object.prototype.hasOwnProperty.call(rawProps, 'visible');
 });
 const isOpen = computed(() => (isControlled.value ? props.visible : localVisible.value));
+
+const collapsedSections = ref({});
+function toggleSection(key) {
+    const curr = isSectionCollapsed(key);
+    collapsedSections.value[key] = !curr;
+}
+function isSectionCollapsed(key) {
+    return collapsedSections.value[key] !== false; // collapsed by default
+}
 const currentItem = computed(() => (isControlled.value ? props.item : localItem.value));
 const currentCharData = computed(() => (isControlled.value ? props.charData : localCharData.value));
 const currentAvatarUrl = computed(() => {
@@ -67,21 +75,40 @@ function formatSectionText(value) {
     return formatText(value);
 }
 
-const sections = computed(() => {
+const infoDescriptionHtml = computed(() => {
+    const char = currentCharData.value || {};
+    return formatSectionText(char.creator_notes);
+});
+
+const promptSections = computed(() => {
     const char = currentCharData.value || {};
     return [
-        { key: 'description', label: 'Description', html: formatSectionText(char.creator_notes || char.description || char.desc) },
+        { key: 'description', label: 'Description', html: formatSectionText(char.description || char.desc) },
         { key: 'personality', label: 'Personality', html: formatSectionText(char.personality) },
         { key: 'scenario', label: 'Scenario', html: formatSectionText(char.scenario) },
-        { key: 'firstMes', label: 'First message', html: formatSectionText(char.first_mes) },
-        { key: 'mesExample', label: 'Example dialogue', html: formatSectionText(char.mes_example) }
+        { key: 'mesExample', label: 'Example dialogue', html: formatSectionText(char.mes_example) },
+        { key: 'systemPrompt', label: 'System prompt', html: formatSectionText(char.system_prompt) },
+        { key: 'postHistoryInstructions', label: 'Post-history instructions', html: formatSectionText(char.post_history_instructions) }
     ].filter(section => section.html);
 });
 
-const alternateGreetings = computed(() => {
-    const greetings = currentCharData.value?.alternate_greetings;
-    return Array.isArray(greetings) ? greetings.filter(Boolean) : [];
+const allFirstMessages = computed(() => {
+    const char = currentCharData.value || {};
+    const msgs = [];
+    if (char.first_mes) msgs.push(char.first_mes);
+    if (Array.isArray(char.alternate_greetings)) {
+        char.alternate_greetings.forEach(g => {
+            if (g) msgs.push(g);
+        });
+    }
+    return msgs;
 });
+
+const activeTab = ref('info');
+const sheetTabs = computed(() => [
+    { id: 'info', label: getTranslated('tab_info', 'Information') || 'Information' },
+    { id: 'prompts', label: getTranslated('tab_prompts', 'Prompts') || 'Prompts' }
+]);
 
 const allTags = computed(() => {
     const tags = currentCharData.value?.tags;
@@ -122,6 +149,7 @@ function open(charOrOptions, maybeOptions = {}) {
     localItem.value = item;
     localAvatarUrl.value = charOrOptions?.avatarUrl || options.avatarUrl || null;
     localImportEnabled.value = !!(charOrOptions?.importEnabled ?? options.importEnabled);
+    activeTab.value = 'info';
     localVisible.value = true;
 }
 
@@ -319,79 +347,127 @@ defineExpose({ open, close });
         </template>
         <div v-if="currentCharData" class="char-sheet">
             <div class="char-hero">
-                <img
-                    v-if="currentAvatarUrl"
-                    :src="currentAvatarUrl"
-                    class="hero-img"
-                    :alt="currentCharData.name"
-                />
-                <div v-else class="hero-placeholder">
-                    {{ currentCharData.name?.[0]?.toUpperCase() || '?' }}
-                </div>
+                <Transition name="sheet-fade" mode="out-in">
+                    <img
+                        v-if="currentAvatarUrl"
+                        :key="currentAvatarUrl"
+                        :src="currentAvatarUrl"
+                        class="hero-img"
+                        :alt="currentCharData.name"
+                    />
+                    <div v-else :key="'placeholder-'+(currentCharData.id || currentCharData.name)" class="hero-placeholder">
+                        {{ currentCharData.name?.[0]?.toUpperCase() || '?' }}
+                    </div>
+                </Transition>
                 <div class="hero-gradient"></div>
-                <div class="hero-overlay">
-                    <div class="hero-badges">
-                        <span v-if="currentItem?.nsfw || allTags.includes('NSFW')" class="nsfw-badge">NSFW</span>
-                        <span v-else-if="allTags.includes('SFW')" class="sfw-badge">SFW</span>
+                <Transition name="sheet-fade" mode="out-in">
+                    <div class="hero-overlay" :key="currentCharData.id || currentCharData.name">
+                        <div class="hero-badges"></div>
+                        <div class="hero-tokens" v-if="currentItem?.tokens">
+                            {{ formatNum(currentItem.tokens) }} tokens
+                        </div>
+                        <div class="hero-name">{{ currentCharData.name }}</div>
+                        <div v-if="currentCharData.creator" class="hero-creator">
+                            <a
+                                v-if="creatorProfileUrl"
+                                :href="creatorProfileUrl"
+                                target="_blank"
+                                class="creator-link"
+                            >@{{ currentCharData.creator }}</a>
+                            <span v-else>@{{ currentCharData.creator }}</span>
+                        </div>
                     </div>
-                    <div class="hero-tokens" v-if="currentItem?.tokens">
-                        {{ formatNum(currentItem.tokens) }} tokens
-                    </div>
-                    <div class="hero-name">{{ currentCharData.name }}</div>
-                    <div v-if="currentCharData.creator" class="hero-creator">
-                        <a
-                            v-if="creatorProfileUrl"
-                            :href="creatorProfileUrl"
-                            target="_blank"
-                            class="creator-link"
-                        >@{{ currentCharData.creator }}</a>
-                        <span v-else>@{{ currentCharData.creator }}</span>
-                    </div>
-                </div>
+                </Transition>
 
                 <button v-if="canImport" class="import-fab" @click="handleImport" title="Import Character">
                     <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
                 </button>
             </div>
 
-            <div class="char-stats" v-if="currentItem?.stats?.chat || currentItem?.stats?.message">
-                <div class="stat-pill">
-                    <svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
-                    <span>{{ formatNum(currentItem.stats.chat) }}</span>
-                    <span class="stat-sep" v-if="currentItem.stats.chat && currentItem.stats.message">|</span>
-                    <span v-if="currentItem.stats.message">{{ formatNum(currentItem.stats.message) }}</span>
-                </div>
-            </div>
-
-            <div class="char-tags" v-if="allTags.length">
-                <span
-                    v-for="tag in allTags"
-                    :key="tag"
-                    class="char-tag"
-                    :class="{
-                        'char-tag-custom': tag.startsWith('#'),
-                        'nsfw-indicator': tag === 'NSFW',
-                        'sfw-indicator': tag === 'SFW'
-                    }"
-                >{{ tag }}</span>
-            </div>
-
-            <div v-for="section in sections" :key="section.key" class="char-desc-section">
-                <div class="section-label">{{ section.label }}</div>
-                <div class="char-desc" v-html="section.html"></div>
-            </div>
-
-            <div v-if="alternateGreetings.length" class="char-desc-section">
-                <div class="section-label">Alternate greetings</div>
-                <div class="alt-greetings">
-                    <div v-for="(greeting, index) in alternateGreetings" :key="index" class="alt-greeting">
-                        <div class="alt-greeting-index">#{{ index + 1 }}</div>
-                        <div class="char-desc" v-html="formatSectionText(greeting)"></div>
+            <div class="char-sheet-details">
+                <div class="char-stats" v-if="currentItem?.stats?.chat || currentItem?.stats?.message">
+                    <div class="stat-pill">
+                        <svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
+                        <span>{{ formatNum(currentItem.stats.chat) }}</span>
+                        <span class="stat-sep" v-if="currentItem.stats.chat && currentItem.stats.message">|</span>
+                        <span v-if="currentItem.stats.message">{{ formatNum(currentItem.stats.message) }}</span>
                     </div>
                 </div>
-            </div>
 
-        </div>
+                <div class="tabs-row">
+                    <div class="top-tabs-container">
+                        <div class="tab-slider" :style="{ transform: `translateX(${activeTab === 'prompts' ? '100%' : '0'})` }"></div>
+                        <div class="top-tab" :class="{ active: activeTab === 'info' }" @click="activeTab = 'info'">
+                            <span>{{ getTranslated('tab_info', 'Information') || 'Information' }}</span>
+                        </div>
+                        <div class="top-tab" :class="{ active: activeTab === 'prompts' }" @click="activeTab = 'prompts'">
+                            <span>{{ getTranslated('tab_prompts', 'Prompts') || 'Prompts' }}</span>
+                        </div>
+                    </div>
+                </div>
+
+                <Transition name="sheet-fade-static" mode="out-in">
+                    <div v-if="activeTab === 'info'" :key="'info-' + (currentCharData.id || currentCharData.name)" class="tab-content">
+                        <div class="char-tags" v-if="allTags.length">
+                            <span
+                                v-for="tag in allTags"
+                                :key="tag"
+                                class="char-tag"
+                                :class="{
+                                    'char-tag-custom': tag.startsWith('#'),
+                                    'nsfw-indicator': tag === 'NSFW',
+                                    'sfw-indicator': tag === 'SFW'
+                                }"
+                            >{{ tag }}</span>
+                        </div>
+
+                        <div class="char-desc-section" v-if="infoDescriptionHtml">
+                            <div class="section-label">Creator Notes</div>
+                            <div class="char-desc" v-html="infoDescriptionHtml"></div>
+                        </div>
+                    </div> <!-- /info tab -->
+                
+                <div v-else :key="'prompts-' + (currentCharData.id || currentCharData.name)" class="tab-content prompts-tab-content">
+                        <div class="menu-group char-desc-group" v-for="section in promptSections" :key="section.key">
+                            <div class="settings-item">
+                                <div class="label-row desc-header" @click="toggleSection(section.key)">
+                                    <label>{{ section.label }}</label>
+                                    <div class="expand-btn">
+                                        <svg viewBox="0 0 24 24" class="chevron" :class="{ 'rotated': isSectionCollapsed(section.key) }">
+                                            <path d="M12 15.5l-6-6 1.41-1.41L12 12.67l4.59-4.58L18 9.5z"/>
+                                        </svg>
+                                    </div>
+                                </div>
+                                <div class="char-desc-body" :class="{ 'collapsed': isSectionCollapsed(section.key) }">
+                                    <div class="char-desc" v-html="section.html"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="menu-group char-desc-group" v-if="allFirstMessages.length">
+                            <div class="settings-item">
+                                <div class="label-row desc-header" @click="toggleSection('first-messages')">
+                                    <label>First Messages ({{ allFirstMessages.length }})</label>
+                                    <div class="expand-btn">
+                                        <svg viewBox="0 0 24 24" class="chevron" :class="{ 'rotated': isSectionCollapsed('first-messages') }">
+                                            <path d="M12 15.5l-6-6 1.41-1.41L12 12.67l4.59-4.58L18 9.5z"/>
+                                        </svg>
+                                    </div>
+                                </div>
+                                <div class="char-desc-body" :class="{ 'collapsed': isSectionCollapsed('first-messages') }">
+                                    <div class="alt-greetings">
+                                        <div v-for="(greeting, index) in allFirstMessages" :key="index" class="alt-greeting">
+                                            <div class="alt-greeting-index">#{{ index + 1 }}</div>
+                                            <div class="char-desc" v-html="formatSectionText(greeting)"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div> <!-- /prompts tab -->
+                </Transition>
+            </div>
+        </div> <!-- /char-sheet -->
         <template #floating>
             <div v-if="canOpenChat" class="chat-fab-wrap">
                 <FabButton :text="getTranslated('btn_open_chat', 'Open Chat')" @click="openSessionsMenu">
@@ -405,6 +481,31 @@ defineExpose({ open, close });
 </template>
 
 <style scoped>
+.sheet-fade-enter-active,
+.sheet-fade-leave-active {
+    transition: opacity 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), filter 0.2s ease;
+}
+.sheet-fade-enter-from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+    filter: blur(4px);
+}
+.sheet-fade-leave-to {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+    filter: blur(4px);
+}
+
+.sheet-fade-static-enter-active,
+.sheet-fade-static-leave-active {
+    transition: opacity 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), filter 0.2s ease;
+}
+.sheet-fade-static-enter-from,
+.sheet-fade-static-leave-to {
+    opacity: 0;
+    filter: blur(4px);
+}
+
 .char-sheet {
     position: relative;
     display: flex;
@@ -412,6 +513,152 @@ defineExpose({ open, close });
     min-height: 100%;
     box-sizing: border-box;
     padding-bottom: calc(104px + var(--sab, 0px));
+}
+
+.char-desc-body {
+    overflow: visible;
+    max-height: none;
+    -webkit-mask-image: none;
+    mask-image: none;
+    transition: max-height 0.4s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.3s ease;
+}
+
+.char-desc-body.collapsed {
+    overflow: hidden;
+    max-height: 65px;
+    -webkit-mask-image: linear-gradient(to bottom, black 35px, transparent 65px);
+    mask-image: linear-gradient(to bottom, black 35px, transparent 65px);
+    pointer-events: none;
+}
+
+.char-sheet-details {
+    display: flex;
+    flex-direction: column;
+    padding-bottom: 80px;
+}
+
+.tab-content {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+}
+
+.prompts-tab-content {
+    padding-top: 0;
+}
+
+.tabs-row {
+  display: flex;
+  align-items: center;
+  margin: 16px 16px 8px;
+}
+
+.top-tabs-container {
+  display: flex;
+  position: relative;
+  align-items: stretch;
+  padding: 0;
+  flex: 1;
+  background-color: var(--bg-item, rgba(255, 255, 255, 0.05));
+  border-radius: 100px;
+  overflow: hidden;
+}
+
+.tab-slider {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 50%;
+  height: 100%;
+  background-color: var(--vk-blue, #4080ff);
+  transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+  border-radius: 100px;
+}
+
+.top-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 0;
+  cursor: pointer;
+  position: relative;
+  z-index: 1;
+  color: var(--text-gray, rgba(255,255,255,0.7));
+  font-weight: 500;
+  font-size: 14px;
+  transition: color 0.2s;
+  user-select: none;
+}
+.top-tab.active {
+  color: #fff;
+  font-weight: 600;
+}
+
+.char-desc-section {
+    padding: 16px 16px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.section-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: rgba(255, 255, 255, 0.35);
+}
+
+.menu-group {
+    background: var(--bg-item, rgba(255, 255, 255, 0.05));
+    border-radius: 16px;
+    margin: 16px 16px 0;
+    overflow: hidden;
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.05));
+}
+
+.settings-item {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.label-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    user-select: none;
+}
+
+.label-row label {
+    margin-bottom: 0;
+    font-weight: 600;
+    font-size: 14px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--vk-blue, #4080ff);
+    cursor: pointer;
+}
+
+.expand-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-gray, rgba(255,255,255,0.5));
+}
+
+.expand-btn svg {
+    width: 24px;
+    height: 24px;
+    fill: currentColor;
+    transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.expand-btn svg.rotated {
+    transform: rotate(180deg);
 }
 
 .header-menu-btn {
@@ -636,21 +883,6 @@ defineExpose({ open, close });
     background: rgba(255, 0, 255, 0.1) !important;
     color: #cc00cc !important;
     border-color: rgba(255, 0, 255, 0.2) !important;
-}
-
-.char-desc-section {
-    padding: 16px 16px 0;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-}
-
-.section-label {
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.07em;
-    color: rgba(255, 255, 255, 0.35);
 }
 
 .char-desc {

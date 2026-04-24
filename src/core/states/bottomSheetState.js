@@ -50,6 +50,7 @@ export function showBottomSheet(config) {
             isTriggered: !!config.cardItems?.length || !!config.bigInfo,
             x,
             y,
+            onClose: config.onClose,
         });
         return;
     }

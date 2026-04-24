@@ -26,6 +26,8 @@ const props = defineProps({
 
 const activeTab = ref('characters');
 const charCardSheet = ref(null);
+const activeMenuCharId = ref(null);
+const activeSheetCharId = ref(null);
 
 const emit = defineEmits(['open-chat']);
 
@@ -215,6 +217,7 @@ const onEditCharacter = (char) => {
 };
 
 const openActions = (char) => {
+    activeMenuCharId.value = char.id;
     const isFav = char.fav === true;
     const favLabel = isFav 
         ? t('action_remove_fav') 
@@ -228,6 +231,11 @@ const openActions = (char) => {
 
     showBottomSheet({
         title: char.name,
+        onClose: () => {
+            if (activeMenuCharId.value === char.id) {
+                activeMenuCharId.value = null;
+            }
+        },
         items: [
             {
                 label: t('action_edit'),
@@ -578,7 +586,12 @@ const openDeleteSessionConfirm = (char, sessionId) => {
 };
 
 const handleCharClick = (char) => {
+  activeSheetCharId.value = char.id;
   charCardSheet.value?.open(char, { importEnabled: false });
+};
+
+const handleSheetVisibleUpdate = (visible) => {
+  if (!visible) activeSheetCharId.value = null;
 };
 
 onUnmounted(() => {
@@ -647,7 +660,8 @@ defineExpose({ onAddCharacter, loadCharacters });
         :key="char.id || char.name"
         class="character-card"
         :class="{
-          favorite: char.fav
+          favorite: char.fav,
+          'menu-open': activeMenuCharId === char.id || activeSheetCharId === char.id
         }"
         @click="handleCharClick(char)"
         @contextmenu.prevent="openActions(char)"
@@ -688,7 +702,7 @@ defineExpose({ onAddCharacter, loadCharacters });
       <div class="empty-state-text">{{ t('no_characters') }}</div>
     </div>
     </template>
-    <CharacterCardSheet ref="charCardSheet" />
+    <CharacterCardSheet ref="charCardSheet" @update:visible="handleSheetVisibleUpdate" />
   </div>
 </template>
 
@@ -981,27 +995,27 @@ defineExpose({ onAddCharacter, loadCharacters });
 }
 
 @media (hover: hover) {
-  .character-card:hover {
+  .character-card:hover, .character-card.menu-open {
     transform: translateY(-4px) scale(1.01);
     box-shadow: 0 12px 24px rgba(0,0,0,0.3);
   }
 
-  .character-card.favorite:hover {
+  .character-card.favorite:hover, .character-card.favorite.menu-open {
     box-shadow: 0 12px 24px rgba(255, 107, 107, 0.25);
     border-color: #ff6b6b;
   }
 
-  .character-card:hover .card-edit-btn {
+  .character-card:hover .card-edit-btn, .character-card.menu-open .card-edit-btn {
     box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.4);
     opacity: 1;
     transform: scale(1.1);
   }
 
-  .character-card:hover .card-image {
+  .character-card:hover .card-image, .character-card.menu-open .card-image {
     transform: scale(1.05);
   }
   
-  .character-card:hover .card-token-badge {
+  .character-card:hover .card-token-badge, .character-card.menu-open .card-token-badge {
     box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.4);
   }
 }
