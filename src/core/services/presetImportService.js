@@ -147,7 +147,7 @@ export function convertSTPreset(data, fileName) {
         data.prompts.forEach((p) => {
             if (!usedIdentifiers.has(p.identifier)) {
                 const promptEnabled = p.enabled !== false;
-                processBlock({ identifier: p.identifier, enabled: promptEnabled }, !promptEnabled);
+                processBlock({ identifier: p.identifier, enabled: promptEnabled }, false);
             }
         });
     }
