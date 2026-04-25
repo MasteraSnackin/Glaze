@@ -57,7 +57,7 @@ The current roadmap is:
 - Phase 13j status: `done` (CharacterList.vue decomposition — extracted useCharacterActions.js (179 — add/import/janitor extract, edit, export PNG/JSON, favorite, delete). Script reduced from 585 → 175 lines)
 - Phase 13k status: `done` (CharacterList.vue decomposition — extracted useSessionSheet.js (168 — session list/CRUD, import chat, delete session confirm). Script remains 175 lines)
 - Phase 13l status: `done` (ThemeSettingsView.vue decomposition — extracted useThemePresets.js (267 — preset CRUD/apply/export/import/options/selector/bgImage/file import). Script reduced from 495 → 236 lines)
-- Phase 14 status: `done` (final legacy cleanup — deleted 7 dead re-export shims + dead useViewer composable, removed dead re-export from generateChat.js, migrated app-back-navigation from window.dispatchEvent to publishCancelableAppEvent, removed dead getLegacyApiConfig/getLegacyEmbeddingConfig + emitLegacyCompatibleEvent, removed app-back-navigation from LEGACY_WINDOW_EVENT_MAP)
+- Phase 14 status: `done` (final legacy cleanup — deleted 7 dead re-export shims + dead useViewer composable, removed dead re-export from generateChat.js, migrated app-back-navigation from window.dispatchEvent to publishCancelableAppEvent, removed dead getLegacyApiConfig/getLegacyEmbeddingConfig + emitLegacyCompatibleEvent, removed app-back-navigation from LEGACY_WINDOW_EVENT_MAP; removed windowEventBridge entirely)
 - Phase 16 status: `not done` (remaining high-ROI cleanup — 16a: deduplicate memory normalization in db.js/chatImporter.js/memoryBooksService.js; 16b: split themeState.js 1224 lines into state/persistence/renderer/migration; 16c: update Phase 10 stale cancelable-event text)
 - Current slice testing: `tested` (`npm run build` + `npm run lint`)
 
@@ -256,7 +256,7 @@ Phase 4 deterministic pipelines:
 - [done] Deduplicate `updateContextCutoff` authors note logic — replaced inline 16-line block with `buildGenerationAuthorsNote` call
 - [done] Route `calculateContext` through use-case facade, remove unused `executeRequest`/`generateMemoryDraft` imports from ChatView
 - [done] Extract `useGenerationAbort` composable — unifies `abortActiveChatGeneration` + `abortAnyActiveGeneration` + `abortImpersonation`, removes duplicated abort logic in `sendMessage`
-- [done] Migrate 13 `window.dispatchEvent`/`addEventListener` calls to `publishAppEvent`/`subscribeAppEvent`, add 10 new `APP_EVENTS` names, activate legacy bridge in `main.js`
+- [done] Migrate 13 `window.dispatchEvent`/`addEventListener` calls to `publishAppEvent`/`subscribeAppEvent`, add 10 new `APP_EVENTS` names
 
 Phase 5 side effects and projections:
 - [done] Split prompt preview state out of `generationService.js` singleton into keyed `core/states/promptPreviewState.js`
@@ -283,7 +283,7 @@ Phase 7 compatibility cleanup:
 - [done] Remove dead debug compat helpers `getLastPrompt()`, `getLastNetworkTrace()`, and `clearLastNetworkTrace()` and switch callers to keyed state/read models
 - [done] Remove old-format persisted network trace hydration branch; keep only keyed persisted trace hydration
 - [done] Remove `core/events/legacyCompatibleSubscription.js` after internal callers were migrated off it
-- [done] Keep `window` event bridge only as an external compatibility adapter, not as an internal subscription boundary
+- [done] Keep `window` event bridge only as an external compatibility adapter, not as an internal subscription boundary (bridge since removed — no consumers remained)
 
 Phase 8 ChatView decomposition:
 - [done] Extract session management into `composables/chat/useSessionManagement.js` — session create/switch/delete, session name editing, session data persistence (~203 lines)

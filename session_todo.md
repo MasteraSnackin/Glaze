@@ -121,8 +121,8 @@ Tracked in `REFACTOR_PLAN.md` and `REFACTOR_PHASE_0_CHECKLIST.md`:
 - [x] Added `src/core/events/eventNames.js`
 - [x] Added `src/core/events/contracts.js`
 - [x] Added `src/core/events/eventHub.js`
-- [x] Added `src/core/events/bridges/windowEventBridge.js`
-- [x] Initialized window compatibility bridge in `src/main.js`
+- [x] Added `src/core/events/bridges/windowEventBridge.js` (later removed — no consumers remained)
+- [x] Initialized window compatibility bridge in `src/main.js` (later removed with bridge)
 - [x] Migrated a safe emitter subset to canonical app events
 - [x] Updated `ARCHITECTURE.md` during implementation
 - [x] `npm run build` passes
