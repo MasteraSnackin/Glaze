@@ -4,6 +4,7 @@ import { APP_EVENTS } from '@/core/events/eventNames.js';
 import * as dropboxAdapter from '@/core/services/adapters/dropboxAdapter.js';
 import * as gdriveAdapter from '@/core/services/adapters/gdriveAdapter.js';
 import { pushEntities, pullEntities, detectEncryptionState, isEncryptionEnabled } from '@/core/services/syncEngine.js';
+import { flushLorebookSave } from '@/core/states/lorebookState.js';
 import { getSyncKey, hasSyncKey } from '@/core/services/crypto/keyManager.js';
 
 function getAdapter() {
@@ -30,6 +31,8 @@ export async function fullPush() {
         await adapter.ensureFolder('/Glaze/characters');
         await adapter.ensureFolder('/Glaze/personas');
         await adapter.ensureFolder('/Glaze/chats');
+
+        await flushLorebookSave();
 
         const result = await pushEntities(adapter, key, (phase, current, total) => {
             setSyncProgress(phase, current, total);

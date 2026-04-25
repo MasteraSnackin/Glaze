@@ -377,6 +377,23 @@ export async function isConnected() {
     return token !== null;
 }
 
+async function findFoldersByName(name, parentId) {
+    let query = `name='${name}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+    if (parentId) {
+        query += ` and '${parentId}' in parents`;
+    } else {
+        query += ` and 'root' in parents`;
+    }
+
+    const response = await apiRequest(
+        `${API_BASE}/files?q=${encodeURIComponent(query)}&spaces=drive&fields=files(id,name)`
+    );
+
+    if (!response.ok) return [];
+    const data = await response.json();
+    return data.files || [];
+}
+
 async function findFolderByName(name, parentId) {
     let query = `name='${name}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
     if (parentId) {
@@ -392,6 +409,34 @@ async function findFolderByName(name, parentId) {
     if (!response.ok) return null;
     const data = await response.json();
     return data.files?.[0]?.id || null;
+}
+
+async function folderHasContent(folderId) {
+    const query = `'${folderId}' in parents and trashed=false`;
+    const response = await apiRequest(
+        `${API_BASE}/files?q=${encodeURIComponent(query)}&spaces=drive&fields=files(id)&pageSize=1`
+    );
+    if (!response.ok) return false;
+    const data = await response.json();
+    return (data.files?.length || 0) > 0;
+}
+
+async function getGlazeFolderId() {
+    if (folderIdCache) return folderIdCache;
+    const folders = await findFoldersByName(FOLDER_NAME, null);
+    if (folders.length === 0) return null;
+    if (folders.length === 1) {
+        folderIdCache = folders[0].id;
+        return folderIdCache;
+    }
+    for (const folder of folders) {
+        if (await folderHasContent(folder.id)) {
+            folderIdCache = folder.id;
+            return folderIdCache;
+        }
+    }
+    folderIdCache = folders[0].id;
+    return folderIdCache;
 }
 
 async function createFolder(name, parentId) {
@@ -428,9 +473,19 @@ export async function ensureFolder(path) {
     const parts = path.split('/').filter(Boolean);
     let parentId = null;
 
-    for (const part of parts) {
-        const folderId = await getOrCreateFolder(part, parentId);
-        parentId = folderId;
+    if (parts[0] === FOLDER_NAME) {
+        parentId = await getGlazeFolderId();
+        if (!parentId) {
+            parentId = await createFolder(FOLDER_NAME, null);
+            folderIdCache = parentId;
+        }
+        for (let i = 1; i < parts.length; i++) {
+            parentId = await getOrCreateFolder(parts[i], parentId);
+        }
+    } else {
+        for (const part of parts) {
+            parentId = await getOrCreateFolder(part, parentId);
+        }
     }
 
     if (path === '/Glaze') {
@@ -440,29 +495,38 @@ export async function ensureFolder(path) {
     return parentId;
 }
 
-async function getGlazeFolderId() {
-    if (folderIdCache) return folderIdCache;
-    folderIdCache = await findFolderByName(FOLDER_NAME, null);
-    if (!folderIdCache) {
-        folderIdCache = await createFolder(FOLDER_NAME, null);
-    }
-    return folderIdCache;
-}
+const _folderIdCache = new Map();
 
 async function resolvePathToParent(path) {
     const parts = path.replace(/^\//, '').split('/');
     const fileName = parts.pop();
     let parentId = await getGlazeFolderId();
 
+    if (!parentId) return { parentId: null, fileName };
+
     for (const dir of parts) {
         if (dir === FOLDER_NAME) continue;
-        parentId = await getOrCreateFolder(dir, parentId);
+        const cacheKey = `${parentId}/${dir}`;
+        if (_folderIdCache.has(cacheKey)) {
+            parentId = _folderIdCache.get(cacheKey);
+            continue;
+        }
+        const existing = await findFolderByName(dir, parentId);
+        if (existing) {
+            _folderIdCache.set(cacheKey, existing);
+            parentId = existing;
+        } else {
+            const created = await createFolder(dir, parentId);
+            _folderIdCache.set(cacheKey, created);
+            parentId = created;
+        }
     }
 
     return { parentId, fileName };
 }
 
 async function findFileByName(name, parentId) {
+    if (!parentId) return null;
     const query = `name='${name}' and '${parentId}' in parents and trashed=false`;
     const response = await apiRequest(
         `${API_BASE}/files?q=${encodeURIComponent(query)}&spaces=drive&fields=files(id,name,modifiedTime)`

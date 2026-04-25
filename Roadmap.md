@@ -787,6 +787,144 @@ Deleted remote branches on origin:
 
 Remaining branches: `dev`, `main` (local); `upstream/dev`, `upstream/main`, `upstream/feature/desktop-layout` (remote).
 
+## Extensibility Architecture Research (2026-04-25)
+
+Status: `research complete`, implementation `not started`
+
+### Motivation
+
+The Phase 1–16 refactoring established separation of concerns (each file does one thing), but did not systematically add registries and contracts. Adding a new feature often requires editing N files instead of plugging into a single extension point. This section documents the gap and proposes where registries would give the highest return.
+
+### Audit Summary
+
+| Surface | Current Mechanism | Can External Code Plug In? | Key Gap | Effort to Fix |
+|---|---|---|---|---|
+| **Generation hooks** | `extensionRegistry.js` — 6 hooks with priority, readonly/mutating, dispose | Yes, already extensible | Payload shapes undocumented | LOW |
+| **Provider adapters** | `providerRegistry.js` — `registerProvider()`, capability flags | Yes, but must import+call registration manually | No auto-discovery barrel; `transportFactory` is hard-coded dispatch; no provider interface validation | LOW |
+| **Event hub** | `eventHub.js` + `APP_EVENTS` frozen object | Subscribe: yes; New event type: no | New events require editing `eventNames.js`; payloads undocumented; no `listAppEvents()` | LOW |
+| **Pipeline steps** | `postPromptOrchestrator.js` accepts steps array | Steps passed as parameter (good), but always same static set | No `registerStep()`/`insertStepBefore()`; no ordering constraints; no step introspection | MEDIUM |
+| **Services** | Plain ES modules; mostly acyclic | Drop in a file + import where needed | Some import `bottomSheetState` (UI coupling); no service registry/lifecycle | LOW (registry), MEDIUM (decoupling) |
+| **State modules** | Vue reactive + CRUD exports | New views can consume any state freely | `lorebookState` re-exports services; no schema validation; adding a property touches reactive init + all setters + persistence + migration | LOW (decoupling), MEDIUM (schema) |
+| **Memory/Lorebook** | Separate schemas for lorebook vs memory; procedural normalizers | New entry type requires touching 4–5 files | Two parallel systems; schemas are procedural (20 `if` checks) not declarative; prompt presets hard-coded | MEDIUM |
+| **Theme system** | 5-file decomposition (constants/state/renderer/persistence/migration) | No | Adding one CSS property → 5–6 files; no `THEME_SCHEMA`; setter pattern repeated 30+ times; `PRESET_FIELDS` and `DEFAULT_PRESET` must be manually kept in sync | MEDIUM |
+| **Composables** | 56 composables; some use DI (`deps`), some use direct imports | Partially — `useMemoryBooks(deps)` yes, `useApiSettings` (hardcoded) no | Mixed DI patterns; UI-coupled imports (`bottomSheetState`); no configuration options | LOW (consistency), MEDIUM (configurability) |
+
+### Top 3 Proposals (Highest Impact / Lowest Effort)
+
+#### Proposal 1: THEME_SCHEMA — Declarative Theme Field Registry
+
+**Problem**: Adding a CSS property requires editing 5–6 files. `PRESET_FIELDS` and `DEFAULT_PRESET` must be manually synced. 30+ setters follow identical boilerplate.
+
+**Proposed structure** (`themeConstants.js`):
+```js
+export const THEME_SCHEMA = [
+  { key: 'accentColor',     default: '#7996ce', cssVar: '--vk-blue',      cssVarRgb: '--vk-blue-rgb', type: 'color',  dbKey: 'gz_theme_accent',       dbSave: true },
+  { key: 'bgOpacity',       default: 0.85,     cssVar: null,              type: 'number', dbKey: 'gz_theme_opacity',     dbSave: true },
+  { key: 'userBubbleColor', default: null,      cssVar: '--user-bubble-bg', type: 'color', dbKey: null,                   dbSave: false },
+  { key: 'borderWidth',     default: 1,        cssVar: '--border-width',  type: 'number', dbKey: null,                   dbSave: false },
+  // ... all 30+ fields
+];
+```
+
+**What this enables**:
+- Auto-generate `DEFAULT_PRESET` from schema (no sync drift)
+- Auto-generate `PRESET_FIELDS` from schema entries where `dbSave !== false`
+- Auto-generate setter functions: `createThemeSetter(key, schema)` replaces 30+ identical functions
+- Auto-generate renderer CSS mapping from `cssVar`/`cssVarRgb` fields
+- Auto-generate persistence field list and preset-from-state builder
+- Adding a new property = one line in `THEME_SCHEMA`
+
+**Effort**: MEDIUM (rewrite setter/renderer/persistence to be data-driven, maintain backward compat with persisted presets)
+
+#### Proposal 2: Provider Barrel + Transport Registry
+
+**Problem**: New provider requires manual import+registration. `transportFactory` is hard-coded `if/else`. No interface validation.
+
+**Proposed structure**:
+```
+src/core/llm/providers/
+  index.js              ← barrel: imports all providers, calls registerProvider for each
+  providerRegistry.js   ← add validateProviderInterface() 
+  openaiCompatibleProvider.js
+  (future: anthropicProvider.js, googleProvider.js, etc.)
+src/core/llm/transport/
+  transportRegistry.js  ← registerTransport(platform, transport), getTransport(platform)
+  transportFactory.js   ← delegates to registry instead of hard-coded if/else
+```
+
+**What this enables**:
+- New provider = one file + one import line in `index.js`
+- New transport = one file + one `registerTransport` call
+- Interface validation catches missing methods at registration time
+
+**Effort**: LOW
+
+#### Proposal 3: Dynamic Event Registration
+
+**Problem**: New event types require editing `eventNames.js`. Payloads undocumented.
+
+**Proposed structure** (`eventNames.js`):
+```js
+const _events = { ... }; // existing frozen APP_EVENTS kept as-is
+
+export function registerEventName(domain, name, payloadShape) {
+  if (!_events[domain]) _events[domain] = {};
+  _events[domain][name] = { name: `${domain}.${name}`, payloadShape };
+}
+
+export function listAppEvents() {
+  // returns flat list of all registered events with payload docs
+}
+```
+
+**What this enables**:
+- External modules can register their own events without touching core source
+- Runtime event discovery for debug/tooling
+- Payload shape documentation accessible programmatically
+
+**Effort**: LOW
+
+### Longer-Term Proposals (Higher Effort, Deferred)
+
+#### Proposal 4: Declarative Schema for Memory/Lorebook
+
+**Problem**: Adding a new memory entry field requires modifying `createDefaultMemorySettings`, `normalizeMemorySettings`, `ensureSessionMemoryBook`, migration, UI composable — 4–5 files minimum. Two parallel entry systems (lorebook vs memory) with no shared extension point.
+
+**Proposed direction**: Define `ENTRY_SCHEMA` and `SETTINGS_SCHEMA` as declarative field arrays with `{ key, default, type, validate }`. Normalizer auto-generates from schema. Two entry systems share the schema extension mechanism.
+
+**Effort**: MEDIUM-HIGH (requires unifying or bridging two independent systems)
+
+#### Proposal 5: Pipeline Step Registry
+
+**Problem**: Pipeline steps are a static constant array. No dynamic registration, no ordering constraints, no introspection.
+
+**Proposed direction**: `PipelineBuilder` with `addStep(step, { after, before })`, ordering constraint validation, step introspection API.
+
+**Effort**: MEDIUM (orchestrator already accepts steps array, so the key enabler is in place; the builder and constraint system are new code)
+
+#### Proposal 6: Service Registry & Lifecycle
+
+**Problem**: Services are plain ES modules. No standard `init()`, no dependency declaration, no health check. Some import UI state.
+
+**Proposed direction**: `registerService(name, { init, dependencies, healthCheck })`. Startup runs `init` in dependency order. UI-coupled services receive callbacks via DI instead of importing `bottomSheetState` directly.
+
+**Effort**: MEDIUM (DI refactoring for bottomSheetState consumers is the bulk of the work)
+
+### Recommended Execution Order
+
+1. **Proposal 2** (Provider barrel + transport registry) — LOW effort, unblocks future provider additions
+2. **Proposal 3** (Dynamic event registration) — LOW effort, unlocks third-party extensibility
+3. **Proposal 1** (THEME_SCHEMA) — MEDIUM effort, highest concrete impact on daily development velocity
+4. **Proposal 4** (Memory/Lorebook schema) — MEDIUM-HIGH, deferred until memory system stabilizes
+5. **Proposal 5** (Pipeline step registry) — MEDIUM, deferred until there's a concrete need for dynamic steps
+6. **Proposal 6** (Service registry) — MEDIUM, deferred until bottomSheetState decoupling is prioritized
+
+### What Already Works Well (No Changes Needed)
+
+- **Generation extension hooks** — fully functional registry with priority, dispose, readonly/mutating contracts
+- **State consumption from new views** — any Vue component can `import { themeState } from ...` without coupling to the view that created it
+- **Composable DI pattern** — `useMemoryBooks(deps)` and `useChatGeneration(deps)` demonstrate the correct pattern; other composables should converge to it over time
+
 ## Suggested Execution Order
 
 The intended order of work is:

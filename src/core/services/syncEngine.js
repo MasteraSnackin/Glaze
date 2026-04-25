@@ -132,10 +132,69 @@ async function computeSyncHash(data) {
     return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+async function migrateV1ManifestToV2(adapter, v1Manifest) {
+    const cloudFiles = await listAllFiles(adapter);
+    const entries = {};
+
+    for (const file of cloudFiles) {
+        const filePath = file.path_display || file.path || '';
+        const cloudModified = file.serverModified ? new Date(file.serverModified).getTime() : Date.now();
+
+        let type = null;
+        let id = null;
+
+        if (filePath.startsWith(`${CLOUD_BASE}/characters/`)) {
+            type = ENTITY_TYPES.CHARACTER;
+            id = filePath.replace(`${CLOUD_BASE}/characters/`, '').replace(/\.(enc|json)$/, '');
+        } else if (filePath.startsWith(`${CLOUD_BASE}/personas/`)) {
+            type = ENTITY_TYPES.PERSONA;
+            id = filePath.replace(`${CLOUD_BASE}/personas/`, '').replace(/\.(enc|json)$/, '');
+        } else if (filePath.startsWith(`${CLOUD_BASE}/chats/`)) {
+            type = ENTITY_TYPES.CHAT;
+            id = filePath.replace(`${CLOUD_BASE}/chats/`, '').replace(/\.(enc|json)$/, '');
+        } else if (filePath.startsWith(`${CLOUD_BASE}/`)) {
+            const fileName = filePath.replace(`${CLOUD_BASE}/`, '').replace(/\.(enc|json)$/, '');
+            if (fileName === 'lorebooks') { type = ENTITY_TYPES.LOREBOOKS; id = 'lorebooks'; }
+            else if (fileName === 'api_presets') { type = ENTITY_TYPES.API_PRESETS; id = 'api_presets'; }
+            else if (fileName === 'theme_presets') { type = ENTITY_TYPES.THEME_PRESETS; id = 'theme_presets'; }
+            else if (fileName === 'theme_state') { type = ENTITY_TYPES.THEME_STATE; id = 'theme_state'; }
+            else if (fileName === 'local_storage') { type = ENTITY_TYPES.LOCAL_STORAGE; id = 'local_storage'; }
+            else { type = ENTITY_TYPES.LOCAL_STORAGE; id = fileName; }
+        }
+
+        if (!type || !id) continue;
+
+        const entryKeyStr = entryKey(type, id);
+        entries[entryKeyStr] = {
+            type,
+            id,
+            path: filePath,
+            updatedAt: cloudModified,
+            hash: null,
+            deleted: false
+        };
+    }
+
+    const migrated = {
+        version: MANIFEST_VERSION,
+        deviceId: v1Manifest.deviceId || getDeviceId(),
+        lastSync: v1Manifest.lastSync || 0,
+        createdAt: v1Manifest.createdAt || Date.now(),
+        entries
+    };
+
+    await adapter.upload(cloudPath(ENTITY_TYPES.MANIFEST), JSON.stringify(migrated));
+    return migrated;
+}
+
 async function readCloudManifestV2(adapter) {
     const manifest = await readManifest(adapter);
+    if (!manifest) return null;
     if (manifest?.version === MANIFEST_VERSION && manifest?.entries) {
         return manifest;
+    }
+    if (manifest?.version === 1 && !manifest?.entries) {
+        return migrateV1ManifestToV2(adapter, manifest);
     }
     return null;
 }
@@ -318,13 +377,13 @@ async function applyCloudEntry(adapter, entry, key) {
         await db.set(`gz_chat_${entry.id}`, entity);
         await clearSyncDeletedEntry(entry.type, entry.id);
     } else if (entry.type === ENTITY_TYPES.LOREBOOKS) {
-        await db.queuedSet('gz_lorebooks', entity);
+        await db.set('gz_lorebooks', entity);
     } else if (entry.type === ENTITY_TYPES.API_PRESETS) {
-        await db.queuedSet('gz_api_connection_presets', entity);
+        await db.set('gz_api_connection_presets', entity);
     } else if (entry.type === ENTITY_TYPES.THEME_PRESETS) {
-        await db.queuedSet('gz_theme_presets', entity);
+        await db.set('gz_theme_presets', entity);
     } else if (entry.type === ENTITY_TYPES.THEME_STATE) {
-        await db.queuedSet('gz_theme_active_preset', entity);
+        await db.set('gz_theme_active_preset', entity);
     } else if (entry.type === ENTITY_TYPES.LOCAL_STORAGE) {
         for (const [lsKey, lsVal] of Object.entries(entity || {})) {
             localStorage.setItem(lsKey, lsVal);
@@ -369,6 +428,22 @@ async function deleteCloudFileIfExists(adapter, entry) {
     }
 }
 
+async function runParallel(tasks, concurrency = 5) {
+    const results = [];
+    let index = 0;
+
+    async function worker() {
+        while (index < tasks.length) {
+            const i = index++;
+            results[i] = await tasks[i]();
+        }
+    }
+
+    const workers = Array.from({ length: Math.min(concurrency, tasks.length) }, () => worker());
+    await Promise.all(workers);
+    return results;
+}
+
 async function pushManifestV2(adapter, key, onProgress) {
     const cloudManifest = await readCloudManifestV2(adapter);
     const localManifest = await buildLocalManifestV2();
@@ -380,50 +455,54 @@ async function pushManifestV2(adapter, key, onProgress) {
     const allKeys = new Set([...Object.keys(localManifest.entries), ...Object.keys(cloudEntries)]);
     const allEntries = Array.from(allKeys);
 
-    for (let i = 0; i < allEntries.length; i++) {
-        const keyName = allEntries[i];
+    const singletonEntries = await collectSingletonEntries();
+
+    const tasks = allEntries.map((keyName, i) => {
         const localEntry = localManifest.entries[keyName];
         const cloudEntry = cloudEntries[keyName];
         const phase = getBreakdownBucket((localEntry || cloudEntry)?.type);
 
-        if (!localEntry) {
-            if (onProgress) onProgress(phase, i + 1, allEntries.length);
-            continue;
-        }
-
-        const shouldUpload = !cloudEntry
-            || localEntry.deleted !== cloudEntry.deleted
-            || localEntry.updatedAt > cloudEntry.updatedAt
-            || localEntry.hash !== cloudEntry.hash;
-
-        if (!shouldUpload) {
-            skipped++;
-            if (onProgress) onProgress(phase, i + 1, allEntries.length);
-            continue;
-        }
-
-        if (localEntry.deleted) {
-            await deleteCloudFileIfExists(adapter, localEntry);
-        } else {
-            let payload = null;
-            if (localEntry.type === ENTITY_TYPES.CHARACTER) payload = await getLocalCharacter(localEntry.id);
-            else if (localEntry.type === ENTITY_TYPES.PERSONA) payload = await getLocalPersona(localEntry.id);
-            else if (localEntry.type === ENTITY_TYPES.CHAT) payload = await getLocalChat(localEntry.id);
-            else {
-                const singletons = await collectSingletonEntries();
-                payload = singletons.find(item => item.type === localEntry.type && item.id === localEntry.id)?.data ?? null;
+        return async () => {
+            if (!localEntry) {
+                if (onProgress) onProgress(phase, i + 1, allEntries.length);
+                return;
             }
 
-            if (payload !== null && payload !== undefined) {
-                const encrypted = await encryptEntity(payload, key);
-                await adapter.upload(localEntry.path, JSON.stringify(encrypted));
-            }
-        }
+            const shouldUpload = !cloudEntry
+                || localEntry.deleted !== cloudEntry.deleted
+                || localEntry.updatedAt > cloudEntry.updatedAt
+                || localEntry.hash !== cloudEntry.hash;
 
-        pushed++;
-        breakdown[phase]++;
-        if (onProgress) onProgress(phase, i + 1, allEntries.length);
-    }
+            if (!shouldUpload) {
+                skipped++;
+                if (onProgress) onProgress(phase, i + 1, allEntries.length);
+                return;
+            }
+
+            if (localEntry.deleted) {
+                await deleteCloudFileIfExists(adapter, localEntry);
+            } else {
+                let payload = null;
+                if (localEntry.type === ENTITY_TYPES.CHARACTER) payload = await getLocalCharacter(localEntry.id);
+                else if (localEntry.type === ENTITY_TYPES.PERSONA) payload = await getLocalPersona(localEntry.id);
+                else if (localEntry.type === ENTITY_TYPES.CHAT) payload = await getLocalChat(localEntry.id);
+                else {
+                    payload = singletonEntries.find(item => item.type === localEntry.type && item.id === localEntry.id)?.data ?? null;
+                }
+
+                if (payload !== null && payload !== undefined) {
+                    const encrypted = await encryptEntity(payload, key);
+                    await adapter.upload(localEntry.path, JSON.stringify(encrypted));
+                }
+            }
+
+            pushed++;
+            breakdown[phase]++;
+            if (onProgress) onProgress(phase, i + 1, allEntries.length);
+        };
+    });
+
+    await runParallel(tasks, 5);
 
     localManifest.lastSync = Date.now();
     localManifest.createdAt = cloudManifest?.createdAt || Date.now();
@@ -449,59 +528,62 @@ async function pullManifestV2(adapter, key, onProgress, onConflict) {
     const conflicts = [];
     let pulled = 0;
 
-    for (let i = 0; i < allEntries.length; i++) {
-        const keyName = allEntries[i];
+    const tasks = allEntries.map((keyName, i) => {
         const cloudEntry = cloudEntries[keyName];
         const localEntry = localEntries[keyName];
         const phase = getBreakdownBucket((cloudEntry || localEntry)?.type);
 
-        if (!cloudEntry) {
-            if (onProgress) onProgress(phase, i + 1, allEntries.length);
-            continue;
-        }
-
-        const cloudIsNewer = !localEntry || cloudEntry.updatedAt > localEntry.updatedAt || cloudEntry.hash !== localEntry.hash || cloudEntry.deleted !== localEntry.deleted;
-        if (!cloudIsNewer) {
-            if (onProgress) onProgress(phase, i + 1, allEntries.length);
-            continue;
-        }
-
-        if (needsConflict(localEntry, cloudEntry)) {
-            const localEntity = await getLocalConflictEntity(cloudEntry.type, cloudEntry.id);
-            let cloudEntity = null;
-            if (!cloudEntry.deleted) {
-                try {
-                    cloudEntity = await readCloudEntityByEntry(adapter, cloudEntry, key);
-                } catch (e) {
-                    decryptErrors.push({ type: cloudEntry.type, id: cloudEntry.id, error: e.message });
-                    if (onProgress) onProgress(phase, i + 1, allEntries.length);
-                    continue;
-                }
+        return async () => {
+            if (!cloudEntry) {
+                if (onProgress) onProgress(phase, i + 1, allEntries.length);
+                return;
             }
-            const conflict = {
-                type: cloudEntry.type,
-                id: cloudEntry.id,
-                name: getConflictName(cloudEntry.type, localEntity, cloudEntity, cloudEntry.id),
-                local: localEntity,
-                cloud: cloudEntity,
-                cloudModified: cloudEntry.updatedAt
-            };
-            conflicts.push(conflict);
-            if (onConflict) onConflict(conflict);
+
+            const cloudIsNewer = !localEntry || cloudEntry.updatedAt > localEntry.updatedAt || cloudEntry.hash !== localEntry.hash || cloudEntry.deleted !== localEntry.deleted;
+            if (!cloudIsNewer) {
+                if (onProgress) onProgress(phase, i + 1, allEntries.length);
+                return;
+            }
+
+            if (needsConflict(localEntry, cloudEntry)) {
+                const localEntity = await getLocalConflictEntity(cloudEntry.type, cloudEntry.id);
+                let cloudEntity = null;
+                if (!cloudEntry.deleted) {
+                    try {
+                        cloudEntity = await readCloudEntityByEntry(adapter, cloudEntry, key);
+                    } catch (e) {
+                        decryptErrors.push({ type: cloudEntry.type, id: cloudEntry.id, error: e.message });
+                        if (onProgress) onProgress(phase, i + 1, allEntries.length);
+                        return;
+                    }
+                }
+                const conflict = {
+                    type: cloudEntry.type,
+                    id: cloudEntry.id,
+                    name: getConflictName(cloudEntry.type, localEntity, cloudEntity, cloudEntry.id),
+                    local: localEntity,
+                    cloud: cloudEntity,
+                    cloudModified: cloudEntry.updatedAt
+                };
+                conflicts.push(conflict);
+                if (onConflict) onConflict(conflict);
+                if (onProgress) onProgress(phase, i + 1, allEntries.length);
+                return;
+            }
+
+            try {
+                await applyCloudEntry(adapter, cloudEntry, key);
+                pulled++;
+                breakdown[phase]++;
+            } catch (e) {
+                decryptErrors.push({ type: cloudEntry.type, id: cloudEntry.id, error: e.message });
+            }
+
             if (onProgress) onProgress(phase, i + 1, allEntries.length);
-            continue;
-        }
+        };
+    });
 
-        try {
-            await applyCloudEntry(adapter, cloudEntry, key);
-            pulled++;
-            breakdown[phase]++;
-        } catch (e) {
-            decryptErrors.push({ type: cloudEntry.type, id: cloudEntry.id, error: e.message });
-        }
-
-        if (onProgress) onProgress(phase, i + 1, allEntries.length);
-    }
+    await runParallel(tasks, 5);
 
     await writeLocalManifestV2(clone(cloudManifest));
 
