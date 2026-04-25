@@ -43,15 +43,12 @@ Files added:
 - `src/core/events/eventNames.js`
 - `src/core/events/contracts.js`
 - `src/core/events/eventHub.js`
-- `src/core/events/bridges/windowEventBridge.js`
 
 Current behavior:
 - Internal canonical event names exist for ALL custom app events (56 total across nav, domain, debug, ui namespaces).
-- `main.js` initializes a bridge from internal app events to the existing legacy `window` events.
-- Existing legacy listeners still work because the bridge republishes the legacy browser events.
-- ALL internal emitters now publish canonical app events through `publishAppEvent()` first. The bridge handles backward-compatible legacy `window` event dispatch automatically.
-- ALL internal listeners now subscribe through `subscribeAppEvent()` instead of raw `window.addEventListener()`. Unsubscriptions are collected and called in `onBeforeUnmount` (Vue) or persist for app lifetime (services/utils).
-- `windowEventBridge.js` is the ONLY place that touches `window` for app event dispatch. It is a pure external adapter for backward compatibility — no internal code imports it or calls it.
+- ALL internal emitters publish canonical app events through `publishAppEvent()`.
+- ALL internal listeners subscribe through `subscribeAppEvent()` instead of raw `window.addEventListener()`. Unsubscriptions are collected and called in `onBeforeUnmount` (Vue) or persist for app lifetime (services/utils).
+- The legacy `windowEventBridge` (which republished app events as `window.dispatchEvent` for backward compatibility) has been removed — no consumers remained.
 
 **Event catalog (56 events, 4 namespaces):**
 
@@ -193,12 +190,62 @@ UI leak sites remaining (for Phase 12):
 
 Why this slice is safe:
 - It adds a new internal boundary without removing the legacy one.
-- Runtime behavior stays compatible because `windowEventBridge` automatically republishes all app events as legacy `window` events for any code that still listens via `window.addEventListener`.
-- Migrated listeners use `subscribeAppEvent()` which receives events from both migrated emitters (via event hub) and legacy emitters (via bridge forward).
-- Later refactor slices can remove the bridge entirely once all legacy consumers are confirmed migrated.
+- Runtime behavior stays compatible because all internal consumers now use `subscribeAppEvent()` directly.
+- The legacy `windowEventBridge` has been removed — no external consumers remained.
 
 What has **not** changed yet:
-- Event hub bridge (`windowEventBridge`) still publishes legacy `window` events for backward compatibility. Can be removed once all external consumers are confirmed on `subscribeAppEvent`.
+
+## 0.1 Directory Tree
+
+```text
+src/
+├── assets/                    # Static resources
+│   ├── css/                   # Global styles
+│   ├── logos/                 # App logos
+│   └── presets/               # Default LLM presets (renri, fawnie, etc.)
+├── components/                # Reusable Vue components
+│   ├── chat/                  # ChatInput, ChatMessage, MagicDrawer
+│   ├── editors/               # GenericEditor, FullScreenEditor
+│   ├── layout/                # AppHeader, BottomNavigation, AppLoader
+│   ├── media/                 # HoloCardViewer, ImageViewer
+│   ├── sheets/                # Bottom sheet content (LorebookSheet, RegexSheet, SyncSheet, etc.)
+│   └── ui/                    # Generic UI primitives (BottomSheet, FabButton, SheetView)
+├── composables/               # Vue composables (extracted from views)
+│   ├── api/                   # API/runtime config composables
+│   ├── app/                   # App-level init, event subscriptions, onboarding
+│   ├── character/             # Character editor, thumbnails, import/export
+│   ├── chat/                  # Chat generation, context, memory, message selection, auto-sync
+│   ├── lorebook/              # Lorebook vector status, embedding logic
+│   ├── theme/                 # Theme presets, settings, renderer
+│   └── ui/                    # Header, glossary, viewer composables
+├── core/
+│   ├── config/                # Settings singletons (APISettings, APPSettings, syncConfig)
+│   ├── events/                # Event hub layer
+│   │   └── projections/       # Event→state projections (debugStateProjection)
+│   ├── extensions/            # App extensions (appExtensions)
+│   ├── llm/                   # LLM orchestration
+│   │   ├── assemblers/        # Request payload builders per provider
+│   │   ├── contracts/         # Provider capability contracts
+│   │   ├── pipeline/          # Ordered prompt/request pipeline
+│   │   ├── providers/         # Provider adapters (openai, claude, novelai, etc.)
+│   │   ├── transport/         # HTTP transport, SSE streaming, wake lock
+│   │   └── usecases/          # Use cases (chat generation, summary, memory draft)
+│   ├── services/              # Business logic services
+│   │   ├── adapters/          # Cloud adapters (gdriveAdapter, dropboxAdapter)
+│   │   ├── catalog/           # Service catalog / dependency wiring
+│   │   └── crypto/            # Sync encryption (AES-GCM)
+│   ├── states/                # Reactive state modules (lorebookState, personaState, presetState, syncState, themeState)
+│   └── utils/                 # Core utility functions
+├── locales/                   # i18n translations
+│   ├── en/                    # English
+│   └── ru/                    # Russian
+├── tokenizers/                # Bundled tokenizer (gp-tokenizer)
+├── utils/                     # Shared utilities (db.js, macroEngine, tokenizer, textFormatter, characterIO)
+├── views/                     # Page-level components
+│   └── Menu/                  # Settings subviews
+│       └── Settings/          # ThemeSettingsView, ApiView, SyncView
+└── workers/                   # Web Workers (generationWorker — off-thread prompt building)
+```
 
 ## 1. Tokenizer
 
@@ -940,7 +987,7 @@ Native-only scope retained:
 
 ### Cloud Sync ↔ Local Data
 - `syncEngine.js` serializes characters, personas, chats, presets, and selected local storage state
-- Pull publishes `APP_EVENTS.domain.sync.dataRefreshed` via event hub (bridge forwards as legacy `sync-data-refreshed` window event)
+- Pull publishes `APP_EVENTS.domain.sync.dataRefreshed` via event hub
 
 ### Cloud Sync ↔ Encryption
 - `syncService.js` decides whether to request a sync key based on `detectEncryptionState()`
