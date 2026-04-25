@@ -720,9 +720,11 @@ Done:
 - `_cleanupScroll` (let) passed via `getCleanupScroll()`/`setCleanupScroll()` callbacks
 - ChatView.vue reduced from 3767 → 2995 lines (-772 lines, -20.5%)
 
-Not done (deferred):
+Not done (deferred — see ARCHITECTURE.md "Deferred Refactoring Items" for details):
 - `openChat()` (~400 lines) extraction into composable — deferred due to ~30+ dependency injections required; marginal ROI given ChatView already meets the <2000 line target
 - Context/tokenizer sheet actions (~32 lines) — too small for a dedicated composable
+- `themeState.js` (639 lines) — violates State ≠ service guard rail; preset CRUD/init should move to `themePresetService.js`. Deferred to next refactor pass.
+- `useMemorySheetUI.js` (844 lines) — intentionally excluded. ~600 lines of imperative DOM; splitting would not improve architecture. Only meaningful fix is Vue-template rewrite, out of scope.
 
 Expected output:
 

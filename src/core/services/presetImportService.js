@@ -82,10 +82,14 @@ export function convertSTPreset(data, fileName) {
 
     let orderList = [];
     if (data.prompt_order && Array.isArray(data.prompt_order) && data.prompt_order.length > 0) {
-        // Some presets have multiple orders, we take the one with most items or just the first one
-        const bestOrder = data.prompt_order.reduce((prev, current) =>
-            (current.order.length > prev.order.length) ? current : prev
-            , data.prompt_order[0]);
+        // ST commonly stores the user-editable prompt layout under character_id 100001.
+        // Fall back to the densest order when that layout is not present.
+        const preferredOrder = data.prompt_order.find(order => order?.character_id === 100001 && Array.isArray(order.order) && order.order.length > 0);
+        const bestOrder = preferredOrder || data.prompt_order.reduce((prev, current) => {
+            const prevLen = Array.isArray(prev?.order) ? prev.order.length : 0;
+            const currentLen = Array.isArray(current?.order) ? current.order.length : 0;
+            return currentLen > prevLen ? current : prev;
+        }, data.prompt_order[0]);
         orderList = bestOrder.order;
     } else if (data.prompts) {
         orderList = data.prompts.map(p => ({ identifier: p.identifier, enabled: p.enabled !== false }));
@@ -142,7 +146,8 @@ export function convertSTPreset(data, fileName) {
     if (data.prompts) {
         data.prompts.forEach((p) => {
             if (!usedIdentifiers.has(p.identifier)) {
-                processBlock({ identifier: p.identifier, enabled: false }, true); // Pass true for isStashed
+                const promptEnabled = p.enabled !== false;
+                processBlock({ identifier: p.identifier, enabled: promptEnabled }, !promptEnabled);
             }
         });
     }
