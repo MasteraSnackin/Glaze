@@ -8,6 +8,8 @@ import { db } from '@/utils/db.js';
 import { logger } from './logger.js';
 import { saveFile } from '../core/services/fileSaver.js';
 import { importSTLorebook } from '@/core/states/lorebookState.js';
+import { publishAppEvent } from '@/core/events/eventHub.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
 
 // ─── Import ──────────────────────────────────────────────────────────────────
 
@@ -284,7 +286,7 @@ export async function generateMissingThumbnails() {
         if (updatedCount > 0) {
             logger.debug(`Generated thumbnails for ${updatedCount} characters.`);
             // Dispatch event to reload character list if needed
-            window.dispatchEvent(new Event('character-updated'));
+            publishAppEvent(APP_EVENTS.domain.character.updated);
         }
     } catch (e) {
         console.error("Error generating missing thumbnails:", e);

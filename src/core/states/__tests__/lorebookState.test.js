@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { scanLorebooks } from '../lorebookState.js';
-import { lorebookState } from '../lorebookState.js';
+import { scanLorebooks, lorebookState } from '../lorebookState.js';
 
 // Mock DB
 vi.mock('@/utils/db.js', () => ({

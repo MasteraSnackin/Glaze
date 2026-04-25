@@ -22,7 +22,7 @@ export function formatDate(timestamp, format = 'short') {
     const dateStr = `${d}.${m}`;
 
     const t = translations[currentLang.value] || {};
-    const yesterdayText = t['date_yesterday'] || 'Yesterday';
+    const yesterdayText = t.date_yesterday || 'Yesterday';
 
     if (diff === 0) { // Today
         // Short: Time
@@ -59,8 +59,8 @@ export function formatDateSeparator(timestamp) {
     
     const t = translations[currentLang.value] || {};
 
-    if (diff === 0) return t['date_today'] || 'Today';
-    if (diff === oneDay) return t['date_yesterday'] || 'Yesterday';
+    if (diff === 0) return t.date_today || 'Today';
+    if (diff === oneDay) return t.date_yesterday || 'Yesterday';
 
     try {
         return new Intl.DateTimeFormat(currentLang.value, {

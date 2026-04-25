@@ -7,10 +7,11 @@ export function createGenerationStreamUpdater({
     msgId,
     genId,
     getGenerationState,
-    getChatData,
-    db,
+    isGenerationStateCurrent,
+    persistence,
     onRawText
 }) {
+    const { getChatData, db } = persistence;
     let backgroundUpdateTimer = null;
     let backgroundPendingText = null;
     let backgroundPendingReasoning = null;
@@ -29,12 +30,12 @@ export function createGenerationStreamUpdater({
         }
 
         const state = getGenerationState(char.id);
-        if (state && state.genId === genId && state.onUIUpdate) {
+        if (isGenerationStateCurrent(char.id, { genId, sessionId, type: 'chat' }) && state?.onUIUpdate) {
             state.onUIUpdate(effectiveText, effectiveReasoning, true, textDelta);
             return;
         }
 
-        if (!state || state.genId !== genId) {
+        if (!isGenerationStateCurrent(char.id, { genId, sessionId, type: 'chat' })) {
             return;
         }
 
@@ -48,8 +49,7 @@ export function createGenerationStreamUpdater({
             backgroundUpdateTimer = null;
             if (backgroundPendingText === null) return;
 
-            const latestState = getGenerationState(char.id);
-            if (!latestState || latestState.genId !== genId) return;
+            if (!isGenerationStateCurrent(char.id, { genId, sessionId, type: 'chat' })) return;
 
             const data = await getChatData(char.id);
             if (data && data.sessions[sessionId]) {

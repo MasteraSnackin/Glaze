@@ -25,6 +25,7 @@ export function usePromptMetadataSnapshots() {
             if (!Array.isArray(messages) || promptMetaSnapshots.size === 0) return false;
 
             let changed = false;
+            const restored = new Set();
             messages.forEach(message => {
                 const snapshot = message?.id ? promptMetaSnapshots.get(message.id) : null;
                 if (!snapshot) return;
@@ -38,10 +39,19 @@ export function usePromptMetadataSnapshots() {
                 if (snapshot.hasContextRefs) message.contextRefs = clonePromptMetaList(snapshot.contextRefs);
                 else delete message.contextRefs;
 
+                restored.add(message.id);
                 changed = true;
             });
 
+            for (const id of restored) {
+                promptMetaSnapshots.delete(id);
+            }
+
             return changed;
+        },
+
+        clearSnapshots() {
+            promptMetaSnapshots.clear();
         }
     };
 }

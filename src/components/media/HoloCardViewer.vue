@@ -11,7 +11,9 @@
                             <div class="holo-card-border"></div>
                             <div class="holo-card-gradient"></div>
                             <div class="holo-card-info" ref="cardInfo">
-                                <h2 class="holo-card-name">{{ name }}</h2>
+                                <h2 class="holo-card-name">
+{{ name }}
+</h2>
                                 <div class="holo-card-meta">
                                     <!-- <span class="holo-card-class">ULTRA RARE</span> -->
                                 </div>
@@ -40,9 +42,36 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue';
-import { useViewer } from '@/composables/media/useViewer.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
+import { subscribeAppEvent } from '@/core/events/eventHub.js';
 
-const { visible, src, name, description, close, onAfterLeave } = useViewer('open-holocards');
+const visible = ref(false);
+const src = ref('');
+const name = ref('');
+const description = ref('');
+let onCloseCallback = null;
+
+const close = () => {
+    visible.value = false;
+};
+
+const onAfterLeave = () => {
+    if (onCloseCallback) onCloseCallback();
+    onCloseCallback = null;
+    src.value = '';
+    name.value = '';
+    description.value = '';
+};
+
+const openViewer = (detail) => {
+    src.value = detail.src;
+    name.value = detail.name || '';
+    description.value = detail.description || '';
+    onCloseCallback = detail.onCloseCallback;
+    visible.value = true;
+};
+
+let unsubHolocards;
 
 // Refs for DOM elements
 const cardContainer = ref(null);
@@ -152,11 +181,11 @@ const onDeviceOrientation = (e) => {
     const limit = 30;
     const drift = 0.05; // Speed of calibration shift
 
-    let rawX = lastGamma - calGamma;
+    const rawX = lastGamma - calGamma;
     if (rawX > limit) calGamma += (rawX - limit) * drift;
     else if (rawX < -limit) calGamma += (rawX + limit) * drift;
 
-    let rawY = lastBeta - calBeta;
+    const rawY = lastBeta - calBeta;
     if (rawY > limit) calBeta += (rawY - limit) * drift;
     else if (rawY < -limit) calBeta += (rawY + limit) * drift;
 
@@ -182,11 +211,13 @@ watch(visible, (newVal) => {
 });
 
 onMounted(() => {
+    unsubHolocards = subscribeAppEvent(APP_EVENTS.nav.openHolocards, ({ detail }) => openViewer(detail));
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('deviceorientation', onDeviceOrientation);
 });
 
 onUnmounted(() => {
+    unsubHolocards?.();
     window.removeEventListener('mousemove', onMouseMove);
     window.removeEventListener('deviceorientation', onDeviceOrientation);
 });

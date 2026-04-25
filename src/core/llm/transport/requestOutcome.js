@@ -1,9 +1,39 @@
 import { cleanText } from '@/utils/textFormatter.js';
+import { runGenerationHook } from '@/core/extensions/extensionRegistry.js';
 import { finishNetworkTrace } from '@/core/services/networkDebugService.js';
 import { extractOpenAiMessage, normalizeReasoningOutput } from '@/core/llm/transport/responseNormalizer.js';
 import { logger } from '../../../utils/logger.js';
 
-export function completeStructuredResponse({
+async function applyNormalizedResponseExtensions({
+    requestType,
+    debugKey,
+    text,
+    reasoning,
+    meta = undefined,
+    rawResponse = undefined
+}) {
+    const hookResult = await runGenerationHook('afterResponseNormalize', {
+        requestType,
+        debugKey,
+        text,
+        reasoning,
+        meta,
+        rawResponse
+    });
+
+    if (!hookResult || typeof hookResult !== 'object') {
+        return { text, reasoning, meta, rawResponse };
+    }
+
+    return {
+        text: hookResult.text === undefined ? text : hookResult.text,
+        reasoning: hookResult.reasoning === undefined ? reasoning : hookResult.reasoning,
+        meta: hookResult.meta === undefined ? meta : hookResult.meta,
+        rawResponse: hookResult.rawResponse === undefined ? rawResponse : hookResult.rawResponse
+    };
+}
+
+export async function completeStructuredResponse({
     data,
     contextLabel,
     logLabel,
@@ -13,11 +43,21 @@ export function completeStructuredResponse({
     tagEnd,
     headerModel,
     headerInline,
-    onComplete
+    requestType,
+    debugKey,
+    onComplete,
+    onError
 }) {
     logger.debug(logLabel, data);
 
-    const { content, reasoningContent } = extractOpenAiMessage(data, contextLabel);
+    let content, reasoningContent;
+    try {
+        ({ content, reasoningContent } = extractOpenAiMessage(data, contextLabel));
+    } catch (extractErr) {
+        finishNetworkTrace({ debugKey, rawResponse: data, error: extractErr.message });
+        if (onError) await onError(extractErr);
+        return;
+    }
     const normalized = normalizeReasoningOutput({
         content,
         requestReasoning,
@@ -29,56 +69,97 @@ export function completeStructuredResponse({
         headerInline
     });
 
-    const cleanedText = cleanText(normalized.text);
-    finishNetworkTrace({ rawResponse: data, text: cleanedText, reasoning: normalized.reasoning });
-    if (onComplete) onComplete(cleanedText, normalized.reasoning, { allReasoning: normalized.allReasoning });
+    const extended = await applyNormalizedResponseExtensions({
+        requestType,
+        debugKey,
+        text: normalized.text,
+        reasoning: normalized.reasoning,
+        meta: { allReasoning: normalized.allReasoning },
+        rawResponse: data
+    });
+
+    const cleanedText = cleanText(extended.text || '');
+    finishNetworkTrace({ debugKey, rawResponse: extended.rawResponse, text: cleanedText, reasoning: extended.reasoning });
+    if (onComplete) await onComplete(cleanedText, extended.reasoning, extended.meta);
 }
 
-export function finalizeStreamResponse({ streamAccumulator, onComplete }) {
-    const finalResult = streamAccumulator.finalize();
-    const finalText = cleanText(finalResult.text);
+export async function finalizeStreamResponse({ requestType, debugKey, streamAccumulator, onComplete, onError }) {
+    let finalResult;
+    try {
+        finalResult = streamAccumulator.finalize();
+    } catch (finalizeErr) {
+        finishNetworkTrace({ debugKey, error: finalizeErr.message });
+        if (onError) await onError(finalizeErr);
+        return;
+    }
+
+    const extended = await applyNormalizedResponseExtensions({
+        requestType,
+        debugKey,
+        text: finalResult.text,
+        reasoning: finalResult.reasoning,
+        rawResponse: {
+            mode: 'sse',
+            eventCount: null
+        }
+    });
+    const finalText = cleanText(extended.text || '');
 
     logger.debug('Stream finished:', finalResult.text);
 
     finishNetworkTrace({
-        rawResponse: {
-            mode: 'sse',
-            eventCount: null
-        },
+        debugKey,
+        rawResponse: extended.rawResponse,
         text: finalText,
-        reasoning: finalResult.reasoning
+        reasoning: extended.reasoning
     });
 
-    if (onComplete) onComplete(finalText, finalResult.reasoning, { allReasoning: finalResult.allReasoning });
+    if (onComplete) await onComplete(finalText, extended.reasoning, { ...extended.meta, allReasoning: finalResult.allReasoning });
 }
 
-export function handleAbortOutcome({ timedOut, streamAccumulator, onComplete, onError, abortError }) {
+export async function handleAbortOutcome({ requestType, debugKey, timedOut, streamAccumulator, onComplete, onError, abortError }) {
     const partial = streamAccumulator.getPartial();
     const hasPartialContent = partial.text.length > 0 || (partial.reasoning && partial.reasoning.length > 0);
     const allReasoning = !partial.text.trim() && !!partial.reasoning?.trim();
 
     if (timedOut) {
         if (hasPartialContent) {
-            finishNetworkTrace({ text: cleanText(partial.text), reasoning: partial.reasoning, error: 'Generation timed out' });
-            if (onComplete) onComplete(cleanText(partial.text), partial.reasoning, { partialError: 'Generation timed out', allReasoning });
+            const extended = await applyNormalizedResponseExtensions({
+                requestType,
+                debugKey,
+                text: partial.text,
+                reasoning: partial.reasoning,
+                meta: { partialError: 'Generation timed out', allReasoning }
+            });
+            const partialText = cleanText(extended.text || '');
+            finishNetworkTrace({ debugKey, text: partialText, reasoning: extended.reasoning, error: 'Generation timed out' });
+            if (onComplete) await onComplete(partialText, extended.reasoning, extended.meta);
         } else {
-            finishNetworkTrace({ error: 'Generation timed out - no response from server' });
-            if (onError) onError(new Error('Generation timed out - no response from server'));
+            finishNetworkTrace({ debugKey, error: 'Generation timed out - no response from server' });
+            if (onError) await onError(new Error('Generation timed out - no response from server'));
         }
         return;
     }
 
     if (hasPartialContent) {
-        finishNetworkTrace({ text: cleanText(partial.text), reasoning: partial.reasoning, error: 'Generation aborted' });
-        if (onComplete) onComplete(cleanText(partial.text), partial.reasoning, { allReasoning });
+        const extended = await applyNormalizedResponseExtensions({
+            requestType,
+            debugKey,
+            text: partial.text,
+            reasoning: partial.reasoning,
+            meta: { allReasoning }
+        });
+        const partialText = cleanText(extended.text || '');
+        finishNetworkTrace({ debugKey, text: partialText, reasoning: extended.reasoning, error: 'Generation aborted' });
+        if (onComplete) await onComplete(partialText, extended.reasoning, extended.meta);
         return;
     }
 
-    finishNetworkTrace({ error: abortError });
-    if (onError) onError(abortError);
+    finishNetworkTrace({ debugKey, error: abortError });
+    if (onError) await onError(abortError);
 }
 
-export function handleRequestFailure({ error, streamAccumulator, onComplete, onError }) {
+export async function handleRequestFailure({ requestType, debugKey, error, streamAccumulator, onComplete, onError }) {
     const partial = streamAccumulator.getPartial();
     const hasPartialContent = partial.text.length > 0 || (partial.reasoning && partial.reasoning.length > 0);
     const allReasoning = !partial.text.trim() && !!partial.reasoning?.trim();
@@ -86,11 +167,19 @@ export function handleRequestFailure({ error, streamAccumulator, onComplete, onE
     if (hasPartialContent) {
         console.warn('Network error during stream, saving partial response:', error);
         const errorMsg = error.message || 'Stream Error';
-        finishNetworkTrace({ text: cleanText(partial.text), reasoning: partial.reasoning, error: errorMsg });
-        if (onComplete) onComplete(cleanText(partial.text), partial.reasoning, { partialError: errorMsg });
+        const extended = await applyNormalizedResponseExtensions({
+            requestType,
+            debugKey,
+            text: partial.text,
+            reasoning: partial.reasoning,
+            meta: { partialError: errorMsg, allReasoning }
+        });
+        const partialText = cleanText(extended.text || '');
+        finishNetworkTrace({ debugKey, text: partialText, reasoning: extended.reasoning, error: errorMsg });
+        if (onComplete) await onComplete(partialText, extended.reasoning, extended.meta);
         return;
     }
 
-    finishNetworkTrace({ error });
-    if (onError) onError(error);
+    finishNetworkTrace({ debugKey, error });
+    if (onError) await onError(error);
 }

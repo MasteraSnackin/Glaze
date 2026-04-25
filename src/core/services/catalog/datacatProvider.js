@@ -272,7 +272,7 @@ export async function datacatExtractionStatus() {
 
 function stripEmoji(str) {
     if (!str) return str;
-    return str.replace(/[\u{1F300}-\u{1FFFF}\u{2600}-\u{27BF}\uFE0F\u200D\s]+/gu, '').trim();
+    return str.replace(/(?:[\u{1F300}-\u{1FFFF}\u{2600}-\u{27BF}\s]|\u{FE0F}|\u{200D})+/gu, '').trim();
 }
 
 const IMAGE_BASE = 'https://ella.janitorai.com/bot-avatars/';

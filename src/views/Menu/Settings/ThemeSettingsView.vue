@@ -1,12 +1,14 @@
 <script setup>
 import { ref, onMounted, computed, watch } from 'vue';
-import { themeState, setAccentColor, setUiColor, setBackgroundImage, setCustomFont, setBgOpacity, setBgBlur, setElementOpacity, setElementBlur, PRESET_COLORS, PRESET_UI_COLORS, createPreset, getPresets, deletePreset, switchPreset, setChatLayout, setUserBubbleColor, setCharBubbleColor, setUserQuoteColor, setCharQuoteColor, setUserTextColor, setCharTextColor, setUserItalicColor, setCharItalicColor, setUiFontSize, setUiLetterSpacing, setChatFontSize, setChatLetterSpacing, setChatFont, exportThemePreset, importThemePreset, updatePresetMeta, setBorderWidth, setBorderColor, setBorderOpacity, setNoiseOpacity, setNoiseIntensity, setBgNoiseOpacity, setBgNoiseIntensity, setUiTextColor, setUiTextGrayColor, setUiFontMode, setChatFontMode } from '@/core/states/themeState.js';
-import { saveFile } from '@/core/services/fileSaver.js';
+import { themeState, setAccentColor, setUiColor, setBackgroundImage, setCustomFont, setBgOpacity, setBgBlur, setElementOpacity, setElementBlur, PRESET_COLORS, PRESET_UI_COLORS, setChatLayout, setUserBubbleColor, setCharBubbleColor, setUserQuoteColor, setCharQuoteColor, setUserTextColor, setCharTextColor, setUserItalicColor, setCharItalicColor, setUiFontSize, setUiLetterSpacing, setChatFontSize, setChatLetterSpacing, setChatFont, setBorderWidth, setBorderColor, setBorderOpacity, setNoiseOpacity, setNoiseIntensity, setBgNoiseOpacity, setBgNoiseIntensity, setUiTextColor, setUiTextGrayColor, setUiFontMode, setChatFontMode } from '@/core/states/themeState.js';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import { updateAppColors } from '@/core/services/ui.js';
 import ColorPickerSheet from '@/components/sheets/ColorPickerSheet.vue';
+import { useThemePresets } from '@/composables/theme/useThemePresets.js';
+
+const t = (key) => translations[currentLang.value]?.[key] || key;
 
 const colorPickerState = ref({
     visible: false,
@@ -73,37 +75,31 @@ const onColorSelected = (color) => {
 const bgInput = ref(null);
 const fontInput = ref(null);
 const chatFontInput = ref(null);
-const themeImportInput = ref(null);
-const presets = ref([]);
 const activeTab = ref('general');
 const activeChatSubTab = ref('font');
 
-const t = (key) => translations[currentLang.value]?.[key] || key;
-
-const loadPresetsList = async () => {
-    presets.value = await getPresets();
-};
+const {
+    presets,
+    themeImportInput,
+    activePresetName,
+    activePresetAuthor,
+    loadPresetsList,
+    handleSavePreset,
+    handleDeletePreset,
+    handleApplyPreset,
+    handleExportPreset,
+    openAddThemeSheet,
+    openThemePresetOptions,
+    openPresetSelector,
+    onThemeFileSelected,
+    getPresetName,
+    onBackgroundImageSelected
+} = useThemePresets();
 
 onMounted(() => {
     loadPresetsList();
 });
 
-const activePresetName = computed(() => {
-    const p = presets.value.find(x => x.id === themeState.activePresetId);
-    return p ? p.name : (t('theme_preset_unknown') || 'Unknown');
-});
-
-const activePresetAuthor = computed(() => {
-    const p = presets.value.find(x => x.id === themeState.activePresetId);
-    return p ? p.author : '';
-});
-
-watch(() => themeState.accentColor, (newVal) => {
-    const index = presets.value.findIndex(p => p.id === themeState.activePresetId);
-    if (index !== -1) {
-        presets.value[index].accentColor = newVal;
-    }
-});
 const getContrastColor = (hex) => {
     if (!hex) return 'white';
     hex = hex.replace('#', '');
@@ -122,262 +118,10 @@ const getCustomColorStyle = (colorValue) => {
     };
 };
 
-const handleSavePreset = () => {
-    showBottomSheet({
-        title: t('theme_save_preset'),
-        input: {
-            label: t('theme_preset_name_placeholder'),
-            value: '',
-            placeholder: t('theme_my_theme') || 'My Theme',
-            confirmLabel: t('btn_save'),
-            onConfirm: async (val) => {
-                if (val) {
-                    presets.value = await createPreset(val);
-                    closeBottomSheet();
-                }
-            }
-        }
-    });
-};
-
-const handleDeletePreset = (id) => {
-    showBottomSheet({
-        title: t('theme_confirm_delete_preset'),
-        items: [
-            {
-                label: t('btn_delete'),
-                icon: '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>',
-                iconColor: '#ff4444',
-                isDestructive: true,
-                onClick: async () => {
-                    presets.value = await deletePreset(id);
-                    closeBottomSheet();
-                }
-            },
-            {
-                label: t('btn_cancel'),
-                icon: '<svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>',
-                onClick: closeBottomSheet
-            }
-        ]
-    });
-};
-
-const handleApplyPreset = async (preset) => {
-    await switchPreset(preset.id);
-    updateAppColors();
-    await loadPresetsList();
-};
-
-
-
-const openPresetSelector = () => {
-    const cardItems = presets.value.map(p => {
-        const isActive = themeState.activePresetId === p.id;
-        const sublabelParts = [];
-        if (p.author) sublabelParts.push(`by ${p.author}`);
-        if (isActive) sublabelParts.push(t('preset_active') || 'Active');
-
-        const item = {
-            label: p.name,
-            sublabel: sublabelParts.join(' • ') || '',
-            image: p.bgImage || null,
-            icon: !p.bgImage ? '<svg viewBox="0 0 24 24" style="fill:currentColor;"><circle cx="12" cy="12" r="10" fill="' + (p.accentColor || '#7996ce') + '"/></svg>' : null,
-            onClick: () => {
-                handleApplyPreset(p);
-                closeBottomSheet();
-            }
-        };
-
-        if (p.id !== 'default') {
-            item.actions = [
-                {
-                    icon: '<svg viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>',
-                    color: 'var(--text-gray)',
-                    onClick: (e) => {
-                        e.stopPropagation();
-                        closeBottomSheet();
-                        openThemePresetOptions(p);
-                    }
-                }
-            ];
-        }
-        return item;
-    });
-
-    cardItems.push({
-        label: t('btn_add') || 'Add / Import',
-        sublabel: t('theme_create_import_desc') || 'Create or import a theme',
-        icon: '<svg viewBox="0 0 24 24" style="fill:currentColor;"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>',
-        onClick: () => {
-            closeBottomSheet();
-            openAddThemeSheet();
-        }
-    });
-
-    showBottomSheet({
-        title: t('theme_presets') || 'Presets',
-        cardItems
-    });
-};
-
-const openAddThemeSheet = () => {
-    showBottomSheet({
-        title: t('theme_presets') || 'Presets',
-        items: [
-            {
-                label: t('action_create_new') || 'Create New',
-                icon: '<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>',
-                onClick: () => {
-                    closeBottomSheet();
-                    handleSavePreset();
-                }
-            },
-            {
-                label: t('action_import') || 'Import from file',
-                icon: '<svg viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>',
-                onClick: () => {
-                    closeBottomSheet();
-                    themeImportInput.value?.click();
-                }
-            }
-        ]
-    });
-};
-
-const openThemePresetOptions = (preset) => {
-    const items = [];
-    
-    items.push({
-        label: t('action_edit_name') || 'Change Name',
-        icon: '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>',
-        onClick: () => {
-            closeBottomSheet();
-            showBottomSheet({
-                title: t('action_edit_name') || 'Change Name',
-                input: {
-                    placeholder: t('theme_preset_name_placeholder') || 'Enter name',
-                    value: preset.name,
-                    confirmLabel: t('btn_save') || 'Save',
-                    onConfirm: async (val) => {
-                        if (val) {
-                            presets.value = await updatePresetMeta(preset.id, val, preset.author);
-                            closeBottomSheet();
-                        }
-                    }
-                }
-            });
-        }
-    });
-
-    items.push({
-        label: t('change_author') || 'Change Author',
-        icon: '<svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>',
-        onClick: () => {
-            closeBottomSheet();
-            showBottomSheet({
-                title: t('change_author') || 'Change Author',
-                input: {
-                    placeholder: t('placeholder_author_name') || 'Enter author',
-                    value: preset.author || '',
-                    confirmLabel: t('btn_save') || 'Save',
-                    onConfirm: async (val) => {
-                        presets.value = await updatePresetMeta(preset.id, preset.name, val);
-                        closeBottomSheet();
-                    }
-                }
-            });
-        }
-    });
-
-    items.push({
-        label: t('action_export') || 'Export',
-        icon: '<svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>',
-        onClick: async () => {
-            closeBottomSheet();
-            await handleExportPreset(preset.id);
-        }
-    });
-
-    items.push({
-        label: t('btn_delete') || 'Delete',
-        icon: '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>',
-        iconColor: '#ff4444',
-        isDestructive: true,
-        onClick: () => {
-            closeBottomSheet();
-            handleDeletePreset(preset.id);
-        }
-    });
-
-    showBottomSheet({
-        title: preset.name,
-        items
-    });
-};
-
-const handleExportPreset = async (presetId) => {
-    try {
-        const exportedData = await exportThemePreset(presetId);
-        if (!exportedData) return;
-        const fileName = (exportedData.name || 'Theme').replace(/[^a-z0-9а-яё]/gi, '_').toLowerCase();
-        await saveFile(`${fileName}.json`, JSON.stringify(exportedData, null, 4), 'application/json', 'themes');
-    } catch (e) {
-        console.error('Export theme failed', e);
-    }
-};
-
-const onThemeFileSelected = async (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-        try {
-            const json = JSON.parse(e.target.result);
-            const newPreset = await importThemePreset(json, file.name.replace(/\.json$/i, ''));
-            updateAppColors();
-            await loadPresetsList();
-        } catch (err) {
-            console.error('Error importing theme:', err);
-            alert(err.message || 'Invalid theme file');
-        }
-        event.target.value = '';
-    };
-    reader.readAsText(file);
-};
-
-const getPresetName = (id) => {
-    if (!id) return t('theme_preset_none') || 'None';
-    const p = presets.value.find(x => x.id === id);
-    return p ? p.name : (t('theme_preset_unknown') || 'Unknown');
-};
-
-
-
-const onBackgroundImageSelected = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (re) => {
-        const dataUrl = re.target.result;
-        setBackgroundImage(file);
-        
-        // Update local presets list instantly for the dropdown/selector
-        const index = presets.value.findIndex(p => p.id === themeState.activePresetId);
-        if (index !== -1) {
-            presets.value[index].bgImage = dataUrl;
-        }
-    };
-    reader.readAsDataURL(file);
-};
-
 const handleResetBackground = async () => {
     await setBackgroundImage(null);
     if (bgInput.value) bgInput.value.value = '';
     
-    // Update local presets list instantly for the dropdown/selector
     const index = presets.value.findIndex(p => p.id === themeState.activePresetId);
     if (index !== -1) {
         presets.value[index].bgImage = null;
@@ -466,12 +210,9 @@ const openChatFontSelector = () => {
 
 const viewStyle = computed(() => {
     if (!themeState.hasBackgroundImage) return {};
-    
-    return {
-    };
+    return {};
 });
 
-// Preview Styles
 const getContrastColorRGB = (hex) => {
     if (!hex) return '255, 255, 255';
     hex = hex.replace('#', '');
@@ -498,7 +239,9 @@ const chatPreviewStyle = computed(() => ({
     <div class="view active-view theme-settings-screen" :style="viewStyle">
         <!-- Persistent Presets Section -->
         <div class="menu-group">
-            <div class="section-header">{{ t('theme_presets') }}</div>
+            <div class="section-header">
+{{ t('theme_presets') }}
+</div>
             <div style="padding: 0 16px 16px;">
                  <div class="preset-selector" @click="openPresetSelector" style="display: flex; justify-content: space-between; padding: 12px; align-items: center;">
                     <div style="display: flex; flex-direction: column; gap: 2px; text-align: left;">
@@ -526,34 +269,50 @@ const chatPreviewStyle = computed(() => ({
 
             <div v-if="themeState.activePresetId !== 'default'">
                 <div class="menu-group" style="display: block;">
-                    <div class="section-header">{{ t('theme_accent_color') }}</div>
+                    <div class="section-header">
+{{ t('theme_accent_color') }}
+</div>
                     <div class="menu-item color-item" @click="openColorPicker('accent', t('theme_accent_color'), themeState.accentColor, PRESET_COLORS)">
-                        <div class="menu-text" style="flex:1;">{{ t('theme_accent_color') }}</div>
+                        <div class="menu-text" style="flex:1;">
+{{ t('theme_accent_color') }}
+</div>
                         <div class="color-pill" :style="{ backgroundColor: themeState.accentColor }"></div>
                     </div>
                 </div>
 
                 <div class="menu-group" style="display: block;">
-                    <div class="section-header">{{ t('theme_ui_font') || 'App Interface Font' }}</div>
+                    <div class="section-header">
+{{ t('theme_ui_font') || 'App Interface Font' }}
+</div>
                     <div class="menu-item" @click="openUiFontSelector">
                         <svg class="menu-icon" viewBox="0 0 24 24"><path d="M9.93 13.5h4.14L12 7.98zM20 2H4c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-4.05 16.5l-1.14-3H9.17l-1.12 3H5.96l5.11-13h1.86l5.11 13h-2.09z"/></svg>
-                        <div class="menu-text" style="flex:1;">{{ t('theme_font') || 'Font' }}</div>
-                        <div style="font-size: 14px; opacity: 0.7;">{{ uiFontModeLabel }}</div>
+                        <div class="menu-text" style="flex:1;">
+{{ t('theme_font') || 'Font' }}
+</div>
+                        <div style="font-size: 14px; opacity: 0.7;">
+{{ uiFontModeLabel }}
+</div>
                     </div>
                     <div v-if="themeState.uiFontMode === 'custom'" class="menu-item" @click="handleResetFont">
                         <svg class="menu-icon" viewBox="0 0 24 24" style="fill: #ff4444;"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
-                        <div class="menu-text" style="color: #ff4444;">{{ t('theme_reset_font') || 'Reset Font' }}</div>
+                        <div class="menu-text" style="color: #ff4444;">
+{{ t('theme_reset_font') || 'Reset Font' }}
+</div>
                     </div>
                     <input type="file" ref="fontInput" accept=".ttf,.otf,.woff,.woff2" style="display: none;" @change="(e) => setCustomFont(e.target.files[0])">
 
                     <div class="menu-item color-item" @click="openColorPicker('uiText', t('theme_ui_text_color') || 'Text Color', themeState.uiTextColor, PRESET_UI_COLORS, true)">
-                        <div class="menu-text" style="flex:1;">{{ t('theme_ui_text_color') || 'Text Color' }}</div>
+                        <div class="menu-text" style="flex:1;">
+{{ t('theme_ui_text_color') || 'Text Color' }}
+</div>
                         <div class="color-pill" :style="{ backgroundColor: themeState.uiTextColor || 'var(--text-black)', border: !themeState.uiTextColor ? '1px solid var(--text-gray)' : 'none' }">
                             <span v-if="!themeState.uiTextColor" style="font-size: 10px; color: var(--text-gray); font-weight: 500;">Auto</span>
                         </div>
                     </div>
                     <div class="menu-item color-item" @click="openColorPicker('uiTextGray', t('theme_ui_text_gray_color') || 'Secondary Text Color', themeState.uiTextGrayColor, PRESET_UI_COLORS, true)">
-                        <div class="menu-text" style="flex:1;">{{ t('theme_ui_text_gray_color') || 'Secondary Text Color' }}</div>
+                        <div class="menu-text" style="flex:1;">
+{{ t('theme_ui_text_gray_color') || 'Secondary Text Color' }}
+</div>
                         <div class="color-pill" :style="{ backgroundColor: themeState.uiTextGrayColor || 'var(--text-gray)', border: !themeState.uiTextGrayColor ? '1px solid var(--text-gray)' : 'none' }">
                             <span v-if="!themeState.uiTextGrayColor" style="font-size: 10px; color: var(--text-gray); font-weight: 500;">Auto</span>
                         </div>
@@ -563,7 +322,9 @@ const chatPreviewStyle = computed(() => ({
 
                     <div class="menu-item" @click="openFontSizeSelector('ui')">
                         <svg class="menu-icon" viewBox="0 0 24 24"><path d="M2.5 4v3h5v12h3V7h5V4h-13zm19 5h-9v3h3v7h3v-7h3V9z"/></svg>
-                        <div class="menu-text" style="flex:1;">{{ t('theme_font_size') || 'Font Size' }}</div>
+                        <div class="menu-text" style="flex:1;">
+{{ t('theme_font_size') || 'Font Size' }}
+</div>
                         <div style="font-size: 14px; opacity: 0.7;">
                             {{ themeState.uiFontSize === 'system' ? (t('theme_system_font_size') || 'System') : themeState.uiFontSize + 'px' }}
                         </div>
@@ -585,9 +346,13 @@ const chatPreviewStyle = computed(() => ({
                 </div>
 
                 <div class="menu-group" style="display: block;">
-                    <div class="section-header">{{ t('theme_ui_effects') }}</div>
+                    <div class="section-header">
+{{ t('theme_ui_effects') }}
+</div>
                     <div class="menu-item color-item" @click="openColorPicker('ui', t('theme_ui_color') || 'UI Color', themeState.uiColor, PRESET_UI_COLORS, true)">
-                        <div class="menu-text" style="flex:1;">{{ t('theme_ui_color') || 'UI Color' }}</div>
+                        <div class="menu-text" style="flex:1;">
+{{ t('theme_ui_color') || 'UI Color' }}
+</div>
                         <div class="color-pill" :style="{ backgroundColor: themeState.uiColor || 'var(--bg-gray)', border: !themeState.uiColor ? '1px solid var(--text-gray)' : 'none' }">
                             <span v-if="!themeState.uiColor" style="font-size: 10px; color: var(--text-gray); font-weight: 500;">Accent</span>
                         </div>
@@ -612,9 +377,13 @@ const chatPreviewStyle = computed(() => ({
                 </div>
 
                 <div class="menu-group" style="display: block;">
-                    <div class="section-header">{{ t('theme_border') || 'Border' }}</div>
+                    <div class="section-header">
+{{ t('theme_border') || 'Border' }}
+</div>
                     <div class="menu-item color-item" @click="openColorPicker('borderColor', t('theme_border_color') || 'Border Color', themeState.borderColor, PRESET_UI_COLORS, true, 'Auto')">
-                        <div class="menu-text" style="flex:1;">{{ t('theme_border_color') || 'Border Color' }}</div>
+                        <div class="menu-text" style="flex:1;">
+{{ t('theme_border_color') || 'Border Color' }}
+</div>
                         <div class="color-pill" :style="{ backgroundColor: themeState.borderColor || 'var(--bg-gray)', border: !themeState.borderColor ? '1px solid var(--text-gray)' : 'none' }">
                             <span v-if="!themeState.borderColor" style="font-size: 10px; color: var(--text-gray); font-weight: 500;">Auto</span>
                         </div>
@@ -639,7 +408,9 @@ const chatPreviewStyle = computed(() => ({
                 </div>
 
                 <div class="menu-group" style="display: block;">
-                    <div class="section-header">{{ t('theme_noise') || 'Noise Texture' }}</div>
+                    <div class="section-header">
+{{ t('theme_noise') || 'Noise Texture' }}
+</div>
                     <div style="padding: 16px;">
                         <div style="margin-bottom: 20px;">
                             <div style="display:flex; justify-content:space-between; margin-bottom:8px; font-size: 14px;">
@@ -659,14 +430,20 @@ const chatPreviewStyle = computed(() => ({
                 </div>
 
                 <div class="menu-group" style="display: block;">
-                    <div class="section-header">{{ t('theme_background_image') }}</div>
+                    <div class="section-header">
+{{ t('theme_background_image') }}
+</div>
                     <div class="menu-item" @click="bgInput.click()">
                         <svg class="menu-icon" viewBox="0 0 24 24"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
-                        <div class="menu-text">{{ t('theme_select_image') }}</div>
+                        <div class="menu-text">
+{{ t('theme_select_image') }}
+</div>
                     </div>
                     <div v-if="themeState.hasBackgroundImage" class="menu-item" @click="handleResetBackground">
                         <svg class="menu-icon" viewBox="0 0 24 24" style="fill: #ff4444;"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
-                        <div class="menu-text" style="color: #ff4444;">{{ t('theme_reset_background') }}</div>
+                        <div class="menu-text" style="color: #ff4444;">
+{{ t('theme_reset_background') }}
+</div>
                     </div>
                     <input type="file" ref="bgInput" accept="image/*" style="display: none;" @change="onBackgroundImageSelected">
                     <div v-if="themeState.hasBackgroundImage">
@@ -712,12 +489,16 @@ const chatPreviewStyle = computed(() => ({
         <div v-if="activeTab === 'chat'">
             <!-- Live Preview -->
             <div class="menu-group preview-group">
-                <div class="section-header">{{ t('theme_preview_title') || 'Preview' }}</div>
+                <div class="section-header">
+{{ t('theme_preview_title') || 'Preview' }}
+</div>
                 <div class="chat-preview-container" :style="chatPreviewStyle">
                     <!-- User Message -->
                     <div class="message-section user" :class="[`layout-${themeState.chatLayout}`]">
                         <div v-if="themeState.chatLayout !== 'bubble'" class="msg-header">
-                            <div class="msg-avatar" style="background-color: var(--vk-blue)">U</div>
+                            <div class="msg-avatar" style="background-color: var(--vk-blue)">
+U
+</div>
                             <span class="msg-name">{{ t('role_user') || 'User' }}</span>
                             <span class="msg-time">12:00</span>
                         </div>
@@ -745,7 +526,9 @@ const chatPreviewStyle = computed(() => ({
                     <!-- Character Message -->
                     <div class="message-section char" :class="[`layout-${themeState.chatLayout}`]">
                         <div v-if="themeState.chatLayout !== 'bubble'" class="msg-header">
-                            <div class="msg-avatar" :style="{ backgroundColor: themeState.accentColor }">C</div>
+                            <div class="msg-avatar" :style="{ backgroundColor: themeState.accentColor }">
+C
+</div>
                             <span class="msg-name">{{ t('level_character') || 'Character' }}</span>
                             <span class="msg-time">12:01</span>
                         </div>
@@ -792,15 +575,23 @@ const chatPreviewStyle = computed(() => ({
             <div v-if="activeChatSubTab === 'font'">
                 <div v-if="themeState.activePresetId !== 'default'">
                     <div class="menu-group" style="display: block;">
-                        <div class="section-header">{{ t('theme_chat_font') || 'Chat Messages Font' }}</div>
+                        <div class="section-header">
+{{ t('theme_chat_font') || 'Chat Messages Font' }}
+</div>
                         <div class="menu-item" @click="openChatFontSelector">
                             <svg class="menu-icon" viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-3 12H7v-2h10v2zm0-3H7V9h10v2zm0-3H7V6h10v2z"/></svg>
-                            <div class="menu-text" style="flex:1;">{{ t('theme_font') || 'Font' }}</div>
-                            <div style="font-size: 14px; opacity: 0.7;">{{ chatFontModeLabel }}</div>
+                            <div class="menu-text" style="flex:1;">
+{{ t('theme_font') || 'Font' }}
+</div>
+                            <div style="font-size: 14px; opacity: 0.7;">
+{{ chatFontModeLabel }}
+</div>
                         </div>
                         <div v-if="themeState.chatFontMode === 'custom'" class="menu-item" @click="handleResetChatFont">
                             <svg class="menu-icon" viewBox="0 0 24 24" style="fill: #ff4444;"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
-                            <div class="menu-text" style="color: #ff4444;">{{ t('theme_reset_font') || 'Reset Font' }}</div>
+                            <div class="menu-text" style="color: #ff4444;">
+{{ t('theme_reset_font') || 'Reset Font' }}
+</div>
                         </div>
                         <input type="file" ref="chatFontInput" accept=".ttf,.otf,.woff,.woff2" style="display: none;" @change="(e) => setChatFont(e.target.files[0])">
 
@@ -808,7 +599,9 @@ const chatPreviewStyle = computed(() => ({
 
                         <div class="menu-item" @click="openFontSizeSelector('chat')">
                             <svg class="menu-icon" viewBox="0 0 24 24"><path d="M2.5 4v3h5v12h3V7h5V4h-13zm19 5h-9v3h3v7h3v-7h3V9z"/></svg>
-                            <div class="menu-text" style="flex:1;">{{ t('theme_font_size') || 'Font Size' }}</div>
+                            <div class="menu-text" style="flex:1;">
+{{ t('theme_font_size') || 'Font Size' }}
+</div>
                             <div style="font-size: 14px; opacity: 0.7;">
                                 {{ themeState.chatFontSize === 'system' ? (t('theme_system_font_size') || 'System') : themeState.chatFontSize + 'px' }}
                             </div>
@@ -834,16 +627,22 @@ const chatPreviewStyle = computed(() => ({
             <div v-if="activeChatSubTab === 'colors'">
                 <div v-if="themeState.activePresetId !== 'default'">
                     <div class="menu-group" style="display: block;">
-                        <div class="section-header">{{ t('theme_bubble_colors') || 'Bubble Colors' }}</div>
+                        <div class="section-header">
+{{ t('theme_bubble_colors') || 'Bubble Colors' }}
+</div>
                         <div v-if="themeState.chatLayout === 'bubble'">
                             <div class="menu-item color-item" @click="openColorPicker('userBubble', t('theme_user_bubble') || 'User Bubble Color', themeState.userBubbleColor, PRESET_COLORS, true)">
-                                <div class="menu-text" style="flex:1;">{{ t('theme_user_bubble') || 'User Bubble Color' }}</div>
+                                <div class="menu-text" style="flex:1;">
+{{ t('theme_user_bubble') || 'User Bubble Color' }}
+</div>
                                 <div class="color-pill" :style="{ backgroundColor: themeState.userBubbleColor || themeState.accentColor }">
                                     <span v-if="!themeState.userBubbleColor" :style="{ color: getContrastColor(themeState.accentColor) }" style="font-size: 10px; font-weight: 600;">Accent</span>
                                 </div>
                             </div>
                             <div class="menu-item color-item" @click="openColorPicker('charBubble', t('theme_char_bubble') || 'Character Bubble Color', themeState.charBubbleColor, PRESET_COLORS, true)">
-                                <div class="menu-text" style="flex:1;">{{ t('theme_char_bubble') || 'Character Bubble Color' }}</div>
+                                <div class="menu-text" style="flex:1;">
+{{ t('theme_char_bubble') || 'Character Bubble Color' }}
+</div>
                                 <div class="color-pill" :style="{ backgroundColor: themeState.charBubbleColor || 'var(--bg-gray)', border: !themeState.charBubbleColor ? '1px solid var(--text-gray)' : 'none' }">
                                     <span v-if="!themeState.charBubbleColor" style="font-size: 10px; color: var(--text-gray); font-weight: 500;">Accent</span>
                                 </div>
@@ -855,15 +654,21 @@ const chatPreviewStyle = computed(() => ({
                     </div>
 
                     <div class="menu-group" style="display: block;">
-                        <div class="section-header">{{ t('theme_reply_colors') || 'Reply Colors' }}</div>
+                        <div class="section-header">
+{{ t('theme_reply_colors') || 'Reply Colors' }}
+</div>
                         <div class="menu-item color-item" @click="openColorPicker('userReply', t('theme_user_reply') || 'User Reply Color', themeState.userQuoteColor, PRESET_COLORS, true)">
-                            <div class="menu-text" style="flex:1;">{{ t('theme_user_reply') || 'User Reply Color' }}</div>
+                            <div class="menu-text" style="flex:1;">
+{{ t('theme_user_reply') || 'User Reply Color' }}
+</div>
                             <div class="color-pill" :style="{ backgroundColor: themeState.userQuoteColor || themeState.accentColor }">
                                 <span v-if="!themeState.userQuoteColor" :style="{ color: getContrastColor(themeState.accentColor) }" style="font-size: 10px; font-weight: 600;">Accent</span>
                             </div>
                         </div>
                         <div class="menu-item color-item" @click="openColorPicker('charReply', t('theme_char_reply') || 'Character Reply Color', themeState.charQuoteColor, PRESET_COLORS, true)">
-                            <div class="menu-text" style="flex:1;">{{ t('theme_char_reply') || 'Character Reply Color' }}</div>
+                            <div class="menu-text" style="flex:1;">
+{{ t('theme_char_reply') || 'Character Reply Color' }}
+</div>
                             <div class="color-pill" :style="{ backgroundColor: themeState.charQuoteColor || themeState.accentColor }">
                                 <span v-if="!themeState.charQuoteColor" :style="{ color: getContrastColor(themeState.accentColor) }" style="font-size: 10px; font-weight: 600;">Accent</span>
                             </div>
@@ -871,15 +676,21 @@ const chatPreviewStyle = computed(() => ({
                     </div>
 
                     <div class="menu-group" style="display: block;">
-                        <div class="section-header">{{ t('theme_text_colors') || 'Text Colors' }}</div>
+                        <div class="section-header">
+{{ t('theme_text_colors') || 'Text Colors' }}
+</div>
                         <div class="menu-item color-item" @click="openColorPicker('userText', t('theme_user_text') || 'User Text Color', themeState.userTextColor, PRESET_COLORS, true)">
-                            <div class="menu-text" style="flex:1;">{{ t('theme_user_text') || 'User Text Color' }}</div>
+                            <div class="menu-text" style="flex:1;">
+{{ t('theme_user_text') || 'User Text Color' }}
+</div>
                             <div class="color-pill" :style="{ backgroundColor: themeState.userTextColor || 'var(--text-black)', border: !themeState.userTextColor ? '1px solid var(--text-gray)' : 'none' }">
                                 <span v-if="!themeState.userTextColor" style="font-size: 10px; color: var(--text-gray); font-weight: 500;">Accent</span>
                             </div>
                         </div>
                         <div class="menu-item color-item" @click="openColorPicker('charText', t('theme_char_text') || 'Character Text Color', themeState.charTextColor, PRESET_COLORS, true)">
-                            <div class="menu-text" style="flex:1;">{{ t('theme_char_text') || 'Character Text Color' }}</div>
+                            <div class="menu-text" style="flex:1;">
+{{ t('theme_char_text') || 'Character Text Color' }}
+</div>
                             <div class="color-pill" :style="{ backgroundColor: themeState.charTextColor || 'var(--text-black)', border: !themeState.charTextColor ? '1px solid var(--text-gray)' : 'none' }">
                                 <span v-if="!themeState.charTextColor" style="font-size: 10px; color: var(--text-gray); font-weight: 500;">Accent</span>
                             </div>
@@ -887,15 +698,21 @@ const chatPreviewStyle = computed(() => ({
                     </div>
 
                     <div class="menu-group" style="display: block;">
-                        <div class="section-header">{{ t('theme_italic_colors') || 'Italic (Thoughts) Colors' }}</div>
+                        <div class="section-header">
+{{ t('theme_italic_colors') || 'Italic (Thoughts) Colors' }}
+</div>
                         <div class="menu-item color-item" @click="openColorPicker('userItalic', t('theme_user_italic') || 'User Italic Color', themeState.userItalicColor, PRESET_COLORS, true)">
-                            <div class="menu-text" style="flex:1;">{{ t('theme_user_italic') || 'User Italic Color' }}</div>
+                            <div class="menu-text" style="flex:1;">
+{{ t('theme_user_italic') || 'User Italic Color' }}
+</div>
                             <div class="color-pill" :style="{ backgroundColor: themeState.userItalicColor || 'var(--text-gray)', border: !themeState.userItalicColor ? '1px solid var(--text-gray)' : 'none' }">
                                 <span v-if="!themeState.userItalicColor" style="font-size: 10px; color: var(--text-gray); font-weight: 500;">Accent</span>
                             </div>
                         </div>
                         <div class="menu-item color-item" @click="openColorPicker('charItalic', t('theme_char_italic') || 'Character Italic Color', themeState.charItalicColor, PRESET_COLORS, true)">
-                            <div class="menu-text" style="flex:1;">{{ t('theme_char_italic') || 'Character Italic Color' }}</div>
+                            <div class="menu-text" style="flex:1;">
+{{ t('theme_char_italic') || 'Character Italic Color' }}
+</div>
                             <div class="color-pill" :style="{ backgroundColor: themeState.charItalicColor || 'var(--text-gray)', border: !themeState.charItalicColor ? '1px solid var(--text-gray)' : 'none' }">
                                 <span v-if="!themeState.charItalicColor" style="font-size: 10px; color: var(--text-gray); font-weight: 500;">Accent</span>
                             </div>

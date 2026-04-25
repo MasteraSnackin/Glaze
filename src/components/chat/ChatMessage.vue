@@ -1,20 +1,21 @@
 <script setup>
-import { ref, computed, nextTick, watch, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import { Capacitor } from '@capacitor/core';
 import { formatText } from '@/utils/textFormatter.js';
 import { replaceMacros } from '@/utils/macroEngine.js';
 import ShadowContent from '@/components/ui/ShadowContent.vue';
 import { translations } from '@/utils/i18n.js';
-import { currentLang, disableSwipeRegeneration, shouldUseBatterySaverUI } from '@/core/config/APPSettings.js';
+import { currentLang, hideMessageId, hideGenerationTime, hideTokenCount } from '@/core/config/APPSettings.js';
 import { themeState } from '@/core/states/themeState.js';
 import { getAllGreetings } from '@/utils/sessions.js';
 import { getEffectivePersona, allPersonas } from '@/core/states/personaState.js';
-import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
-import { hideMessageId, hideGenerationTime, hideTokenCount } from '@/core/config/APPSettings.js';
 import RollingNumber from '@/components/ui/RollingNumber.vue';
 import SheetView from '@/components/ui/SheetView.vue';
 import { getBlacklistedProvider, getApiRuntimeStorage } from '@/core/config/APISettings.js';
-import { saveFile } from '@/core/services/fileSaver.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
+import { publishAppEvent, subscribeAppEvent } from '@/core/events/eventHub.js';
+import { useMessageSwipe } from '@/composables/chat/useMessageSwipe.js';
+import { useMessageImageGen } from '@/composables/chat/useMessageImageGen.js';
 
 const props = defineProps({
     message: { type: Object, required: true },
@@ -34,81 +35,32 @@ const props = defineProps({
 const emit = defineEmits([
     'swipe', 'change-greeting', 'regenerate', 'edit', 'save-edit', 'cancel-edit',
     'open-actions', 'open-avatar', 'delete', 'toggle-selection', 'toggle-image-hidden',
-    'save-guidance', 'regenerate-image', 'open-memory-coverage'
+    'save-guidance', 'regenerate-image', 'open-memory-coverage', 'update:editText'
 ]);
+
+const localEditText = computed({
+    get: () => props.message.editText ?? '',
+    set: (val) => emit('update:editText', val)
+});
 
 const triggeredItemsSheet = ref(null);
 const t = (key) => translations[currentLang.value]?.[key] || key;
-const isNativePlatform = Capacitor.isNativePlatform();
-const useLiteNativeRenderer = computed(() => shouldUseBatterySaverUI());
-const swipeTransitionName = computed(() => useLiteNativeRenderer.value ? 'transition-none' : (props.message.swipeDirection || 'slide-next'));
-const fadeTransitionName = computed(() => useLiteNativeRenderer.value ? 'transition-none' : 'fade');
+const _isNativePlatform = Capacitor.isNativePlatform();
 
-const isGuidedSwipeOpen = ref(false);
-const guidedSwipeText = ref('');
-const guidedSwipeInput = ref(null);
+const {
+    isGuidedSwipeOpen, guidedSwipeText, guidedSwipeInput,
+    useLiteNativeRenderer, swipeTransitionName, fadeTransitionName,
+    toggleGuidedSwipe, submitGuidedSwipe,
+    isGuidanceEditing, guidanceEditText, currentGuidance,
+    startGuidanceEdit, cancelGuidanceEdit, saveGuidanceEdit,
+    handleTouchStart, handleTouchMove, handleTouchEnd,
+    handleMessageClick,
+} = useMessageSwipe(props, emit);
 
-const toggleGuidedSwipe = () => {
-    isGuidedSwipeOpen.value = !isGuidedSwipeOpen.value;
-    if (isGuidedSwipeOpen.value) {
-        nextTick(() => { if (guidedSwipeInput.value) guidedSwipeInput.value.focus(); });
-    } else {
-        guidedSwipeText.value = '';
-    }
-};
-
-const submitGuidedSwipe = () => {
-    emit('regenerate', 'guided', guidedSwipeText.value);
-    isGuidedSwipeOpen.value = false;
-    guidedSwipeText.value = '';
-};
-
-const isGuidanceEditing = ref(false);
-const guidanceEditText = ref('');
-
-const startGuidanceEdit = () => {
-    guidanceEditText.value = currentGuidance.value?.text || '';
-    isGuidanceEditing.value = true;
-};
-
-const cancelGuidanceEdit = () => {
-    isGuidanceEditing.value = false;
-};
-
-const saveGuidanceEdit = () => {
-    emit('save-guidance', guidanceEditText.value.trim() || null);
-    isGuidanceEditing.value = false;
-};
-
-const currentGuidance = computed(() => {
-    // If it's a character message, ONLY show if it's explicitly a SWIPE
-    if (props.message.role === 'char') {
-        const meta = props.message.swipesMeta?.[props.message.swipeId || 0];
-        if (meta && meta.guidanceText && meta.guidanceType === 'SWIPE') {
-            return {
-                text: meta.guidanceText,
-                type: 'SWIPE'
-            };
-        }
-        // Fallback for typing/initial swipe state
-        if (props.message.isTyping && props.message.guidanceText && props.message.guidanceType === 'SWIPE') {
-            return {
-                text: props.message.guidanceText,
-                type: 'SWIPE'
-            };
-        }
-        return null; // Don't show redundant headers for GENERATION or IMPERSONATION on bot side
-    }
-
-    // User message: Show if it has any guidance
-    if (props.message.role === 'user' && props.message.guidanceText) {
-        return {
-            text: props.message.guidanceText,
-            type: props.message.guidanceType || 'GENERATION'
-        };
-    }
-    return null;
-});
+const {
+    handleContentClick: imgGenContentClick,
+    openImage,
+} = useMessageImageGen(emit);
 
 // --- Helpers ---
 const getAvatar = () => {
@@ -156,8 +108,7 @@ const formatMessageText = (text, regexTracking = undefined) => {
     if (!text) return '';
     const effPersona = getEffectivePersona(props.activeChatChar?.id, props.activeChatChar?.sessionId);
     text = replaceMacros(text, props.activeChatChar, effPersona);
-    // Fix: Clean artifacts and trim leading whitespace immediately
-    let clean = text.replace(/^\s+/, '')
+    const clean = text.replace(/^\s+/, '')
                     .replace(/&gt;/gi, '>')
                     .replace(/&lt;/gi, '<')
                     .replace(/&amp;/gi, '&')
@@ -173,177 +124,7 @@ const formatMessageText = (text, regexTracking = undefined) => {
     });
 };
 
-// --- Swipe & Long Press Logic ---
-let swipeStartX = 0;
-let swipeStartY = 0;
-let isSwipeScrolling = false;
-let currentSwipeElement = null;
-let longPressTimer = null;
-let isLongPressTriggered = false;
-
-let hadSelectionOnStart = false;
- 
-function handleTouchStart(e) {
-    hadSelectionOnStart = false;
-    const sel = window.getSelection();
-    if (sel && sel.toString().trim().length > 0) {
-        hadSelectionOnStart = true;
-    }
-
-    if (props.isSelectionMode) return;
-    if (props.message.role !== 'char' || props.message.isEditing || props.isGenerating) {
-        // Still allow long press for selection on user messages or non-editing states
-        if (props.message.isEditing || props.isGenerating) return;
-    } else {
-        swipeStartX = e.touches[0].clientX;
-        swipeStartY = e.touches[0].clientY;
-        isSwipeScrolling = false;
-        
-        const section = e.currentTarget;
-        const body = section.querySelector('.msg-body');
-        if (body) {
-            body.style.transition = 'none';
-            currentSwipeElement = body;
-        }
-    }
-
-    // Long press logic
-    isLongPressTriggered = false;
-    longPressTimer = setTimeout(() => {
-        isLongPressTriggered = true;
-        emit('toggle-selection');
-        if (currentSwipeElement) {
-            currentSwipeElement.style.transform = '';
-            currentSwipeElement = null;
-        }
-    }, 500);
-}
-
-function handleTouchMove(e) {
-    if (isLongPressTriggered) return;
-    
-    const dX = e.touches[0].clientX - (swipeStartX || e.touches[0].clientX);
-    const dY = e.touches[0].clientY - (swipeStartY || e.touches[0].clientY);
-
-    // If moved significantly, cancel long press
-    if (Math.abs(dX) > 10 || Math.abs(dY) > 10) {
-        if (longPressTimer) {
-            clearTimeout(longPressTimer);
-            longPressTimer = null;
-        }
-    }
-
-    if (!currentSwipeElement || props.message.role !== 'char' || props.message.isEditing) return;
-    if (isSwipeScrolling) return;
-
-    const deltaX = e.touches[0].clientX - swipeStartX;
-    const deltaY = e.touches[0].clientY - swipeStartY;
-
-    if (Math.abs(deltaY) > Math.abs(deltaX)) {
-        isSwipeScrolling = true;
-        return;
-    }
-
-    if (e.cancelable) e.preventDefault();
-
-    const isFirstMsg = props.index === 0;
-    const canSwitchGreeting = isFirstMsg && getAllGreetings(props.activeChatChar).length > 1;
-    
-    if (deltaX < 0) { // Left (Next)
-        if (!canSwitchGreeting) {
-            if (!props.isLast && (props.message.swipeId || 0) >= (props.message.swipes?.length || 1) - 1) return;
-        }
-    } else if (deltaX > 0) { // Right (Prev)
-        if (!canSwitchGreeting) {
-            if ((props.message.swipeId || 0) <= 0) return;
-        }
-    }
-
-    currentSwipeElement.style.transform = `translateX(${deltaX}px)`;
-}
-
-function handleTouchEnd(e) {
-    if (longPressTimer) {
-        clearTimeout(longPressTimer);
-        longPressTimer = null;
-    }
-
-    if (isLongPressTriggered) {
-        isLongPressTriggered = false;
-        return;
-    }
-
-    if (!currentSwipeElement) return;
-    
-    const deltaX = e.changedTouches[0].clientX - swipeStartX;
-    const body = currentSwipeElement;
-    currentSwipeElement = null;
-    
-    if (isSwipeScrolling) {
-        body.style.transform = '';
-        return;
-    }
-
-    const isFirstMsg = props.index === 0;
-    const canSwitchGreeting = isFirstMsg && getAllGreetings(props.activeChatChar).length > 1;
-
-    const resetStyle = () => {
-        body.style.transition = 'transform 0.3s ease';
-        body.style.transform = '';
-    };
-
-    const animateChange = (callback) => {
-        body.style.opacity = '0';
-        callback();
-        nextTick(() => {
-            body.style.transform = '';
-            setTimeout(() => {
-                body.style.transition = 'opacity 0.2s ease';
-                body.style.opacity = '1';
-                setTimeout(() => { body.style.transition = ''; }, 200);
-            }, 50);
-        });
-    };
-
-    if (canSwitchGreeting) {
-        if (deltaX < -100) animateChange(() => emit('change-greeting', 1));
-        else if (deltaX > 100) animateChange(() => emit('change-greeting', -1));
-        else resetStyle();
-        return;
-    }
-
-    if (deltaX < -100) {
-        if ((props.message.swipeId || 0) < (props.message.swipes?.length || 1) - 1) {
-            animateChange(() => emit('swipe', 1));
-        } else if (props.isLast && !disableSwipeRegeneration.value) {
-            body.style.transition = 'transform 0.1s';
-            body.style.transform = `translateX(-20px)`;
-            setTimeout(() => { 
-                body.style.transform = ''; 
-                emit('regenerate', 'new_variant');
-            }, 100);
-        } else {
-            resetStyle();
-        }
-    } else if (deltaX > 100) {
-        if ((props.message.swipeId || 0) > 0) animateChange(() => emit('swipe', -1));
-        else resetStyle();
-    } else {
-        resetStyle();
-    }
-}
- 
-const handleMessageClick = () => {
-    if (!props.isSelectionMode) return;
-    
-    if (hadSelectionOnStart) {
-        hadSelectionOnStart = false;
-        window.getSelection()?.removeAllRanges();
-        return;
-    }
-    
-    emit('toggle-selection');
-};
+const layoutMode = computed(() => themeState.chatLayout);
 
 const handleBubbleClick = (e) => {
     if (layoutMode.value !== 'bubble') return;
@@ -354,8 +135,6 @@ const handleBubbleClick = (e) => {
     
     emit('open-actions');
 };
-
-
 
 const focusAndResize = (el) => {
     if (!el) return;
@@ -369,7 +148,6 @@ const copyText = (text) => {
 };
 
 const combinedMessageData = computed(() => {
-    // Adding regexRevision as a dependency to trigger re-render
     const _rev = props.regexRevision;
     const triggeredRegexes = [];
     let html = formatMessageText(props.message.text, triggeredRegexes);
@@ -393,168 +171,29 @@ const combinedMessageData = computed(() => {
     return { html, regexes: triggeredRegexes };
 });
 
+const onContentClick = (e) => {
+    const handled = imgGenContentClick(e, layoutMode, props.isSelectionMode);
+    if (handled === true) handleBubbleClick(e);
+};
+
 const openTriggeredSheet = () => {
     triggeredItemsSheet.value?.open();
 };
 
 const openLorebookEntry = (lb) => {
     triggeredItemsSheet.value?.close();
-    window.dispatchEvent(new CustomEvent('open-lorebook-entry', {
-        detail: { lorebookId: lb.lorebookId, entryId: lb.id }
-    }));
+    publishAppEvent(APP_EVENTS.nav.openLorebookEntry, { lorebookId: lb.lorebookId, entryId: lb.id });
 };
+
 const copyErrorText = (text) => {
     if (!text) return;
     const div = document.createElement('div');
-    // Convert <br> to newlines before stripping tags
     div.innerHTML = text.replace(/<br\s*\/?>/gi, '\n');
     const cleanText = div.textContent || div.innerText || text;
     copyText(cleanText.trim());
 };
 
-const openImage = (src, instruction = null) => {
-    if (!src) return;
-    window.dispatchEvent(new CustomEvent('trigger-open-image', {
-        detail: { src, name: 'Attachment', description: instruction?.prompt || '' }
-    }));
-};
-
-const parseIIGInstruction = (el) => {
-    if (!el?.dataset?.iigInstruction) return null;
-    try {
-        return JSON.parse(el.dataset.iigInstruction
-            .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&'));
-    } catch { return null; }
-};
-
-const handleContentClick = (e) => {
-    const path = e.composedPath();
-
-    // Loading block — tap to expand/collapse prompt text
-    const loadingBlock = path.find(el => el?.classList?.contains('imggen-loading'));
-    if (loadingBlock) {
-        e.stopPropagation();
-        loadingBlock.classList.toggle('expanded');
-        return;
-    }
-
-    // Options button on janitor image → bottom sheet with 2 actions
-    const janitorOptionsBtn = path.find(el => el?.classList?.contains('janitor-options-btn'));
-    if (janitorOptionsBtn) {
-        e.stopPropagation();
-        const wrapper = path.find(el => el?.classList?.contains('janitor-img-wrapper'));
-        const img = wrapper?.querySelector?.('img.janitor-img');
-        if (!img) return;
-        const src = img.src;
-        showBottomSheet({
-            items: [
-                {
-                    label: t('imggen_expand_image') || 'Expand image',
-                    hint: t('expand_image_hint') || 'Открыть картинку в полноэкранном режиме',
-                    icon: '<svg viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zm0 12.5c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>',
-                    onClick: () => { closeBottomSheet(); openImage(src); }
-                },
-                {
-                    label: t('action_save_image') || 'Save image',
-                    hint: t('imggen_save_hint') || 'Сохранить картинку на устройство',
-                    icon: '<svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>',
-                    onClick: async () => {
-                        closeBottomSheet();
-                        try {
-                            const response = await fetch(src);
-                            const blob = await response.blob();
-                            await saveFile(`Image_${Date.now()}.png`, blob, 'image/png');
-                        } catch (err) {
-                            console.error('Failed to save image:', err);
-                        }
-                    }
-                },
-            ]
-        });
-        return;
-    }
-
-    // Options button on generated image → bottom sheet with 3 actions
-    const optionsBtn = path.find(el => el?.classList?.contains('imggen-options-btn'));
-    if (optionsBtn) {
-        e.stopPropagation();
-        const wrapper = path.find(el => el?.classList?.contains('imggen-result-wrapper'));
-        const img = wrapper?.querySelector?.('img.imggen-result');
-        if (!img) return;
-        const instr = parseIIGInstruction(img);
-        const id = img.dataset?.iigId;
-        const src = img.src;
-        showBottomSheet({
-            items: [
-                {
-                    label: t('imggen_expand_image') || 'Expand image',
-                    hint: t('imggen_expand_image_hint') || 'Открыть картинку в полноэкранном режиме и посмотреть промпт',
-                    icon: '<svg viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zm0 12.5c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>',
-                    onClick: () => { closeBottomSheet(); openImage(src, instr); }
-                },
-                {
-                    label: t('action_save_image') || 'Save image',
-                    hint: t('imggen_save_hint') || 'Сохранить картинку на устройство',
-                    icon: '<svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>',
-                    onClick: async () => {
-                        closeBottomSheet();
-                        try {
-                            const response = await fetch(src);
-                            const blob = await response.blob();
-                            await saveFile(`Image_${Date.now()}.png`, blob, 'image/png');
-                        } catch (err) {
-                            console.error('Failed to save image:', err);
-                        }
-                    }
-                },
-                {
-                    label: t('action_regenerate') || 'Regenerate',
-                    hint: t('imggen_regenerate_hint') || 'Повторно сгенерировать картинку',
-                    icon: '<svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>',
-                    onClick: () => { closeBottomSheet(); if (instr && id) emit('regenerate-image', { instruction: instr, id }); }
-                },
-            ]
-        });
-        return;
-    }
-
-    // Error retry button
-    const retryBtn = path.find(el => el?.classList?.contains('imggen-error-retry'));
-    if (retryBtn) {
-        e.stopPropagation();
-        const errorBlock = path.find(el => el?.classList?.contains('imggen-error'));
-        if (errorBlock) {
-            const instr = parseIIGInstruction(errorBlock);
-            const id = errorBlock.dataset?.iigId;
-            if (instr && id) emit('regenerate-image', { instruction: instr, id });
-        }
-        return;
-    }
-
-    // Enable and generate button
-    const enableBtn = path.find(el => el?.classList?.contains('imggen-enable-retry'));
-    if (enableBtn) {
-        e.stopPropagation();
-        const disabledBlock = path.find(el => el?.classList?.contains('imggen-disabled'));
-        if (disabledBlock) {
-            import('@/core/services/imageGenService.js').then(module => {
-                const settings = module.getImageGenSettings();
-                settings.enabled = true;
-                module.saveImageGenSettings(settings);
-                
-                const instr = parseIIGInstruction(disabledBlock);
-                const id = disabledBlock.dataset?.iigId;
-                if (instr && id) emit('regenerate-image', { instruction: instr, id });
-            });
-        }
-        return;
-    }
-
-    handleBubbleClick(e);
-};
-const layoutMode = computed(() => themeState.chatLayout);
 const showFooter = computed(() => {
-    // In bubble layout, meta and actions are hidden, so we only show footer if there are actual controls
     if (layoutMode.value === 'bubble') {
         const hasSwipes = props.message.role === 'char' && props.message.swipes?.length > 1;
         const hasGreetings = props.index === 0 && props.message.role === 'char' && getAllGreetings(props.activeChatChar).length > 1;
@@ -562,7 +201,7 @@ const showFooter = computed(() => {
         const hasTriggeredItems = props.message.triggeredLorebooks?.length || props.message.triggeredMemories?.length || combinedMessageData.value.regexes?.length;
         return hasSwipes || hasGreetings || hasRegenerate || props.message.isEditing || hasTriggeredItems;
     }
-    return true; // Always show in other layouts for meta/actions
+    return true;
 });
 
 const blacklistedErrorProvider = computed(() => {
@@ -577,9 +216,7 @@ const tokenCount = computed(() => {
 
 const memoryBadge = computed(() => {
     const coverage = props.message.memoryCoverage;
-    // Check coverage states in priority order
     if (!coverage || typeof coverage !== 'object') {
-        // No coverage object — check draft/pending states
         if (props.isPendingMemory) return { label: 'PENDING', className: 'pending' };
         if (props.isDraftMemory) return { label: 'DRAFT', className: 'draft-memory' };
         return null;
@@ -589,7 +226,6 @@ const memoryBadge = computed(() => {
     if (Array.isArray(coverage.entryIds) && coverage.entryIds.length > 0) {
         return { label: 'MEM', className: 'covered' };
     }
-    // No approved entries — check draft/pending
     if (props.isPendingMemory) return { label: 'PENDING', className: 'pending' };
     if (props.isDraftMemory) return { label: 'DRAFT', className: 'draft-memory' };
     return null;
@@ -613,12 +249,13 @@ const onSettingsChanged = () => {
     uiHideTokenCnt.value = hideTokenCount.value;
 };
 
+const unsubs = [];
 onMounted(() => {
-    window.addEventListener('settings-changed', onSettingsChanged);
+    unsubs.push(subscribeAppEvent(APP_EVENTS.domain.settings.changed, onSettingsChanged));
 });
 
-onUnmounted(() => {
-    window.removeEventListener('settings-changed', onSettingsChanged);
+onBeforeUnmount(() => {
+    unsubs.forEach(fn => fn?.());
 });
 </script>
 
@@ -683,7 +320,9 @@ onUnmounted(() => {
                     </div>
                 </div>
             </div>
-            <div v-else class="guidance-content">{{ currentGuidance.text }}</div>
+            <div v-else class="guidance-content">
+{{ currentGuidance.text }}
+</div>
         </div>
 
         <!-- Reasoning Block -->
@@ -711,7 +350,7 @@ onUnmounted(() => {
                 <!-- Edit Mode -->
                 <div class="msg-body" v-if="message.isEditing" key="edit">
                     <textarea 
-                        v-model="message.editText" 
+                        v-model="localEditText" 
                         class="edit-textarea" 
                         rows="1" 
                         @vue:mounted="({ el }) => focusAndResize(el)"
@@ -723,7 +362,7 @@ onUnmounted(() => {
                     class="msg-body" 
                     v-else-if="message.text || (!message.isTyping && !message.text)" 
                     :key="(message.swipeId || 0) + '-' + (message.greetingIndex || 0)"
-                    @click="handleContentClick"
+                    @click="onContentClick"
                 >
                     <div v-if="message.isError" class="error-window">
                         <div class="error-header">
@@ -891,7 +530,9 @@ onUnmounted(() => {
 
         <div class="guided-swipe-container" v-if="isGuidedSwipeOpen">
             <div class="guidance-main">
-                <div class="guidance-header">{{ t('guided_swipe') || 'GUIDED SWIPE' }}</div>
+                <div class="guidance-header">
+{{ t('guided_swipe') || 'GUIDED SWIPE' }}
+</div>
                 <textarea 
                     class="guided-swipe-textarea"
                     v-model="guidedSwipeText"
@@ -915,7 +556,9 @@ onUnmounted(() => {
     <SheetView ref="triggeredItemsSheet" fit-content :title="t('sheet_triggered_items') || 'Triggered Items'">
         <div class="triggered-items-list">
             <div v-if="message.triggeredLorebooks?.length" class="triggered-group">
-                <div class="triggered-group-title">{{ t('menu_lorebooks') || 'World Info' }}</div>
+                <div class="triggered-group-title">
+{{ t('menu_lorebooks') || 'World Info' }}
+</div>
                 <div v-for="lb in message.triggeredLorebooks" :key="lb.id" class="triggered-item-card" @click="openLorebookEntry(lb)">
                     <div class="item-icon">
                         <svg viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9H9V9h10v2zm-4 4H9v-2h6v2zm4-8H9V5h10v2z"/></svg>
@@ -926,33 +569,47 @@ onUnmounted(() => {
                             <span v-if="lb._source === 'keyword'" class="retrieval-badge keyword-badge">keyword</span>
                             <span v-else-if="lb._source === 'vector'" class="retrieval-badge vector-badge">vector</span>
                         </div>
-                        <div class="item-sublabel">{{ lb.lorebookName }}</div>
+                        <div class="item-sublabel">
+{{ lb.lorebookName }}
+</div>
                     </div>
                 </div>
             </div>
 
             <div v-if="message.triggeredMemories?.length" class="triggered-group">
-                <div class="triggered-group-title">Memory Books</div>
+                <div class="triggered-group-title">
+Memory Books
+</div>
                 <div v-for="mem in message.triggeredMemories" :key="mem.id" class="triggered-item-card static">
                     <div class="item-icon">
                         <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 14H7v-2h10v2zm0-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
                     </div>
                     <div class="item-info">
-                        <div class="item-label">{{ mem.name }}</div>
-                        <div class="item-sublabel">Memory entry</div>
+                        <div class="item-label">
+{{ mem.name }}
+</div>
+                        <div class="item-sublabel">
+Memory entry
+</div>
                     </div>
                 </div>
             </div>
             
             <div v-if="combinedMessageData.regexes?.length" class="triggered-group">
-                <div class="triggered-group-title">{{ t('menu_regex') || 'Regex Extensions' }}</div>
+                <div class="triggered-group-title">
+{{ t('menu_regex') || 'Regex Extensions' }}
+</div>
                 <div v-for="(r, idx) in combinedMessageData.regexes" :key="idx" class="triggered-item-card static">
                     <div class="item-icon">
                         <svg viewBox="0 0 24 24"><path d="M14.6 16.6l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4m-5.2 0L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4z"/></svg>
                     </div>
                     <div class="item-info">
-                        <div class="item-label">{{ r.name || 'Unnamed Script' }}</div>
-                        <div class="item-sublabel">{{ r.regex ? `/${r.regex}/` : 'Trim Out' }}</div>
+                        <div class="item-label">
+{{ r.name || 'Unnamed Script' }}
+</div>
+                        <div class="item-sublabel">
+{{ r.regex ? `/${r.regex}/` : 'Trim Out' }}
+</div>
                     </div>
                 </div>
             </div>

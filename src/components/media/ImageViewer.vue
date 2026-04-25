@@ -1,8 +1,38 @@
 <script setup>
-import { ref, computed, nextTick, watch } from 'vue';
-import { useViewer } from '@/composables/media/useViewer.js';
+import { ref, computed, nextTick, watch, onMounted, onBeforeUnmount } from 'vue';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
+import { subscribeAppEvent } from '@/core/events/eventHub.js';
 
-const { visible, src: imgSrc, description, close, onAfterLeave } = useViewer('open-image-viewer');
+const visible = ref(false);
+const imgSrc = ref('');
+const description = ref('');
+let onCloseCallback = null;
+
+const close = () => {
+    visible.value = false;
+};
+
+const onAfterLeave = () => {
+    if (onCloseCallback) onCloseCallback();
+    onCloseCallback = null;
+    imgSrc.value = '';
+    description.value = '';
+};
+
+const openViewer = (detail) => {
+    imgSrc.value = detail.src;
+    description.value = detail.description || '';
+    onCloseCallback = detail.onCloseCallback;
+    visible.value = true;
+};
+
+let unsubImageViewer;
+onMounted(() => {
+    unsubImageViewer = subscribeAppEvent(APP_EVENTS.nav.openImageViewer, ({ detail }) => openViewer(detail));
+});
+onBeforeUnmount(() => {
+    unsubImageViewer?.();
+});
 const containerRef = ref(null);
 const imgRef = ref(null);
 
@@ -183,7 +213,9 @@ watch(visible, (newVal) => {
                     <img ref="imgRef" class="image-viewer-img" :src="imgSrc" alt="Full view">
                 </div>
                 <Transition name="prompt-fade">
-                    <div v-if="promptText && promptVisible" class="image-viewer-prompt" @click.stop>{{ promptText }}</div>
+                    <div v-if="promptText && promptVisible" class="image-viewer-prompt" @click.stop>
+{{ promptText }}
+</div>
                 </Transition>
                 <div id="image-viewer-close-btn" class="close-btn-trigger" @click="handleCloseClick" style="position: absolute; top: calc(20px + var(--sat)); right: 20px; z-index: 20020; width: 44px; height: 44px; cursor: pointer; background: rgba(0,0,0,0.5); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
                     <svg viewBox="0 0 24 24" style="width:24px;height:24px;fill:white;"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>

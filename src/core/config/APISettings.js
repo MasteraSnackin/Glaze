@@ -1,6 +1,8 @@
 import { db } from '@/utils/db.js';
 import { DEFAULT_PROVIDER_ID } from '@/core/llm/contracts/providerContracts.js';
 import { getProviderById } from '@/core/llm/providers/providerRegistry.js';
+import { publishAppEvent } from '@/core/events/eventHub.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
 
 export const PROVIDER_BLACKLIST = [
     { name: 'EllyAI', match: 'ellyai' },
@@ -71,7 +73,7 @@ export function saveApiRuntimeSetting(key, value) {
     localStorage.setItem(key, value);
 
     if (key === 'api-context' || key === 'api-max-tokens') {
-        window.dispatchEvent(new CustomEvent('api-context-settings-changed'));
+        publishAppEvent(APP_EVENTS.domain.settings.apiContextChanged);
     }
 }
 

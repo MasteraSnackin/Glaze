@@ -14,7 +14,7 @@ const ToolsView = defineAsyncComponent(() => import('@/views/ToolsView.vue'));
 
 const props = defineProps({
     bottomSheetState: Object,
-    sidebarState: Object,
+    rightSidebarState: Object,
     activeChatCharObj: Object,
     currentView: { type: String, default: '' }
 });
@@ -40,17 +40,15 @@ const emit = defineEmits([
 // collapsed is derived from drag-resize width — same mechanic as left sidebar
 const { width: rightSidebarWidth, collapsed, startResize: startRightResizeOriginal } = useSidebarResizer('gz_right_sidebar_width', 300, 'right', 200, 800);
 
+const wasAutoExpanded = ref(false);
+
 const startRightResize = (e) => {
-    // If the user manually resizes, cancel any pending auto-collapse
     wasAutoExpanded.value = false;
     startRightResizeOriginal(e);
 };
 
 const isChat = computed(() => props.currentView === 'view-chat');
-const hasSheet = computed(() => props.bottomSheetState.visible || props.sidebarState.isOccupied);
-
-// ── Auto-expand on subview ──
-let wasAutoExpanded = ref(false);
+const hasSheet = computed(() => props.bottomSheetState.visible || props.rightSidebarState.isOccupied);
 
 watch(hasSheet, (newHasSheet, oldHasSheet) => {
     // Opening a sumbview

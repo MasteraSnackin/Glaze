@@ -5,6 +5,8 @@ import { currentLang } from '@/core/config/APPSettings.js';
 import { activePersona, allPersonas, setActivePersona } from '@/core/states/personaState.js';
 import { logger } from '../../utils/logger.js';
 import { notificationsState, clearUnread } from '@/core/states/notificationsState.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
+import { publishAppEvent, subscribeAppEvent } from '@/core/events/eventHub.js';
 
 const props = defineProps({
   currentView: String,
@@ -142,7 +144,7 @@ function setupChatHeader(char, currentSessionId, callbacks, sessionName) {
              if (!state.isChatSearchMode) {
                  state.searchQuery = '';
              }
-             window.dispatchEvent(new CustomEvent('header-chat-search-toggle', { detail: state.isChatSearchMode }));
+              publishAppEvent(APP_EVENTS.ui.chatSearchToggle, state.isChatSearchMode);
              if (state.isChatSearchMode) {
                  nextTick(() => {
                      const input = headerEl.value?.querySelector('.chat-search-input');
@@ -156,7 +158,7 @@ function setupChatHeader(char, currentSessionId, callbacks, sessionName) {
         if (state.isChatSearchMode) {
             state.isChatSearchMode = false;
             state.searchQuery = '';
-            window.dispatchEvent(new CustomEvent('header-chat-search-toggle', { detail: false }));
+              publishAppEvent(APP_EVENTS.ui.chatSearchToggle, false);
         } else {
             callbacks.onBackClick();
         }
@@ -187,7 +189,7 @@ function setupThemeSettingsHeader(title) {
     clearHeader('default');
     state.title = title;
     state.showBack = true;
-    state.onBack = () => window.dispatchEvent(new CustomEvent('navigate-to', { detail: 'view-menu' }));
+    state.onBack = () => publishAppEvent(APP_EVENTS.nav.navigateTo, 'view-menu');
     toggleTabbar(false); // Hide tabbar for full screen feel
 }
 
@@ -195,7 +197,7 @@ function setupGlossaryHeader() {
     clearHeader('default');
     state.title = translations[currentLang.value]?.menu_glossary || 'Glossary';
     state.showBack = true;
-    state.onBack = () => window.dispatchEvent(new CustomEvent('gl-back'));
+    state.onBack = () => publishAppEvent(APP_EVENTS.ui.glossary.back);
     toggleTabbar(true);
 }
 
@@ -203,7 +205,7 @@ function setupSettingsHeader(title) {
     clearHeader('default');
     state.title = title;
     state.showBack = true;
-    state.onBack = () => window.dispatchEvent(new CustomEvent('navigate-to', { detail: 'view-menu' }));
+    state.onBack = () => publishAppEvent(APP_EVENTS.nav.navigateTo, 'view-menu');
     toggleTabbar(true);
 }
 
@@ -211,7 +213,7 @@ function setupSubmenuHeader(title, targetView) {
     clearHeader('default');
     state.title = title;
     state.showBack = true;
-    state.onBack = () => window.dispatchEvent(new CustomEvent('navigate-to', { detail: targetView }));
+    state.onBack = () => publishAppEvent(APP_EVENTS.nav.navigateTo, targetView);
     toggleTabbar(true);
 }
 
@@ -310,7 +312,7 @@ function updateHeader() {
     }
 
     nextTick(() => {
-        window.dispatchEvent(new CustomEvent('header-view-changed', { detail: props.currentView }));
+        publishAppEvent(APP_EVENTS.ui.header.viewChanged, props.currentView);
     });
 }
 
@@ -319,9 +321,29 @@ const t = (key) => translations[currentLang.value]?.[key] || key;
 
 // Event Handlers
 const handleBack = () => {
-    const backNavEvent = new CustomEvent('app-back-navigation', { cancelable: true });
-    window.dispatchEvent(backNavEvent);
-    if (backNavEvent.defaultPrevented) return;
+    logger.debug('[AppHeader] handleBack called. currentView:', props.currentView, 'showBack:', state.showBack, 'onBack:', !!state.onBack, 'mode:', state.mode);
+
+    // Editor headers have a fixed close action. Route directly to the parent
+    // instead of relying on mutable header state or global back listeners.
+    if (props.currentView === 'view-character-edit' || props.currentView === 'view-persona-edit') {
+        emit('action-close');
+        return;
+    }
+
+    // Settings screens own their back behavior through explicit header state.
+    // Let that run before broadcasting global back events from unrelated views.
+    if (state.onBack && (props.currentView === 'view-settings' || props.currentView === 'view-theme-settings')) {
+        state.onBack();
+        return;
+    }
+
+    // For submenu views, if we have an explicit onBack, use it directly too.
+    if (state.onBack && ['view-api', 'view-presets', 'view-lorebook', 'view-regex', 'view-personas', 'view-tools'].includes(props.currentView)) {
+        state.onBack();
+        return;
+    }
+
+    publishAppEvent(APP_EVENTS.ui.backNavigation);
 
     if (state.onBack) state.onBack();
 };
@@ -333,37 +355,35 @@ const handleActionsClick = (e) => {
 const handleAvatarClick = (e) => {
     e.stopPropagation();
     if (state.chat.avatar) {
-        window.dispatchEvent(new CustomEvent('trigger-open-image', {
-            detail: {
-                src: state.chat.avatar,
-                name: state.chat.name
-            }
-        }));
+        publishAppEvent(APP_EVENTS.nav.triggerOpenImage, {
+            src: state.chat.avatar,
+            name: state.chat.name
+        });
     }
 };
 
 // Listeners for external events (from header.js bridge)
-const onSetupChat = (e) => {
-    const { char, currentSessionId, callbacks, sessionName } = e.detail;
+const onSetupChat = (detail) => {
+    const { char, currentSessionId, callbacks, sessionName } = detail;
     setupChatHeader(char, currentSessionId, callbacks, sessionName);
 };
 
-const onUpdateAvatar = (e) => {
-    const char = e.detail || {};
+const onUpdateAvatar = (detail) => {
+    const char = detail || {};
     const safeName = char.name || "Unknown";
     state.chat.avatar = char.avatar;
     state.chat.color = char.color;
     state.chat.initial = (safeName[0] || "?").toUpperCase();
 };
 
-const onSetupEditor = (e) => {
-    logger.debug('[AppHeader] Event header-setup-editor received', e.detail);
-    const { title, onBack, actions } = e.detail;
+const onSetupEditor = (detail) => {
+    logger.debug('[AppHeader] Event header-setup-editor received', detail);
+    const { title, onBack, actions } = detail;
     setupEditorHeader(title, onBack, actions);
 };
 
-const onSetupSubmenu = (e) => {
-    const { title, onBack } = e.detail;
+const onSetupSubmenu = (detail) => {
+    const { title, onBack } = detail;
     clearHeader('default');
     state.title = title;
     state.showBack = true;
@@ -375,20 +395,20 @@ const onForceUpdate = () => {
     updateHeader();
 };
 
-const onSetupGeneration = (e) => {
-    logger.debug('[AppHeader] Event header-setup-generation received', e.detail);
-    const { title, activeTab, onTabChange } = e.detail;
+const onSetupGeneration = (detail) => {
+    logger.debug('[AppHeader] Event header-setup-generation received', detail);
+    const { title, activeTab, onTabChange } = detail;
     setupGenerationHeader(title, activeTab, onTabChange);
 };
 
-const onUpdateSession = (e) => {
+const onUpdateSession = (detail) => {
     if (state.mode === 'chat') {
-        state.chat.session = `Session #${e.detail}`;
+        state.chat.session = `Session #${detail}`;
     }
 };
 
-const onScrollHidden = (e) => {
-    state.scrollHidden = e.detail;
+const onScrollHidden = (detail) => {
+    state.scrollHidden = detail;
 };
 
 const onResetHeader = () => {
@@ -396,17 +416,16 @@ const onResetHeader = () => {
     setupDefaultHeader("", false);
 };
 
-const onShowLbBanner = (e) => {
+const onShowLbBanner = (detail) => {
     if (state.lorebookBanner.timer) clearTimeout(state.lorebookBanner.timer);
     
-    // Support both Legacy (Array) and New (Object) formats
-    if (Array.isArray(e.detail)) {
-        state.lorebookBanner.names = e.detail;
+    if (Array.isArray(detail)) {
+        state.lorebookBanner.names = detail;
         state.lorebookBanner.presetName = '';
     } else {
-        state.lorebookBanner.names = e.detail.names || [];
-        state.lorebookBanner.presetName = e.detail.preset || '';
-        state.lorebookBanner.personaName = e.detail.persona || '';
+        state.lorebookBanner.names = detail.names || [];
+        state.lorebookBanner.presetName = detail.preset || '';
+        state.lorebookBanner.personaName = detail.persona || '';
     }
 
     state.lorebookBanner.show = true;
@@ -440,12 +459,6 @@ function onBannerAfterLeave() {
     state.lorebookBanner.isTransitioning = false;
 }
 
-const onChangeGenerationTab = (e) => {
-    if (state.mode === 'generation') {
-        handleGenTabClick(e.detail);
-    }
-};
-
 const handleGenTabClick = (tab) => {
     state.generationTab = tab;
     if (state.onGenerationTabChange) {
@@ -453,47 +466,44 @@ const handleGenTabClick = (tab) => {
     }
 };
 
+const onChangeGenerationTab = (detail) => {
+    if (state.mode === 'generation') {
+        handleGenTabClick(detail);
+    }
+};
+
 // Update the header whenever the view or editing index changes
 watch([() => props.currentView, () => props.editingIndex], updateHeader);
 
 // Initial update on mount
+const unsubs = [];
+
 onMounted(() => {
     updateHeader();
-    window.addEventListener('header-setup-chat', onSetupChat);
-    window.addEventListener('header-update-avatar', onUpdateAvatar);
-    window.addEventListener('header-scroll-hidden', onScrollHidden);
-    window.addEventListener('header-setup-editor', onSetupEditor);
-    window.addEventListener('header-setup-generation', onSetupGeneration);
-    window.addEventListener('header-reset', onResetHeader);
-    window.addEventListener('header-update-session', onUpdateSession);
-    window.addEventListener('change-generation-tab', onChangeGenerationTab);
-    window.addEventListener('header-show-lb-banner', onShowLbBanner);
-    window.addEventListener('header-setup-submenu', onSetupSubmenu);
-    window.addEventListener('header-force-update', onForceUpdate);
-    window.addEventListener('gl-header-update', onGlossaryHeaderUpdate);
+    unsubs.push(subscribeAppEvent(APP_EVENTS.ui.header.setupChat, ({ detail }) => onSetupChat(detail)));
+    unsubs.push(subscribeAppEvent(APP_EVENTS.ui.header.updateAvatar, ({ detail }) => onUpdateAvatar(detail)));
+    unsubs.push(subscribeAppEvent(APP_EVENTS.ui.header.scrollHidden, ({ detail }) => onScrollHidden(detail)));
+    unsubs.push(subscribeAppEvent(APP_EVENTS.ui.header.setupEditor, ({ detail }) => onSetupEditor(detail)));
+    unsubs.push(subscribeAppEvent(APP_EVENTS.ui.header.setupGeneration, ({ detail }) => onSetupGeneration(detail)));
+    unsubs.push(subscribeAppEvent(APP_EVENTS.ui.header.reset, onResetHeader));
+    unsubs.push(subscribeAppEvent(APP_EVENTS.ui.header.updateSession, ({ detail }) => onUpdateSession(detail)));
+    unsubs.push(subscribeAppEvent(APP_EVENTS.ui.changeGenerationTab, ({ detail }) => onChangeGenerationTab(detail)));
+    unsubs.push(subscribeAppEvent(APP_EVENTS.ui.header.showLbBanner, ({ detail }) => onShowLbBanner(detail)));
+    unsubs.push(subscribeAppEvent(APP_EVENTS.ui.header.setupSubmenu, ({ detail }) => onSetupSubmenu(detail)));
+    unsubs.push(subscribeAppEvent(APP_EVENTS.ui.header.forceUpdate, onForceUpdate));
+    unsubs.push(subscribeAppEvent(APP_EVENTS.ui.glossary.headerUpdate, ({ detail }) => onGlossaryHeaderUpdate(detail)));
     const onResize = () => { isDesktop.value = window.innerWidth >= 768; };
     window.addEventListener('resize', onResize);
     onUnmounted(() => window.removeEventListener('resize', onResize));
 });
 
 onBeforeUnmount(() => {
-    window.removeEventListener('header-setup-chat', onSetupChat);
-    window.removeEventListener('header-update-avatar', onUpdateAvatar);
-    window.removeEventListener('header-scroll-hidden', onScrollHidden);
-    window.removeEventListener('header-setup-editor', onSetupEditor);
-    window.removeEventListener('header-setup-generation', onSetupGeneration);
-    window.removeEventListener('header-reset', onResetHeader);
-    window.removeEventListener('header-update-session', onUpdateSession);
-    window.removeEventListener('change-generation-tab', onChangeGenerationTab);
-    window.removeEventListener('header-show-lb-banner', onShowLbBanner);
-    window.removeEventListener('header-setup-submenu', onSetupSubmenu);
-    window.removeEventListener('header-force-update', onForceUpdate);
-    window.removeEventListener('gl-header-update', onGlossaryHeaderUpdate);
+    unsubs.forEach(unsub => unsub());
 });
 
-function onGlossaryHeaderUpdate(e) {
+function onGlossaryHeaderUpdate(detail) {
     if (props.currentView !== 'view-glossary') return;
-    if (e.detail.title !== undefined) state.title = e.detail.title;
+    if (detail.title !== undefined) state.title = detail.title;
     // showBack stays true — back always navigates to view-menu
 }
 
@@ -501,11 +511,11 @@ watch(() => state.searchQuery, (val) => {
     if (state.mode === 'chat' && (state.isChatSearchMode || isDesktop.value)) {
         // On desktop, keep isSearchMode in sync with whether there's a query
         if (isDesktop.value) {
-            window.dispatchEvent(new CustomEvent('header-chat-search-toggle', { detail: val.length > 0 }));
+            publishAppEvent(APP_EVENTS.ui.chatSearchToggle, val.length > 0);
         }
-        window.dispatchEvent(new CustomEvent('header-chat-search', { detail: val }));
+        publishAppEvent(APP_EVENTS.ui.chatSearch, val);
     } else {
-        window.dispatchEvent(new CustomEvent('header-search', { detail: val }));
+        publishAppEvent(APP_EVENTS.ui.headerSearch, val);
     }
 });
 
@@ -542,7 +552,7 @@ function onAfterTransition() {
 
 function openNotifications() {
     clearUnread();
-    window.dispatchEvent(new CustomEvent('open-notifications-sheet'));
+    publishAppEvent(APP_EVENTS.nav.openNotificationsSheet);
 }
 
 // Expose updateHeader so the parent can force a refresh (e.g., on language change)
@@ -598,9 +608,13 @@ defineExpose({ updateHeader });
                   </div>
                   <div style="display: flex; flex-direction: column; justify-content: center; margin-left: 10px; min-width: 0; flex: 1;">
                       <div style="display: flex; align-items: center;">
-                          <div class="header-name" id="chat-header-name" style="line-height: 1.2;">{{ state.chat.name }}</div>
+                          <div class="header-name" id="chat-header-name" style="line-height: 1.2;">
+{{ state.chat.name }}
+</div>
                       </div>
-                      <div id="chat-header-session" style="color: var(--text-gray); font-size: 0.8em; line-height: 1.2;">{{ state.chat.session }}</div>
+                      <div id="chat-header-session" style="color: var(--text-gray); font-size: 0.8em; line-height: 1.2;">
+{{ state.chat.session }}
+</div>
                   </div>
                   <!-- Desktop inline search -->
                   <div v-if="isDesktop" class="header-search-inline chat-search-inline-desktop">
@@ -642,8 +656,12 @@ defineExpose({ updateHeader });
                   <!-- Generation Sub-tabs -->
                   <div v-if="state.mode === 'generation'" class="header-sub-tabs" key="tabs">
                       <div class="segmented-control">
-                          <div class="sub-tab-btn" :class="{ active: state.generationTab === 'subview-api' }" @click="handleGenTabClick('subview-api')">{{ state.tabApiLabel }}</div>
-                          <div class="sub-tab-btn" :class="{ active: state.generationTab === 'subview-preset' }" @click="handleGenTabClick('subview-preset')">{{ state.tabPresetLabel }}</div>
+                          <div class="sub-tab-btn" :class="{ active: state.generationTab === 'subview-api' }" @click="handleGenTabClick('subview-api')">
+{{ state.tabApiLabel }}
+</div>
+                          <div class="sub-tab-btn" :class="{ active: state.generationTab === 'subview-preset' }" @click="handleGenTabClick('subview-preset')">
+{{ state.tabPresetLabel }}
+</div>
                       </div>
                   </div>
 
@@ -655,9 +673,11 @@ defineExpose({ updateHeader });
 
       <!-- Right Actions + Notification Bell -->
       <div v-if="!state.isChatSearchMode" id="header-actions" class="header-btn-right" @click.stop>
-          <div v-if="state.showActions" v-for="(action, idx) in state.actions" :key="idx" class="header-action-btn" :id="action.id" @click.stop="action.onClick" :style="{ color: action.color }">
+          <template v-if="state.showActions">
+          <div v-for="(action, idx) in state.actions" :key="idx" class="header-action-btn" :id="action.id" @click.stop="action.onClick" :style="{ color: action.color }">
               <span v-html="action.icon" style="display: flex; fill: currentColor;"></span>
           </div>
+          </template>
           <!-- <div class="header-action-btn notif-btn" @click.stop="openNotifications">
               <svg viewBox="0 0 24 24" fill="currentColor" style="width:22px;height:22px;"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/></svg>
               <span v-if="notificationsState.unreadCount > 0" class="notif-badge"></span>
@@ -752,7 +772,7 @@ defineExpose({ updateHeader });
     cursor: pointer;
     fill: var(--vk-blue);
     transition: fill var(--transition-speed) ease;
-    z-index: 2;
+    z-index: 10;
 }
 
 .header-logo {

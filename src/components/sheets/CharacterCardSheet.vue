@@ -7,6 +7,8 @@ import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { db } from '@/utils/db.js';
 import HelpTip from '@/components/ui/HelpTip.vue';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
+import { publishAppEvent } from '@/core/events/eventHub.js';
 
 const sheet = ref(null);
 const character = ref({});
@@ -62,12 +64,12 @@ async function onSave(newVal) {
         
         await db.saveCharacter(charToSave);
         // Notify the app that a character was updated
-        window.dispatchEvent(new CustomEvent('character-updated', { detail: { character: charToSave } }));
+        publishAppEvent(APP_EVENTS.domain.character.updated, { character: charToSave });
     }
 }
 
 function handleOpenFs(payload) {
-    window.dispatchEvent(new CustomEvent('open-fs-request', { detail: payload }));
+    publishAppEvent(APP_EVENTS.nav.openFsRequest, payload);
 }
 
 defineExpose({ open, close });
@@ -84,7 +86,7 @@ defineExpose({ open, close });
             show-avatar 
             avatar-field="avatar"
             @save="onSave"
-            @update:modelValue="(val) => character = val"
+            @update:model-value="(val) => character = val"
             @open-fs="handleOpenFs"
         />
     </SheetView>

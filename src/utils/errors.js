@@ -1,4 +1,6 @@
 import { logger } from './logger.js';
+import { subscribeAppEvent } from '@/core/events/eventHub.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
 
 export function formatError(error, currentText = '') {
     logger.debug("[ErrorUtils] Raw error:", error);
@@ -74,7 +76,7 @@ export function initGlobalErrorHandling() {
             if (saved) lang = saved;
             else if ((navigator.language || 'en').startsWith('ru')) lang = 'ru';
         } catch (e) { }
-        const t = translations[lang] || translations['en'];
+        const t = translations[lang] || translations.en;
 
         // Ensure body is visible if error occurs during loading
         if (document.body) {
@@ -461,8 +463,8 @@ export function initGlobalErrorHandling() {
         showError('Unhandled Promise Rejection', String(details).replace(/\n/g, '<br>'));
     };
 
-    window.addEventListener('vue-error', (event) => {
-        const { err, info } = event.detail;
+    subscribeAppEvent(APP_EVENTS.debug.vueError, ({ detail }) => {
+        const { err, info } = detail;
         const details = `${err.message}<br>Component Info: ${info}<br>Stack: ${(err.stack || 'N/A').replace(/\n/g, '<br>')}`;
         showError('Vue Error', details);
     });

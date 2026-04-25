@@ -858,6 +858,7 @@
     "btn_indexing": "Индексация...",
     "btn_index_all": "Индексировать все",
     "btn_retry_failed": "Повторить ошибки",
+    "btn_rate_limited": "Лимит запросов ({seconds}с)",
     "btn_enable_vector_all": "Включить вектор для всех",
     "btn_disable_vector_all": "Отключить вектор для всех",
     "entry_indexed": "Проиндексировано",

@@ -365,12 +365,20 @@ defineExpose({ open, close });
       <div class="memory-session-overview">
         <div class="memory-session-overview-head">
           <div>
-            <div class="memory-session-title">{{ characterName }}</div>
-            <div class="memory-session-note">Session {{ sessionId }}</div>
+            <div class="memory-session-title">
+{{ characterName }}
+</div>
+            <div class="memory-session-note">
+Session {{ sessionId }}
+</div>
           </div>
-          <div class="memory-session-chip">{{ stableConversationCount }} stable msgs</div>
+          <div class="memory-session-chip">
+{{ stableConversationCount }} stable msgs
+</div>
         </div>
-        <div class="memory-session-overview-meta">{{ generationSettingsSummary }}</div>
+        <div class="memory-session-overview-meta">
+{{ generationSettingsSummary }}
+</div>
         <div class="memory-quick-model-row" @click="openQuickModelSelector">
           <span class="memory-quick-model-label">Model</span>
           <span class="memory-quick-model-value">{{ currentMemoryModelLabel }}</span>
@@ -386,7 +394,9 @@ defineExpose({ open, close });
           </span>
           <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
         </div>
-        <div class="memory-note">Choose keyword retrieval, vector retrieval, or a combined mode for this session.</div>
+        <div class="memory-note">
+Choose keyword retrieval, vector retrieval, or a combined mode for this session.
+</div>
       </div>
       <div v-if="!shouldEnableVectorSearch" class="memory-note">
         Embeddings are not configured, so vector search is unavailable.
@@ -465,7 +475,9 @@ defineExpose({ open, close });
         <template v-else-if="uncoveredSegments.count > 0">
           <div class="memory-batch-info">
             <strong>{{ uncoveredSegments.count }}</strong> uncovered messages ({{ uncoveredSegments.segmentsNeeded }} full segments of {{ uncoveredSegments.interval }})
-            <template v-if="uncoveredSegments.remainder > 0"> • {{ uncoveredSegments.remainder }} left over</template>
+            <template v-if="uncoveredSegments.remainder > 0">
+• {{ uncoveredSegments.remainder }} left over
+</template>
           </div>
           <div class="memory-batch-buttons">
             <button type="button" class="memory-btn memory-btn-secondary" :disabled="uncoveredSegments.segmentsNeeded === 0" @click.stop.prevent="handleScanChat" @touchend.stop.prevent="handleScanChat">
@@ -496,21 +508,31 @@ defineExpose({ open, close });
           >
             <div class="memory-entry-head">
               <div>
-                <div class="memory-entry-title">{{ draft.title || 'Untitled draft' }}</div>
+                <div class="memory-entry-title">
+{{ draft.title || 'Untitled draft' }}
+</div>
                 <div class="memory-entry-meta">
                   <template v-if="isDraftGenerating(draft.id)">
                     <span style="color:#ffd700;">generating...</span>
-                    <template v-if="getDraftProgress(draft.id)?.elapsedMs > 0"> • {{ formatElapsedSeconds(getDraftProgress(draft.id).elapsedMs) }}</template>
+                    <template v-if="getDraftProgress(draft.id)?.elapsedMs > 0">
+• {{ formatElapsedSeconds(getDraftProgress(draft.id).elapsedMs) }}
+</template>
                   </template>
                   <template v-else-if="!draft.content && draft.status === 'pending_generation'">
                     <span style="color:#ffd700;">needs generation</span>
-                    <template v-if="draft.messageRange"> • messages {{ draft.messageRange.start }}-{{ draft.messageRange.end }}</template>
+                    <template v-if="draft.messageRange">
+• messages {{ draft.messageRange.start }}-{{ draft.messageRange.end }}
+</template>
                   </template>
                   <template v-else>
                     <span>pending approval</span>
-                    <template v-if="draft.generatedAt"> • generated {{ formatGenerationTime(draft.generatedAt) }}</template>
+                    <template v-if="draft.generatedAt">
+• generated {{ formatGenerationTime(draft.generatedAt) }}
+</template>
                   </template>
-                  <template v-if="vectorEnabled && draft.content"> • hybrid</template>
+                  <template v-if="vectorEnabled && draft.content">
+• hybrid
+</template>
                   <template v-if="draft.keys && draft.keys.length && draft.content">
                     • {{ draft.keys.slice(0, 3).join(', ') }}
                   </template>
@@ -586,7 +608,9 @@ defineExpose({ open, close });
           >
             <div class="memory-entry-head">
               <div>
-                <div class="memory-entry-title">{{ entry.title || 'Untitled memory' }}</div>
+                <div class="memory-entry-title">
+{{ entry.title || 'Untitled memory' }}
+</div>
                 <div class="memory-entry-meta">
                   {{ entry.status || 'active' }} • {{ normalizeEntryMessageIds(entry).length }} messages
                   {{ vectorEnabled ? ' • hybrid' : ' • keys' }}

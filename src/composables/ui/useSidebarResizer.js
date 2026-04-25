@@ -18,7 +18,7 @@ export function useSidebarResizer(storageKey, defaultWidth, direction = 'left', 
         document.body.style.cursor = 'col-resize';
 
         const onMouseMove = (moveEvent) => {
-            let dx = moveEvent.clientX - startX;
+            const dx = moveEvent.clientX - startX;
             let newWidth = direction === 'left' ? startWidth + dx : startWidth - dx;
             // During drag: clamp to hard edges only, collapsed state is derived automatically
             if (newWidth < COLLAPSED_WIDTH) newWidth = COLLAPSED_WIDTH;

@@ -48,8 +48,11 @@ function applyMessageStreamUpdate(message, text, reasoning, isTyping, textDelta)
 
 export function setupGenerationState({
     char,
+    sessionId,
     msgId,
     genId,
+    ownerKey,
+    requestToken,
     controller,
     startTime,
     currentMessages,
@@ -68,6 +71,8 @@ export function setupGenerationState({
 
     const flushPendingUIUpdate = () => {
         streamFlushTimer = null;
+
+        if (pendingText === null && pendingReasoning === null && pendingTyping === null && pendingTextDelta === null) return;
 
         const idx = currentMessages.value.findIndex(message => message.id === msgId);
         if (idx === -1) {
@@ -129,7 +134,7 @@ export function setupGenerationState({
         generationTimer = setTimeout(() => {
             generationTimer = null;
 
-            if (activeChatChar && activeChatChar.id === char.id) {
+            if (activeChatChar?.value && activeChatChar.value.id === char.id) {
                 const idx = currentMessages.value.findIndex(message => message.id === msgId);
                 if (idx !== -1) {
                     currentMessages.value[idx].genTime = formatGenerationElapsed(startTime);
@@ -145,6 +150,11 @@ export function setupGenerationState({
 
     setGenerationState(char.id, {
         genId,
+        ownerKey,
+        requestToken,
+        sessionId,
+        charId: char.id,
+        type: 'chat',
         controller,
         startTime,
         msgId,

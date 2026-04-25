@@ -4,6 +4,8 @@ import { currentLang } from '@/core/config/APPSettings.js';
 import { translations } from '@/utils/i18n.js';
 import { useSidebarResizer } from '@/composables/ui/useSidebarResizer.js';
 import { attachHoverGlow } from '@/core/services/ui.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
+import { publishAppEvent } from '@/core/events/eventHub.js';
 
 const props = defineProps({
     currentView: String,
@@ -15,7 +17,7 @@ const props = defineProps({
 const emit = defineEmits(['update:currentView', 'openChat']);
 
 function handleGlossaryToggle() {
-    window.dispatchEvent(new CustomEvent('toggle-glossary'));
+    publishAppEvent(APP_EVENTS.ui.glossary.toggle);
 }
 
 const t = (key) => translations[currentLang.value]?.[key] || key;

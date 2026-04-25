@@ -4,10 +4,10 @@ import { logger } from '../../../utils/logger.js';
 
 export async function consumeStreamingSseResponse({
     responseBody,
+    debugKey,
     controller,
     streamTimeout,
     throwIfAborted,
-    requestReasoning,
     streamAccumulator,
     onUpdate
 }) {
@@ -39,7 +39,7 @@ export async function consumeStreamingSseResponse({
             pendingLineBuffer = parsedChunk.remaining;
 
             for (const dataStr of parsedChunk.dataLines) {
-                appendNetworkTraceLine(dataStr);
+                appendNetworkTraceLine({ debugKey, line: dataStr });
                 throwIfAborted();
 
                 try {
@@ -76,7 +76,7 @@ export async function consumeStreamingSseResponse({
 
         const trailingDataLine = getTrailingSseDataLine(pendingLineBuffer);
         if (trailingDataLine) {
-            appendNetworkTraceLine(trailingDataLine);
+            appendNetworkTraceLine({ debugKey, line: trailingDataLine });
         }
 
         throwIfAborted();

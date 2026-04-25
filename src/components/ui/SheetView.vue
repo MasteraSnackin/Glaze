@@ -176,7 +176,9 @@ onBeforeUnmount(() => {
                                 <div v-if="showBack || isSidebarMode" class="sc-header-btn back-btn" @click="isSidebarMode ? close() : $emit('back')">
                                     <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
                                 </div>
-                                <div class="sc-header-title" v-if="title">{{ title }}</div>
+                                <div class="sc-header-title" v-if="title">
+{{ title }}
+</div>
                                 <slot name="header-title"></slot>
                             </div>
                             <div class="sc-header-right">

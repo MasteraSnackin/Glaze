@@ -44,10 +44,10 @@ export async function handleGenerationPromptReady({
     msgIndex,
     char,
     sessionId,
-    getChatData,
-    db,
+    persistence,
     snapshotPromptMeta
 }) {
+    const { getChatData, db } = persistence;
     const triggeredLorebooks = mapTriggeredLorebooks(loreEntries);
     const triggeredMemories = mapTriggeredMemories(memoryEntries);
     const contextRefs = buildContextRefs(triggeredLorebooks, triggeredMemories, sessionId);

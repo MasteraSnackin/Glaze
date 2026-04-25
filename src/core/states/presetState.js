@@ -162,5 +162,5 @@ export function getEffectivePresetId(charId, chatId) {
 
 export function getEffectivePreset(charId, chatId) {
     const id = getEffectivePresetId(charId, chatId);
-    return presetState.presets[id] || presetState.presets['default_shino'] || Object.values(presetState.presets)[0];
+    return presetState.presets[id] || presetState.presets.default_shino || Object.values(presetState.presets)[0];
 }

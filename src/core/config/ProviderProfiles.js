@@ -193,33 +193,6 @@ export function getMemoryBooksProfile() {
     return getServiceEffectiveProfile(SERVICE_NAMES.MEMORY_BOOKS);
 }
 
-// ---- Legacy compatibility helpers ----
-
-/**
- * Returns legacy-shaped config for services that expect old format.
- * This is a bridge during migration.
- */
-export function getLegacyApiConfig() {
-    const profile = getLLMProfile();
-    return {
-        providerId: 'openai_compatible',
-        endpoint: profile.endpoint,
-        apiUrl: profile.endpoint,
-        key: profile.apiKey,
-        apiKey: profile.apiKey,
-        model: profile.model
-    };
-}
-
-export function getLegacyEmbeddingConfig() {
-    const profile = getEmbeddingProfile();
-    return {
-        endpoint: profile.endpoint,
-        apiKey: profile.apiKey,
-        model: profile.model
-    };
-}
-
 // ---- Sync key sharing toggle ----
 
 const SYNC_KEYS_ENABLED_KEY = 'gz_sync_include_api_keys';

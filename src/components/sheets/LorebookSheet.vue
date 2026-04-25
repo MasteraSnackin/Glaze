@@ -1,13 +1,17 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import SheetView from '@/components/ui/SheetView.vue';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
-import { lorebookState, initLorebookState, createLorebook, deleteLorebook, deleteLorebookEmbeddings, deleteLorebookEntryEmbedding, importSTLorebook, exportSTLorebook, flushLorebookSave, indexLorebookEntries, indexLorebookEntry, getEmbeddingStatus, getEmbeddingRecord } from '@/core/states/lorebookState.js';
+import { lorebookState, initLorebookState, createLorebook, deleteLorebook, importSTLorebook, exportSTLorebook, flushLorebookSave } from '@/core/states/lorebookState.js';
 import { saveFile } from '@/core/services/fileSaver.js';
 import HelpTip from '@/components/ui/HelpTip.vue';
-import { showToast } from '@/core/states/toastState.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
+import { subscribeAppEvent, publishAppEvent } from '@/core/events/eventHub.js';
+import { useLorebookIndexing } from '@/composables/lorebook/useLorebookIndexing.js';
+import { useLorebookEntries } from '@/composables/lorebook/useLorebookEntries.js';
+import { db } from '@/utils/db.js';
 
 const sheet = ref(null);
 const t = (key) => translations[currentLang.value]?.[key] || key;
@@ -16,199 +20,72 @@ const props = defineProps({
     viewMode: { type: Boolean, default: false }
 });
 
-const currentView = ref('list'); // list, entries, edit_entry
+const currentView = ref('list');
 const activeLorebook = ref(null);
 const activeEntry = ref(null);
 const activeEntryIndex = ref(-1);
+let unsubscribeSyncDataRefreshed = null;
+const unsubs = [];
 
-
-
-const filteredEntries = computed(() => {
-    if (!activeLorebook.value) return [];
-    if (!searchQuery.value) return activeLorebook.value.entries;
-    const q = searchQuery.value.toLowerCase();
-    return activeLorebook.value.entries.filter(e => 
-        e.keys.some(k => k.toLowerCase().includes(q)) || 
-        e.content.toLowerCase().includes(q)
-    );
-});
-
-function handleCreateEntry() {
-    if (!activeLorebook.value) return;
-    const newEntry = {
-        id: Date.now().toString(36) + Math.random().toString(36).substr(2, 5),
-        keys: [],
-        content: '',
-        enabled: true,
-        secondary_keys: [],
-        comment: '',
-        order: 100,
-        caseSensitive: null,
-        matchWholeWords: null,
-        useGroupScoring: null,
-        vectorSearch: false,
-        useKeywordSearch: true
-    };
-    activeLorebook.value.entries.push(newEntry);
-    selectEntry(newEntry, activeLorebook.value.entries.length - 1);
-
-}
-
-function selectEntry(entry, index) {
-    // Normalize useKeywordSearch for existing entries (default true for backward compatibility)
-    if (entry.useKeywordSearch === undefined) {
-        entry.useKeywordSearch = true;
-    }
-    activeEntry.value = entry;
-    activeEntryIndex.value = index;
-    currentView.value = 'edit_entry';
-    checkEntryEmbeddingStatus();
-}
-
-function handleDeleteEntry(index) {
-    if (!activeLorebook.value) return;
-    activeLorebook.value.entries.splice(index, 1);
-}
-
-function handleEntryMenu(entry, index) {
-    const entryError = failedEntryMap.value.get(entry.id);
-    showBottomSheet({
-        title: entry.comment || t('unnamed_entry'),
-        items: [
-            ...(entryError ? [{
-                label: t('vector_status_error') || 'Index error',
-                description: getEmbeddingErrorMessage(entryError),
-                icon: '<svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>',
-                iconColor: '#ff9500',
-                onClick: () => {
-                    closeBottomSheet();
-                }
-            }] : []),
-            {
-                label: t('action_export') || 'Export',
-                icon: '<svg viewBox="0 0 24 24"><path d="M19 12v7H5v-7H3v7c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-7h-2zm-6 .67l2.59-2.58L17 11.5l-5 5-5-5 1.41-1.41L11 12.67V3h2v9.67z"/></svg>',
-                onClick: async () => {
-                    closeBottomSheet();
-                    const stLb = exportSTLorebook({ entries: [entry] });
-                    const filename = (entry.comment || 'entry') + '.json';
-                    await saveFile(filename, JSON.stringify(stLb, null, 2), 'application/json', 'lorebooks');
-                }
-            },
-            {
-                label: t('btn_delete') || 'Delete',
-                icon: '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>',
-                iconColor: '#ff4444',
-                isDestructive: true,
-                onClick: () => {
-                    handleDeleteEntry(index);
-                    closeBottomSheet();
-                }
-            }
-        ]
-    });
-}
-
-function updateEntryKeys(val) {
-    if (activeEntry.value) {
-        activeEntry.value.keys = val.split(',').map(k => k.trim()).filter(k => k);
-    }
-}
-
-function updateEntrySecondaryKeys(val) {
-    if (activeEntry.value) {
-        activeEntry.value.secondary_keys = val.split(',').map(k => k.trim()).filter(k => k);
-    }
-}
-
-function updateCharacterFilter(val) {
-    if (activeEntry.value) {
-        if (!activeEntry.value.characterFilter) {
-            activeEntry.value.characterFilter = { names: [], isExclude: false };
-        }
-        activeEntry.value.characterFilter.names = val.split(',').map(n => n.trim()).filter(n => n);
-    }
-}
-
-const characterFilterExclude = computed({
-    get: () => activeEntry.value?.characterFilter?.isExclude || false,
-    set: (val) => {
-        if (activeEntry.value) {
-            if (!activeEntry.value.characterFilter) {
-                activeEntry.value.characterFilter = { names: [], isExclude: false };
-            }
-            activeEntry.value.characterFilter.isExclude = val;
-        }
-    }
-});
-
-const searchQuery = ref('');
 const isGlobalSettingsExpanded = ref(false);
-const indexingEntry = ref(false);
-const entryEmbeddingStatus = ref('none');
-const indexProgress = ref(null);
-const indexedEntryIds = ref(new Set());
-const failedEntryMap = ref(new Map());
-const needsVectorReindex = ref(false);
-const missingVectorCount = ref(0);
 
-const failedEntries = computed(() => {
-    if (!activeLorebook.value) return [];
-    return activeLorebook.value.entries
-        .filter(entry => failedEntryMap.value.has(entry.id))
-        .map(entry => ({ entry, error: failedEntryMap.value.get(entry.id) }));
+const {
+    indexingEntry,
+    entryEmbeddingStatus,
+    indexProgress,
+    indexedEntryIds,
+    needsVectorReindex,
+    missingVectorCount,
+    rateLimitCooldown,
+    checkEntryEmbeddingStatus,
+    updateVectorReindexNotice,
+    loadIndexedStatuses,
+    handleIndexEntry,
+    handleIndexAllEntries,
+    handleRetryFailedEntries: handleRetryFailed,
+    handleDeleteAllIndexes
+} = useLorebookIndexing({ activeLorebook, activeEntry });
+
+const {
+    searchQuery,
+    failedEntryMap,
+    filteredEntries,
+    failedEntries,
+    allVectorEnabled,
+    characterFilterExclude,
+    handleCreateEntry,
+    selectEntry,
+    handleDeleteEntry,
+    handleConstantToggle,
+    handleEntryMenu,
+    openEntriesMenu,
+    updateEntryKeys,
+    updateEntrySecondaryKeys,
+    updateCharacterFilter,
+    toggleAllVector,
+    resetAllEntriesToGlobal,
+    getEntryDisplayName,
+    getEmbeddingErrorLabel,
+    getEmbeddingErrorMessage
+} = useLorebookEntries({
+    activeLorebook,
+    activeEntry,
+    activeEntryIndex,
+    currentView,
+    t,
+    indexingDeps: {
+        checkEntryEmbeddingStatus,
+        loadIndexedStatuses,
+        updateVectorReindexNotice,
+        handleIndexAllEntries,
+        handleDeleteAllIndexes
+    }
 });
-
-function getEntryDisplayName(entry) {
-    return entry.comment || entry.keys?.[0] || t('unnamed_entry');
-}
-
-function getEmbeddingErrorLabel(error) {
-    if (!error?.type) return t('vector_error_unknown');
-    return t(`vector_error_${error.type}`) || error.message || t('vector_error_unknown');
-}
-
-function getEmbeddingErrorMessage(error) {
-    return error?.message || getEmbeddingErrorLabel(error);
-}
-
-const allVectorEnabled = computed(() => {
-    if (!activeLorebook.value || activeLorebook.value.entries.length === 0) return false;
-    return activeLorebook.value.entries.every(e => e.vectorSearch);
-});
-
-function toggleAllVector() {
-    if (!activeLorebook.value) return;
-    const enable = !allVectorEnabled.value;
-    activeLorebook.value.entries.forEach(e => { e.vectorSearch = enable; });
-}
-
-function resetAllEntriesToGlobal() {
-    if (!activeLorebook.value) return;
-    let changedCount = 0;
-    activeLorebook.value.entries.forEach(entry => {
-        const didChange = entry.caseSensitive !== null
-            || entry.matchWholeWords !== null
-            || entry.useGroupScoring !== null
-            || entry.position !== 'matchGlobal'
-            || entry.scanDepth !== null;
-        entry.caseSensitive = null;
-        entry.matchWholeWords = null;
-        entry.useGroupScoring = null;
-        entry.position = 'matchGlobal';
-        entry.scanDepth = null;
-        if (didChange) changedCount += 1;
-    });
-    showToast(changedCount > 0
-        ? `${changedCount} entries reset to ${t('match_global')}`
-        : 'All entries already match global settings');
-}
 
 const currentContext = ref({ charId: null, chatId: null });
 
 const allCharacters = ref([]);
 const allSessions = ref([]);
-
-import { db } from '@/utils/db.js';
 
 async function loadPickerData() {
     const [chars, chatsData] = await Promise.all([
@@ -241,7 +118,6 @@ function getActivationState(lb) {
     const isChar = !!(currentContext.value.charId && lorebookState.activations?.character?.[currentContext.value.charId]?.includes(lb.id));
     const isChat = !!(currentContext.value.chatId && lorebookState.activations?.chat?.[currentContext.value.chatId]?.includes(lb.id));
 
-    // Priority for "applies here": chat > character > global
     if (isChat) return 'chat';
     if (isChar) return 'character';
     if (isGlobal) return 'global';
@@ -249,7 +125,7 @@ function getActivationState(lb) {
 }
 
 function openConnectionManager(lb) {
-    window.dispatchEvent(new CustomEvent('open-connections', { detail: { type: 'lorebook', id: lb.id, name: lb.name } }));
+    publishAppEvent(APP_EVENTS.nav.openConnections, { type: 'lorebook', id: lb.id, name: lb.name });
 }
 
 function getLorebookConnectionCounts(lbId) {
@@ -315,171 +191,27 @@ function getReserveModeLabel() {
         : (t('label_context_percent') || 'Percent');
 }
 
-// activation now managed via LorebookConnectionsSheet
-
-// --- Lifecycle ---
-
-async function handleIndexEntry() {
-    if (!activeEntry.value || !activeLorebook.value) return;
-    indexingEntry.value = true;
-    try {
-        await indexLorebookEntry(activeEntry.value, activeLorebook.value.id);
-    } catch (e) {
-        console.warn('Failed to index entry:', e);
-    } finally {
-        await loadIndexedStatuses();
-        await checkEntryEmbeddingStatus();
-        indexingEntry.value = false;
-    }
-}
-
-async function handleIndexAllEntries() {
-    if (!activeLorebook.value) return;
-    indexingEntry.value = true;
-    indexProgress.value = null;
-    try {
-        const result = await indexLorebookEntries(activeLorebook.value.id, (done, total) => {
-            indexProgress.value = { done, total };
-        });
-        indexProgress.value = result;
-        await loadIndexedStatuses();
-    } catch (e) {
-        console.warn('Failed to index lorebook:', e);
-    } finally {
-        indexingEntry.value = false;
-    }
-}
-
-async function handleRetryFailedEntries() {
-    if (!activeLorebook.value) return;
-    indexingEntry.value = true;
-    indexProgress.value = null;
-    try {
-        const result = await indexLorebookEntries(activeLorebook.value.id, (done, total) => {
-            indexProgress.value = { done, total };
-        }, { retryFailedOnly: true });
-        indexProgress.value = result;
-        await loadIndexedStatuses();
-        await updateVectorReindexNotice();
-    } catch (e) {
-        console.warn('Failed to retry failed lorebook entries:', e);
-    } finally {
-        indexingEntry.value = false;
-    }
-}
-
-async function handleDeleteAllIndexes() {
-    if (!activeLorebook.value) return;
-    indexingEntry.value = true;
-    indexProgress.value = null;
-    try {
-        await deleteLorebookEmbeddings(activeLorebook.value.id);
-        indexedEntryIds.value = new Set();
-        entryEmbeddingStatus.value = 'none';
-        await updateVectorReindexNotice();
-    } catch (e) {
-        console.warn('Failed to delete lorebook embeddings:', e);
-    } finally {
-        indexingEntry.value = false;
-    }
-}
-
-async function handleConstantToggle(isEnabled) {
-    if (!activeEntry.value?.id) return;
-    if (!isEnabled) return;
-
-    activeEntry.value.vectorSearch = false;
-    await deleteLorebookEntryEmbedding(activeEntry.value.id);
-    await loadIndexedStatuses();
-    await checkEntryEmbeddingStatus();
-    await updateVectorReindexNotice();
-}
-
-function openEntriesMenu() {
-    if (!activeLorebook.value) return;
-    const allVector = activeLorebook.value.entries.every(e => e.vectorSearch);
-    showBottomSheet({
-        title: t('section_entries_actions') || 'Entries Actions',
-        items: [
-            {
-                label: allVector ? (t('action_disable_vector_all') || 'Disable Vector Search All') : (t('action_enable_vector_all') || 'Enable Vector Search All'),
-                icon: '<svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>',
-                onClick: () => {
-                    activeLorebook.value.entries.forEach(e => { e.vectorSearch = !allVector; });
-                    closeBottomSheet();
-                }
-            },
-            {
-                label: t('action_index_all') || 'Index All Vector Entries',
-                icon: '<svg viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>',
-                onClick: async () => {
-                    closeBottomSheet();
-                    await handleIndexAllEntries();
-                }
-            },
-            {
-                label: t('action_delete_indexes') || 'Delete Vector Indexes',
-                icon: '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>',
-                iconColor: '#ff4444',
-                isDestructive: true,
-                onClick: async () => {
-                    closeBottomSheet();
-                    await handleDeleteAllIndexes();
-                }
-            }
-        ]
-    });
-}
-
-async function checkEntryEmbeddingStatus() {
-    if (activeEntry.value?.vectorSearch && activeEntry.value?.id) {
-        entryEmbeddingStatus.value = await getEmbeddingStatus(activeEntry.value.id);
-    } else {
-        entryEmbeddingStatus.value = 'none';
-    }
-}
-
-async function updateVectorReindexNotice() {
-    const vectorEntries = lorebookState.lorebooks.flatMap(lb =>
-        (lb.entries || []).filter(entry => entry.enabled !== false && entry.vectorSearch && entry.id)
-    );
-
-    if (vectorEntries.length === 0) {
-        missingVectorCount.value = 0;
-        needsVectorReindex.value = false;
-        return;
-    }
-
-    let missing = 0;
-    for (const entry of vectorEntries) {
-        const status = await getEmbeddingStatus(entry.id);
-        if (status !== 'indexed') missing++;
-    }
-
-    missingVectorCount.value = missing;
-    needsVectorReindex.value = missing > 0;
-}
-
 async function handleSyncDataRefreshed() {
     await updateVectorReindexNotice();
     if (activeLorebook.value) {
-        await loadIndexedStatuses();
+        const failed = await loadIndexedStatuses();
+        failedEntryMap.value = failed;
     }
 }
+
 onMounted(async () => {
     await initLorebookState();
     loadPickerData();
     await updateVectorReindexNotice();
-    window.addEventListener('sync-data-refreshed', handleSyncDataRefreshed);
-    window.addEventListener('app-back-navigation', handleBackNavigation);
+    unsubscribeSyncDataRefreshed = subscribeAppEvent(APP_EVENTS.domain.sync.dataRefreshed, handleSyncDataRefreshed);
+    unsubs.push(subscribeAppEvent(APP_EVENTS.ui.backNavigation, handleBackNavigation));
 });
 
 onUnmounted(() => {
-    window.removeEventListener('sync-data-refreshed', handleSyncDataRefreshed);
-    window.removeEventListener('app-back-navigation', handleBackNavigation);
+    unsubscribeSyncDataRefreshed?.();
+    unsubscribeSyncDataRefreshed = null;
+    unsubs.forEach(fn => fn?.());
 });
-
-// --- Navigation ---
 
 function open(context = {}) {
     currentContext.value = {
@@ -518,6 +250,7 @@ function openEntry(lbId, entryId) {
 }
 
 function close() {
+    currentView.value = 'list';
     sheet.value?.close();
 }
 
@@ -530,20 +263,18 @@ function goBack() {
         currentView.value = 'list';
         activeLorebook.value = null;
     } else if (props.viewMode) {
-        window.dispatchEvent(new CustomEvent('navigate-to', { detail: 'view-tools' }));
+        publishAppEvent(APP_EVENTS.nav.navigateTo, 'view-tools');
     } else {
         close();
     }
 }
 
-function handleBackNavigation(e) {
+function handleBackNavigation() {
+    if (!props.viewMode && !sheet.value?.isVisible) return;
     if (currentView.value !== 'list') {
-        e.preventDefault();
         goBack();
     }
 }
-
-// --- Lorebook Management ---
 
 function handleCreateLorebook() {
     showBottomSheet({
@@ -600,13 +331,13 @@ function openLorebookMenu() {
     });
 }
 
-
-function selectLorebook(lb) {
+async function selectLorebook(lb) {
     activeLorebook.value = lb;
     currentView.value = 'entries';
     searchQuery.value = '';
     indexProgress.value = null;
-    loadIndexedStatuses();
+    const failed = await loadIndexedStatuses();
+    failedEntryMap.value = failed;
     updateVectorReindexNotice();
 }
 
@@ -618,24 +349,6 @@ watch(() => activeEntry.value?.constant, async (isConstant, wasConstant) => {
     if (!activeEntry.value || isConstant === wasConstant) return;
     await handleConstantToggle(isConstant);
 });
-
-async function loadIndexedStatuses() {
-    if (!activeLorebook.value) return;
-    const ids = new Set();
-    const failed = new Map();
-    for (const entry of activeLorebook.value.entries) {
-        if (entry.vectorSearch && entry.id) {
-            const status = await getEmbeddingStatus(entry.id);
-            if (status === 'indexed') ids.add(entry.id);
-            if (status === 'error') {
-                const record = await getEmbeddingRecord(entry.id);
-                if (record?.error) failed.set(entry.id, record.error);
-            }
-        }
-    }
-    indexedEntryIds.value = ids;
-    failedEntryMap.value = failed;
-}
 
 function handleLorebookMenu(lb) {
     showBottomSheet({
@@ -664,8 +377,6 @@ function handleLorebookMenu(lb) {
         ]
     });
 }
-
-
 
 const sheetTitle = computed(() => {
     if (currentView.value === 'list') return t('menu_lorebooks');
@@ -887,11 +598,19 @@ defineExpose({ open, openEntry, close, openLorebook });
 
                 <div v-if="lorebookState.lorebooks.length === 0" class="empty-state">
                     <svg class="empty-icon" viewBox="0 0 24 24"><path d="M18 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 4h5v8l-2.5-1.5L6 12V4z"/></svg>
-                    <div class="empty-text">{{ t('no_lorebooks') }}</div>
-                    <div class="empty-subtext">{{ t('empty_lorebooks_desc') }}</div>
+                    <div class="empty-text">
+{{ t('no_lorebooks') }}
+</div>
+                    <div class="empty-subtext">
+{{ t('empty_lorebooks_desc') }}
+</div>
                     <div class="empty-actions">
-                        <button class="vk-btn-action" @click="handleCreateLorebook">{{ t('btn_create') }}</button>
-                        <button class="vk-btn-action secondary" @click="handleImportLorebook">{{ t('action_import') }}</button>
+                        <button class="vk-btn-action" @click="handleCreateLorebook">
+{{ t('btn_create') }}
+</button>
+                        <button class="vk-btn-action secondary" @click="handleImportLorebook">
+{{ t('action_import') }}
+</button>
                     </div>
                 </div>
                 
@@ -900,8 +619,12 @@ defineExpose({ open, openEntry, close, openLorebook });
                         <div class="lb-item-wrapper">
                             <div class="lb-item" @click="selectLorebook(lb)">
                                 <div class="lb-info">
-                                    <div class="lb-name">{{ lb.name }}</div>
-                                    <div class="lb-meta">{{ lb.entries.length }} {{ t('label_entries') }}</div>
+                                    <div class="lb-name">
+{{ lb.name }}
+</div>
+                                    <div class="lb-meta">
+{{ lb.entries.length }} {{ t('label_entries') }}
+</div>
                                     <div class="lb-conn-badges" style="margin-top: 6px;">
                                         <span v-if="lb.enabled" class="conn-badge global">{{ t('label_global') || 'Global' }}</span>
                                         <span v-if="getLorebookConnectionCounts(lb.id).chars" class="conn-badge char">{{ getLorebookConnectionCounts(lb.id).chars }} {{ t('header_characters') || 'chars' }}</span>
@@ -927,10 +650,16 @@ defineExpose({ open, openEntry, close, openLorebook });
 
                 <div v-if="needsVectorReindex" class="vector-reindex-banner">
                     <div class="vector-reindex-copy">
-                        <div class="vector-reindex-title">{{ t('vector_reindex_title') || 'Vector entries need reindexing' }}</div>
-                        <div class="vector-reindex-text">{{ (t('vector_reindex_desc') || '{count} vector entries were restored from sync without local embeddings. Run Index All to rebuild them.').replace('{count}', missingVectorCount) }}</div>
+                        <div class="vector-reindex-title">
+{{ t('vector_reindex_title') || 'Vector entries need reindexing' }}
+</div>
+                        <div class="vector-reindex-text">
+{{ (t('vector_reindex_desc') || '{count} vector entries were restored from sync without local embeddings. Run Index All to rebuild them.').replace('{count}', missingVectorCount) }}
+</div>
                     </div>
-                    <button class="vk-btn-action secondary" @click="handleIndexAllEntries" :disabled="indexingEntry">{{ t('btn_index_all') }}</button>
+                    <button class="vk-btn-action secondary" @click="handleIndexAllEntries" :disabled="indexingEntry">
+{{ t('btn_index_all') }}
+</button>
                 </div>
 
                 <div v-if="activeLorebook && activeLorebook.entries.length > 0" class="entries-toolbar-wrap">
@@ -943,13 +672,14 @@ defineExpose({ open, openEntry, close, openLorebook });
                             <svg viewBox="0 0 24 24" class="toolbar-icon"><path d="M12 5V2L8 6l4 4V7c3.31 0 6 2.69 6 6a6 6 0 0 1-10.24 4.24l-1.42 1.42A8 8 0 1 0 12 5z"/></svg>
                             <span>{{ t('match_global') }}</span>
                         </button>
-                        <button class="toolbar-btn" @click="handleIndexAllEntries" :disabled="indexingEntry">
+                        <button class="toolbar-btn" @click="handleIndexAllEntries" :disabled="indexingEntry || rateLimitCooldown > 0">
                             <svg viewBox="0 0 24 24" class="toolbar-icon"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>
-                            <span v-if="indexingEntry && indexProgress?.total">{{ t('index_progress').replace('{done}', indexProgress.done).replace('{total}', indexProgress.total) }}</span>
+                            <span v-if="rateLimitCooldown > 0">{{ t('btn_rate_limited').replace('{seconds}', rateLimitCooldown) }}</span>
+                            <span v-else-if="indexingEntry && indexProgress?.total">{{ t('index_progress').replace('{done}', indexProgress.done).replace('{total}', indexProgress.total) }}</span>
                             <span v-else-if="indexingEntry">{{ t('btn_indexing') }}</span>
                             <span v-else>{{ t('btn_index_all') }}</span>
                         </button>
-                        <button v-if="failedEntries.length > 0" class="toolbar-btn secondary" @click="handleRetryFailedEntries" :disabled="indexingEntry">
+                        <button v-if="failedEntries.length > 0" class="toolbar-btn secondary" @click="handleRetryFailedEntries" :disabled="indexingEntry || rateLimitCooldown > 0">
                             <svg viewBox="0 0 24 24" class="toolbar-icon"><path d="M12 6V3L8 7l4 4V8c2.76 0 5 2.24 5 5a5 5 0 0 1-8.9 3.1l-1.42 1.42A7 7 0 1 0 12 6z"/></svg>
                             <span>{{ t('btn_retry_failed') }}</span>
                         </button>
@@ -960,19 +690,29 @@ defineExpose({ open, openEntry, close, openLorebook });
                         <span v-if="indexProgress.failed > 0" class="index-result-line index-result-error">{{ t('index_failed').replace('{failed}', indexProgress.failed) }}</span>
                     </div>
                     <div v-if="failedEntries.length > 0" class="failed-entries-block">
-                        <div class="failed-entries-title">{{ t('vector_failed_entries_title').replace('{count}', failedEntries.length) }}</div>
+                        <div class="failed-entries-title">
+{{ t('vector_failed_entries_title').replace('{count}', failedEntries.length) }}
+</div>
                         <div v-for="item in failedEntries" :key="item.entry.id" class="failed-entry-row">
                             <div class="failed-entry-copy">
-                                <div class="failed-entry-name">{{ getEntryDisplayName(item.entry) }}</div>
-                                <div class="failed-entry-reason">{{ getEmbeddingErrorLabel(item.error) }}</div>
-                                <div v-if="item.error?.message && item.error.message !== getEmbeddingErrorLabel(item.error)" class="failed-entry-message">{{ item.error.message }}</div>
+                                <div class="failed-entry-name">
+{{ getEntryDisplayName(item.entry) }}
+</div>
+                                <div class="failed-entry-reason">
+{{ getEmbeddingErrorLabel(item.error) }}
+</div>
+                                <div v-if="item.error?.message && item.error.message !== getEmbeddingErrorLabel(item.error)" class="failed-entry-message">
+{{ item.error.message }}
+</div>
                             </div>
                         </div>
                     </div>
                 </div>
 
                 <div v-if="filteredEntries.length === 0" class="empty-state">
-                    <div class="empty-text">{{ t('no_entries_found') }}</div>
+                    <div class="empty-text">
+{{ t('no_entries_found') }}
+</div>
                 </div>
                 <div v-else class="list-container">
                     <div v-for="(entry, index) in filteredEntries" :key="index" class="lb-item" @click="selectEntry(entry, index)">
@@ -983,7 +723,9 @@ defineExpose({ open, openEntry, close, openLorebook });
                                  <span v-if="entry.vectorSearch && indexedEntryIds.has(entry.id)" class="conn-badge indexed">idx</span>
                                  <span v-if="entry.vectorSearch && failedEntryMap.has(entry.id)" class="conn-badge errored">err</span>
                              </div>
-                            <div class="lb-meta preview-text">{{ entry.keys.join(', ') || t('no_keys') }}</div>
+                            <div class="lb-meta preview-text">
+{{ (entry.keys || []).join(', ') || t('no_keys') }}
+</div>
                         </div>
                         <div class="lb-actions">
                             <input type="checkbox" class="vk-switch small-switch" v-model="entry.enabled" @click.stop>
@@ -999,12 +741,16 @@ defineExpose({ open, openEntry, close, openLorebook });
             <div v-else-if="currentView === 'edit_entry'" class="lb-editor">
                 <div class="editor-scroll">
                     <div class="menu-group first-group">
-                        <div class="section-header">{{ t('section_activation_logic') }} <HelpTip term="lorebook-keys"/></div>
-                        <div v-if="activeEntry.vectorSearch" class="settings-desc" style="padding:8px 0;color:#34c759;">{{ t('desc_vector_search_supplements_keys') }}</div>
+                        <div class="section-header">
+{{ t('section_activation_logic') }} <HelpTip term="lorebook-keys"/>
+</div>
+                        <div v-if="activeEntry.vectorSearch" class="settings-desc" style="padding:8px 0;color:#34c759;">
+{{ t('desc_vector_search_supplements_keys') }}
+</div>
                         <div v-if="!activeEntry.constant">
                         <div class="settings-item">
                                 <label>{{ t('label_primary_keys') }} <span class="hint">{{ t('hint_comma_separated') }}</span></label>
-                                <input type="text" :value="activeEntry.keys.join(', ')" @input="updateEntryKeys($event.target.value)" :placeholder="t('placeholder_keys')">
+                                <input type="text" :value="(activeEntry.keys || []).join(', ')" @input="updateEntryKeys($event.target.value)" :placeholder="t('placeholder_keys')">
                             </div>
                             <div class="settings-item">
                                 <label>{{ t('label_logic_mode') }}</label>
@@ -1077,13 +823,15 @@ defineExpose({ open, openEntry, close, openLorebook });
 
                         <div class="settings-item" v-if="activeEntry.selectiveLogic !== 4">
                             <label>{{ t('label_secondary_keys') }} <span class="hint">{{ t('hint_optional') }}</span></label>
-                            <input type="text" :value="activeEntry.secondary_keys?.join(', ')" @input="updateEntrySecondaryKeys($event.target.value)" :placeholder="t('placeholder_filters')">
+                            <input type="text" :value="activeEntry.secondary_keys?.join?.(', ') || ''" @input="updateEntrySecondaryKeys($event.target.value)" :placeholder="t('placeholder_filters')">
                         </div>
                         </div>
                         </div>
 
                     <div class="menu-group">
-                    <div class="section-header">{{ t('section_content_properties') }}</div>
+                    <div class="section-header">
+{{ t('section_content_properties') }}
+</div>
                         <div class="settings-item">
                             <label>{{ t('label_content') }}</label>
                             <textarea v-model="activeEntry.content" rows="12" :placeholder="t('placeholder_lore_content')"></textarea>
@@ -1095,7 +843,9 @@ defineExpose({ open, openEntry, close, openLorebook });
                 </div>
 
                 <div class="menu-group">
-                    <div class="section-header">{{ t('section_injection_rules') }} <HelpTip term="lorebook-budget"/></div>
+                    <div class="section-header">
+{{ t('section_injection_rules') }} <HelpTip term="lorebook-budget"/>
+</div>
                          <div class="settings-item">
                             <label>{{ t('label_injection_position') }}</label>
                             <div class="clickable-selector" @click="openOptionSelector({
@@ -1112,7 +862,9 @@ defineExpose({ open, openEntry, close, openLorebook });
                                 <span>{{ activeEntry.position === 'worldInfoAfter' ? '@worldInfoAfter' : activeEntry.position === 'lorebooksMacro' ? '{' + '{lorebooks}' + '}' : activeEntry.position === 'matchGlobal' ? t('match_global') : '@worldInfoBefore' }}</span>
                                 <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
                             </div>
-                            <div class="settings-desc" style="margin-top: 6px;">{{ t('hint_lorebook_macro_override') }}</div>
+                            <div class="settings-desc" style="margin-top: 6px;">
+{{ t('hint_lorebook_macro_override') }}
+</div>
                         </div>
                         <div class="settings-item">
                             <label>{{ t('label_order_priority') }} <span class="hint">{{ t('hint_lower_first') }}</span></label>
@@ -1121,7 +873,9 @@ defineExpose({ open, openEntry, close, openLorebook });
                 </div>
 
                 <div class="menu-group">
-                    <div class="section-header">{{ t('section_scan_recursion') }} <HelpTip term="lorebook-recursion"/></div>
+                    <div class="section-header">
+{{ t('section_scan_recursion') }} <HelpTip term="lorebook-recursion"/>
+</div>
                         <div class="settings-item">
                             <label>{{ t('label_scan_depth_lore') }} <span class="hint">{{ t('hint_messages_back') }}</span></label>
                             <input type="number" v-model="activeEntry.scanDepth" placeholder="1">
@@ -1145,25 +899,33 @@ defineExpose({ open, openEntry, close, openLorebook });
                 </div>
 
                 <div class="menu-group">
-                    <div class="section-header">{{ t('section_vector_search') }}</div>
+                    <div class="section-header">
+{{ t('section_vector_search') }}
+</div>
                         <div class="settings-item-checkbox">
                             <div class="settings-text-col">
                                 <label>{{ t('label_constant') }} <span class="hint">{{ t('hint_always_active') }}</span></label>
-                                <div class="settings-desc">{{ t('desc_constant_disables_vector') }}</div>
+                                <div class="settings-desc">
+{{ t('desc_constant_disables_vector') }}
+</div>
                             </div>
                             <input type="checkbox" v-model="activeEntry.constant" class="vk-switch">
                         </div>
                         <div class="settings-item-checkbox">
                             <div class="settings-text-col">
                                 <label>{{ t('label_vector_search') }}</label>
-                                <div class="settings-desc">{{ activeEntry.constant ? t('desc_vector_disabled_for_constant') : t('desc_vector_search_entry') }}</div>
+                                <div class="settings-desc">
+{{ activeEntry.constant ? t('desc_vector_disabled_for_constant') : t('desc_vector_search_entry') }}
+</div>
                             </div>
                             <input type="checkbox" v-model="activeEntry.vectorSearch" class="vk-switch" :disabled="activeEntry.constant">
                         </div>
                         <div v-if="activeEntry.vectorSearch && !activeEntry.constant" class="settings-item-checkbox">
                             <div class="settings-text-col">
                                 <label>{{ t('label_use_keyword_search') }}</label>
-                                <div class="settings-desc">{{ t('desc_use_keyword_search') }}</div>
+                                <div class="settings-desc">
+{{ t('desc_use_keyword_search') }}
+</div>
                             </div>
                             <input type="checkbox" v-model="activeEntry.useKeywordSearch" class="vk-switch">
                         </div>
@@ -1171,15 +933,25 @@ defineExpose({ open, openEntry, close, openLorebook });
                             <button class="vk-btn-action" style="width:100%;" @click="handleIndexEntry" :disabled="indexingEntry">
                                 {{ indexingEntry ? t('btn_indexing') : t('btn_index_entry') }}
                             </button>
-                            <div v-if="entryEmbeddingStatus === 'indexed'" class="settings-desc" style="margin-top:8px; color: #34c759;">{{ t('entry_indexed') }}</div>
-                            <div v-if="entryEmbeddingStatus === 'none'" class="settings-desc" style="margin-top:8px; color: var(--text-gray);">{{ t('entry_not_indexed') }}</div>
-                            <div v-if="entryEmbeddingStatus === 'error'" class="settings-desc" style="margin-top:8px; color: #ff9500;">{{ t('entry_index_error') }}: {{ getEmbeddingErrorLabel(failedEntryMap.get(activeEntry.id)) }}</div>
-                            <div v-if="entryEmbeddingStatus === 'error' && failedEntryMap.get(activeEntry.id)?.message" class="settings-desc" style="margin-top:4px; color: var(--text-gray);">{{ failedEntryMap.get(activeEntry.id).message }}</div>
+                            <div v-if="entryEmbeddingStatus === 'indexed'" class="settings-desc" style="margin-top:8px; color: #34c759;">
+{{ t('entry_indexed') }}
+</div>
+                            <div v-if="entryEmbeddingStatus === 'none'" class="settings-desc" style="margin-top:8px; color: var(--text-gray);">
+{{ t('entry_not_indexed') }}
+</div>
+                            <div v-if="entryEmbeddingStatus === 'error'" class="settings-desc" style="margin-top:8px; color: #ff9500;">
+{{ t('entry_index_error') }}: {{ getEmbeddingErrorLabel(failedEntryMap.get(activeEntry.id)) }}
+</div>
+                            <div v-if="entryEmbeddingStatus === 'error' && failedEntryMap.get(activeEntry.id)?.message" class="settings-desc" style="margin-top:4px; color: var(--text-gray);">
+{{ failedEntryMap.get(activeEntry.id).message }}
+</div>
                         </div>
                 </div>
 
                 <div class="menu-group">
-                    <div class="section-header">{{ t('section_temporal_logic') }} <HelpTip term="lorebook-temporal"/></div>
+                    <div class="section-header">
+{{ t('section_temporal_logic') }} <HelpTip term="lorebook-temporal"/>
+</div>
                         <div class="settings-item">
                             <label>{{ t('label_sticky') }} <span class="hint">{{ t('hint_sticky_turns') }}</span></label>
                             <input type="number" v-model="activeEntry.sticky" placeholder="0">
@@ -1195,7 +967,9 @@ defineExpose({ open, openEntry, close, openLorebook });
                 </div>
 
                 <div class="menu-group">
-                    <div class="section-header">{{ t('section_grouping_filter') }} <HelpTip term="lorebook-group"/></div>
+                    <div class="section-header">
+{{ t('section_grouping_filter') }} <HelpTip term="lorebook-group"/>
+</div>
                         <div class="settings-item">
                             <label>{{ t('label_group_name') }}</label>
                             <input type="text" v-model="activeEntry.group" :placeholder="t('placeholder_faction')">
@@ -1206,7 +980,7 @@ defineExpose({ open, openEntry, close, openLorebook });
                         </div>
                         <div class="settings-item">
                             <label>{{ t('label_character_filter') }} <span class="hint">{{ t('hint_names') }}</span></label>
-                            <input type="text" :value="activeEntry.characterFilter?.names.join(', ')" @input="updateCharacterFilter($event.target.value)" :placeholder="t('placeholder_char_names')">
+                            <input type="text" :value="activeEntry.characterFilter?.names?.join?.(', ') || ''" @input="updateCharacterFilter($event.target.value)" :placeholder="t('placeholder_char_names')">
                         </div>
                         <div class="settings-item-checkbox">
                             <div class="settings-text-col">

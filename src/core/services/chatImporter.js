@@ -4,14 +4,7 @@ import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { saveFile } from './fileSaver.js';
 import { addMessageStats, addRegenerationStats } from './statsService.js';
-
-function createEmptyMemoryCoverage() {
-    return {
-        entryIds: [],
-        needsRebuild: false,
-        stale: false
-    };
-}
+import { createEmptyMemoryCoverage } from './memorySchema.js';
 
 function normalizeImportedMessage(msg) {
     if (!msg || typeof msg !== 'object') return msg;

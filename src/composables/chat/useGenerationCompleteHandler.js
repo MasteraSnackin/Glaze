@@ -1,3 +1,5 @@
+import { finalizeGenerationState } from './useGenerationFinalization.js';
+
 function applyCompletionToMessage({
     msg,
     response,
@@ -61,6 +63,19 @@ function applyCompletionToMessage({
     }
 }
 
+function resolveFinalResponse(cleanedResponse, existingText) {
+    if (cleanedResponse && cleanedResponse.trim()) {
+        return cleanedResponse;
+    }
+
+    if (existingText && existingText.trim()) {
+        console.warn('[onComplete] Preserving streamed text because final response was empty');
+        return existingText;
+    }
+
+    return cleanedResponse;
+}
+
 export async function handleGenerationComplete({
     response,
     finalReasoning,
@@ -82,8 +97,8 @@ export async function handleGenerationComplete({
     clearPersistedGeneration,
     clearBackgroundUpdateTimer,
     clearTypingStateForMessage,
-    getChatData,
-    db,
+    persistence,
+    app,
     cleanText,
     estimateTokens,
     updateSessionMessage,
@@ -99,35 +114,33 @@ export async function handleGenerationComplete({
     triggerAutoSyncCheck,
     addNotification
 }) {
+    const { getChatData, db } = persistence;
+    const { notifyGenerationEnded, notifyChatUpdated } = app;
     const ensureCleanup = () => {
-        const currentState = getGenerationState(char.id);
-        if (currentState && currentState.timerId) clearTimeout(currentState.timerId);
-        if (currentState && typeof currentState.clearStreamFlushTimer === 'function') {
-            currentState.clearStreamFlushTimer();
-        }
-        if (currentState && typeof currentState.streamFlush === 'function') {
-            currentState.streamFlush();
-        }
-        if (typeof clearBackgroundUpdateTimer === 'function') {
-            clearBackgroundUpdateTimer();
-        }
-        clearPersistedGeneration(char.id, sessionId);
-        clearGenerationState(char.id);
-        if (activeChatChar && activeChatChar.id === char.id) isGenerating.value = false;
+        finalizeGenerationState({
+            charId: char.id,
+            sessionId,
+            getGenerationState,
+            clearGenerationState,
+            clearPersistedGeneration,
+            clearBackgroundUpdateTimer,
+            isGenerating,
+            activeChatChar
+        });
     };
 
     const ensureStaleCleanup = () => {
-        const currentState = getGenerationState(char.id);
-        if (currentState && typeof currentState.clearStreamFlushTimer === 'function') {
-            currentState.clearStreamFlushTimer();
-        }
-        if (currentState && typeof currentState.streamFlush === 'function') {
-            currentState.streamFlush();
-        }
-        if (typeof clearBackgroundUpdateTimer === 'function') {
-            clearBackgroundUpdateTimer();
-        }
-        clearPersistedGeneration(char.id, sessionId);
+        finalizeGenerationState({
+            charId: char.id,
+            sessionId,
+            expectedGenId: genId,
+            getGenerationState,
+            clearGenerationState,
+            clearPersistedGeneration,
+            clearBackgroundUpdateTimer,
+            isGenerating,
+            activeChatChar
+        });
     };
 
     try {
@@ -139,7 +152,7 @@ export async function handleGenerationComplete({
         if (!currentState || currentState.genId !== genId) {
             await clearTypingStateForMessage({ charId: char.id, sessionId, msgId });
             ensureStaleCleanup();
-            window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: char.id, sessionId } }));
+            notifyGenerationEnded({ charId: char.id, sessionId });
             return;
         }
 
@@ -156,7 +169,7 @@ export async function handleGenerationComplete({
         if (controller.signal.aborted && !hasCompletionPayload) {
             await clearTypingStateForMessage({ charId: char.id, sessionId, msgId });
             ensureCleanup();
-            window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: char.id, sessionId } }));
+            notifyGenerationEnded({ charId: char.id, sessionId });
             return;
         }
 
@@ -172,19 +185,20 @@ export async function handleGenerationComplete({
         }
 
         clearGenerationState(char.id);
-        if (activeChatChar && activeChatChar.id === char.id) isGenerating.value = false;
+        if (activeChatChar?.value && activeChatChar.value.id === char.id) isGenerating.value = false;
 
         const now = new Date();
         const cleanedResponse = cleanText(response);
         const time = now.getHours() + ':' + String(now.getMinutes()).padStart(2, '0');
         const duration = ((Date.now() - startTime) / 1000).toFixed(2) + 's';
 
-        if (activeChatChar && activeChatChar.id === char.id && foundIndex !== -1) {
+        if (activeChatChar?.value && activeChatChar.value.id === char.id && foundIndex !== -1) {
             const msg = currentMessages.value[foundIndex];
+            const finalResponse = resolveFinalResponse(cleanedResponse, msg.text);
             msg.time = time;
             applyCompletionToMessage({
                 msg,
-                response: cleanedResponse,
+                response: finalResponse,
                 finalReasoning,
                 duration,
                 meta,
@@ -199,7 +213,7 @@ export async function handleGenerationComplete({
                 includeInitialGuidanceMeta: true
             });
 
-            updateSessionMessage(char, foundIndex, msg);
+            await updateSessionMessage(char, foundIndex, msg);
 
             processMessageImages(msg.text, (updatedText) => {
                 msg.text = updatedText;
@@ -226,18 +240,22 @@ export async function handleGenerationComplete({
                 smartScroll();
             }
 
-            sendMessageNotification(char.name, cleanedResponse, char.avatar, char.id, sessionId, msgId);
+            sendMessageNotification(char.name, finalResponse, char.avatar, char.id, sessionId, msgId);
 
             if (guidanceType === 'GENERATION') {
                 const autoData = await getChatData(char.id);
                 if (autoData) {
                     const autoSessionId = char.sessionId || autoData.currentId;
                     autoData.sessions[autoSessionId] = currentMessages.value;
-                    await runMemoryAutomationAfterStableTurn(autoData, autoSessionId, currentMessages.value, { allowImmediate: true });
+                    await runMemoryAutomationAfterStableTurn(autoData, autoSessionId, currentMessages.value, {
+                        allowImmediate: true,
+                        charId: char.id,
+                        syncUi: true
+                    });
                 }
             }
 
-            window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: char.id, sessionId } }));
+            notifyGenerationEnded({ charId: char.id, sessionId });
             return;
         }
 
@@ -246,10 +264,11 @@ export async function handleGenerationComplete({
             const bIdx = bgData.sessions[sessionId].findIndex(m => m.id === msgId);
             if (bIdx !== -1) {
                 const msg = bgData.sessions[sessionId][bIdx];
+                const finalResponse = resolveFinalResponse(cleanedResponse, msg.text);
                 msg.time = time;
                 applyCompletionToMessage({
                     msg,
-                    response: cleanedResponse,
+                    response: finalResponse,
                     finalReasoning,
                     duration,
                     meta,
@@ -264,7 +283,7 @@ export async function handleGenerationComplete({
                 includeInitialGuidanceMeta: false
             });
 
-                processMessageImages(cleanedResponse, (updatedText) => {
+                processMessageImages(finalResponse, (updatedText) => {
                     msg.text = updatedText;
                     msg.swipes[msg.swipeId || 0] = updatedText;
                     if (!updatedText.includes('imggen-loading')) {
@@ -286,23 +305,27 @@ export async function handleGenerationComplete({
                 await db.saveChat(char.id, bgData);
 
                 if (guidanceType === 'GENERATION') {
-                    await runMemoryAutomationAfterStableTurn(bgData, sessionId, bgData.sessions[sessionId], { allowImmediate: true });
+                    await runMemoryAutomationAfterStableTurn(bgData, sessionId, bgData.sessions[sessionId], {
+                        allowImmediate: true,
+                        charId: char.id,
+                        syncUi: false
+                    });
                 }
 
-            sendMessageNotification(char.name, cleanedResponse, char.avatar, char.id, sessionId, msgId);
+                sendMessageNotification(char.name, finalResponse, char.avatar, char.id, sessionId, msgId);
 
-            if (meta?.allReasoning && addNotification) {
-                addNotification('The entire response went into the reasoning block', 'warning');
-            }
+                if (meta?.allReasoning && addNotification) {
+                    addNotification('The entire response went into the reasoning block', 'warning');
+                }
 
                 db.get('gz_unread').then(unread => {
                     const newUnread = unread || {};
                     newUnread[char.id] = true;
                     db.set('gz_unread', newUnread);
-                    window.dispatchEvent(new CustomEvent('chat-updated'));
+                    notifyChatUpdated();
                 });
 
-                window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: char.id, sessionId } }));
+                notifyGenerationEnded({ charId: char.id, sessionId });
             }
         }
     } catch (completeErr) {
@@ -314,6 +337,6 @@ export async function handleGenerationComplete({
             msgId,
             errorLabel: '[onComplete]'
         });
-        window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: char.id, sessionId } }));
+        notifyGenerationEnded({ charId: char.id, sessionId });
     }
 }

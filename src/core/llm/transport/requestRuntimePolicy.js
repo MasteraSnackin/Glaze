@@ -21,18 +21,6 @@ export async function setupRequestRuntimePolicy({ notificationTitle, notificatio
 
     await requestWakeLock();
 
-    const handleVisibilityChange = () => {
-        if (document.visibilityState === 'visible') {
-            requestWakeLock();
-            return;
-        }
-
-        if (Capacitor.isNativePlatform()) {
-            enableForegroundRuntime();
-        }
-    };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
     const platform = Capacitor.getPlatform();
     const isAndroid = platform === 'android';
     const isIos = platform === 'ios';
@@ -51,6 +39,18 @@ export async function setupRequestRuntimePolicy({ notificationTitle, notificatio
             }
         }
     };
+
+    const handleVisibilityChange = () => {
+        if (document.visibilityState === 'visible') {
+            requestWakeLock();
+            return;
+        }
+
+        if (Capacitor.isNativePlatform()) {
+            enableForegroundRuntime();
+        }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     if (Capacitor.isNativePlatform()) {
         longRequestTimer = setTimeout(() => {

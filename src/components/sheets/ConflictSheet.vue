@@ -3,10 +3,9 @@ import { ref, computed } from 'vue';
 import SheetView from '@/components/ui/SheetView.vue';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
-import { syncConflicts, removeConflict, clearConflicts, SYNC_STATUS } from '@/core/states/syncState.js';
+import { syncConflicts, removeConflict, clearConflicts, SYNC_STATUS, syncStatus } from '@/core/states/syncState.js';
 import { resolveConflict } from '@/core/services/syncEngine.js';
 import { fullPush } from '@/core/services/syncService.js';
-import { syncStatus } from '@/core/states/syncState.js';
 
 const sheet = ref(null);
 defineProps({ zIndex: { type: Number, default: 11050 } });
@@ -126,6 +125,8 @@ async function resolveAllCloud() {
     }
 }
 
+const close = () => sheet.value?.close();
+
 async function pushResolvedAndClose() {
     clearConflicts();
     syncStatus.value = SYNC_STATUS.IDLE;
@@ -142,7 +143,6 @@ const open = () => {
     resolvedIds.value = new Set();
     sheet.value?.open();
 };
-const close = () => sheet.value?.close();
 
 defineExpose({ open, close });
 </script>
@@ -151,8 +151,12 @@ defineExpose({ open, close });
     <SheetView ref="sheet" :z-index="zIndex" :title="t('sync_conflicts_title') || 'Sync Conflicts'" :fit-content="false">
         <div class="cs-body">
             <div class="cs-header-info" v-if="hasConflicts">
-                <div class="cs-count">{{ unresolvedConflicts.length }} {{ t('sync_conflicts_pending') || 'unresolved conflict(s)' }}</div>
-                <div class="cs-hint">{{ t('sync_conflicts_hint') || 'Choose which version to keep for each item.' }}</div>
+                <div class="cs-count">
+{{ unresolvedConflicts.length }} {{ t('sync_conflicts_pending') || 'unresolved conflict(s)' }}
+</div>
+                <div class="cs-hint">
+{{ t('sync_conflicts_hint') || 'Choose which version to keep for each item.' }}
+</div>
             </div>
 
             <div class="cs-empty" v-if="!hasConflicts">
@@ -181,8 +185,12 @@ defineExpose({ open, close });
                     <div class="cs-item-header" @click="toggleExpand(conflict.id)">
                         <div class="cs-item-icon" v-html="typeIcon(conflict.type)"></div>
                         <div class="cs-item-info">
-                            <div class="cs-item-name">{{ conflict.name }}</div>
-                            <div class="cs-item-type">{{ typeLabel(conflict.type) }}</div>
+                            <div class="cs-item-name">
+{{ conflict.name }}
+</div>
+                            <div class="cs-item-type">
+{{ typeLabel(conflict.type) }}
+</div>
                         </div>
                         <svg class="cs-chevron" viewBox="0 0 24 24" :class="{ rotated: expandedConflictId === conflict.id }"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
                     </div>
@@ -201,7 +209,9 @@ defineExpose({ open, close });
                                     </div>
                                 </div>
                             </div>
-                            <div class="cs-vs">VS</div>
+                            <div class="cs-vs">
+VS
+</div>
                             <div class="cs-side cs-cloud">
                                 <div class="cs-side-label">
                                     <svg viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z"/></svg>

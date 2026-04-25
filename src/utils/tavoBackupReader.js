@@ -28,20 +28,20 @@ function extractStringsAndJson(uint8Array) {
     const items = [];
     let i = 0;
     const len = uint8Array.length;
-    let decoder = new TextDecoder("utf-8");
+    const decoder = new TextDecoder("utf-8");
 
     while (i < len) {
         if (uint8Array[i] >= 32 || uint8Array[i] === 10 || uint8Array[i] === 13 || uint8Array[i] === 9) {
-            let start = i;
+            const start = i;
             while (i < len && (uint8Array[i] >= 32 || uint8Array[i] === 10 || uint8Array[i] === 13 || uint8Array[i] === 9)) {
                 i++;
             }
             try {
-                let text = decoder.decode(uint8Array.subarray(start, i)).trim();
+                const text = decoder.decode(uint8Array.subarray(start, i)).trim();
                 if (text.length >= 2) {
                     if (text.startsWith("[") || text.startsWith("{")) {
                         try {
-                            let parsed = JSON.parse(text);
+                            const parsed = JSON.parse(text);
                             items.push({ type: "json", data: parsed });
                             continue;
                         } catch (e) {
@@ -68,7 +68,7 @@ export function parseTavoLMDB(arrayBuffer) {
     const pageSize = 4096;
 
     const categories = {};
-    for (let k of Object.values(TYPE_NAMES)) categories[k] = new Map();
+    for (const k of Object.values(TYPE_NAMES)) categories[k] = new Map();
 
     let bigCount = 0;
 
@@ -139,21 +139,21 @@ export function parseTavoLMDB(arrayBuffer) {
     }
 
     // Convert maps back to arrays
-    for (let k in categories) {
+    for (const k in categories) {
         categories[k] = Array.from(categories[k].values());
     }
 
     // Group chats
     const chats = [];
-    if (categories['conversation'] && categories['message']) {
+    if (categories.conversation && categories.message) {
         const msgByConv = {};
-        for (const msg of categories['message']) {
+        for (const msg of categories.message) {
             if (msg.conversationId) {
                 if (!msgByConv[msg.conversationId]) msgByConv[msg.conversationId] = [];
                 msgByConv[msg.conversationId].push(msg);
             }
         }
-        for (const conv of categories['conversation']) {
+        for (const conv of categories.conversation) {
             const cid = conv.entity_id;
             const msgs = msgByConv[cid] || [];
             msgs.sort((a, b) => (a.timestamp || a.entity_id) - (b.timestamp || b.entity_id));
@@ -231,7 +231,7 @@ export async function importTavoBackupFromZip(zipFile, onProgress) {
     localStorage.removeItem('silly_cradle_presets');
     localStorage.removeItem('regex_scripts');
 
-    let mdbFile = Object.keys(zip.files).find(p => p.toLowerCase().endsWith('data.mdb'));
+    const mdbFile = Object.keys(zip.files).find(p => p.toLowerCase().endsWith('data.mdb'));
     if (!mdbFile) throw new Error("No data.mdb found in Tavo backup zip.");
 
     progress('reading DB');
@@ -558,13 +558,13 @@ export async function importTavoBackupFromZip(zipFile, onProgress) {
                 if (!firstCharMsg) continue;
                 const charEntityId = firstCharMsg.characterId;
 
-                let glazeCharId = charNameToId[charEntityId];
+                const glazeCharId = charNameToId[charEntityId];
                 if (!glazeCharId) {
                     continue;
                 }
 
                 // Convert messages to ST format JSONL and use existing importer
-                let lines = [];
+                const lines = [];
                 const metadata = {
                     user_name: "User",
                     character_name: "Char",

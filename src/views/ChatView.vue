@@ -3,31 +3,21 @@
 let activeChatChar = null;
 let _cleanupScroll = null;
 let _msgIdCounter = 0;
-function genMsgId() {
-    return `msg_${Date.now()}_${++_msgIdCounter}`;
-}
+let unsubCharacterUpdated = null;
+let unsubGenerationEnded = null;
+let unsubFsEditorClosed = null;
+let unsubChatSearchToggle = null;
+let unsubRegexChanged = null;
+let unsubChatSearch = null;
+let unsubApiContextChanged = null;
+let unsubSettingsChanged = null;
+
+import * as memoryBooksService from '@/core/services/memoryBooksService.js';
 
 // Import Memory Books functions from service
 const {
     createEmptyMemoryCoverage,
     createBaseMessageMeta,
-    ensureSessionMemoryBook,
-    createMemoryAutomationState,
-    memoryBooksHasAutomationState,
-    ensureMemoryAutomationState,
-    getStableVisibleMessages,
-    countStableConversationMessages,
-    getLastStableConversationRole,
-    computeDelayedWaitExchanges,
-    countCompletedExchangesSince,
-    normalizeAutoCreateInterval,
-    resolvePendingTriggerMessages,
-    buildBootstrapSegments,
-    arraysEqual,
-    calculateMessageOverlapRatio,
-    findConflictingMemoryEntry,
-    normalizeEntryMessageIds,
-    reconcileMemoryBookForMessages,
     reconcileSessionMemoryState,
     runMemoryMaintenancePass,
     formatElapsedSeconds,
@@ -45,20 +35,18 @@ const {
 </script>
 
 <script setup>
-import { ref, nextTick, onMounted, onUnmounted, watch, computed, onBeforeUnmount } from 'vue';
+import { ref, nextTick, onMounted, onUnmounted, watch, computed } from 'vue';
 import { Capacitor } from '@capacitor/core';
 import { App } from '@capacitor/app';
 import { keyboardOverlap } from '@/core/services/keyboardHandler.js';
 import { estimateTokens } from '@/utils/tokenizer.js';
-import { formatText, cleanText } from '@/utils/textFormatter.js';
-import { replaceMacros } from '@/utils/macroEngine.js';
+import { cleanText } from '@/utils/textFormatter.js';
 import { getEffectivePersona, activePersona, allPersonas } from '@/core/states/personaState.js';
 import { formatDate, formatDateSeparator } from '@/utils/dateFormatter.js';
 import { currentLang, chatPaddingLR, setChatPaddingLR, shouldUseBatterySaverUI } from '@/core/config/APPSettings.js';
 import { translations } from '@/utils/i18n.js';
-import { generateChatResponse, calculateContext, generateMemoryDraft } from '@/core/services/generationService.js';
-import { executeRequest } from '@/core/services/llmApi.js';
-import { getApiConfig, getApiRuntimeStorage, getApiReasoningTags, fetchRemoteModels } from '@/core/config/APISettings.js';
+import { createChatGenerationServices } from '@/core/llm/usecases/generateChat.js';
+import { useGenerationAbort } from '@/composables/chat/useGenerationAbort.js';
 import { getActiveLLMProfile } from '@/core/config/ProviderProfiles.js';
 import { getEmbeddingConfig, isEmbeddingConfigured } from '@/core/config/embeddingSettings.js';
 import { animateTextChange, updateAppColors, initHeaderScroll, initRipple } from '@/core/services/ui.js';
@@ -69,18 +57,9 @@ import { lorebookState, getActiveLorebooksForContext } from '@/core/states/loreb
 import { presetState, getEffectivePreset, getEffectivePresetId } from '@/core/states/presetState.js';
 import { useVirtualScroll } from '@/composables/chat/useVirtualScroll.js';
 import { useGenerationRegistry } from '@/composables/chat/useGenerationRegistry.js';
-import { handleGenerationComplete } from '@/composables/chat/useGenerationCompleteHandler.js';
-import { handleGenerationError } from '@/composables/chat/useGenerationErrorHandler.js';
-import { buildGenerationAuthorsNote, buildGenerationHistory, ensureGenerationPlaceholderMessage, resolveGenerationSessionContext } from '@/composables/chat/useGenerationPreparation.js';
-import { handleGenerationPromptReady } from '@/composables/chat/useGenerationPromptReady.js';
-import { createPromptMetadataSnapshots } from '@/composables/chat/usePromptMetadataSnapshots.js';
-import { restoreGenerationState } from '@/composables/chat/useGenerationStateRestore.js';
-import { applyGenerationGuidanceState, setupGenerationState } from '@/composables/chat/useGenerationStateSetup.js';
-import { createGenerationStreamUpdater } from '@/composables/chat/useGenerationStreamUpdate.js';
 import { useTypingStateCleanup } from '@/composables/chat/useTypingStateCleanup.js';
 import { useSidebarResizer } from '@/composables/ui/useSidebarResizer.js';
-import { sendMessageNotification, clearMessageNotifications, startGenerationNotification, stopGenerationNotification } from '@/core/services/notificationService.js';
-import { addNotification } from '@/core/states/notificationsState.js';
+import { sendMessageNotification, clearMessageNotifications } from '@/core/services/notificationService.js';
 import { formatError } from '@/utils/errors.js';
 import { themeState } from '@/core/states/themeState.js';
 import { triggerChatImport } from '@/core/services/chatImporter.js';
@@ -96,14 +75,28 @@ import TokenizerSheet from '@/components/sheets/TokenizerSheet.vue';
 import ImageGenSheet from '@/components/sheets/ImageGenSheet.vue';
 import GlossarySheet from '@/components/sheets/GlossarySheet.vue';
 import MemoryBooksSheet from '@/components/sheets/MemoryBooksSheet.vue';
-import { addMessageStats, addDeletedStats, addRegenerationStats, migrateStatsIfNeeded } from '@/core/services/statsService.js';
-import { processMessageImages, generateImage, makeLoadingHtml, makeErrorHtml, makeResultHtml } from '@/core/services/imageGenService.js';
+import { addDeletedStats, migrateStatsIfNeeded } from '@/core/services/statsService.js';
 import { showToast } from '@/core/states/toastState.js';
-import { incrementMessageCounter, shouldAutoSync, resetMessageCounter } from '@/core/states/syncState.js';
-import { fullSync } from '@/core/services/syncService.js';
+import { triggerAutoSyncCheck } from '@/composables/chat/useAutoSync.js';
 import { useMemoryBooks } from '@/composables/chat/useMemoryBooks.js';
-import * as memoryBooksService from '@/core/services/memoryBooksService.js';
-import * as contextService from '@/core/services/contextService.js';
+import { useMemoryAutomation } from '@/composables/chat/useMemoryAutomation.js';
+import { useChatMessageDisplay, restoreVisibleSwipeState } from '@/composables/chat/useChatMessageDisplay.js';
+import { useMessageSelection } from '@/composables/chat/useMessageSelection.js';
+import { useChatSearch } from '@/composables/chat/useChatSearch.js';
+import { useMemorySheetUI } from '@/composables/chat/useMemorySheetUI.js';
+import { useSwipeNavigation } from '@/composables/chat/useSwipeNavigation.js';
+import { useSessionManagement } from '@/composables/chat/useSessionManagement.js';
+import { useMessageActions } from '@/composables/chat/useMessageActions.js';
+import { useChatGeneration } from '@/composables/chat/useChatGeneration.js';
+import { useContextCutoff } from '@/composables/chat/useContextCutoff.js';
+import { publishAppEvent, subscribeAppEvent } from '@/core/events/eventHub.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
+import { useSessionPersistence } from '@/composables/chat/useSessionPersistence.js';
+
+function genMsgId() {
+    return `msg_${Date.now()}_${++_msgIdCounter}`;
+}
+import { getMemoryPromptOptions, getMemoryPromptLabel, getMemoryPromptLabelByKey, getNormalizedMemoryGenerationState } from '@/core/services/memoryPromptPresets.js';
 
 // Import additional memory service functions needed locally
 const {
@@ -112,79 +105,9 @@ const {
     reindexAllMemoryEntries
 } = memoryBooksService;
 
-async function openMemoryEntryEditor(entryId) {
-    if (!activeChatChar || !entryId) return;
+let chatGenerationServices = null;
 
-    const chatData = await getChatData(activeChatChar.id);
-    const sessionId = activeChatChar.sessionId || chatData.currentId;
-    const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
-    const entry = memoryBook.entries.find(item => item.id === entryId);
-    if (!entry) return;
-
-    const content = document.createElement('div');
-    content.className = 'context-sheet';
-    content.innerHTML = `
-        <div class="settings-item">
-            <label>Title</label>
-            <input id="memory-entry-title" type="text" value="${(entry.title || '').replace(/"/g, '&quot;')}" placeholder="Memory title">
-        </div>
-        <div class="settings-item">
-            <label>Content</label>
-            <textarea id="memory-entry-content" rows="8" placeholder="Memory text">${(entry.content || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>
-        </div>
-        <div class="settings-item">
-            <label>Keys</label>
-            <input id="memory-entry-keys" type="text" value="${(Array.isArray(entry.keys) ? entry.keys.join(', ') : '').replace(/"/g, '&quot;')}" placeholder="key one, key two">
-            <div class="context-sheet-note">Only this field is used for keyword retrieval.</div>
-        </div>
-        <div class="context-sheet-actions">
-            <button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-entry-cancel">Cancel</button>
-            <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="memory-entry-save">Save</button>
-        </div>
-    `;
-
-    content.querySelector('#memory-entry-cancel')?.addEventListener('click', () => {
-        closeBottomSheet();
-        setTimeout(() => openMemoryTextPreview(entry, 'Memory Entry'), 50);
-    });
-
-    content.querySelector('#memory-entry-save')?.addEventListener('click', async () => {
-        const nextTitle = content.querySelector('#memory-entry-title')?.value?.trim() || 'Untitled memory';
-        const nextContent = content.querySelector('#memory-entry-content')?.value?.trim() || '';
-        const nextKeys = parseMemoryKeyInput(content.querySelector('#memory-entry-keys')?.value);
-
-        if (!nextContent) {
-            showToast('Memory content is required');
-            return;
-        }
-
-        const retrievalChanged = JSON.stringify(entry.keys || []) !== JSON.stringify(nextKeys)
-            || String(entry.content || '') !== nextContent;
-
-        entry.title = nextTitle;
-        entry.content = nextContent;
-        entry.keys = nextKeys;
-        entry.updatedAt = Date.now();
-        normalizeMemoryEntryShape(entry);
-        memoryBook.updatedAt = Date.now();
-        reconcileSessionMemoryState(chatData, sessionId, currentMessages.value);
-        chatData.sessions[sessionId] = currentMessages.value;
-
-        try {
-            if (getMemoryVectorSearchEnabled(memoryBook) && retrievalChanged) {
-                await reindexMemoryEntry(entry, activeChatChar.id, sessionId);
-            }
-            await db.saveChat(activeChatChar.id, chatData);
-            closeBottomSheet();
-            setTimeout(() => openMemoryTextPreview(entry, 'Memory Entry'), 50);
-        } catch (error) {
-            console.error('Failed to save memory entry:', error);
-            showToast(`Memory save failed: ${formatError(error)}`);
-        }
-    });
-
-    showBottomSheet({ title: 'Edit Memory Entry', content, isSolid: true });
-}
+const t = (key) => translations[currentLang.value]?.[key] || key;
 
 const isAndroid = Capacitor.getPlatform() === 'android';
 const isBatterySaverUI = computed(() => shouldUseBatterySaverUI());
@@ -195,6 +118,20 @@ const formatGenerationElapsed = (startTime) => {
         : elapsedSeconds.toFixed(1) + 's';
 };
 const getGenerationTimerInterval = () => isBatterySaverUI.value ? 1000 : 100;
+const currentMessages = ref([]);
+const {
+    nextGenerationId,
+    listGeneratingCharIds,
+    getGenerationState,
+    hasGenerationState,
+    setGenerationState,
+    isGenerationStateCurrent,
+    clearGenerationState,
+    markGenerationPersisted,
+    clearPersistedGeneration,
+    buildGenerationOwnerKey,
+    createGenerationRequestToken
+} = useGenerationRegistry();
 const restartVisibleGenerationTimers = () => {
     if (!activeChatChar) return;
 
@@ -215,17 +152,9 @@ const restartVisibleGenerationTimers = () => {
         }
     }, getGenerationTimerInterval());
 };
-const currentMessages = ref([]);
-const {
-    nextGenerationId,
-    listGeneratingCharIds,
-    getGenerationState,
-    hasGenerationState,
-    setGenerationState,
-    clearGenerationState,
-    markGenerationPersisted,
-    clearPersistedGeneration
-} = useGenerationRegistry();
+
+let abortActiveChatGeneration = async () => false;
+let abortAnyActiveGeneration = async () => false;
 const { clearTypingStateForMessage } = useTypingStateCleanup({ currentMessages, getChatData, db });
 
 // --- Component State ---
@@ -259,7 +188,6 @@ const showScrollButton = ref(false);
 const isLoading = ref(false);
 let currentOnBack = null;
 let inputResizeObserver = null;
-const cutoffIndex = ref(-1);
 const apiView = ref(null);
 const statsSheet = ref(null);
 const tokenizerSheet = ref(null);
@@ -273,6 +201,13 @@ const charCardSheet = ref(null);
 const lorebookSheet = ref(null);
 const regexSheet = ref(null);
 const activeChar = ref(null);
+({ abortActiveChatGeneration, abortAnyActiveGeneration } = useGenerationAbort({
+    getGenerationState,
+    clearGenerationState,
+    isGenerating,
+    isImpersonating,
+    activeChatChar: activeChar
+}));
 const regexRevision = ref(0);
 // Initialize Memory Books composable
 const {
@@ -305,1610 +240,166 @@ const {
     db
 });
 
+let openMemoryBooksSheet = () => {};
+
+const {
+    createPendingMemoryDraft,
+    generateMemoryDraftForMessages,
+    runMemoryAutomationAfterStableTurn,
+    bootstrapImportedMemoryDrafts,
+    buildMemoryContinuityContext,
+    buildMemoryDraftLoreContext,
+    buildMemoryDraftSummaryExcerpt,
+    parseMemoryDraftResponse,
+    runBatchDraftGeneration,
+    runBatchDraftGenerationFromIds,
+    generateSingleDraft,
+    handleMemoryBatchGenerate: handleMemoryBatchGenerate_impl,
+    handleMemoryQuickModelChange: handleMemoryQuickModelChange_impl
+} = useMemoryAutomation({
+    activeChatChar,
+    currentMessages,
+    activePersona,
+    getGenerationState,
+    memoryDraftState,
+    currentMemoryBookData,
+    loadCurrentMemoryBook,
+    updatePendingMemoryMessageIds,
+    startMemoryDraftProgress,
+    stopMemoryDraftProgress,
+    setMemoryDraftAbortController,
+    openMemoryBooksSheet
+});
+
+const {
+    getAvatar,
+    getAvatarLetter,
+    getAvatarColor,
+    getDisplayName,
+    openAvatar
+} = useChatMessageDisplay(activeChatChar, allPersonas);
+
 const onRegexChanged = () => { regexRevision.value++; };
-const contextBreakdown = ref(null);
-// Import context settings from service
-const { fillThreshold: initialFillThreshold, hidePercent: initialHidePercent } = contextService.loadHistoryContextSettings();
-const historyFillThreshold = ref(initialFillThreshold);
-const historyHidePercent = ref(initialHidePercent);
-let isCalculatingCutoff = false;
-let pendingCutoffRecalc = false;
+
 let isOpeningChat = false;
-let cutoffRerunTimer = null;
-let cutoffDebounceTimer = null;
-let contextCutoffCache = null; // { charId, sessionId, messageCount, hash, result }
+
+const {
+    cutoffIndex,
+    contextBreakdown,
+    contextSegments,
+    contextBreakdownItems,
+    contextLegendItems,
+    visibleHistoryMessages,
+    historyUsagePercent,
+    historyHidePreview,
+    shouldRecommendHide,
+    historyFillThreshold,
+    historyHidePercent,
+    saveCurrentMessages,
+    updateContextCutoff,
+    debouncedUpdateContextCutoff,
+    invalidateContextCache,
+    handleSaveContextSettings,
+    hideTopMessagesNow,
+    confirmHideTopMessages,
+    unhideAllMessages,
+    openContextSheet,
+    resetCutoffState,
+    clearCutoffTimers,
+    consumePendingCutoffRecalc,
+    getIsCalculatingCutoff,
+    setPendingCutoffRecalc
+} = useContextCutoff({
+    getActiveChatChar: () => activeChatChar,
+    currentMessages,
+    isOpeningChat: () => isOpeningChat,
+    isBatterySaverUI,
+    getChatData,
+    db,
+    getEffectivePreset,
+    showBottomSheet,
+    closeBottomSheet,
+    showToast,
+    tokenizerSheet,
+    presetView
+});
+
 const pendingGuidance = ref(null); // { text, type }
 
 let ignoreScrollAdjustment = false;
 let ignoreScrollAdjustmentTimer = null;
 
-// --- Search State ---
-const isSearchMode = ref(false);
-const searchQuery = ref('');
-const searchResults = ref([]); // array of original indices
-const currentSearchIndex = ref(-1);
+
 
 // --- Selection State ---
-const selectedMessages = ref(new Set());
-const isSelectionMode = computed(() => selectedMessages.value.size > 0);
-
-const selectionIncludesLast = computed(() => {
-    if (selectedMessages.value.size === 0 || !currentMessages.value.length) return false;
-    // All selected messages must be consecutive from the end
-    const msgs = currentMessages.value;
-    for (let i = msgs.length - 1; i >= msgs.length - selectedMessages.value.size; i--) {
-        if (i < 0 || !msgs[i] || !selectedMessages.value.has(msgs[i].id)) return false;
-    }
-    return true;
+const {
+    selectedMessages,
+    isSelectionMode,
+    selectionIncludesLast,
+    toggleSelection,
+    clearSelection,
+    deleteSelectedMessages,
+    toggleHideSelectedMessages
+} = useMessageSelection(currentMessages, {
+    getChatData,
+    db,
+    addDeletedStats,
+    reconcileSessionMemoryState,
+    debouncedUpdateContextCutoff: () => debouncedUpdateContextCutoff(),
+    getActiveChatChar: () => activeChatChar
 });
 
-const builtInMemoryPrompts = [
-    {
-        key: 'detailed_beats',
-        label: 'Detailed beats (recommended)',
-        prompt: [
-            'Analyze the following roleplay segment and create a comprehensive memory entry.',
-            'Preserve the original language of the source segment. Do not translate it.',
-            'Exclude all [OOC] (out-of-character) conversation — it is not useful for memory.',
-            '',
-            'Create a detailed beat-by-beat summary in narrative prose. Include:',
-            '- Timeline: Date/time context if mentioned',
-            '- Story Beats: All important plot events, decisions, and developments in order',
-            '- Key Interactions: Significant character exchanges, dialogue highlights, and relationship developments',
-            '- Notable Details: Important objects, settings, revelations, memorable quotes',
-            '- Outcome: Results, resolutions, emotional states, and consequences for future continuity',
-            '',
-            'Capture all nuance without repeating verbatim. Use concrete nouns (e.g., "rice cooker" not "appliance").',
-            'Write in past tense, third person. Focus on cause → intention → reaction → consequence.',
-            '',
-            'For keywords: generate 15-30 concrete, scene-specific retrieval tags:',
-            '- Use proper nouns (locations: "Chinatown", "Ritz-Carlton bar")',
-            '- Use specific objects ("CPAP machine", "chocolate chip cookies")',
-            '- Use distinctive actions ("cookie baking", "piano apology")',
-            '- Use unique phrases from the scene ("pack for forever", specific nicknames)',
-            '- DO NOT use abstract themes ("intimacy", "trust", "vulnerability")',
-            '- DO NOT use character names ({{char}}, {{user}})',
-            '- DO NOT combine multiple concepts into one keyword',
-            '',
-            'Return plain text in this exact format:',
-            'Memory: <detailed beat-by-beat summary following the structure above>',
-            'Keys: <15-30 comma-separated concrete keywords as specified>',
-            '',
-            '{{history}}'
-        ].join('\n')
-    },
-    {
-        key: 'concise_narrative',
-        label: 'Concise narrative',
-        prompt: [
-            'Analyze the following roleplay segment and create a concise memory entry.',
-            'Preserve the original language. Do not translate. Exclude all [OOC] conversation.',
-            '',
-            'Write a compact 3-5 sentence narrative summary in past tense, third person.',
-            'Focus on:',
-            '- What happened (main events and decisions)',
-            '- Key character interactions or developments',
-            '- Important outcome or state change',
-            '',
-            'For keywords: provide 10-20 concrete, scene-specific keywords:',
-            '- Locations, objects, proper nouns, unique actions',
-            '- NOT abstract themes, emotions, or character names',
-            '',
-            'Return plain text in this exact format:',
-            'Memory: <3-5 sentence concise narrative summary>',
-            'Keys: <10-20 comma-separated concrete keywords>',
-            '',
-            '{{history}}'
-        ].join('\n')
-    },
-    {
-        key: 'structured_markdown',
-        label: 'Structured (markdown)',
-        prompt: [
-            'Analyze the following roleplay segment and create a structured memory entry.',
-            'Preserve the original language. Exclude all [OOC] conversation.',
-            '',
-            'Use this markdown structure (skip sections if not applicable):',
-            '**Timeline**: Day/time this scene covers',
-            '**Story Beats**: Important plot events and developments',
-            '**Key Interactions**: Significant character exchanges and relationship shifts',
-            '**Notable Details**: Important objects, settings, revelations, quotes',
-            '**Outcome**: Results, emotional states, consequences',
-            '',
-            'Write in past tense, third person. Be comprehensive but avoid verbatim repetition.',
-            '',
-            'For keywords: generate 15-25 concrete scene-specific tags:',
-            '- Proper nouns, locations, specific objects, unique actions',
-            '- NOT abstract concepts, emotions, or character names',
-            '',
-            'Return plain text in this exact format:',
-            'Memory: <structured markdown summary following the template above>',
-            'Keys: <15-25 comma-separated concrete keywords>',
-            '',
-            '{{history}}'
-        ].join('\n')
-    },
-    {
-        key: 'minimal_factual',
-        label: 'Minimal (1-2 sentences)',
-        prompt: [
-            'Create a minimal memory entry from the following roleplay segment.',
-            'Preserve the original language. Exclude [OOC] conversation.',
-            '',
-            'Write 1-2 sentences capturing only the most important factual development.',
-            'Focus on durable outcomes: status changes, revealed facts, decisions, or relationship shifts.',
-            '',
-            'For keywords: provide 5-10 most relevant concrete keywords (locations, objects, proper nouns).',
-            'Do not use abstract themes or character names.',
-            '',
-            'Return plain text in this exact format:',
-            'Memory: <1-2 sentence factual summary>',
-            'Keys: <5-10 comma-separated concrete keywords>',
-            '',
-            '{{history}}'
-        ].join('\n')
-    }
-];
 
-function getMemoryPromptOptions(settings = {}) {
-    const custom = Array.isArray(settings.customPrompts) ? settings.customPrompts : [];
-    return [
-        ...builtInMemoryPrompts,
-        ...custom.map(item => ({ key: item.id, label: item.name || 'Custom prompt', prompt: item.prompt || '' }))
-    ];
-}
-
-function resolveMemoryPrompt(settings = {}) {
-    const options = getMemoryPromptOptions(settings);
-    const selected = options.find(item => item.key === settings.promptPreset);
-    return selected?.prompt || builtInMemoryPrompts[0].prompt;
-}
-
-function getMemoryPromptLabel(settings = {}) {
-    const options = getMemoryPromptOptions(settings);
-    return options.find(item => item.key === settings.promptPreset)?.label || builtInMemoryPrompts[0].label;
-}
-
-function getMemoryPromptLabelByKey(settings = {}, promptPreset = 'detailed_beats') {
-    const options = getMemoryPromptOptions(settings);
-    return options.find(item => item.key === promptPreset)?.label || builtInMemoryPrompts[0].label;
-}
-
-function restoreVisibleSwipeState(messages = []) {
-    if (!Array.isArray(messages)) return [];
-
-    return messages.map(msg => {
-        if (!msg || !Array.isArray(msg.swipesMeta)) return msg;
-
-        const swipeIndex = msg.swipeId || 0;
-        const swipeMeta = msg.swipesMeta[swipeIndex];
-        if (!swipeMeta) return msg;
-
-        let nextMsg = msg;
-
-        if (msg.reasoning == null && swipeMeta.reasoning != null) {
-            nextMsg = { ...nextMsg, reasoning: swipeMeta.reasoning };
-        }
-        if (nextMsg.genTime == null && swipeMeta.genTime != null) {
-            nextMsg = { ...nextMsg, genTime: swipeMeta.genTime };
-        }
-        if ((nextMsg.tokens == null || nextMsg.tokens === 0) && swipeMeta.tokens != null) {
-            nextMsg = { ...nextMsg, tokens: swipeMeta.tokens };
-        }
-
-        return nextMsg;
-    });
-}
-
-function getNormalizedMemoryGenerationState(settings = {}, overrides = {}) {
-    const source = settings.generationSource === 'custom' ? 'custom' : 'llm';
-    return {
-        source,
-        model: settings.generationModel || '',
-        endpoint: settings.generationEndpoint || '',
-        apiKey: settings.generationApiKey || '',
-        temperature: settings.generationTemperature,
-        maxTokens: Number.isFinite(Number(settings.generationMaxTokens)) && Number(settings.generationMaxTokens) > 0
-            ? Math.round(Number(settings.generationMaxTokens))
-            : null,
-        autoCreateEnabled: settings.autoCreateEnabled !== false,
-        autoGenerateEnabled: settings.autoGenerateEnabled === true,
-        promptPreset: getMemoryPromptOptions(settings).some(p => p.key === settings.promptPreset) ? settings.promptPreset : 'detailed_beats',
-        autoCreateInterval: Number.isFinite(Number(settings.autoCreateInterval)) && Number(settings.autoCreateInterval) > 0
-            ? Number(settings.autoCreateInterval)
-            : 12,
-        batchSize: Number.isFinite(Number(settings.batchSize)) && Number(settings.batchSize) > 0
-            ? Number(settings.batchSize)
-            : 1,
-        useDelayedAutomation: settings.useDelayedAutomation !== false,
-        maxInjectedEntries: Number.isFinite(Number(settings.maxInjectedEntries)) && Number(settings.maxInjectedEntries) > 0
-            ? Number(settings.maxInjectedEntries)
-            : 3,
-        injectionTarget: settings.injectionTarget === 'summary_macro' ? 'summary_macro' : 'summary_block',
-        ...overrides
-    };
-}
-
-function createPendingMemoryDraft(memoryBook, selectedMessages, { source = 'scan_chat', vectorSearch = false } = {}) {
-    const selected = (Array.isArray(selectedMessages) ? selectedMessages : []).filter(Boolean);
-    if (!memoryBook || !selected.length) return null;
-
-    const selectedIds = selected.map(msg => msg.id).filter(Boolean);
-    if (!selectedIds.length) return null;
-
-    const existingDrafts = Array.isArray(memoryBook.pendingDrafts) ? memoryBook.pendingDrafts : [];
-    const existingDraft = existingDrafts.find(draft => arraysEqual(normalizeEntryMessageIds(draft), selectedIds));
-    if (existingDraft) {
-        if (!existingDraft.content) existingDraft.status = 'pending_generation';
-        existingDraft.source = source;
-        existingDraft.updatedAt = Date.now();
-        return existingDraft;
-    }
-
-    const stableMessages = currentMessages.value.filter(m => m && !m.isTyping && !m.isError && (m.role === 'user' || m.role === 'char'));
-    const firstMessage = selected[0];
-    const lastMessage = selected[selected.length - 1];
-    const firstIdx = stableMessages.findIndex(m => m.id === firstMessage.id);
-    const lastIdx = stableMessages.findIndex(m => m.id === lastMessage.id);
-    const rangeDisplay = firstIdx >= 0 && lastIdx >= 0
-        ? `${firstIdx + 1}-${lastIdx + 1}`
-        : `Draft ${(Array.isArray(memoryBook.pendingDrafts) ? memoryBook.pendingDrafts.length : 0) + 1}`;
-    const createdAt = Date.now();
-    const draft = normalizeMemoryEntryShape({
-        id: genMemoryEntryId(),
-        title: rangeDisplay,
-        content: '',
-        rawContent: '',
-        keys: [],
-        glazeKeys: [],
-        vectorSearch,
-        messageIds: selectedIds,
-        messageRange: {
-            startMessageId: firstMessage.id,
-            endMessageId: lastMessage.id,
-            start: firstIdx >= 0 ? firstIdx + 1 : null,
-            end: lastIdx >= 0 ? lastIdx + 1 : null
-        },
-        status: 'pending_generation',
-        source,
-        createdAt,
-        updatedAt: createdAt,
-        generatedAt: null
-    });
-
-    if (!Array.isArray(memoryBook.pendingDrafts)) memoryBook.pendingDrafts = [];
-    memoryBook.pendingDrafts.push(draft);
-    return draft;
-}
-
-watch([isSearchMode, isSelectionMode], () => {
-    ignoreScrollAdjustment = true;
-    if (ignoreScrollAdjustmentTimer) clearTimeout(ignoreScrollAdjustmentTimer);
-    ignoreScrollAdjustmentTimer = setTimeout(() => {
-        ignoreScrollAdjustment = false;
-    }, 400); // Wait for transition animations
+const {
+    openMemoryEntryEditor,
+    openMemoryPromptPreview,
+    createMemoryFromSelection,
+    generateMemoryDraftFromSelection,
+    openMemoryTextPreview,
+    openMessageMemoryCoverage,
+    removeMemoryFromSelection,
+    openMemoryGenerationSettings,
+    openMemoryPromptManager,
+    openMemoryPromptEditor,
+    openMemoryBooksSheet: openMemoryBooksSheetImpl,
+    handleMemorySearchTypeUpdate,
+    handleMemoryReindexAll,
+    handleMemoryScanChat,
+    handleMemoryBatchGenerate,
+    handleMemoryGenerateSingleDraft,
+    handleMemoryApproveDraft,
+    handleMemoryDeleteDraft,
+    handleMemoryDeleteAllDrafts,
+    handleMemoryDeleteEntry,
+    handleMemoryOpenMaintenance,
+    handleMemoryCancelDraft,
+    handleMemoryPreview,
+    handleMemoryOpenSettings,
+    handleMemoryQuickModelChange
+} = useMemorySheetUI({
+    getActiveChatChar: () => activeChatChar,
+    currentMessages,
+    selectedMessages,
+    clearSelection,
+    memoryBooksSheet,
+    loadCurrentMemoryBook,
+    generateMemoryDraftForMessages,
+    generateSingleDraft,
+    cancelMemoryDraft,
+    handleMemorySearchTypeUpdate_composable,
+    handleMemoryReindexAll_composable,
+    handleMemoryScanChat_composable,
+    handleMemoryApproveDraft_composable,
+    handleMemoryDeleteDraft_composable,
+    handleMemoryDeleteAllDrafts_composable,
+    handleMemoryDeleteEntry_composable,
+    handleMemoryOpenMaintenance_composable,
+    handleMemoryBatchGenerate_impl,
+    handleMemoryQuickModelChange_impl,
+    debouncedUpdateContextCutoff: () => debouncedUpdateContextCutoff()
 });
 
-function toggleSelection(msgId) {
-    if (selectedMessages.value.has(msgId)) {
-        selectedMessages.value.delete(msgId);
-    } else {
-        selectedMessages.value.add(msgId);
-    }
-}
-
-function clearSelection() {
-    selectedMessages.value = new Set();
-}
-
-function buildMemoryContinuityContext(memoryBook, selected) {
-    const selectedIds = new Set(selected.map(msg => msg.id));
-    const activeEntries = Array.isArray(memoryBook.entries) ? memoryBook.entries : [];
-    return activeEntries
-        .filter(entry => {
-            const ids = Array.isArray(entry.messageIds) ? entry.messageIds : [];
-            return ids.length && ids.every(id => !selectedIds.has(id));
-        })
-        .slice(-2)
-        .map(entry => `${entry.title || 'Memory'}: ${entry.content || ''}`.trim())
-        .filter(Boolean)
-        .join('\n\n');
-}
-
-function buildMemoryDraftLoreContext(selected) {
-    const historicalLabels = new Map();
-    selected.forEach(msg => {
-        (Array.isArray(msg?.contextRefs) ? msg.contextRefs : []).forEach(ref => {
-            if (ref?.type === 'lorebook' && ref?.id) {
-                const key = ref.id;
-                const existing = historicalLabels.get(key) || { label: ref.label || 'Entry', count: 0 };
-                existing.count += 1;
-                historicalLabels.set(key, existing);
-            }
-        });
-    });
-
-    const historicalLines = [...historicalLabels.values()]
-        .sort((a, b) => b.count - a.count)
-        .slice(0, 3)
-        .map(item => `- ${item.label}${item.count > 1 ? ` x${item.count}` : ''}`);
-
-    const liveCandidates = [...new Set(selected.flatMap(msg =>
-        (Array.isArray(msg?.triggeredLorebooks) ? msg.triggeredLorebooks : [])
-            .map(entry => entry?.name || entry?.label || '')
-            .filter(Boolean)
-    ))]
-        .slice(0, 2)
-        .map(label => `- ${label}`);
-
-    const sections = [];
-    if (historicalLines.length) {
-        sections.push(['Historical triggers:', ...historicalLines].join('\n'));
-    }
-    if (liveCandidates.length) {
-        sections.push(['Current live candidates:', ...liveCandidates].join('\n'));
-    }
-    return sections.join('\n\n');
-}
-
-function buildMemoryDraftSummaryExcerpt(summary) {
-    if (!summary) return '';
-    if (typeof summary === 'string') return summary.trim().slice(0, 800);
-    if (typeof summary === 'object') {
-        if (typeof summary.content === 'string') return summary.content.trim().slice(0, 800);
-        return ['timeline', 'characterArcs', 'conflictsThreads', 'notHappenedYet', 'notes']
-            .map(key => summary[key])
-            .filter(value => typeof value === 'string' && value.trim())
-            .join('\n\n')
-            .slice(0, 800);
-    }
-    return '';
-}
-
-function parseMemoryDraftResponse(rawText, fallbackKeys = []) {
-    const text = String(rawText || '').trim();
-    const lines = text.split(/\r?\n/);
-    const memoryLines = [];
-    let keysLine = '';
-    let inMemoryBlock = false;
-
-    for (const line of lines) {
-        if (/^memory\s*:/i.test(line)) {
-            inMemoryBlock = true;
-            const firstLine = line.replace(/^memory\s*:/i, '').trim();
-            if (firstLine) memoryLines.push(firstLine);
-            continue;
-        }
-        if (/^keys\s*:/i.test(line)) {
-            keysLine = line.replace(/^keys\s*:/i, '').trim();
-            inMemoryBlock = false;
-            continue;
-        }
-        if (inMemoryBlock) {
-            memoryLines.push(line);
-        }
-    }
-
-    let memory = memoryLines.join('\n').trim();
-
-    if (!memory) {
-        const nonMeta = lines.filter(line => !/^keys\s*:/i.test(line)).join('\n').trim();
-        memory = nonMeta.replace(/^memory\s*:/i, '').trim();
-    }
-
-    const parsedKeys = keysLine
-        ? keysLine.split(',').map(item => item.trim()).filter(Boolean)
-        : [];
-
-    const content = memory || text;
-
-    return {
-        content,
-        raw: text,
-        keys: parsedKeys.length ? parsedKeys : buildMemoryKeysFromText(content, fallbackKeys)
-    };
-}
-
-function openMemoryPromptPreview(item, options = {}) {
-    if (!item) return;
-    const { onClose } = options;
-    const hasOnClose = typeof onClose === 'function';
-    const content = document.createElement('div');
-    content.className = 'context-sheet';
-    content.innerHTML = `
-        <div class="settings-item">
-            <label>Rule</label>
-            <div class="context-sheet-note">${(item.label || 'Prompt').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
-        </div>
-        <div class="memory-entry-fulltext">${(item.prompt || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
-        <div class="context-sheet-actions">
-            <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="memory-prompt-preview-close">${hasOnClose ? 'Back' : 'Close'}</button>
-        </div>
-    `;
-    content.querySelector('#memory-prompt-preview-close')?.addEventListener('click', () => {
-        closeBottomSheet();
-        if (hasOnClose) {
-            setTimeout(() => onClose(), 50);
-        }
-    });
-    showBottomSheet({ title: 'Generation Rule', content, isSolid: true });
-}
-
-async function createMemoryFromSelection() {
-    if (!activeChatChar || selectedMessages.value.size === 0) return;
-
-    const selected = currentMessages.value.filter(msg => msg && selectedMessages.value.has(msg.id));
-    if (!selected.length) return;
-
-    const chatData = await getChatData(activeChatChar.id);
-    const sessionId = activeChatChar.sessionId || chatData.currentId;
-    const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
-    const vectorEnabled = getMemoryVectorSearchEnabled(memoryBook);
-    const selectedIds = selected.map(msg => msg.id);
-    const firstMessage = selected[0];
-    const lastMessage = selected[selected.length - 1];
-    const previewLines = selected
-        .map(msg => `${msg.role === 'user' ? (msg.persona?.name || 'User') : (activeChatChar?.name || 'Character')}: ${msg.text || ''}`.trim())
-        .filter(Boolean)
-        .slice(0, 6);
-    const content = previewLines.join('\n').slice(0, 2000);
-    const personaNames = selected
-        .map(msg => msg.role === 'user' ? (msg.persona?.name || 'User') : (activeChatChar?.name || 'Character'))
-        .filter(Boolean);
-
-    const createdEntry = normalizeMemoryEntryShape({
-        id: genMemoryEntryId(),
-        title: `Memory ${memoryBook.entries.length + 1}`,
-        content,
-        keys: buildMemoryKeysFromText(content, personaNames),
-        glazeKeys: [],
-        vectorSearch: vectorEnabled,
-        messageIds: selectedIds,
-        messageRange: {
-            startMessageId: firstMessage.id,
-            endMessageId: lastMessage.id
-        },
-        status: 'active',
-        source: 'manual',
-        createdAt: Date.now(),
-        updatedAt: Date.now()
-    });
-    memoryBook.entries.push(createdEntry);
-
-    memoryBook.updatedAt = Date.now();
-    reconcileSessionMemoryState(chatData, sessionId, currentMessages.value);
-    chatData.sessions[sessionId] = currentMessages.value;
-    await db.saveChat(activeChatChar.id, chatData);
-    await indexMemoryEntryIfNeeded(createdEntry, activeChatChar.id, sessionId);
-    clearSelection();
-}
-
-async function generateMemoryDraftFromSelection() {
-    if (!activeChatChar || selectedMessages.value.size === 0) return;
-
-    const selected = currentMessages.value.filter(msg => msg && selectedMessages.value.has(msg.id));
-    if (!selected.length) return;
-    clearSelection();
-    await generateMemoryDraftForMessages(selected, { openSheet: true, source: 'manual_draft' });
-}
-
-async function generateMemoryDraftForMessages(selectedMessages, { openSheet = false, source = 'auto_delayed', existingDraftId = null } = {}) {
-    if (!activeChatChar || !Array.isArray(selectedMessages) || !selectedMessages.length) return false;
-    console.debug('[MemoryBooks] generateMemoryDraftForMessages:start', { source, existingDraftId, inputCount: selectedMessages.length });
-
-    const activeGeneration = getGenerationState(activeChatChar.id);
-    if (activeGeneration && activeGeneration.type !== 'impersonation') {
-        showToast('Stop the current response generation before starting a memory draft');
-        return false;
-    }
-
-    const selected = selectedMessages.filter(msg => msg && !msg.isTyping && !msg.isError);
-    console.debug('[MemoryBooks] generateMemoryDraftForMessages:filtered', { source, existingDraftId, filteredCount: selected.length });
-    if (!selected.length) {
-        showToast('No valid messages found for memory draft generation');
-        return false;
-    }
-
-    const chatData = await getChatData(activeChatChar.id);
-    const sessionId = activeChatChar.sessionId || chatData.currentId;
-    const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
-    const automation = ensureMemoryAutomationState(memoryBook);
-    const isManualDraftRequest = source === 'manual_draft' || source === 'manual_regenerate';
-
-    if (automation.isGeneratingDraft && !isManualDraftRequest) {
-        showToast('Already generating a draft. Please wait...');
-        return false;
-    }
-
-    const vectorEnabled = getMemoryVectorSearchEnabled(memoryBook);
-    const settings = memoryBook.settings || {};
-    const generationMaxTokens = Number.isFinite(Number(settings.generationMaxTokens)) && Number(settings.generationMaxTokens) > 0
-        ? Math.round(Number(settings.generationMaxTokens))
-        : null;
-    const summary = chatData?.summaries?.[sessionId] || null;
-    const playerName = selected.find(msg => msg?.role === 'user')?.persona?.name || activePersona.value?.name || 'User';
-    const history = selected
-        .map(msg => `${msg.role === 'user' ? (msg.persona?.name || playerName) : (activeChatChar?.name || 'Character')}: ${msg.text || ''}`.trim())
-        .filter(Boolean)
-        .join('\n');
-
-    const continuity = buildMemoryContinuityContext(memoryBook, selected);
-    const loreContext = buildMemoryDraftLoreContext(selected);
-    const summaryExcerpt = buildMemoryDraftSummaryExcerpt(summary);
-    const apiConfigOverride = settings.generationSource === 'custom'
-        ? {
-            apiUrl: settings.generationEndpoint,
-            apiKey: settings.generationApiKey,
-            model: settings.generationModel,
-            temp: settings.generationTemperature ?? undefined,
-            ...(generationMaxTokens ? { maxTokens: generationMaxTokens } : {})
-        }
-        : {
-            ...(settings.generationModel
-                ? { model: settings.generationModel }
-                : {}),
-            ...(settings.generationTemperature != null
-                ? { temp: settings.generationTemperature }
-                : {}),
-            ...(generationMaxTokens ? { maxTokens: generationMaxTokens } : {})
-        };
-    const prompt = resolveMemoryPrompt(settings)
-        .replaceAll('{{user}}', playerName)
-        .replaceAll('{{char}}', activeChatChar?.name || 'Character');
-    const finalPrompt = [
-        prompt,
-        continuity ? `Previous approved memory context:\n${continuity}` : '',
-        loreContext ? `Historical lore trigger candidates:\n${loreContext}` : '',
-        summaryExcerpt ? `Summary excerpt:\n${summaryExcerpt}` : ''
-    ].filter(Boolean).join('\n\n');
-
-    const firstMessage = selected[0];
-    const lastMessage = selected[selected.length - 1];
-    const selectedIds = selected.map(msg => msg.id).filter(Boolean);
-    if (!selectedIds.length) return false;
-    const progressDraftId = existingDraftId || `memory_draft_${selectedIds[0]}`;
-    const generatedAt = Date.now();
-
-    if (existingDraftId && memoryDraftState.value?.activeDrafts?.[progressDraftId]) {
-        showToast('This draft is already generating');
-        return false;
-    }
-
-    // Find existing draft if ID provided
-    let existingDraft = null;
-    if (existingDraftId) {
-        existingDraft = (Array.isArray(memoryBook.pendingDrafts) ? memoryBook.pendingDrafts : [])
-            .find(d => d.id === existingDraftId);
-    }
-
-    // Skip conflict check for manual drafts — user explicitly wants to create/update a draft
-    if (source !== 'manual_draft' && source !== 'manual_regenerate') {
-        const conflictingEntry = findConflictingMemoryEntry(memoryBook, selectedIds, {
-            includeEntries: true,
-            includeDrafts: true,
-            overlapThreshold: 0.8
-        });
-        if (conflictingEntry) {
-            return false;
-        }
-    }
-
-    try {
-        automation.isGeneratingDraft = true;
-        memoryBook.updatedAt = Date.now();
-        await db.saveChat(activeChatChar.id, chatData);
-
-        const progressLabel = existingDraftId
-            ? `Draft ${existingDraft?.title || 'generation'}`
-            : (source === 'manual_draft' ? 'Generating selected memory draft' : 'Generating memory draft');
-        startMemoryDraftProgress(progressLabel, progressDraftId);
-        if (!existingDraftId || source !== 'manual_draft') {
-            showToast('Generating memory draft...', 2000);
-        }
-        const memoryDraftAbortController = new AbortController();
-        setMemoryDraftAbortController(memoryDraftAbortController, progressDraftId);
-        const draftText = await generateMemoryDraft({ history, prompt: finalPrompt, controller: memoryDraftAbortController, apiConfigOverride });
-        console.debug('[MemoryBooks] generateMemoryDraftForMessages:request-complete', { existingDraftId, textLength: draftText?.length || 0 });
-        const parsedDraft = parseMemoryDraftResponse(draftText || '', [playerName, activeChatChar?.name || 'Character']);
-
-        const latestChatData = await getChatData(activeChatChar.id);
-        const latestSessionId = activeChatChar.sessionId || latestChatData.currentId;
-        const latestMemoryBook = ensureSessionMemoryBook(latestChatData, latestSessionId);
-        const latestAutomation = ensureMemoryAutomationState(latestMemoryBook);
-
-        if (!Array.isArray(latestMemoryBook.pendingDrafts)) latestMemoryBook.pendingDrafts = [];
-
-        const latestExistingDraft = existingDraftId
-            ? latestMemoryBook.pendingDrafts.find(d => d.id === existingDraftId)
-            : null;
-
-        if (latestExistingDraft) {
-            // Update existing draft
-            latestExistingDraft.content = (parsedDraft.content || parsedDraft.raw || '').trim();
-            latestExistingDraft.rawContent = (parsedDraft.raw || parsedDraft.content || '').trim();
-            latestExistingDraft.keys = parsedDraft.keys || [];
-            latestExistingDraft.glazeKeys = [];
-            latestExistingDraft.vectorSearch = vectorEnabled;
-            latestExistingDraft.status = 'pending_approval';
-            latestExistingDraft.source = source;
-            latestExistingDraft.updatedAt = generatedAt;
-            latestExistingDraft.generatedAt = generatedAt;
-        } else {
-            const createdDraft = createPendingMemoryDraft(latestMemoryBook, selected, { source, vectorSearch: vectorEnabled });
-            if (createdDraft) {
-                createdDraft.content = (parsedDraft.content || parsedDraft.raw || '').trim();
-                createdDraft.rawContent = (parsedDraft.raw || parsedDraft.content || '').trim();
-                createdDraft.keys = parsedDraft.keys || [];
-                createdDraft.glazeKeys = [];
-                createdDraft.vectorSearch = vectorEnabled;
-                createdDraft.status = 'pending_approval';
-                createdDraft.source = source;
-                createdDraft.updatedAt = generatedAt;
-                createdDraft.generatedAt = generatedAt;
-            }
-        }
-        latestAutomation.isGeneratingDraft = true;
-        latestMemoryBook.updatedAt = generatedAt;
-        await db.saveChat(activeChatChar.id, latestChatData);
-        stopMemoryDraftProgress(progressDraftId);
-        const postSaveChatData = await getChatData(activeChatChar.id);
-        const postSaveSessionId = activeChatChar.sessionId || postSaveChatData.currentId;
-        const postSaveMemoryBook = ensureSessionMemoryBook(postSaveChatData, postSaveSessionId);
-        const postSaveAutomation = ensureMemoryAutomationState(postSaveMemoryBook);
-        postSaveAutomation.isGeneratingDraft = Object.keys(memoryDraftState.value.activeDrafts || {}).length > 0;
-        postSaveMemoryBook.updatedAt = Date.now();
-        await db.saveChat(activeChatChar.id, postSaveChatData);
-        await updatePendingMemoryMessageIds(activeChatChar);
-        await loadCurrentMemoryBook(activeChatChar);
-        showToast(latestExistingDraft ? 'Draft updated' : 'Memory draft created');
-        if (openSheet && (!bottomSheetState.isOpen || bottomSheetState.title !== 'Memory Books')) {
-            openMemoryBooksSheet();
-        }
-        return true;
-    } catch (error) {
-        stopMemoryDraftProgress(progressDraftId);
-        const latestChatData = await getChatData(activeChatChar.id);
-        const latestSessionId = activeChatChar.sessionId || latestChatData.currentId;
-        const latestMemoryBook = ensureSessionMemoryBook(latestChatData, latestSessionId);
-        const latestAutomation = ensureMemoryAutomationState(latestMemoryBook);
-        latestAutomation.isGeneratingDraft = Object.keys(memoryDraftState.value.activeDrafts || {}).length > 0;
-        latestMemoryBook.updatedAt = Date.now();
-        await db.saveChat(activeChatChar.id, latestChatData);
-        await loadCurrentMemoryBook(activeChatChar);
-        console.error('Failed to generate memory draft:', error);
-        showToast(`Memory draft failed: ${formatError(error)}`, 5000);
-        return false;
-    }
-}
-
-async function runMemoryAutomationAfterStableTurn(chatData, sessionId, messages, { allowImmediate = true } = {}) {
-    const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
-    const automation = ensureMemoryAutomationState(memoryBook);
-    const autoCreateEnabled = memoryBook.settings?.autoCreateEnabled !== false;
-    const autoGenerateEnabled = memoryBook.settings?.autoGenerateEnabled === true;
-    const stableMessages = getStableVisibleMessages(messages).filter(msg => msg.role === 'user' || msg.role === 'char');
-    const stableCount = stableMessages.length;
-    const interval = normalizeAutoCreateInterval(memoryBook);
-    const delayed = memoryBook.settings?.useDelayedAutomation !== false;
-    const lastRole = getLastStableConversationRole(stableMessages);
-
-    if (!autoCreateEnabled) {
-        automation.pendingTrigger = null;
-        automation.lastProcessedMessageCount = Math.max(automation.lastProcessedMessageCount || 0, stableCount);
-        memoryBook.updatedAt = Date.now();
-        await db.saveChat(activeChatChar.id, chatData);
-        return false;
-    }
-
-    if (!stableCount || !lastRole) {
-        automation.lastProcessedMessageCount = stableCount;
-        automation.pendingTrigger = null;
-        return false;
-    }
-
-    if (automation.pendingTrigger) {
-        const completedExchanges = countCompletedExchangesSince(automation.pendingTrigger.triggerCount, stableCount);
-        if (completedExchanges >= automation.pendingTrigger.waitExchanges) {
-            const selected = resolvePendingTriggerMessages(stableMessages, automation.pendingTrigger);
-            const pendingDraft = createPendingMemoryDraft(memoryBook, selected, { source: 'auto_delayed' });
-            automation.lastProcessedMessageCount = stableCount;
-            automation.pendingTrigger = null;
-            memoryBook.updatedAt = Date.now();
-            await db.saveChat(activeChatChar.id, chatData);
-            await updatePendingMemoryMessageIds(activeChatChar);
-            if (!pendingDraft) return false;
-            if (!autoGenerateEnabled) return true;
-            return await generateMemoryDraftForMessages(selected, {
-                source: 'auto_delayed',
-                existingDraftId: pendingDraft.id
-            });
-        }
-        memoryBook.updatedAt = Date.now();
-        await db.saveChat(activeChatChar.id, chatData);
-        return false;
-    }
-
-    if (!allowImmediate || automation.isGeneratingDraft || stableCount < interval) {
-        automation.lastProcessedMessageCount = Math.max(automation.lastProcessedMessageCount, stableCount);
-        memoryBook.updatedAt = Date.now();
-        await db.saveChat(activeChatChar.id, chatData);
-        return false;
-    }
-
-    const nextThreshold = Math.floor(stableCount / interval) * interval;
-    if (nextThreshold <= 0 || nextThreshold <= automation.lastProcessedMessageCount) {
-        automation.lastProcessedMessageCount = Math.max(automation.lastProcessedMessageCount, stableCount);
-        memoryBook.updatedAt = Date.now();
-        await db.saveChat(activeChatChar.id, chatData);
-        return false;
-    }
-
-    if (delayed) {
-        const windowEndExclusive = nextThreshold;
-        const windowStartIndex = Math.max(0, windowEndExclusive - interval);
-        const windowMessages = stableMessages.slice(windowStartIndex, windowEndExclusive);
-        automation.pendingTrigger = {
-            triggerCount: stableCount,
-            triggerRole: lastRole,
-            waitExchanges: computeDelayedWaitExchanges(lastRole),
-            windowStartIndex,
-            windowEndIndex: Math.max(windowStartIndex, windowEndExclusive - 1),
-            messageIds: windowMessages.map(msg => msg.id).filter(Boolean),
-            createdAt: Date.now()
-        };
-        memoryBook.updatedAt = Date.now();
-        await db.saveChat(activeChatChar.id, chatData);
-        return false;
-    }
-
-    const selected = stableMessages.slice(Math.max(0, stableCount - interval), stableCount);
-    const pendingDraft = createPendingMemoryDraft(memoryBook, selected, { source: 'auto_immediate' });
-    automation.lastProcessedMessageCount = stableCount;
-    memoryBook.updatedAt = Date.now();
-    await db.saveChat(activeChatChar.id, chatData);
-    await updatePendingMemoryMessageIds(activeChatChar);
-    if (!pendingDraft) return false;
-    if (!autoGenerateEnabled) return true;
-    return await generateMemoryDraftForMessages(selected, {
-        source: 'auto_immediate',
-        existingDraftId: pendingDraft.id
-    });
-}
-
-async function bootstrapImportedMemoryDrafts(charId, sessionId) {
-    const chatData = await getChatData(charId);
-    if (!chatData?.sessions?.[sessionId]) return 0;
-
-    const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
-    const automation = ensureMemoryAutomationState(memoryBook);
-    const existingEntries = Array.isArray(memoryBook.entries) ? memoryBook.entries.length : 0;
-    const existingDrafts = Array.isArray(memoryBook.pendingDrafts) ? memoryBook.pendingDrafts.length : 0;
-    if (existingEntries > 0 || existingDrafts > 0) return 0;
-
-    const interval = normalizeAutoCreateInterval(memoryBook);
-    const segments = buildBootstrapSegments(chatData.sessions[sessionId], interval);
-    if (!segments.length) return 0;
-
-    let createdCount = 0;
-    automation.pendingTrigger = null;
-    for (const segment of segments) {
-        const created = createPendingMemoryDraft(memoryBook, segment, { source: 'import_bootstrap' });
-        if (created) createdCount += 1;
-    }
-
-    memoryBook.updatedAt = Date.now();
-    await db.saveChat(charId, chatData);
-
-    const latestData = await getChatData(charId);
-    if (!latestData?.sessions?.[sessionId]) return createdCount;
-    const latestMemoryBook = ensureSessionMemoryBook(latestData, sessionId);
-    const latestAutomation = ensureMemoryAutomationState(latestMemoryBook);
-    latestAutomation.lastProcessedMessageCount = countStableConversationMessages(latestData.sessions[sessionId]);
-    latestAutomation.pendingTrigger = null;
-    latestMemoryBook.updatedAt = Date.now();
-    await db.saveChat(charId, latestData);
-    return createdCount;
-}
-
-async function runBatchDraftGeneration(chatData, sessionId, memoryBook, segments, count) {
-    const toGenerate = segments.slice(0, count);
-    const results = await Promise.all(toGenerate.map(async (segmentIds) => {
-        const messages = currentMessages.value.filter(m => m && segmentIds.includes(m.id));
-        if (!messages.length) return false;
-
-        const success = await generateMemoryDraftForMessages(messages, {
-            openSheet: false,
-            source: 'manual_draft'
-        });
-
-        if (success && memoryBook.automation?.plannedSegments) {
-            memoryBook.automation.plannedSegments = memoryBook.automation.plannedSegments.filter(
-                seg => JSON.stringify(seg) !== JSON.stringify(segmentIds)
-            );
-        }
-
-        return success;
-    }));
-
-    const generated = results.filter(Boolean).length;
-    const failed = results.length - generated;
-
-    await updatePendingMemoryMessageIds(activeChatChar);
-    await loadCurrentMemoryBook(activeChatChar);
-    
-    const msg = failed > 0 
-        ? `Batch complete: ${generated} generated, ${failed} failed`
-        : `Batch complete: ${generated} draft${generated > 1 ? 's' : ''} generated`;
-    showToast(msg, 3000);
-    
-    setTimeout(() => openMemoryBooksSheet(), 100);
-}
-
-async function runBatchDraftGenerationFromIds(chatData, sessionId, memoryBook, drafts, count) {
-    const toGenerate = drafts.slice(0, count);
-    const batchJobs = toGenerate.map(async (draft) => {
-        const messages = currentMessages.value.filter(m => m && draft.messageIds.includes(m.id));
-        if (!messages.length) {
-            return false;
-        }
-
-        try {
-            return await generateMemoryDraftForMessages(messages, {
-                openSheet: false,
-                source: 'manual_draft',
-                existingDraftId: draft.id
-            });
-        } catch (error) {
-            console.error('Failed to generate draft:', error);
-            return false;
-        }
-    });
-
-    const results = await Promise.all(batchJobs);
-    const generated = results.filter(Boolean).length;
-    const failed = results.length - generated;
-
-    await updatePendingMemoryMessageIds(activeChatChar);
-    await loadCurrentMemoryBook(activeChatChar);
-
-    const msg = failed > 0
-        ? `Batch complete: ${generated} generated, ${failed} failed`
-        : `Batch complete: ${generated} draft${generated > 1 ? 's' : ''} generated`;
-    showToast(msg, 3000);
-
-    setTimeout(() => openMemoryBooksSheet(), 100);
-}
-
-async function generateSingleDraft(draftId) {
-    if (!activeChatChar || !currentMemoryBookData.value) return;
-    console.debug('[MemoryBooks] generateSingleDraft:start', { draftId });
-
-    if (memoryDraftState.value?.activeDrafts?.[draftId]) {
-        showToast('This draft is already generating');
-        return;
-    }
-
-    const chatData = await getChatData(activeChatChar.id);
-    const sessionId = activeChatChar.sessionId || chatData.currentId;
-    const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
-
-    const draft = (Array.isArray(memoryBook.pendingDrafts) ? memoryBook.pendingDrafts : [])
-        .find(d => d.id === draftId);
-
-    if (!draft) {
-        console.debug('[MemoryBooks] generateSingleDraft:draft-not-found', { draftId });
-        showToast('Draft not found');
-        return;
-    }
-
-    if (draft.content) {
-        showToast('Draft already has content. Use regenerate.');
-        return;
-    }
-
-    const messages = currentMessages.value.filter(m => m && draft.messageIds.includes(m.id));
-    console.debug('[MemoryBooks] generateSingleDraft:resolved-messages', {
-        draftId,
-        messageIds: draft.messageIds,
-        resolvedCount: messages.length,
-        hiddenCount: messages.filter(m => m?.isHidden).length
-    });
-    if (!messages.length) {
-        showToast('Messages not found for this draft');
-        return;
-    }
-
-    try {
-        const success = await generateMemoryDraftForMessages(messages, {
-            openSheet: true,
-            source: 'manual_draft',
-            existingDraftId: draft.id
-        });
-        if (success) {
-            showToast('Draft generated');
-        }
-    } catch (error) {
-        console.error('Failed to generate draft:', error);
-        showToast(`Generation failed: ${formatError(error)}`);
-    }
-}
-
-function openMemoryTextPreview(entry, kind = 'Memory') {
-    if (!entry) return;
-    const keys = Array.isArray(entry.keys) && entry.keys.length
-        ? entry.keys.map(key => `<span class="memory-chip">${String(key).replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span>`).join('')
-        : '<span class="context-sheet-note">No keys yet</span>';
-    const isApprovedEntry = kind === 'Memory Entry';
-    const content = document.createElement('div');
-    content.className = 'context-sheet';
-    content.innerHTML = `
-        <div class="settings-item">
-            <label>${kind}</label>
-            <div class="context-sheet-note">${(entry.title || kind).replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
-        </div>
-        <div class="settings-item">
-            <label>Retrieval</label>
-            <div class="context-sheet-note">Vector search: ${entry.vectorSearch ? 'enabled' : 'disabled'}</div>
-            <div class="memory-chip-list">${keys}</div>
-        </div>
-        <div class="memory-entry-fulltext">${(entry.content || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
-        <div class="context-sheet-actions">
-            <button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-preview-regenerate">Regenerate</button>
-            ${isApprovedEntry ? `<button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-preview-edit">Edit</button>` : ''}
-            ${isApprovedEntry ? `<button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-preview-reindex">Reindex</button>` : ''}
-            ${isApprovedEntry ? `<button type="button" class="context-sheet-btn context-sheet-btn-secondary memory-preview-delete" id="memory-preview-delete">Delete</button>` : ''}
-            <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="memory-preview-close">${isApprovedEntry ? 'Close' : 'Back'}</button>
-        </div>
-    `;
-    content.querySelector('#memory-preview-edit')?.addEventListener('click', () => {
-        closeBottomSheet();
-        setTimeout(() => openMemoryEntryEditor(entry.id), 50);
-    });
-    content.querySelector('#memory-preview-reindex')?.addEventListener('click', async () => {
-        if (!activeChatChar) return;
-        const chatData = await getChatData(activeChatChar.id);
-        const sessionId = activeChatChar.sessionId || chatData.currentId;
-        const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
-        if (!getMemoryVectorSearchEnabled(memoryBook)) {
-            showToast('Enable Memory Books vector search first');
-            return;
-        }
-        const reindexButton = content.querySelector('#memory-preview-reindex');
-        try {
-            reindexButton.disabled = true;
-            reindexButton.textContent = 'Reindexing...';
-            showToast('Reindexing memory entry...', 1500);
-            entry.vectorSearch = true;
-            await reindexMemoryEntry(entry, activeChatChar.id, sessionId);
-            entry.updatedAt = Date.now();
-            memoryBook.updatedAt = Date.now();
-            await db.saveChat(activeChatChar.id, chatData);
-            showToast('Memory entry reindexed');
-        } catch (error) {
-            console.error('Failed to reindex memory entry:', error);
-            showToast(`Reindex failed: ${formatError(error)}`);
-        } finally {
-            reindexButton.disabled = false;
-            reindexButton.textContent = 'Reindex';
-        }
-    });
-    content.querySelector('#memory-preview-delete')?.addEventListener('click', async () => {
-        if (!activeChatChar) return;
-        const chatData = await getChatData(activeChatChar.id);
-        const sessionId = activeChatChar.sessionId || chatData.currentId;
-        const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
-        await deleteMemoryEntryIndexIfPresent(entry.id);
-        memoryBook.entries = memoryBook.entries.filter(item => item.id !== entry.id);
-        memoryBook.updatedAt = Date.now();
-        reconcileSessionMemoryState(chatData, sessionId, currentMessages.value);
-        chatData.sessions[sessionId] = currentMessages.value;
-        await db.saveChat(activeChatChar.id, chatData);
-        closeBottomSheet();
-        setTimeout(() => openMemoryBooksSheet(), 50);
-    });
-    content.querySelector('#memory-preview-regenerate')?.addEventListener('click', async () => {
-        if (!activeChatChar || !entry.messageIds || !entry.messageIds.length) {
-            showToast('Cannot regenerate: no message range');
-            return;
-        }
-        const chatData = await getChatData(activeChatChar.id);
-        const sessionId = activeChatChar.sessionId || chatData.currentId;
-        const messages = chatData.sessions[sessionId] || [];
-        const selectedMessages = messages.filter(msg => entry.messageIds.includes(msg.id));
-        if (!selectedMessages.length) {
-            showToast('Cannot regenerate: messages not found');
-            return;
-        }
-        closeBottomSheet();
-        // Regenerate draft
-        try {
-            await generateMemoryDraftForMessages(selectedMessages, { source: 'manual_regenerate' });
-            showToast('Draft regenerated');
-            setTimeout(() => openMemoryBooksSheet(), 50);
-        } catch (error) {
-            console.error('Failed to regenerate draft:', error);
-            showToast(`Regeneration failed: ${formatError(error)}`);
-        }
-    });
-    content.querySelector('#memory-preview-close')?.addEventListener('click', () => {
-        closeBottomSheet();
-        // Always return to Memory Books sheet
-        setTimeout(() => openMemoryBooksSheet(), 50);
-    });
-    showBottomSheet({ title: kind, content, isSolid: true });
-}
-
-async function openMessageMemoryCoverage(message) {
-    if (!activeChatChar || !message) return;
-
-    const chatData = await getChatData(activeChatChar.id);
-    const sessionId = activeChatChar.sessionId || chatData.currentId;
-    const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
-    const coverage = message.memoryCoverage && typeof message.memoryCoverage === 'object'
-        ? message.memoryCoverage
-        : createEmptyMemoryCoverage();
-    const entryIds = Array.isArray(coverage.entryIds) ? coverage.entryIds : [];
-    const matchedEntries = (Array.isArray(memoryBook.entries) ? memoryBook.entries : [])
-        .filter(entry => entryIds.includes(entry.id));
-
-    if (!matchedEntries.length) {
-        if (coverage.needsRebuild) {
-            showToast('This message is marked for memory rebuild');
-        } else if (coverage.stale) {
-            showToast('This message has stale memory coverage');
-        } else {
-            showToast('No linked memory entries for this message');
-        }
-        return;
-    }
-
-    const content = document.createElement('div');
-    content.className = 'context-sheet';
-    content.innerHTML = `
-        <div class="settings-item">
-            <label>Message Memory Coverage</label>
-            <div class="context-sheet-note">This message is linked to ${matchedEntries.length} memory ${matchedEntries.length === 1 ? 'entry' : 'entries'}.</div>
-            ${coverage.needsRebuild ? '<div class="context-sheet-note" style="color: var(--warning-color, #ffb84d);">Coverage needs rebuild.</div>' : ''}
-            ${coverage.stale ? '<div class="context-sheet-note" style="color: var(--danger-color, #ff6b6b);">Coverage is marked stale.</div>' : ''}
-        </div>
-        <div class="memory-entry-list">
-            ${matchedEntries.map(entry => `
-                <button type="button" class="memory-entry-card" data-coverage-entry-id="${entry.id}">
-                    <div class="memory-entry-title-row">
-                        <strong>${String(entry.title || 'Memory Entry').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</strong>
-                        <span class="context-sheet-note">${String(entry.status || 'active').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span>
-                    </div>
-                    <div class="context-sheet-note">${normalizeEntryMessageIds(entry).length} linked message${normalizeEntryMessageIds(entry).length === 1 ? '' : 's'}</div>
-                </button>
-            `).join('')}
-        </div>
-        <div class="context-sheet-actions">
-            <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="memory-coverage-close">Close</button>
-        </div>
-    `;
-
-    content.querySelectorAll('[data-coverage-entry-id]').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const entryId = btn.getAttribute('data-coverage-entry-id');
-            const entry = matchedEntries.find(item => item.id === entryId);
-            if (!entry) return;
-            closeBottomSheet();
-            setTimeout(() => openMemoryTextPreview(entry, 'Memory Entry'), 50);
-        });
-    });
-    content.querySelector('#memory-coverage-close')?.addEventListener('click', () => closeBottomSheet());
-    showBottomSheet({ title: 'Message Memory Coverage', content, isSolid: true });
-}
-
-async function removeMemoryFromSelection() {
-    if (!activeChatChar || selectedMessages.value.size === 0) return;
-
-    const chatData = await getChatData(activeChatChar.id);
-    const sessionId = activeChatChar.sessionId || chatData.currentId;
-    const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
-    const selectedIds = new Set(currentMessages.value.filter(msg => msg && selectedMessages.value.has(msg.id)).map(msg => msg.id));
-    if (!selectedIds.size) return;
-
-    const removedEntryIds = memoryBook.entries
-        .filter(entry => normalizeEntryMessageIds(entry).some(id => selectedIds.has(id)))
-        .map(entry => entry.id);
-
-    if (!removedEntryIds.length) {
-        clearSelection();
-        return;
-    }
-
-    memoryBook.entries = memoryBook.entries.filter(entry => !removedEntryIds.includes(entry.id));
-    memoryBook.updatedAt = Date.now();
-
-    for (const msg of currentMessages.value) {
-        if (!msg?.memoryCoverage) msg.memoryCoverage = createEmptyMemoryCoverage();
-        const wasCovered = Array.isArray(msg.memoryCoverage.entryIds) && msg.memoryCoverage.entryIds.some(id => removedEntryIds.includes(id));
-        msg.memoryCoverage.entryIds = (msg.memoryCoverage.entryIds || []).filter(id => !removedEntryIds.includes(id));
-        if (wasCovered) {
-            msg.memoryCoverage.needsRebuild = true;
-            msg.memoryCoverage.stale = false;
-        }
-    }
-
-    chatData.sessions[sessionId] = currentMessages.value;
-    await db.saveChat(activeChatChar.id, chatData);
-    clearSelection();
-}
-
-async function openMemoryGenerationSettings(initialState = null) {
-    if (!activeChatChar) return;
-
-    const chatData = await getChatData(activeChatChar.id);
-    const sessionId = activeChatChar.sessionId || chatData.currentId;
-    const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
-    if (!memoryBook.settings) memoryBook.settings = {};
-    const currentApiConfig = getApiConfig();
-    const settings = memoryBook.settings;
-    const state = getNormalizedMemoryGenerationState(settings, initialState || {});
-
-    const renderSheet = () => {
-        const content = document.createElement('div');
-        content.className = 'context-sheet';
-        content.innerHTML = `
-            <div class="settings-item">
-                <label>Generation Rules</label>
-                <div class="clickable-selector" id="memory-prompt-selector">
-                    <span>${getMemoryPromptLabelByKey(settings, state.promptPreset)}</span>
-                    <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
-                </div>
-                <button type="button" class="memory-inline-link" id="memory-prompt-preview-btn">Preview Rule</button>
-            </div>
-            <div class="settings-item">
-                <label>Temperature Override</label>
-                <input id="memory-temperature-input" type="number" min="0" max="2" step="0.05" value="${state.temperature ?? ''}" placeholder="Use current API temperature">
-            </div>
-            <div class="settings-item">
-                <label>Output Token Limit</label>
-                <input id="memory-max-tokens-input" type="number" min="200" max="32000" step="100" value="${state.maxTokens ?? ''}" placeholder="Auto (recommended 2000-4000 for large batches)">
-                <div class="context-sheet-note">Optional max completion tokens for memory draft generation. Leave blank to use the provider default with a safety floor.</div>
-            </div>
-            <div class="settings-item-checkbox">
-                <div class="settings-text-col">
-                    <label>Auto-Create Drafts</label>
-                    <div class="settings-desc">Automatically create Memory Book drafts after enough stable messages accumulate.</div>
-                </div>
-                <input id="memory-auto-create-toggle" type="checkbox" class="vk-switch" ${state.autoCreateEnabled ? 'checked' : ''}>
-            </div>
-            <div class="settings-item-checkbox">
-                <div class="settings-text-col">
-                    <label>Auto-Generate Draft Text</label>
-                    <div class="settings-desc">When enabled, newly auto-created draft placeholders immediately generate text. When disabled, auto mode only marks segments and leaves text generation manual.</div>
-                </div>
-                <input id="memory-auto-generate-toggle" type="checkbox" class="vk-switch" ${state.autoGenerateEnabled ? 'checked' : ''}>
-            </div>
-            <div class="settings-item">
-                <label>Create Memory Every N Messages</label>
-                <input id="memory-auto-interval-input" type="number" min="1" max="200" step="1" value="${state.autoCreateInterval}" placeholder="12">
-                <div class="context-sheet-note">User-facing interval for future automatic memory creation and import bootstrap segmentation.</div>
-            </div>
-            <div class="settings-item">
-                <label>Max Generate Batch</label>
-                <input id="memory-batch-size-input" type="number" min="1" max="50" step="1" value="${state.batchSize}" placeholder="1">
-                <div class="context-sheet-note">Limits how many pending drafts the batch generate button starts at once.</div>
-            </div>
-            <div class="settings-item-checkbox">
-                <div class="settings-text-col">
-                    <label>Work With Delay</label>
-                    <div class="settings-desc">Wait for extra turns before auto-creating a memory draft, so the last user message and latest assistant reply can still be edited or regenerated safely.</div>
-                </div>
-                <input id="memory-delayed-automation-toggle" type="checkbox" class="vk-switch" ${state.useDelayedAutomation ? 'checked' : ''}>
-            </div>
-            <div class="settings-item">
-                <label>Memory Entries In Prompt</label>
-                <input id="memory-max-injected-input" type="number" min="1" max="20" step="1" value="${state.maxInjectedEntries}" placeholder="3">
-                <div class="context-sheet-note">How many retrieved memory entries can be injected into the prompt at once.</div>
-            </div>
-            <div class="settings-item">
-                <label>Injection Target</label>
-                <div class="clickable-selector" id="memory-injection-target-selector">
-                    <span>${state.injectionTarget === 'summary_macro' ? '{{summary}} macro' : 'Chat summary block'}</span>
-                    <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
-                </div>
-                <div class="context-sheet-note">Choose whether retrieved memory context follows the dedicated summary block path or the {{summary}} macro location.</div>
-            </div>
-            <div class="context-sheet-actions">
-                <button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-settings-cancel">Cancel</button>
-                <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="memory-settings-save">Save</button>
-            </div>
-        `;
-
-        content.querySelector('#memory-prompt-selector')?.addEventListener('click', () => {
-            closeBottomSheet();
-            const promptItems = getMemoryPromptOptions(settings).map(item => ({
-                label: item.label,
-                onClick: () => {
-                    state.promptPreset = item.key;
-                    closeBottomSheet();
-                    setTimeout(() => showBottomSheet({ title: 'Memory Generation', content: renderSheet(), isSolid: true }), 50);
-                }
-            }));
-            promptItems.push({
-                label: `Preview: ${getMemoryPromptLabelByKey(settings, state.promptPreset)}`,
-                onClick: () => {
-                    const selected = getMemoryPromptOptions(settings).find(item => item.key === state.promptPreset);
-                    closeBottomSheet();
-                    setTimeout(() => openMemoryPromptPreview(selected, {
-                        onClose: () => openMemoryGenerationSettings({ ...state })
-                    }), 50);
-                }
-            });
-            promptItems.push({
-                label: 'Manage custom prompts',
-                onClick: () => {
-                    closeBottomSheet();
-                    setTimeout(() => openMemoryPromptManager(), 50);
-                }
-            });
-            showBottomSheet({ title: 'Generation Rules', items: promptItems });
-        });
-
-        content.querySelector('#memory-prompt-preview-btn')?.addEventListener('click', () => {
-            const options = getMemoryPromptOptions(settings);
-            const selected = options.find(item => item.key === state.promptPreset) || options[0];
-            closeBottomSheet();
-            setTimeout(() => openMemoryPromptPreview(selected, {
-                onClose: () => openMemoryGenerationSettings({ ...state })
-            }), 50);
-        });
-
-        content.querySelector('#memory-injection-target-selector')?.addEventListener('click', () => {
-            closeBottomSheet();
-            showBottomSheet({
-                title: 'Memory Injection Target',
-                items: [
-                    {
-                        label: 'Chat summary block',
-                        onClick: () => {
-                            state.injectionTarget = 'summary_block';
-                            closeBottomSheet();
-                            setTimeout(() => showBottomSheet({ title: 'Memory Generation', content: renderSheet(), isSolid: true }), 50);
-                        }
-                    },
-                    {
-                        label: '{{summary}} macro',
-                        onClick: () => {
-                            state.injectionTarget = 'summary_macro';
-                            closeBottomSheet();
-                            setTimeout(() => showBottomSheet({ title: 'Memory Generation', content: renderSheet(), isSolid: true }), 50);
-                        }
-                    }
-                ]
-            });
-        });
-
-        content.querySelector('#memory-settings-cancel')?.addEventListener('click', () => {
-            closeBottomSheet();
-            setTimeout(() => openMemoryBooksSheet(), 50);
-        });
-        content.querySelector('#memory-settings-save')?.addEventListener('click', async () => {
-            settings.generationSource = state.source;
-            settings.generationUseCurrentModelOverride = false;
-            settings.generationModel = state.model || '';
-            settings.generationEndpoint = state.source === 'custom'
-                ? (content.querySelector('#memory-endpoint-input')?.value?.trim() || '')
-                : '';
-            settings.generationApiKey = state.source === 'custom'
-                ? (content.querySelector('#memory-apikey-input')?.value || '')
-                : '';
-            const tempValue = content.querySelector('#memory-temperature-input')?.value?.trim();
-            settings.generationTemperature = tempValue === '' ? null : Number(tempValue);
-            const maxTokensValue = content.querySelector('#memory-max-tokens-input')?.value?.trim();
-            settings.generationMaxTokens = maxTokensValue === ''
-                ? null
-                : Math.max(200, Math.min(32000, Number.isFinite(Number(maxTokensValue)) ? Math.round(Number(maxTokensValue)) : 2000));
-            settings.autoCreateEnabled = !!content.querySelector('#memory-auto-create-toggle')?.checked;
-            settings.autoGenerateEnabled = !!content.querySelector('#memory-auto-generate-toggle')?.checked;
-            const autoIntervalValue = Number(content.querySelector('#memory-auto-interval-input')?.value || state.autoCreateInterval || 12);
-            settings.autoCreateInterval = Math.max(1, Math.min(200, Number.isFinite(autoIntervalValue) ? Math.round(autoIntervalValue) : 12));
-            const batchSizeValue = Number(content.querySelector('#memory-batch-size-input')?.value || state.batchSize || 1);
-            settings.batchSize = Math.max(1, Math.min(50, Number.isFinite(batchSizeValue) ? Math.round(batchSizeValue) : 1));
-            settings.useDelayedAutomation = !!content.querySelector('#memory-delayed-automation-toggle')?.checked;
-            const maxInjectedValue = Number(content.querySelector('#memory-max-injected-input')?.value || state.maxInjectedEntries || 3);
-            settings.maxInjectedEntries = Math.max(1, Math.min(20, Number.isFinite(maxInjectedValue) ? Math.round(maxInjectedValue) : 3));
-            settings.injectionTarget = state.injectionTarget === 'summary_macro' ? 'summary_macro' : 'summary_block';
-            settings.promptPreset = state.promptPreset || 'detailed_beats';
-            memoryBook.updatedAt = Date.now();
-            await db.saveChat(activeChatChar.id, chatData);
-            closeBottomSheet();
-            setTimeout(() => openMemoryBooksSheet(), 50);
-        });
-
-        return content;
-    };
-
-    showBottomSheet({
-        title: 'Memory Generation',
-        content: renderSheet(),
-        isSolid: true
-    });
-}
-
-async function openMemoryPromptManager() {
-    if (!activeChatChar) return;
-    const chatData = await getChatData(activeChatChar.id);
-    const sessionId = activeChatChar.sessionId || chatData.currentId;
-    const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
-    const settings = memoryBook.settings || {};
-    if (!Array.isArray(settings.customPrompts)) settings.customPrompts = [];
-
-    const content = document.createElement('div');
-    content.className = 'context-sheet';
-    const promptCards = settings.customPrompts.length
-        ? settings.customPrompts.map(item => `
-            <div class="memory-entry-card" data-prompt-id="${item.id}">
-                <div class="memory-entry-head">
-                    <div>
-                        <div class="memory-entry-title">${(item.name || 'Custom prompt').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
-                        <div class="memory-entry-meta">custom prompt</div>
-                    </div>
-                    <div class="memory-draft-actions">
-                        <button type="button" class="memory-entry-approve" data-prompt-edit="${item.id}">Edit</button>
-                        <button type="button" class="memory-entry-delete" data-prompt-delete="${item.id}">Delete</button>
-                    </div>
-                </div>
-                <div class="memory-entry-preview">${(item.prompt || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').slice(0, 180)}</div>
-            </div>
-        `).join('')
-        : '<div class="context-sheet-note">No custom prompts yet.</div>';
-
-    content.innerHTML = `
-        <div class="context-sheet-actions" style="margin-top: 0; margin-bottom: 12px;">
-            <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="memory-prompt-add">Add Prompt</button>
-            <button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-prompt-close">Close</button>
-        </div>
-        <div class="memory-entry-list">${promptCards}</div>
-    `;
-
-    content.querySelector('#memory-prompt-add')?.addEventListener('click', () => {
-        closeBottomSheet();
-        setTimeout(() => openMemoryPromptEditor(), 50);
-    });
-    content.querySelector('#memory-prompt-close')?.addEventListener('click', () => closeBottomSheet());
-    content.querySelectorAll('[data-prompt-id]').forEach(card => {
-        card.addEventListener('click', (event) => {
-            if (event.target.closest('button')) return;
-            const promptId = card.getAttribute('data-prompt-id');
-            const prompt = settings.customPrompts.find(item => item.id === promptId);
-            if (!prompt) return;
-            closeBottomSheet();
-            setTimeout(() => openMemoryPromptPreview(
-                { label: prompt.name || 'Custom prompt', prompt: prompt.prompt || '' },
-                { onClose: openMemoryPromptManager }
-            ), 50);
-        });
-    });
-    content.querySelectorAll('[data-prompt-delete]').forEach(btn => {
-        btn.addEventListener('click', async () => {
-            const promptId = btn.getAttribute('data-prompt-delete');
-            settings.customPrompts = settings.customPrompts.filter(item => item.id !== promptId);
-            if (settings.promptPreset === promptId) settings.promptPreset = 'detailed_beats';
-            memoryBook.updatedAt = Date.now();
-            await db.saveChat(activeChatChar.id, chatData);
-            closeBottomSheet();
-            setTimeout(() => openMemoryPromptManager(), 50);
-        });
-    });
-    content.querySelectorAll('[data-prompt-edit]').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const promptId = btn.getAttribute('data-prompt-edit');
-            const prompt = settings.customPrompts.find(item => item.id === promptId);
-            if (!prompt) return;
-            closeBottomSheet();
-            setTimeout(() => openMemoryPromptEditor(prompt), 50);
-        });
-    });
-
-    showBottomSheet({ title: 'Generation Rules', content, isSolid: true });
-}
-
-async function openMemoryPromptEditor(existing = null) {
-    if (!activeChatChar) return;
-    const chatData = await getChatData(activeChatChar.id);
-    const sessionId = activeChatChar.sessionId || chatData.currentId;
-    const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
-    const settings = memoryBook.settings || {};
-    if (!Array.isArray(settings.customPrompts)) settings.customPrompts = [];
-
-    const content = document.createElement('div');
-    content.className = 'context-sheet';
-    content.innerHTML = `
-        <div class="settings-item">
-            <label>Name</label>
-            <input id="memory-prompt-name" type="text" value="${(existing?.name || '').replace(/"/g, '&quot;')}" placeholder="Prompt name">
-        </div>
-        <div class="settings-item">
-            <label>Prompt</label>
-            <textarea id="memory-prompt-text" rows="10" placeholder="Use {{history}}, {{user}}, {{char}}">${(existing?.prompt || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>
-        </div>
-        <div class="context-sheet-actions">
-            <button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-prompt-cancel">Cancel</button>
-            <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="memory-prompt-save">Save</button>
-        </div>
-    `;
-
-    content.querySelector('#memory-prompt-cancel')?.addEventListener('click', () => closeBottomSheet());
-    content.querySelector('#memory-prompt-save')?.addEventListener('click', async () => {
-        const name = content.querySelector('#memory-prompt-name')?.value?.trim() || 'Custom prompt';
-        const prompt = content.querySelector('#memory-prompt-text')?.value?.trim() || '';
-        if (!prompt) {
-            showToast('Prompt text is required');
-            return;
-        }
-        if (existing) {
-            const target = settings.customPrompts.find(item => item.id === existing.id);
-            if (target) {
-                target.name = name;
-                target.prompt = prompt;
-            }
-        } else {
-            const created = { id: genMemoryPromptId(), name, prompt };
-            settings.customPrompts.push(created);
-            settings.promptPreset = created.id;
-        }
-        memoryBook.updatedAt = Date.now();
-        await db.saveChat(activeChatChar.id, chatData);
-        closeBottomSheet();
-        setTimeout(() => openMemoryPromptManager(), 50);
-    });
-
-    showBottomSheet({ title: existing ? 'Edit Prompt' : 'Add Prompt', content, isSolid: true });
-}
-
-async function openMemoryBooksSheet() {
-    if (!activeChatChar) return;
-    await loadCurrentMemoryBook(activeChatChar);
-    nextTick(() => {
-        memoryBooksSheet.value?.open();
-    });
-}
-
-// Memory Books Sheet event handlers (wrappers for composable handlers)
-async function handleMemorySearchTypeUpdate() {
-    await handleMemorySearchTypeUpdate_composable(activeChatChar, memoryBooksSheet);
-}
-
-async function handleMemoryReindexAll() {
-    await handleMemoryReindexAll_composable(activeChatChar, memoryBooksSheet);
-}
-
-async function handleMemoryScanChat() {
-    await handleMemoryScanChat_composable(activeChatChar, currentMessages.value, memoryBooksSheet);
-}
-
-async function handleMemoryBatchGenerate() {
-    if (!activeChatChar || !currentMemoryBookData.value) return;
-
-    const chatData = await getChatData(activeChatChar.id);
-    const sessionId = activeChatChar.sessionId || chatData.currentId;
-    const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
-
-    // Get drafts that need generation (no content yet)
-    const draftsNeedingGeneration = (Array.isArray(memoryBook.pendingDrafts) ? memoryBook.pendingDrafts : [])
-        .filter(d => !d.content && d.status === 'pending_generation' && !memoryDraftState.value?.activeDrafts?.[d.id]);
-    const maxBatchSize = Math.max(1, Math.min(50, Number(memoryBook.settings?.batchSize) || 1));
-
-    if (!draftsNeedingGeneration.length) {
-        showToast(memoryDraftState.value?.activeCount ? 'All remaining drafts are already generating' : 'No drafts need generation');
-        return;
-    }
-
-    await runBatchDraftGenerationFromIds(
-        chatData,
-        sessionId,
-        memoryBook,
-        draftsNeedingGeneration,
-        Math.min(draftsNeedingGeneration.length, maxBatchSize)
-    );
-}
-
-async function handleMemoryGenerateSingleDraft(draftId) {
-    await generateSingleDraft(draftId);
-}
-
-async function handleMemoryApproveDraft(draftId) {
-    await handleMemoryApproveDraft_composable(draftId, activeChatChar, currentMessages.value, memoryBooksSheet);
-}
-
-async function handleMemoryDeleteDraft(draftId) {
-    await handleMemoryDeleteDraft_composable(draftId, activeChatChar, memoryBooksSheet);
-}
-
-async function handleMemoryDeleteAllDrafts() {
-    await handleMemoryDeleteAllDrafts_composable(activeChatChar, memoryBooksSheet);
-}
-
-async function handleMemoryDeleteEntry(entryId) {
-    await handleMemoryDeleteEntry_composable(entryId, activeChatChar, currentMessages.value, memoryBooksSheet);
-}
-
-function handleMemoryOpenMaintenance() {
-    handleMemoryOpenMaintenance_composable(activeChatChar, memoryBooksSheet);
-}
-
-function handleMemoryCancelDraft(draftId = null) {
-    cancelMemoryDraft(draftId || null);
-}
-
-function handleMemoryPreview({ entry, kind }) {
-    openMemoryTextPreview(entry, kind);
-}
-
-function handleMemoryOpenSettings() {
-    openMemoryGenerationSettings();
-}
-
-function handleMemoryQuickModelChange(model) {
-    if (!activeChatChar || !currentMemoryBookData.value) return;
-    const settings = currentMemoryBookData.value.settings || {};
-    settings.generationModel = model || '';
-    settings.generationUseCurrentModelOverride = false;
-    currentMemoryBookData.value.updatedAt = Date.now();
-    getChatData(activeChatChar.id).then(chatData => {
-        const sessionId = activeChatChar.sessionId || chatData.currentId;
-        const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
-        if (memoryBook.settings) {
-            memoryBook.settings.generationModel = model || '';
-            memoryBook.settings.generationUseCurrentModelOverride = false;
-        }
-        memoryBook.updatedAt = Date.now();
-        db.saveChat(activeChatChar.id, chatData);
-    });
-    showToast('Memory generation model updated');
-}
-
-async function deleteSelectedMessages() {
-    if (selectedMessages.value.size === 0) return;
-
-    const lastMsg = currentMessages.value[currentMessages.value.length - 1];
-    if (!lastMsg || !selectedMessages.value.has(lastMsg.id)) return;
-
-    const newMsgs = currentMessages.value.filter(msg => msg && !selectedMessages.value.has(msg.id));
-    const count = currentMessages.value.length - newMsgs.length;
-    currentMessages.value = newMsgs;
-    
-    // Save to active chat data
-    if (activeChatChar) {
-        if (count > 0) {
-            const sid = activeChatChar.sessionId || (await getChatData(activeChatChar.id)).currentId;
-            addDeletedStats(activeChatChar.id, sid, count);
-        }
-
-        let chatData = await getChatData(activeChatChar.id);
-        const sessionId = activeChatChar.sessionId || chatData.currentId;
-        reconcileSessionMemoryState(chatData, sessionId, currentMessages.value);
-        chatData.sessions[sessionId] = currentMessages.value;
-        await db.saveChat(activeChatChar.id, chatData);
-        debouncedUpdateContextCutoff();
-    }
-    
-    clearSelection();
-}
-
-async function toggleHideSelectedMessages() {
-    if (selectedMessages.value.size === 0) return;
-    
-    for (const msg of currentMessages.value) {
-        if (msg && selectedMessages.value.has(msg.id)) {
-            msg.isHidden = !msg.isHidden;
-        }
-    }
-    
-    if (activeChatChar) {
-        let chatData = await getChatData(activeChatChar.id);
-        const sessionId = activeChatChar.sessionId || chatData.currentId;
-        chatData.sessions[sessionId] = currentMessages.value;
-        await db.saveChat(activeChatChar.id, chatData);
-        debouncedUpdateContextCutoff();
-    }
-    
-    clearSelection();
-}
+openMemoryBooksSheet = openMemoryBooksSheetImpl;
 
 // --- Display Logic (Separators) ---
 const displayMessages = computed(() => {
@@ -1953,6 +444,61 @@ const { visibleItems, paddingTop, paddingBottom, refresh: refreshVirtualScroll, 
     estimateHeight: 100
 });
 
+const {
+    asyncSaveCurrentSessionState,
+    applyImageAutoHide,
+    onVisibilityChange
+} = useSessionPersistence({
+    getActiveChatChar: () => activeChatChar,
+    activeChar,
+    currentMessages,
+    inputValue,
+    messagesContainer,
+    db,
+    getChatData,
+    getScrollAnchor,
+    clearMessageNotifications
+});
+
+const {
+    deleteSession,
+    openSessionsSheet,
+    openDeleteSessionConfirm,
+    createNewSession
+} = useSessionManagement({
+    activeChar,
+    getActiveChatChar: () => activeChatChar,
+    setActiveChatChar: (v) => { activeChatChar = v; },
+    currentMessages,
+    inputValue,
+    isGenerating,
+    hasGenerationState,
+    getGenerationState,
+    clearGenerationState,
+    abortActiveChatGeneration,
+    getChatGenerationServices: () => chatGenerationServices,
+    loadChats,
+    openChat,
+    asyncSaveCurrentSessionState: () => asyncSaveCurrentSessionState(),
+    getCleanupScroll: () => _cleanupScroll,
+    setCleanupScroll: (v) => { _cleanupScroll = v; },
+    t
+});
+
+// --- Search Logic ---
+const {
+    isSearchMode,
+    searchQuery,
+    searchResults,
+    currentSearchIndex,
+    searchMatchState,
+    scrollToSearchResult,
+    nextSearchResult,
+    prevSearchResult,
+    onChatSearchToggle,
+    onChatSearch
+} = useChatSearch({ currentMessages, scrollToIndex, displayMessages });
+
 const onScroll = (e) => {
     const el = e.target;
     if (isSearchMode.value) {
@@ -1966,228 +512,13 @@ const onScroll = (e) => {
 // Expose vsScrollToBottom
 window.forceScrollToBottom = () => { vsScrollToBottom('auto') };
 
-// Helper to access translations
-const t = (key) => translations[currentLang.value]?.[key] || key;
-
-const contextSegments = computed(() => {
-    const breakdown = contextBreakdown.value;
-    if (!breakdown || !breakdown.safeContext) return { used: [], reserve: null };
-
-    const total = breakdown.safeContext;
-    const toPercent = (value) => Math.max(0, Math.min(100, (value / total) * 100));
-    const used = [];
-
-    if (breakdown.character > 0) {
-        used.push({ key: 'character', value: breakdown.character, percent: toPercent(breakdown.character), className: 'segment-character' });
-    }
-    if (breakdown.preset > 0) {
-        used.push({ key: 'preset', value: breakdown.preset, percent: toPercent(breakdown.preset), className: 'segment-fixed' });
-    }
-    if (breakdown.authorsNote > 0) {
-        used.push({ key: 'authorsNote', value: breakdown.authorsNote, percent: toPercent(breakdown.authorsNote), className: 'segment-authors-note' });
-    }
-    if (breakdown.summary > 0) {
-        used.push({ key: 'summary', value: breakdown.summary, percent: toPercent(breakdown.summary), className: 'segment-summary' });
-    }
-    if (breakdown.memory > 0) {
-        used.push({ key: 'memory', value: breakdown.memory, percent: toPercent(breakdown.memory), className: 'segment-memory' });
-    }
-    // Don't add lorebook/vectorLore to used - they go inside reserve
-    if (breakdown.history > 0) {
-        used.push({ key: 'history', value: breakdown.history, percent: toPercent(breakdown.history), className: 'segment-history' });
-    }
-
-    // Build reserve with lorebooks inside
-    let reserve = null;
-    if (breakdown.lorebookReserve > 0) {
-        const reserveUsed = [];
-        if (breakdown.lorebook > 0) {
-            reserveUsed.push({ key: 'lorebook', value: breakdown.lorebook, percent: toPercent(breakdown.lorebook), className: 'segment-lorebook' });
-        }
-        if (breakdown.vectorLore > 0) {
-            reserveUsed.push({ key: 'vectorLore', value: breakdown.vectorLore, percent: toPercent(breakdown.vectorLore), className: 'segment-vector-lore' });
-        }
-        const totalLoreUsed = (breakdown.lorebook || 0) + (breakdown.vectorLore || 0);
-        const reserveRemaining = breakdown.lorebookReserve - totalLoreUsed;
-        
-        reserve = {
-            key: 'lorebookReserve',
-            value: breakdown.lorebookReserve,
-            percent: toPercent(breakdown.lorebookReserve),
-            className: 'segment-lorebook-reserve',
-            used: reserveUsed,
-            remaining: reserveRemaining > 0 ? reserveRemaining : 0
-        };
-    }
-
-    return { used, reserve };
+watch([isSearchMode, isSelectionMode], () => {
+    ignoreScrollAdjustment = true;
+    if (ignoreScrollAdjustmentTimer) clearTimeout(ignoreScrollAdjustmentTimer);
+    ignoreScrollAdjustmentTimer = setTimeout(() => {
+        ignoreScrollAdjustment = false;
+    }, 400);
 });
-
-const contextBreakdownItems = computed(() => {
-    const breakdown = contextBreakdown.value;
-    if (!breakdown) return [];
-
-    return [
-        { key: 'character', label: 'Character', value: breakdown.character || 0 },
-        { key: 'preset', label: 'Preset', value: breakdown.preset || 0 },
-        { key: 'authorsNote', label: 'Author\'s Note', value: breakdown.authorsNote || 0 },
-        { key: 'summary', label: 'Summary Base', value: breakdown.summaryBase ?? breakdown.summary ?? 0 },
-        { key: 'memory', label: 'Memory', value: breakdown.memory || 0 },
-        { key: 'summaryCombined', label: 'Summary Total', value: breakdown.summary || 0 },
-        { key: 'lorebook', label: 'Keyword Lorebook', value: breakdown.lorebook || 0 },
-        { key: 'vectorLore', label: 'Vector Lorebook', value: breakdown.vectorLore || 0 },
-        { key: 'lorebookTotal', label: 'Lorebook Total', value: (breakdown.lorebook || 0) + (breakdown.vectorLore || 0) },
-        { key: 'lorebookReserve', label: 'Lorebook Reserve', value: breakdown.lorebookReserve || 0 },
-        { key: 'history', label: 'History', value: breakdown.history || 0 }
-    ];
-});
-
-const contextLegendItems = computed(() => [
-    { key: 'character', label: 'Character', className: 'segment-character' },
-    { key: 'preset', label: 'Preset', className: 'segment-fixed' },
-    { key: 'authorsNote', label: 'Author\'s Note', className: 'segment-authors-note' },
-    { key: 'summary', label: 'Summary', className: 'segment-summary' },
-    { key: 'memory', label: 'Memory', className: 'segment-memory' },
-    { key: 'lorebook', label: 'Keyword Lorebook', className: 'segment-lorebook' },
-    { key: 'vectorLore', label: 'Vector Lorebook', className: 'segment-vector-lore' },
-    { key: 'history', label: 'History', className: 'segment-history' },
-    { key: 'lorebookReserve', label: 'Lorebook Reserve', className: 'segment-lorebook-reserve' }
-]);
-
-const visibleHistoryMessages = computed(() => {
-    return currentMessages.value.filter(m => m && !m.isTyping && !m.isHidden);
-});
-
-const historyUsagePercent = computed(() => {
-    const breakdown = contextBreakdown.value;
-    if (!breakdown) return 0;
-    const available = breakdown.availableForHistory || 0;
-    if (available <= 0) return breakdown.history > 0 ? 100 : 0;
-    return Math.max(0, Math.min(100, Math.round(((breakdown.history || 0) / available) * 100)));
-});
-
-const historyHidePreview = computed(() => {
-    const messages = visibleHistoryMessages.value;
-    const percent = Math.max(1, Math.min(95, historyHidePercent.value || 30));
-    if (!messages.length) return { count: 0, tokens: 0 };
-
-    const count = Math.max(1, Math.min(messages.length, Math.ceil(messages.length * percent / 100)));
-    const tokens = messages
-        .slice(0, count)
-        .reduce((sum, msg) => sum + estimateTokens(msg.text || ''), 0);
-
-    return { count, tokens };
-});
-
-const shouldRecommendHide = computed(() => {
-    const breakdown = contextBreakdown.value;
-    if (!breakdown || !breakdown.history) return false;
-    const threshold = Math.max(1, Math.min(100, historyFillThreshold.value || 85));
-    return historyUsagePercent.value >= threshold;
-});
-
-let autoSyncRunning = false;
-let autoSyncCooldownUntil = 0;
-async function triggerAutoSyncCheck() {
-    incrementMessageCounter();
-    if (!shouldAutoSync()) return;
-    if (autoSyncRunning) return;
-    if (Capacitor.isNativePlatform() && Date.now() < autoSyncCooldownUntil) return;
-    if (Capacitor.isNativePlatform() && (isGenerating.value || document.visibilityState !== 'visible')) return;
-    autoSyncRunning = true;
-    resetMessageCounter();
-    try {
-        await fullSync();
-        if (Capacitor.isNativePlatform()) {
-            autoSyncCooldownUntil = Date.now() + 60000;
-        }
-    } catch (e) {
-        console.warn('[ChatView] Auto-sync failed:', e);
-    } finally {
-        autoSyncRunning = false;
-    }
-}
-
-// --- Search Logic ---
-watch(searchQuery, (newVal) => {
-    if (!newVal || !isSearchMode.value) {
-        searchResults.value = [];
-        currentSearchIndex.value = -1;
-        return;
-    }
-    const query = newVal.toLowerCase();
-    const results = [];
-    currentMessages.value.forEach((msg, idx) => {
-        if (msg && msg.text) {
-            const text = msg.text.toLowerCase();
-            let lastIdx = -1;
-            while ((lastIdx = text.indexOf(query, lastIdx + 1)) !== -1) {
-                results.push({ msgIdx: idx, matchIdx: lastIdx });
-            }
-        }
-    });
-    searchResults.value = results;
-    if (results.length > 0) {
-        currentSearchIndex.value = results.length - 1; // Start from most recent (bottom)
-        scrollToSearchResult();
-    } else {
-        currentSearchIndex.value = -1;
-    }
-});
-
-function scrollToSearchResult() {
-    if (currentSearchIndex.value >= 0 && currentSearchIndex.value < searchResults.value.length) {
-        const { msgIdx } = searchResults.value[currentSearchIndex.value];
-        const displayIndex = displayMessages.value.findIndex(m => m.type === 'message' && m.originalIndex === msgIdx);
-        if (displayIndex !== -1) {
-            scrollToIndex(displayIndex, 'smooth').then(() => {
-                const el = document.getElementById(`msg-${msgIdx}`);
-                if (el) {
-                    el.classList.add('search-highlight');
-                    setTimeout(() => el.classList.remove('search-highlight'), 1500);
-                }
-            });
-        }
-    }
-}
-
-function nextSearchResult() {
-    if (searchResults.value.length === 0) return;
-    currentSearchIndex.value = (currentSearchIndex.value + 1) % searchResults.value.length;
-    scrollToSearchResult();
-}
-
-function prevSearchResult() {
-    if (searchResults.value.length === 0) return;
-    currentSearchIndex.value = (currentSearchIndex.value - 1 + searchResults.value.length) % searchResults.value.length;
-    scrollToSearchResult();
-}
-
-const searchMatchState = computed(() => {
-    if (!isSearchMode.value || searchResults.value.length === 0 || currentSearchIndex.value < 0) return { msgIdx: -1, occurrenceIdx: -1 };
-    const activeMatch = searchResults.value[currentSearchIndex.value];
-    let occurrenceIdx = 0;
-    for (let i = 0; i < currentSearchIndex.value; i++) {
-        if (searchResults.value[i].msgIdx === activeMatch.msgIdx) {
-            occurrenceIdx++;
-        }
-    }
-    return {
-        msgIdx: activeMatch.msgIdx,
-        occurrenceIdx: occurrenceIdx
-    };
-});
-
-const onChatSearchToggle = (e) => {
-    isSearchMode.value = e.detail;
-    if (!isSearchMode.value) {
-        searchQuery.value = '';
-    }
-};
-
-const onChatSearch = (e) => {
-    searchQuery.value = e.detail;
-};
 
 // --- Data Management ---
 
@@ -2240,141 +571,8 @@ async function loadChats() {
     }
 }
 
-async function abortActiveChatGeneration(charId, { restore = true } = {}) {
-    const state = getGenerationState(charId);
-    if (!state || state.type === 'impersonation') return false;
-
-    if (state.controller) {
-        try {
-            state.controller.abort();
-        } catch (abortErr) {
-            console.warn('[generation] Failed to abort controller:', abortErr);
-        }
-    }
-
-    if (restore && state.restoreState) {
-        try {
-            await state.restoreState();
-        } catch (restoreErr) {
-            console.error('[generation] Failed to restore state after abort:', restoreErr);
-        }
-    }
-
-    clearGenerationState(charId, state.genId);
-
-    if (activeChatChar && activeChatChar.id === charId) {
-        isGenerating.value = false;
-    }
-
-    return true;
-}
-
-async function updateContextCutoff() {
-    if (!activeChatChar || !currentMessages.value) return;
-
-    console.time('[updateContextCutoff] total');
-
-    if (isOpeningChat) {
-        pendingCutoffRecalc = true;
-        return;
-    }
-
-    if (isCalculatingCutoff) {
-        pendingCutoffRecalc = true;
-        return;
-    }
-
-    // Set guard BEFORE any await to prevent concurrent executions from bypassing it
-    isCalculatingCutoff = true;
-
-    const currentCharId = activeChatChar.id;
-    const visibleMessages = currentMessages.value.filter(m => m && !m.isTyping && !m.isHidden);
-    const messageCount = visibleMessages.length;
-
-    try {
-        const cutoffChatData = await getChatData(activeChatChar.id);
-        const sessionId = cutoffChatData.currentId;
-
-        // Cache key includes context settings so changes to context size bust the cache
-        const runtime = getApiRuntimeStorage();
-        const contextSize = String(runtime.contextSize || 32000);
-        const maxTokens = String(runtime.maxTokens || 8000);
-        const cacheKey = `${currentCharId}_${sessionId}_${messageCount}_${contextSize}_${maxTokens}`;
-
-        if (contextCutoffCache && contextCutoffCache.hash === cacheKey) {
-            cutoffIndex.value = contextCutoffCache.result?.cutoffIndex ?? 0;
-            contextBreakdown.value = contextCutoffCache.result?.contextBreakdown || null;
-            return;
-        }
-
-        const history = visibleMessages
-            .map((m, i) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text || "", originalIndex: i }));
-
-        const summary = cutoffChatData.summaries?.[sessionId];
-
-        let authorsNote = null;
-        if (cutoffChatData.authorsNotes && cutoffChatData.authorsNotes[sessionId]) {
-            const storedAn = cutoffChatData.authorsNotes[sessionId];
-            let anContent = typeof storedAn === 'string' ? storedAn : storedAn.content;
-
-            const effectivePreset = getEffectivePreset(activeChatChar.id, sessionId ? `${activeChatChar.id}_${sessionId}` : null);
-            const anBlock = effectivePreset?.blocks?.find(b => b.id === 'authors_note');
-            if (anBlock && anBlock.enabled && anContent) {
-                authorsNote = {
-                    content: anContent,
-                    role: anBlock.role || 'system',
-                    enabled: true,
-                    depth: anBlock.depth !== undefined ? anBlock.depth : 0,
-                    insertion_mode: anBlock.insertion_mode || 'relative'
-                };
-            }
-        }
-
-        const result = await calculateContext({
-            char: activeChatChar,
-            history,
-            authorsNote,
-            summary
-        });
-
-        if (activeChatChar && activeChatChar.id === currentCharId) {
-            cutoffIndex.value = result?.cutoffIndex ?? 0;
-            contextBreakdown.value = result?.contextBreakdown || null;
-            contextCutoffCache = {
-                hash: cacheKey,
-                charId: currentCharId,
-                sessionId,
-                messageCount,
-                result
-            };
-        }
-    } finally {
-        console.timeEnd('[updateContextCutoff] total');
-        isCalculatingCutoff = false;
-        if (pendingCutoffRecalc) {
-            pendingCutoffRecalc = false;
-            if (cutoffRerunTimer) clearTimeout(cutoffRerunTimer);
-            cutoffRerunTimer = setTimeout(() => {
-                updateContextCutoff();
-            }, 0);
-        }
-    }
-}
-
-function debouncedUpdateContextCutoff(delay = 300) {
-    const effectiveDelay = isBatterySaverUI.value ? Math.max(delay, 700) : delay;
-    if (cutoffDebounceTimer) clearTimeout(cutoffDebounceTimer);
-    cutoffDebounceTimer = setTimeout(() => {
-        updateContextCutoff();
-    }, effectiveDelay);
-}
-
-function invalidateContextCache() {
-    contextCutoffCache = null;
-}
-
 async function updateSessionMessage(char, msgIndex, newMsgData) {
-    let data = await getChatData(char.id);
+    const data = await getChatData(char.id);
     const sessionId = char.sessionId || data.currentId;
     if (data && data.sessions[sessionId]) {
         data.sessions[sessionId][msgIndex] = newMsgData;
@@ -2382,135 +580,7 @@ async function updateSessionMessage(char, msgIndex, newMsgData) {
     }
 }
 
-// Use context service functions
-const { clampHistoryFillThreshold, clampHistoryHidePercent } = contextService;
-
-function persistHistoryContextSettings(fillThreshold, hidePercent) {
-    const clamped = contextService.persistHistoryContextSettings(fillThreshold, hidePercent);
-    historyFillThreshold.value = clamped.fillThreshold;
-    historyHidePercent.value = clamped.hidePercent;
-}
-
-async function saveCurrentMessages() {
-    if (!activeChatChar) return;
-    const data = await getChatData(activeChatChar.id);
-    if (!data) return;
-    const sessionId = activeChatChar.sessionId || data.currentId;
-    data.sessions[sessionId] = currentMessages.value;
-    await db.saveChat(activeChatChar.id, data);
-}
-
-function handleSaveContextSettings({ fillThreshold, hidePercent }) {
-    persistHistoryContextSettings(fillThreshold, hidePercent);
-}
-
-async function hideTopMessagesNow() {
-    const count = historyHidePreview.value.count;
-    if (!count || !activeChatChar) return;
-
-    let hidden = 0;
-    for (const msg of currentMessages.value) {
-        if (!msg || msg.isTyping || msg.isHidden) continue;
-        msg.isHidden = true;
-        hidden += 1;
-        if (hidden >= count) break;
-    }
-
-    if (!hidden) return;
-
-    await saveCurrentMessages();
-    await updateContextCutoff();
-    closeBottomSheet();
-    showToast(`Hidden ${hidden} top message${hidden === 1 ? '' : 's'}`);
-}
-
-function confirmHideTopMessages() {
-    const preview = historyHidePreview.value;
-    if (!preview.count) return;
-
-    showBottomSheet({
-        title: 'Hide Top Messages',
-        items: [
-            {
-                label: 'Open Summary',
-                hint: 'Review or generate a summary first',
-                icon: '<svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 14H7v-2h10v2zm0-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>',
-                onClick: () => {
-                    closeBottomSheet();
-                    setTimeout(() => presetView.value?.openSummarySheet(), 250);
-                }
-            },
-            {
-                label: `Hide ${preview.count} message${preview.count === 1 ? '' : 's'} now`,
-                hint: `Free about ${preview.tokens} tokens`,
-                icon: '<svg viewBox="0 0 24 24"><path d="M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.43-4.75-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46C3.08 8.3 1.78 10.02 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27z"/></svg>',
-                onClick: () => {
-                    hideTopMessagesNow();
-                }
-            },
-            {
-                label: 'Cancel',
-                onClick: () => {
-                    closeBottomSheet();
-                    // Return to Tokenizer sheet
-                    setTimeout(() => {
-                        isCalculatingCutoff = false; // ensure loader doesn't stick
-                        tokenizerSheet.value?.open();
-                    }, 50);
-                }
-            }
-        ]
-    });
-}
-
-async function unhideAllMessages() {
-    if (!activeChatChar) return;
-
-    let changed = 0;
-    for (const msg of currentMessages.value) {
-        if (!msg || msg.isTyping || !msg.isHidden) continue;
-        msg.isHidden = false;
-        changed += 1;
-    }
-
-    if (!changed) return;
-
-    await saveCurrentMessages();
-    await updateContextCutoff();
-    closeBottomSheet();
-    showToast(`Unhid ${changed} message${changed === 1 ? '' : 's'}`);
-}
-
-async function openContextSheet() {
-    // Always recalculate to ensure vector lorebooks are included
-    if (activeChatChar) {
-        const calculatePromise = updateContextCutoff();
-        const timeoutPromise = new Promise(resolve => setTimeout(resolve, 5000));
-        await Promise.race([calculatePromise, timeoutPromise]);
-
-        if (isCalculatingCutoff) {
-            await new Promise(resolve => setTimeout(resolve, 1000));
-        }
-    }
-
-    if (!contextBreakdown.value) {
-        showBottomSheet({
-            title: 'Context',
-            bigInfo: {
-                icon: '<svg viewBox="0 0 24 24" style="fill:currentColor;width:100%;height:100%;"><path d="M11 17h2v-6h-2v6zm0-8h2V7h-2v2zm1-7C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/></svg>',
-                description: 'Context calculation is taking longer than expected. Please check that your API settings are configured correctly and try again.',
-                buttonText: 'Close',
-                onButtonClick: () => closeBottomSheet()
-            }
-        });
-        return;
-    }
-
-    tokenizerSheet.value?.open();
-}
-
 function handleSheetBack() {
-    // Close current sheet and open MagicDrawer
     tokenizerSheet.value?.close();
     memoryBooksSheet.value?.close();
     chatInputRef.value?.openMagicDrawer();
@@ -2522,10 +592,9 @@ async function setupHeader(char = activeChatChar) {
     const initialSessionId = char.sessionId || (data ? data.currentId : '...');
     const sessionName = data?.sessionNames?.[initialSessionId];
 
-    window.dispatchEvent(new CustomEvent('header-setup-chat', { 
-        detail: { 
-            char, 
-            currentSessionId: initialSessionId, 
+    publishAppEvent(APP_EVENTS.ui.header.setupChat, {
+            char,
+            currentSessionId: initialSessionId,
             sessionName,
             callbacks: {
                 onActionsClick: () => openSessionsSheet(char),
@@ -2533,9 +602,9 @@ async function setupHeader(char = activeChatChar) {
                     closeChat();
                     if (currentOnBack) currentOnBack();
                 }
-            } 
-        } 
-    }));
+            }
+        }
+    );
 }
 
 const onFsEditorClosed = async () => {
@@ -2584,8 +653,7 @@ async function openChat(char, onBack, force = false) {
 
     isOpeningChat = true;
     isLoading.value = true;
-    cutoffIndex.value = -1;
-    contextBreakdown.value = null;
+    resetCutoffState();
 
     try {
     // Attempt to migrate legacy stats locally
@@ -2634,7 +702,7 @@ async function openChat(char, onBack, force = false) {
     isGenerating.value = hasGenerationState(char.id);
 
     // Clear unread
-    let unread = (await db.get('gz_unread')) || {};
+    const unread = (await db.get('gz_unread')) || {};
     if (unread[char.id]) {
         delete unread[char.id];
         await db.set('gz_unread', unread);
@@ -2817,7 +885,7 @@ async function openChat(char, onBack, force = false) {
 
     // Restore draft
     inputValue.value = chatData.draft || '';
-    pendingCutoffRecalc = true;
+    setPendingCutoffRecalc(true);
 
     // Reset virtual scroll (defaults to bottom)
     refreshVirtualScroll();
@@ -2927,84 +995,21 @@ async function openChat(char, onBack, force = false) {
     const personaName = effPersona ? effPersona.name : '';
 
     if (activeLbs.length > 0 || presetName || personaName) {
-        window.dispatchEvent(new CustomEvent('header-show-lb-banner', { 
-            detail: {
+        publishAppEvent(APP_EVENTS.ui.header.showLbBanner, {
                 names: activeLbs,
                 preset: presetName,
                 persona: personaName
-            }
-        }));
+            });
     }
 
     } finally {
         isLoading.value = false;
         isOpeningChat = false;
-        if (pendingCutoffRecalc) {
-            pendingCutoffRecalc = false;
+        if (consumePendingCutoffRecalc()) {
             updateContextCutoff();
         }
         // Update pending memory indicators
         updatePendingMemoryMessageIds(activeChatChar);
-    }
-}
-
-function asyncSaveCurrentSessionState() {
-    if (activeChatChar && messagesContainer.value) {
-        const charContext = activeChatChar;
-        const sessionId = charContext.sessionId;
-        const inputValueDraft = inputValue.value;
-        const currentAnchor = getScrollAnchor();
-
-        db.patchChatData(charContext.id, (data) => {
-            data.lastScrollAnchor = currentAnchor;
-            data.draft = inputValueDraft;
-
-            if (sessionId && data.sessions && data.sessions[sessionId]) {
-                const msgs = data.sessions[sessionId];
-                for (let i = msgs.length - 1; i >= 0; i--) {
-                    const msg = msgs[i];
-                    if (msg.isEditing) {
-                        msg.isEditing = false;
-                        delete msg.editText;
-                    }
-
-                    if (msg.isError) {
-                        if (msg.swipes && msg.swipes.length > 1) {
-                            const errorSwipeId = msg.swipeId || 0;
-                            msg.swipes.splice(errorSwipeId, 1);
-                            if (msg.swipesMeta) msg.swipesMeta.splice(errorSwipeId, 1);
-
-                            let newSwipeId = errorSwipeId - 1;
-                            if (newSwipeId < 0) newSwipeId = 0;
-
-                            msg.swipeId = newSwipeId;
-                            msg.text = msg.swipes[newSwipeId] || "";
-                            msg.isError = false;
-
-                            if (msg.swipesMeta && msg.swipesMeta[newSwipeId]) {
-                                msg.reasoning = msg.swipesMeta[newSwipeId].reasoning;
-                                msg.genTime = msg.swipesMeta[newSwipeId].genTime;
-                            } else {
-                                msg.reasoning = null;
-                                msg.genTime = null;
-                            }
-                        } else {
-                            msgs.splice(i, 1);
-                        }
-                    }
-                }
-                data.sessions[sessionId] = msgs;
-            }
-
-            if (charContext.authors_note !== undefined) {
-                if (!data.authorsNotes) data.authorsNotes = {};
-                data.authorsNotes[sessionId] = charContext.authors_note;
-            }
-            if (charContext.summary !== undefined) {
-                if (!data.summaries) data.summaries = {};
-                data.summaries[sessionId] = charContext.summary;
-            }
-        });
     }
 }
 
@@ -3020,7 +1025,7 @@ function closeChat() {
         _cleanupScroll = null;
     }
 
-    window.dispatchEvent(new CustomEvent('header-reset'));
+    publishAppEvent(APP_EVENTS.ui.header.reset);
     activeChatChar = null;
     activeChar.value = null;
     setTrackedContext(null, null);
@@ -3039,1310 +1044,96 @@ function smartScroll() {
     }
 }
 
-async function sendMessage(attachedImage = null, guidanceText = null) {
-    if (isGenerating.value && activeChatChar) {
-        // Stop Generation
-        const state = getGenerationState(activeChatChar.id);
-        if (state?.type === 'impersonation') {
-            if (state.controller) state.controller.abort();
-            clearGenerationState(activeChatChar.id);
-            isGenerating.value = false;
-            isImpersonating.value = false;
-        } else if (state) {
-            await abortActiveChatGeneration(activeChatChar.id);
-        } else {
-            // Stale isGenerating flag — no active generation found, just reset
-            isGenerating.value = false;
-        }
-        return;
-    }
+chatGenerationServices = createChatGenerationServices({
+    activeChatChar: activeChar,
+    isGenerating,
+    currentMessages,
+    displayMessages,
+    smartScroll,
+    scrollToBottom,
+    isItemVisible,
+    scrollToIndex,
+    genMsgId,
+    updateSessionMessage,
+    runMemoryAutomationAfterStableTurn
+});
 
-    let effectiveGuidance = guidanceText;
-    let effectiveGuidanceType = 'GENERATION';
+const {
+    sendMessage,
+    startGeneration,
+    handleImageRegenerate,
+    startImpersonation
+} = useChatGeneration({
+    getActiveChatChar: () => activeChatChar,
+    currentMessages,
+    inputValue,
+    isGenerating,
+    pendingGuidance,
+    hasGenerationState,
+    getGenerationState,
+    abortAnyActiveGeneration,
+    getChatGenerationServices: () => chatGenerationServices,
+    genMsgId,
+    createBaseMessageMeta,
+    nextGenerationId,
+    createGenerationRequestToken,
+    buildGenerationOwnerKey,
+    updateSessionMessage,
+    scrollToBottom,
+    openApiView,
+    memoryDraftState,
+    isImpersonating,
+    setGenerationState,
+    clearGenerationState,
+    cleanText,
+    activeChar,
+    t
+});
 
-    if (!effectiveGuidance && pendingGuidance.value) {
-        effectiveGuidance = pendingGuidance.value.text;
-        effectiveGuidanceType = pendingGuidance.value.type;
-        pendingGuidance.value = null;
-    }
 
-    const text = inputValue.value.trim();
-    const hasImage = typeof attachedImage === 'string';
-    if (text || hasImage || effectiveGuidance) {
 
-        const now = new Date();
-        const time = now.getHours() + ':' + String(now.getMinutes()).padStart(2, '0');
-        
-        const persona = activePersona.value;
-        
-        const processedText = replaceMacros(text, activeChatChar, persona);
-        
-        inputValue.value = '';
-
-        const msgData = { 
-            id: genMsgId(),
-            role: 'user', 
-            text: processedText, 
-            time: time, 
-            timestamp: now.getTime(),
-            image: attachedImage, 
-            tokens: estimateTokens(processedText),
-            persona: { ...activePersona.value },
-            guidanceText: effectiveGuidance,
-            guidanceType: effectiveGuidanceType,
-            ...createBaseMessageMeta()
-        };
-        currentMessages.value.push(msgData);
-        if (activeChatChar) {
-            const currentSessionId = activeChatChar.sessionId || (await getChatData(activeChatChar.id))?.currentId;
-            addMessageStats(activeChatChar.id, currentSessionId, msgData.tokens, processedText.length, msgData.timestamp);
-            const data = await getChatData(activeChatChar.id);
-            if (data && currentSessionId && data.sessions?.[currentSessionId]) {
-                data.sessions[currentSessionId] = currentMessages.value;
-                await db.saveChat(activeChatChar.id, data);
-            }
-        }
-        
-        // Wait for vue to render the new item then force scroll to bottom
-        nextTick(() => {
-            scrollToBottom(false);
-            if (window.forceScrollToBottom) {
-                setTimeout(window.forceScrollToBottom, 100);
-            }
-        });
-        
-        if (activeChatChar) {
-            startGeneration(activeChatChar, null, -1, null, effectiveGuidance, effectiveGuidanceType);
-        }
-    }
-}
-
-// --- Generation Logic ---
-
-function startGeneration(char, text, existingMsgIndex = -1, onAbort = null, guidanceText = null, guidanceType = 'GENERATION') {
-    // Check API Configuration
-    const runtime = getApiRuntimeStorage();
-    const model = runtime.model;
-    const endpoint = runtime.normalizedEndpoint;
-    const existingState = getGenerationState(char.id);
-
-    if (existingState && existingState.type !== 'impersonation') {
-        console.warn('[generation] Ignoring overlapping startGeneration call for active chat request', {
-            charId: char.id,
-            existingGenId: existingState.genId
-        });
-        return;
-    }
-    
-    if (!model || !endpoint) {
-        showBottomSheet({
-            bigInfo: {
-                icon: '<svg viewBox="0 0 24 24" style="fill:currentColor;width:100%;height:100%;"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.04.24.24.41.48.41h3.84c.24 0 .43-.17.47-.41l.36-2.54c.59-.24 1.13-.57 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>',
-                description: t('api_not_configured') || "API Not Configured",
-                buttonText: t('btn_configure') || "Configure",
-                onButtonClick: () => {
-                    closeBottomSheet();
-                    openApiView();
-                }
-            }
-        });
-        return;
-    }
-
-    const genId = nextGenerationId();
-    const controller = new AbortController();
-    const startTime = Date.now();
-    let rawStreamText = text || "";
-    resolveGenerationSessionContext({ char, db }).then(context => {
-        continueGeneration(context);
-    }).catch(e => {
-        console.error('Failed to load chat for generation:', e);
-        isGenerating.value = false;
-    });
-
-    async function continueGeneration({ sessionId, summary, anContent }) {
-
-    // Notify application about generation start
-    window.dispatchEvent(new CustomEvent('chat-generation-started', { detail: { charId: char.id, sessionId: sessionId } }));
-
-    isGenerating.value = true;
-    let msgIndex = existingMsgIndex;
-    const authorsNote = buildGenerationAuthorsNote({
-        getEffectivePreset,
-        charId: char.id,
-        sessionId,
-        anContent
-    });
-
-    msgIndex = await ensureGenerationPlaceholderMessage({
-        msgIndex,
-        text,
-        guidanceText,
-        guidanceType,
-        currentMessages,
-        createBaseMessageMeta,
-        genMsgId,
-        charId: char.id,
-        sessionId,
-        getChatData,
-        db,
-        scrollToBottom
-    });
-
-    applyGenerationGuidanceState({
-        currentMessages,
-        msgIndex,
-        guidanceText,
-        guidanceType
-    });
-
-    const msgId = currentMessages.value[msgIndex]?.id || genMsgId();
-    const { snapshotPromptMeta, restorePromptMetaOnMessages } = createPromptMetadataSnapshots();
-
-    // Save generation status for DialogList
-    markGenerationPersisted(char.id, sessionId);
-
-    setupGenerationState({
-        char,
-        msgId,
-        genId,
-        controller,
-        startTime,
-        currentMessages,
-        activeChatChar,
-        setGenerationState,
-        getGenerationState,
-        smartScroll
-    });
-
-    const { onUpdate, clearBackgroundUpdateTimer } = createGenerationStreamUpdater({
-        char,
-        sessionId,
-        msgId,
-        genId,
-        getGenerationState,
-        getChatData,
-        db,
-        onRawText: (effectiveText, chunk) => {
-            rawStreamText = effectiveText || (rawStreamText + (chunk || ''));
-        }
-    });
-
-    const restoreState = async (isError = false) => {
-        await restoreGenerationState({
-            currentMessages,
-            getChatData,
-            db,
-            getGenerationState,
-            clearPersistedGeneration,
-            char,
-            sessionId,
-            msgId,
-            isError,
-            onAbort,
-            restorePromptMetaOnMessages,
-            clearBackgroundUpdateTimer,
-            updateSessionMessage
-        });
-    };
-
-    getGenerationState(char.id).restoreState = restoreState;
-
-    const onError = async (e) => {
-        await handleGenerationError({
-            error: e,
-            char,
-            sessionId,
-            msgId,
-            genId,
-            rawStreamText,
-            activeChatChar,
-            isGenerating,
-            currentMessages,
-            getGenerationState,
-            clearGenerationState,
-            restoreState,
-            clearBackgroundUpdateTimer,
-            clearTypingStateForMessage,
-            getChatData,
-            db,
-            formatError,
-            sendMessageNotification
-        });
-    };
-
-    const history = buildGenerationHistory(currentMessages);
-
-    generateChatResponse({
-        text,
-        char,
-        history,
-        authorsNote,
-        summary,
-        guidanceText,
-        type: 'normal',
-        controller,
-        callbacks: {
-            onPromptReady: async ({ loreEntries, memoryEntries }) => {
-                await handleGenerationPromptReady({
-                    loreEntries,
-                    memoryEntries,
-                    currentMessages,
-                    msgIndex,
-                    char,
-                    sessionId,
-                    getChatData,
-                    db,
-                    snapshotPromptMeta
-                });
-            },
-            onUpdate,
-            onComplete: async (response, finalReasoning, meta) => {
-                await handleGenerationComplete({
-                    response,
-                    finalReasoning,
-                    meta,
-                    char,
-                    sessionId,
-                    msgId,
-                    genId,
-                    startTime,
-                    controller,
-                    guidanceText,
-                    guidanceType,
-                    activeChatChar,
-                    isGenerating,
-                    currentMessages,
-                    displayMessages,
-                    getGenerationState,
-                    clearGenerationState,
-                    clearPersistedGeneration,
-                    clearBackgroundUpdateTimer,
-                    clearTypingStateForMessage,
-                    getChatData,
-                    db,
-                    cleanText,
-                    estimateTokens,
-                    updateSessionMessage,
-                    processMessageImages,
-                    userAvatar: activePersona.value?.avatar || null,
-                    isItemVisible,
-                    scrollToIndex,
-                    smartScroll,
-                    sendMessageNotification,
-                    runMemoryAutomationAfterStableTurn,
-                    addMessageStats,
-                    addRegenerationStats,
-                    triggerAutoSyncCheck,
-                    addNotification
-                });
-            },
-            onError
-        }
-    });
-    }
-}
-
-async function handleImageRegenerate(msgIndex, { instruction, id }) {
-    const char = activeChatChar;
-    if (!char || !currentMessages.value[msgIndex]) return;
-    const msg = currentMessages.value[msgIndex];
-
-    const idEsc = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const loadingHtml = makeLoadingHtml(instruction, id);
-    const toLoading = (text) => text
-        .replace(new RegExp(`<span[^>]+class="[^"]*imggen-error[^"]*"[^>]+data-iig-id="${idEsc}"[^>]*>[\\s\\S]*?<\\/button><\\/span>`, 'g'), loadingHtml)
-        .replace(new RegExp(`<span[^>]+class="[^"]*imggen-result-wrapper[^"]*"[^>]*>[\\s\\S]*?data-iig-id="${idEsc}"[\\s\\S]*?<\\/span>`, 'g'), loadingHtml);
-
-    msg.text = toLoading(msg.text);
-    msg.swipes[msg.swipeId || 0] = msg.text;
-    updateSessionMessage(char, msgIndex, msg);
-
-    const loadingRe = new RegExp(`<span[^>]+class="[^"]*imggen-loading[^"]*"[^>]+data-iig-id="${idEsc}"[^>]*>(?:<span[^>]*>[\\s\\S]*?<\\/span>)*<\\/span>`, 'g');
-    const context = { charAvatar: char.avatar || null, userAvatar: activePersona.value?.avatar || null };
-
-    startGenerationNotification(t('imggen_notification_title') || 'Glaze', t('imggen_notification_body') || 'Generating image...');
-    addNotification(t('imggen_notification_body') || 'Generating image...', 'info');
-
-    try {
-        const dataUrl = await generateImage(instruction, context);
-        const latest = currentMessages.value[msgIndex]?.text || msg.text;
-        msg.text = latest.replace(loadingRe, makeResultHtml(instruction, id, dataUrl));
-        msg.swipes[msg.swipeId || 0] = msg.text;
-        updateSessionMessage(char, msgIndex, msg);
-    } catch (err) {
-        const latest = currentMessages.value[msgIndex]?.text || msg.text;
-        msg.text = latest.replace(loadingRe, makeErrorHtml(instruction, id, err.message));
-        msg.swipes[msg.swipeId || 0] = msg.text;
-        updateSessionMessage(char, msgIndex, msg);
-    } finally {
-        stopGenerationNotification();
-    }
-}
-
-function regenerateMessage(msgIndex, mode = 'normal', guidanceText = null) {
-    if (msgIndex === -1) return;
-    const msg = currentMessages.value[msgIndex];
-    const isUser = msg.role === 'user';
-    const isLast = msgIndex === currentMessages.value.length - 1;
-
-    if (msg.isError) {
-        msg.isError = false;
-        msg.text = "";
-        msg.reasoning = null;
-        msg.isTyping = true;
-        if (msg.swipes && msg.swipes.length > 0) {
-            msg.swipes[msg.swipeId || 0] = "";
-        }
-        updateSessionMessage(activeChatChar, msgIndex, msg);
-        startGeneration(activeChatChar, null, msgIndex, null, guidanceText, 'SWIPE');
-        return;
-    }
-
-    if (mode === 'magic' && isUser) {
-        // Inherit guidance from the user message if it exists
-        startGeneration(activeChatChar, null, -1, null, msg.guidanceText, 'GENERATION');
-        return;
-    }
-
-    if (!isUser && isLast && mode === 'normal') {
-        mode = 'new_variant';
-    }
-
-    if ((mode === 'new_variant' || mode === 'guided') && !isUser) {
-        // Add new swipe
-        const newSwipeIndex = (msg.swipes?.length || 0);
-        if (!msg.swipes) msg.swipes = [msg.text];
-        msg.swipes.push(""); // Placeholder
-        msg.swipeId = newSwipeIndex;
-        msg.text = "";
-        msg.reasoning = null;
-        msg.isTyping = true;
-        
-        let effectiveGuidance = null;
-        let effectiveType = 'GENERATION';
-        
-        if (mode === 'guided') {
-            effectiveGuidance = guidanceText;
-            effectiveType = 'SWIPE';
-        }
-        
-        startGeneration(activeChatChar, null, msgIndex, null, effectiveGuidance, effectiveType);
-    } else {
-        // Delete and regen (simplified for Vue: remove subsequent, then regen)
-        // In Vue we just slice the array
-        const deleted = currentMessages.value.splice(msgIndex);
-        // Update DB
-        const charId = activeChatChar.id;
-        const sessionId = activeChatChar.sessionId;
-        const messageSnapshot = currentMessages.value;
-        getChatData(activeChatChar.id).then(data => {
-            if (data && sessionId && data.sessions?.[sessionId]) {
-                data.sessions[sessionId] = messageSnapshot; // Save truncated
-                db.saveChat(charId, data);
-            }
-        });
-        
-        startGeneration(activeChatChar, null, -1, null, guidanceText, 'GENERATION');
-    }
-}
-
-async function branchSession(msgIndex) {
-    if (!activeChatChar) return;
-
-    if (isGenerating.value && hasGenerationState(activeChatChar.id)) {
-        const state = getGenerationState(activeChatChar.id);
-        if (state?.type === 'impersonation') {
-            if (state.controller) state.controller.abort();
-            clearGenerationState(activeChatChar.id);
-            isGenerating.value = false;
-        } else {
-            await abortActiveChatGeneration(activeChatChar.id);
-        }
-    }
-
-    const data = await getChatData(activeChatChar.id);
-    const currentMsgs = data.sessions[data.currentId] || [];
-    // Deep copy to avoid reference issues between sessions
-    const newHistory = JSON.parse(JSON.stringify(currentMsgs.slice(0, msgIndex + 1)));
-    
-    // Capture old session ID and notes
-    const oldSessionId = data.currentId;
-    const oldAuthorsNote = data.authorsNotes?.[oldSessionId] ? JSON.parse(JSON.stringify(data.authorsNotes[oldSessionId])) : null;
-    
-    // Create new session directly (updates DB)
-    await dbCreateSession(activeChatChar.id);
-    await loadChats(); // Reload to get new ID
-    
-    const newData = await getChatData(activeChatChar.id);
-    newData.sessions[newData.currentId] = newHistory;
-    const newSessionId = newData.currentId;
-    const oldMemoryBook = data.memoryBooks?.[oldSessionId]
-        ? JSON.parse(JSON.stringify(data.memoryBooks[oldSessionId]))
-        : null;
-    if (oldMemoryBook) {
-        if (!newData.memoryBooks) newData.memoryBooks = {};
-        newData.memoryBooks[newSessionId] = oldMemoryBook;
-    }
-    reconcileSessionMemoryState(newData, newSessionId, newHistory);
-    
-    // Copy authors note
-    if (oldAuthorsNote) {
-        if (!newData.authorsNotes) newData.authorsNotes = {};
-        newData.authorsNotes[newData.currentId] = oldAuthorsNote;
-    }
-    // Copy session variables for macros
-    const oldVarsKey = `gz_vars_${activeChatChar.id}_${oldSessionId}`;
-    const oldVars = localStorage.getItem(oldVarsKey);
-    if (oldVars) {
-        const newVarsKey = `gz_vars_${activeChatChar.id}_${newData.currentId}`;
-        localStorage.setItem(newVarsKey, oldVars);
-    }
-
-    await db.saveChat(activeChatChar.id, newData);
-    
-    // Reload UI
-    const charObj = { ...activeChatChar };
-    delete charObj.sessionId;
-    await openChat(charObj, null, true);
-}
 
 // --- Message Actions ---
 
-function changeSwipe(msgIndex, dir, fromSwipe = false) {
-    if (isGenerating.value) return;
-    const msg = currentMessages.value[msgIndex];
-    
-    // If the current message is an error and other swipes exist, remove the error entry on swipe
-    if (msg.isError && msg.swipes && msg.swipes.length > 1) {
-        const errorSwipeId = msg.swipeId || 0;
-        
-        msg.swipes.splice(errorSwipeId, 1);
-        if (msg.swipesMeta) msg.swipesMeta.splice(errorSwipeId, 1);
-        
-        let newIndex = errorSwipeId;
-        if (dir < 0) newIndex = errorSwipeId - 1;
-        
-        if (newIndex >= msg.swipes.length) newIndex = msg.swipes.length - 1;
-        if (newIndex < 0) newIndex = 0;
-        
-        msg.swipeId = newIndex;
-        msg.text = msg.swipes[newIndex];
-        msg.isError = false;
-        msg.swipeDirection = fromSwipe ? (dir > 0 ? 'slide-next' : 'slide-prev') : 'fade';
-        
-        let newReasoning = null;
-        let newGenTime = null;
-        let newTokens = null;
-        if (msg.swipesMeta && msg.swipesMeta[newIndex]) {
-            newReasoning = msg.swipesMeta[newIndex].reasoning;
-            newGenTime = msg.swipesMeta[newIndex].genTime;
-            newTokens = msg.swipesMeta[newIndex].tokens;
-        }
-        msg.reasoning = newReasoning;
-        msg.genTime = newGenTime;
-        msg.tokens = newTokens;
-        
-        updateSessionMessage(activeChatChar, msgIndex, msg);
-        return;
-    }
+const {
+    openMessageActions,
+    regenerateMessage,
+    branchSession,
+    enterEditMode,
+    saveEdit,
+    cancelEdit,
+    saveGuidance,
+    toggleImageHidden
+} = useMessageActions({
+    activeChar,
+    getActiveChatChar: () => activeChatChar,
+    currentMessages,
+    isGenerating,
+    hasGenerationState,
+    getGenerationState,
+    clearGenerationState,
+    abortActiveChatGeneration,
+    startGeneration,
+    updateSessionMessage,
+    updateContextCutoff,
+    unhideAllMessages,
+    toggleSelection,
+    loadChats,
+    openChat,
+    t
+});
 
-    if (!msg.swipes || msg.swipes.length <= 1) return;
-    
-    let newIndex = (msg.swipeId || 0) + dir;
-
-    const isLastMsg = msgIndex === currentMessages.value.length - 1;
-    if (dir > 0 && newIndex >= msg.swipes.length && isLastMsg) {
-        regenerateMessage(msgIndex, 'new_variant');
-        return;
-    }
-    
-    if (newIndex < 0 || newIndex >= msg.swipes.length) return;
-    
-    msg.swipeDirection = fromSwipe ? (dir > 0 ? 'slide-next' : 'slide-prev') : 'fade';
-    msg.swipeId = newIndex;
-    msg.text = msg.swipes[newIndex];
-    msg.isError = false;
-
-    let newReasoning = null;
-    let newGenTime = null;
-    let newTokens = null;
-    if (msg.swipesMeta && msg.swipesMeta[newIndex]) {
-        newReasoning = msg.swipesMeta[newIndex].reasoning;
-        newGenTime = msg.swipesMeta[newIndex].genTime;
-        newTokens = msg.swipesMeta[newIndex].tokens;
-    }
-    msg.reasoning = newReasoning;
-    msg.genTime = newGenTime;
-    msg.tokens = newTokens;
-
-    updateSessionMessage(activeChatChar, msgIndex, msg);
-}
-
-function changeGreeting(msgIndex, dir, fromSwipe = false) {
-    if (isGenerating.value) return;
-    const msg = currentMessages.value[msgIndex];
-    const persona = activePersona.value;
-    const greetings = getAllGreetings(activeChatChar, persona);
-    if (greetings.length <= 1) return;
-    
-    let newIndex = (msg.greetingIndex || 0) + dir;
-    if (newIndex >= greetings.length) newIndex = 0;
-    if (newIndex < 0) newIndex = greetings.length - 1;
-    
-    msg.swipeDirection = fromSwipe ? (dir > 0 ? 'slide-next' : 'slide-prev') : 'fade';
-    msg.greetingIndex = newIndex;
-    msg.text = greetings[newIndex];
-    msg.tokens = estimateTokens(greetings[newIndex]);
-    msg.swipes = [msg.text]; // Reset swipes for greeting
-    msg.swipeId = 0;
-    msg.reasoning = null;
-    msg.isError = false;
-    updateSessionMessage(activeChatChar, msgIndex, msg);
-}
-
-function getReasoningTags() {
-    let { start, end } = getApiReasoningTags();
-
-    try {
-        const charId = activeChatChar?.id;
-        const chatId = charId && activeChatChar?.sessionId ? `${charId}_${activeChatChar.sessionId}` : null;
-        const activePreset = getEffectivePreset(charId, chatId);
-        if (activePreset) {
-            if (activePreset.reasoningStart) start = activePreset.reasoningStart;
-            if (activePreset.reasoningEnd) end = activePreset.reasoningEnd;
-        }
-    } catch (e) {}
-    
-    return { start, end };
-}
-
-function openMessageActions(msg, index) {
-    if (msg.isTyping) {
-        showBottomSheet({
-            title: t('sheet_title_msg_actions'),
-            items: [{
-                label: "Stop generation",
-                icon: '<svg viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg>',
-                iconColor: '#ff4444',
-                onClick: () => {
-                    if (activeChatChar && hasGenerationState(activeChatChar.id)) {
-                        const state = getGenerationState(activeChatChar.id);
-                        if (state?.type === 'impersonation') {
-                            if (state.controller) state.controller.abort();
-                            clearGenerationState(activeChatChar.id);
-                            isGenerating.value = false;
-                        } else {
-                            abortActiveChatGeneration(activeChatChar.id);
-                        }
-                    } else {
-                        currentMessages.value.splice(index, 1);
-                        if (activeChatChar) {
-                            const charId = activeChatChar.id;
-                            const sessionId = activeChatChar.sessionId;
-                            const messageSnapshot = currentMessages.value;
-                            getChatData(activeChatChar.id).then(data => {
-                                if (data && sessionId && data.sessions?.[sessionId]) {
-                                    data.sessions[sessionId] = messageSnapshot;
-                                    db.saveChat(charId, data);
-                                }
-                            });
-                        }
-                    }
-                    closeBottomSheet();
-                }
-            }]
-        });
-        return;
-    }
-
-    const items = [];
-
-    // 1. Regenerate (for char messages or errors)
-    if ((msg.role === 'char' && index > 0) || msg.isError) {
-        items.push({
-            label: t('action_regenerate'),
-            icon: '<svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>',
-            onClick: () => {
-                closeBottomSheet();
-                regenerateMessage(index);
-            }
-        });
-    }
-
-    // 2. Edit
-    if (!msg.isError) {
-        items.push({
-            label: t('action_edit'),
-            icon: '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>',
-            onClick: () => {
-                closeBottomSheet();
-                enterEditMode(msg);
-            }
-        });
-    }
-
-    // 3. Copy
-    items.push({
-        label: t('action_copy'),
-        icon: '<svg viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>',
-        onClick: () => {
-            let text = msg.text;
-            if (msg.isError) {
-                const div = document.createElement('div');
-                div.innerHTML = text.replace(/<br\s*\/?>/gi, '\n');
-                text = div.textContent || div.innerText || text;
-                text = text.trim();
-            }
-            navigator.clipboard.writeText(text);
-            closeBottomSheet();
-        }
-    });
-
-    items.push({
-        label: t('action_select') || 'Select',
-        icon: '<svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-9 14l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>',
-        onClick: () => {
-            toggleSelection(msg.id);
-            closeBottomSheet();
-        }
-    });
-
-    // 4. Branch
-    if (!msg.isError) {
-        items.push({
-            label: t('action_branch'),
-            icon: '<svg viewBox="0 0 24 24"><path d="M17.5 4C15.57 4 14 5.57 14 7.5C14 8.55 14.46 9.49 15.2 10.15L11.2 14.15C10.46 13.46 9.55 13 8.5 13C7.57 13 6.72 13.36 6.08 13.96L6 6.5C6.55 6.23 7 5.69 7 5C7 3.9 6.1 3 5 3C3.9 3 3 3.9 3 5C3 5.69 3.45 6.23 4 6.5L4.08 16.04C3.44 16.64 3 17.43 3 18.5C3 20.43 4.57 22 6.5 22C8.43 22 10 20.43 10 18.5C10 17.55 9.54 16.71 8.8 16.05L12.8 12.05C13.54 12.74 14.45 13.2 15.5 13.2C17.43 13.2 19 11.63 19 9.7C19 7.77 17.43 6.2 15.5 6.2C15.5 6.2 15.5 6.2 15.5 6.2L17.5 4Z"/></svg>',
-            onClick: () => {
-                closeBottomSheet();
-                branchSession(index);
-            }
-        });
-    }
-
-    // 5. Hide/Unhide
-    items.push({
-        label: msg.isHidden ? (t('action_unhide_msg') || 'Unhide') : (t('action_hide_msg') || 'Hide'),
-        icon: msg.isHidden
-            ? '<svg viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>'
-            : '<svg viewBox="0 0 24 24"><path d="M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.43-4.75-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46C3.08 8.3 1.78 10.02 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3 .22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53-2.76 0-5-2.24-5-5 0-.79.2-1.53.53-2.2zm4.31-.78l3.15 3.15.02-.16c0-1.66-1.34-3-3-3l-.17.01z"/></svg>',
-        onClick: () => {
-            msg.isHidden = !msg.isHidden;
-            updateSessionMessage(activeChatChar, index, msg);
-            updateContextCutoff();
-            closeBottomSheet();
-        }
-    });
-
-    const hiddenCount = currentMessages.value.filter(m => m && !m.isTyping && m.isHidden).length;
-    if (hiddenCount > 0) {
-        items.push({
-            label: `Unhide All (${hiddenCount})`,
-            icon: '<svg viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5 2.29 0 4.42-.65 6.22-1.78l-1.46-1.46A9.44 9.44 0 0 1 12 17.5c-3.73 0-6.96-2.1-8.56-5.5C5.04 8.6 8.27 6.5 12 6.5c1.41 0 2.75.3 3.96.85l1.53-1.53A11.4 11.4 0 0 0 12 4.5zm8.78 1.72-17 17 1.41 1.41 2.68-2.68A11.79 11.79 0 0 0 12 19.5c5 0 9.27-3.11 11-7.5a11.81 11.81 0 0 0-3.09-4.47l2.28-2.28-1.41-1.41z"/></svg>',
-            onClick: () => {
-                unhideAllMessages();
-            }
-        });
-    }
-
-    // 6. Delete (only allow deleting the last message)
-    if (index === currentMessages.value.length - 1) items.push({
-        label: t('action_delete_msg'),
-        icon: '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>',
-        iconColor: '#ff4444',
-        isDestructive: true,
-        onClick: () => {
-            const msg = currentMessages.value[index];
-            if (msg.isError && msg.swipes && msg.swipes.length > 1) {
-                const currentSwipeId = msg.swipeId || 0;
-                msg.swipes.splice(currentSwipeId, 1);
-                if (msg.swipesMeta) msg.swipesMeta.splice(currentSwipeId, 1);
-                
-                let newSwipeId = currentSwipeId - 1;
-                if (newSwipeId < 0) newSwipeId = 0;
-                
-                msg.swipeId = newSwipeId;
-                msg.text = msg.swipes[newSwipeId] || "";
-                msg.isError = false;
-                
-                if (msg.swipesMeta && msg.swipesMeta[newSwipeId]) {
-                    msg.reasoning = msg.swipesMeta[newSwipeId].reasoning;
-                    msg.genTime = msg.swipesMeta[newSwipeId].genTime;
-                } else {
-                    msg.reasoning = null;
-                    msg.genTime = null;
-                }
-                updateSessionMessage(activeChatChar, index, msg);
-            } else {
-                currentMessages.value.splice(index, 1);
-                if (activeChatChar) {
-                    const sid = activeChatChar.sessionId || '1';
-                    let cDel = parseInt(localStorage.getItem(`gz_deleted_char_${activeChatChar.id}`) || '0', 10);
-                    localStorage.setItem(`gz_deleted_char_${activeChatChar.id}`, cDel + 1);
-                    let sDel = parseInt(localStorage.getItem(`gz_deleted_chat_${activeChatChar.id}_${sid}`) || '0', 10);
-                    localStorage.setItem(`gz_deleted_chat_${activeChatChar.id}_${sid}`, sDel + 1);
-                }
-                getChatData(activeChatChar.id).then(data => {
-                    const charId = activeChatChar.id;
-                    const sessionId = activeChatChar.sessionId;
-                    const messageSnapshot = currentMessages.value;
-                    if (data && sessionId && data.sessions?.[sessionId]) {
-                        data.sessions[sessionId] = messageSnapshot;
-                        db.saveChat(charId, data);
-                    }
-                });
-            }
-            closeBottomSheet();
-        }
-    });
-
-    showBottomSheet({ title: t('sheet_title_msg_actions'), items });
-}
-
-function enterEditMode(msg) {
-    msg._iigMap = msg._iigMap || {};
-    const { text, map } = prepareEditText(msg?.text || '', msg._iigMap);
-    msg.editText = text;
-    msg._base64Map = map;
-    msg.isEditing = true;
-}
-
-function normalizeImgGenHtmlForEditing(text, iigMap) {
-    if (!text) return text;
-
-    const makeTag = (instruction) => `<img data-iig-instruction='${instruction}' src="[IMG:GEN]">`;
-
-    const extractInstruction = (chunk) => {
-        if (!chunk) return null;
-        const m1 = chunk.match(/\bdata-iig-instruction='([^']*)'/i);
-        if (m1?.[1] != null) return m1[1];
-        const m2 = chunk.match(/\bdata-iig-instruction="([^"]*)"/i);
-        if (m2?.[1] != null) return m2[1];
-        return null;
-    };
-
-    // Result wrapper (contains base64 src + options button) → canonical [IMG:GEN] tag.
-    text = text.replace(
-        /<span\b[^>]*\bclass="[^"]*\bimggen-result-wrapper\b[^"]*"[^>]*>[\s\S]*?<\/span>/gi,
-        (wrapperHtml) => {
-            const instruction = extractInstruction(wrapperHtml);
-            if (!instruction) return wrapperHtml;
-            
-            if (iigMap) {
-                const mSrc = wrapperHtml.match(/src="([^"]+)"/i);
-                const mId = wrapperHtml.match(/data-iig-id="([^"]+)"/i);
-                if (mSrc && mSrc[1]) {
-                    iigMap[instruction] = { dataUrl: mSrc[1], id: mId ? mId[1] : `iig_${Date.now()}` };
-                }
-            }
-            return makeTag(instruction);
-        }
-    );
-
-    // Standalone imggen-result <img> (in case wrapper was stripped elsewhere) → canonical [IMG:GEN] tag.
-    text = text.replace(
-        /<img\b[^>]*\bclass="[^"]*\bimggen-result\b[^"]*"[^>]*>/gi,
-        (imgHtml) => {
-            const instruction = extractInstruction(imgHtml);
-            if (!instruction) return imgHtml;
-            
-            if (iigMap) {
-                const mSrc = imgHtml.match(/src="([^"]+)"/i);
-                const mId = imgHtml.match(/data-iig-id="([^"]+)"/i);
-                if (mSrc && mSrc[1]) {
-                    iigMap[instruction] = { dataUrl: mSrc[1], id: mId ? mId[1] : `iig_${Date.now()}` };
-                }
-            }
-            return makeTag(instruction);
-        }
-    );
-
-    // Loading / Error / Disabled blocks → canonical [IMG:GEN] tag.
-    text = text.replace(
-        /<span\b[^>]*\bclass="[^"]*\bimggen-loading\b[^"]*"[^>]*>[\s\S]*?<\/span>/gi,
-        (spanHtml) => {
-            const instruction = extractInstruction(spanHtml);
-            if (!instruction) return spanHtml;
-            return makeTag(instruction);
-        }
-    );
-    text = text.replace(
-        /<span\b[^>]*\bclass="[^"]*\bimggen-error\b[^"]*"[^>]*>[\s\S]*?<\/span>/gi,
-        (spanHtml) => {
-            const instruction = extractInstruction(spanHtml);
-            if (!instruction) return spanHtml;
-            return makeTag(instruction);
-        }
-    );
-
-    return text;
-}
-
-function prepareEditText(text, iigMap) {
-    text = normalizeImgGenHtmlForEditing(text, iigMap);
-
-    // Only shorten src for imggen canonical tags (data-iig-instruction + src="[IMG:GEN]").
-    // Regular <img> tags with normal links or base64 are left completely untouched.
-    const map = {};
-    let idx = 0;
-    const cleaned = text.replace(
-        /(<img\b[^>]*\bdata-iig-instruction=[^>]*\bsrc=")([^"]{256,})("[^>]*>)/gi,
-        (match, before, src, after) => {
-            const key = `[IMG:SRC:${idx}]`;
-            map[key] = src;
-            idx++;
-            return before + key + after;
-        }
-    );
-    return { text: cleaned, map };
-}
-
-function restoreEditText(text, map) {
-    if (!map) return text;
-    for (const [key, src] of Object.entries(map)) {
-        text = text.replace(key, src);
-    }
-    return text;
-}
-
-function saveEdit(msg, index) {
-    let newText = restoreEditText(msg.editText || "", msg._base64Map);
-    delete msg._base64Map;
-    
-    const iigMap = msg._iigMap || {};
-    newText = newText.replace(
-        /<img\b[^>]*?(?:data-iig-instruction='([^']*)'[^>]*?src="\[IMG:GEN\]"|src="\[IMG:GEN\]"[^>]*?data-iig-instruction='([^']*?)')[^>]*?>/g,
-        (match, inst1, inst2) => {
-            const raw = inst1 ?? inst2 ?? '{}';
-            if (iigMap[raw]) {
-                const { dataUrl, id } = iigMap[raw];
-                let instrObj = {};
-                try {
-                     instrObj = JSON.parse(raw.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&'));
-                } catch(e) { }
-                return makeResultHtml(instrObj, id, dataUrl);
-            }
-            return match;
-        }
-    );
-    delete msg._iigMap;
-
-    let newReasoning = msg.reasoning;
-
-    const { start: tagStart, end: tagEnd } = getReasoningTags();
-
-    if (tagStart && tagEnd) {
-        const startIndex = newText.indexOf(tagStart);
-        if (startIndex !== -1) {
-            const endIndex = newText.indexOf(tagEnd, startIndex);
-            if (endIndex !== -1) {
-                newReasoning = newText.substring(startIndex + tagStart.length, endIndex).trim();
-                newText = newText.substring(0, startIndex) + newText.substring(endIndex + tagEnd.length);
-            }
-        }
-    }
-
-    newText = cleanText(newText);
-    msg.text = newText;
-    msg.reasoning = newReasoning;
-    msg.tokens = estimateTokens(newText);
-    if (msg.swipes) msg.swipes[msg.swipeId || 0] = newText;
-    if (msg.swipesMeta && msg.swipesMeta[msg.swipeId || 0]) {
-        msg.swipesMeta[msg.swipeId || 0].reasoning = newReasoning;
-        msg.swipesMeta[msg.swipeId || 0].tokens = msg.tokens;
-    }
-    msg.isEditing = false;
-    updateSessionMessage(activeChatChar, index, msg);
-    delete msg.editText;
-
-    if (newText.includes('[IMG:GEN]')) {
-        processMessageImages(msg.text, (updatedText) => {
-            const mIdx = currentMessages.value.findIndex(m => m.id === msg.id);
-            if (mIdx !== -1) {
-                const currentMsg = currentMessages.value[mIdx];
-                currentMsg.text = updatedText;
-                if (currentMsg.swipes) currentMsg.swipes[currentMsg.swipeId || 0] = updatedText;
-                updateSessionMessage(activeChatChar, mIdx, currentMsg);
-            }
-        }, {
-            messages: currentMessages.value,
-            currentMsgIndex: index
-        }).catch(e => console.error('[ImageGen] processMessageImages failed:', e));
-    }
-}
-
-function cancelEdit(msg) {
-    msg.isEditing = false;
-    delete msg.editText;
-    delete msg._base64Map;
-    delete msg._iigMap;
-}
-
-function saveGuidance(msg, index, newGuidance) {
-    if (msg.role === 'char') {
-        if (msg.swipesMeta && msg.swipesMeta[msg.swipeId || 0] && msg.swipesMeta[msg.swipeId || 0].guidanceType === 'SWIPE') {
-            msg.swipesMeta[msg.swipeId || 0].guidanceText = newGuidance;
-        }
-        if (msg.guidanceType === 'SWIPE') {
-            msg.guidanceText = newGuidance;
-        }
-    } else if (msg.role === 'user') {
-        msg.guidanceText = newGuidance;
-    }
-    updateSessionMessage(activeChatChar, index, msg);
-}
-
-function toggleImageHidden(msg, index) {
-    msg.imageHidden = !msg.imageHidden;
-    updateSessionMessage(activeChatChar, index, msg);
-    showToast(msg.imageHidden ? 'Изображение скрыто из контекста' : 'Изображение добавлено в контекст');
-}
-
-// --- Magic Menu ---
-
-async function startImpersonation(guidanceText = null) {
-    if (guidanceText) {
-        pendingGuidance.value = { text: guidanceText, type: 'IMPERSONATION' };
-    } else {
-        pendingGuidance.value = null;
-    }
-    if (!activeChatChar) return;
-    const charId = activeChatChar.id;
-    
-    let preset = null;
-    try {
-        const charId = activeChatChar?.id;
-        const chatId = charId && activeChatChar?.sessionId ? `${charId}_${activeChatChar.sessionId}` : null;
-        preset = getEffectivePreset(charId, chatId);
-    } catch(e) {}
-
-    const promptText = preset ? (preset.impersonationPrompt || "") : "";
-
-    if (!promptText) {
-        showBottomSheet({
-            bigInfo: {
-                icon: '<svg viewBox="0 0 24 24" style="fill:currentColor;width:100%;height:100%;"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.04.24.24.41.48.41h3.84c.24 0 .43-.17.47-.41l.36-2.54c.59-.24 1.13-.57 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>',
-                description: t('impersonation_prompt_missing') || "Impersonation prompt is empty",
-                buttonText: t('btn_configure') || "Configure",
-                onButtonClick: () => {
-                    closeBottomSheet();
-                    openApiView();
-                }
-            }
-        });
-        return;
-    }
-
-    inputValue.value = '';
-
-    isImpersonating.value = true;
-    isGenerating.value = true;
-    const controller = new AbortController();
-    setGenerationState(charId, { genId: nextGenerationId(), controller, type: 'impersonation' });
-
-    // Prepare history
-    const history = currentMessages.value
-        .map((m, i) => ({ ...m, originalIndex: i }))
-        .filter(m => !m.isTyping && !m.isHidden)
-        .map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text, chatId: m.originalIndex }));
-
-    window.dispatchEvent(new CustomEvent('chat-generation-started', { detail: { charId, sessionId: activeChatChar.sessionId } }));
-
-    generateChatResponse({
-        text: promptText,
-        char: activeChatChar,
-        history,
-        guidanceText,
-        type: 'impersonation',
-        controller,
-        callbacks: {
-            onUpdate: (chunk) => { inputValue.value += chunk || ""; },
-            onComplete: (response) => {
-        inputValue.value = cleanText(response);
-        isImpersonating.value = false;
-        isGenerating.value = false;
-        clearGenerationState(charId);
-        window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: charId } }));
-            },
-            onError: (err) => {
-        console.error(err);
-        isImpersonating.value = false;
-        isGenerating.value = false;
-        clearGenerationState(charId);
-        window.dispatchEvent(new CustomEvent('chat-generation-ended', { detail: { charId: charId } }));
-            }
-        }
-    });
-}
+const {
+    changeSwipe,
+    changeGreeting
+} = useSwipeNavigation({
+    currentMessages,
+    isGenerating,
+    getActiveChatChar: () => activeChatChar,
+    regenerateMessage: (msgIndex, mode, guidanceText) => regenerateMessage(msgIndex, mode, guidanceText)
+});
 
 // --- Utils ---
-
-function getAvatar(msg) {
-    if (msg.role === 'user') {
-        // Try to resolve avatar from allPersonas by ID (IndexedDB-backed)
-        if (msg.persona?.id) {
-            const p = allPersonas.value.find(p => p.id === msg.persona.id);
-            if (p?.avatar) return p.avatar;
-        }
-        // Fallback to embedded avatar for old messages
-        return msg.persona?.avatar || null;
-    }
-    return activeChatChar?.avatar || null;
-}
-
-function getAvatarLetter(msg) {
-    if (msg.role === 'user') return (msg.persona?.name?.[0] || "U").toUpperCase();
-    return (activeChatChar?.name?.[0] || "?").toUpperCase();
-}
-
-function getAvatarColor(msg) {
-    if (msg.role === 'user') return 'var(--vk-blue)';
-    return activeChatChar?.color || '#ccc';
-}
-
-function getDisplayName(msg) {
-    if (msg.role === 'user') return msg.persona?.name || "User";
-    return activeChatChar?.name || "Character";
-}
-
-function openAvatar(msg) {
-    const src = getAvatar(msg);
-    if (src) {
-        const name = getDisplayName(msg);
-        const description = "";
-        window.dispatchEvent(new CustomEvent('trigger-open-image', { 
-            detail: { src, name, description, onCloseCallback: null } 
-        }));
-    }
-}
-
-async function deleteSession(sessionId, targetChar) {
-    const char = targetChar || activeChatChar;
-
-    if (char && hasGenerationState(char.id)) {
-        const state = getGenerationState(char.id);
-        if (state?.type === 'impersonation') {
-            if (state.controller) state.controller.abort();
-            clearGenerationState(char.id);
-            if (activeChatChar && activeChatChar.id === char.id) {
-                isGenerating.value = false;
-            }
-        } else {
-            await abortActiveChatGeneration(char.id);
-        }
-    }
-
-    if (char) {
-        // Check if last session to prevent auto-creation
-        const data = await getChatData(char.id);
-        let isLast = false;
-        if (data) {
-             if (data.sessions) {
-                 if (Object.keys(data.sessions).length <= 1 && data.sessions[sessionId]) isLast = true;
-             } else if (Array.isArray(data)) {
-                 isLast = true;
-             }
-        }
-
-        if (isLast) {
-            let deletedCount = 0;
-            if (Array.isArray(data)) {
-                deletedCount = data.length;
-                await db.saveChat(char.id, { currentId: 1, sessions: {} });
-            }
-            else if (data.sessions) {
-                if (data.sessions[sessionId]) deletedCount = data.sessions[sessionId].length;
-                delete data.sessions[sessionId];
-                await db.saveChat(char.id, data);
-            }
-            if (deletedCount > 0) addDeletedStats(char.id, sessionId, deletedCount);
-        } else {
-            let deletedCount = 0;
-            if (data.sessions && data.sessions[sessionId]) deletedCount = data.sessions[sessionId].length;
-            await dbDeleteSession(char.id, sessionId);
-            if (deletedCount > 0) addDeletedStats(char.id, sessionId, deletedCount);
-        }
-
-        await loadChats(); // Reload local state
-        
-        if (activeChatChar && activeChatChar.id === char.id) {
-            // Fetch raw DB state to bypass getChat's auto-creation
-            const currentData = await db.get(`gz_chat_${char.id}`);
-            // Check if there are any sessions left
-            if (!currentData || !currentData.sessions || Object.keys(currentData.sessions).length === 0) {
-                // No sessions left, close chat manually to avoid creating a new empty one
-                const onBack = currentOnBack;
-                
-                updateAppColors(true);
-                if (_cleanupScroll) {
-                    _cleanupScroll();
-                    _cleanupScroll = null;
-                }
-                window.dispatchEvent(new CustomEvent('header-reset'));
-                activeChatChar = null;
-                currentMessages.value = [];
-                inputValue.value = '';
-                
-                if (onBack) onBack();
-            } else {
-                // Reload chat
-                const charObj = { ...activeChatChar };
-                delete charObj.sessionId; // Ensure we load the new currentId
-                openChat(charObj, null, true);
-            }
-        }
-        
-        // Notify other components
-        window.dispatchEvent(new CustomEvent('chat-updated'));
-    }
-}
-
-async function openSessionsSheet(char) {
-    const data = await getChatData(char.id);
-    if (!data) return;
-    const sessions = data.sessions || {};
-    
-    // Sort by timestamp desc
-    const ids = Object.keys(sessions).map(Number).sort((a,b) => {
-        const lastA = sessions[a][sessions[a].length-1]?.timestamp || 0;
-        const lastB = sessions[b][sessions[b].length-1]?.timestamp || 0;
-        return lastB - lastA;
-    });
-
-    const currentSessionId = data.currentId;
-
-    const cardItems = ids.map(sid => {
-        const msgs = sessions[sid] || [];
-        const lastMsg = msgs[msgs.length - 1];
-        const preview = lastMsg ? (lastMsg.text.length > 40 ? lastMsg.text.substring(0, 40) + '...' : lastMsg.text) : 'Empty session';
-        const dateFormatted = lastMsg ? formatDate(lastMsg.timestamp, 'short') : '';
-        const isCurrent = sid === currentSessionId;
-        
-        return {
-            label: `Session #${sid}`,
-            sublabel: preview,
-            badge: `${msgs.length} msgs${dateFormatted ? ' · ' + dateFormatted : ''}`,
-            isActive: isCurrent,
-            onClick: async () => {
-                if (sid !== currentSessionId) {
-                    asyncSaveCurrentSessionState();
-                    await dbSwitchSession(char.id, sid);
-                    await loadChats();
-                    // Pass char without sessionId so openChat uses the currentId from DB
-                    openChat({ ...char, sessionId: sid }, null, true);
-                }
-                closeBottomSheet();
-            },
-            actions: [
-                {
-                    icon: '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>',
-                    color: '#ff4444',
-                    onClick: () => {
-                        openDeleteSessionConfirm(char, sid, true);
-                    }
-                }
-            ]
-        };
-    });
-
-    showBottomSheet({
-        title: t('history_title') + ' ',
-        helpTip: 'sessions',
-        cardItems: cardItems,
-        isSolid: true,
-        headerAction: {
-            icon: '<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>',
-            onClick: () => {
-                closeBottomSheet();
-                setTimeout(() => {
-                    showBottomSheet({
-                        title: t('history_title') + ' ',
-                        helpTip: 'sessions',
-                        items: [
-                            {
-                                label: t('action_create_new') || 'Create New',
-                                icon: '<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>',
-                                onClick: () => {
-                                    closeBottomSheet();
-                                    createNewSession(char);
-                                }
-                            },
-                            {
-                                label: t('action_import') || 'Import from file',
-                                icon: '<svg viewBox="0 0 24 24"><path d="M4 15h2v3h12v-3h2v3c0 1.1-.9 2-2 2H6c-1.1 0-2-.9-2-2v-3zm4.41-6.59L11 5.83V17h2V5.83l2.59 2.58L17 7l-5-5-5 5 1.41 1.41z"/></svg>',
-                                onClick: () => {
-                                    closeBottomSheet();
-                                    triggerChatImport(char.id, null, async (result) => {
-                                        await loadChats();
-                                        // Mark imported session as fully processed so auto-draft doesn't trigger
-                                        if (result?.sessionId) {
-                                            const importedData = await getChatData(char.id);
-                                            if (importedData?.sessions?.[result.sessionId]) {
-                                                const mb = ensureSessionMemoryBook(importedData, result.sessionId);
-                                                const auto = ensureMemoryAutomationState(mb);
-                                                const stableCount = getStableVisibleMessages(importedData.sessions[result.sessionId])
-                                                    .filter(m => m.role === 'user' || m.role === 'char').length;
-                                                auto.lastProcessedMessageCount = stableCount;
-                                                auto.pendingTrigger = null;
-                                                mb.updatedAt = Date.now();
-                                                await db.saveChat(char.id, importedData);
-                                            }
-                                        }
-                                        const charObj = { ...char, sessionId: result?.sessionId || char.sessionId };
-                                        openChat(charObj, null, true);
-                                    });
-                                }
-                            }
-                        ]
-                    });
-                }, 300);
-            }
-        }
-    });
-}
-
-function openDeleteSessionConfirm(char, sessionId, returnToSessions = false) {
-    showBottomSheet({
-        title: t('confirm_delete_session'),
-        items: [
-            {
-                label: t('btn_yes'),
-                icon: '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>',
-                iconColor: '#ff4444',
-                isDestructive: true,
-                onClick: async () => {
-                    await deleteSession(sessionId, char);
-                    closeBottomSheet();
-                    if (returnToSessions) {
-                        const currentData = await db.get(`gz_chat_${char.id}`);
-                        if (currentData && currentData.sessions && Object.keys(currentData.sessions).length > 0) {
-                            setTimeout(() => openSessionsSheet(char), 300);
-                        }
-                    }
-                }
-            },
-            {
-                label: t('btn_no'),
-                icon: '<svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>',
-                onClick: () => {
-                    closeBottomSheet();
-                    if (returnToSessions) setTimeout(() => openSessionsSheet(char), 300);
-                }
-            }
-        ]
-    });
-}
-
-async function createNewSession(char) {
-    asyncSaveCurrentSessionState();
-    await dbCreateSession(char.id);
-    await loadChats(); // Reload local state to get new session
-    
-    // Open chat with the new currentId (by removing sessionId from char object)
-    const charObj = { ...char };
-    delete charObj.sessionId;
-    openChat(charObj, null, true);
-}
 
 async function openCharCard() {
     if (!activeChatChar) return;
@@ -4355,7 +1146,7 @@ async function openChatStatsSheet(char = activeChatChar) {
 }
 
 function openApiView() {
-    window.dispatchEvent(new CustomEvent('open-api-sheet'));
+    publishAppEvent(APP_EVENTS.nav.openApiSheet);
 }
 
 function openPresetView() {
@@ -4381,41 +1172,6 @@ function openLorebookEntry(lbId, entryId) {
 function openRegexSheet() {
     regexSheet.value?.open();
 }
-
-const applyImageAutoHide = () => {
-    const autoHide = localStorage.getItem('gz_api_auto_hide_images') === 'true';
-    const threshold = parseInt(localStorage.getItem('gz_api_auto_hide_images_n') || '1', 10);
-    
-    if (!autoHide || threshold <= 0 || !activeChatChar) return;
-
-    let changed = false;
-    let assistantCount = 0;
-    
-    // Iterate backwards to count assistant responses after user images
-    for (let i = currentMessages.value.length - 1; i >= 0; i--) {
-        const msg = currentMessages.value[i];
-        if (msg.role === 'char' || msg.role === 'assistant') {
-            assistantCount++;
-        } else if (msg.role === 'user' && msg.image) {
-            if (assistantCount >= threshold && !msg.imageHidden) {
-                msg.imageHidden = true;
-                changed = true;
-            }
-        }
-    }
-
-    if (changed) {
-        const charId = activeChatChar.id;
-        const sessionId = activeChatChar.sessionId;
-        const messageSnapshot = currentMessages.value;
-        getChatData(activeChatChar.id).then(data => {
-            if (data && sessionId && data.sessions?.[sessionId]) {
-                data.sessions[sessionId] = messageSnapshot;
-                db.saveChat(charId, data);
-            }
-        });
-    }
-};
 
 const restoreHeader = () => {
     if (activeChatChar) setupHeader(activeChatChar);
@@ -4459,34 +1215,7 @@ const onCharacterUpdated = (e) => {
     if (activeChatChar && activeChatChar.id === e.detail.character.id) {
         activeChatChar = e.detail.character;
         activeChar.value = e.detail.character;
-        window.dispatchEvent(new CustomEvent('header-update-avatar', { detail: activeChatChar }));
-    }
-};
-
-const onVisibilityChange = () => {
-    if (document.visibilityState === 'hidden' && activeChatChar) {
-        const charId = activeChatChar.id;
-        const sessionId = activeChatChar.sessionId;
-        const messagesSnapshot = currentMessages.value;
-        const draft = inputValue.value;
-        const authorsNote = activeChatChar.authors_note;
-        const summary = activeChatChar.summary;
-        db.patchChatData(charId, (data) => {
-            if (sessionId && messagesSnapshot.length > 0) {
-                data.sessions[sessionId] = messagesSnapshot;
-            }
-            data.draft = draft;
-            if (authorsNote !== undefined) {
-                if (!data.authorsNotes) data.authorsNotes = {};
-                data.authorsNotes[sessionId] = authorsNote;
-            }
-            if (summary !== undefined) {
-                if (!data.summaries) data.summaries = {};
-                data.summaries[sessionId] = summary;
-            }
-        });
-    } else if (document.visibilityState === 'visible' && activeChatChar) {
-        clearMessageNotifications(activeChatChar.id);
+        publishAppEvent(APP_EVENTS.ui.header.updateAvatar, activeChatChar);
     }
 };
 
@@ -4508,7 +1237,7 @@ const updateContentPadding = () => {
         el._lastFullHeight = currentFullHeight;
         const diffScroll = currentFullHeight - prevFullHeight;
 
-        let targetPadding = currentFullHeight;
+        const targetPadding = currentFullHeight;
 
         const currentPadding = parseFloat(el.style.paddingBottom) || 0;
         const paddingDiff = targetPadding - currentPadding;
@@ -4568,9 +1297,9 @@ onMounted(() => {
     if (activeChatChar) {
         setupHeader(activeChatChar);
     }
-    window.addEventListener('character-updated', onCharacterUpdated);
-    window.addEventListener('chat-generation-ended', onGenerationEnded);
-    window.addEventListener('fs-editor-closed', onFsEditorClosed);
+    unsubCharacterUpdated = subscribeAppEvent(APP_EVENTS.domain.character.updated, ({ detail }) => onCharacterUpdated({ detail }));
+    unsubGenerationEnded = subscribeAppEvent(APP_EVENTS.domain.generation.ended, ({ detail }) => onGenerationEnded({ detail }));
+    unsubFsEditorClosed = subscribeAppEvent(APP_EVENTS.ui.fsEditorClosed, onFsEditorClosed);
     if (window.visualViewport) {
         window.visualViewport.addEventListener('resize', handleVisualViewport);
         window.visualViewport.addEventListener('scroll', handleVisualViewport);
@@ -4604,79 +1333,15 @@ onMounted(() => {
         updateContentPadding();
     }
     updateContextCutoff();
-    window.addEventListener('header-chat-search-toggle', onChatSearchToggle);
-    window.addEventListener('regex-scripts-changed', onRegexChanged);
-    window.addEventListener('header-chat-search', onChatSearch);
-    window.addEventListener('api-context-settings-changed', updateContextCutoff);
-    window.addEventListener('settings-changed', restartVisibleGenerationTimers);
+    unsubChatSearchToggle = subscribeAppEvent(APP_EVENTS.ui.chatSearchToggle, ({ detail }) => onChatSearchToggle({ detail }));
+    unsubRegexChanged = subscribeAppEvent(APP_EVENTS.domain.lorebook.regexScriptsChanged, onRegexChanged);
+    unsubChatSearch = subscribeAppEvent(APP_EVENTS.ui.chatSearch, ({ detail }) => onChatSearch({ detail }));
+    unsubApiContextChanged = subscribeAppEvent(APP_EVENTS.domain.settings.apiContextChanged, updateContextCutoff);
+    unsubSettingsChanged = subscribeAppEvent(APP_EVENTS.domain.settings.changed, restartVisibleGenerationTimers);
 });
 
 watch(() => currentMessages.value.length, () => {
     updateContextCutoff();
-});
-
-watch(activeChar, async (newVal) => {
-    if (!newVal) return;
-    
-    const chatData = await getChatData(newVal.id);
-    if (!chatData) return;
-    const sessionId = chatData.currentId;
-    let changed = false;
-
-    // Sync Summary Content
-    if (newVal.summary !== undefined) {
-        if (!chatData.summaries) chatData.summaries = {};
-        let currentSum = chatData.summaries[sessionId];
-        if (typeof currentSum === 'string') {
-            currentSum = { content: currentSum, depth: 4, role: 'system', insertion_mode: 'relative', prefix: 'Summary: ' };
-        } else if (!currentSum) {
-            currentSum = { content: '', depth: 4, role: 'system', insertion_mode: 'relative', prefix: 'Summary: ' };
-        }
-        if (currentSum.content !== newVal.summary) {
-            chatData.summaries[sessionId] = { ...currentSum, content: newVal.summary };
-            changed = true;
-        }
-    }
-
-    // Sync Author's Note Content
-    if (newVal.authors_note !== undefined) {
-        if (!chatData.authorsNotes) chatData.authorsNotes = {};
-        const storedAn = chatData.authorsNotes[sessionId];
-        let currentAN = typeof storedAn === 'string' ? storedAn : storedAn?.content || '';
-        if (currentAN !== newVal.authors_note) {
-            chatData.authorsNotes[sessionId] = newVal.authors_note;
-            changed = true;
-        }
-    }
-
-    if (changed) await db.saveChat(newVal.id, chatData);
-}, { deep: true });
-
-onBeforeUnmount(() => {
-    if (activeChatChar && messagesContainer.value) {
-        const charId = activeChatChar.id;
-        const sessionId = activeChatChar.sessionId;
-        const currentAnchor = getScrollAnchor();
-        const draft = inputValue.value;
-        const messagesSnapshot = currentMessages.value;
-        const authorsNote = activeChatChar.authors_note;
-        const summary = activeChatChar.summary;
-        db.patchChatData(charId, (data) => {
-            data.lastScrollAnchor = currentAnchor;
-            data.draft = draft;
-            if (sessionId && messagesSnapshot.length > 0) {
-                data.sessions[sessionId] = messagesSnapshot;
-            }
-            if (authorsNote !== undefined) {
-                if (!data.authorsNotes) data.authorsNotes = {};
-                data.authorsNotes[sessionId] = authorsNote;
-            }
-            if (summary !== undefined) {
-                if (!data.summaries) data.summaries = {};
-                data.summaries[sessionId] = summary;
-            }
-        });
-    }
 });
 
 onUnmounted(() => {
@@ -4699,6 +1364,12 @@ onUnmounted(() => {
             clearTimeout(state.timerId);
             state.timerId = null;
         }
+        if (typeof state.clearStreamFlushTimer === 'function') {
+            state.clearStreamFlushTimer();
+        }
+        if (typeof state.streamFlush === 'function') {
+            state.streamFlush();
+        }
         // Disconnect UI updater to prevent updates to unmounted component
         state.onUIUpdate = null;
         // Clean localStorage flag
@@ -4706,11 +1377,13 @@ onUnmounted(() => {
         if (sessionId) {
             clearPersistedGeneration(charId, sessionId);
         }
+        // Clear registry entry to prevent stale state from blocking future generations
+        clearGenerationState(charId);
     }
-    window.removeEventListener('character-updated', onCharacterUpdated);
+    if (unsubCharacterUpdated) { unsubCharacterUpdated(); unsubCharacterUpdated = null; }
     document.removeEventListener('visibilitychange', onVisibilityChange);
-    window.removeEventListener('chat-generation-ended', onGenerationEnded);
-    window.removeEventListener('fs-editor-closed', onFsEditorClosed);
+    if (unsubGenerationEnded) { unsubGenerationEnded(); unsubGenerationEnded = null; }
+    if (unsubFsEditorClosed) { unsubFsEditorClosed(); unsubFsEditorClosed = null; }
     
     if (window.visualViewport) {
         window.visualViewport.removeEventListener('resize', handleVisualViewport);
@@ -4736,15 +1409,12 @@ onUnmounted(() => {
         inputResizeObserver.disconnect();
         inputResizeObserver = null;
     }
-    window.removeEventListener('header-chat-search-toggle', onChatSearchToggle);
-    window.removeEventListener('regex-scripts-changed', onRegexChanged);
-    window.removeEventListener('header-chat-search', onChatSearch);
-    window.removeEventListener('api-context-settings-changed', updateContextCutoff);
-    window.removeEventListener('settings-changed', restartVisibleGenerationTimers);
-    if (cutoffRerunTimer) {
-        clearTimeout(cutoffRerunTimer);
-        cutoffRerunTimer = null;
-    }
+    if (unsubChatSearchToggle) { unsubChatSearchToggle(); unsubChatSearchToggle = null; }
+    if (unsubRegexChanged) { unsubRegexChanged(); unsubRegexChanged = null; }
+    if (unsubChatSearch) { unsubChatSearch(); unsubChatSearch = null; }
+    if (unsubApiContextChanged) { unsubApiContextChanged(); unsubApiContextChanged = null; }
+    if (unsubSettingsChanged) { unsubSettingsChanged(); unsubSettingsChanged = null; }
+    clearCutoffTimers();
 
     // Reset chatViewRoot height to prevent stale inline style leaking to next mount
     if (chatViewRoot.value) {
@@ -4796,6 +1466,7 @@ onUnmounted(() => {
                     @edit="() => enterEditMode(vItem.item.data)"
                     @save-edit="saveEdit(vItem.item.data, vItem.item.originalIndex)"
                     @cancel-edit="cancelEdit(vItem.item.data)"
+                    @update:edit-text="(val) => { vItem.item.data.editText = val }"
                     @save-guidance="(text) => saveGuidance(vItem.item.data, vItem.item.originalIndex, text)"
                     @open-actions="openMessageActions(vItem.item.data, vItem.item.originalIndex)"
                     @open-avatar="openAvatar(vItem.item.data)"
@@ -4855,7 +1526,7 @@ onUnmounted(() => {
         </div>
 
         <div style="display: none;"></div>
-        <PresetView ref="presetView" :active-chat-char="activeChar" :chat-history="currentMessages" :is-generating="isGenerating" />
+        <PresetView ref="presetView" :active-chat-char="activeChar" :chat-history="currentMessages" :is-generating="isGenerating" @update:active-chat-char="val => { if (activeChar) Object.assign(activeChar, val) }" />
         <CharacterCardSheet ref="charCardSheet" />
         <LorebookSheet ref="lorebookSheet" />
         <RegexSheet ref="regexSheet" :active-chat-char="activeChar" />
@@ -4871,7 +1542,7 @@ onUnmounted(() => {
             :should-recommend-hide="shouldRecommendHide"
             :history-fill-threshold="historyFillThreshold"
             :history-hide-percent="historyHidePercent"
-            :is-calculating="isCalculatingCutoff"
+            :is-calculating="getIsCalculatingCutoff()"
             @hide-messages="confirmHideTopMessages"
             @save-settings="handleSaveContextSettings"
             @back="handleSheetBack"
@@ -4907,967 +1578,8 @@ onUnmounted(() => {
     </div>
 </template>
 
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Rajdhani:wght@300;500;700&display=swap');
-/* Chat View */
-#view-chat {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    display: flex;
-    flex-direction: column;
-    flex: none;
-    height: 100%;
-    min-height: 0;
-    width: 100%;
-    overflow: hidden; /* Disable view scroll, delegate to chat-container */
-    padding: 0 !important;
-    background-color: var(--ui-bg);
-    z-index: 1000;
-}
+<style src="@/assets/css/chat.css"></style>
 
-@keyframes msgFadeIn {
-    from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 1; transform: translateY(0); }
-}
-
-.message-section {
-    animation: msgFadeIn 0.3s ease-out;
-}
-
-.chat-container {
-    padding: calc(60px + var(--sat)) 0 0 0; /* Space for fixed header */
-    margin-top: 0;
-    flex: 1;
-    overflow-y: auto;
-    overflow-x: hidden;
-    min-height: 0;
-    /* Enable scroll anchoring to prevent jumps when top padding changes */
-    overflow-anchor: auto; 
-    
-    /* Hide scrollbar */
-    scrollbar-width: none; /* Firefox */
-    -ms-overflow-style: none;  /* IE 10+ */
-}
-
-.chat-container::-webkit-scrollbar {
-    display: none; /* Chrome, Safari and Opera */
-}
-
-/* Performance optimization: disable pointer events on items while scrolling */
-.chat-container.is-scrolling .message-section {
-    pointer-events: none;
-}
-
-.message-section {
-    padding: 12px 16px;
-    display: flex;
-    flex-direction: column;
-    transition: background-color 0.5s ease, color 0.5s ease;
-    touch-action: pan-y;
-    overflow: hidden;
-}
-
-
-.msg-name {
-    font-weight: 500;
-    font-size: 14px;
-    color: var(--text-dark-gray);
-}
-
-.msg-time {
-    margin-left: auto;
-    font-size: 12px;
-    color: var(--text-gray);
-}
-
-/* Typing Indicator (VK Style Pencil) */
-@keyframes pencil-write {
-    0% { transform: translateX(0); }
-    15% { transform: translateX(1px); }
-    30% { transform: translateX(2px); }
-    45% { transform: translateX(3px); }
-    60% { transform: translateX(4px); }
-    75% { transform: translateX(5px); }
-    100% { transform: translateX(0); }
-}
-
-.typing-container {
-    display: flex;
-    align-items: center;
-    padding: 2px 0;
-    color: var(--text-gray, #818c99);
-    font-size: 0.9em;
-}
-
-.typing-icon {
-    width: 16px;
-    height: 16px;
-    fill: var(--text-gray);
-    margin-right: 10px;
-    animation: pencil-write 1.5s infinite ease-in-out;
-}
-
-
-/* Chat Input Bar */
-.chat-input-wrapper {
-    position: absolute !important;
-    bottom: 0;
-    left: 0;
-    width: 100%;
-    z-index: 1000;
-    display: flex;
-    flex-direction: column;
-    overflow: visible !important;
-    flex-shrink: 0;
-}
-
-.context-sheet {
-    padding: 0 16px 16px;
-}
-
-.context-sheet-note {
-    font-size: 13px;
-    color: var(--text-gray);
-    line-height: 1.45;
-}
-
-.context-sheet-actions {
-    display: flex;
-    gap: 10px;
-    margin-top: 16px;
-}
-
-.clickable-selector {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    background: var(--bg-item);
-    border: 1px solid var(--border-color);
-    padding: 0 16px;
-    min-height: 44px;
-    border-radius: 12px;
-    cursor: pointer;
-    font-size: 14px;
-    transition: background 0.2s;
-    margin-top: 4px;
-}
-
-.clickable-selector:active {
-    background: var(--bg-item-active);
-}
-
-.clickable-selector span {
-    min-width: 0;
-    flex: 1;
-}
-
-.clickable-selector svg {
-    width: 20px;
-    height: 20px;
-    flex-shrink: 0;
-    fill: var(--text-gray);
-    opacity: 0.5;
-}
-
-.context-sheet-btn {
-    flex: 1;
-    min-height: 42px;
-    border: none;
-    border-radius: 12px;
-    padding: 0 14px;
-    font-size: 14px;
-    font-weight: 600;
-}
-
-.context-sheet-btn-primary {
-    color: #fff;
-    background: var(--vk-blue);
-}
-
-.context-sheet-btn-secondary {
-    color: var(--text-black);
-    background: rgba(255, 255, 255, 0.08);
-}
-
-.context-sheet-btn-destructive {
-    color: #fff;
-    background: #ff4444;
-}
-
-.memory-batch-actions {
-    margin-bottom: 12px;
-    padding: 12px 14px;
-    border-radius: 14px;
-    background: rgba(199, 156, 255, 0.08);
-    border: 1px solid rgba(199, 156, 255, 0.25);
-}
-
-.memory-batch-info {
-    color: var(--text-black);
-    font-size: 13px;
-    margin-bottom: 10px;
-}
-
-.memory-batch-info strong {
-    color: #c79cff;
-}
-
-.memory-generation-status-card {
-    margin-bottom: 12px;
-    padding: 12px 14px;
-    border-radius: 14px;
-    background: rgba(30, 200, 255, 0.12);
-    border: 1px solid rgba(30, 200, 255, 0.28);
-}
-
-.memory-generation-status-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 4px;
-}
-
-.memory-generation-status-row strong {
-    color: var(--text-black);
-    font-size: 14px;
-}
-
-.memory-generation-status-row span {
-    color: var(--vk-blue);
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-}
-
-.memory-session-overview {
-    margin-bottom: 12px;
-    padding: 14px;
-    border-radius: 16px;
-    background: linear-gradient(180deg, rgba(122, 108, 255, 0.14), rgba(30, 200, 255, 0.08));
-    border: 1px solid rgba(122, 108, 255, 0.22);
-}
-
-.memory-session-overview-head {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 8px;
-}
-
-.memory-session-title {
-    color: var(--text-black);
-    font-size: 16px;
-    font-weight: 800;
-}
-
-.memory-session-chip {
-    padding: 6px 10px;
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.5);
-    color: var(--text-black);
-    font-size: 12px;
-    font-weight: 700;
-    white-space: nowrap;
-}
-
-.memory-session-overview-meta {
-    color: var(--text-gray);
-    font-size: 12px;
-    line-height: 1.5;
-}
-
-.memory-sheet-section {
-    margin-top: 12px;
-}
-
-.memory-sheet-section-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 8px;
-}
-
-.memory-sheet-section-head label {
-    color: var(--text-black);
-    font-weight: 800;
-    font-size: 13px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-}
-
-.memory-sheet-section-head span {
-    min-width: 28px;
-    padding: 4px 8px;
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.08);
-    color: var(--text-gray);
-    text-align: center;
-    font-size: 12px;
-    font-weight: 700;
-}
-
-.memory-status-summary {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 10px;
-    margin-bottom: 12px;
-}
-
-.memory-status-summary-item {
-    padding: 10px 12px;
-    border-radius: 12px;
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    text-align: center;
-}
-
-.memory-status-summary-item strong {
-    display: block;
-    color: var(--text-black);
-    font-size: 18px;
-    line-height: 1.1;
-}
-
-.memory-status-summary-item span {
-    display: block;
-    margin-top: 4px;
-    color: var(--text-gray);
-    font-size: 12px;
-}
-
-.memory-status-summary-item.warning {
-    background: rgba(255, 184, 77, 0.12);
-    border-color: rgba(255, 184, 77, 0.3);
-}
-
-.memory-status-summary-item.danger {
-    background: rgba(255, 107, 107, 0.12);
-    border-color: rgba(255, 107, 107, 0.3);
-}
-
-.memory-status-summary-item.ok {
-    background: rgba(126, 231, 135, 0.12);
-    border-color: rgba(126, 231, 135, 0.3);
-}
-
-.memory-status-summary-item.draft {
-    background: rgba(122, 108, 255, 0.12);
-    border-color: rgba(122, 108, 255, 0.3);
-}
-
-.memory-entry-card.is-warning {
-    border-color: rgba(255, 184, 77, 0.35);
-    box-shadow: inset 0 0 0 1px rgba(255, 184, 77, 0.14);
-}
-
-.memory-status-badge.ok {
-    background: rgba(126, 231, 135, 0.16);
-    color: #2d8a39;
-}
-
-.memory-status-badge.warning {
-    background: rgba(255, 184, 77, 0.18);
-    color: #a85e00;
-}
-
-.memory-status-badge.draft {
-    background: rgba(122, 108, 255, 0.16);
-    color: #5b4bd0;
-}
-
-@media (max-width: 480px) {
-    .memory-status-summary {
-        grid-template-columns: 1fr 1fr;
-    }
-
-    .memory-session-overview-head {
-        flex-direction: column;
-        align-items: flex-start;
-    }
-}
-
-
-/* History List */
-.history-item {
-    padding: 12px;
-    border-bottom: 1px solid var(--border-color);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.chat-date-separator {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 16px 0;
-    color: var(--text-gray);
-    font-size: 11px;
-    font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    width: 100%;
-}
-
-.chat-date-separator::before, .chat-date-separator::after {
-    content: '';
-    flex: 1;
-    height: 1px;
-    background: var(--border-color);
-    margin: 0 12px;
-    opacity: 0.5;
-}
-
-.chat-context-limit {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 16px 0;
-    color: var(--text-gray);
-    font-size: 11px;
-    font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    opacity: 1;
-}
-.chat-context-limit::before, .chat-context-limit::after {
-    content: '';
-    flex: 1;
-    height: 1px;
-    background: var(--border-color);
-    margin: 0 12px;
-    opacity: 1;
-}
-
-.impersonate-status {
-    display: flex;
-    align-items: center;
-    margin-left: auto;
-    margin-right: 8px;
-    pointer-events: none;
-    background-color: transparent;
-}
-
-/* Typing Dots for Dialog List */
-.typing-dots {
-    display: inline-flex;
-    align-items: center;
-    height: 12px;
-}
-.typing-dot {
-    width: 4px;
-    height: 4px;
-    background-color: var(--vk-blue);
-    border-radius: 50%;
-    margin: 0 1px;
-    animation: typingDot 1.4s infinite ease-in-out both;
-}
-.typing-dot:nth-child(1) { animation-delay: -0.32s; }
-.typing-dot:nth-child(2) { animation-delay: -0.16s; }
-@keyframes typingDot {
-    0%, 80%, 100% { transform: scale(0); }
-    40% { transform: scale(1); }
-}
-
-/* Typing Dots for Chat Message & Impersonation */
-.typing-dots-bounce {
-    display: inline-block;
-    margin-left: 4px;
-}
-
-.typing-dots-bounce span {
-    display: inline-block;
-    animation: dotBounce 1.4s infinite ease-in-out both;
-    color: var(--text-gray);
-    font-size: 1.4em;
-    line-height: 10px;
-    vertical-align: middle;
-}
-
-.typing-dots-bounce span:nth-child(1) { animation-delay: -0.32s; }
-.typing-dots-bounce span:nth-child(2) { animation-delay: -0.16s; }
-
-@keyframes dotBounce {
-    0%, 80%, 100% { transform: translateY(0); opacity: 0.5; }
-    40% { transform: translateY(-5px); opacity: 1; }
-}
-
-/* Unread Message State */
-.list-item.unread .item-subtitle,
-.list-item.unread .item-meta {
-    color: var(--vk-blue);
-    font-weight: 500;
-}
-
-
-/* Deletion Animation */
-@keyframes msgDelete {
-    0% {
-        opacity: 1;
-        transform: translateY(0);
-        max-height: 500px; /* Large enough to cover most messages */
-        margin-bottom: 0;
-        padding-top: 12px;
-        padding-bottom: 12px;
-    }
-    100% {
-        opacity: 0;
-        transform: translateY(20px);
-        max-height: 0;
-        margin-bottom: 0;
-        padding-top: 0;
-        padding-bottom: 0;
-        border-bottom-width: 0;
-    }
-}
-
-.message-section.deleting {
-    animation: msgDelete 0.3s ease-out forwards;
-    overflow: hidden;
-    border-bottom: none;
-    pointer-events: none;
-}
-
-
-.msg-switcher {
-    background-color: rgba(30, 30, 30, var(--element-opacity, 0.6));
-    color: var(--text-gray);
-}
-
-/* Code Blocks */
-.code-block {
-    background-color: rgba(255, 255, 255, 0.1);
-    border-radius: 6px;
-    padding: 10px;
-    margin: 8px 0;
-    overflow-x: auto;
-    font-family: Consolas, Monaco, 'Courier New', monospace;
-    font-size: 13px;
-    white-space: pre;
-    color: var(--text-black);
-}
-
-.edit-btn.save svg {
-    fill: #4CAF50;
-}
-
-.edit-btn.cancel svg {
-    fill: #ff4444;
-}
-
-.edit-btn:hover {
-    background-color: rgba(255,255,255,0.1);
-}
-
-/* --- Custom Interface Styles (FC) --- */
-.fc-interface {
-  width: 100%;
-  max-width: 340px;
-  margin: 20px auto;
-  background: #050a05;
-  border: 1px solid #33ff33;
-  font-family: 'Rajdhani', sans-serif;
-  color: #ccffcc;
-  overflow: hidden;
-  position: relative;
-  box-shadow: 0 0 15px rgba(51, 255, 51, 0.2);
-  border-radius: 8px;
-}
-
-.fc-header {
-  background: linear-gradient(90deg, #0a1f0a, #003300);
-  padding: 10px;
-  border-bottom: 1px solid #33ff33;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.fc-logo {
-  font-family: 'Orbitron', sans-serif;
-  font-weight: 700;
-  color: #33ff33;
-  text-shadow: 0 0 5px #33ff33;
-  font-size: 14px;
-}
-
-.fc-status {
-  font-size: 10px;
-  color: #33ff33;
-  animation: blink 2s infinite;
-}
-
-.fc-content {
-  padding: 15px;
-  position: relative;
-  min-height: 280px;
-}
-
-/* Character Scan Layer */
-.scan-container {
-  position: relative;
-  height: 180px;
-  background: url('https://image.pollinations.ai/prompt/silhouette%20of%20a%20man%20standing%20in%20a%20casino%20green%20hologram%20style%20wireframe?nologo=true') center/cover no-repeat;
-  border: 1px solid #1a4d1a;
-  margin-bottom: 15px;
-  overflow: hidden;
-}
-
-.scan-line {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 2px;
-  background: #33ff33;
-  box-shadow: 0 0 10px #33ff33;
-  animation: scan 3s linear infinite;
-}
-
-.scan-overlay {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  width: 100%;
-  background: rgba(0, 20, 0, 0.8);
-  padding: 5px;
-  font-size: 12px;
-  transform: translateY(100%);
-  transition: transform 0.3s ease;
-}
-
-.scan-container:hover .scan-overlay {
-  transform: translateY(0);
-}
-
-/* Interactive Tabs */
-.fc-tabs {
-  display: flex;
-  gap: 5px;
-  margin-bottom: 10px;
-}
-
-.fc-tab {
-  flex: 1;
-  background: #0f2b0f;
-  border: 1px solid #1a4d1a;
-  color: #88cc88;
-  padding: 8px;
-  text-align: center;
-  cursor: pointer;
-  font-size: 12px;
-  transition: all 0.3s ease;
-  text-transform: uppercase;
-}
-
-.fc-tab:hover, .fc-tab.active {
-  background: #33ff33;
-  color: #000;
-  box-shadow: 0 0 10px rgba(51, 255, 51, 0.4);
-}
-
-/* Data Display Area */
-.data-panel {
-  display: none;
-  animation: fadeInUp 0.4s ease;
-}
-
-.data-panel.active {
-  display: block;
-}
-
-.stat-row {
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: 8px;
-  font-size: 13px;
-  border-bottom: 1px dashed #1a4d1a;
-  padding-bottom: 4px;
-}
-
-.stat-val {
-  color: #33ff33;
-  font-weight: 700;
-}
-
-/* Animations */
-@keyframes scan {
-  0% { top: 0; opacity: 0; }
-  10% { opacity: 1; }
-  90% { opacity: 1; }
-  100% { top: 100%; opacity: 0; }
-}
-
-@keyframes blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
-}
-
-@keyframes fadeInUp {
-  from { opacity: 0; transform: translateY(5px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-/* Header Hiding Fix */
-.app-header, header.app-header {
-    transform: translateY(0) translateZ(0);
-}
-.app-header.fixed-header {
-    position: fixed;
-    left: 0;
-    right: 0;
-    margin-top: calc(var(--sat) + 10px) !important;
-    width: auto;
-    z-index: 1000;
-}
-.app-header.scroll-hidden {
-    transform: none;
-    transform: translateY(-250%);
-}
-
-/* Text Change Animations */
-@keyframes slideOutLeft {
-    to { opacity: 0; transform: translateX(-20px); }
-}
-@keyframes slideOutRight {
-    to { opacity: 0; transform: translateX(20px); }
-}
-@keyframes slideInLeft {
-    from { opacity: 0; transform: translateX(-20px); }
-    to { opacity: 1; transform: translateX(0); }
-}
-@keyframes slideInRight {
-    from { opacity: 0; transform: translateX(20px); }
-    to { opacity: 1; transform: translateX(0); }
-}
-
-.msg-body.slide-out-left { animation: slideOutLeft 0.15s ease forwards; }
-.msg-body.slide-out-right { animation: slideOutRight 0.15s ease forwards; }
-.msg-body.slide-in-left { animation: slideInLeft 0.15s ease forwards; }
-.msg-body.slide-in-right { animation: slideInRight 0.15s ease forwards; }
-
-/* Streaming Text Animation */
-@keyframes streamAnim {
-    from { opacity: 0; transform: translateY(5px); }
-    to { opacity: 1; transform: translateY(0); }
-}
-
-.stream-char {
-    animation: streamAnim 0.2s ease-out forwards;
-    display: inline-block;
-}
-
-
-
-.chat-loading-placeholder {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding-top: 60px;
-}
-
-.chat-loading-overlay {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background-color: var(--white);
-    z-index: 100;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding-top: 60px;
-}
-
-.visually-hidden {
-    opacity: 0;
-}
-
-.chat-status-gradient {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: calc(var(--sat) + 20px);
-    background: linear-gradient(to bottom, rgba(0,0,0,0.4), transparent);
-    z-index: 900;
-    pointer-events: none;
-}
-
-.memory-entry-list {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-}
-
-.memory-entry-card {
-    padding: 12px;
-    border: 1px solid var(--border-color, rgba(0, 0, 0, 0.08));
-    border-radius: 14px;
-    background: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.72));
-    backdrop-filter: blur(var(--element-blur, 16px));
-    -webkit-backdrop-filter: blur(var(--element-blur, 16px));
-}
-
-.memory-entry-head {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 8px;
-}
-
-.memory-entry-title {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--text-black);
-}
-
-.memory-entry-meta {
-    font-size: 12px;
-    color: var(--text-gray);
-    text-transform: uppercase;
-}
-
-.memory-entry-preview {
-    font-size: 13px;
-    line-height: 1.45;
-    color: var(--text-dark-gray);
-    white-space: pre-wrap;
-}
-
-.memory-entry-fulltext {
-    padding: 12px;
-    border-radius: 14px;
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    font-size: 14px;
-    line-height: 1.55;
-    color: var(--text-black);
-    white-space: pre-wrap;
-}
-
-.memory-chip-list {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-top: 8px;
-}
-
-.memory-chip {
-    display: inline-flex;
-    align-items: center;
-    padding: 4px 8px;
-    border-radius: 999px;
-    font-size: 12px;
-    color: #7ee787;
-    background: rgba(126, 231, 135, 0.12);
-    border: 1px solid rgba(126, 231, 135, 0.22);
-}
-
-.memory-entry-delete {
-    border: none;
-    border-radius: 999px;
-    padding: 6px 10px;
-    background: rgba(255, 68, 68, 0.12);
-    color: #ff6b6b;
-    font-size: 12px;
-    font-weight: 600;
-}
-
-.memory-status-badges {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-}
-
-.memory-status-badge {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 999px;
-    padding: 6px 10px;
-    font-size: 12px;
-    font-weight: 600;
-}
-
-.memory-status-badge.vector {
-    background: rgba(30, 200, 255, 0.14);
-    color: #1ec8ff;
-}
-
-.memory-status-badge.indexed {
-    background: rgba(126, 231, 135, 0.12);
-    color: #7ee787;
-}
-
-.memory-preview-delete {
-    color: #ff6b6b;
-}
-
-.memory-draft-actions {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.memory-entry-approve {
-    border: none;
-    border-radius: 999px;
-    padding: 6px 10px;
-    background: rgba(30, 200, 255, 0.14);
-    color: #1ec8ff;
-    font-size: 12px;
-    font-weight: 600;
-}
-
-.memory-inline-link {
-    margin-top: 8px;
-    padding: 0;
-    border: none;
-    background: transparent;
-    color: var(--vk-blue);
-    font-size: 13px;
-    font-weight: 600;
-    text-align: left;
-}
-
-
-
-.clock-flip-enter-active,
-.clock-flip-leave-active {
-    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.25s ease;
-}
-.clock-flip-enter-from {
-    transform: translateY(-15px);
-    opacity: 0;
-}
-.clock-flip-leave-to {
-    transform: translateY(15px);
-    opacity: 0;
-}
-
-/* Android text selection fix */
-#view-chat.android-resize-fix .chat-container {
-    transition: margin-bottom 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-#view-chat.android-resize-fix .chat-input-wrapper {
-    transition: bottom 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-#view-chat.android-resize-fix .chat-input-container.keyboard-open .chat-input-content {
-    padding-bottom: 0 !important;
-}
-</style>
 
 <style scoped>
 /* Scoped overrides if necessary, but mostly relying on chat.css */

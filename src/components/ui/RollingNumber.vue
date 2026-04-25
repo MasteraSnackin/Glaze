@@ -7,11 +7,17 @@
         class="rolling-column" 
         :class="{ 'is-symbol': isNaN(col.value) }"
       >
-        <div v-if="isNaN(col.value)" class="symbol">{{ col.value }}</div>
+        <div v-if="isNaN(col.value)" class="symbol">
+{{ col.value }}
+</div>
         <div v-else class="digit-container">
-          <div class="digit-measure">0</div>
+          <div class="digit-measure">
+0
+</div>
           <transition :name="col.isFast ? 'slide-digit-fast' : 'slide-digit'">
-            <div :key="col.value" class="digit">{{ col.value }}</div>
+            <div :key="col.value" class="digit">
+{{ col.value }}
+</div>
           </transition>
         </div>
       </div>

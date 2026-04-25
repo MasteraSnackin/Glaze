@@ -54,6 +54,15 @@ function averageVectors(vectors) {
     return result;
 }
 
+export class RateLimitError extends Error {
+    constructor(message, retryAfter = 60) {
+        super(message);
+        this.name = 'RateLimitError';
+        this.status = 429;
+        this.retryAfter = retryAfter;
+    }
+}
+
 async function callEmbeddingAPI(url, headers, requestBody) {
     let data;
 
@@ -64,6 +73,10 @@ async function callEmbeddingAPI(url, headers, requestBody) {
             data: requestBody,
             responseType: 'json'
         });
+        if (response.status === 429) {
+            const retryAfter = parseInt(response.headers?.['retry-after'] || response.headers?.['Retry-After'] || '60', 10);
+            throw new RateLimitError(`Rate limited by provider (429)`, retryAfter);
+        }
         if (response.status >= 400) {
             throw new Error(`Embedding API Error: ${response.status}`);
         }
@@ -74,6 +87,10 @@ async function callEmbeddingAPI(url, headers, requestBody) {
             headers,
             body: JSON.stringify(requestBody)
         });
+        if (res.status === 429) {
+            const retryAfter = parseInt(res.headers.get('retry-after') || '60', 10);
+            throw new RateLimitError(`Rate limited by provider (429)`, retryAfter);
+        }
         if (!res.ok) {
             const errText = await res.text().catch(() => '');
             throw new Error(`Embedding API Error: ${res.status} ${errText}`);
@@ -83,7 +100,10 @@ async function callEmbeddingAPI(url, headers, requestBody) {
 
     if (!data || !Array.isArray(data.data)) {
         const providerMessage = data?.error?.message || data?.message || '';
-        throw new Error(providerMessage ? `Invalid embedding response: ${providerMessage}` : 'Invalid embedding response: missing data array');
+        if (providerMessage) {
+            throw new Error(`Embedding provider error: ${providerMessage}`);
+        }
+        throw new Error('Invalid embedding response: missing data array');
     }
 
     return data.data.sort((a, b) => a.index - b.index).map(item => item.embedding);
@@ -104,7 +124,7 @@ export async function getEmbeddings(texts) {
     const endpoint = config.endpoint;
     const url = /\/embeddings\/?$/i.test(endpoint) ? endpoint : `${endpoint.replace(/\/+$/, '')}/embeddings`;
     const headers = { 'Content-Type': 'application/json' };
-    if (config.apiKey) headers['Authorization'] = `Bearer ${config.apiKey}`;
+    if (config.apiKey) headers.Authorization = `Bearer ${config.apiKey}`;
 
     console.info('[embeddingService] requesting embeddings', {
         count: texts.length,
@@ -119,6 +139,7 @@ export async function getEmbeddings(texts) {
     const results = [];
 
     for (let i = 0; i < allChunked.length; i++) {
+        if (i > 0) await new Promise(r => { setTimeout(r, 200); });
         const chunks = allChunked[i];
         const vectors = await callEmbeddingAPI(url, headers, {
             model: config.model,

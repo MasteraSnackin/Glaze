@@ -10,6 +10,8 @@ import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetStat
 import { themeState, getPresets, applyPreset } from '@/core/states/themeState.js';
 import { ref } from 'vue';
 import { logger } from '../../utils/logger.js';
+import { publishAppEvent, publishCancelableAppEvent } from '@/core/events/eventHub.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
 import { isKeyboardOpen, initKeyboard, hideKeyboard } from './keyboardHandler.js';
 
 // --- Long-press background guard ---
@@ -238,9 +240,9 @@ export function rgbToHex(rgb) {
     let r = (+rgbVals[0]).toString(16),
         g = (+rgbVals[1]).toString(16),
         b = (+rgbVals[2]).toString(16);
-    if (r.length == 1) r = "0" + r;
-    if (g.length == 1) g = "0" + g;
-    if (b.length == 1) b = "0" + b;
+        if (r.length === 1) r = "0" + r;
+        if (g.length === 1) g = "0" + g;
+        if (b.length === 1) b = "0" + b;
     return "#" + r + g + b;
 }
 
@@ -456,8 +458,7 @@ export function initBackButton() {
     let lastBackPress = 0;
     const handleBackButton = async () => {
         // --- Hierarchical Back Navigation Dispatch ---
-        const backNavEvent = new CustomEvent('app-back-navigation', { cancelable: true });
-        window.dispatchEvent(backNavEvent);
+        const backNavEvent = publishCancelableAppEvent(APP_EVENTS.ui.backNavigation);
         if (backNavEvent.defaultPrevented) return;
 
         // 0. If keyboard is open — dismiss it
@@ -546,7 +547,7 @@ export function initBackButton() {
         } else {
             lastBackPress = now;
             await Toast.show({
-                text: (translations[currentLang.value] && translations[currentLang.value]['exit_hint']) || 'Press again to exit',
+                text: (translations[currentLang.value] && translations[currentLang.value].exit_hint) || 'Press again to exit',
                 duration: 'short',
                 position: 'bottom'
             });
@@ -658,12 +659,12 @@ export function initHeaderScroll(messagesContainer, initialScrollTop, isGenerati
 
         if (st > lastScrollTop + 3 && st > 50) {
             if (!isHidden) {
-                window.dispatchEvent(new CustomEvent('header-scroll-hidden', { detail: true }));
+                publishAppEvent(APP_EVENTS.ui.header.scrollHidden, true);
                 isHidden = true;
             }
         } else if (st < lastScrollTop - 3) {
             if (isHidden) {
-                window.dispatchEvent(new CustomEvent('header-scroll-hidden', { detail: false }));
+                publishAppEvent(APP_EVENTS.ui.header.scrollHidden, false);
                 isHidden = false;
             }
         }

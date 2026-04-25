@@ -37,7 +37,6 @@ function combineReasoningSections(modelReasoning, inlineReasoning, headerModel, 
 }
 
 export function createStreamAccumulator({
-    requestReasoning,
     tagStart,
     tagEnd,
     hasInlineTags,
@@ -48,6 +47,7 @@ export function createStreamAccumulator({
     let rawAccumulated = '';
     let accumulatedReasoning = '';
     let previousEffectiveText = '';
+    let latestEffectiveReasoning = null;
 
     return {
         consumeDelta({ content = '', reasoning = '' }) {
@@ -75,6 +75,7 @@ export function createStreamAccumulator({
                 textDelta = effectiveText.substring(previousEffectiveText.length);
             }
             previousEffectiveText = effectiveText;
+            latestEffectiveReasoning = effectiveReasoning || null;
 
             return {
                 effectiveText,
@@ -101,8 +102,8 @@ export function createStreamAccumulator({
 
         getPartial() {
             return {
-                text: fullText,
-                reasoning: accumulatedReasoning || null
+                text: previousEffectiveText || fullText,
+                reasoning: latestEffectiveReasoning ?? (accumulatedReasoning || null)
             };
         }
     };

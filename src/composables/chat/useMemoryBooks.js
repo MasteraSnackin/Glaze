@@ -349,12 +349,17 @@ export function useMemoryBooks(deps) {
         
         try {
             showToast('Reindexing memory entries...', 1500);
-            await reindexAllMemoryEntries(memoryBook, activeChatChar.id, sessionId);
+            const result = await reindexAllMemoryEntries(memoryBook, activeChatChar.id, sessionId);
+            if (result?.rateLimited) {
+                showToast(`Rate limited — retry in ${result.retryAfter || 60}s`, (result.retryAfter || 60) * 1000);
+                return result;
+            }
             memoryBook.updatedAt = Date.now();
             await db.saveChat(activeChatChar.id, chatData);
             showToast('Memory entries reindexed');
             await loadCurrentMemoryBook(activeChatChar);
             setTimeout(() => memoryBooksSheet.value?.open(), 50);
+            return result;
         } catch (error) {
             console.error('Failed to reindex memory entries:', error);
             showToast(`Reindex failed: ${formatError(error)}`);

@@ -26,7 +26,7 @@ vi.mock('@/utils/db.js', () => ({
     }
 }));
 
-vi.mock('@/core/services/llmApi.js', () => ({
+vi.mock('@/core/llm/transport/requestOrchestrator.js', () => ({
     executeRequest: (...args) => mockExecuteRequest(...args)
 }));
 
@@ -93,7 +93,8 @@ if (!globalThis.crypto?.subtle) {
 }
 
 const { lorebookState, indexLorebookEntries, vectorSearchLorebooks } = await import('../../states/lorebookState.js');
-const { generateChatResponse, getLastPrompt } = await import('../generationService.js');
+const { generateChatResponse } = await import('../generationService.js');
+const { getLastRequestPreviewSnapshot } = await import('../../states/requestPreviewState.js');
 
 describe('Vector lorebook E2E verification', () => {
     beforeEach(() => {
@@ -192,7 +193,7 @@ describe('Vector lorebook E2E verification', () => {
         expect(promptReadyPayload).toBeTruthy();
         expect(promptReadyPayload.loreEntries.some(entry => entry.id === 'entry-vector-only')).toBe(true);
 
-        const lastPrompt = getLastPrompt();
+        const lastPrompt = getLastRequestPreviewSnapshot().prompt;
         expect(lastPrompt).toBeTruthy();
         expect(lastPrompt.messages.some(message =>
             typeof message.content === 'string' && message.content.includes('bright blue hair, cat ears, a fluffy tail')
@@ -259,7 +260,7 @@ describe('Vector lorebook E2E verification', () => {
             }
         });
 
-        const lastPrompt = getLastPrompt();
+        const lastPrompt = getLastRequestPreviewSnapshot().prompt;
         expect(lastPrompt).toBeTruthy();
         const contents = lastPrompt.messages.map(message => message.content);
         expect(contents).toEqual([
@@ -346,7 +347,7 @@ describe('Vector lorebook E2E verification', () => {
             }
         });
 
-        const lastPrompt = getLastPrompt();
+        const lastPrompt = getLastRequestPreviewSnapshot().prompt;
         expect(lastPrompt).toBeTruthy();
         expect(lastPrompt.messages.some(message => message.content === 'Lore slot: Macro block lore')).toBe(true);
         expect(lastPrompt.messages.some(message => message.content === 'Lore slot: Before block lore\n\nMacro block lore')).toBe(false);
@@ -434,7 +435,7 @@ describe('Vector lorebook E2E verification', () => {
         expect(promptReadyPayload).toBeTruthy();
         expect(promptReadyPayload.loreEntries.map(entry => entry.id)).toEqual(['entry-keyword']);
 
-        const lastPrompt = getLastPrompt();
+        const lastPrompt = getLastRequestPreviewSnapshot().prompt;
         expect(lastPrompt).toBeTruthy();
         expect(lastPrompt.messages.some(message => typeof message.content === 'string' && message.content.includes('Vector extra lore'))).toBe(false);
 

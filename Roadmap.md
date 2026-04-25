@@ -30,6 +30,273 @@ The current roadmap is:
 3. Add vector-based lorebook entries and retrieval
 4. Build memory books on top of that foundation
 
+## Current Refactor Branch
+
+- Branch: `feat/refactor-phase1-event-hub`
+- Base: latest stabilized `dev`
+- Scope: `REFACTOR_PLAN.md` Phases 1–6 in progress (event hub, request ownership, composable extraction, deterministic pipelines, projections, extension API)
+- Phase 1 status: `done`
+- Phase 2 status: `done`
+- Phase 3 status: `done`
+- Phase 4 status: `done`
+- Phase 5 status: `done`
+- Phase 6 status: `done`
+- Phase 7 status: `done`
+- Phase 8 status: `done` (ChatView reduced from 3767 → 1611 lines, target <2000 met)
+- Phase 11 status: `done` (use-case layer re-architecture — pipeline dir, split scope-creep files, fix naming, eliminate hollow entrypoints)
+- Phase 12 status: `done` (transport split, legacy cleanup, dead param removal)
+- Phase 13a status: `done` (App.vue decomposition — 1229 → 622 lines script + 5 composables: useAppNavigation, useEditorController, useAppEventSubscriptions, useGlossaryPopup, useAppInit)
+- Phase 13b status: `done` (PresetView.vue decomposition — usePresetEditor.js god-object (2080 lines) → 11 focused composables (max 177 lines each) + 279 lines glue in PresetView.vue script. Deleted usePresetEditor.js. New composables: usePresetNavigation (107), usePresetLoader (89), usePresetConnections (33), usePresetCRUD (173), usePresetSelectors (171), usePresetImage (40), useBlockManager (141), useBlockEditor (94), useAuthorsNoteSheet (73), useSummarySheet (126), usePresetTokenPreview (177))
+- Phase 13c status: `done` (lorebookState.js decomposition — 1319 → 326 lines state+CRUD. Extracted: lorebookSearchService.js (182), lorebookVectorSearch.js (431), lorebookEmbeddingService.js (352). Re-exports from lorebookState.js for backward compatibility)
+- Phase 13d status: `done` (ChatMessage.vue decomposition — 1985 → 1621 lines. Extracted: useMessageSwipe.js (262 — touch/swipe/long-press/guided swipe/guidance editing), useMessageImageGen.js (149 — image gen click handler/parseIIG/openImage). Script reduced from 624 → 334 lines)
+- Phase 13e status: `done` (ChatInput.vue decomposition — 1155 → 905 lines. Extracted: useContentEditable.js (128 — getCaretIndex/setCaretPosition/getText/updatePreview), useInputActions.js (168 — send/guidance/image/magic drawer/fullscreen editor). Script reduced from 420 → 170 lines)
+- Phase 13f status: `done` (LorebookSheet.vue decomposition — extracted useLorebookEntries.js (157 — entry CRUD, reorder, search/filter, selectEntry, saveEntry, deleteEntry, duplicateEntry, batch vector toggle). Script reduced from 572 → 385 lines)
+- Phase 13g status: `done` (LorebookSheet.vue decomposition — extracted useLorebookIndexing.js (93 — indexAllEntries, indexSingleEntry, retryFailedEmbeddings, getVectorStatusCounts). Script reduced from 385 → 290 lines)
+- Phase 13h status: `done` (ApiView.vue decomposition — extracted useApiSettings.js (237 — API state/presets/connection/blacklist/debounce/model selector/reasoning). Script reduced from ~645 → 140 lines)
+- Phase 13i status: `done` (ApiView.vue decomposition — extracted useServiceProviders.js (128 — embedding/imageGen/memory provider settings, load/test). Script remains 140 lines)
+- Phase 13j status: `done` (CharacterList.vue decomposition — extracted useCharacterActions.js (179 — add/import/janitor extract, edit, export PNG/JSON, favorite, delete). Script reduced from 585 → 175 lines)
+- Phase 13k status: `done` (CharacterList.vue decomposition — extracted useSessionSheet.js (168 — session list/CRUD, import chat, delete session confirm). Script remains 175 lines)
+- Phase 13l status: `done` (ThemeSettingsView.vue decomposition — extracted useThemePresets.js (267 — preset CRUD/apply/export/import/options/selector/bgImage/file import). Script reduced from 495 → 236 lines)
+- Phase 14 status: `done` (final legacy cleanup — deleted 7 dead re-export shims + dead useViewer composable, removed dead re-export from generateChat.js, migrated app-back-navigation from window.dispatchEvent to publishCancelableAppEvent, removed dead getLegacyApiConfig/getLegacyEmbeddingConfig + emitLegacyCompatibleEvent, removed app-back-navigation from LEGACY_WINDOW_EVENT_MAP)
+- Phase 16 status: `not done` (remaining high-ROI cleanup — 16a: deduplicate memory normalization in db.js/chatImporter.js/memoryBooksService.js; 16b: split themeState.js 1224 lines into state/persistence/renderer/migration; 16c: update Phase 10 stale cancelable-event text)
+- Current slice testing: `tested` (`npm run build` + `npm run lint`)
+
+### Bugs Found & Fixed on This Branch
+
+1. **Fix: missing `await` on `completeStructuredResponse` in `completeJsonResponse`**
+   - Status: `done`
+   - File: `src/core/llm/transport/responseHandling.js:30`
+   - Issue: `completeJsonResponse()` called `completeStructuredResponse()` without `await`. Since `completeStructuredResponse` is async, the caller returned before the completion path finished processing, creating a race condition. `finalizeStreamResponse` could execute before `onComplete` fired, or errors in the completion path could escape unhandled.
+   - Fix: Added `await` before `completeStructuredResponse(...)` call.
+
+2. **Fix: missing `onError` propagation and try/catch in `completeStructuredResponse` / `finalizeStreamResponse`**
+   - Status: `done`
+   - Files: `src/core/llm/transport/requestOutcome.js`, `src/core/llm/transport/chatCompletionsClient.js`, `src/core/llm/transport/responseHandling.js`, `src/core/services/llmApi.js`
+   - Issue: `completeStructuredResponse` and `finalizeStreamResponse` had no try/catch. If `extractOpenAiMessage` or `streamAccumulator.finalize()` threw (e.g. malformed API response), the exception propagated uncaught, breaking the callback contract — neither `onComplete` nor `onError` would fire, leaving `isTyping` stuck forever. The `onError` callback was also not threaded through from `executeRequest` → `chatCompletionsClient` → `completeJsonResponse` → `completeStructuredResponse`.
+   - Fix:
+     - Added `onError` parameter propagation through the full call chain: `llmApi.js` → `chatCompletionsClient.js` → `responseHandling.js` → `requestOutcome.js`.
+     - Wrapped `extractOpenAiMessage()` in try/catch in `completeStructuredResponse` — on failure, calls `onError` instead of crashing.
+     - Wrapped `streamAccumulator.finalize()` in try/catch in `finalizeStreamResponse` — on failure, calls `onError` instead of crashing.
+     - Added `await` on all `onComplete`/`onError` calls in `requestOutcome.js` (they were fire-and-forget, now properly awaited).
+
+3. **Fix: stale `activeChatChar` capture in generation services — foreground path never executed**
+   - Status: `done`
+   - Files: `src/views/ChatView.vue`, `src/composables/chat/useGenerationCompleteHandler.js`, `src/composables/chat/useGenerationFinalization.js`, `src/composables/chat/useGenerationStateSetup.js`
+   - Issue: `createChatGenerationServices()` in ChatView.vue (line 1335) received `activeChatChar` — a module-level `let` variable initialized as `null` at `<script>` load time. The value `null` was captured once and never updated. All generation handlers (`handleGenerationComplete`, `finalizeGenerationState`, `setupGenerationState`) received `activeChatChar = null`, causing:
+     - `isGenerating.value = false` never set by handlers (condition `activeChatChar && activeChatChar.id === char.id` always false). The stop button only disappeared via the `onGenerationEnded` event listener which used the live module-level `activeChatChar`.
+     - Foreground completion path in `handleGenerationComplete` (line 190) never executed — always fell through to background path which only updates `msg.isTyping = false` in DB, not in `currentMessages.value`.
+     - Messages stayed with `isTyping: true` permanently in the reactive UI after generation completed.
+   - Fix: Pass `activeChar` (a `ref` that stays synchronized with `activeChatChar` via `activeChar.value = activeChatChar`) instead of the stale `let`. Updated all handler checks from `activeChatChar && activeChatChar.id` to `activeChatChar?.value && activeChatChar.value.id`.
+
+4. **Fix: `streamAccumulator.getPartial()` returned raw text instead of effective text during reasoning**
+   - Status: `done`
+   - File: `src/core/llm/transport/streamAccumulator.js`
+   - Issue: `getPartial()` returned `fullText` (raw accumulated text without reasoning tag stripping) and `accumulatedReasoning` (raw reasoning buffer) instead of the effective (display-ready) text and reasoning. This meant partial results sent during abort/timeout paths contained unprocessed `<reasoning>` tags and duplicate content.
+   - Fix: `getPartial()` now returns `previousEffectiveText` (processed text) and `latestEffectiveReasoning` (processed reasoning) with correct fallback.
+
+### Vector / Embedding Fixes (on This Branch)
+
+5. **Fix: vector search queries contained raw HTML, images, base64 data, and reasoning tags**
+   - Status: `done`
+   - Files: `src/core/states/lorebookState.js`
+   - Issue: Query text assembled from chat messages for embedding included unprocessed HTML tags, `<style>`/`<script>`/`<svg>` blocks, base64-encoded images, `<think>...</think>` reasoning blocks, and `imggen-loading` class names. These bloated the query token count, degraded embedding quality, and could exceed embedding model context limits.
+   - Fix: Added `sanitizeVectorQueryText()` that strips heavy HTML blocks, converts remaining HTML to plain text via `htmlToPlainText()`, removes reasoning tags, collapses whitespace. Applied in `vectorSearchLorebooks()` before embedding queries.
+
+6. **Fix: vector query text was unbounded — could exceed embedding model context**
+   - Status: `done`
+   - Files: `src/core/states/lorebookState.js`
+   - Issue: `focusedQueryParts` and `fallbackQueryParts` were joined with `\n` and sent directly to the embedding API without any token/length limit. Long chats could produce query text well over 8K tokens, causing API errors or truncated embeddings.
+   - Fix: Added `buildBoundedQueryText()` that iterates parts from most recent backward, trims each part to a char limit, and stops when total tokens or chars exceed configurable thresholds. `focusedQuery` capped at 1024 tokens / 6000 chars, `fallbackQuery` at 1536 tokens / 10000 chars.
+
+7. **Fix: stale embeddings used for vector search — no hash check at query time**
+   - Status: `done`
+   - Files: `src/core/states/lorebookState.js`
+   - Issue: `vectorSearchLorebooks()` checked that an embedding record existed (`emb && (emb.vectors || emb.vector)`) but never verified that the stored `textHash` still matched the current entry content. If a lorebook entry was edited after indexing, the stale (incorrect) embedding was still used for retrieval, producing wrong results.
+   - Fix: Added per-candidate hash check at query time — compute current `buildEmbeddingFingerprint` hash, compare with `emb.textHash`. Only fresh embeddings participate in search. Stale ones are reported in `missingEmbeddings` with `reason: 'stale_or_invalid'`.
+
+8. **Fix: stale embedding detection in UI — `getEmbeddingStatus` always returned 'indexed' for existing records**
+   - Status: `done`
+   - Files: `src/core/states/lorebookState.js`
+   - Issue: `getEmbeddingStatus(entryId)` checked if a DB record existed and had no error, but never compared the stored hash with current entry content. Edited entries showed "indexed" status even though the embedding was stale.
+   - Fix: `getEmbeddingStatus` now accepts entry object, computes current hash, and returns `'stale'` when hash differs. Added `isLorebookEmbeddingFresh()` helper. LorebookSheet uses the new signature everywhere.
+
+9. **Fix: no rate limit (429) handling for embedding API**
+   - Status: `done`
+   - Files: `src/core/services/embeddingService.js`, `src/core/states/lorebookState.js`, `src/core/services/memoryBooksService.js`, `src/composables/chat/useMemoryBooks.js`, `src/components/sheets/LorebookSheet.vue`, `src/locales/en/index.json`, `src/locales/ru/index.json`
+   - Issue: Embedding API calls had no 429 handling. When a provider rate-limited bulk indexing, every subsequent request also failed with an unhandled error, and the UI showed no feedback. Users would see "Index All" spin forever or fail silently.
+   - Fix:
+     - Added `RateLimitError` class in `embeddingService.js` with `retryAfter` from `Retry-After` header.
+     - Both native (CapacitorHttp) and web (fetch) paths now detect 429 and throw `RateLimitError`.
+     - `indexLorebookEntries` catches `RateLimitError`, marks all remaining entries as rate-limited errors, returns `{ rateLimited: true, retryAfter }`.
+     - `reindexAllMemoryEntries` catches `RateLimitError` and returns `{ rateLimited: true, retryAfter }` instead of crashing.
+     - LorebookSheet shows cooldown timer on "Index All" / "Retry Failed" buttons during rate limit.
+     - Memory Books reindex shows toast with retry countdown on rate limit.
+     - Added 200ms delay between chunked embedding requests to reduce rate limit risk.
+     - i18n keys: `btn_rate_limited` (en/ru).
+
+10. **Fix: entries with embedding errors were skipped during "Index All" instead of re-indexed**
+    - Status: `done`
+    - Files: `src/core/states/lorebookState.js`
+    - Issue: `indexLorebookEntries` skipped entries where `existing.textHash === textHash` even when `existing.error` was set. Previously failed entries were never retried during normal "Index All" — only the separate "Retry Failed" path would catch them.
+    - Fix: Added `&& !existing.error` condition — entries with errors are always re-indexed regardless of hash match.
+
+11. **Fix: deleting a lorebook entry did not delete its embedding from IndexedDB**
+    - Status: `done`
+    - Files: `src/components/sheets/LorebookSheet.vue`
+    - Issue: `handleDeleteEntry()` spliced the entry from the array but left the orphaned embedding record in IndexedDB, wasting storage and potentially appearing in vector search.
+    - Fix: `handleDeleteEntry` now calls `deleteLorebookEntryEmbedding(entry.id)` before removing the entry, then refreshes vector status.
+
+12. **Fix: vector search did not respect `characterFilter` on entries**
+    - Status: `done`
+    - Files: `src/core/states/lorebookState.js`
+    - Issue: `vectorSearchLorebooks()` collected all entries with `vectorSearch: true` without checking `characterFilter`. Entries intended for specific characters were matched for all characters.
+    - Fix: Added character filter check in vector entry collection — respects `isExclude` and `names` from `entry.characterFilter`.
+
+13. **Fix: vector search failure blocked entire generation**
+    - Status: `done`
+    - Files: `src/core/llm/usecases/chatPostPromptPipeline.js`
+    - Issue: When vector search failed (provider down, config error, etc.), `runChatPostPromptPipeline` showed an error bottom sheet and called `onError`, aborting the entire generation. Users couldn't generate at all if the embedding endpoint was down, even though keyword lorebook retrieval was unaffected.
+    - Fix: Vector search failure now degrades gracefully — generation continues without vector lorebook results. Warning is logged but no error popup and no generation abort.
+
+14. **Fix: `ctx.loreEntries` lost after vector merge in pipeline**
+    - Status: `done`
+    - Files: `src/core/llm/usecases/chatPipelineSteps.js`
+    - Issue: After `mergeLateVectorLoreEntries` in `stepVectorSearch`, `ctx.loreEntries` was overwritten with the merge result but the original `ctx.result.loreEntries` was not propagated back. Subsequent pipeline steps could see empty `loreEntries`.
+    - Fix: After merge, `ctx.loreEntries` is restored from `ctx.result.loreEntries` if available.
+
+15. **Fix: `stepPromptReady` was synchronous but `onPromptReady` callback is async**
+    - Status: `done`
+    - Files: `src/core/llm/usecases/chatPipelineSteps.js`
+    - Issue: `stepPromptReady` called `onPromptReady(...)` without `await`, so the prompt-ready handler (which persists lore/memory refs to messages) could race with the generation request dispatch.
+    - Fix: Made `stepPromptReady` async and added `await` on `onPromptReady`.
+
+16. **Fix: `maxInjectedEntries` capped at 5 regardless of user setting**
+    - Status: `done`
+    - Files: `src/core/llm/usecases/memoryBookContext.js`
+    - Issue: `buildMemoryInjection` used `.slice(0, Math.max(1, Math.min(5, settings.maxInjectedEntries || 3)))`, which clamped `maxInjectedEntries` to 5 even if the user configured a higher value.
+    - Fix: Removed the `Math.min(5, ...)` cap — now uses `Math.max(1, settings.maxInjectedEntries || 3)`.
+
+17. **Fix: `userAvatar` getter crash when `activeChatChar` ref is null**
+    - Status: `done`
+    - Files: `src/core/llm/usecases/chatGenerationServiceFactory.js`
+    - Issue: After passing `activeChar` ref (from the stale-capture fix), the getter `activeChatChar.value?.avatar` would crash when `activeChar.value === null` because `null.value` is undefined access on a non-ref.
+    - Fix: Changed to `activeChatChar?.value?.avatar` — optional chaining on the ref itself.
+
+### Memory Automation Fixes (on This Branch)
+
+18. **Fix: `runMemoryAutomationAfterStableTurn` crashed for background characters**
+    - Status: `done`
+    - Files: `src/composables/chat/useMemoryAutomation.js`
+    - Issue: `runMemoryAutomationAfterStableTurn` used `activeChatChar.value.id` for DB saves and UI sync. When called for a background character (e.g. from `handleGenerationComplete` background path where `activeChatChar.value` is a different character), it saved data under the wrong character ID and updated the wrong UI.
+    - Fix: Added `charId` and `syncUi` parameters. Uses `targetCharId` (from param or `activeChatChar.value?.id`) for all DB writes. Only calls `updatePendingMemoryMessageIds` when `syncUi && activeChatChar.value?.id === targetCharId`.
+
+### Database Fixes (on This Branch)
+
+19. **Fix: Vue reactive proxies persisted to IndexedDB**
+    - Status: `done`
+    - Files: `src/utils/db.js`
+    - Issue: `saveChat` and `patchChatData` stored `normalizeChatData(chatData)` directly, which could contain Vue reactive Proxy objects. IndexedDB serialization of Proxies can produce incomplete or incorrect data (missing properties, getter side effects). This could cause data loss or corruption on reload.
+    - Fix: Added `toPlain()` deep snapshot before writing — strips all Proxy layers, producing a plain object for IndexedDB.
+
+### Navigation / UI Fixes (on This Branch)
+
+20. **Fix: editor close used stale `currentView` after resetting state**
+    - Status: `done`
+    - Files: `src/App.vue`
+    - Issue: `closeEditor()` read `currentView.value` after already setting `previousViewForEditor.value = null` and changing `currentView.value`. The view check for `view-character-edit` vs `view-persona-edit` could match the new view instead of the closing one. Editing indices were not reset, causing stale editor state on next open.
+    - Fix: Capture `closingView` before resetting state. Reset `isHeaderEditorMode`, `editingCharacterIndex`, and `editingPersonaIndex` explicitly. Pass `currentView` (not `effectiveMainView`) to AppHeader so it sees the real view name.
+
+21. **Fix: AppHeader back button didn't route to correct close action for editors/settings**
+    - Status: `done`
+    - Files: `src/components/layout/AppHeader.vue`
+    - Issue: `handleBack()` always dispatched a global `app-back-navigation` event. For editor headers (character edit, persona edit) and nested settings views, the global listener could be from a different view, causing incorrect navigation (e.g. closing the whole app instead of the editor).
+    - Fix: Added explicit routing in `handleBack()`: editor views emit `action-close` directly; settings/submenu views call `state.onBack()` directly; only falls through to global event for standard views.
+
+22. **Fix: back navigation fired on hidden/closed sheets**
+    - Status: `done`
+    - Files: `src/components/sheets/LorebookSheet.vue`, `src/components/sheets/RegexSheet.vue`, `src/views/ApiView.vue`, `src/views/PersonasView.vue`, `src/views/PresetView.vue`
+    - Issue: `handleBackNavigation` event listeners on sheets fired even when the sheet was closed or not visible. This caused spurious `preventDefault()` calls that blocked normal Android hardware back button behavior (navigating between views).
+    - Fix: Added visibility guard — `handleBackNavigation` returns early if `!sheet.value?.isVisible`.
+
+23. **Fix: LorebookSheet/RegexSheet close didn't reset internal view state**
+    - Status: `done`
+    - Files: `src/components/sheets/LorebookSheet.vue`, `src/components/sheets/RegexSheet.vue`
+    - Issue: `close()` called `sheet.value?.close()` but left `currentView` on the detail/edit sub-view. Next time the sheet opened, it showed the previous detail view instead of the list.
+    - Fix: `close()` now sets `currentView.value = 'list'` before closing the sheet.
+
+24. **Fix: null-safe key array access in LorebookSheet**
+    - Status: `done`
+    - Files: `src/components/sheets/LorebookSheet.vue`
+    - Issue: Several template bindings accessed `entry.keys.join(...)`, `activeEntry.secondary_keys?.join(...)`, `activeEntry.characterFilter?.names.join(...)` without null guards. Entries with missing/undefined `keys` arrays crashed the template renderer.
+    - Fix: Added `|| []` fallbacks and `?.join?.()` optional chaining on all key/array accesses in template.
+
+25. **Fix: `triggerAutoSyncCheck` crash when `isGenerating` not passed**
+    - Status: `done`
+    - Files: `src/composables/chat/useAutoSync.js`
+    - Issue: `triggerAutoSyncCheck({ isGenerating })` required `isGenerating` but some callers didn't pass it. Accessing `isGenerating.value` on undefined crashed.
+    - Fix: Default destructuring to `{ isGenerating } = {}`, use optional chaining `isGenerating?.value`.
+
+Phase 3 composable extractions:
+- [done] Extract `triggerAutoSyncCheck` into `composables/chat/useAutoSync.js`
+- [done] Extract memory automation functions into `composables/chat/useMemoryAutomation.js`
+- [done] Extract memory prompt presets into `core/services/memoryPromptPresets.js`
+- [done] Extract message edit helpers into `core/utils/messageEditHelpers.js`
+- [done] Extract context breakdown computed properties into `composables/chat/useContextBreakdown.js`
+- [done] Extract message selection state + delete/hide actions into `composables/chat/useMessageSelection.js`
+- [done] Extract chat search into `composables/chat/useChatSearch.js`
+- [done] Extract memory sheet UI (DOM builders, entry editor, prompt manager, generation settings, event handlers) into `composables/chat/useMemorySheetUI.js`
+- [done] Extract swipe/greeting navigation into `composables/chat/useSwipeNavigation.js`
+- [done] Extract message display helpers into `composables/chat/useChatMessageDisplay.js`
+- [done] ChatView.vue reduced from ~5700 to 3774 lines (33.8%)
+
+Phase 4 deterministic pipelines:
+- [done] Extract `executeImpersonationUseCase` into `core/llm/usecases/impersonationRequest.js` — fixes broken `generateChatResponse` call in `startImpersonation`
+- [done] Introduce `PipelineContext` class in `core/llm/usecases/chatPipelineContext.js` — context object with step logging, abort flags, documented forbidden reorderings
+- [done] Refactor `chatPostPromptPipeline` to use `PipelineContext` + 6 named steps in `chatPipelineSteps.js`
+- [done] Deduplicate `updateContextCutoff` authors note logic — replaced inline 16-line block with `buildGenerationAuthorsNote` call
+- [done] Route `calculateContext` through use-case facade, remove unused `executeRequest`/`generateMemoryDraft` imports from ChatView
+- [done] Extract `useGenerationAbort` composable — unifies `abortActiveChatGeneration` + `abortAnyActiveGeneration` + `abortImpersonation`, removes duplicated abort logic in `sendMessage`
+- [done] Migrate 13 `window.dispatchEvent`/`addEventListener` calls to `publishAppEvent`/`subscribeAppEvent`, add 10 new `APP_EVENTS` names, activate legacy bridge in `main.js`
+
+Phase 5 side effects and projections:
+- [done] Split prompt preview state out of `generationService.js` singleton into keyed `core/states/promptPreviewState.js`
+- [done] Split network trace state out of `networkDebugService.js` singleton into keyed `core/states/requestTraceState.js`
+- [done] Thread `debugKey` through chat, impersonation, summary, and memory-draft request flows so preview and trace belong to the same request/session
+- [done] Update `RequestPreviewSheet.vue` to read a matched prompt preview + request trace pair instead of mixing unrelated "last" globals
+- [done] Keep backward-compatible `getLastPrompt()` / `getLastNetworkTrace()` facades and legacy persisted trace hydration during migration
+- [done] Publish richer domain/debug events from pipelines and transport: `domain.generation.promptReady`, `domain.generation.requestDispatched`, and `debug.*` trace/preview events
+- [done] Move prompt preview + request trace writes behind `core/events/projections/debugStateProjection.js` subscribers instead of direct orchestration updates
+- [done] Add `core/states/requestPreviewState.js` read model so UI consumes a single request-preview snapshot instead of manually stitching prompt + trace state
+
+Phase 6 extension API:
+- [done] Add `core/extensions/extensionRegistry.js` with declared generation hook definitions, registration helpers, priority ordering, and disposer-based unregistration
+- [done] Define read-only vs mutating hook contracts for `beforePromptBuild`, `afterPromptBuild`, `beforeRequestAssembly`, `beforeRequestSend`, `afterResponseNormalize`, and `afterGenerationCommit`
+- [done] Wire chat generation to declared hooks at real use-case/transport boundaries instead of adding new ad-hoc event points
+- [done] Apply `afterResponseNormalize` to both JSON and SSE completion paths so extensions see one normalized response boundary
+- [done] Extend the same extension API coverage to summary and memory-draft request flows
+- [done] Add `core/extensions/appExtensions.js` bootstrap surface and initialize it from `main.js` for app-start extension registration
+- [done] Keep feature-local registration possible as well: `registerGenerationHook(...)` and `registerAppExtension(...)` remain directly usable where scoped registration is safer than app-wide bootstrap
+
+Phase 7 compatibility cleanup:
+- [done] Replace internal `subscribeLegacyCompatibleEvent(...)` usage with direct `subscribeAppEvent(...)` where dual listening was no longer required
+- [done] Replace internal `sync-data-refreshed` `window.dispatchEvent(...)` source with `publishAppEvent(APP_EVENTS.domain.sync.dataRefreshed, ...)`
+- [done] Remove dead debug compat helpers `getLastPrompt()`, `getLastNetworkTrace()`, and `clearLastNetworkTrace()` and switch callers to keyed state/read models
+- [done] Remove old-format persisted network trace hydration branch; keep only keyed persisted trace hydration
+- [done] Remove `core/events/legacyCompatibleSubscription.js` after internal callers were migrated off it
+- [done] Keep `window` event bridge only as an external compatibility adapter, not as an internal subscription boundary
+
+Phase 8 ChatView decomposition:
+- [done] Extract session management into `composables/chat/useSessionManagement.js` — session create/switch/delete, session name editing, session data persistence (~203 lines)
+- [done] Extract message actions into `composables/chat/useMessageActions.js` — message delete/hide, edit save/cancel, branch creation, image regeneration, guidance text patching (~194 lines)
+- [done] Extract chat generation into `composables/chat/useChatGeneration.js` — sendMessage, startGeneration, handleImageRegenerate, generation preflight checks, image-gen lifecycle (~152 lines)
+- [done] Clean up unused imports after extraction (15+ unused import references removed)
+- [done] `activeChatChar` plain `let` passed via `getActiveChatChar()`/`setActiveChatChar()` callbacks instead of direct capture
+- [done] `chatGenerationServices` lazy `let` passed via `getChatGenerationServices()` factory
+- [done] `_cleanupScroll` let passed via `getCleanupScroll()`/`setCleanupScroll()` callbacks
+- [not done] Extract `openChat()` (~400 lines) into composable — deferred: ~30+ dependency injections, marginal ROI
+- [not done] Extract context/tokenizer sheet actions (~32 lines) — too small for dedicated composable
+- [done] ChatView.vue reduced from 3767 → 1611 lines (-57%, target <2000 met)
+
 This roadmap intentionally assumes the tokenizer and current context UI are already in place and are not being redesigned again unless a new decision is made explicitly.
 
 ## Decisions Already Made
@@ -324,7 +591,7 @@ Current implementation status notes:
 - [done] Memory Books now expose a user-facing session-level retrieved-entry cap (`maxInjectedEntries`) as the "количество мемори в памяти" control.
 - [done] Memory generation prompts now ask for both memory text and optional retrieval keys in a simple text format (`Memory:` / `Keys:`), avoiding JSON-only contracts.
 - [done] Draft parsing now supports vector-first usage: if the model leaves `Keys:` empty, fallback keys are generated automatically while vector retrieval can still dominate when configured.
-- [not done] Replace the temporary bottom-sheet implementation with a dedicated polished memory sheet component before considering the UI complete.
+- [done] Replace the temporary bottom-sheet implementation with a dedicated polished memory sheet component before considering the UI complete. — **Done in Phase 6.** `MemoryBooksSheet.vue` created.
 - [done] Add an explicit session setting for "раз в сколько сообщений создается мемори" so automation/bootstrap can use a user-configurable interval instead of a hardcoded threshold.
 - [done] Add an explicit session setting for memory injection target selection: `{{summary}}` macro slot vs dedicated chat summary block injection.
 - [done] Batch 3 persistence hardening: Memory Generation now preserves unsaved modal state across prompt preview/reopen flows, and DB normalization now keeps `autoCreateInterval`, `useDelayedAutomation`, `injectionTarget`, and the current Memory Books key-match defaults aligned during reload/save paths.
@@ -897,15 +1164,97 @@ Tested status:
 - [done] `npm run build`
 
 Still not done:
-- [not done] Split `llmApi.js` into smaller transport modules (`chatCompletionsClient`, `sseParser`, runtime policy pieces) while preserving the current callback contract.
 - [not done] Move more remaining direct runtime API config access behind `APISettings.js` helpers, especially lower-priority UI code and legacy toggles.
 - [not done] Extract generation session lifecycle out of `ChatView.vue` into a dedicated composable/service.
-- [not done] Separate prompt preview storage from network trace storage and stop relying on singleton global last-trace state.
-- [not done] Promote explicit request use cases (`generateChat`, `generateSummary`, `generateMemoryDraft`, `calculateContext`) instead of keeping orchestration concentrated in `generationService.js`.
+- [done] Separate prompt preview storage from network trace storage and stop relying on singleton global last-trace state. — **Done as Candidate 4.** Prompt preview keyed by generation/session, trace history keyed by request.
+- [done] Promote explicit request use cases (`generateChat`, `generateSummary`, `generateMemoryDraft`, `calculateContext`) instead of keeping orchestration concentrated in `generationService.js`. — **Done in Phase 11.** `calculateContext.js`, `generateSummary.js`, `generateMemoryDraft.js` now own their dependency assembly locally. `generationService.js` reduced from 267 → 172 lines, only exports `generateChatResponse`.
+- [done] Split `llmApi.js` into transport modules — **Done in Phase 12a.** `llmApi.js` moved to `transport/requestOrchestrator.js`, i18n coupling extracted to `reasoningHeaders.js`, dead `requestReasoning` param removed from `streamAccumulator` and `streamingSse`.
 
 Immediate next refactor step:
 - [done] Extracted SSE parsing and stream normalization out of `llmApi.js` first, because that was the highest-complexity remaining transport logic and the biggest blocker to finishing the provider/network split cleanly.
-- [not done] Continue splitting the remaining `llmApi.js` orchestration path into a dedicated transport client boundary once the SSE slice is stabilized.
+- [done] Moved remaining `llmApi.js` orchestration path into `transport/requestOrchestrator.js`, removed i18n coupling from transport layer, removed dead params. Transport split complete.
+
+### Phase 11: Use-Case Layer Re-architecture (2026-04-24)
+
+Branch: `feat/refactor-phase1-event-hub`
+Status: `done`
+Testing: `tested` (`npm run build` + `npm run lint`, 0 errors)
+
+Goal: Clean up the use-case/pipeline layer — relocate pipeline files, split scope-creep files, fix naming, eliminate hollow entrypoints, document remaining UI leak sites.
+
+Tasks:
+- [done] **11a. Pipeline directory** — Created `src/core/llm/pipeline/`, moved 3 files:
+  - `chatPipelineContext.js` → `pipeline/pipelineContext.js`
+  - `chatPipelineSteps.js` → `pipeline/steps.js`
+  - `chatPostPromptPipeline.js` → `pipeline/postPromptOrchestrator.js`
+- [done] **11b. Split scope-creep files** — 3 files split into 7:
+  - `chatLateEnrichment.js` → `vectorLoreInjection.js` + `memoryMessageInjection.js`
+  - `chatPromptShared.js` → `promptConfigReaders.js` + `promptWorkerLifecycle.js` + `promptPayloadBuilder.js`
+  - `memoryBookContext.js` → `memoryEmbeddingIndex.js` + `memoryKeyMatching.js` + `memoryContextInjection.js`
+- [done] **11c. Fix naming** — 4 files renamed:
+  - `chatContextCalculation.js` → `contextCalculation.js`
+  - `chatRequestExecution.js` → `chatRequestAssembly.js`
+  - `nonChatGenerationHooks.js` → `sharedRequestHooks.js`
+  - `transport/chatCompletionsClient.js` → `transport/completionsClient.js`
+- [done] **11d. Eliminate hollow entrypoints**:
+  - `calculateContext.js`, `generateSummary.js`, `generateMemoryDraft.js` now own dependency assembly locally instead of proxying to `generationService.js`.
+  - `generationService.js` reduced from 267 → 172 lines; only exports `generateChatResponse`.
+  - Removed dead exports and unused imports from `generationService.js`.
+- [done] **11e. Document UI leak sites** for Phase 12:
+  - `generationService.js` imports `translations`/`currentLang` (i18n) and `showBottomSheet`/`closeBottomSheet` (UI state) — passed as `t` and sheet callbacks into pipeline.
+  - `pipeline/steps.js` `stepContextLimitGuard` receives `showBottomSheet`/`closeBottomSheet` via deps — UI notification from pipeline step.
+  - These should become callback-style dep injection or event-driven in Phase 12.
+
+Files changed:
+- Moved/renamed: 7 files
+- Split: 3 → 7 files (3 new files added)
+- Rewritten: `calculateContext.js`, `generateSummary.js`, `generateMemoryDraft.js` (now real entrypoints)
+- Trimmed: `generationService.js` (267 → 172 lines)
+- Updated: `ARCHITECTURE.md` (Phase 11 section + updated "not changed yet")
+
+### Phase 12: Transport Split & Legacy Cleanup (2026-04-24)
+
+Branch: `feat/refactor-phase1-event-hub`
+Status: `done`
+Testing: `tested` (`npm run build` + `npm run lint`, 0 errors)
+
+Tasks:
+- [done] **12a. Transport extraction** — `llmApi.js` moved to `transport/requestOrchestrator.js`, i18n coupling extracted to `reasoningHeaders.js`, dead `requestReasoning` param removed
+- [done] **12b. Naming & organization** — `chatCompletionsClient.js` → `completionsClient.js`, pipeline files renamed, dead exports removed
+- [done] **12c. Dead parameter cleanup** — removed unused params from `streamAccumulator`, `streamingSse`, and transport chain
+
+Files changed:
+- Moved: `llmApi.js` → `transport/requestOrchestrator.js`
+- Renamed: `chatCompletionsClient.js` → `completionsClient.js`
+- Trimmed: `generationService.js` (172 → 173 lines)
+- New: `transport/reasoningHeaders.js`
+
+### Phase 13a: App.vue Decomposition (2026-04-24)
+
+Branch: `feat/refactor-phase1-event-hub`
+Status: `done`
+Testing: `tested` (`npm run build` + `npm run lint`, 0 errors)
+
+Goal: Break App.vue from 1229-line god object into thin shell wiring 5 composables.
+
+Tasks:
+- [done] Extract `composables/app/useAppNavigation.js` (101 lines) — view routing, desktop/mobile detection, effectiveMainView, floating menu, FAB, layout metrics
+- [done] Extract `composables/app/useEditorController.js` (304 lines) — character/persona editor lifecycle, editor configs, save/auto-save/delete, FS editor, close-and-return-to-chat
+- [done] Extract `composables/app/useGlossaryPopup.js` (99 lines) — desktop glossary drag popup, position state, header event handlers
+- [done] Extract `composables/app/useAppEventSubscriptions.js` (190 lines) — all 25+ subscribeAppEvent calls, sync refresh, open-chat routing, sheet openers, cleanup
+- [done] Extract `composables/app/useAppInit.js` (108 lines) — onMounted init (theme, lorebooks, presets, sync, thumbnails, notifications, keyboard, ResizeObserver), onBeforeUnmount cleanup
+- [done] Wire composables into App.vue, fix template ref unwrapping bug (inline `chatViewRef` was unwrapped by Vue template compiler → `openChatFromTemplate` wrapper)
+
+Files changed:
+- New: 5 composables in `src/composables/app/`
+- Trimmed: `App.vue` (1229 → 622 lines)
+
+All 13a–13e complete:
+- [done] 13a: App.vue decomposition
+- [done] 13b: PresetView.vue decomposition
+- [done] 13c: lorebookState.js decomposition
+- [done] 13d: ChatMessage.vue decomposition
+- [done] 13e: ChatInput.vue decomposition
 
 ## Refactoring Phase — Tokenizer, Memory Books, Vectors/Lorebooks (Active)
 
@@ -1011,12 +1360,7 @@ Status: `partially done | ready for testing` (Commits: b5857d0, 78be7ed)
    - Reference: https://github.com/aikohanasaki/SillyTavern-MemoryBooks
 
 **Remaining Tasks**:
-1. [not done] **Extract memory books UI into dedicated component**
-   - Create `src/components/sheets/MemoryBooksSheet.vue`
-   - Move logic from ChatView.vue:1684-2070 (openMemoryBooksSheet)
-   - Move settings from ChatView.vue:1300-1551 (openMemoryGenerationSettings)
-   - Move prompt manager from ChatView.vue:1553-1629 (openMemoryPromptManager)
-   - Deferred: Technical debt, not blocking users
+1. [done] **Extract memory books UI into dedicated component** — Done in Phase 6. `MemoryBooksSheet.vue` created (1176 lines).
    
 2. [not done] **Fix: Memory menu in chat doesn't persist settings state**
    - Settings from main Memory Books sheet should sync with in-chat memory UI
@@ -1203,7 +1547,7 @@ PR: #34
 
 **MEDIUM Priority:**
 - [ ] Memory Books settings sync (main ↔ in-chat menu)
-- [ ] Extract Memory Books UI to dedicated component (reduce ChatView ~1000 lines)
+- [x] Extract Memory Books UI to dedicated component (MemoryBooksSheet.vue, done in Phase 6)
 - [ ] Separate menus for injection types (vector/keyword/memory)
 
 **LOW Priority:**
@@ -1215,9 +1559,7 @@ PR: #34
 
 **Goal:** Reduce ChatView.vue complexity by extracting large UI sections into dedicated SheetView-based components.
 
-**Status:** `in progress`
-
-**Branch:** `feat/component-extraction` (from `origin/dev` at `1434aa3`)
+**Status:** `done`
 
 **Motivation:**
 - ChatView.vue is ~7000 lines, making it difficult to maintain and navigate

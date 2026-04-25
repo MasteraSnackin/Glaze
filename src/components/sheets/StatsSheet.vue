@@ -52,22 +52,6 @@ const formatDate = (timestamp) => {
     return new Date(timestamp).toLocaleString();
 };
 
-const calculateStats = async (charId, currentSessionId, history) => {
-    // Only calculate chat stats if we have a charId
-    if (charId && currentSessionId) {
-        const cStats = getChatStats(charId, currentSessionId);
-        if (cStats) {
-            statsData.value.chat = cStats;
-            if (cStats.firstMessage !== '-') {
-                statsData.value.chat.firstMessage = formatDate(parseInt(cStats.firstMessage, 10));
-            }
-        }
-    }
-
-    await calculateCharStats(selectedCharId.value);
-    await calculateGlobalStats();
-};
-
 const calculateCharStats = async (charId) => {
     if (!charId) return;
     const cStats = getCharStats(charId);
@@ -85,6 +69,22 @@ const calculateGlobalStats = async () => {
     if (gStats.firstMessage !== '-') {
         statsData.value.general.firstMessage = formatDate(parseInt(gStats.firstMessage, 10));
     }
+};
+
+const calculateStats = async (charId, currentSessionId, history) => {
+    // Only calculate chat stats if we have a charId
+    if (charId && currentSessionId) {
+        const cStats = getChatStats(charId, currentSessionId);
+        if (cStats) {
+            statsData.value.chat = cStats;
+            if (cStats.firstMessage !== '-') {
+                statsData.value.chat.firstMessage = formatDate(parseInt(cStats.firstMessage, 10));
+            }
+        }
+    }
+
+    await calculateCharStats(selectedCharId.value);
+    await calculateGlobalStats();
 };
 
 let updateInterval = null;
@@ -153,7 +153,7 @@ const setTab = (tab) => {
 </script>
 
 <template>
-    <SheetView ref="sheet" :z-index="1005" :title="t('action_chat_stats') || 'Statistics'" :tabs="statsTabs" :active-tab="currentTab" @update:activeTab="setTab">
+    <SheetView ref="sheet" :z-index="1005" :title="t('action_chat_stats') || 'Statistics'" :tabs="statsTabs" :active-tab="currentTab" @update:active-tab="setTab">
         <div class="stats-body">
             <!-- Character selector (char tab only) — above hero -->
             <div v-if="currentTab === 'char'" class="char-picker" @click="showCharDropdown = !showCharDropdown">

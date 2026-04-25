@@ -3,6 +3,8 @@ import { logger } from '../../utils/logger.js';
 import { ForegroundService } from '@capawesome-team/capacitor-android-foreground-service';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { getActiveContext } from '@/core/services/timeTracker.js';
+import { publishAppEvent } from '@/core/events/eventHub.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
 
 const MessagingStyleNotification = registerPlugin('MessagingStyleNotification');
 
@@ -27,7 +29,7 @@ if (Capacitor.getPlatform() === 'android') {
         if (data && data.charId) {
             pendingNotificationData = data;
             logger.debug("[NotificationService] Dispatching open-chat for:", data);
-            window.dispatchEvent(new CustomEvent('open-chat', { detail: data }));
+            publishAppEvent(APP_EVENTS.nav.openChat, data);
         }
     });
 
@@ -36,7 +38,7 @@ if (Capacitor.getPlatform() === 'android') {
         if (data && data.charId) {
             pendingNotificationData = data;
             logger.debug("[MessagingStyleNotificationPlugin] Dispatching open-chat for:", data);
-            window.dispatchEvent(new CustomEvent('open-chat', { detail: data }));
+            publishAppEvent(APP_EVENTS.nav.openChat, data);
         }
     });
 }
@@ -220,7 +222,7 @@ export async function sendMessageNotification(title, body, icon, charId, session
             });
             n.onclick = () => {
                 window.focus();
-                if (charId) window.dispatchEvent(new CustomEvent('open-chat', { detail: { charId, sessionId, msgId } }));
+                if (charId) publishAppEvent(APP_EVENTS.nav.openChat, { charId, sessionId, msgId });
                 n.close();
             };
         }

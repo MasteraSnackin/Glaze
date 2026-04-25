@@ -9,6 +9,7 @@ export async function executeNativeNonStreamingRequest({
     requestUrl,
     headers,
     requestBody,
+    debugKey,
     connectTimeout,
     streamTimeout
 }) {
@@ -25,12 +26,12 @@ export async function executeNativeNonStreamingRequest({
         const errorData = typeof response.data === 'object'
             ? JSON.stringify(response.data)
             : String(response.data || '');
-        updateNetworkTrace({ responseStatus: response.status });
-        finishNetworkTrace({ rawResponse: response.data, error: `API Error: ${response.status} ${errorData}` });
+        updateNetworkTrace({ debugKey, patch: { responseStatus: response.status } });
+        finishNetworkTrace({ debugKey, rawResponse: response.data, error: `API Error: ${response.status} ${errorData}` });
         throw new Error(`API Error: ${response.status} ${errorData}`);
     }
 
-    updateNetworkTrace({ responseStatus: response.status });
+    updateNetworkTrace({ debugKey, patch: { responseStatus: response.status } });
     return response.data;
 }
 
@@ -48,17 +49,26 @@ export async function executeFetchRequest({
     });
 }
 
-export async function validateFetchResponse(response) {
+export async function validateFetchResponse(response, debugKey) {
     if (!response.ok) {
         let errText = '';
         try { errText = await response.text(); } catch (e) {}
-        updateNetworkTrace({ responseStatus: response.status, responseHeaders: Object.fromEntries(response.headers.entries()) });
-        finishNetworkTrace({ rawResponse: errText, error: `API Error: ${response.status} ${errText}` });
+        updateNetworkTrace({
+            debugKey,
+            patch: {
+                responseStatus: response.status,
+                responseHeaders: Object.fromEntries(response.headers.entries())
+            }
+        });
+        finishNetworkTrace({ debugKey, rawResponse: errText, error: `API Error: ${response.status} ${errText}` });
         throw new Error(`API Error: ${response.status} ${errText}`);
     }
 
     updateNetworkTrace({
-        responseStatus: response.status,
-        responseHeaders: Object.fromEntries(response.headers.entries())
+        debugKey,
+        patch: {
+            responseStatus: response.status,
+            responseHeaders: Object.fromEntries(response.headers.entries())
+        }
     });
 }

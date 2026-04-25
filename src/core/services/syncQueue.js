@@ -6,7 +6,7 @@ const BASE_DELAY_MS = 1000;
 const MAX_DELAY_MS = 30000;
 
 let _queue = Promise.resolve();
-let _pendingCount = ref(0);
+const _pendingCount = ref(0);
 let _isPaused = false;
 let _abortController = null;
 

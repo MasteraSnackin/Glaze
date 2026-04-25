@@ -91,6 +91,20 @@ const updateProgress = (msg) => {
     }
 };
 
+const showError = (err) => {
+    isImporting.value = false;
+    console.error("Restore failed", err);
+    showBottomSheet({
+        title: t('title_error') || "Error",
+        bigInfo: {
+            icon: '<svg viewBox="0 0 24 24" style="fill:currentColor;width:100%;height:100%;color:#ff4444"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>',
+            description: "Restore failed: " + err.message,
+            buttonText: t('btn_ok') || "OK",
+            onButtonClick: () => closeBottomSheet()
+        }
+    });
+};
+
 const handleRestoreFile = async (event) => {
     const file = event.target.files[0];
     if (!file) return;
@@ -140,20 +154,6 @@ const handleRestoreFile = async (event) => {
     event.target.value = '';
 };
 
-const showError = (err) => {
-    isImporting.value = false;
-    console.error("Restore failed", err);
-    showBottomSheet({
-        title: t('title_error') || "Error",
-        bigInfo: {
-            icon: '<svg viewBox="0 0 24 24" style="fill:currentColor;width:100%;height:100%;color:#ff4444"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>',
-            description: "Restore failed: " + err.message,
-            buttonText: t('btn_ok') || "OK",
-            onButtonClick: () => closeBottomSheet()
-        }
-    });
-};
-
 const open = () => {
     isImporting.value = false;
     importComplete.value = false;
@@ -177,7 +177,9 @@ defineExpose({ open, close });
             <!-- Normal View -->
             <div v-if="!isImporting && !importComplete" class="bs-sections">
                 <div class="bs-section">
-                    <div class="bs-section-title">Import</div>
+                    <div class="bs-section-title">
+Import
+</div>
                     <button class="bs-btn bs-import-btn" @click="triggerImport">
                         <svg viewBox="0 0 24 24"><path d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z"/></svg>
                         <span>{{ t('menu_import') || 'Import Backup' }}</span>
@@ -192,13 +194,17 @@ defineExpose({ open, close });
                 <div class="bs-separator"></div>
 
                 <div class="bs-section">
-                    <div class="bs-section-title">Export</div>
+                    <div class="bs-section-title">
+Export
+</div>
                     <button class="bs-btn bs-export-btn" @click="performExport" :disabled="isExporting">
                         <div v-if="isExporting" class="app-loader-spinner small" style="width: 22px; height: 22px;"></div>
                         <svg v-else viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
                         <span>{{ isExporting ? (t('exporting_data') || 'Exporting...') : (t('menu_export') || 'Export Data (.glz)') }}</span>
                     </button>
-                    <div class="bs-hint">{{ t('backup_hint_export') || 'Create a full backup of your current application state.' }}</div>
+                    <div class="bs-hint">
+{{ t('backup_hint_export') || 'Create a full backup of your current application state.' }}
+</div>
                 </div>
                 
                 <input type="file" ref="fileInput" style="display: none" accept="*/*" @change="handleRestoreFile">
@@ -209,8 +215,12 @@ defineExpose({ open, close });
                 <div class="progress-icon">
                     <div class="app-loader-spinner" style="width: 48px; height: 48px;"></div>
                 </div>
-                <div class="progress-title">{{ t('importing_data') || 'Importing Data' }}</div>
-                <div class="progress-subtitle">{{ importProgressText }}</div>
+                <div class="progress-title">
+{{ t('importing_data') || 'Importing Data' }}
+</div>
+                <div class="progress-subtitle">
+{{ importProgressText }}
+</div>
                 
                 <div class="progress-bar-container">
                     <div class="progress-bar" :style="{ width: (importProgressStage / importTotalStages) * 100 + '%' }"></div>
@@ -222,8 +232,12 @@ defineExpose({ open, close });
                 <div class="success-icon">
                     <svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>
                 </div>
-                <div class="success-title">{{ t('backup_success_title') || 'Restore Complete' }}</div>
-                <div class="success-subtitle">{{ t('backup_success_desc') || 'Restore successful! The app will now reload to apply changes.' }}</div>
+                <div class="success-title">
+{{ t('backup_success_title') || 'Restore Complete' }}
+</div>
+                <div class="success-subtitle">
+{{ t('backup_success_desc') || 'Restore successful! The app will now reload to apply changes.' }}
+</div>
                 <button class="bs-btn bs-success-btn" @click="reloadApp">
                     <span>{{ t('btn_reload') || 'Reload App' }}</span>
                 </button>
