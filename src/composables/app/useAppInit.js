@@ -14,6 +14,9 @@ import { generateMissingThumbnails } from '@/utils/characterIO.js';
 import { migrateScToGz } from '@/utils/db.js';
 import { isKeyboardOpen, onKeyboardShow, onKeyboardHide } from '@/core/services/keyboardHandler.js';
 import { updateLanguage } from '@/utils/i18n.js';
+import { db } from '@/utils/db.js';
+import { publishAppEvent } from '@/core/events/eventHub.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
 
 export function useAppInit({
     isOnboarding,
@@ -30,6 +33,34 @@ export function useAppInit({
 }) {
     let layoutObserver = null;
     const kbListeners = [];
+    let lastVisibilityHidden = 0;
+
+    async function onVisibilityChange() {
+        if (document.visibilityState === 'hidden') {
+            lastVisibilityHidden = Date.now();
+            return;
+        }
+        const wasHiddenMs = Date.now() - lastVisibilityHidden;
+        if (wasHiddenMs < 5000) return;
+
+        try {
+            const chars = await db.getAll('characters');
+            if (chars?.length > 0) {
+                publishAppEvent(APP_EVENTS.domain.sync.dataRefreshed, {});
+                return;
+            }
+        } catch {}
+
+        if (syncProvider.value) {
+            try {
+                await fullPull();
+            } catch (e) {
+                console.warn('[App] Auto-pull after wake failed:', e);
+            }
+        } else {
+            console.warn('[App] IndexedDB appears empty after wake and no cloud provider configured');
+        }
+    }
 
     onMounted(async () => {
         await migrateScToGz();
@@ -81,6 +112,7 @@ export function useAppInit({
 
         checkDesktop();
         window.addEventListener('resize', checkDesktop);
+        document.addEventListener('visibilitychange', onVisibilityChange);
 
         setTimeout(() => {
             document.body.classList.remove('preload');
@@ -101,6 +133,7 @@ export function useAppInit({
         appEventUnsubs.length = 0;
         kbListeners.forEach(l => l.remove());
         window.removeEventListener('resize', checkDesktop);
+        document.removeEventListener('visibilitychange', onVisibilityChange);
     });
 
     return { kbListeners };
