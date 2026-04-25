@@ -103,7 +103,7 @@
 
 ## Known Unfinished Architecture Work (Deferred)
 
-Tracked in `REFACTOR_PLAN.md` and `REFACTOR_PHASE_0_CHECKLIST.md`:
+Tracked in `REFACTOR_PLAN.md` and `REFACTOR_PHASE_0_CHECKLIST.md` (now in `docs/`):
 - Event hub + event catalog formalization
 - Request ownership token model
 - `generateChat` use-case boundary extraction

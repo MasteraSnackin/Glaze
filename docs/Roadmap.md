@@ -34,7 +34,7 @@ The current roadmap is:
 
 - Branch: `feat/refactor-phase1-event-hub`
 - Base: latest stabilized `dev`
-- Scope: `REFACTOR_PLAN.md` Phases 1–6 in progress (event hub, request ownership, composable extraction, deterministic pipelines, projections, extension API)
+- Scope: Phases 1–6 in progress (event hub, request ownership, composable extraction, deterministic pipelines, projections, extension API) — see `REFACTOR_PLAN.md`
 - Phase 1 status: `done`
 - Phase 2 status: `done`
 - Phase 3 status: `done`
@@ -1455,7 +1455,7 @@ Status: `done | ready for testing` (Commit: d215502)
 - `src/locales/en/index.json` — new i18n keys
 - `src/locales/ru/index.json` — new i18n keys
 
-**Testing**: See TESTING_CHECKLIST.md section 1
+**Testing**: See `TESTING_CHECKLIST.md` section 1
 
 ### Phase 2: Memory Books UX Improvements
 
@@ -1516,7 +1516,7 @@ Status: `partially done | ready for testing` (Commits: b5857d0, 78be7ed)
 - `src/components/chat/ChatMessage.vue` — PENDING badge prop, styling with pulse animation
 - `src/utils/db.js` — default promptPreset changed to detailed_beats
 
-**Testing**: See TESTING_CHECKLIST.md sections 3-6
+**Testing**: See `TESTING_CHECKLIST.md` sections 3-6
 
 ### Phase 3: Tokenizer Performance & Loading
 
@@ -1552,7 +1552,7 @@ Status: `done | ready for testing` (Commit: b5857d0)
 **Files modified**:
 - `src/views/ChatView.vue` — timeout handling, debounce timer, debouncedUpdateContextCutoff()
 
-**Testing**: See TESTING_CHECKLIST.md section 2
+**Testing**: See `TESTING_CHECKLIST.md` section 2
 
 ### Phase 4: Lorebook Optional Keyword Search for Vectorized Entries
 
@@ -1586,7 +1586,7 @@ Status: `done | ready for testing` (Commit: d215502)
 - `src/workers/generationWorker.js` — keyword scan filter for vector-only entries
 - `src/locales/en/index.json`, `src/locales/ru/index.json` — i18n keys
 
-**Testing**: See TESTING_CHECKLIST.md section 1
+**Testing**: See `TESTING_CHECKLIST.md` section 1
 
 ### Phase 5: Memory Injection, Deletion Protection, Import Cleanup (2026-04-18)
 
