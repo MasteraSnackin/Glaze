@@ -17,6 +17,7 @@ const props = defineProps({
 const emit = defineEmits(['action-save', 'action-delete', 'action-close']);
 
 const headerEl = ref(null);
+const defaultSearchInputEl = ref(null);
 const isDesktop = ref(typeof window !== 'undefined' && window.innerWidth >= 768);
 
 // State
@@ -30,6 +31,7 @@ const state = reactive({
     scrollHidden: false,
     hasSubheader: false,
     showSearch: false,
+    isSearchExpanded: false,
     isChatSearchMode: false,
     searchQuery: '',
     searchPlaceholder: '',
@@ -86,6 +88,7 @@ function clearHeader(nextMode = 'default', keepSearchVisibility = false) {
     state.onBack = null;
     if (!keepSearchVisibility) {
         state.showSearch = false;
+        state.isSearchExpanded = false;
         state.isChatSearchMode = false;
     }
     state.searchQuery = '';
@@ -348,6 +351,25 @@ const handleBack = () => {
     if (state.onBack) state.onBack();
 };
 
+function toggleDefaultSearch(forceExpanded) {
+    if (!state.showSearch || state.mode === 'chat' || isDesktop.value) return;
+
+    const nextExpanded = typeof forceExpanded === 'boolean'
+        ? forceExpanded
+        : !state.isSearchExpanded;
+
+    state.isSearchExpanded = nextExpanded;
+
+    if (!nextExpanded) {
+        state.searchQuery = '';
+        return;
+    }
+
+    nextTick(() => {
+        defaultSearchInputEl.value?.focus();
+    });
+}
+
 const handleActionsClick = (e) => {
     if (state.chat.callbacks?.onActionsClick) state.chat.callbacks.onActionsClick();
 };
@@ -567,7 +589,12 @@ defineExpose({ updateHeader });
       </div>
 
       <!-- Logo -->
-      <div v-if="state.showLogo" id="header-logo" class="header-logo">
+      <div
+          v-if="state.showLogo"
+          id="header-logo"
+          class="header-logo"
+          :class="{ 'header-logo--hidden': state.isSearchExpanded }"
+      >
           <svg viewBox="0 0 600 600" width="26" height="26" style="fill: var(--vk-blue);">
               <g transform="translate(0.000000,600.000000) scale(0.100000,-0.100000)">
                   <path d="M2799 4916 c-2 -2 -33 -7 -69 -10 -36 -3 -76 -8 -90 -11 -14 -2 -65 -12 -115 -21 -49 -9 -116 -25 -147 -35 -32 -11 -63 -19 -71 -19 -7 0 -31 -8 -53 -19 -21 -10 -55 -22 -74 -26 -38 -8 -146 -60 -285 -136 -43 -23 -118 -79 -123 -91 -2 -5 -10 -8 -18 -8 -8 0 -14 -4 -14 -10 0 -5 -6 -10 -13 -10 -8 0 -27 -13 -43 -30 -16 -16 -34 -30 -40 -30 -7 0 -30 -20 -52 -45 -23 -25 -45 -47 -49 -48 -12 -3 -133 -139 -133 -149 0 -5 -5 -6 -10 -3 -6 3 -10 1 -10 -6 0 -6 -36 -59 -80 -117 -44 -58 -80 -111 -80 -119 0 -7 -4 -13 -9 -13 -5 0 -12 -11 -15 -24 -3 -14 -12 -31 -19 -38 -6 -7 -17 -24 -24 -38 -6 -14 -30 -64 -52 -111 -23 -48 -41 -93 -41 -101 0 -8 -4 -18 -9 -23 -4 -6 -14 -32 -20 -60 -7 -27 -21 -72 -31 -100 -17 -43 -27 -94 -55 -255 -17 -100 -27 -293 -22 -435 6 -160 38 -417 56 -439 7 -9 17 -42 26 -86 11 -56 30 -120 41 -137 8 -12 14 -31 14 -41 0 -10 4 -22 8 -28 5 -5 17 -29 26 -54 36 -92 154 -293 216 -367 5 -7 10 -16 10 -22 0 -5 7 -11 15 -15 8 -3 15 -12 15 -20 0 -9 38 -54 85 -101 47 -47 85 -90 85 -96 0 -5 4 -9 9 -9 5 0 16 -6 23 -13 7 -6 38 -32 67 -57 30 -25 65 -54 77 -65 49 -43 92 -75 102 -75 5 0 15 -7 22 -15 7 -9 15 -13 18 -11 3 3 18 -4 34 -15 36 -26 190 -103 201 -101 4 1 7 -3 7 -8 0 -6 9 -10 19 -10 11 0 21 -4 23 -8 2 -6 140 -56 183 -67 6 -1 23 -7 38 -13 15 -7 51 -16 80 -21 29 -6 72 -14 97 -19 25 -6 68 -13 95 -16 28 -4 82 -11 120 -17 46 -7 343 -9 855 -7 725 3 787 4 815 20 17 10 37 18 46 18 20 0 95 36 119 58 11 9 32 28 47 42 15 14 31 24 35 23 5 -2 8 3 8 11 0 7 11 24 23 37 51 52 100 169 108 254 2 28 4 399 4 825 0 774 0 775 -23 858 -32 115 -48 143 -140 238 -63 65 -171 122 -272 143 -37 8 -1228 5 -1278 -3 -23 -4 -61 -14 -84 -22 -47 -16 -154 -86 -181 -118 -10 -11 -15 -15 -11 -7 5 9 3 12 -4 7 -7 -4 -12 -13 -12 -21 0 -7 -6 -20 -13 -27 -7 -7 -27 -37 -45 -66 -58 -94 -77 -226 -52 -362 10 -55 38 -144 40 -125 0 6 7 -3 15 -20 7 -16 27 -45 44 -64 17 -18 31 -37 31 -40 0 -4 15 -15 33 -26 17 -10 37 -23 42 -27 100 -81 181 -96 545 -97 266 -2 296 -3 308 -19 18 -24 13 -435 -6 -454 -9 -9 -112 -12 -460 -10 -246 1 -472 6 -502 11 -30 5 -58 7 -62 4 -5 -2 -8 -1 -8 4 0 4 -13 9 -30 10 -16 1 -51 11 -77 22 -26 10 -63 25 -82 32 -18 7 -49 23 -68 36 -19 13 -38 21 -43 18 -4 -3 -10 -2 -12 3 -1 4 -25 23 -53 42 -60 42 -181 163 -201 202 -8 15 -19 28 -23 28 -5 0 -12 13 -16 30 -4 16 -11 30 -16 30 -5 0 -9 6 -9 14 0 8 -3 16 -7 18 -13 5 -43 68 -43 88 0 10 -4 20 -9 22 -22 7 -70 238 -76 366 -9 172 11 297 68 432 5 14 12 36 14 49 2 13 11 30 19 38 7 8 14 23 14 34 0 11 5 17 10 14 6 -3 10 1 10 9 0 8 6 21 13 28 8 7 26 32 40 55 14 23 49 65 76 95 28 29 51 56 51 61 0 4 4 7 10 7 10 0 38 21 76 58 13 13 28 21 33 18 4 -3 16 3 26 14 10 11 24 20 32 20 7 0 13 5 13 11 0 6 7 9 15 6 8 -4 17 -2 20 3 4 6 15 10 26 10 10 0 19 4 19 8 0 8 81 37 165 58 74 20 230 24 910 27 704 2 775 4 823 20 94 32 208 99 218 130 3 9 12 17 20 17 8 0 14 4 14 8 0 5 8 17 18 28 36 42 70 110 88 177 26 100 8 307 -32 358 -6 8 -17 29 -25 47 -8 17 -17 32 -21 32 -5 0 -8 4 -8 9 0 11 -77 91 -88 91 -4 0 -19 11 -34 25 -15 14 -29 25 -30 26 -19 0 -48 14 -48 22 0 6 -3 8 -6 4 -3 -3 -27 4 -52 16 -47 22 -50 22 -842 25 -438 2 -798 1 -801 -2z" />
@@ -606,15 +633,11 @@ defineExpose({ updateHeader });
                           {{ state.chat.initial }}
                       </div>
                   </div>
-                  <div style="display: flex; flex-direction: column; justify-content: center; margin-left: 10px; min-width: 0; flex: 1;">
-                      <div style="display: flex; align-items: center;">
-                          <div class="header-name" id="chat-header-name" style="line-height: 1.2;">
-{{ state.chat.name }}
-</div>
+                  <div class="header-chat-text">
+                      <div class="header-chat-text-row">
+                          <div class="header-name" id="chat-header-name">{{ state.chat.name }}</div>
                       </div>
-                      <div id="chat-header-session" style="color: var(--text-gray); font-size: 0.8em; line-height: 1.2;">
-{{ state.chat.session }}
-</div>
+                      <div id="chat-header-session" class="header-chat-session">{{ state.chat.session }}</div>
                   </div>
                   <!-- Desktop inline search -->
                   <div v-if="isDesktop" class="header-search-inline chat-search-inline-desktop">
@@ -629,17 +652,42 @@ defineExpose({ updateHeader });
           <div v-else class="header-default-group" key="default">
               <!-- Top Row: Title (left, next to logo) + Inline Search (right) -->
               <div class="header-top-row">
-                  <div class="header-content" id="header-content-default">
-                      <Transition name="title-fade">
-                          <span :key="state.title" id="header-title">{{ state.title }}</span>
+                  <div class="header-content" :class="{ 'header-content--search-expanded': state.isSearchExpanded && !isDesktop }" id="header-content-default">
+                      <Transition name="search-swap" mode="out-in">
+                          <div v-if="state.showSearch && state.isSearchExpanded && !isDesktop" key="search" class="header-search-expand">
+                              <div class="search-field-wrapper search-field-wrapper--expanded">
+                                  <input
+                                      ref="defaultSearchInputEl"
+                                      :key="state.searchPlaceholder"
+                                      type="text"
+                                      v-model="state.searchQuery"
+                                      :placeholder="state.searchPlaceholder"
+                                  >
+                                  <button
+                                      type="button"
+                                      class="header-search-clear-btn"
+                                      @click="toggleDefaultSearch(false)"
+                                  >
+                                      <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                                  </button>
+                              </div>
+                          </div>
+                          <span v-else :key="state.title" :id="isDesktop ? 'header-title' : 'header-title-mobile'">{{ state.title }}</span>
                       </Transition>
                   </div>
-                  <!-- Inline Search -->
-                  <div v-if="state.showSearch" class="header-search-inline">
+
+                  <!-- Desktop inline search for default mode -->
+                  <div v-if="isDesktop && state.showSearch" class="header-search-inline default-search-inline-desktop">
                       <div class="search-field-wrapper">
-                          <Transition name="fade-slide">
-                              <input :key="state.searchPlaceholder" type="text" v-model="state.searchQuery" :placeholder="state.searchPlaceholder">
-                          </Transition>
+                          <input type="text" v-model="state.searchQuery" :placeholder="state.searchPlaceholder">
+                          <button
+                              v-if="state.searchQuery"
+                              type="button"
+                              class="header-search-clear-btn"
+                              @click="state.searchQuery = ''"
+                          >
+                              <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                          </button>
                       </div>
                   </div>
               </div>
@@ -673,11 +721,19 @@ defineExpose({ updateHeader });
 
       <!-- Right Actions + Notification Bell -->
       <div v-if="!state.isChatSearchMode" id="header-actions" class="header-btn-right" @click.stop>
-          <template v-if="state.showActions">
-          <div v-for="(action, idx) in state.actions" :key="idx" class="header-action-btn" :id="action.id" @click.stop="action.onClick" :style="{ color: action.color }">
+          <button
+              v-if="state.showSearch && state.mode !== 'chat' && !state.isSearchExpanded && !isDesktop"
+              type="button"
+              class="header-action-btn header-search-toggle-btn"
+              :class="{ 'header-search-toggle-btn--active': state.isSearchExpanded }"
+              @click.stop="toggleDefaultSearch()"
+          >
+              <svg v-if="!state.isSearchExpanded" viewBox="0 0 24 24" fill="currentColor" style="width:22px;height:22px;"><path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+              <svg v-else viewBox="0 0 24 24" fill="currentColor" style="width:22px;height:22px;"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+          </button>
+          <div v-if="state.showActions" v-for="(action, idx) in state.actions" :key="idx" class="header-action-btn" :id="action.id" @click.stop="action.onClick" :style="{ color: action.color }">
               <span v-html="action.icon" style="display: flex; fill: currentColor;"></span>
           </div>
-          </template>
           <!-- <div class="header-action-btn notif-btn" @click.stop="openNotifications">
               <svg viewBox="0 0 24 24" fill="currentColor" style="width:22px;height:22px;"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/></svg>
               <span v-if="notificationsState.unreadCount > 0" class="notif-badge"></span>
@@ -717,6 +773,8 @@ defineExpose({ updateHeader });
 <style>
 /* Header */
 .app-header {
+    --header-left-safe-space: 52px;
+    --header-right-safe-space: 0px;
     min-height: 56px;
     height: auto;
     padding-top: 0;
@@ -785,14 +843,20 @@ defineExpose({ updateHeader });
     align-items: center;
     justify-content: center;
     fill: var(--vk-blue);
-    transition: fill var(--transition-speed) ease;
+    transition: fill var(--transition-speed) ease, opacity var(--transition-speed) ease, transform var(--transition-speed) ease;
     z-index: 2;
+}
+
+.header-logo--hidden {
+    opacity: 0;
+    pointer-events: none;
 }
 
 .header-btn-right {
     position: absolute;
     right: 10px;
-    top: 9px;
+    top: 50%;
+    transform: translateY(-50%);
     display: flex;
     align-items: center;
     gap: 2px;
@@ -830,16 +894,19 @@ defineExpose({ updateHeader });
 .header-default-group {
     width: 100%;
     display: flex;
+    flex: 1 1 auto;
     flex-direction: column;
     align-items: stretch;
+    min-width: 0;
 }
 
 .header-top-row {
     width: 100%;
     display: flex;
+    flex: 1 1 auto;
     flex-direction: row;
     align-items: center;
-    height: 56px;
+    min-height: 56px;
 }
 
 .header-chat-info {
@@ -847,15 +914,23 @@ defineExpose({ updateHeader });
     align-items: center;
     font-size: 16px;
     font-weight: 500;
-    height: 56px;
+    min-height: 56px;
     width: 100%;
-    justify-content: center;
+    justify-content: flex-start;
+    min-width: 0;
+    padding-left: var(--header-left-safe-space);
+    padding-right: var(--header-right-safe-space);
+    box-sizing: border-box;
 }
 
 .header-chat-info--desktop {
     justify-content: flex-start;
-    padding-left: 52px;
+    padding-left: var(--header-left-safe-space);
     padding-right: 12px;
+}
+
+.app-header.has-right-actions .header-chat-info:not(.header-chat-info--desktop) {
+    padding-right: 56px;
 }
 
 .header-avatar {
@@ -879,19 +954,66 @@ defineExpose({ updateHeader });
     cursor: pointer;
     position: relative;
     justify-content: flex-start;
-    height: 56px;
-    transition: width var(--transition-speed) ease;
+    min-height: 56px;
+    transition: width var(--transition-speed) ease, padding-left var(--transition-speed) ease, padding-right var(--transition-speed) ease;
     z-index: 5;
     background-color: transparent;
     flex: 1;
     min-width: 0;
-    padding-left: 52px;
+    padding-left: var(--header-left-safe-space);
+    padding-right: var(--header-right-safe-space);
+    box-sizing: border-box;
+}
+
+.app-header.has-right-actions .header-content {
+    padding-right: 56px;
+}
+
+.app-header.has-search-toggle .header-content {
+    padding-right: 56px;
+}
+
+.header-content.header-content--search-expanded {
+    padding-left: 12px;
+    padding-right: 12px;
 }
 
 /* In wrap mode (generation tabs) header-content fills the top row */
 .app-header.header-wrap .header-content {
     width: 100%;
     flex: 1;
+}
+
+.header-chat-text {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    margin-left: 10px;
+    min-width: 0;
+    flex: 1;
+}
+
+.header-chat-text-row {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+}
+
+.header-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    line-height: 1.2;
+}
+
+.header-chat-session {
+    color: var(--text-gray);
+    font-size: 0.8em;
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 
@@ -907,7 +1029,14 @@ defineExpose({ updateHeader });
     opacity: 0;
 }
 
-/* Inline Search (in title row) */
+.search-field-wrapper {
+    width: 100%;
+    background-color: transparent;
+    border-radius: 10px;
+    position: relative;
+    overflow: hidden;
+}
+
 .header-search-inline {
     display: flex;
     align-items: center;
@@ -917,19 +1046,10 @@ defineExpose({ updateHeader });
     width: 200px;
 }
 
-.search-field-wrapper {
-    width: 100%;
-    height: 32px;
-    background-color: transparent;
-    border-radius: 10px;
-    position: relative;
-    overflow: hidden;
-}
-
-.header-search-inline input {
+.header-search-inline input,
+.header-search-expand input {
     width: 100%;
     height: 100%;
-    padding: 0 12px;
     border: none;
     background-color: var(--bg-gray);
     font-size: 14px;
@@ -939,6 +1059,78 @@ defineExpose({ updateHeader });
     position: absolute;
     top: 0;
     left: 0;
+}
+
+.header-search-expand input::placeholder {
+    color: var(--text-gray);
+    opacity: 0.75;
+}
+
+.header-search-expand {
+    width: 100%;
+    display: flex;
+    align-items: center;
+}
+
+.search-field-wrapper--expanded {
+    min-height: 36px;
+    display: flex;
+    align-items: stretch;
+}
+
+.header-search-clear-btn {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: transparent;
+    color: var(--text-gray);
+    fill: currentColor;
+    cursor: pointer;
+    z-index: 2;
+    opacity: 0.75;
+}
+
+.header-search-clear-btn svg {
+    width: 18px;
+    height: 18px;
+}
+
+.header-search-toggle-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: transparent;
+    color: inherit;
+    fill: currentColor;
+    padding: 0;
+}
+
+.header-search-toggle-btn--active {
+    color: var(--text-gray);
+}
+
+.header-content--search-expanded {
+    width: 100%;
+    flex: 1 1 auto;
+}
+
+.search-swap-enter-active,
+.search-swap-leave-active {
+    transition: opacity var(--transition-speed) ease, transform var(--transition-speed) ease;
+}
+
+.search-swap-enter-from,
+.search-swap-leave-to {
+    opacity: 0;
+    transform: translateX(12px);
 }
 
 /* Header Sub-tabs */
@@ -1098,5 +1290,19 @@ defineExpose({ updateHeader });
     fill: #888;
     cursor: pointer;
     z-index: 5;
+}
+
+@media (min-width: 768px) {
+    .header-content {
+        padding-right: 12px;
+    }
+
+    .app-header.has-right-actions .header-content {
+        padding-right: 12px;
+    }
+
+    .search-field-wrapper {
+        min-height: 32px;
+    }
 }
 </style>
