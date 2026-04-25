@@ -37,12 +37,15 @@ export function useAppEventSubscriptions({
     handleGlossaryOpen,
     handleGlossaryToggle,
     onGlossaryHeaderUpdate,
-    onLanguageChanged
+    onLanguageChanged,
+    isOnboarding
 }) {
     const appEventUnsubs = [];
 
     const onNavigateTo = (detail) => { currentView.value = detail; };
-    const onOpenOnboarding = () => { /* handled via isOnboarding in useAppNavigation */ };
+    const onOpenOnboarding = () => { 
+        isOnboarding.value = true;
+    };
 
     const onTriggerOpenImage = (detail) => {
         const { src, description, onCloseCallback } = detail;

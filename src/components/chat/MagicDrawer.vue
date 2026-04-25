@@ -442,7 +442,10 @@ watch(() => props.visible, (val) => {
 defineExpose({
     openPersonas: () => {
         personasSheet.value?.open();
-    }
+    },
+    getDisplayItems: () => displayItems.value,
+    getAllAvailableItems: () => allAvailableItems,
+    handleAction: (item) => handleAction(item)
 });
 </script>
 
@@ -466,7 +469,7 @@ defineExpose({
                         v-if="!item.isAddBtn"
                         :text="t(item.i18n) || item.fallback || ''"
                         placement="left"
-                        :disabled="!iconOnly"
+                        :disabled="sidebarMode || isEditing"
                     >
                     <div
                             class="magic-item"

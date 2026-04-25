@@ -13,6 +13,7 @@ import { importSillyTavernChat, exportSillyTavernChat, exportGlazeChat, pickChat
 import { allPersonas, loadPersonas } from '@/core/states/personaState.js';
 import { APP_EVENTS } from '@/core/events/eventNames.js';
 import { subscribeAppEvent, publishAppEvent } from '@/core/events/eventHub.js';
+import ToolStripTooltip from '@/components/ToolStripTooltip.vue';
 
 const props = defineProps({
   activeCategory: { type: String, default: 'all' },
@@ -123,11 +124,30 @@ const getAvatarUrl = (avatar) => {
 
 const formatPreview = (text) => {
     let formatted = formatText(text);
-    formatted = formatted.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]*>/g, '');
+    formatted = formatted.replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]*>/g, '');
+    // Replace multiple newlines with space
+    formatted = formatted.replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim();
     // Only first line
     const firstLine = formatted.split('\n').find(l => l.trim()) || '';
     return firstLine.length > 100 ? firstLine.substring(0, 100) + '...' : firstLine;
 };
+
+// Tooltip items for collapsed mode
+const collapsedTooltipItems = computed(() => {
+    return groupedChats.value.map(group => {
+        const preview = formatPreview(group.latest.msg);
+        const sessionInfo = dialogGrouping.value 
+            ? `${group.sessions.length} ${pluralize(group.sessions.length, 'count_sessions')}`
+            : (group.latest.sessionName || `Session #${group.latest.sessionId}`);
+        
+        return {
+            id: group.latest.id,
+            label: group.latest.name,
+            meta: sessionInfo,
+            subtitle: preview
+        };
+    });
+});
 
 // Grouped view: accordion groups per character
 const expandedGroups = ref(new Set());
@@ -531,25 +551,31 @@ onUnmounted(() => {
 
           <!-- Collapsed: icon-only avatar strip -->
           <template v-if="collapsed">
-              <div v-for="group in groupedChats" :key="'col_' + group.latest.id"
-                   class="collapsed-avatar-item"
-                   :class="{ unread: unread[group.latest.id] }"
-                   :title="group.latest.name"
-                   @click="onOpenChat(group.latest)">
-                  <div class="collapsed-avatar-circle">
-                      <img v-if="group.latest.thumbnail || group.latest.avatar"
-                           :src="getAvatarUrl(group.latest.thumbnail || group.latest.avatar)"
-                           :alt="group.latest.name" loading="lazy">
-                      <div v-else class="avatar-placeholder"
-                           :style="{ backgroundColor: group.latest.color || '#66ccff' }">
-                          {{ group.latest.name && group.latest.name[0] ? group.latest.name[0].toUpperCase() : '?' }}
+              <ToolStripTooltip :items="collapsedTooltipItems" placement="right">
+                  <template #default="{ onItemEnter, onItemLeave }">
+                      <div v-for="group in groupedChats" :key="'col_' + group.latest.id"
+                           class="collapsed-avatar-item"
+                           :class="{ unread: unread[group.latest.id] }"
+                           :data-tooltip-id="group.latest.id"
+                           @click="onOpenChat(group.latest)"
+                           @mouseenter="(e) => onItemEnter(group.latest.id, e)"
+                           @mouseleave="onItemLeave">
+                          <div class="collapsed-avatar-circle">
+                              <img v-if="group.latest.thumbnail || group.latest.avatar"
+                                   :src="getAvatarUrl(group.latest.thumbnail || group.latest.avatar)"
+                                   :alt="group.latest.name" loading="lazy">
+                              <div v-else class="avatar-placeholder"
+                                   :style="{ backgroundColor: group.latest.color || '#66ccff' }">
+                                  {{ group.latest.name && group.latest.name[0] ? group.latest.name[0].toUpperCase() : '?' }}
+                              </div>
+                          </div>
+                          <div class="collapsed-unread-dot" v-if="unread[group.latest.id]"></div>
                       </div>
-                  </div>
-                  <div class="collapsed-unread-dot" v-if="unread[group.latest.id]"></div>
-              </div>
-              <div v-if="groupedChats.length === 0" class="collapsed-empty">
-                  <svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/></svg>
-              </div>
+                      <div v-if="groupedChats.length === 0" class="collapsed-empty">
+                          <svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/></svg>
+                      </div>
+                  </template>
+              </ToolStripTooltip>
           </template>
 
           <template v-if="!dialogGrouping && !collapsed">

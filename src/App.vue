@@ -126,7 +126,7 @@ const events = useAppEventSubscriptions({
     handleGlossaryToggle: glossary.handleGlossaryToggle,
     onGlossaryHeaderUpdate: glossary.onGlossaryHeaderUpdate,
     onLanguageChanged,
-    finishOnboarding: nav.finishOnboarding
+    isOnboarding: nav.isOnboarding
 });
 
 useAppInit({
