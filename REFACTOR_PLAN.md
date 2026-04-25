@@ -429,7 +429,6 @@ These should become the official public entrypoints instead of `generationServic
 - `src/core/events/eventNames.js`
 - `src/core/events/eventHub.js`
 - `src/core/events/contracts.js`
-- `src/core/events/bridges/windowEventBridge.js`
 
 ### Read Models / State
 
@@ -803,9 +802,8 @@ Work:
 
 - audit every remaining `window.dispatchEvent` / `window.addEventListener` call outside the bridge itself
 - move each remaining internal usage to `publishAppEvent` / `subscribeAppEvent`
-- verify that `windowEventBridge` is the only place that touches `window` for app events
-- document the bridge as an external adapter, not an internal dependency
-- add a lint/convention rule: new code must not import from the bridge or touch `window` for app signaling
+- verify that no code touches `window` for app event dispatch
+- add a lint/convention rule: new code must not touch `window` for app signaling
 
 Done:
 
@@ -839,9 +837,9 @@ Remaining `window.addEventListener` calls are ALL native browser events (resize,
 
 Expected output:
 
-- `windowEventBridge` is genuinely an external adapter — DONE (bridge only converts app events → legacy window events for backward compat)
+- `windowEventBridge` has been removed — no consumers of legacy window events remained
 - no new code will ever need to import it — DONE (all internal callers use publishAppEvent/subscribeAppEvent)
-- existing internal callers have been migrated off — DONE (except cancelable back-nav pattern)
+- existing internal callers have been migrated off — DONE (including cancelable back-nav pattern)
 
 ### Phase 11. Organize orchestration by scenario, not by technique
 Status: done (11a–11c complete; 11d partial — generateSummary/generateMemoryDraft promoted to real entrypoints, calculateContext still hollow wrapper, generateChat still delegates to generationService.js as middleman; remaining 11d items deferred to Phase 14)
