@@ -164,16 +164,14 @@ async function migrateV1ManifestToV2(adapter, v1Manifest) {
 
         if (!type || !id) continue;
 
-        const key = entryKey(type, id);
-        const ext = filePath.endsWith('.enc') ? '.enc' : '.json';
-        entries[key] = {
+        const entryKeyStr = entryKey(type, id);
+        entries[entryKeyStr] = {
             type,
             id,
             path: filePath,
             updatedAt: cloudModified,
             hash: null,
-            deleted: false,
-            _v1Ext: ext
+            deleted: false
         };
     }
 
@@ -379,13 +377,13 @@ async function applyCloudEntry(adapter, entry, key) {
         await db.set(`gz_chat_${entry.id}`, entity);
         await clearSyncDeletedEntry(entry.type, entry.id);
     } else if (entry.type === ENTITY_TYPES.LOREBOOKS) {
-        await db.queuedSet('gz_lorebooks', entity);
+        await db.set('gz_lorebooks', entity);
     } else if (entry.type === ENTITY_TYPES.API_PRESETS) {
-        await db.queuedSet('gz_api_connection_presets', entity);
+        await db.set('gz_api_connection_presets', entity);
     } else if (entry.type === ENTITY_TYPES.THEME_PRESETS) {
-        await db.queuedSet('gz_theme_presets', entity);
+        await db.set('gz_theme_presets', entity);
     } else if (entry.type === ENTITY_TYPES.THEME_STATE) {
-        await db.queuedSet('gz_theme_active_preset', entity);
+        await db.set('gz_theme_active_preset', entity);
     } else if (entry.type === ENTITY_TYPES.LOCAL_STORAGE) {
         for (const [lsKey, lsVal] of Object.entries(entity || {})) {
             localStorage.setItem(lsKey, lsVal);
