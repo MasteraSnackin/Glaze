@@ -217,6 +217,9 @@ onBeforeUnmount(() => {
                     <slot></slot>
                 </div>
             </div>
+            <div v-if="$slots.floating" class="sheet-view-floating-layer" :class="{ 'is-sidebar': isSidebarMode }">
+                <slot name="floating"></slot>
+            </div>
         </div>
     </Teleport>
 </template>
@@ -422,6 +425,17 @@ onBeforeUnmount(() => {
 .sheet-view-content.expanded:has(.sc-sheet-tabs):has(.sc-sheet-header-bottom) .sheet-view-body {
     padding-top: calc(200px + var(--sat, 0px));
     scroll-padding-top: calc(200px + var(--sat, 0px));
+}
+
+.sheet-view-floating-layer {
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    pointer-events: none;
+}
+
+.sheet-view-floating-layer.is-sidebar {
+    position: absolute;
 }
 
 .sheet-view-body::-webkit-scrollbar-track {

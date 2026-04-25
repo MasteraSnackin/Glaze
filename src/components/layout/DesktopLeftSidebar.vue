@@ -3,7 +3,7 @@ import DialogList from '@/views/DialogList.vue';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { translations } from '@/utils/i18n.js';
 import { useSidebarResizer } from '@/composables/ui/useSidebarResizer.js';
-import { attachHoverGlow } from '@/core/services/ui.js';
+import { attachHoverGlow } from '@/core/services/interactionEffects.js';
 import { APP_EVENTS } from '@/core/events/eventNames.js';
 import { publishAppEvent } from '@/core/events/eventHub.js';
 

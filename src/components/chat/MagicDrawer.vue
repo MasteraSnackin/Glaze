@@ -1,8 +1,9 @@
 <script setup>
 import { ref, watch, nextTick, onMounted, computed } from 'vue';
+import Tooltip from '@/components/ui/Tooltip.vue';
 import { translations, pluralize } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
-import { attachRipple } from '@/core/services/ui.js';
+import { attachRipple } from '@/core/services/interactionEffects.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import { lorebookState, initLorebookState } from '@/core/states/lorebookState.js';
 import { estimateTokens } from '@/utils/tokenizer.js';
@@ -461,8 +462,14 @@ defineExpose({
             
             <div class="drawer-content">
                 <template v-for="(item) in displayItems" :key="item.id">
-                    <div v-if="!item.isAddBtn"
-                            class="magic-item" 
+                    <Tooltip
+                        v-if="!item.isAddBtn"
+                        :text="t(item.i18n) || item.fallback || ''"
+                        placement="left"
+                        :disabled="!iconOnly"
+                    >
+                    <div
+                            class="magic-item"
                             :data-index="item.originalIndex"
                             :class="{ 'editing': isEditing, 'dragging': item.originalIndex === dragSrcIndex }"
                             :draggable="isEditing || sidebarMode"
@@ -494,11 +501,12 @@ defineExpose({
                                 <span class="item-status" v-else-if="item.id === 'preview' && generationTokens > 0"><span>{{ generationTokens }} {{ pluralize(generationTokens, 'count_tokens') }}</span></span>
                             </div>
                         </div>
-                        
+
                         <div v-if="isEditing || (sidebarMode && !iconOnly)" class="delete-btn" @click.stop="removeItem(item.originalIndex)">
                             <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
                         </div>
                     </div>
+                    </Tooltip>
 
                     <div v-else class="magic-item add-btn" @click="addItem">
                         <div class="magic-item-content">

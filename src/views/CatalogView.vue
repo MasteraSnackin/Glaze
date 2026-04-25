@@ -13,7 +13,7 @@ import { createNewSession } from '@/utils/sessions.js';
 import { datacatGetCharacter, datacatExtract, datacatExtractionStatus } from '@/core/services/catalog/datacatProvider.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import FiltersBottomSheet from '@/components/sheets/FiltersBottomSheet.vue';
-import CatalogCharacterSheet from '@/components/sheets/CatalogCharacterSheet.vue';
+import CharacterCardEditorSheet from '@/components/sheets/CharacterCardEditorSheet.vue';
 
 // ─── Search ───────────────────────────────────────────────────────────────────
 
@@ -418,7 +418,7 @@ onUnmounted(() => {
         </div>
 
         <FiltersBottomSheet v-model:visible="showFiltersSheet" @apply="onFiltersApply" />
-        <CatalogCharacterSheet
+        <CharacterCardEditorSheet
             v-model:visible="showCharSheet"
             :item="previewItem"
             :char-data="previewCharData"

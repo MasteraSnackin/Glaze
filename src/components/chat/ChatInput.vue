@@ -5,7 +5,7 @@ import MagicDrawer from '@/components/chat/MagicDrawer.vue';
 import { translations } from '@/utils/i18n.js';
 import { currentLang, enterToSubmit } from '@/core/config/APPSettings.js';
 import { Capacitor } from '@capacitor/core';
-import { attachRipple } from '@/core/services/ui.js';
+import { attachRipple } from '@/core/services/interactionEffects.js';
 import { getCaretIndex, getTextFromContentEditable, updateInputPreview } from '@/composables/chat/useContentEditable.js';
 import { useInputActions, useMagicDrawer } from '@/composables/chat/useInputActions.js';
 

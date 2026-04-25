@@ -4,7 +4,7 @@ import { publishAppEvent, subscribeAppEvent } from '@/core/events/eventHub.js';
 import { APP_EVENTS } from '@/core/events/eventNames.js';
 import { getProviderProfiles, getActiveLLMProfile, setActiveLLMProfile } from '@/core/config/ProviderProfiles.js';
 import { updateLanguage, translations } from '@/utils/i18n.js';
-import { initRipple } from '@/core/services/ui.js';
+import { initRipple } from '@/core/services/interactionEffects.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import SheetView from '@/components/ui/SheetView.vue';

@@ -3,7 +3,7 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import { publishAppEvent, subscribeAppEvent } from '@/core/events/eventHub.js';
 import { APP_EVENTS } from '@/core/events/eventNames.js';
 import { translations, t, updateLanguage } from '@/utils/i18n.js';
-import { initRipple } from '@/core/services/ui.js';
+import { initRipple } from '@/core/services/interactionEffects.js';
 import Editor from '@/components/editors/GenericEditor.vue';
 import { presetState, initPresetState, getEffectivePresetId, flushPresetSave } from '@/core/states/presetState.js';
 import SheetView from '@/components/ui/SheetView.vue';

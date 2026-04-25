@@ -10,9 +10,10 @@ export const desktopDropdownState = ref({
     x: 0,
     y: 0,
     isTriggered: false,
+    onClose: null,
 });
 
-export function showDesktopDropdown({ title, items, bigInfo, headerAction, x, y, isTriggered = false }) {
+export function showDesktopDropdown({ title, items, bigInfo, headerAction, x, y, isTriggered = false, onClose = null }) {
     desktopDropdownState.value = {
         visible: true,
         title: title || '',
@@ -22,10 +23,14 @@ export function showDesktopDropdown({ title, items, bigInfo, headerAction, x, y,
         isTriggered,
         x,
         y,
+        onClose,
     };
 }
 
 export function closeDesktopDropdown() {
+    if (desktopDropdownState.value.onClose) {
+        desktopDropdownState.value.onClose();
+    }
     desktopDropdownState.value = {
         ...desktopDropdownState.value,
         visible: false,

@@ -1,10 +1,16 @@
 <script setup>
 import { toastState } from '@/core/states/toastState.js';
+import { appToastPosition } from '@/core/config/APPSettings.js';
 </script>
 
 <template>
     <Transition name="toast">
-        <div v-if="toastState.visible" class="app-toast" @click="toastState.visible = false">
+        <div
+            v-if="toastState.visible"
+            class="app-toast"
+            :class="`app-toast--${appToastPosition}`"
+            @click="toastState.visible = false"
+        >
             <span>{{ toastState.text }}</span>
         </div>
     </Transition>
@@ -13,7 +19,6 @@ import { toastState } from '@/core/states/toastState.js';
 <style scoped>
 .app-toast {
     position: fixed;
-    bottom: calc(var(--footer-height, 80px) + 24px);
     left: 50%;
     transform: translateX(-50%);
     z-index: 10000;
@@ -35,6 +40,14 @@ import { toastState } from '@/core/states/toastState.js';
     -webkit-user-select: none;
 }
 
+.app-toast--bottom {
+    bottom: calc(var(--footer-height, 80px) + 24px);
+}
+
+.app-toast--top {
+    top: calc(env(safe-area-inset-top, 0px) + var(--header-height, 56px) + 16px);
+}
+
 
 
 .toast-enter-active {
@@ -45,10 +58,20 @@ import { toastState } from '@/core/states/toastState.js';
 }
 .toast-enter-from {
     opacity: 0;
-    transform: translateX(-50%) translateY(20px) scale(0.85);
+    transform: translateX(-50%) translateY(var(--toast-enter-offset, 20px)) scale(0.85);
 }
 .toast-leave-to {
     opacity: 0;
-    transform: translateX(-50%) translateY(10px) scale(0.95);
+    transform: translateX(-50%) translateY(var(--toast-leave-offset, 10px)) scale(0.95);
+}
+
+.app-toast--top {
+    --toast-enter-offset: -20px;
+    --toast-leave-offset: -10px;
+}
+
+.app-toast--bottom {
+    --toast-enter-offset: 20px;
+    --toast-leave-offset: 10px;
 }
 </style>

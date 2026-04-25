@@ -44,13 +44,14 @@ import { estimateTokens } from '@/utils/tokenizer.js';
 import { cleanText } from '@/utils/textFormatter.js';
 import { getEffectivePersona, activePersona, allPersonas } from '@/core/states/personaState.js';
 import { formatDate, formatDateSeparator } from '@/utils/dateFormatter.js';
-import { currentLang, chatPaddingLR, setChatPaddingLR, shouldUseBatterySaverUI } from '@/core/config/APPSettings.js';
+import { currentLang, chatMaxWidth, setChatMaxWidth, shouldUseBatterySaverUI } from '@/core/config/APPSettings.js';
 import { translations } from '@/utils/i18n.js';
 import { createChatGenerationServices } from '@/core/llm/usecases/generateChat.js';
 import { useGenerationAbort } from '@/composables/chat/useGenerationAbort.js';
 import { getActiveLLMProfile } from '@/core/config/ProviderProfiles.js';
 import { getEmbeddingConfig, isEmbeddingConfigured } from '@/core/config/embeddingSettings.js';
-import { animateTextChange, updateAppColors, initHeaderScroll, initRipple } from '@/core/services/ui.js';
+import { animateTextChange, updateAppColors, initHeaderScroll } from '@/core/services/ui.js';
+import { initRipple } from '@/core/services/interactionEffects.js';
 import { showBottomSheet, closeBottomSheet, bottomSheetState } from '@/core/states/bottomSheetState.js';
 import { db } from '@/utils/db.js';
 import { createNewSession as dbCreateSession, deleteSession as dbDeleteSession, switchSession as dbSwitchSession, getAllGreetings, getChatData } from '@/utils/sessions.js';
@@ -165,20 +166,20 @@ const chatInputContainer = ref(null);
 
 const chatRootStyle = computed(() => {
     return {
-        '--chat-padding-lr': (chatPaddingLR.value > 0) ? `${chatPaddingLR.value}px` : '0px'
+        '--chat-max-width': chatMaxWidth.value > 0 ? `${chatMaxWidth.value}px` : '100%'
     };
 });
 
-const { width: leftPaddingRef, startResize: startLeftPaddingResize } = useSidebarResizer('gz_chat_padding_lr', chatPaddingLR.value, 'left', 0, 800);
-const { width: rightPaddingRef, startResize: startRightPaddingResize } = useSidebarResizer('gz_chat_padding_lr', chatPaddingLR.value, 'right', 0, 800);
+const { width: leftWidthRef, startResize: startLeftWidthResize } = useSidebarResizer('gz_chat_max_width', chatMaxWidth.value || 800, 'right', 400, 1600);
+const { width: rightWidthRef, startResize: startRightWidthResize } = useSidebarResizer('gz_chat_max_width', chatMaxWidth.value || 800, 'left', 400, 1600);
 
-watch(leftPaddingRef, (val) => {
-    setChatPaddingLR(val);
-    if (rightPaddingRef.value !== val) rightPaddingRef.value = val;
+watch(leftWidthRef, (val) => {
+    setChatMaxWidth(val);
+    if (rightWidthRef.value !== val) rightWidthRef.value = val;
 });
-watch(rightPaddingRef, (val) => {
-    setChatPaddingLR(val);
-    if (leftPaddingRef.value !== val) leftPaddingRef.value = val;
+watch(rightWidthRef, (val) => {
+    setChatMaxWidth(val);
+    if (leftWidthRef.value !== val) leftWidthRef.value = val;
 });
 
 const chatInputRef = ref(null);
@@ -1138,7 +1139,7 @@ const {
 
 async function openCharCard() {
     if (!activeChatChar) return;
-    charCardSheet.value?.open(activeChatChar);
+    charCardSheet.value?.open(activeChatChar, { importEnabled: false });
 }
 
 async function openChatStatsSheet(char = activeChatChar) {
@@ -1436,8 +1437,8 @@ onUnmounted(() => {
             <div class="app-loader-spinner"></div>
         </div>
 
-        <div class="sidebar-drag-handle" v-if="!isAndroid" :style="{ left: 'calc(' + chatPaddingLR + 'px - 4px)' }" @mousedown="startLeftPaddingResize" style="position: absolute; z-index: 10;"></div>
-        <div class="sidebar-drag-handle" v-if="!isAndroid" :style="{ right: 'calc(' + chatPaddingLR + 'px - 4px)' }" @mousedown="startRightPaddingResize" style="position: absolute; z-index: 10;"></div>
+        <div class="sidebar-drag-handle" v-if="!isAndroid && chatMaxWidth > 0" :style="{ left: 'calc((100% - ' + chatMaxWidth + 'px) / 2 - 4px)' }" @mousedown="startLeftWidthResize" style="position: absolute; z-index: 10;"></div>
+        <div class="sidebar-drag-handle" v-if="!isAndroid && chatMaxWidth > 0" :style="{ right: 'calc((100% - ' + chatMaxWidth + 'px) / 2 - 4px)' }" @mousedown="startRightWidthResize" style="position: absolute; z-index: 10;"></div>
 
         <div class="chat-container" id="chat-messages" ref="messagesContainer" :class="{ 'is-scrolling': isScrolling, 'visually-hidden': isLoading }" :style="isAndroid ? { marginBottom: keyboardOverlap + 'px' } : {}">
             <!-- paddingTop - spacer for virtual list scroll offset -->

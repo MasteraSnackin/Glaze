@@ -110,16 +110,18 @@
     z-index: 1 !important;
 }
 
-/* Chat container: small top pad — messages scroll behind the header */
+/* Chat container: fixed max-width, centered */
 .desktop-mode .chat-container {
     padding-top: 8px !important;
-    padding-left: var(--chat-padding-lr, 0px) !important;
-    padding-right: var(--chat-padding-lr, 0px) !important;
+    max-width: var(--chat-max-width, 100%) !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
 }
 
 .desktop-mode .chat-input-wrapper {
-    padding-left: var(--chat-padding-lr, 0px) !important;
-    padding-right: var(--chat-padding-lr, 0px) !important;
+    left: max(0px, calc((100% - var(--chat-max-width, 100%)) / 2)) !important;
+    right: max(0px, calc((100% - var(--chat-max-width, 100%)) / 2)) !important;
+    width: auto !important;
 }
 
 /* Hide mobile-only magic button and its bottom drawer */
@@ -465,7 +467,7 @@
     bottom: 0;
     width: 8px;
     cursor: col-resize;
-    z-index: 500;
+    z-index: 13000;
     background-color: transparent;
     transition: background-color 0.2s, opacity 0.2s;
     opacity: 0;
