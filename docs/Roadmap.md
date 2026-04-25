@@ -293,9 +293,14 @@ Phase 8 ChatView decomposition:
 - [done] `activeChatChar` plain `let` passed via `getActiveChatChar()`/`setActiveChatChar()` callbacks instead of direct capture
 - [done] `chatGenerationServices` lazy `let` passed via `getChatGenerationServices()` factory
 - [done] `_cleanupScroll` let passed via `getCleanupScroll()`/`setCleanupScroll()` callbacks
-- [not done] Extract `openChat()` (~400 lines) into composable — deferred: ~30+ dependency injections, marginal ROI
+- [not done] Extract `openChat()` (~400 lines) into composable — deferred: ~30+ dependency injections, marginal ROI (see ARCHITECTURE.md "Deferred Refactoring Items")
 - [not done] Extract context/tokenizer sheet actions (~32 lines) — too small for dedicated composable
 - [done] ChatView.vue reduced from 3767 → 1611 lines (-57%, target <2000 met)
+
+### Deferred Refactoring (documented in ARCHITECTURE.md)
+
+- `themeState.js` (639 lines) — violates State ≠ service. Extract preset CRUD/init into `themePresetService.js` (~340 lines). Deferred to next refactor pass.
+- `useMemorySheetUI.js` (844 lines) — do not refactor. ~600 lines of imperative DOM (innerHTML + querySelector); splitting would scatter without improving architecture. Only meaningful fix is full Vue-template rewrite, which is out of scope.
 
 This roadmap intentionally assumes the tokenizer and current context UI are already in place and are not being redesigned again unless a new decision is made explicitly.
 

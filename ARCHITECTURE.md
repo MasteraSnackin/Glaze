@@ -1066,6 +1066,30 @@ These rules prevent the gradual re-accumulation of responsibilities that motivat
 
 7. **Template is not logic** — 1000+ lines of template is acceptable for complex UI. The decomposition target is script logic, not HTML structure. Never extract a sub-component solely to reduce line count if it requires excessive prop-drilling.
 
+## Deferred Refactoring Items
+
+These files exceed the 400-line guard rail but are intentionally left as-is. Each entry explains why refactoring is deferred.
+
+### `ChatView.vue` — `openChat()` extraction (~400 lines inline)
+
+- **Status:** Deferred
+- **Reason:** `openChat()` has ~30+ dependency injections. Extracting it into a composable would create a massive parameter list and prop-drilling surface with no architectural gain — ChatView is already a composable-wiring shell. Accepted as permanent exception (see Guard Rail #1).
+- **Revisit if:** A new feature requires testing `openChat()` in isolation, or the function grows significantly beyond its current scope.
+
+### `themeState.js` (639 lines) — State ≠ service violation
+
+- **Status:** Deferred (next refactor pass)
+- **Problem:** Violates Guard Rail #3. File mixes reactive state + simple setters (~300 lines, correct) with preset CRUD orchestration (`initTheme`, `applyPreset`, `createPreset/switchPreset/deletePreset/updatePresetMeta/exportThemePreset/importThemePreset`, ~340 lines, should be a service).
+- **Proposed fix:** Extract preset orchestration into `themePresetService.js`. `themeState.js` would retain only `themeState` reactive + setter functions (~300 lines).
+- **Risk:** Low — preset functions already delegate to `themePersistence.js`, `themeMigration.js`, `themeRenderer.js`. The extraction boundary is clear.
+
+### `useMemorySheetUI.js` (844 lines) — imperative DOM anti-pattern
+
+- **Status:** Do not refactor
+- **Reason:** ~600 of 844 lines are `document.createElement('div')` + `innerHTML` + `querySelector` + `addEventListener`. This is a fundamental DOM approach problem, not a concern-mixing problem. Splitting the file into smaller pieces would not improve architecture — it would just scatter imperative DOM code across more files. The only meaningful refactoring would be rewriting all innerHTML sheets as Vue components, which is a large UI rewrite with zero architectural payoff.
+- **CRUD logic** mixed in (`createMemoryFromSelection`, `removeMemoryFromSelection`, save logic in `openMemoryEntryEditor`) is tightly coupled to the imperative DOM event handlers — extracting it separately would require passing the same DOM-read values through an extra layer.
+- **Revisit if:** A decision is made to rewrite the memory sheet UI as proper Vue template components.
+
 ---
 
 ## Testing Checklist
