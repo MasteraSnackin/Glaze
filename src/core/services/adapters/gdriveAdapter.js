@@ -19,7 +19,7 @@ const UPLOAD_BASE = 'https://www.googleapis.com/upload/drive/v3';
 const AUTH_BASE = 'https://accounts.google.com/o/oauth2/v2/auth';
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
 
-const SCOPES = 'https://www.googleapis.com/auth/drive';
+const SCOPES = 'https://www.googleapis.com/auth/drive.file';
 
 const FOLDER_NAME = 'Glaze';
 let folderIdCache = null;
