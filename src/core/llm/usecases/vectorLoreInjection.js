@@ -170,11 +170,17 @@ export function injectLateVectorLoreMessages({ messages, newVectorEntries, safeC
         }
     }
 
+    const keptHistoryMessages = historyMessages.slice(historyMessages.length - includedHistoryCount);
+    const finalMessages = [];
+
+    for (const message of injectedMessages) {
+        if (!message.isHistory || keptHistoryMessages.includes(message)) {
+            finalMessages.push(message);
+        }
+    }
+
     return {
-        messages: [
-            ...staticMessages,
-            ...historyMessages.slice(historyMessages.length - includedHistoryCount)
-        ],
+        messages: finalMessages,
         vectorLoreTokens
     };
 }
