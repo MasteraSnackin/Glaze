@@ -24,6 +24,7 @@ import AppToast from '@/components/ui/AppToast.vue';
 import MagicDrawer from '@/components/chat/MagicDrawer.vue';
 import DesktopLeftSidebar from '@/components/layout/DesktopLeftSidebar.vue';
 import DesktopRightSidebar from '@/components/layout/DesktopRightSidebar.vue';
+import WindowView from '@/components/ui/WindowView.vue';
 
 const ConnectionsSheet = defineAsyncComponent(() => import('@/components/sheets/ConnectionsSheet.vue'));
 const LorebookSheet = defineAsyncComponent(() => import('@/components/sheets/LorebookSheet.vue'));
@@ -262,7 +263,8 @@ function closeEditorWrapper() {
     <div class="header-container" ref="headerContainer" :style="{ zIndex: headerZIndex }">
         <AppHeader
             ref="headerRef"
-            :current-view="nav.currentView.value"
+            :current-view="nav.effectiveMainView.value"
+            :is-active="!nav.isDesktopFloating.value"
             :categories="categories"
             :editing-index="editor.headerEditingIndex.value"
             @action-save="editor.handleHeaderSave"
@@ -392,20 +394,12 @@ function closeEditorWrapper() {
       </main>
 
       <!-- Desktop: Floating menu overlay -->
-      <Transition name="fade">
-          <div v-if="nav.isDesktopFloating.value" class="desktop-float-overlay" @click.self="nav.currentView.value = nav.desktopPreMenuView.value">
-              <div class="desktop-float-panel">
-                  <button class="desktop-float-close" @click="nav.currentView.value = nav.desktopPreMenuView.value">
-                      <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
-                  </button>
-                  <MenuView v-if="nav.currentView.value === 'view-menu'" class="view-gray-bg" />
-                  <!-- glossary has its own corner popup, not shown here -->
-                  <ThemeSettingsView v-else-if="nav.currentView.value === 'view-theme-settings'" class="view-gray-bg" />
-                  <SettingsView v-else-if="nav.currentView.value === 'view-settings'" class="view-gray-bg" />
-              </div>
-          </div>
-
-      </Transition>
+      <WindowView :nav="nav">
+          <MenuView v-if="nav.currentView.value === 'view-menu'" class="view-gray-bg window-panel" />
+          <!-- glossary has its own corner popup, not shown here -->
+          <ThemeSettingsView v-else-if="nav.currentView.value === 'view-theme-settings'" class="view-gray-bg window-panel" />
+          <SettingsView v-else-if="nav.currentView.value === 'view-settings'" class="view-gray-bg window-panel" />
+      </WindowView>
 
       <!-- Desktop: Glossary corner popup -->
       <Transition name="glossary-popup">
