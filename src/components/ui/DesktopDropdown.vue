@@ -38,6 +38,12 @@ function recalcPosition() {
     };
 }
 
+function handleItemClick(item) {
+    if (item.disabled) return;
+    closeDesktopDropdown();
+    item.onClick?.();
+}
+
 watch(
     () => desktopDropdownState.value.visible,
     (val) => {
@@ -90,7 +96,7 @@ watch(
                             'dd-item--has-bg': item.image
                         }"
                         :style="item.image ? { backgroundImage: `url(${item.image})` } : {}"
-                        @click="!item.disabled && (item.onClick?.(), closeDesktopDropdown())"
+                        @click="handleItemClick(item)"
                     >
                         <div v-if="item.image" class="dd-card-overlay"></div>
                         <div v-if="item.isFeatured" class="dd-featured-badge">
