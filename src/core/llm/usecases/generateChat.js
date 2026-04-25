@@ -177,6 +177,7 @@ export async function executeChatGenerationUseCase({
             currentMessages,
             getGenerationState,
             clearGenerationState,
+            clearPersistedGeneration,
             restoreState,
             clearBackgroundUpdateTimer,
             clearTypingStateForMessage,
