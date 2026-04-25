@@ -94,6 +94,7 @@ export function usePresetCRUD({ currentPreset, currentPresetId, editingPresetId,
         const presetName = presetState.presets[id]?.name;
         showBottomSheet({
             title: `${t('confirm_delete_preset')} "${presetName}"?`,
+            noDropdown: true,
             items: [
                 { label: t('btn_yes') || 'Yes', icon: '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>', iconColor: '#ff4444', isDestructive: true,
                     onClick: () => {
@@ -116,6 +117,7 @@ export function usePresetCRUD({ currentPreset, currentPresetId, editingPresetId,
         const presetName = presetState.presets[id]?.name;
         showBottomSheet({
             title: `${t('confirm_reset_preset') || 'Reset to default:'} "${presetName}"?`,
+            noDropdown: true,
             items: [
                 { label: t('btn_yes') || 'Yes', icon: '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>', iconColor: 'var(--vk-blue)',
                     onClick: () => { if (!DEFAULT_PRESETS[id]) return; presetState.presets[id] = JSON.parse(JSON.stringify(DEFAULT_PRESETS[id])); closeBottomSheet(); }

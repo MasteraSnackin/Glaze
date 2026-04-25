@@ -11,6 +11,7 @@ let unsubRegexChanged = null;
 let unsubChatSearch = null;
 let unsubApiContextChanged = null;
 let unsubSettingsChanged = null;
+let _appStateListener = null;
 
 import * as memoryBooksService from '@/core/services/memoryBooksService.js';
 
@@ -1323,7 +1324,7 @@ onMounted(() => {
                     data.draft = draft;
                 });
             }
-        });
+        }).then(handle => { _appStateListener = handle; });
     }
 
     if (chatInputContainer.value) {
@@ -1392,6 +1393,11 @@ onUnmounted(() => {
     if (_vpRafId) {
         cancelAnimationFrame(_vpRafId);
         _vpRafId = null;
+    }
+
+    if (_appStateListener) {
+        _appStateListener.remove();
+        _appStateListener = null;
     }
 
     // Cleanup scroll listener (may not have been cleaned up by closeChat)
