@@ -99,13 +99,13 @@ git checkout -b feat/memorybook-ui feat/multi-vector
 
 ## Roadmap Maintenance
 
-- `Roadmap.md` must be kept current during implementation, not updated retroactively at the very end.
+- `docs/Roadmap.md` must be kept current during implementation, not updated retroactively at the very end.
 - Break roadmap work into smaller concrete subtasks instead of leaving large vague items.
 - For each roadmap task or subtask, explicitly record:
   - completion status: `done` / `not done`
   - testing status: `tested` / `not tested`
 - When work is only partially completed, split the remaining scope into separate follow-up subtasks instead of leaving an ambiguous mixed-status item.
-- Use `Roadmap.md` to explicitly point the user to what still needs manual verification, so pending test coverage is visible in the roadmap itself.
+- Use `docs/Roadmap.md` to explicitly point the user to what still needs manual verification, so pending test coverage is visible in the roadmap itself.
 
 ## Conflict Avoidance Strategy
 
