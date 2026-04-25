@@ -1,5 +1,6 @@
 import { computed } from 'vue';
 import { t } from '@/utils/i18n.js';
+import { normalizeBlockId } from '@/utils/presetBlockIds.js';
 
 export function useBlockEditor({ currentPreset, activeEditBlock, activeChatChar, emit }) {
     function getMagicBlockFields(blockId) {
@@ -39,10 +40,15 @@ export function useBlockEditor({ currentPreset, activeEditBlock, activeChatChar,
         if (activeEditBlock.value?.isStatic) {
             const blockName = activeEditBlock.value.i18n ? t(activeEditBlock.value.i18n) : activeEditBlock.value.name;
             const fields = [];
-            if (activeEditBlock.value.id !== 'chat_history') fields.push({ key: 'role', label: 'label_role', type: 'select', helpTerm: 'preset-role', options: [{ value: 'system', label: 'role_system' }, { value: 'user', label: 'role_user' }, { value: 'assistant', label: 'role_assistant' }] });
-            fields.push({ key: 'insertion_mode', label: 'label_injection_point', type: 'select', helpTerm: 'preset-injection', options: [{ value: 'relative', label: 'injection_relative' }, { value: 'depth', label: 'injection_depth' }] });
-            if (activeEditBlock.value.insertion_mode === 'depth') fields.push({ key: 'depth', label: 'label_depth', type: 'number', placeholder: '4' });
-            fields.push({ key: 'content', label: '', type: 'info', text: `${t('msg_block_managed_by')} "${blockName}"` });
+            const isChatHistory = normalizeBlockId(activeEditBlock.value.id) === 'chat_history';
+            if (!isChatHistory) fields.push({ key: 'role', label: 'label_role', type: 'select', helpTerm: 'preset-role', options: [{ value: 'system', label: 'role_system' }, { value: 'user', label: 'role_user' }, { value: 'assistant', label: 'role_assistant' }] });
+            if (!isChatHistory) fields.push({ key: 'insertion_mode', label: 'label_injection_point', type: 'select', helpTerm: 'preset-injection', options: [{ value: 'relative', label: 'injection_relative' }, { value: 'depth', label: 'injection_depth' }] });
+            if (!isChatHistory && activeEditBlock.value.insertion_mode === 'depth') fields.push({ key: 'depth', label: 'label_depth', type: 'number', placeholder: '4' });
+            if (isChatHistory) {
+                fields.push({ key: 'info', label: '', type: 'info', text: t('chat_history_anchor_hint') || 'This block marks where chat messages are inserted into the prompt. Drag it to reorder. Depth blocks (Author\'s Note, Summary) are injected inside it at their specified depth.' });
+            } else {
+                fields.push({ key: 'content', label: '', type: 'info', text: `${t('msg_block_managed_by')} "${blockName}"` });
+            }
             return [{ title: '', fields }];
         }
         const genericFields = [

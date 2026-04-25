@@ -1,6 +1,7 @@
 import { watch } from 'vue';
 import { initPresetState, presetState } from '@/core/states/presetState.js';
 import { mandatoryBlocks } from '@/core/services/presetImportService.js';
+import { normalizeBlockId } from '@/utils/presetBlockIds.js';
 import { logger } from '@/utils/logger.js';
 
 export function usePresetLoader({ currentPreset }) {
@@ -37,7 +38,7 @@ export function usePresetLoader({ currentPreset }) {
         if (!blocks) return;
 
         mandatoryBlocks.forEach(mb => {
-            if (!blocks.find(b => b.id === mb.id)) {
+            if (!blocks.find(b => normalizeBlockId(b.id) === mb.id)) {
                 if (mb.id === 'chat_history') {
                     blocks.push({ ...mb });
                 } else {
@@ -45,11 +46,11 @@ export function usePresetLoader({ currentPreset }) {
                     const myIndex = mandatoryBlocks.findIndex(m => m.id === mb.id);
                     if (myIndex > 0) {
                         const prevId = mandatoryBlocks[myIndex - 1].id;
-                        const prevIdxInPreset = blocks.findIndex(b => b.id === prevId);
+                        const prevIdxInPreset = blocks.findIndex(b => normalizeBlockId(b.id) === prevId);
                         if (prevIdxInPreset !== -1) insertIndex = prevIdxInPreset + 1;
                     } else {
                         for (let i = myIndex + 1; i < mandatoryBlocks.length; i++) {
-                            const nextIdx = blocks.findIndex(b => b.id === mandatoryBlocks[i].id);
+                            const nextIdx = blocks.findIndex(b => normalizeBlockId(b.id) === mandatoryBlocks[i].id);
                             if (nextIdx !== -1) { insertIndex = nextIdx; break; }
                         }
                     }
@@ -58,19 +59,19 @@ export function usePresetLoader({ currentPreset }) {
             }
         });
 
-        if (!blocks.find(b => b.id === 'summary')) {
-            const historyIdx = blocks.findIndex(b => b.id === 'chat_history');
+        if (!blocks.find(b => normalizeBlockId(b.id) === 'summary')) {
+            const historyIdx = blocks.findIndex(b => normalizeBlockId(b.id) === 'chat_history');
             const insertIdx = historyIdx !== -1 ? historyIdx : blocks.length;
             blocks.splice(insertIdx, 0, { id: 'summary', name: 'Summary', role: 'system', content: '', enabled: true, isStatic: true, i18n: 'magic_summary', depth: 4, insertion_mode: 'relative', prefix: 'Summary: ' });
         }
-        if (!blocks.find(b => b.id === 'authors_note')) {
-            const historyIdx = blocks.findIndex(b => b.id === 'chat_history');
+        if (!blocks.find(b => normalizeBlockId(b.id) === 'authors_note')) {
+            const historyIdx = blocks.findIndex(b => normalizeBlockId(b.id) === 'chat_history');
             const insertIdx = historyIdx !== -1 ? historyIdx + 1 : blocks.length;
             blocks.splice(insertIdx, 0, { id: 'authors_note', name: "Author's Note", role: 'system', content: '', enabled: true, isStatic: true, i18n: 'magic_authors_notes', insertion_mode: 'relative' });
         }
-        if (!blocks.find(b => b.id === 'guided_generation')) {
-            const authorsIdx = blocks.findIndex(b => b.id === 'authors_note');
-            const historyIdx = blocks.findIndex(b => b.id === 'chat_history');
+        if (!blocks.find(b => normalizeBlockId(b.id) === 'guided_generation')) {
+            const authorsIdx = blocks.findIndex(b => normalizeBlockId(b.id) === 'authors_note');
+            const historyIdx = blocks.findIndex(b => normalizeBlockId(b.id) === 'chat_history');
             const insertIdx = authorsIdx !== -1 ? authorsIdx + 1 : (historyIdx !== -1 ? historyIdx + 1 : blocks.length);
             blocks.splice(insertIdx, 0, { id: 'guided_generation', name: 'Guided Generation', role: 'system', content: '[System Note: {{guidance}}]', enabled: true, isStatic: true, i18n: 'block_guided_generation', insertion_mode: 'relative' });
         }
