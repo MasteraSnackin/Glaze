@@ -14,7 +14,6 @@ export function useSheetGestures({ isVisible, isExpanded, isSidebarMode, fitCont
             return {
                 height: '100%',
                 transform: 'none',
-                paddingBottom: '20px',
                 borderRadius: '0',
                 boxShadow: 'none',
                 maxWidth: 'none',
