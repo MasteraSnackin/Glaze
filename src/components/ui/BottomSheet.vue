@@ -7,6 +7,21 @@ import HelpTip from '@/components/ui/HelpTip.vue';
 import { bottomSheetState } from '@/core/states/bottomSheetState.js';
 import { APP_EVENTS } from '@/core/events/eventNames.js';
 import { publishAppEvent } from '@/core/events/eventHub.js';
+import { attachLongPress } from '@/core/services/ui.js';
+
+const vLongPress = {
+    mounted: (el, binding) => {
+        if (binding.value) {
+            const check = attachLongPress(el, binding.value);
+            el._checkLongPress = check;
+        }
+    }
+};
+
+const handleCardClick = (event, item) => {
+    if (event.currentTarget._checkLongPress && event.currentTarget._checkLongPress()) return;
+    if (item.onClick) item.onClick(event);
+};
 const props = defineProps({
     visible: Boolean,
     locked: { type: Boolean, default: false }, // when true, prevents backdrop/drag dismiss
@@ -292,7 +307,9 @@ onBeforeUnmount(() => {
                              class="triggered-item-card" 
                              :class="{ 'has-bg': item.image, 'is-active': item.isActive }"
                              :style="item.image ? { backgroundImage: `url(${item.image})` } : {}"
-                             @click="item.onClick">
+                             v-long-press="item.onLongPress"
+                             @click="handleCardClick($event, item)"
+                             @contextmenu.prevent="item.onLongPress ? item.onLongPress() : undefined">
                             <div class="card-overlay" v-if="item.image"></div>
                             <div v-if="item.isFeatured" class="featured-badge">
                                 {{ t('label_featured_preset') || 'FEATURED PRESET' }}
