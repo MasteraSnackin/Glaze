@@ -101,7 +101,7 @@ export function initRipple() {
         document.head.appendChild(style);
     }
 
-    const elements = document.querySelectorAll('.tabbar, .app-header, .menu-group, .preset-selector, .conn-badge, .glass-panel, .segmented-control, .bottom-sheet-content');
+    const elements = document.querySelectorAll('.tabbar, .app-header:not(.window-app-header), .menu-group, .preset-selector, .conn-badge, .glass-panel, .segmented-control, .bottom-sheet-content');
     elements.forEach(attachRipple);
 
     if (!_rippleDelegationAdded) {
