@@ -9,6 +9,7 @@ Object.assign(DEFAULT_PRESETS, userDefaultPresets);
 
 export const presetState = reactive({
     presets: JSON.parse(JSON.stringify(DEFAULT_PRESETS)),
+    presetOrder: [],
     connections: {
         character: {}, // charId -> presetId
         chat: {}       // chatId -> presetId
@@ -63,6 +64,25 @@ export async function initPresetState(force = false) {
             didBackfillCreatedAt = true;
         }
 
+        const savedOrder = localStorage.getItem('gz_preset_order');
+        if (savedOrder) {
+            presetState.presetOrder = JSON.parse(savedOrder);
+        } else {
+            // backfill order using old logic one last time if possible
+            presetState.presetOrder = Object.keys(presetState.presets).sort((a, b) => {
+                const cA = presetState.presets[a].createdAt || 0;
+                const cB = presetState.presets[b].createdAt || 0;
+                if (cA !== cB) return cA - cB;
+                return presetState.presets[a].name.localeCompare(presetState.presets[b].name);
+            });
+        }
+        for (const key in presetState.presets) {
+            if (!presetState.presetOrder.includes(key)) {
+                presetState.presetOrder.push(key);
+            }
+        }
+        presetState.presetOrder = presetState.presetOrder.filter(id => presetState.presets[id]);
+
         const savedId = localStorage.getItem('silly_cradle_current_preset_id');
         if (savedId && savedId !== 'undefined' && presetState.presets[savedId]) {
             presetState.globalPresetId = savedId;
@@ -96,6 +116,7 @@ export async function initPresetState(force = false) {
 export function savePresets() {
     try {
         localStorage.setItem('silly_cradle_presets', JSON.stringify(presetState.presets));
+        localStorage.setItem('gz_preset_order', JSON.stringify(presetState.presetOrder));
         localStorage.setItem('silly_cradle_current_preset_id', presetState.globalPresetId);
         localStorage.setItem('gz_preset_connections', JSON.stringify(presetState.connections));
     } catch (e) {

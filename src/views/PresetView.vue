@@ -166,7 +166,9 @@ const {
     getPresetCreatedAt, sortedPresetEntries,
     openPresetSelector, openPresetConnectionManager,
     openMergeRoleSelector, openSquashRoleSelector, openReasoningEffortSelector,
-    openPresetOptionsMenu: openPresetOptionsMenuRaw
+    openPresetOptionsMenu: openPresetOptionsMenuRaw,
+    dragPresetIndex, dragHoverIndex, onPresetDragStart, onPresetDragEnter, onPresetDrop, onPresetDragEnd,
+    onPresetTouchStart, onPresetTouchMove, onPresetTouchEnd
 } = usePresetSelectors({
     currentPreset, currentPresetId, editingPresetId,
     activeChatChar: computed(() => props.activeChatChar),
@@ -285,10 +287,25 @@ onBeforeUnmount(() => { unsubs.forEach(unsub => unsub()); });
             <Transition :name="navDirection === 'forward' ? 'ps-fwd' : 'ps-back'" mode="out-in" @before-leave="onTransitionBeforeLeave" @before-enter="onTransitionBeforeEnter">
         <!-- ═══ SELECTOR LIST VIEW ═══ -->
         <div class="preset-selector-list" v-if="!isEditingBlock && !editingPresetId" key="list" data-scroll-key="list">
-            <div class="ps-list">
+            <TransitionGroup name="preset-list" tag="div" class="ps-list">
                 <div v-for="[id, preset] in sortedPresetEntries" :key="id"
                      class="ps-card"
-                     :class="{ 'ps-active': (optimisticGlobalPresetId || presetState.globalPresetId) === id, 'ps-has-bg': !!preset.image }"
+                     :data-id="id"
+                     draggable="true"
+                     @dragstart="onPresetDragStart($event, id)"
+                     @dragenter.prevent="onPresetDragEnter($event, id)"
+                     @dragover.prevent
+                     @drop="onPresetDrop($event, id)"
+                     @dragend="onPresetDragEnd"
+                     @touchstart="onPresetTouchStart($event, id)"
+                     @touchmove="onPresetTouchMove($event)"
+                     @touchend="onPresetTouchEnd($event)"
+                     :class="{ 
+                         'ps-active': (optimisticGlobalPresetId || presetState.globalPresetId) === id, 
+                         'ps-has-bg': !!preset.image, 
+                         'dragging': dragPresetIndex === presetState.presetOrder.indexOf(id),
+                         'drag-hover': dragHoverIndex !== -1 && dragHoverIndex === presetState.presetOrder.indexOf(id) && dragHoverIndex !== dragPresetIndex
+                     }"
                      :style="preset.image ? { backgroundImage: 'url(' + preset.image + ')' } : {}"
                      @click="activatePreset(id)">
                     <!-- Overlay for image cards -->
@@ -336,11 +353,11 @@ onBeforeUnmount(() => { unsubs.forEach(unsub => unsub()); });
                 </div>
 
                 <!-- Add / Import Button -->
-                <div class="ps-add-btn" @click="openAddPresetSheet">
+                <div class="ps-add-btn" @click="openAddPresetSheet" key="add-btn">
                     <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
                     <span>{{ t('btn_add') || 'Add / Import' }}</span>
                 </div>
-            </div>
+            </TransitionGroup>
         </div>
 
         <!-- ═══ EDITOR VIEW ═══ -->
@@ -399,12 +416,17 @@ by {{ currentPreset.author }}
                     <TransitionGroup name="block-list" tag="div">
                         <div v-for="block in activeBlocks" :key="block.id" 
                              class="prompt-block"
-                             :class="{ 'disabled': !block.enabled }"
+                             :class="{ 
+                                 'disabled': !block.enabled,
+                                 'dragging': dragSrcIndex === currentPreset.blocks.findIndex(b => b.id === block.id),
+                                 'drag-hover': dragHoverIndex !== -1 && dragHoverIndex === currentPreset.blocks.findIndex(b => b.id === block.id) && dragSrcIndex !== dragHoverIndex
+                             }"
                              :data-id="block.id"
                              draggable="true"
                              @dragstart="!isBlockLocked(block) && onDragStart($event, block.id)"
                              @dragenter.prevent="!isBlockLocked(block) && onDragEnter($event, block.id)"
                              @dragover.prevent
+                             @drop="!isBlockLocked(block) && onDrop($event, block.id)"
                              @dragend="onDragEnd">
                             <div class="block-handle"
                                  @touchstart="!isBlockLocked(block) && onTouchStart($event, block.id)"
@@ -638,6 +660,19 @@ Add Block
 .status-dot.failed { background-color: #ff4444; }
 
 /* Prompt Preset Editor Styles */
+.preset-list-move {
+    transition: transform 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+}
+.ps-card.dragging {
+    opacity: 0.5;
+    transform: scale(0.98);
+}
+.ps-card.drag-hover {
+    transform: scale(1.02);
+    box-shadow: 0 0 0 2px var(--vk-blue), 0 5px 15px rgba(0,0,0,0.2) !important;
+    z-index: 2;
+}
+
 .prompt-container {
     padding: 0 !important;
     overflow: hidden;
@@ -667,7 +702,11 @@ Add Block
 .prompt-block.dragging {
     opacity: 0.5;
     transform: scale(0.98);
-    box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+}
+
+.prompt-block.drag-hover {
+    box-shadow: inset 0 0 0 2px var(--vk-blue) !important;
+    z-index: 2;
 }
 
 .prompt-block.disabled {

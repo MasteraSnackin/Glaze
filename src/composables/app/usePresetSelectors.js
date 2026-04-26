@@ -1,10 +1,11 @@
-import { computed } from 'vue';
+import { computed, toRef } from 'vue';
 import { publishAppEvent } from '@/core/events/eventHub.js';
 import { APP_EVENTS } from '@/core/events/eventNames.js';
-import { presetState, DEFAULT_PRESETS } from '@/core/states/presetState.js';
+import { presetState, DEFAULT_PRESETS, flushPresetSave } from '@/core/states/presetState.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import { Browser } from '@capacitor/browser';
 import { t } from '@/utils/i18n.js';
+import { useDragDrop } from '@/composables/ui/useDragDrop.js';
 
 export function usePresetSelectors({ currentPreset, currentPresetId, editingPresetId, activeChatChar, getPresetTokens, getPresetWeight, comparePresetEntries, updateHeaderState, openAddPresetSheet }) {
     function getPresetCreatedAt(id, preset) {
@@ -15,8 +16,28 @@ export function usePresetSelectors({ currentPreset, currentPresetId, editingPres
     }
 
     const sortedPresetEntries = computed(() => {
-        return Object.entries(presetState.presets).sort(comparePresetEntries);
+        return presetState.presetOrder
+            .map(id => [id, presetState.presets[id]])
+            .filter(([id, preset]) => preset !== undefined);
     });
+
+    const {
+        dragIndex: dragPresetIndex,
+        dropTargetIndex: dragHoverIndex,
+        onDragStart: onPresetDragStart,
+        onDragEnter: onPresetDragEnter,
+        onDrop: onPresetDrop,
+        onDragEnd: onPresetDragEnd,
+        onTouchStart: onPresetTouchStart,
+        onTouchMove: onPresetTouchMove,
+        onTouchEnd: onPresetTouchEnd
+    } = useDragDrop({
+        listRef: toRef(presetState, 'presetOrder'),
+        getIndex: (id) => presetState.presetOrder.indexOf(id),
+        onSwap: flushPresetSave,
+        itemSelector: '.ps-card'
+    });
+
 
     function openPresetSelector() {
         const cardItems = [];
@@ -166,6 +187,8 @@ export function usePresetSelectors({ currentPreset, currentPresetId, editingPres
         getPresetCreatedAt, sortedPresetEntries,
         openPresetSelector, openPresetConnectionManager,
         openMergeRoleSelector, openSquashRoleSelector, openReasoningEffortSelector,
-        openPresetOptionsMenu
+        openPresetOptionsMenu,
+        dragPresetIndex, dragHoverIndex, onPresetDragStart, onPresetDragEnter, onPresetDrop, onPresetDragEnd,
+        onPresetTouchStart, onPresetTouchMove, onPresetTouchEnd
     };
 }

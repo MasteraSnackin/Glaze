@@ -15,6 +15,7 @@ import { getImageGenSettings } from '@/core/services/imageGenService.js';
 import { replaceMacros } from '@/utils/macroEngine.js';
 import { normalizeBlockId } from '@/utils/presetBlockIds.js';
 import { getApiPresets } from '@/core/config/APISettings.js';
+import { useDragDrop } from '@/composables/ui/useDragDrop.js';
 import PersonasSheet from '@/views/PersonasView.vue';
 
 const personasSheet = ref(null);
@@ -49,7 +50,6 @@ const emit = defineEmits([
 const t = (key) => translations[currentLang.value]?.[key] || key;
 
 const isEditing = ref(false);
-const dragSrcIndex = ref(-1);
 let longPressTimer = null;
 
 const allAvailableItems = [
@@ -200,22 +200,24 @@ const addItem = () => {
 };
 
 // Drag and Drop Logic
+const {
+    dragIndex: dragSrcIndex,
+    dropTargetIndex: dragHoverIndex,
+    onDragStart: rawDragStart,
+    onDragEnter,
+    onDrop,
+    onDragEnd,
+    onTouchStart: rawTouchStart,
+    onTouchMove: rawTouchMove,
+    onTouchEnd: rawTouchEnd
+} = useDragDrop({
+    listRef: items,
+    itemSelector: '.magic-item'
+});
+
 const onDragStart = (e, index) => {
     if (!isEditing.value && !props.sidebarMode) return;
-    dragSrcIndex.value = index;
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.dropEffect = 'move';
-};
-
-const onDragEnter = (e, index) => {
-    if (dragSrcIndex.value === -1 || dragSrcIndex.value === index) return;
-    const item = items.value.splice(dragSrcIndex.value, 1)[0];
-    items.value.splice(index, 0, item);
-    dragSrcIndex.value = index;
-};
-
-const onDragEnd = (e) => {
-    dragSrcIndex.value = -1;
+    rawDragStart(e, index);
 };
 
 let touchStartX = 0;
@@ -229,9 +231,8 @@ const onTouchStart = (e, index) => {
         if (!isEditing.value) {
             isEditing.value = true;
         }
-        dragSrcIndex.value = index;
+        rawTouchStart(e, index);
         if (navigator.vibrate) navigator.vibrate(50);
-        document.body.style.overflow = 'hidden';
     }, 300);
 };
 
@@ -242,27 +243,13 @@ const onTouchMove = (e) => {
         }
         return;
     }
-    e.preventDefault();
-    const touch = e.touches[0];
-    
-    const target = document.elementFromPoint(touch.clientX, touch.clientY);
-    
-    const el = target?.closest('.magic-item');
-    if (el && el.dataset.index !== undefined) {
-        const index = parseInt(el.dataset.index);
-        if (!isNaN(index) && index !== -1 && index !== dragSrcIndex.value) {
-             const item = items.value.splice(dragSrcIndex.value, 1)[0];
-             items.value.splice(index, 0, item);
-             dragSrcIndex.value = index;
-        }
-    }
+    rawTouchMove(e);
 };
 
 const onTouchEnd = (e) => {
     clearTimeout(longPressTimer);
     if (dragSrcIndex.value !== -1) {
-        dragSrcIndex.value = -1;
-        document.body.style.overflow = '';
+        rawTouchEnd(e);
     }
 };
 
@@ -477,12 +464,17 @@ defineExpose({
                     <div
                             class="magic-item"
                             :data-index="item.originalIndex"
-                            :class="{ 'editing': isEditing, 'dragging': item.originalIndex === dragSrcIndex }"
+                            :class="{ 
+                                'editing': isEditing, 
+                                'dragging': item.originalIndex === dragSrcIndex,
+                                'drag-hover': dragHoverIndex !== -1 && dragHoverIndex === item.originalIndex && dragSrcIndex !== dragHoverIndex
+                            }"
                             :draggable="isEditing || sidebarMode"
                             @click="handleAction(item)"
                             @dragstart="onDragStart($event, item.originalIndex)"
                             @dragenter.prevent="onDragEnter($event, item.originalIndex)"
                             @dragover.prevent
+                            @drop="onDrop($event, item.originalIndex)"
                             @dragend="onDragEnd"
                             @touchstart="onTouchStart($event, item.originalIndex)"
                             @touchmove="onTouchMove($event)"
@@ -716,6 +708,12 @@ defineExpose({
     transition: transform 0.2s cubic-bezier(0.2, 0, 0.2, 1), background-color 0.2s ease, border-color 0.2s ease;
     display: flex;
     align-items: center;
+}
+
+.magic-item.drag-hover {
+    transform: scale(1.02);
+    box-shadow: 0 0 0 2px var(--vk-blue), 0 5px 15px rgba(0,0,0,0.2) !important;
+    z-index: 2;
 }
 
 .magic-item:active {
