@@ -55,8 +55,7 @@ export const mandatoryBlocks = [
     { id: "scenario", i18n: "block_scenario", name: "Scenario", role: "system", content: "", isStatic: true, enabled: true },
     { id: "example_dialogue", i18n: "block_example_dialogue", name: "Dialogue Examples", role: "system", content: "", isStatic: true, enabled: true },
     { id: "worldInfoAfter", i18n: "block_wi_after", name: "World Info After", role: "system", content: "", isStatic: true, enabled: true },
-    { id: "chat_history", i18n: "block_chat_history", name: "Chat History", role: "system", content: "", isStatic: true, enabled: true },
-    { id: "guided_generation", i18n: "block_guided_generation", name: "Guided Generation", role: "system", content: "[System Note: {{guidance}}]", isStatic: true, enabled: true }
+    { id: "chat_history", i18n: "block_chat_history", name: "Chat History", role: "system", content: "", isStatic: true, enabled: true }
 ];
 
 const BLOCK_TO_ST_MAP = {
@@ -102,7 +101,7 @@ export function convertSTPreset(data, fileName) {
     const processBlock = (item, isStashed = false) => {
         const p = data.prompts.find(p => p.identifier === item.identifier);
         if (!p) return;
-        if (['enhanceDefinitions'].includes(item.identifier) && !p.content) return;
+        if (['enhanceDefinitions', 'guided_generation'].includes(item.identifier) && !p.content) return;
 
         usedIdentifiers.add(item.identifier);
 
@@ -322,7 +321,8 @@ export function convertLatexPreset(data, fileName) {
 
     const EXTRA_DISABLED_BLOCKS = {
         'authors_note': { id: 'authors_note', name: "Author's Note", role: 'system', content: '', isStatic: true, i18n: 'magic_authors_notes', enabled: false, isStashed: false, insertion_mode: 'relative' },
-        'summary': { id: 'summary', name: 'Summary', role: 'system', content: '', isStatic: true, i18n: 'magic_summary', enabled: false, isStashed: false, depth: 4, insertion_mode: 'relative', prefix: 'Summary: ' }
+        'summary': { id: 'summary', name: 'Summary', role: 'system', content: '', isStatic: true, i18n: 'magic_summary', enabled: false, isStashed: false, depth: 4, insertion_mode: 'relative', prefix: 'Summary: ' },
+        'guided_generation': { id: 'guided_generation', name: 'Guided Generation', role: 'system', content: '[System Note: {{guidance}}]', isStatic: true, i18n: 'block_guided_generation', enabled: false, isStashed: false, insertion_mode: 'relative' }
     };
     for (const [blockId, blockDef] of Object.entries(EXTRA_DISABLED_BLOCKS)) {
         if (disabledNativeIds.has(blockId)) {
