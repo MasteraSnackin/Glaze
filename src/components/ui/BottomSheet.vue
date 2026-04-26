@@ -69,6 +69,7 @@ function close() {
 }
 
 // Sync with sidebar state to ensure only one sheet/view is active at a time
+let _historyPushed = false;
 watch(() => props.visible, (newVal) => {
     if (newVal && props.sidebarMode) {
         setSidebarOccupied(true, 'bottom_sheet');
@@ -78,6 +79,18 @@ watch(() => props.visible, (newVal) => {
     
     if (!newVal && isLocalKeyboardOpen.value) {
         isLocalKeyboardOpen.value = false;
+    }
+
+    // Support browser back gesture/button for PWA/Web
+    const isDesktop = window.innerWidth >= 768;
+    if (newVal && !isDesktop) {
+        window.history.pushState({ type: 'bottom_sheet' }, '');
+        _historyPushed = true;
+    } else if (!newVal && _historyPushed) {
+        if (window.history.state?.type === 'bottom_sheet') {
+            window.history.back();
+        }
+        _historyPushed = false;
     }
 }, { immediate: true });
 
@@ -225,7 +238,7 @@ onBeforeUnmount(() => {
 <template>
     <Teleport :to="sidebarMode ? '#desktop-sidebar-content' : 'body'">
         <Transition name="bottom-sheet">
-            <div v-if="visible" :class="{ 'modal-overlay': !sidebarMode, 'bottom-sheet-sidebar-wrapper': sidebarMode }">
+            <div v-if="visible" class="visible" :class="{ 'modal-overlay': !sidebarMode, 'bottom-sheet-sidebar-wrapper': sidebarMode }">
                 <div v-if="!sidebarMode" class="modal-backdrop" @click="locked ? undefined : close()"></div>
                 <div class="bottom-sheet-content" @click.stop 
                      :style="!sidebarMode && isDragging ? { transform: `translateY(${currentDragY}px)` } : ''"
@@ -274,20 +287,22 @@ onBeforeUnmount(() => {
 
                     <!-- List Items -->
                     <div v-if="items && items.length" class="sheet-list">
-                        <div v-for="(item, index) in items" :key="index" class="sheet-item" :class="{ 'centered': item.centered, 'has-hint': item.hint }" @click="item.onClick">
-                            <div class="sheet-item-icon" v-if="item.icon" v-html="item.icon" :style="{ color: item.iconColor }"></div>
-                            <div class="sheet-item-content">
-                                <span :class="{ 'text-destructive': item.isDestructive }">{{ item.label }}</span>
-                                <span v-if="item.hint" class="sheet-item-hint">{{ item.hint }}</span>
-                            </div>
-                            
-                            <!-- Item Actions (Buttons on the right) -->
-                            <div class="sheet-item-actions" v-if="item.actions && item.actions.length">
-                                <div v-for="(action, aIndex) in item.actions" :key="aIndex" 
-                                     class="sheet-item-action-btn"
-                                     @click.stop="action.onClick"
-                                     v-html="action.icon"
-                                     :style="{ color: action.color }">
+                        <div class="sheet-group-card">
+                            <div v-for="(item, index) in items" :key="index" class="sheet-item" :class="{ 'centered': item.centered, 'has-hint': item.hint }" @click="item.onClick">
+                                <div class="sheet-item-icon" v-if="item.icon" v-html="item.icon" :style="{ color: item.iconColor }"></div>
+                                <div class="sheet-item-content">
+                                    <span :class="{ 'text-destructive': item.isDestructive }">{{ item.label }}</span>
+                                    <span v-if="item.hint" class="sheet-item-hint">{{ item.hint }}</span>
+                                </div>
+                                
+                                <!-- Item Actions (Buttons on the right) -->
+                                <div class="sheet-item-actions" v-if="item.actions && item.actions.length">
+                                    <div v-for="(action, aIndex) in item.actions" :key="aIndex" 
+                                         class="sheet-item-action-btn"
+                                         @click.stop="action.onClick"
+                                         v-html="action.icon"
+                                         :style="{ color: action.color }">
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -295,25 +310,27 @@ onBeforeUnmount(() => {
 
                     <!-- Session Items (Custom Layout) -->
                     <div v-if="sessionItems && sessionItems.length" class="sheet-list">
-                        <div v-for="(item, index) in sessionItems" :key="index" class="sheet-item session-item" @click="item.onClick">
-                            <div class="session-content">
-                                <div class="session-title">
-{{ item.title }} <span class="session-count"><svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>{{ item.count }}</span>
-</div>
-                                <div class="session-preview">
-{{ item.preview }}
-</div>
-                            </div>
-                            <div class="session-right">
-                                <div class="session-meta-right">
-                                    <div class="session-time">
-{{ item.time }}
-</div>
-                                    <div v-if="item.isActive" class="active-dot"></div>
+                        <div class="sheet-group-card">
+                            <div v-for="(item, index) in sessionItems" :key="index" class="sheet-item session-item" @click="item.onClick">
+                                <div class="session-content">
+                                    <div class="session-title">
+                                        {{ item.title }} <span class="session-count"><svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>{{ item.count }}</span>
+                                    </div>
+                                    <div class="session-preview">
+                                        {{ item.preview }}
+                                    </div>
                                 </div>
-                                <div class="session-delete-btn" @click.stop="item.onDelete">
-<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
-</div>
+                                <div class="session-right">
+                                    <div class="session-meta-right">
+                                        <div class="session-time">
+                                            {{ item.time }}
+                                        </div>
+                                        <div v-if="item.isActive" class="active-dot"></div>
+                                    </div>
+                                    <div class="session-delete-btn" @click.stop="item.onDelete">
+                                        <svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -489,17 +506,27 @@ onBeforeUnmount(() => {
 
 .sheet-list {
     overflow-y: auto;
+    padding: 8px 16px 24px 16px;
+}
+
+.sheet-group-card {
+    background: rgba(128, 128, 128, 0.12);
+    border: 1px solid rgba(128, 128, 128, 0.2);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+    border-radius: 16px;
+    overflow: hidden;
 }
 
 .sheet-item {
-    padding: 12px 16px;
+    position: relative;
+    padding: 14px 16px;
     display: flex;
     align-items: center;
     cursor: pointer;
 }
 
 .sheet-item:active {
-    background-color: var(--bg-gray);
+    background-color: var(--bg-gray, rgba(128, 128, 128, 0.1));
 }
 
 .sheet-item-icon {
