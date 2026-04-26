@@ -203,7 +203,7 @@ defineExpose({ onAddCharacter, loadCharacters });
   <div class="view-content-wrapper" ref="scrollContainer">
     <!-- Tab Bar -->
     <div class="tabs-row">
-      <div class="top-tabs-container">
+      <div class="top-tabs-container tabs-2">
         <div class="tab-slider" :style="{ transform: `translateX(${activeTab === 'catalog' ? '100%' : '0'})` }"></div>
         <div class="top-tab" :class="{ active: activeTab === 'characters' }" @click="activeTab = 'characters'">
           <svg viewBox="0 0 24 24" class="tab-icon"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
@@ -321,114 +321,6 @@ v{{ char.version }}
   margin: 10px 16px 12px;
 }
 
-.top-tabs-container {
-  display: flex;
-  position: relative;
-  align-items: stretch;
-  padding: 0;
-  flex: 1;
-  background-color: rgba(var(--vk-blue-rgb, 82, 139, 204), 0.1);
-  backdrop-filter: blur(var(--element-blur, 12px));
-  -webkit-backdrop-filter: blur(var(--element-blur, 12px));
-  border: 1px solid rgba(var(--vk-blue-rgb, 82, 139, 204), 0.2);
-  border-radius: 100px;
-  overflow: hidden;
-}
-
-@media (min-width: 600px) {
-  .top-tabs-container {
-    flex: 0 0 clamp(320px, 33.333%, 500px);
-  }
-}
-
-.tabs-add-btn {
-  display: none;
-}
-
-@media (min-width: 600px) {
-  .tabs-add-btn {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    height: 40px;
-    padding: 0 16px;
-    border-radius: 100px;
-    background-color: var(--vk-blue, #4080ff);
-    color: #fff;
-    font-size: 14px;
-    font-weight: 600;
-    border: none;
-    cursor: pointer;
-    flex-shrink: 0;
-    margin-left: auto;
-    transition: transform 0.1s ease, opacity 0.2s;
-    user-select: none;
-  }
-
-  .tabs-add-btn:hover {
-    transform: translateY(-1px);
-  }
-
-  .tabs-add-btn:active {
-    transform: scale(0.95);
-    opacity: 0.85;
-  }
-
-  .tabs-add-btn svg {
-    width: 18px;
-    height: 18px;
-    fill: currentColor;
-  }
-}
-
-.tabs-add-btn-enter-active,
-.tabs-add-btn-leave-active {
-  transition: opacity 0.15s ease, transform 0.15s ease;
-}
-
-.tabs-add-btn-enter-from,
-.tabs-add-btn-leave-to {
-  opacity: 0;
-  transform: scale(0.85);
-}
-
-.tab-slider {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 50%;
-  height: 100%;
-  background-color: var(--vk-blue, #4080ff);
-  border-radius: 100px;
-  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  z-index: 0;
-}
-
-.top-tab {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 10px 14px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--vk-blue, #4080ff);
-  cursor: pointer;
-  z-index: 1;
-  transition: color 0.3s ease;
-  user-select: none;
-}
-
-.top-tab.active {
-  color: #fff;
-}
-
-.tab-icon {
-  width: 18px;
-  height: 18px;
-  fill: currentColor;
-}
 
 .sort-controls {
   display: flex;

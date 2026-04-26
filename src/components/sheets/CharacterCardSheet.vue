@@ -360,12 +360,14 @@ function openHeroImage() {
                 </div>
 
                 <div class="tabs-row">
-                    <div class="top-tabs-container">
+                    <div class="top-tabs-container tabs-2">
                         <div class="tab-slider" :style="{ transform: `translateX(${activeTab === 'prompts' ? '100%' : '0'})` }"></div>
                         <div class="top-tab" :class="{ active: activeTab === 'info' }" @click="activeTab = 'info'">
+                            <svg class="tab-icon" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
                             <span>{{ getTranslated('tab_info', 'Information') || 'Information' }}</span>
                         </div>
                         <div class="top-tab" :class="{ active: activeTab === 'prompts' }" @click="activeTab = 'prompts'">
+                            <svg class="tab-icon" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
                             <span>{{ getTranslated('tab_prompts', 'Prompts') || 'Prompts' }}</span>
                         </div>
                     </div>
@@ -518,47 +520,6 @@ function openHeroImage() {
   margin: 16px 16px 8px;
 }
 
-.top-tabs-container {
-  display: flex;
-  position: relative;
-  align-items: stretch;
-  padding: 0;
-  flex: 1;
-  background-color: var(--bg-item, rgba(255, 255, 255, 0.05));
-  border-radius: 100px;
-  overflow: hidden;
-}
-
-.tab-slider {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 50%;
-  height: 100%;
-  background-color: var(--vk-blue, #4080ff);
-  transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
-  border-radius: 100px;
-}
-
-.top-tab {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 10px 0;
-  cursor: pointer;
-  position: relative;
-  z-index: 1;
-  color: var(--text-gray, rgba(255,255,255,0.7));
-  font-weight: 500;
-  font-size: 14px;
-  transition: color 0.2s;
-  user-select: none;
-}
-.top-tab.active {
-  color: #fff;
-  font-weight: 600;
-}
 
 .char-desc-section {
     padding: 16px 16px 0;

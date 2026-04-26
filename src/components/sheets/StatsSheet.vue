@@ -153,7 +153,24 @@ const setTab = (tab) => {
 </script>
 
 <template>
-    <SheetView ref="sheet" :z-index="1005" :title="t('action_chat_stats') || 'Statistics'" :tabs="statsTabs" :active-tab="currentTab" @update:active-tab="setTab">
+    <SheetView ref="sheet" :z-index="1005" :title="t('action_chat_stats') || 'Statistics'" @close="close">
+        <template #header-bottom>
+            <div class="tabs-row stats-tabs-row">
+                <div class="top-tabs-container tabs-3">
+                    <div class="tab-slider" :style="{ transform: `translateX(${currentTab === 'chat' ? '0%' : currentTab === 'char' ? '100%' : '200%'})` }"></div>
+                    <div 
+                        v-for="tab in statsTabs" 
+                        :key="tab.key" 
+                        class="top-tab" 
+                        :class="{ active: currentTab === tab.key }"
+                        @click="setTab(tab.key)"
+                    >
+                        <svg class="tab-icon" viewBox="0 0 24 24"><path :d="tab.icon"/></svg>
+                        <span>{{ tab.label }}</span>
+                    </div>
+                </div>
+            </div>
+        </template>
         <div class="stats-body">
             <!-- Character selector (char tab only) — above hero -->
             <div v-if="currentTab === 'char'" class="char-picker" @click="showCharDropdown = !showCharDropdown">
@@ -513,5 +530,8 @@ const setTab = (tab) => {
 .dropdown-leave-to {
     opacity: 0;
     transform: scaleY(0.95) translateY(-4px);
+}
+.stats-tabs-row {
+    margin: 0 16px 12px;
 }
 </style>

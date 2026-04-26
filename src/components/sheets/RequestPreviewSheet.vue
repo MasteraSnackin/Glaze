@@ -113,14 +113,18 @@ defineExpose({ open });
 Refresh
 </div>
                 </div>
-                <div class="segmented-control">
-                    <div class="sub-tab-btn" :class="{ active: previewTab === 'formatted' }" @click="previewTab = 'formatted'">
-{{ t('label_formatted') || 'Formatted' }}
-</div>
-                    <div class="sub-tab-btn" :class="{ active: previewTab === 'raw' }" @click="previewTab = 'raw'">
-{{ t('label_raw_json') || 'Raw JSON' }}
-</div>
-                    <div class="tab-glider" :style="{ width: 'calc((100% - 8px) / 2)', transform: `translateX(${previewTab === 'formatted' ? '0%' : '100%'})` }"></div>
+                <div class="tabs-row preview-tabs-row">
+                    <div class="top-tabs-container tabs-2">
+                        <div class="tab-slider" :style="{ transform: `translateX(${previewTab === 'formatted' ? '0%' : '100%'})` }"></div>
+                        <div class="top-tab" :class="{ active: previewTab === 'formatted' }" @click="previewTab = 'formatted'">
+                            <svg class="tab-icon" viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>
+                            <span>{{ t('label_formatted') || 'Formatted' }}</span>
+                        </div>
+                        <div class="top-tab" :class="{ active: previewTab === 'raw' }" @click="previewTab = 'raw'">
+                            <svg class="tab-icon" viewBox="0 0 24 24"><path d="M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z"/></svg>
+                            <span>{{ t('label_raw_json') || 'Raw JSON' }}</span>
+                        </div>
+                    </div>
                 </div>
             </div>
         </template>
@@ -311,45 +315,8 @@ Raw SSE Lines
     color: var(--vk-blue);
 }
 
-.segmented-control {
-    display: flex;
-    background-color: rgba(255,255,255,0.1);
-    border-radius: 10px;
-    padding: 4px;
-    position: relative;
-    isolation: isolate;
-}
-
-.sub-tab-btn {
-    flex: 1;
-    text-align: center;
-    padding: 6px 12px;
-    border-radius: 8px;
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--text-gray);
-    cursor: pointer;
-    transition: color 0.2s ease;
-    position: relative;
-    z-index: 2;
-}
-
-.sub-tab-btn.active {
-    background-color: transparent;
-    color: var(--text-black);
-    box-shadow: none;
-}
-
-.tab-glider {
-    position: absolute;
-    top: 4px;
-    bottom: 4px;
-    left: 4px;
-    background-color: var(--vk-blue);
-    border-radius: 8px;
-    z-index: 1;
-    transition: transform 0.25s cubic-bezier(0.2, 0, 0.2, 1);
-    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+.preview-tabs-row {
+    margin-bottom: 12px;
 }
 
 .preview-container {
