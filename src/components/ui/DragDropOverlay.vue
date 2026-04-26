@@ -206,7 +206,15 @@ const onDrop = async (e) => {
     }
 };
 
+const onDragStart = (e) => {
+    const target = e.composedPath ? e.composedPath()[0] : e.target;
+    if (target && target.tagName && target.tagName.toLowerCase() === 'img') {
+        e.preventDefault();
+    }
+};
+
 onMounted(() => {
+    window.addEventListener('dragstart', onDragStart);
     window.addEventListener('dragenter', onDragEnter);
     window.addEventListener('dragleave', onDragLeave);
     window.addEventListener('dragover', onDragOver);
@@ -214,6 +222,7 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+    window.removeEventListener('dragstart', onDragStart);
     window.removeEventListener('dragenter', onDragEnter);
     window.removeEventListener('dragleave', onDragLeave);
     window.removeEventListener('dragover', onDragOver);
