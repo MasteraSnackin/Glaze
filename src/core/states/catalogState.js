@@ -4,7 +4,8 @@
  */
 import { ref, watch } from 'vue';
 import { db } from '@/utils/db.js';
-import { extractCharacterBook, generateThumbnail } from '@/utils/characterIO.js';
+import { extractCharacterBook } from '@/utils/characterIO.js';
+import { generateAllThumbnails } from '@/utils/thumbnailUtils.js';
 import { datacatBrowse, datacatSearch, datacatGetCharacter, datacatEnsureSession, datacatFresh } from '@/core/services/catalog/datacatProvider.js';
 import { janitorSearch, janitorHampterSearch, fetchJanitorTags } from '@/core/services/catalog/janitorProvider.js';
 import { Capacitor } from '@capacitor/core';
@@ -130,7 +131,9 @@ export async function importCharacter(charData, avatarUrl) {
         try {
             const avatarBase64 = await fetchImageAsBase64(avatarUrl);
             charData.avatar = avatarBase64;
-            charData.thumbnail = await generateThumbnail(avatarBase64);
+            const thumbs = await generateAllThumbnails(avatarBase64);
+            charData.thumbnail = thumbs.thumbnail;
+            charData.mini_thumbnail = thumbs.mini_thumbnail;
         } catch (e) {
             console.warn('[catalog] Failed to download avatar:', e.message);
             charData.avatar = null;
