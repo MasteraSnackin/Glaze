@@ -468,7 +468,7 @@
 }
 
 /* When acting as Left Icon Strip (only while a sheet is open behind it) */
-.desktop-sidebar-right.has-sheet .magic-drawer-sidebar.icon-only {
+.desktop-sidebar-right .magic-drawer-sidebar.icon-only.left-icon-strip {
     position: absolute !important;
     left: 0 !important;
     top: 0 !important;
@@ -484,21 +484,33 @@
     /* Let clicks pass through the padded top area */
 }
 
-.desktop-sidebar-right.has-sheet .magic-drawer-sidebar.icon-only .drawer-content {
+.desktop-sidebar-right .magic-drawer-sidebar.icon-only.left-icon-strip .drawer-content {
     pointer-events: auto !important;
     /* Re-enable clicks for the icon list */
 }
 
-/* Ensure padding for content when icon strip is visible (Chat Mode Only) */
-.desktop-sidebar-right.is-chat.has-sheet .sheet-view-content.is-sidebar .sheet-view-body,
-.desktop-sidebar-right.is-chat.has-sheet .bottom-sheet-content.is-sidebar .sheet-scroll-container,
-.desktop-sidebar-right.is-chat.has-sheet .sheet-view-content.is-sidebar .sc-sheet-tabs {
+/* Ensure padding for content when icon strip is visible */
+.desktop-sidebar-right.has-left-strip .sheet-view-content.is-sidebar .sheet-view-body,
+.desktop-sidebar-right.has-left-strip .bottom-sheet-content.is-sidebar .sheet-scroll-container,
+.desktop-sidebar-right.has-left-strip .sheet-view-content.is-sidebar .sc-sheet-tabs,
+.desktop-sidebar-right.has-left-strip .sheet-view-content.is-sidebar .sc-sheet-header-bottom {
     padding-left: 60px !important;
 }
 
 .desktop-sidebar-right.has-sheet .sheet-view-content.is-sidebar .sheet-view-body {
     padding-top: 56px !important;
     scroll-padding-top: 56px !important;
+}
+
+.desktop-sidebar-right.has-sheet .sheet-view-content.is-sidebar:has(.sc-sheet-tabs) .sheet-view-body,
+.desktop-sidebar-right.has-sheet .sheet-view-content.is-sidebar:has(.sc-sheet-header-bottom) .sheet-view-body {
+    padding-top: 116px !important;
+    scroll-padding-top: 116px !important;
+}
+
+.desktop-sidebar-right.has-sheet .sheet-view-content.is-sidebar:has(.sc-sheet-tabs):has(.sc-sheet-header-bottom) .sheet-view-body {
+    padding-top: 176px !important;
+    scroll-padding-top: 176px !important;
 }
 
 /* Keep header full width */
@@ -510,6 +522,10 @@
 .desktop-sidebar-right.has-sheet .sheet-view-content.is-sidebar .sc-header-title,
 .desktop-sidebar-right.has-sheet .bottom-sheet-content.is-sidebar .sc-header-title {
     margin-left: 16px;
+}
+
+.desktop-sidebar-right.has-sheet .bottom-sheet-content.is-sidebar .sheet-header .sheet-title {
+    padding: 0 16px;
 }
 
 .desktop-sidebar-right.has-sheet .bottom-sheet-content.is-sidebar .sheet-header {
