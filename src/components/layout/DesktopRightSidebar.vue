@@ -177,9 +177,8 @@ const chatStripItems = computed(() => {
         return displayItems
             .filter(item => !item.isAddBtn)
             .map(item => ({
-                id: item.id,
+                ...item,
                 label: (item.i18n ? t(item.i18n) : null) || item.fallback || item.label || item.id,
-                icon: item.icon
             }));
     }
     

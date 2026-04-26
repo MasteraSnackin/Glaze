@@ -152,13 +152,16 @@ watch(() => props.visible, (val) => {
 
 const handleAction = (item) => {
     if (isEditing.value && !props.sidebarMode) return;
-    if (item.id === 'personas') {
+    
+    const canonicalItem = allAvailableItems.find(i => i.id === item.id) || item;
+
+    if (canonicalItem.id === 'personas') {
         personasSheet.value?.open();
-    } else if (item.id === 'image-gen') {
+    } else if (canonicalItem.id === 'image-gen') {
         emit('magic-image-gen');
         emit('close');
-    } else {
-        emit(item.event);
+    } else if (canonicalItem.event) {
+        emit(canonicalItem.event);
         emit('close');
     }
 };
