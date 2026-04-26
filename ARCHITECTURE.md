@@ -55,8 +55,9 @@ Current behavior:
 `nav.*` (19 events):
 - `openApiSheet`, `navigateTo`, `openCharacterEditor`, `openChat`, `openOnboarding`, `openBackupSheet`, `openSyncSheet`, `openConflictSheet`, `openConnections`, `openFsRequest`, `openGlossary`, `openHolocards`, `openImageViewer`, `openItemEditor`, `openLorebookEntry`, `openNotificationsSheet`, `openPersonaEditor`, `openPresetSheet`, `triggerOpenImage`
 
-`domain.*` (11 events):
+- `domain.*` (11 events):
 - `chat.updated`, `character.updated`, `generation.{started,ended,promptReady,requestDispatched}`, `lorebook.regexScriptsChanged`, `sync.dataRefreshed`, `settings.{apiContextChanged,changed,languageChanged}`
+- Generation started/ended events carry `{ charId, sessionId, genId, type }` — `genId` for stale-generation filtering, `type` for `chat`/`impersonation` disambiguation
 
 `debug.*` (6 events):
 - `promptPreviewUpdated`, `requestTrace{Started,Updated,LineAppended,Finished}`, `vueError`
@@ -535,7 +536,7 @@ MemorySettings: {
 - `src/core/llm/transport/requestOrchestrator.js` — Transport entrypoint that resolves provider, wires runtime policy, and dispatches to execution path
 - `src/core/llm/transport/completionsClient.js` — Fetch-based `/chat/completions` execution
 - `src/core/llm/transport/requestLifecycle.js` — Timeouts, abort guards, request headers, trace start
-- `src/core/llm/transport/requestExecution.js` — Native non-stream vs fetch execution split
+- `src/core/llm/transport/requestExecution.js` — Native non-stream vs fetch execution split, abortable XHR for native HTTP
 - `src/core/llm/transport/streamingSse.js` — SSE stream consumption and delta dispatch
 - `src/core/llm/transport/responseHandling.js` — One-shot/native response shaping
 - `src/core/llm/transport/requestOutcome.js` — Abort/timeout/failure completion policy
@@ -582,9 +583,10 @@ MemorySettings: {
    - context breakdown assembly
    - request-body creation and sanitization
    - `lastPrompt` snapshot for request preview UI
-  5. `generationService.js` calls `chatRequestAssembly.js:executeFinalChatRequest()` which calls `requestOrchestrator.js:executeRequest()` with transport config, reasoning config, request type, abort controller, and callbacks.
-  6. `requestOrchestrator.js` resolves the provider from `providerRegistry.js`, sets up `requestRuntimePolicy`, `streamAccumulator`, and `requestLifecycle`, then dispatches through either `completionsClient.js` (fetch streaming) or `requestExecution.js` (native non-stream).
-7. The transport executes `/chat/completions` using either:
+5. `generationService.js` calls `chatRequestAssembly.js:executeFinalChatRequest()` which calls `requestOrchestrator.js:executeRequest()` with transport config, reasoning config, request type, abort controller, and callbacks.
+   `chatRequestAssembly.js` injects `controller` into `requestConfig` via `createImmutableChatRequestEnvelope()` — preserving abort ownership even through extension hooks.
+   6. `requestOrchestrator.js` resolves the provider from `providerRegistry.js`, sets up `requestRuntimePolicy`, `streamAccumulator`, and `requestLifecycle`, then dispatches through `completionsClient.js` (fetch streaming), `executeAbortableJsonRequest` (XHR for native non-stream), or `requestExecution.js` (native non-stream fallback).
+   7. The transport executes `/chat/completions` using either:
    - `CapacitorHttp.post()` for native non-stream local HTTP requests
    - `fetch()` for web and streaming requests
 8. The transport parses either:
@@ -636,11 +638,48 @@ MemorySettings: {
 - `ApiView.vue` writes many of those values directly back to `localStorage`, and also mutates the active API preset record.
 - `ChatView.vue` still performs some direct localStorage reads for preflight config checks.
 
+### Abort Signal Propagation (PR #72)
+
+Before PR #72, `AbortController` was created and stored in generation state, but the signal never reached `fetch()`. Pressing stop only cleared UI state; the TCP connection stayed open until the server finished.
+
+**Current signal chain:**
+1. `ChatView.vue` creates `AbortController` and passes `controller` into `useChatGeneration.startGeneration()`
+2. `generationService.js:generateChatResponse()` injects `controller` into `requestConfig` (the critical fix — was `undefined` before)
+3. `chatRequestAssembly.js:createImmutableChatRequestEnvelope()` preserves the original controller, warns if extension hooks try to replace it
+4. `requestOrchestrator.js:executeRequest()` passes `controller?.signal` as `abortSignal` to `completionsClient.js`
+5. `completionsClient.js` passes `abortSignal` to `streamingSse.js:consumeStreamingSseResponse()`
+6. `streamingSse.js:readChunk()` listens on `abortSignal`, calls `reader.cancel()` and rejects with `AbortError`
+7. `requestOutcome.js:handleAbortOutcome()` receives `userAborted` flag and routes accordingly
+
+**User abort flow:**
+1. User presses stop → `useGenerationAbort.js` sets `state.userAborted = true`, `state.controller.userAborted = true`, calls `controller.abort()`
+2. Abort signal propagates through the chain above → `reader.cancel()` closes the TCP connection immediately
+3. `handleAbortOutcome()` sees `userAborted = true` → tags `abortError.userAborted = true` → calls `onError(abortError)`
+4. `useGenerationErrorHandler.js` fast-paths `AbortError` with `userAborted` → skips error toast, restores state, finalizes generation
+
+**Stale generation guards:**
+- `useGenerationFinalization.js` — `expectedGenId` check prevents finalizing a wrong generation
+- `useGenerationStateRestore.js` — `expectedGenId` check, early-return if no state
+- `useGenerationCompleteHandler.js` — stale completion skips typing cleanup for active newer generation
+- `useGenerationStateSetup.js` — `flushPendingUIUpdate` and `initialUIUpdate` check `genId`/`sessionId`/`msgId` match; timer reschedule checks abort
+
+### Crash Recovery Buffer (PR #72)
+
+`useSessionPersistence.js` now maintains a crash recovery buffer in `localStorage`:
+- `writeCrashBuffer()` writes on `visibilitychange` (hidden), `pagehide`, and `beforeunload`
+- Buffer contains: `messages`, `draft`, `authorsNote`, `summary`, `lastScrollAnchor`, `savedAt`
+- `clearCrashBuffer()` called after successful `asyncSaveCurrentSessionState()`
+- On `openChat()`, if crash buffer has more messages than stored session, buffer is restored and persisted to IndexedDB
+- Key format: `gz_chat_recovery_{charId}_{sessionId}`
+
 ### Transport Behavior Today
 - Request endpoint is always `${apiUrl}/chat/completions` for generation and `${apiUrl}/models` for model discovery.
 - `CONNECT_TIMEOUT` and `STREAM_TIMEOUT` are read from `localStorage` through `requestLifecycle.js`.
 - Streaming requests use SSE parsing with `data: ...` lines and `[DONE]` termination.
 - If a streaming response body is unavailable on the current runtime, the transport falls back to one-shot JSON parsing instead of hard-failing.
+- **Abort signal propagation**: `AbortController.signal` now reaches `fetch()` through the full chain. Stream reader listens on signal and cancels immediately on abort.
+- **Native non-streaming abort**: XHR-based `executeAbortableJsonRequest()` used for native HTTP non-streaming chat requests, allowing abort to close the TCP connection (CapacitorHttp does not support abort).
+- **User abort vs timeout**: `userAborted` flag distinguishes intentional stop from timeout/failure. User abort skips error toast and partial-content recovery.
 - Abort handling is dual-purpose:
   - user abort may still preserve partial text
   - timeout-triggered abort is treated as an error and may preserve partial text with `partialError`
@@ -709,6 +748,9 @@ Native-only scope retained:
 - Runtime config has multiple owners: `localStorage`, IndexedDB API presets, reactive `ApiView.vue` state, onboarding writes, and direct reads in feature views.
 - Worker/service boundaries are not documented clearly: keyword lore lives in the worker, vector retrieval and memory injection happen later in the service layer.
 - Callback signatures are flexible but brittle across chat, summary, and memory-draft flows.
+- **Resolved (PR #72):** AbortController signal previously did not reach `fetch()`, so stop button only cleared UI state while TCP connection stayed open. Now signal propagates end-to-end through `requestConfig` → `completionsClient` → `streamingSse:readChunk()`.
+- **Resolved (PR #72):** Stale completions from aborted generations could mutate typing state for newer active generations. Now guarded by `expectedGenId` checks in finalize/restore/complete/setup paths.
+- **Resolved (PR #72):** No crash recovery — closing the browser tab during generation or auto-save race conditions could lose messages. Now `useSessionPersistence` writes crash buffer on `pagehide`/`beforeunload`/`visibilitychange`.
 
 ### Actual Architecture (Landed)
 
@@ -728,8 +770,8 @@ Native-only scope retained:
 - `requestOrchestrator.js` — Transport entrypoint: resolves provider, wires runtime policy, dispatches
 - `completionsClient.js` — Fetch-based `/chat/completions` execution
 - `requestLifecycle.js` — Timeout setup, abort guards, request headers
-- `requestExecution.js` — Native non-stream vs fetch execution branching
-- `streamingSse.js` — SSE stream consumption and delta dispatch
+- `requestExecution.js` — Native non-stream vs fetch execution branching, abortable XHR for native HTTP (`executeAbortableJsonRequest`)
+- `streamingSse.js` — SSE stream consumption and delta dispatch, abort-signal–aware chunk reader
 - `sseParser.js` — SSE line parsing
 - `responseHandling.js` — One-shot/native completion shaping
 - `requestOutcome.js` — Abort/timeout/failure completion policy
@@ -795,22 +837,22 @@ Native-only scope retained:
 - `src/composables/chat/useGenerationStateSetup.js` — generation state registration
 - `src/composables/chat/useGenerationStreamUpdate.js` — background persistence throttling
 - `src/composables/chat/useGenerationPromptReady.js` — prompt metadata assignment
-- `src/composables/chat/useGenerationCompleteHandler.js` — completion/finalization
-- `src/composables/chat/useGenerationErrorHandler.js` — error path handling
-- `src/composables/chat/useGenerationStateRestore.js` — abort/rollback restore
+- `src/composables/chat/useGenerationCompleteHandler.js` — completion/finalization with stale-generation guard (genId match, userAborted fast-path)
+- `src/composables/chat/useGenerationErrorHandler.js` — error path handling with userAborted fast-path and expectedGenId
+- `src/composables/chat/useGenerationStateRestore.js` — abort/rollback restore with stale-generation guard (expectedGenId)
 - `src/composables/chat/usePromptMetadataSnapshots.js` — prompt metadata rollback snapshots
 - `src/composables/chat/useTypingStateCleanup.js` — stale typing cleanup
 - `src/composables/chat/useChatSearch.js` — search in chat
 - `src/composables/chat/useContentEditable.js` — content-editable input handling
 - `src/composables/chat/useContextCutoff.js` — context cutoff management
-- `src/composables/chat/useGenerationAbort.js` — generation abort handling
-- `src/composables/chat/useGenerationFinalization.js` — generation finalization
+- `src/composables/chat/useGenerationAbort.js` — generation abort handling, userAborted flag propagation, timer cleanup (completion handler owns state cleanup)
+- `src/composables/chat/useGenerationFinalization.js` — generation finalization with stale-generation guard (expectedGenId)
 - `src/composables/chat/useGenerationRegistry.js` — generation registry
 - `src/composables/chat/useInputActions.js` — chat input actions
 - `src/composables/chat/useMemorySheetUI.js` — memory sheet UI
 - `src/composables/chat/useMessageImageGen.js` — image generation from messages
 - `src/composables/chat/useMessageSwipe.js` — message swipe actions
-- `src/composables/chat/useSessionPersistence.js` — session persistence
+- `src/composables/chat/useSessionPersistence.js` — session persistence, crash recovery buffer (localStorage → IndexedDB restore on openChat)
 - `src/composables/chat/useSwipeNavigation.js` — swipe navigation
 - `src/composables/chat/useVirtualScroll.js` — virtual scrolling
 
@@ -1134,8 +1176,12 @@ These files exceed the 400-line guard rail but are intentionally left as-is. Eac
 - [ ] Chat requests succeed in both streaming and non-streaming modes
 - [ ] Native non-stream requests still work through `CapacitorHttp`
 - [ ] Missing stream reader fallback still produces a complete response
-- [ ] User abort preserves partial text when expected
-- [ ] Timeout abort reports an error and does not leave phantom typing state
+- [ ] User abort closes the TCP connection immediately (signal reaches `fetch()`)
+- [ ] Abort during streaming stops chunk reading immediately (readChunk abort listener)
+- [ ] Native HTTP non-stream abort works through XHR (`executeAbortableJsonRequest`)
+- [ ] User abort skips error toast and partial-content recovery
+- [ ] Timeout abort still shows error toast
+- [ ] Stale completions from previous generations do not mutate newer generation's typing state
 - [ ] Summary and memory-draft requests do not regress while chat transport is refactored
 - [ ] Request preview still shows the final built payload after prompt assembly
 - [ ] Network trace capture remains optional and does not affect generation success
@@ -1143,6 +1189,7 @@ These files exceed the 400-line guard rail but are intentionally left as-is. Eac
 - [ ] Native auto-sync does not start while active generation is still running
 - [ ] Prompt metadata rollback still works after abort/error paths
 - [ ] Late vector lore still respects `maxInjectedEntries` after transport/refactor changes
+- [ ] Crash buffer recovery: messages survive browser crash/force-close during generation
 
 ### Cloud Sync
 - [ ] Provider buttons only appear when their env keys are configured

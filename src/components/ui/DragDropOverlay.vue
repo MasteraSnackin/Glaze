@@ -87,8 +87,9 @@ const onDrop = async (e) => {
                 const json = JSON.parse(text);
 
                 if (json.entries) {
-                    const { importSTLorebook } = await import('@/core/states/lorebookState.js');
+                    const { importSTLorebook, saveLorebooks } = await import('@/core/states/lorebookState.js');
                     await importSTLorebook(json, file.name);
+                    await saveLorebooks();
                     showSuccess('Import Successful', 'Successfully imported lorebook: ' + (json.name || file.name.replace('.json', '')));
                     isProcessing.value = false;
                     return;
@@ -119,14 +120,42 @@ const onDrop = async (e) => {
                     return;
                 } else if (json.blocks && Array.isArray(json.blocks)) {
                     const { presetState, savePresets, initPresetState } = await import('@/core/states/presetState.js');
+                    const { finalizeImportedPreset } = await import('@/core/services/presetImportService.js');
                     if (!presetState.initialized) {
                         await initPresetState();
                     }
-                    const newPreset = { ...json };
-                    if (!newPreset.id) newPreset.id = Date.now().toString();
-                    presetState.presets[newPreset.id] = newPreset;
+                    let preset = { ...json };
+                    if (!preset.id) preset.id = Date.now().toString();
+                    preset = finalizeImportedPreset(preset);
+                    presetState.presets[preset.id] = preset;
                     savePresets();
-                    showSuccess('Import Successful', 'Successfully imported preset: ' + (newPreset.name || 'Unnamed'));
+                    showSuccess('Import Successful', 'Successfully imported preset: ' + (preset.name || 'Unnamed'));
+                    isProcessing.value = false;
+                    return;
+                } else if (json.prompts && Array.isArray(json.prompts)) {
+                    const { presetState, savePresets, initPresetState } = await import('@/core/states/presetState.js');
+                    const { convertSTPreset, finalizeImportedPreset } = await import('@/core/services/presetImportService.js');
+                    if (!presetState.initialized) {
+                        await initPresetState();
+                    }
+                    let preset = convertSTPreset(json, file.name.replace('.json', ''));
+                    preset = finalizeImportedPreset(preset);
+                    presetState.presets[preset.id] = preset;
+                    savePresets();
+                    showSuccess('Import Successful', 'Successfully imported SillyTavern preset: ' + (preset.name || 'Unnamed'));
+                    isProcessing.value = false;
+                    return;
+                } else if (json.tabs && Array.isArray(json.tabs)) {
+                    const { presetState, savePresets, initPresetState } = await import('@/core/states/presetState.js');
+                    const { convertLatexPreset, finalizeImportedPreset } = await import('@/core/services/presetImportService.js');
+                    if (!presetState.initialized) {
+                        await initPresetState();
+                    }
+                    let preset = convertLatexPreset(json, file.name.replace('.json', ''));
+                    preset = finalizeImportedPreset(preset);
+                    presetState.presets[preset.id] = preset;
+                    savePresets();
+                    showSuccess('Import Successful', 'Successfully imported LaTeX preset: ' + (preset.name || 'Unnamed'));
                     isProcessing.value = false;
                     return;
                 } else if (json.themeMode || json.accentColor || json.bgOpacity !== undefined) {
@@ -160,6 +189,11 @@ const onDrop = async (e) => {
                 showSuccess(
                     translations[lang]?.sheet_title_char_options || 'Import Successful',
                     (translations[lang]?.msg_import_char_success || 'Successfully imported character:') + ' ' + charData.name
+                );
+            } else if (file.name.toLowerCase().endsWith('.json')) {
+                const lang = currentLang.value;
+                showError(
+                    (translations[lang]?.msg_import_char_failed || 'Failed to import file') + ': Unrecognized JSON format. Expected a character card, lorebook, preset, regex script, or theme file.'
                 );
             }
         } catch (error) {
