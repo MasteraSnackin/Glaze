@@ -4,6 +4,10 @@ import BottomSheet from '@/components/ui/BottomSheet.vue';
 import MagicDrawer from '@/components/chat/MagicDrawer.vue';
 import ToolStripTooltip from '@/components/ToolStripTooltip.vue';
 import { sidebarState } from '@/core/states/sidebarState.js';
+import { translations } from '@/utils/i18n.js';
+import { currentLang } from '@/core/config/APPSettings.js';
+
+const t = (key) => translations[currentLang.value]?.[key] || key;
 
 const PresetView = defineAsyncComponent(() => import('@/views/PresetView.vue'));
 const ApiView = defineAsyncComponent(() => import('@/views/ApiView.vue'));
@@ -34,7 +38,8 @@ const emit = defineEmits([
     'magic-memory-books',
     'magic-regex',
     'magic-image-gen',
-    'magic-glossary'
+    'magic-glossary',
+    'request-preview'
 ]);
 
 // ── Two independent widths: expanded and collapsed never affect each other ──
@@ -132,13 +137,13 @@ const toolComponentMap = {
 };
 
 // Tool strip icon definitions (mirrors ToolsView.vue tools list)
-const toolStripItems = [
-    { id: 'view-personas', label: 'Personas', icon: 'M19 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm6 12H6v-1c0-2 4-3.1 6-3.1s6 1.1 6 3.1v1z' },
-    { id: 'view-presets', label: 'Presets', icon: 'M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6h-6V2zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z' },
-    { id: 'view-api', label: 'API', icon: 'M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z' },
-    { id: 'view-lorebook', label: 'Lorebook', icon: 'M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9H9V9h10v2zm-4 4H9v-2h6v2zm4-8H9V5h10v2z' },
-    { id: 'view-regex', label: 'Regex', icon: 'M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z' },
-];
+const toolStripItems = computed(() => [
+    { id: 'view-personas', label: t('tab_personas') || 'Personas', icon: 'M19 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm6 12H6v-1c0-2 4-3.1 6-3.1s6 1.1 6 3.1v1z' },
+    { id: 'view-presets', label: t('subtab_preset') || 'Presets', icon: 'M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6h-6V2zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z' },
+    { id: 'view-api', label: t('tab_api') || 'API', icon: 'M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z' },
+    { id: 'view-lorebook', label: t('menu_lorebooks') || 'Lorebook', icon: 'M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9H9V9h10v2zm-4 4H9v-2h6v2zm4-8H9V5h10v2z' },
+    { id: 'view-regex', label: t('menu_regex') || 'Regex', icon: 'M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z' },
+]);
 
 const activeToolComponent = computed(() =>
     activeTool.value ? toolComponentMap[activeTool.value] : null
@@ -150,20 +155,20 @@ const magicDrawerRef = ref(null);
 const chatStripItems = computed(() => {
     // Default items if MagicDrawer not yet mounted
     const defaultItems = [
-        { id: 'notes', label: 'Author\'s Notes', icon: 'M3 10h11v2H3v-2zm0-2h11V6H3v2zm0 8h7v-2H3v2zm15.01-3.13l.71-.71c.39-.39 1.02-.39 1.41 0l.71.71c.39.39.39 1.02 0 1.41l-.71.71-2.12-2.12zm-.71.71l-5.3 5.3V21h2.12l5.3-5.3-2.12-2.12z' },
-        { id: 'context', label: 'Tokenizer', icon: 'M4 11h16v2H4zm0-6h16v2H4zm0 12h10v2H4z' },
-        { id: 'summary', label: 'Summary', icon: 'M14 17H4v2h10v-2zm6-8H4v2h16V9zM4 15h16v-2H4v2zM4 5v2h16V5H4z' },
-        { id: 'sessions', label: 'Sessions', icon: 'M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42C8.27 19.99 10.51 21 13 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z' },
-        { id: 'stats', label: 'Stats', icon: 'M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z' },
-        { id: 'char-card', label: 'Character Card', icon: 'M3 5v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2H5c-1.11 0-2 .9-2 2zm12 4c0 1.66-1.34 3-3 3s-3-1.34-3-3 1.34-3 3-3 3 1.34 3 3zm-9 8c0-2 4-3.1 6-3.1s6 1.1 6 3.1v1H6v-1z' },
-        { id: 'lorebooks', label: 'Lorebooks', icon: 'M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9H9V9h10v2zm-4 4H9v-2h6v2zm4-8H9V5h10v2z' },
-        { id: 'memory-books', label: 'Memory Books', icon: 'M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 10h-4v4h-2v-4H7v-2h4V7h2v4h4v2z' },
-        { id: 'regex', label: 'Regex', icon: 'M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z' },
-        { id: 'api', label: 'API', icon: 'M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z' },
-        { id: 'presets', label: 'Presets', icon: 'M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6h-6V2zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z' },
-        { id: 'preview', label: 'Request Preview', icon: 'M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z' },
-        { id: 'personas', label: 'Personas', icon: 'M19 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm6 12H6v-1c0-2 4-3.1 6-3.1s6 1.1 6 3.1v1z' },
-        { id: 'image-gen', label: 'Image Gen', icon: 'M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z' },
+        { id: 'notes', label: t('magic_authors_notes') || 'Author\'s Notes', icon: 'M3 10h11v2H3v-2zm0-2h11V6H3v2zm0 8h7v-2H3v2zm15.01-3.13l.71-.71c.39-.39 1.02-.39 1.41 0l.71.71c.39.39.39 1.02 0 1.41l-.71.71-2.12-2.12zm-.71.71l-5.3 5.3V21h2.12l5.3-5.3-2.12-2.12z' },
+        { id: 'context', label: t('label_tokenizer') || 'Tokenizer', icon: 'M4 11h16v2H4zm0-6h16v2H4zm0 12h10v2H4z' },
+        { id: 'summary', label: t('magic_summary') || 'Summary', icon: 'M14 17H4v2h10v-2zm6-8H4v2h16V9zM4 15h16v-2H4v2zM4 5v2h16V5H4z' },
+        { id: 'sessions', label: t('history_title') || 'Sessions', icon: 'M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42C8.27 19.99 10.51 21 13 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z' },
+        { id: 'stats', label: t('action_chat_stats') || 'Stats', icon: 'M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z' },
+        { id: 'char-card', label: t('block_char_card') || 'Character Card', icon: 'M3 5v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2H5c-1.11 0-2 .9-2 2zm12 4c0 1.66-1.34 3-3 3s-3-1.34-3-3 1.34-3 3-3 3 1.34 3 3zm-9 8c0-2 4-3.1 6-3.1s6 1.1 6 3.1v1H6v-1z' },
+        { id: 'lorebooks', label: t('menu_lorebooks') || 'Lorebooks', icon: 'M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9H9V9h10v2zm-4 4H9v-2h6v2zm4-8H9V5h10v2z' },
+        { id: 'memory-books', label: t('magic_memory_books') || 'Memory Books', icon: 'M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 10h-4v4h-2v-4H7v-2h4V7h2v4h4v2z' },
+        { id: 'regex', label: t('menu_regex') || 'Regex', icon: 'M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z' },
+        { id: 'api', label: t('tab_api') || 'API', icon: 'M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z' },
+        { id: 'presets', label: t('subtab_preset') || 'Presets', icon: 'M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6h-6V2zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z' },
+        { id: 'preview', label: t('magic_request_preview') || 'Request Preview', icon: 'M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z' },
+        { id: 'personas', label: t('tab_personas') || 'Personas', icon: 'M19 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm6 12H6v-1c0-2 4-3.1 6-3.1s6 1.1 6 3.1v1z' },
+        { id: 'image-gen', label: t('imggen_title') || 'Image Gen', icon: 'M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z' },
     ];
     
     // Try to get items from MagicDrawer if available
@@ -173,7 +178,7 @@ const chatStripItems = computed(() => {
             .filter(item => !item.isAddBtn)
             .map(item => ({
                 id: item.id,
-                label: item.fallback || item.label || item.id,
+                label: (item.i18n ? t(item.i18n) : null) || item.fallback || item.label || item.id,
                 icon: item.icon
             }));
     }
@@ -265,6 +270,7 @@ function openTool(viewId) {
       id="desktop-sidebar-container"
       :class="{
           'has-sheet': hasSheet,
+          'has-left-strip': isChat ? (hasSheet && !collapsed) : (!!activeToolComponent && !collapsed),
           'tools-mode': !isChat,
           'is-chat': isChat,
           'sidebar-collapsed': collapsed
@@ -275,9 +281,9 @@ function openTool(viewId) {
 
       <!-- ── Chat mode: MagicDrawer icon strip + BottomSheet ── -->
       <template v-if="isChat">
-          <!-- Collapsed: icon strip with ToolStripTooltip -->
-          <template v-if="collapsed && !hasSheet">
-              <div class="tools-strip magic-drawer-sidebar icon-only">
+          <!-- Collapsed or has sheet: icon strip with ToolStripTooltip -->
+          <template v-if="collapsed || hasSheet">
+              <div class="tools-strip magic-drawer-sidebar icon-only" :class="{ 'left-icon-strip': hasSheet && !collapsed }">
                   <div class="drawer-content">
                       <ToolStripTooltip :items="chatStripItems" placement="left">
                           <template #default="{ onItemEnter, onItemLeave }">
@@ -302,36 +308,33 @@ function openTool(viewId) {
               </div>
           </template>
 
-          <!-- Expanded or has sheet: full MagicDrawer -->
-          <template v-else>
-              <MagicDrawer
-                  ref="magicDrawerRef"
-                  :visible="true"
-                  :sidebar-mode="true"
-                  :icon-only="hasSheet || collapsed"
-                  :class="{ 'left-icon-strip': hasSheet && !collapsed }"
-                  :active-char="activeChatCharObj"
-                  @magic-notes="emit('magic-notes')"
-                  @magic-context="emit('magic-context')"
-                  @magic-summary="emit('magic-summary')"
-                  @magic-sessions="emit('magic-sessions')"
-                  @magic-stats="emit('magic-stats')"
-                  @magic-impersonate="emit('magic-impersonate')"
-                  @magic-char-card="emit('magic-char-card')"
-                  @magic-api="emit('magic-api')"
-                  @magic-presets="emit('magic-presets')"
-                  @magic-lorebooks="emit('magic-lorebooks')"
-                  @magic-memory-books="emit('magic-memory-books')"
-                  @magic-regex="emit('magic-regex')"
-                  @magic-image-gen="emit('magic-image-gen')"
-                  @magic-glossary="emit('magic-glossary')"
-                  @request-preview="() => {}"
-                  @close="() => {}"
-              />
-          </template>
+          <!-- Expanded and no sheet: full MagicDrawer -->
+          <MagicDrawer
+              v-show="!collapsed && !hasSheet"
+              ref="magicDrawerRef"
+              :visible="!collapsed && !hasSheet"
+              :sidebar-mode="true"
+              :icon-only="false"
+              :active-char="activeChatCharObj"
+              @magic-notes="emit('magic-notes')"
+              @magic-context="emit('magic-context')"
+              @magic-summary="emit('magic-summary')"
+              @magic-sessions="emit('magic-sessions')"
+              @magic-stats="emit('magic-stats')"
+              @magic-impersonate="emit('magic-impersonate')"
+              @magic-char-card="emit('magic-char-card')"
+              @magic-api="emit('magic-api')"
+              @magic-presets="emit('magic-presets')"
+              @magic-lorebooks="emit('magic-lorebooks')"
+              @magic-memory-books="emit('magic-memory-books')"
+              @magic-regex="emit('magic-regex')"
+              @magic-image-gen="emit('magic-image-gen')"
+              @magic-glossary="emit('magic-glossary')"
+              @request-preview="emit('request-preview')"
+              @close="() => {}"
+          />
 
           <BottomSheet
-               v-if="bottomSheetState.visible"
                v-bind="bottomSheetState"
                :sidebar-mode="true"
                @close="emit('closeBottomSheet')"
@@ -340,9 +343,9 @@ function openTool(viewId) {
 
       <!-- ── Non-chat mode: Tools icon strip + ToolsView + tool sheets ── -->
       <template v-else>
-          <!-- Collapsed: vertical tool icon strip mirroring MagicDrawer icon styling -->
-          <template v-if="collapsed">
-              <div class="tools-strip magic-drawer-sidebar icon-only">
+          <!-- Collapsed or has active tool: vertical tool icon strip mirroring MagicDrawer icon styling -->
+          <template v-if="collapsed || activeToolComponent">
+              <div class="tools-strip magic-drawer-sidebar icon-only" :class="{ 'left-icon-strip': activeToolComponent && !collapsed }">
                   <div class="drawer-content">
                       <ToolStripTooltip :items="toolStripItems" placement="left">
                           <template #default="{ onItemEnter, onItemLeave }">
@@ -369,7 +372,7 @@ function openTool(viewId) {
           </template>
 
           <!-- Expanded: ToolsView background + active tool sheet -->
-          <template v-else>
+          <template v-if="!collapsed">
               <div class="tools-view-bg">
                   <ToolsView :sidebar-mode="true" @tool-select="openTool" />
               </div>
