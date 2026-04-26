@@ -3,7 +3,7 @@ import { translations } from '@/utils/i18n.js';
 import { formatText } from '@/utils/textFormatter.js';
 import { Capacitor } from '@capacitor/core';
 import { App } from '@capacitor/app';
-import { Toast } from '@capacitor/toast';
+import { showToast } from '@/core/states/toastState.js';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { SafeArea } from '@capacitor-community/safe-area';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
@@ -420,11 +420,9 @@ export function initBackButton() {
             App.exitApp();
         } else {
             lastBackPress = now;
-            await Toast.show({
-                text: (translations[currentLang.value] && translations[currentLang.value].exit_hint) || 'Press again to exit',
-                duration: 'short',
-                position: 'bottom'
-            });
+            const text = (translations[currentLang.value] && translations[currentLang.value].exit_hint) || 'Press again to exit';
+            // Show custom app toast instead of native
+            showToast(text, 2500);
         }
     };
 
