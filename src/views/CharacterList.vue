@@ -12,6 +12,7 @@ import { APP_EVENTS } from '@/core/events/eventNames.js';
 import { subscribeAppEvent, publishAppEvent } from '@/core/events/eventHub.js';
 import { useCharacterActions } from '@/composables/character/useCharacterActions.js';
 import { useSessionSheet } from '@/composables/character/useSessionSheet.js';
+import { useVirtualScroll } from '@/composables/chat/useVirtualScroll.js';
 import CharacterCardSheet from '@/components/sheets/CharacterCardSheet.vue';
 
 const props = defineProps({
@@ -156,6 +157,12 @@ const hasVisibleCards = computed(() => {
   return filteredCharacters.value.length > 0;
 });
 
+const scrollContainer = ref(null);
+const { visibleItems, paddingTop, paddingBottom } = useVirtualScroll(filteredCharacters, scrollContainer, {
+    grid: true,
+    estimateHeight: 250
+});
+
 
 
 const unsubs = [];
@@ -193,7 +200,7 @@ defineExpose({ onAddCharacter, loadCharacters });
 </script>
 
 <template>
-  <div class="view-content-wrapper">
+  <div class="view-content-wrapper" ref="scrollContainer">
     <!-- Tab Bar -->
     <div class="tabs-row">
       <div class="top-tabs-container">
@@ -237,15 +244,15 @@ defineExpose({ onAddCharacter, loadCharacters });
     </div>
 
     <!-- Main Character List -->
-    <TransitionGroup 
-      tag="div" 
+    <div 
       class="character-grid" 
-      id="characters-list" 
-      name="list"
+      id="characters-list"
+      :style="{ paddingTop: paddingTop + 'px', paddingBottom: paddingBottom + 'px' }"
     >
       <div 
-        v-for="char in filteredCharacters" 
-        :key="char.id || char.name"
+        v-for="{ item: char, index, key } in visibleItems" 
+        :key="key"
+        :data-index="index"
         class="character-card"
         :class="{
           favorite: char.fav,
@@ -253,6 +260,8 @@ defineExpose({ onAddCharacter, loadCharacters });
         }"
         @click="handleCharClick(char)"
         @contextmenu.prevent="wrappedOpenActions(char)"
+        draggable="false"
+        @dragstart.prevent
       >
         <div class="card-token-badge">
           <svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
@@ -262,7 +271,7 @@ defineExpose({ onAddCharacter, loadCharacters });
           <svg viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>
         </div>
         <div class="card-image-wrapper">
-          <img v-if="char.thumbnail || char.avatar" :src="getAvatarUrl(char.thumbnail || char.avatar)" :alt="char.name" loading="lazy" class="card-image">
+          <img v-if="char.thumbnail || char.avatar" :src="getAvatarUrl(char.thumbnail || char.avatar)" :alt="char.name" loading="lazy" class="card-image" draggable="false">
           <div v-else class="card-placeholder" :style="{ backgroundColor: char.color || '#66ccff' }">
             {{ (char.name && char.name[0]) ? char.name[0].toUpperCase() : '?' }}
           </div>
@@ -285,7 +294,7 @@ v{{ char.version }}
           </div>
         </div>
       </div>
-    </TransitionGroup>
+    </div>
 
     <div v-if="!isLoading && !hasVisibleCards" class="empty-state">
       <svg class="empty-state-icon" viewBox="0 0 24 24"><path d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
@@ -577,6 +586,8 @@ v{{ char.version }}
   transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.3s ease, border-color 0.3s ease;
   cursor: pointer;
   border: 2px solid rgba(255,255,255,0.05);
+  user-select: none;
+  -webkit-user-drag: none;
 }
 
 .character-card:active {

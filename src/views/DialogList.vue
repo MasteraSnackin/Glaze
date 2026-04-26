@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { db } from '@/utils/db.js';
 import { formatDate } from '@/utils/dateFormatter.js';
 import { formatText } from '@/utils/textFormatter.js';
@@ -15,6 +15,7 @@ import { APP_EVENTS } from '@/core/events/eventNames.js';
 import { subscribeAppEvent, publishAppEvent } from '@/core/events/eventHub.js';
 import ToolStripTooltip from '@/components/ToolStripTooltip.vue';
 import { useSessionSheet } from '@/composables/character/useSessionSheet.js';
+import { useVirtualScroll } from '@/composables/chat/useVirtualScroll.js';
 import { getGenerationState } from '@/core/states/generationState.js';
 
 const props = defineProps({
@@ -84,6 +85,7 @@ const loadData = async () => {
                     messagesCount: msgs.length,
                     avatar: char.avatar,
                     thumbnail: char.thumbnail,
+                    mini_thumbnail: char.mini_thumbnail,
                     color: char.color,
                     category: char.category || 'all',
                     tags: char.tags || [],
@@ -180,6 +182,21 @@ const groupedChats = computed(() => {
         entry.sessions.sort((a, b) => b.timestamp - a.timestamp);
     }
     return [...map.values()].sort((a, b) => b.latest.timestamp - a.latest.timestamp);
+});
+
+const activeScrollItems = computed(() => {
+    if (props.collapsed) return groupedChats.value;
+    if (dialogGrouping.value) return groupedChats.value;
+    return filteredChats.value;
+});
+
+const scrollContainer = ref(null);
+const { visibleItems, paddingTop, paddingBottom, refresh: refreshScroll } = useVirtualScroll(activeScrollItems, scrollContainer, {
+    estimateHeight: 72
+});
+
+watch([() => props.collapsed, dialogGrouping], () => {
+    refreshScroll();
 });
 
 const onOpenChat = (chat) => {
@@ -523,14 +540,15 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="view-content-wrapper">
+  <div class="view-content-wrapper" ref="scrollContainer">
       <div class="list-container" :class="{ 'list-container-collapsed': collapsed }">
 
           <!-- Collapsed: icon-only avatar strip -->
           <template v-if="collapsed">
               <ToolStripTooltip :items="collapsedTooltipItems" placement="right">
                   <template #default="{ onItemEnter, onItemLeave }">
-                      <div v-for="group in groupedChats" :key="'col_' + group.latest.id"
+                      <div :style="{ paddingTop: paddingTop + 'px', paddingBottom: paddingBottom + 'px' }">
+                      <div v-for="{ item: group, index, key } in visibleItems" :key="key" :data-index="index"
                            class="collapsed-avatar-item"
                            :class="{ unread: unread[group.latest.id] }"
                            :data-tooltip-id="group.latest.id"
@@ -538,8 +556,8 @@ onUnmounted(() => {
                            @mouseenter="(e) => onItemEnter(group.latest.id, e)"
                            @mouseleave="onItemLeave">
                           <div class="collapsed-avatar-circle">
-                              <img v-if="group.latest.thumbnail || group.latest.avatar"
-                                   :src="getAvatarUrl(group.latest.thumbnail || group.latest.avatar)"
+                              <img v-if="group.latest.mini_thumbnail || group.latest.thumbnail || group.latest.avatar"
+                                   :src="getAvatarUrl(group.latest.mini_thumbnail || group.latest.thumbnail || group.latest.avatar)"
                                    :alt="group.latest.name" loading="lazy">
                               <div v-else class="avatar-placeholder"
                                    :style="{ backgroundColor: group.latest.color || '#66ccff' }">
@@ -547,6 +565,7 @@ onUnmounted(() => {
                               </div>
                           </div>
                           <div class="collapsed-unread-dot" v-if="unread[group.latest.id]"></div>
+                      </div>
                       </div>
                       <div v-if="isLoading" class="collapsed-spinner">
                           <div class="dl-spinner-mini"></div>
@@ -559,9 +578,10 @@ onUnmounted(() => {
           </template>
 
           <template v-if="!dialogGrouping && !collapsed">
-              <div v-for="chat in filteredChats" :key="chat.id + '_' + chat.sessionId" class="list-item" :class="{ unread: unread[chat.id] && chat.isCurrent }" v-long-press="() => openActions(chat)" v-hover-glow @click="handleItemClick($event, chat)" @contextmenu.prevent="openActions(chat)">
+              <div :style="{ paddingTop: paddingTop + 'px', paddingBottom: paddingBottom + 'px' }">
+              <div v-for="{ item: chat, index, key } in visibleItems" :key="key" :data-index="index" class="list-item" :class="{ unread: unread[chat.id] && chat.isCurrent }" v-long-press="() => openActions(chat)" v-hover-glow @click="handleItemClick($event, chat)" @contextmenu.prevent="openActions(chat)">
                 <div class="avatar">
-                    <img v-if="chat.thumbnail || chat.avatar" :src="getAvatarUrl(chat.thumbnail || chat.avatar)" :alt="chat.name" loading="lazy">
+                    <img v-if="chat.mini_thumbnail || chat.thumbnail || chat.avatar" :src="getAvatarUrl(chat.mini_thumbnail || chat.thumbnail || chat.avatar)" :alt="chat.name" loading="lazy">
                     <div v-else class="avatar-placeholder" :style="{ backgroundColor: chat.color || '#66ccff' }">
 {{ chat.name && chat.name[0] ? chat.name[0].toUpperCase() : '?' }}
 </div>
@@ -585,15 +605,17 @@ onUnmounted(() => {
                 </div>
                 <div class="unread-dot" v-if="unread[chat.id] && chat.isCurrent"></div>
               </div>
+              </div>
           </template>
 
           <!-- Grouped mode -->
           <template v-else-if="dialogGrouping && !collapsed">
-              <div v-for="group in groupedChats" :key="'g_' + group.latest.id" class="group-block">
+              <div :style="{ paddingTop: paddingTop + 'px', paddingBottom: paddingBottom + 'px' }">
+              <div v-for="{ item: group, index, key } in visibleItems" :key="key" :data-index="index" class="group-block">
                 <!-- Character group header -->
                 <div class="list-item group-header" :class="{ unread: unread[group.latest.id] && !expandedGroups.has(group.latest.id) }" v-long-press="() => openActions(group.latest, 'header')" v-hover-glow @click="handleHeaderClick($event, group.latest.id)" @contextmenu.prevent="openActions(group.latest, 'header')">
                     <div class="avatar">
-                        <img v-if="group.latest.thumbnail || group.latest.avatar" :src="getAvatarUrl(group.latest.thumbnail || group.latest.avatar)" :alt="group.latest.name" loading="lazy">
+                        <img v-if="group.latest.mini_thumbnail || group.latest.thumbnail || group.latest.avatar" :src="getAvatarUrl(group.latest.mini_thumbnail || group.latest.thumbnail || group.latest.avatar)" :alt="group.latest.name" loading="lazy">
                         <div v-else class="avatar-placeholder" :style="{ backgroundColor: group.latest.color || '#66ccff' }">
 {{ group.latest.name && group.latest.name[0] ? group.latest.name[0].toUpperCase() : '?' }}
 </div>
@@ -656,6 +678,7 @@ onUnmounted(() => {
                         </div>
                     </div>
                 </Transition>
+              </div>
               </div>
           </template>
 
