@@ -36,6 +36,7 @@ export function usePresetCRUD({ currentPreset, currentPresetId, editingPresetId,
                         { ...mandatoryBlocks.find(b => b.id === 'chat_history') },
                         { ...mandatoryBlocks.find(b => b.id === 'guided_generation') },
                     ];
+                    presetState.presetOrder.push(id);
                     setPresetConnection('global', null, id);
                     editingPresetId.value = id;
                     closeBottomSheet();
@@ -60,6 +61,7 @@ export function usePresetCRUD({ currentPreset, currentPresetId, editingPresetId,
             });
         }
         presetState.presets[newId] = clone;
+        presetState.presetOrder.push(newId);
         setPresetConnection('global', null, newId);
         editingPresetId.value = newId;
         updateHeaderState();
@@ -96,10 +98,12 @@ export function usePresetCRUD({ currentPreset, currentPresetId, editingPresetId,
             title: `${t('confirm_delete_preset')} "${presetName}"?`,
             noDropdown: true,
             items: [
-                { label: t('btn_yes') || 'Yes', icon: '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>', iconColor: '#ff4444', isDestructive: true,
+                {
+                    label: t('btn_yes') || 'Yes', icon: '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>', iconColor: '#ff4444', isDestructive: true,
                     onClick: () => {
                         if (DEFAULT_PRESETS[id]) { closeBottomSheet(); return; }
                         delete presetState.presets[id];
+                        presetState.presetOrder = presetState.presetOrder.filter(i => i !== id);
                         Object.keys(presetState.connections.character).forEach(k => { if (presetState.connections.character[k] === id) delete presetState.connections.character[k]; });
                         Object.keys(presetState.connections.chat).forEach(k => { if (presetState.connections.chat[k] === id) delete presetState.connections.chat[k]; });
                         if (presetState.globalPresetId === id) setPresetConnection('global', null, null);
@@ -119,7 +123,8 @@ export function usePresetCRUD({ currentPreset, currentPresetId, editingPresetId,
             title: `${t('confirm_reset_preset') || 'Reset to default:'} "${presetName}"?`,
             noDropdown: true,
             items: [
-                { label: t('btn_yes') || 'Yes', icon: '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>', iconColor: 'var(--vk-blue)',
+                {
+                    label: t('btn_yes') || 'Yes', icon: '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>', iconColor: 'var(--vk-blue)',
                     onClick: () => { if (!DEFAULT_PRESETS[id]) return; presetState.presets[id] = JSON.parse(JSON.stringify(DEFAULT_PRESETS[id])); closeBottomSheet(); }
                 },
                 { label: t('btn_no') || 'No', icon: '<svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>', onClick: () => closeBottomSheet() }
@@ -156,6 +161,9 @@ export function usePresetCRUD({ currentPreset, currentPresetId, editingPresetId,
                 else { alert("Unknown preset format. Expected SillyTavern, LaTeX, or Glaze JSON."); return; }
                 preset = finalizeImportedPreset(preset);
                 presetState.presets[preset.id] = preset;
+                if (!presetState.presetOrder.includes(preset.id)) {
+                    presetState.presetOrder.push(preset.id);
+                }
                 editingPresetId.value = preset.id;
                 updateHeaderState();
             } catch (err) {
