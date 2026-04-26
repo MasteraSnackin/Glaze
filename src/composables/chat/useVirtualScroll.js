@@ -12,6 +12,7 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
     const renderEnd = ref(20); // Initial chunk size
     const paddingTop = ref(0);
     const paddingBottom = ref(0);
+    const columns = ref(1);
     const isScrolling = ref(false);
     const isProgrammaticScrolling = ref(false);
     let scrollTimeout = null;
@@ -27,7 +28,7 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
 
     let observer = null;
     let realObserver = null;
-    const resizeObserver = null;
+    let gridResizeObserver = null;
 
     // Computed slice of items to render
     // We wrap them to preserve original index
@@ -53,18 +54,33 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
         const start = renderStart.value;
         const end = renderEnd.value;
         const total = items.length;
+        const cols = columns.value;
 
         // Calculate Top Padding
         let top = 0;
-        for (let i = 0; i < start; i++) {
-            top += itemHeights.get(i) || estimateHeight;
+        for (let i = 0; i < start; i += cols) {
+            let rowHeight = 0;
+            for (let j = 0; j < cols && i + j < start; j++) {
+                const h = itemHeights.get(i + j) || estimateHeight;
+                if (h > rowHeight) rowHeight = h;
+            }
+            top += rowHeight;
         }
         paddingTop.value = top;
 
         // Calculate Bottom Padding
         let bottom = 0;
-        for (let i = end; i < total; i++) {
-            bottom += itemHeights.get(i) || estimateHeight;
+        let rowStart = end;
+        if (cols > 1) {
+            rowStart = Math.ceil(end / cols) * cols;
+        }
+        for (let i = rowStart; i < total; i += cols) {
+            let rowHeight = 0;
+            for (let j = 0; j < cols && i + j < total; j++) {
+                const h = itemHeights.get(i + j) || estimateHeight;
+                if (h > rowHeight) rowHeight = h;
+            }
+            bottom += rowHeight;
         }
         paddingBottom.value = bottom;
     };
@@ -76,12 +92,19 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
         const indices = Array.from(visibleIndices).sort((a, b) => a - b);
         const minVis = indices[0];
         const maxVis = indices[indices.length - 1];
-        const total = itemsRef.value.length;
+        const total = itemsRef.value?.length || 0;
 
         // Expand window by buffer
         const buffer = getBuffer();
-        const newStart = Math.max(0, minVis - buffer);
-        const newEnd = Math.min(total, maxVis + buffer + 1);
+        const cols = columns.value;
+        let newStart = Math.max(0, minVis - buffer);
+        let newEnd = Math.min(total, maxVis + buffer + 1);
+
+        if (cols > 1) {
+            newStart = Math.floor(newStart / cols) * cols;
+            newEnd = Math.ceil(newEnd / cols) * cols;
+            newEnd = Math.min(total, newEnd);
+        }
 
         // Only update if changed significantly to avoid thrashing
         if (newStart !== renderStart.value || newEnd !== renderEnd.value) {
@@ -123,87 +146,109 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
             const scrollTop = containerRef.value.scrollTop;
             const clientHeight = containerRef.value.clientHeight;
 
-        // Define the rendered area in pixels
-        const renderedTop = paddingTop.value;
+            // Define the rendered area in pixels
+            const renderedTop = paddingTop.value;
 
-        // Calculate height of currently rendered items
-        let renderedContentHeight = 0;
-        const start = renderStart.value;
-        const end = renderEnd.value;
-        for (let i = start; i < end; i++) {
-            renderedContentHeight += itemHeights.get(i) || estimateHeight;
-        }
-        const renderedBottom = renderedTop + renderedContentHeight;
+            // Calculate height of currently rendered items
+            let renderedContentHeight = 0;
+            const start = renderStart.value;
+            const end = renderEnd.value;
+            const cols = columns.value;
 
-        // Buffer to detect "jump" (scrolled far outside rendered area)
-        // We use a large buffer so normal scrolling is handled by IntersectionObserver
-        // Increased to 2000 to match larger render buffers and prevent jitter
-        const scrollBuffer = 2000;
+            for (let i = start; i < end; i += cols) {
+                let rowHeight = 0;
+                for (let j = 0; j < cols && i + j < end; j++) {
+                    const h = itemHeights.get(i + j) || estimateHeight;
+                    if (h > rowHeight) rowHeight = h;
+                }
+                renderedContentHeight += rowHeight;
+            }
+            const renderedBottom = renderedTop + renderedContentHeight;
 
-        // Check if viewport is significantly outside the rendered bounds
+            // Buffer to detect "jump" (scrolled far outside rendered area)
+            // We use a large buffer so normal scrolling is handled by IntersectionObserver
+            // Increased to 2000 to match larger render buffers and prevent jitter
+            const scrollBuffer = 2000;
+
+            // Check if viewport is significantly outside the rendered bounds
             if (scrollTop < renderedTop - scrollBuffer || scrollTop + clientHeight > renderedBottom + scrollBuffer) {
-            // We jumped far away. Recalculate window.
+                // We jumped far away. Recalculate window.
 
-            // Find target index at scrollTop
-            let currentTop = 0;
-            let targetIndex = -1;
-            const count = itemsRef.value.length;
+                // Find target index at scrollTop
+                let currentTop = 0;
+                let targetIndex = -1;
+                const count = itemsRef.value.length;
 
-            for (let i = 0; i < count; i++) {
-                const h = itemHeights.get(i) || estimateHeight;
-                if (currentTop + h > scrollTop) {
-                    targetIndex = i;
-                    break;
+                for (let i = 0; i < count; i += cols) {
+                    let rowHeight = 0;
+                    for (let j = 0; j < cols && i + j < count; j++) {
+                        const h = itemHeights.get(i + j) || estimateHeight;
+                        if (h > rowHeight) rowHeight = h;
+                    }
+                    if (currentTop + rowHeight > scrollTop) {
+                        targetIndex = i;
+                        break;
+                    }
+                    currentTop += rowHeight;
                 }
-                currentTop += h;
-            }
 
-            // If we scrolled past the end (estimation error), target the last item
-            if (targetIndex === -1) targetIndex = Math.max(0, count - 1);
+                // If we scrolled past the end (estimation error), target the last item
+                if (targetIndex === -1) targetIndex = Math.max(0, count - 1);
 
-            // Center window around target
-            const buffer = getBuffer();
-            const newStart = Math.max(0, targetIndex - buffer);
+                // Center window around target
+                const buffer = getBuffer();
+                let newStart = Math.max(0, targetIndex - buffer);
 
-            // Estimate end based on clientHeight
-            let hSum = 0;
-            let i = targetIndex;
-            while (hSum < clientHeight + 1000 && i < count) {
-                hSum += itemHeights.get(i) || estimateHeight;
-                i++;
-            }
-            const newEnd = Math.min(count, i + buffer);
+                // Estimate end based on clientHeight
+                let hSum = 0;
+                let i = targetIndex;
+                while (hSum < clientHeight + 1000 && i < count) {
+                    let rowHeight = 0;
+                    for (let j = 0; j < cols && i + j < count; j++) {
+                        const h = itemHeights.get(i + j) || estimateHeight;
+                        if (h > rowHeight) rowHeight = h;
+                    }
+                    hSum += rowHeight;
+                    i += cols;
+                }
+                let newEnd = Math.min(count, i + buffer);
 
-            if (newStart !== renderStart.value || newEnd !== renderEnd.value) {
-                renderStart.value = newStart;
-                renderEnd.value = newEnd;
-                visibleIndices.clear(); // Clear stale indices to prevent window expansion ghosting
-                realVisibleIndices.clear();
-                updateSpacers();
-                nextTick(observeItems);
-            }
+                if (cols > 1) {
+                    newStart = Math.floor(newStart / cols) * cols;
+                    newEnd = Math.ceil(newEnd / cols) * cols;
+                    newEnd = Math.min(count, newEnd);
+                }
+
+                if (newStart !== renderStart.value || newEnd !== renderEnd.value) {
+                    renderStart.value = newStart;
+                    renderEnd.value = newEnd;
+                    visibleIndices.clear(); // Clear stale indices to prevent window expansion ghosting
+                    realVisibleIndices.clear();
+                    updateSpacers();
+                    nextTick(observeItems);
+                }
             } else if (!shouldUseBatterySaverUI()) {
-            // Periodic visibility health check during normal scroll
-            // This ensures realVisibleIndices doesn't get stuck if Observer missed a fast transition
-            const children = containerRef.value.querySelectorAll('[data-index]');
-            const containerRect = containerRef.value.getBoundingClientRect();
-            const style = window.getComputedStyle(containerRef.value);
-            const paddingBottom = parseFloat(style.paddingBottom) || 0;
-            const visibleBottom = containerRect.bottom - paddingBottom;
-            const visibleTop = containerRect.top;
+                // Periodic visibility health check during normal scroll
+                // This ensures realVisibleIndices doesn't get stuck if Observer missed a fast transition
+                const children = containerRef.value.querySelectorAll('[data-index]');
+                const containerRect = containerRef.value.getBoundingClientRect();
+                const style = window.getComputedStyle(containerRef.value);
+                const paddingBottom = parseFloat(style.paddingBottom) || 0;
+                const visibleBottom = containerRect.bottom - paddingBottom;
+                const visibleTop = containerRect.top;
 
-            children.forEach(el => {
-                const index = parseInt(el.dataset.index);
-                if (isNaN(index)) return;
-                const rect = el.getBoundingClientRect();
+                children.forEach(el => {
+                    const index = parseInt(el.dataset.index);
+                    if (isNaN(index)) return;
+                    const rect = el.getBoundingClientRect();
 
-                // If the top is above visible bottom AND bottom is below visible top
-                if (rect.top < visibleBottom - 20 && rect.bottom > visibleTop + 20) {
-                    realVisibleIndices.add(index);
-                } else {
-                    realVisibleIndices.delete(index);
-                }
-            });
+                    // If the top is above visible bottom AND bottom is below visible top
+                    if (rect.top < visibleBottom - 20 && rect.bottom > visibleTop + 20) {
+                        realVisibleIndices.add(index);
+                    } else {
+                        realVisibleIndices.delete(index);
+                    }
+                });
             }
         };
 
@@ -256,8 +301,18 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
             isProgrammaticScrolling.value = true;
 
             const buffer = getBuffer();
-            renderStart.value = Math.max(0, index - buffer);
-            renderEnd.value = Math.min(count, index + buffer + 1);
+            const cols = columns.value;
+            let newStart = Math.max(0, index - buffer);
+            let newEnd = Math.min(count, index + buffer + 1);
+
+            if (cols > 1) {
+                newStart = Math.floor(newStart / cols) * cols;
+                newEnd = Math.ceil(newEnd / cols) * cols;
+                newEnd = Math.min(count, newEnd);
+            }
+
+            renderStart.value = newStart;
+            renderEnd.value = newEnd;
 
             visibleIndices.clear();
             updateSpacers();
@@ -275,8 +330,16 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
                     });
 
                     let targetTop = paddingTop.value;
-                    for (let i = renderStart.value; i < index; i++) {
-                        targetTop += itemHeights.get(i) || estimateHeight;
+                    const cols = columns.value;
+                    const alignedIndex = Math.floor(index / cols) * cols;
+
+                    for (let i = renderStart.value; i < alignedIndex; i += cols) {
+                        let rowHeight = 0;
+                        for (let j = 0; j < cols && i + j < alignedIndex; j++) {
+                            const h = itemHeights.get(i + j) || estimateHeight;
+                            if (h > rowHeight) rowHeight = h;
+                        }
+                        targetTop += rowHeight;
                     }
                     targetTop += (anchor.offset || 0);
 
@@ -428,6 +491,27 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
         nextTick(() => {
             observeItems();
         });
+
+        if (options.grid) {
+            updateColumns();
+            gridResizeObserver = new ResizeObserver(() => updateColumns());
+            gridResizeObserver.observe(containerRef.value);
+        }
+    };
+
+    const updateColumns = () => {
+        if (!options.grid || !containerRef.value) return;
+        const style = window.getComputedStyle(containerRef.value);
+        const gridCols = style.gridTemplateColumns;
+        if (gridCols && gridCols !== 'none') {
+            const numCols = gridCols.split(' ').length;
+            if (columns.value !== numCols) {
+                columns.value = numCols > 0 ? numCols : 1;
+                // If columns changed, we re-evaluate everything
+                updateWindow();
+                updateSpacers();
+            }
+        }
     };
 
     // Watchers
@@ -491,7 +575,7 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
     onBeforeUnmount(() => {
         if (observer) observer.disconnect();
         if (realObserver) realObserver.disconnect();
-        if (resizeObserver) resizeObserver.disconnect();
+        if (gridResizeObserver) gridResizeObserver.disconnect();
         if (containerRef.value) {
             containerRef.value.removeEventListener('scroll', onContainerScroll);
         }
@@ -548,8 +632,18 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
 
             // If completely out of bounds, change render window
             const buffer = getBuffer();
-            renderStart.value = Math.max(0, index - buffer);
-            renderEnd.value = Math.min(count, index + buffer + 1);
+            const cols = columns.value;
+            let newStart = Math.max(0, index - buffer);
+            let newEnd = Math.min(count, index + buffer + 1);
+
+            if (cols > 1) {
+                newStart = Math.floor(newStart / cols) * cols;
+                newEnd = Math.ceil(newEnd / cols) * cols;
+                newEnd = Math.min(count, newEnd);
+            }
+
+            renderStart.value = newStart;
+            renderEnd.value = newEnd;
 
             visibleIndices.clear();
             updateSpacers();
@@ -567,8 +661,16 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
                     });
 
                     let targetTop = paddingTop.value;
-                    for (let i = renderStart.value; i < index; i++) {
-                        targetTop += itemHeights.get(i) || estimateHeight;
+                    const cols = columns.value;
+                    const alignedIndex = Math.floor(index / cols) * cols;
+
+                    for (let i = renderStart.value; i < alignedIndex; i += cols) {
+                        let rowHeight = 0;
+                        for (let j = 0; j < cols && i + j < alignedIndex; j++) {
+                            const h = itemHeights.get(i + j) || estimateHeight;
+                            if (h > rowHeight) rowHeight = h;
+                        }
+                        targetTop += rowHeight;
                     }
 
                     const itemH = itemHeights.get(index) || estimateHeight;
