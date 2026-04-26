@@ -29,6 +29,15 @@ export function useMessageActions(deps) {
         t
     } = deps;
 
+    async function persistCurrentSessionMessages(chatChar) {
+        if (!chatChar?.id) return;
+        const data = await getChatData(chatChar.id);
+        const sessionId = chatChar.sessionId || data?.currentId;
+        if (!data || !sessionId) return;
+        data.sessions[sessionId] = currentMessages.value;
+        await db.saveChat(chatChar.id, data);
+    }
+
     function getReasoningTags() {
         let { start, end } = getApiReasoningTags();
 
@@ -79,9 +88,22 @@ export function useMessageActions(deps) {
             const newSwipeIndex = (msg.swipes?.length || 0);
             if (!msg.swipes) msg.swipes = [msg.text];
             msg.swipes.push("");
+            if (Array.isArray(msg.swipesMeta)) {
+                msg.swipesMeta[newSwipeIndex] = {
+                    guidanceText: null,
+                    guidanceType: null,
+                    reasoning: null,
+                    genTime: null,
+                    tokens: null
+                };
+            }
             msg.swipeId = newSwipeIndex;
             msg.text = "";
             msg.reasoning = null;
+            msg.genTime = null;
+            msg.isAllReasoning = false;
+            msg.isPartial = false;
+            msg.partialErrorMsg = null;
             msg.isTyping = true;
 
             let effectiveGuidance = null;
@@ -95,15 +117,7 @@ export function useMessageActions(deps) {
             startGeneration(activeChatChar, null, msgIndex, null, effectiveGuidance, effectiveType);
         } else {
             currentMessages.value.splice(msgIndex);
-            const charId = activeChatChar.id;
-            const sessionId = activeChatChar.sessionId;
-            const messageSnapshot = currentMessages.value;
-            getChatData(activeChatChar.id).then(data => {
-                if (data && sessionId && data.sessions?.[sessionId]) {
-                    data.sessions[sessionId] = messageSnapshot;
-                    db.saveChat(charId, data);
-                }
-            });
+            persistCurrentSessionMessages(activeChatChar);
 
             startGeneration(activeChatChar, null, -1, null, guidanceText, 'GENERATION');
         }
@@ -185,17 +199,7 @@ export function useMessageActions(deps) {
                             }
                         } else {
                             currentMessages.value.splice(index, 1);
-                            if (activeChatChar) {
-                                const charId = activeChatChar.id;
-                                const sessionId = activeChatChar.sessionId;
-                                const messageSnapshot = currentMessages.value;
-                                getChatData(activeChatChar.id).then(data => {
-                                    if (data && sessionId && data.sessions?.[sessionId]) {
-                                        data.sessions[sessionId] = messageSnapshot;
-                                        db.saveChat(charId, data);
-                                    }
-                                });
-                            }
+                            persistCurrentSessionMessages(activeChatChar);
                         }
                         closeBottomSheet();
                     }
@@ -325,16 +329,8 @@ export function useMessageActions(deps) {
                             localStorage.setItem(`gz_deleted_char_${chatChar.id}`, cDel + 1);
                             const sDel = parseInt(localStorage.getItem(`gz_deleted_chat_${chatChar.id}_${sid}`) || '0', 10);
                             localStorage.setItem(`gz_deleted_chat_${chatChar.id}_${sid}`, sDel + 1);
+                            persistCurrentSessionMessages(chatChar);
                         }
-                        getChatData(chatChar.id).then(data => {
-                            const charId = chatChar.id;
-                            const sessionId = chatChar.sessionId;
-                            const messageSnapshot = currentMessages.value;
-                            if (data && sessionId && data.sessions?.[sessionId]) {
-                                data.sessions[sessionId] = messageSnapshot;
-                                db.saveChat(charId, data);
-                            }
-                        });
                     }
                     closeBottomSheet();
                 }

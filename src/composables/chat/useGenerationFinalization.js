@@ -11,6 +11,7 @@ export function finalizeGenerationState({
 }) {
     const currentState = getGenerationState(charId);
     if (!currentState) return;
+    if (expectedGenId !== null && currentState.genId !== expectedGenId) return;
 
     if (currentState.timerId) {
         clearTimeout(currentState.timerId);

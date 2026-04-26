@@ -11,6 +11,21 @@ function getTranslation(key) {
     return translations[currentLang.value]?.[key] || key;
 }
 
+function createImmutableChatRequestEnvelope(requestEnvelope, controller) {
+    if (!requestEnvelope || typeof requestEnvelope !== 'object') {
+        return { controller };
+    }
+
+    if (requestEnvelope.controller && requestEnvelope.controller !== controller) {
+        console.warn('[chatRequestAssembly] Ignoring controller replacement from beforeRequestSend hook to preserve abort ownership');
+    }
+
+    return {
+        ...requestEnvelope,
+        controller
+    };
+}
+
 export async function executeFinalChatRequest({
     char,
     providerId,
@@ -72,7 +87,7 @@ export async function executeFinalChatRequest({
         stopString: effectiveStopString
     });
 
-    const requestEnvelope = await runGenerationHook('beforeRequestSend', {
+    const requestEnvelopeRaw = await runGenerationHook('beforeRequestSend', {
         requestType: 'chat',
         debugKey,
         char,
@@ -88,6 +103,7 @@ export async function executeFinalChatRequest({
         tagStart,
         tagEnd
     });
+    const requestEnvelope = createImmutableChatRequestEnvelope(requestEnvelopeRaw, controller);
 
     const {
         providerId: requestProviderId = effectiveProviderId,

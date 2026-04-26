@@ -9,7 +9,8 @@ export async function consumeStreamingSseResponse({
     streamTimeout,
     throwIfAborted,
     streamAccumulator,
-    onUpdate
+    onUpdate,
+    abortSignal
 }) {
     const reader = responseBody.getReader();
     const decoder = new TextDecoder('utf-8');
@@ -23,12 +24,55 @@ export async function consumeStreamingSseResponse({
         }, streamTimeout);
     };
 
+    function readChunk() {
+        if (abortSignal?.aborted) {
+            try { reader.cancel(); } catch (_e) {}
+            const error = new Error('Generation aborted');
+            error.name = 'AbortError';
+            return Promise.reject(error);
+        }
+
+        return new Promise((resolve, reject) => {
+            let settled = false;
+
+            const onAbort = () => {
+                if (settled) return;
+                settled = true;
+                try { reader.cancel(); } catch (_e) {}
+                const error = new Error('Generation aborted');
+                error.name = 'AbortError';
+                reject(error);
+            };
+
+            if (abortSignal && !abortSignal.aborted) {
+                abortSignal.addEventListener('abort', onAbort, { once: true });
+            }
+
+            reader.read()
+                .then(result => {
+                    if (settled) return;
+                    settled = true;
+                    resolve(result);
+                })
+                .catch(err => {
+                    if (settled) return;
+                    settled = true;
+                    reject(err);
+                })
+                .finally(() => {
+                    if (abortSignal) {
+                        abortSignal.removeEventListener('abort', onAbort);
+                    }
+                });
+        });
+    }
+
     try {
         resetStreamTimer();
 
         while (true) {
             throwIfAborted();
-            const { done, value } = await reader.read();
+            const { done, value } = await readChunk();
             if (done) break;
 
             resetStreamTimer();

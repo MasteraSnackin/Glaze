@@ -449,7 +449,9 @@ const { visibleItems, paddingTop, paddingBottom, refresh: refreshVirtualScroll, 
 const {
     asyncSaveCurrentSessionState,
     applyImageAutoHide,
-    onVisibilityChange
+    onVisibilityChange,
+    buildCrashBufferKey,
+    clearCrashBuffer
 } = useSessionPersistence({
     getActiveChatChar: () => activeChatChar,
     activeChar,
@@ -774,6 +776,32 @@ async function openChat(char, onBack, force = false) {
     if (!msgs) {
         msgs = [];
         chatData.sessions[currentSessionId] = msgs;
+    }
+
+    try {
+        const crashBufferRaw = localStorage.getItem(buildCrashBufferKey(char.id, currentSessionId));
+        if (crashBufferRaw) {
+            const crashBuffer = JSON.parse(crashBufferRaw);
+            if (Array.isArray(crashBuffer?.messages) && crashBuffer.messages.length >= msgs.length) {
+                msgs = crashBuffer.messages;
+                chatData.sessions[currentSessionId] = msgs;
+                if (typeof crashBuffer.draft === 'string') {
+                    chatData.draft = crashBuffer.draft;
+                }
+                if (crashBuffer.authorsNote !== undefined) {
+                    if (!chatData.authorsNotes) chatData.authorsNotes = {};
+                    chatData.authorsNotes[currentSessionId] = crashBuffer.authorsNote;
+                }
+                if (crashBuffer.summary !== undefined) {
+                    if (!chatData.summaries) chatData.summaries = {};
+                    chatData.summaries[currentSessionId] = crashBuffer.summary;
+                }
+                await db.saveChat(char.id, chatData);
+            }
+            clearCrashBuffer(char.id, currentSessionId);
+        }
+    } catch (e) {
+        console.warn('[chat] Failed to restore crash buffer:', e);
     }
 
     // Filter out corrupted/null messages
@@ -1211,6 +1239,17 @@ defineExpose({
 
 const onGenerationEnded = (e) => {
     if (activeChatChar && activeChatChar.id === e.detail.charId) {
+        const activeState = getGenerationState(activeChatChar.id);
+        if (activeState?.type === 'chat') {
+            const endedSessionId = e.detail.sessionId ?? null;
+            const endedGenId = e.detail.genId ?? null;
+            if (endedGenId !== null && activeState.genId !== endedGenId) {
+                return;
+            }
+            if (endedSessionId === null || String(activeState.sessionId) === String(endedSessionId)) {
+                return;
+            }
+        }
         isGenerating.value = false;
         isImpersonating.value = false;
         applyImageAutoHide();

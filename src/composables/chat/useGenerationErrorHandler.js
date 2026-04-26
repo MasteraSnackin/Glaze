@@ -47,11 +47,12 @@ export async function handleGenerationError({
     };
 
     try {
-        if (error.message === 'Context limit exceeded') {
+        if (error?.name === 'AbortError' && error?.userAborted) {
             await restoreState(false);
             finalizeGenerationState({
                 charId: char.id,
                 sessionId,
+                expectedGenId: genId,
                 getGenerationState,
                 clearGenerationState,
                 clearPersistedGeneration,
@@ -59,7 +60,24 @@ export async function handleGenerationError({
                 isGenerating,
                 activeChatChar
             });
-            notifyGenerationEnded({ charId: char.id, sessionId });
+            notifyGenerationEnded({ charId: char.id, sessionId, genId, type: 'chat' });
+            return;
+        }
+
+        if (error.message === 'Context limit exceeded') {
+            await restoreState(false);
+            finalizeGenerationState({
+                charId: char.id,
+                sessionId,
+                expectedGenId: genId,
+                getGenerationState,
+                clearGenerationState,
+                clearPersistedGeneration,
+                clearBackgroundUpdateTimer,
+                isGenerating,
+                activeChatChar
+            });
+            notifyGenerationEnded({ charId: char.id, sessionId, genId, type: 'chat' });
             return;
         }
 
@@ -67,6 +85,7 @@ export async function handleGenerationError({
         finalizeGenerationState({
             charId: char.id,
             sessionId,
+            expectedGenId: genId,
             getGenerationState,
             clearGenerationState,
             clearPersistedGeneration,
@@ -109,13 +128,14 @@ export async function handleGenerationError({
             }
         }
 
-        notifyGenerationEnded({ charId: char.id, sessionId });
+        notifyGenerationEnded({ charId: char.id, sessionId, genId, type: 'chat' });
     } catch (handlerErr) {
         console.error('[onError] Error handler failed:', handlerErr);
         await ensureTypingCleared();
         finalizeGenerationState({
             charId: char.id,
             sessionId,
+            expectedGenId: genId,
             getGenerationState,
             clearGenerationState,
             clearPersistedGeneration,
@@ -123,6 +143,6 @@ export async function handleGenerationError({
             isGenerating,
             activeChatChar
         });
-        notifyGenerationEnded({ charId: char.id, sessionId });
+        notifyGenerationEnded({ charId: char.id, sessionId, genId, type: 'chat' });
     }
 }

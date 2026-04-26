@@ -117,7 +117,7 @@ export async function finalizeStreamResponse({ requestType, debugKey, streamAccu
     if (onComplete) await onComplete(finalText, extended.reasoning, { ...extended.meta, allReasoning: finalResult.allReasoning });
 }
 
-export async function handleAbortOutcome({ requestType, debugKey, timedOut, streamAccumulator, onComplete, onError, abortError }) {
+export async function handleAbortOutcome({ requestType, debugKey, timedOut, userAborted = false, streamAccumulator, onComplete, onError, abortError }) {
     const partial = streamAccumulator.getPartial();
     const hasPartialContent = partial.text.length > 0 || (partial.reasoning && partial.reasoning.length > 0);
     const allReasoning = !partial.text.trim() && !!partial.reasoning?.trim();
@@ -138,6 +138,20 @@ export async function handleAbortOutcome({ requestType, debugKey, timedOut, stre
             finishNetworkTrace({ debugKey, error: 'Generation timed out - no response from server' });
             if (onError) await onError(new Error('Generation timed out - no response from server'));
         }
+        return;
+    }
+
+    if (userAborted) {
+        if (abortError && typeof abortError === 'object') {
+            abortError.userAborted = true;
+        }
+        finishNetworkTrace({
+            debugKey,
+            text: hasPartialContent ? partial.text : undefined,
+            reasoning: hasPartialContent ? partial.reasoning : undefined,
+            error: 'Generation aborted by user'
+        });
+        if (onError) await onError(abortError);
         return;
     }
 

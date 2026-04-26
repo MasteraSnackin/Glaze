@@ -6,6 +6,7 @@ export function restoreVisibleSwipeState(messages = []) {
 
     return messages.map(msg => {
         if (!msg || !Array.isArray(msg.swipesMeta)) return msg;
+        if (msg.isTyping) return msg;
 
         const swipeIndex = msg.swipeId || 0;
         const swipeMeta = msg.swipesMeta[swipeIndex];

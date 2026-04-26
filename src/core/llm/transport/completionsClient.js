@@ -91,7 +91,8 @@ export async function executeFetchChatCompletions({
         streamTimeout: requestLifecycle.streamTimeout,
         throwIfAborted: requestLifecycle.throwIfAborted,
         streamAccumulator,
-        onUpdate
+        onUpdate,
+        abortSignal: controller?.signal
     });
 
     await finalizeStreamResponse({

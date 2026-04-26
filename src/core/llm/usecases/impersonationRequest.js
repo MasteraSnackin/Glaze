@@ -66,7 +66,7 @@ export async function executeImpersonationUseCase({
 
     const history = buildGenerationHistory(currentMessages);
 
-    notifyGenerationStarted({ charId, sessionId: char.sessionId });
+    notifyGenerationStarted({ charId, sessionId: char.sessionId, genId, type: 'impersonation' });
 
     return generateChat({
         text: promptText,
@@ -83,14 +83,14 @@ export async function executeImpersonationUseCase({
                 isImpersonating.value = false;
                 isGenerating.value = false;
                 clearGenerationState(charId);
-                notifyGenerationEnded({ charId });
+                notifyGenerationEnded({ charId, sessionId: char.sessionId, genId, type: 'impersonation' });
             },
             onError: (err) => {
                 console.error(err);
                 isImpersonating.value = false;
                 isGenerating.value = false;
                 clearGenerationState(charId);
-                notifyGenerationEnded({ charId });
+                notifyGenerationEnded({ charId, sessionId: char.sessionId, genId, type: 'impersonation' });
             }
         }
     });

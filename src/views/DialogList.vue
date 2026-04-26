@@ -15,6 +15,7 @@ import { APP_EVENTS } from '@/core/events/eventNames.js';
 import { subscribeAppEvent, publishAppEvent } from '@/core/events/eventHub.js';
 import ToolStripTooltip from '@/components/ToolStripTooltip.vue';
 import { useSessionSheet } from '@/composables/character/useSessionSheet.js';
+import { getGenerationState } from '@/core/states/generationState.js';
 
 const props = defineProps({
   activeCategory: { type: String, default: 'all' },
@@ -429,6 +430,15 @@ const onGenerationStarted = (e) => {
 
 const onGenerationEnded = (e) => {
     if (e.detail && e.detail.charId && e.detail.sessionId) {
+        const activeState = getGenerationState(e.detail.charId);
+        const endedGenId = e.detail.genId ?? null;
+        if (
+            activeState?.type === 'chat' &&
+            String(activeState.sessionId) === String(e.detail.sessionId) &&
+            (endedGenId === null || activeState.genId !== endedGenId)
+        ) {
+            return;
+        }
         generating.value[`${e.detail.charId}_${e.detail.sessionId}`] = false;
         loadData(); // Reload to show new message and unread status
     }

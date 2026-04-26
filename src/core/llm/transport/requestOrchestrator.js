@@ -1,6 +1,6 @@
 import { getProviderById } from '@/core/llm/providers/providerRegistry.js';
 import { completeStructuredResponse, handleAbortOutcome, handleRequestFailure } from '@/core/llm/transport/requestOutcome.js';
-import { executeNativeNonStreamingRequest, shouldUseNativeNonStreamingRequest } from '@/core/llm/transport/requestExecution.js';
+import { executeAbortableJsonRequest, executeNativeNonStreamingRequest, shouldUseAbortableFetchRequest, shouldUseAbortableXhrRequest, shouldUseNativeNonStreamingRequest } from '@/core/llm/transport/requestExecution.js';
 import { executeFetchChatCompletions } from '@/core/llm/transport/completionsClient.js';
 import { createRequestLifecycle } from '@/core/llm/transport/requestLifecycle.js';
 import { completeJsonResponse } from '@/core/llm/transport/responseHandling.js';
@@ -57,10 +57,40 @@ export async function executeRequest({
     try {
         logger.debug("LLM Request Body:", JSON.stringify(requestBody, null, 2));
 
+        if (shouldUseAbortableXhrRequest({ apiUrl, stream, requestType })) {
+            const data = await executeAbortableJsonRequest({
+                requestUrl,
+                headers: requestLifecycle.headers,
+                requestBody,
+                controller,
+                debugKey: requestLifecycle.debugKey
+            });
+            requestLifecycle.throwIfAborted();
+
+            await completeJsonResponse({
+                data,
+                throwIfAborted: requestLifecycle.throwIfAborted,
+                contextLabel: 'API response structure (XHR)',
+                logLabel: 'LLM Response (XHR):',
+                requestReasoning,
+                hasInlineTags,
+                tagStart,
+                tagEnd,
+                headerModel,
+                headerInline,
+                requestType,
+                debugKey: requestLifecycle.debugKey,
+                onComplete,
+                onError
+            });
+
+            return;
+        }
+
         // Bypass Mixed Content/Cleartext restrictions on Native for local HTTP
         // Use CapacitorHttp only for non-streaming requests.
         // For streaming, we fall through to standard fetch (requires android:usesCleartextTraffic="true")
-        if (shouldUseNativeNonStreamingRequest({ apiUrl, stream })) {
+        if (shouldUseNativeNonStreamingRequest({ apiUrl, stream }) && !shouldUseAbortableFetchRequest({ apiUrl, stream, requestType })) {
             const data = await executeNativeNonStreamingRequest({
                 requestUrl,
                 headers: requestLifecycle.headers,
@@ -117,6 +147,7 @@ export async function executeRequest({
                 requestType,
                 debugKey: requestLifecycle.debugKey,
                 timedOut: requestLifecycle.timedOut,
+                userAborted: !!controller?.userAborted,
                 streamAccumulator,
                 onComplete,
                 onError,
