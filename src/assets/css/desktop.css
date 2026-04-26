@@ -113,9 +113,13 @@
 /* Chat container: fixed max-width, centered */
 .desktop-mode .chat-container {
     padding-top: 8px !important;
-    max-width: var(--chat-max-width, 100%) !important;
-    margin-left: auto !important;
-    margin-right: auto !important;
+    max-width: none !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    padding-left: max(0px, calc((100% - var(--chat-max-width, 100%)) / 2)) !important;
+    padding-right: max(0px, calc((100% - var(--chat-max-width, 100%)) / 2)) !important;
 }
 
 .desktop-mode .chat-input-wrapper {
