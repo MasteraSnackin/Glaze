@@ -65,6 +65,7 @@ function extractStringsAndJson(uint8Array) {
 export function parseTavoLMDB(arrayBuffer) {
     const dv = new DataView(arrayBuffer);
     const buffer = new Uint8Array(arrayBuffer);
+    const bufLen = buffer.length;
     const pageSize = 4096;
 
     const categories = {};
@@ -72,68 +73,85 @@ export function parseTavoLMDB(arrayBuffer) {
 
     let bigCount = 0;
 
-    for (let pOffset = 0; pOffset < buffer.length; pOffset += pageSize) {
-        if (pOffset + 16 > buffer.length) break;
+    for (let pOffset = 0; pOffset < bufLen; pOffset += pageSize) {
+        if (pOffset + 16 > bufLen) break;
         const flags = dv.getUint16(pOffset + 10, true);
-        if ((flags & 0x02) === 0x02) { // P_LEAF
-            const lower = dv.getUint16(pOffset + 12, true);
-            const numNodes = (lower - 16) / 2;
+        if ((flags & 0x02) !== 0x02) continue; // P_LEAF
 
-            for (let i = 0; i < numNodes; i++) {
-                const nodeOffset = dv.getUint16(pOffset + 16 + (i * 2), true);
-                if (nodeOffset === 0) continue;
+        const lower = dv.getUint16(pOffset + 12, true);
+        // Validate lower: must be within [16, pageSize] and not beyond buffer
+        if (lower < 16 || lower > pageSize || pOffset + lower > bufLen) continue;
 
-                const ptr = pOffset + nodeOffset;
+        const numNodes = (lower - 16) / 2;
+        // Sanity check on node count (max ~2032 for a full 4K page)
+        if (numNodes <= 0 || numNodes > (pageSize - 16) / 2) continue;
 
-                const mn_dsize = dv.getUint32(ptr, true);
-                const mn_flags = dv.getUint16(ptr + 4, true);
-                const mn_ksize = dv.getUint16(ptr + 6, true);
+        for (let i = 0; i < numNodes; i++) {
+            const nodePtrOff = pOffset + 16 + (i * 2);
+            if (nodePtrOff + 2 > bufLen) break;
 
-                // Ensure valid Isar key (18 prefix) -> 1 byte 0x18 + 7 bytes
-                if (mn_ksize >= 8 && buffer[ptr + 8] === 0x18) {
-                    const type_id = (buffer[ptr + 10] << 8) | buffer[ptr + 11];
-                    const type_name = TYPE_NAMES[type_id];
-                    if (!type_name) continue;
+            const nodeOffset = dv.getUint16(nodePtrOff, true);
+            // Node offset must point into the page (after header, before page end)
+            if (nodeOffset === 0 || nodeOffset < 16 || nodeOffset >= pageSize) continue;
 
-                    const entity_id = dv.getUint32(ptr + 12, false); // BIG ENDIAN
+            const ptr = pOffset + nodeOffset;
+            // Need at least 16 bytes for node header + key prefix (8 + 8)
+            if (ptr + 16 > bufLen) continue;
 
-                    let dataBuffer = null;
-                    const keyOffset = ptr + 8;
-                    const dataOffset = keyOffset + mn_ksize;
+            const mn_dsize = dv.getUint32(ptr, true);
+            const mn_flags = dv.getUint16(ptr + 4, true);
+            const mn_ksize = dv.getUint16(ptr + 6, true);
 
-                    // Inline data
-                    if (mn_flags === 0) {
-                        dataBuffer = buffer.subarray(dataOffset, dataOffset + mn_dsize);
-                    }
-                    // Overflow pages (F_BIGDATA)
-                    else if (mn_flags === 1) {
-                        bigCount++;
-                        const pgno = dv.getUint32(dataOffset, true);
-                        if (pgno * pageSize < buffer.length) {
-                            const ovfOffset = pgno * pageSize;
-                            const ovfFlags = dv.getUint16(ovfOffset + 10, true);
-                            if ((ovfFlags & 0x04) === 0x04) { // P_OVERFLOW
-                                dataBuffer = buffer.subarray(ovfOffset + 16, ovfOffset + 16 + mn_dsize);
-                            }
+            // Ensure valid Isar key (0x18 prefix) and key fits in buffer
+            if (mn_ksize < 8 || ptr + 8 + mn_ksize > bufLen) continue;
+            if (buffer[ptr + 8] !== 0x18) continue;
+
+            const type_id = (buffer[ptr + 10] << 8) | buffer[ptr + 11];
+            const type_name = TYPE_NAMES[type_id];
+            if (!type_name) continue;
+
+            const entity_id = dv.getUint32(ptr + 12, false); // BIG ENDIAN
+
+            let dataBuffer = null;
+            const keyOffset = ptr + 8;
+            const dataOffset = keyOffset + mn_ksize;
+
+            // Inline data
+            if (mn_flags === 0) {
+                if (dataOffset + mn_dsize <= bufLen) {
+                    dataBuffer = buffer.subarray(dataOffset, dataOffset + mn_dsize);
+                }
+            }
+            // Overflow pages (F_BIGDATA)
+            else if (mn_flags === 1) {
+                bigCount++;
+                if (dataOffset + 4 <= bufLen) {
+                    const pgno = dv.getUint32(dataOffset, true);
+                    const ovfOffset = pgno * pageSize;
+                    // Ensure overflow page header + data fits in buffer
+                    if (ovfOffset + 16 + mn_dsize <= bufLen) {
+                        const ovfFlags = dv.getUint16(ovfOffset + 10, true);
+                        if ((ovfFlags & 0x04) === 0x04) { // P_OVERFLOW
+                            dataBuffer = buffer.subarray(ovfOffset + 16, ovfOffset + 16 + mn_dsize);
                         }
-                    }
-
-                    if (dataBuffer) {
-                        const fields = extractStringsAndJson(dataBuffer);
-                        const entry = { entity_id, fields };
-
-                        if (type_name === 'message' && dataBuffer.length >= 88) {
-                            try {
-                                const msgDv = new DataView(dataBuffer.buffer, dataBuffer.byteOffset, dataBuffer.byteLength);
-                                entry.timestamp = Number(msgDv.getBigInt64(48, true));
-                                entry.conversationId = Number(msgDv.getBigInt64(64, true));
-                                entry.characterId = Number(msgDv.getBigInt64(80, true));
-                            } catch (e) { }
-                        }
-
-                        categories[type_name].set(entity_id, entry);
                     }
                 }
+            }
+
+            if (dataBuffer && dataBuffer.length > 0) {
+                const fields = extractStringsAndJson(dataBuffer);
+                const entry = { entity_id, fields };
+
+                if (type_name === 'message' && dataBuffer.length >= 88) {
+                    try {
+                        const msgDv = new DataView(dataBuffer.buffer, dataBuffer.byteOffset, dataBuffer.byteLength);
+                        entry.timestamp = Number(msgDv.getBigInt64(48, true));
+                        entry.conversationId = Number(msgDv.getBigInt64(64, true));
+                        entry.characterId = Number(msgDv.getBigInt64(80, true));
+                    } catch (e) { }
+                }
+
+                categories[type_name].set(entity_id, entry);
             }
         }
     }
