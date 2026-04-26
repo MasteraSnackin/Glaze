@@ -29,6 +29,7 @@ const emit = defineEmits(['close', 'back', 'update:expanded', 'update:activeTab'
 const isVisible = ref(false);
 const instanceId = ref(`sv_${Math.random().toString(36).substring(2, 9)}`);
 
+let _historyPushed = false;
 watch(isVisible, (val) => {
     if (isDesktop.value) {
         if (val) {
@@ -36,6 +37,19 @@ watch(isVisible, (val) => {
         } else if (sidebarState.activeSheetId === instanceId.value) {
             setSidebarOccupied(false);
         }
+    }
+
+    // Support browser back gesture/button for PWA/Web
+    if (val && !isDesktop.value) {
+        window.history.pushState({ type: 'sheet', id: instanceId.value }, '');
+        _historyPushed = true;
+    } else if (!val && _historyPushed) {
+        // Only go back if the current history state is still the one we pushed
+        // (meaning we're closing manually, not via a popstate gesture)
+        if (window.history.state?.id === instanceId.value) {
+            window.history.back();
+        }
+        _historyPushed = false;
     }
 });
 
@@ -155,7 +169,7 @@ onBeforeUnmount(() => {
 
     <Teleport v-else :to="isSidebarMode ? '#desktop-sidebar-content' : 'body'">
         <Transition name="sheet-view">
-            <div v-if="isVisible" class="sheet-view-overlay" :class="{ 'is-sidebar': isSidebarMode }" :style="{ zIndex: zIndex }" @click.self="close" @hw-back="onHwBack">
+            <div v-if="isVisible" class="sheet-view-overlay visible" :class="{ 'is-sidebar': isSidebarMode }" :style="{ zIndex: zIndex }" @click.self="close" @hw-back="onHwBack">
                 <div ref="sheetViewContentRef"
                      class="sheet-view-content" 
                      :class="{ 'expanded': isExpanded, 'is-dragging': isDragging, 'keyboard-open': isLocalKeyboardOpen, 'is-sidebar': isSidebarMode, 'fit-content': fitContent }"
@@ -163,11 +177,15 @@ onBeforeUnmount(() => {
                     
                     <div class="sheet-header-area"
                          :class="{ 'no-drag': isSidebarMode }"
-                         @touchstart="isSidebarMode ? undefined : onHandleTouchStart"
-                         @touchmove.prevent="isSidebarMode ? undefined : onHandleTouchMove"
-                         @touchend="isSidebarMode ? undefined : onHandleTouchEnd"
                     >
-                        <div v-if="!isSidebarMode" class="sheet-handle-bar" @click.stop="toggle"></div>
+                        <div v-if="!isSidebarMode"
+                             class="sheet-handle-bar"
+                             :class="{ 'is-expanded': isExpanded }"
+                             @click.stop="toggle"
+                             @touchstart.passive="onHandleTouchStart"
+                             @touchmove.prevent="onHandleTouchMove"
+                             @touchend.passive="onHandleTouchEnd"
+                        ></div>
                         
                         <div class="sc-sheet-header-wrapper" v-if="title || showBack || isSidebarMode || actions?.length || tabs?.length || $slots['header-right'] || $slots['header-title'] || $slots['header-bottom']">
                             <div class="sc-sheet-header" v-if="title || showBack || isSidebarMode || actions?.length || $slots['header-right'] || $slots['header-title']">
@@ -285,6 +303,16 @@ onBeforeUnmount(() => {
     border-radius: 0;
 }
 
+/* Smooth transition for expand/collapse state changes */
+.sheet-view-content:not(.is-dragging):not(.is-sidebar) {
+    transition:
+        transform 0.38s cubic-bezier(0.34, 1.04, 0.64, 1),
+        height 0.38s cubic-bezier(0.34, 1.04, 0.64, 1),
+        border-radius 0.3s ease,
+        padding-bottom 0.38s cubic-bezier(0.34, 1.04, 0.64, 1),
+        max-height 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
 .sheet-view-content.is-dragging {
     transition: none !important;
 }
@@ -340,13 +368,15 @@ onBeforeUnmount(() => {
 
 .sheet-handle-bar {
     width: 100%;
-    height: 24px;
+    height: 32px;
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
     cursor: grab;
     touch-action: none;
+    /* Increase touch target without increasing visual size */
+    padding: 4px 0;
 }
 
 .sheet-view-content.fit-content .sheet-handle-bar {
@@ -355,10 +385,19 @@ onBeforeUnmount(() => {
 
 .sheet-handle-bar::after {
     content: '';
-    width: 32px;
+    width: 36px;
     height: 4px;
-    background-color: #e0e0e0;
+    background-color: rgba(255, 255, 255, 0.35);
     border-radius: 2px;
+    transition: width 0.3s cubic-bezier(0.34, 1.04, 0.64, 1),
+                background-color 0.25s ease,
+                transform 0.3s cubic-bezier(0.34, 1.04, 0.64, 1);
+}
+
+/* When expanded, the pill shortens slightly to hint at collapse direction */
+.sheet-handle-bar.is-expanded::after {
+    width: 24px;
+    background-color: rgba(255, 255, 255, 0.6);
 }
 
 .sheet-view-body {
