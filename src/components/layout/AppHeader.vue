@@ -10,8 +10,10 @@ import { publishAppEvent, subscribeAppEvent } from '@/core/events/eventHub.js';
 
 const props = defineProps({
   currentView: String,
-  categories: Object,
-  editingIndex: { type: Number, default: -1 }
+  categories: { type: Object, default: () => ({}) },
+  editingIndex: { type: Number, default: -1 },
+  isActive: { type: Boolean, default: true },
+  isWindowHeader: { type: Boolean, default: false }
 });
 
 const emit = defineEmits(['action-save', 'action-delete', 'action-close']);
@@ -66,6 +68,9 @@ const headerClasses = computed(() => {
     if (state.mode === 'chat') classes.push('fixed-header');
     if (['generation', 'more'].includes(state.mode) || state.hasSubheader || state.lorebookBanner.show || state.lorebookBanner.isTransitioning) {
         classes.push('header-wrap');
+    }
+    if (!state.showBack && (!state.showLogo || props.isWindowHeader)) {
+        classes.push('no-left-element');
     }
     return classes.join(' ');
 });
@@ -192,7 +197,7 @@ function setupThemeSettingsHeader(title) {
     clearHeader('default');
     state.title = title;
     state.showBack = true;
-    state.onBack = () => publishAppEvent(APP_EVENTS.nav.navigateTo, 'view-menu');
+    state.onBack = () => publishAppEvent(APP_EVENTS.nav.navigateTo, 'view-settings');
     toggleTabbar(false); // Hide tabbar for full screen feel
 }
 
@@ -386,11 +391,13 @@ const handleAvatarClick = (e) => {
 
 // Listeners for external events (from header.js bridge)
 const onSetupChat = (detail) => {
+    if (!props.isActive) return;
     const { char, currentSessionId, callbacks, sessionName } = detail;
     setupChatHeader(char, currentSessionId, callbacks, sessionName);
 };
 
 const onUpdateAvatar = (detail) => {
+    if (!props.isActive) return;
     const char = detail || {};
     const safeName = char.name || "Unknown";
     state.chat.avatar = char.avatar;
@@ -399,12 +406,14 @@ const onUpdateAvatar = (detail) => {
 };
 
 const onSetupEditor = (detail) => {
+    if (!props.isActive) return;
     logger.debug('[AppHeader] Event header-setup-editor received', detail);
     const { title, onBack, actions } = detail;
     setupEditorHeader(title, onBack, actions);
 };
 
 const onSetupSubmenu = (detail) => {
+    if (!props.isActive) return;
     const { title, onBack } = detail;
     clearHeader('default');
     state.title = title;
@@ -414,31 +423,37 @@ const onSetupSubmenu = (detail) => {
 };
 
 const onForceUpdate = () => {
+    if (!props.isActive) return;
     updateHeader();
 };
 
 const onSetupGeneration = (detail) => {
+    if (!props.isActive) return;
     logger.debug('[AppHeader] Event header-setup-generation received', detail);
     const { title, activeTab, onTabChange } = detail;
     setupGenerationHeader(title, activeTab, onTabChange);
 };
 
 const onUpdateSession = (detail) => {
+    if (!props.isActive) return;
     if (state.mode === 'chat') {
         state.chat.session = `Session #${detail}`;
     }
 };
 
 const onScrollHidden = (detail) => {
+    if (!props.isActive) return;
     state.scrollHidden = detail;
 };
 
 const onResetHeader = () => {
+    if (!props.isActive) return;
     clearHeader();
     setupDefaultHeader("", false);
 };
 
 const onShowLbBanner = (detail) => {
+    if (!props.isActive) return;
     if (state.lorebookBanner.timer) clearTimeout(state.lorebookBanner.timer);
     
     if (Array.isArray(detail)) {
@@ -489,13 +504,18 @@ const handleGenTabClick = (tab) => {
 };
 
 const onChangeGenerationTab = (detail) => {
+    if (!props.isActive) return;
     if (state.mode === 'generation') {
         handleGenTabClick(detail);
     }
 };
 
 // Update the header whenever the view or editing index changes
-watch([() => props.currentView, () => props.editingIndex], updateHeader);
+watch([() => props.currentView, () => props.editingIndex, () => props.isActive], () => {
+    if (props.isActive) {
+        updateHeader();
+    }
+});
 
 // Initial update on mount
 const unsubs = [];
@@ -524,6 +544,7 @@ onBeforeUnmount(() => {
 });
 
 function onGlossaryHeaderUpdate(detail) {
+    if (!props.isActive) return;
     if (props.currentView !== 'view-glossary') return;
     if (detail.title !== undefined) state.title = detail.title;
     // showBack stays true — back always navigates to view-menu
@@ -590,7 +611,7 @@ defineExpose({ updateHeader });
 
       <!-- Logo -->
       <div
-          v-if="state.showLogo"
+          v-if="state.showLogo && !props.isWindowHeader"
           id="header-logo"
           class="header-logo"
           :class="{ 'header-logo--hidden': state.isSearchExpanded }"
@@ -855,7 +876,7 @@ defineExpose({ updateHeader });
 .header-btn-right {
     position: absolute;
     right: 10px;
-    top: 50%;
+    top: 28px;
     transform: translateY(-50%);
     display: flex;
     align-items: center;
@@ -951,7 +972,6 @@ defineExpose({ updateHeader });
     font-size: 18px;
     display: flex;
     align-items: center;
-    cursor: pointer;
     position: relative;
     justify-content: flex-start;
     min-height: 56px;
@@ -971,6 +991,10 @@ defineExpose({ updateHeader });
 
 .app-header.has-search-toggle .header-content {
     padding-right: 56px;
+}
+
+.app-header.no-left-element .header-content {
+    padding-left: 20px;
 }
 
 .header-content.header-content--search-expanded {
