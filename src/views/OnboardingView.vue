@@ -297,13 +297,16 @@ async function savePreset() {
 function triggerPresetImport() {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.json';
     input.onchange = async (e) => {
         const file = e.target.files[0];
         if (!file) return;
         
         try {
             const text = await file.text();
+            if (!text || !text.trim()) {
+                alert(translations[currentLang.value]?.onboarding_import_error || 'File is empty or could not be read.');
+                return;
+            }
             const data = JSON.parse(text);
             
             initPresetState();
@@ -325,7 +328,7 @@ function triggerPresetImport() {
                     return;
                 }
             } else {
-                alert(translations[currentLang.value]?.onboarding_import_error || 'Unknown preset format');
+                alert(translations[currentLang.value]?.onboarding_import_error || 'Unknown preset format. Expected SillyTavern, LaTeX, or Glaze JSON.');
                 return;
             }
 
@@ -335,7 +338,10 @@ function triggerPresetImport() {
             savePresets();
             next();
         } catch (err) {
-            alert(translations[currentLang.value]?.onboarding_import_error + err.message);
+            const errorMsg = err instanceof SyntaxError
+                ? 'Invalid JSON file: the file is not valid JSON.'
+                : (err.message || 'Unknown error');
+            alert((translations[currentLang.value]?.onboarding_import_error || 'Import error: ') + errorMsg);
         }
     };
     input.click();

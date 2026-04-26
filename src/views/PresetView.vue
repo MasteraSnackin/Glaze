@@ -595,7 +595,6 @@ Add Block
         type="file"
         id="preset-file-input"
         style="display: none" 
-        accept=".json" 
         @change="onFileSelected"
     >
     <input 
@@ -1726,6 +1725,7 @@ Add Block
     top: 0; left: 0; width: 100%; height: 100%;
     background: linear-gradient(to top, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.3) 100%);
     z-index: 1;
+    pointer-events: none;
 }
 
 .ps-card > *:not(.ps-card-overlay):not(.ps-featured-badge):not(.ps-card-actions) {

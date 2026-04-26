@@ -294,18 +294,29 @@ function handleCreateLorebook() {
 function handleImportLorebook() {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.json';
     input.onchange = async (e) => {
         const file = e.target.files[0];
         if (!file) return;
         const reader = new FileReader();
+        reader.onerror = () => {
+            alert('Failed to read file. Please try again.');
+        };
         reader.onload = async (ev) => {
             try {
-                const json = JSON.parse(ev.target.result);
-                await importSTLorebook(json, file.name);
+                const text = ev.target.result;
+                if (typeof text !== 'string' || !text.trim()) {
+                    alert('File is empty or could not be read.');
+                    return;
+                }
+                const json = JSON.parse(text);
+                const result = await importSTLorebook(json, file.name);
+                if (result) {
+                    const { saveLorebooks } = await import('@/core/states/lorebookState.js');
+                    await saveLorebooks();
+                }
             } catch (err) {
-                console.error(err);
-                alert('Error importing lorebook: ' + err.message);
+                console.error('[lorebook] Import failed:', err);
+                alert('Error importing lorebook: ' + (err.message || 'Unknown error'));
             }
         };
         reader.readAsText(file);

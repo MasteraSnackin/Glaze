@@ -1161,6 +1161,59 @@ Active branch: `fast-fixes`
     - Commits: `f33a9d3`, `915dbf3`
     - PR: pending
 
+16. **Fix: Abort signal propagation, stale generation guards, and crash recovery**
+    - Status: `done`
+    - Complexity: hard
+    - Branch: `feat/chat-persistence-and-reasoning-fixes`
+    - Issue: Three interrelated bugs causing stuck generations, lost messages, and non-functional stop button
+    - Root causes:
+      - `AbortController.signal` never reached `fetch()` — stop button only cleared UI state, TCP connection stayed open
+      - Stale completions from aborted generations could mutate typing state for newer active generations
+      - No crash recovery — closing the browser tab during generation or auto-save race conditions could lose messages
+      - Swipe regeneration left stale `isAllReasoning`, `isPartial`, `partialErrorMsg`, `genTime` on the new swipe
+      - `useChatMessageDisplay.js` tried to restore swipe state on typing messages
+    - Fixes applied:
+      - **Abort signal propagation**: `generationService.js` injects `controller` into `requestConfig`; `chatRequestAssembly.js` preserves controller through `createImmutableChatRequestEnvelope()`; `completionsClient.js` passes `abortSignal` to `streamingSse.js`; `readChunk()` listens on signal, calls `reader.cancel()` immediately
+      - **userAborted flag**: `useGenerationAbort.js` sets `state.userAborted = true` + `state.controller.userAborted = true` before abort; propagated through `requestOutcome.js:handleAbortOutcome()` → `useGenerationErrorHandler.js` fast-path
+      - **Abortable XHR for native HTTP**: `requestExecution.js:executeAbortableJsonRequest()` — XHR-based request for native non-streaming chat, since `CapacitorHttp` does not support abort
+      - **Stale generation guards**: `expectedGenId` check added to `useGenerationFinalization.js`, `useGenerationStateRestore.js`, `useGenerationCompleteHandler.js`; `useGenerationStateSetup.js` checks `genId`/`sessionId`/`msgId` match before UI updates and timer reschedule
+      - **Event payload enrichment**: `notifyGenerationStarted`/`Ended` now carry `genId` + `type`; `ChatView.vue:onGenerationEnded` and `DialogList.vue` filter stale events by `genId`
+      - **Crash recovery buffer**: `useSessionPersistence.js` writes `localStorage` buffer on `pagehide`/`beforeunload`/`visibilitychange:hidden`; `openChat()` restores buffer if it has more messages than stored session
+      - **Swipe metadata reset**: New swipe gets clean `swipesMeta`, `genTime`, `isAllReasoning`, `isPartial`, `partialErrorMsg` defaults
+      - **Typing message guard**: `useChatMessageDisplay.js:restoreVisibleSwipeState` skips typing messages
+      - **Timer cleanup**: `useGenerationAbort.js` clears generation timer and stream flush timer instead of running full restore+clear sequence; completion handler owns final state cleanup
+    - Files modified:
+      - `src/core/services/generationService.js` — inject controller into requestConfig
+      - `src/core/llm/usecases/chatRequestAssembly.js` — immutable controller envelope
+      - `src/core/llm/usecases/generateChat.js` — genId/type in events, expectedGenId in restore
+      - `src/core/llm/usecases/impersonationRequest.js` — genId/type in events
+      - `src/core/llm/usecases/chatGenerationAppAdapters.js` — genId/type in started/ended events
+      - `src/core/llm/transport/requestOrchestrator.js` — abortable XHR dispatch, userAborted flag
+      - `src/core/llm/transport/requestExecution.js` — abortable XHR, shouldUseAbortableFetchRequest/XhrRequest
+      - `src/core/llm/transport/completionsClient.js` — pass abortSignal to streamingSse
+      - `src/core/llm/transport/streamingSse.js` — abort-signal-aware readChunk()
+      - `src/core/llm/transport/requestOutcome.js` — userAborted handling in handleAbortOutcome
+      - `src/composables/chat/useGenerationAbort.js` — userAborted flag, timer cleanup
+      - `src/composables/chat/useGenerationCompleteHandler.js` — stale guard, userAborted fast-path, normalizeCompletionText
+      - `src/composables/chat/useGenerationErrorHandler.js` — userAborted fast-path, expectedGenId
+      - `src/composables/chat/useGenerationFinalization.js` — expectedGenId guard
+      - `src/composables/chat/useGenerationStateRestore.js` — expectedGenId guard, null-check
+      - `src/composables/chat/useGenerationStateSetup.js` — genId/sessionId/msgId guard on UI updates
+      - `src/composables/chat/useChatGeneration.js` — abort-clear on overlapping start, genId guard on pending state
+      - `src/composables/chat/useSessionPersistence.js` — crash buffer write/restore/clear, pagehide/beforeunload
+      - `src/composables/chat/useMessageActions.js` — persistCurrentSessionMessages helper, swipe metadata reset
+      - `src/composables/chat/useChatMessageDisplay.js` — skip typing messages in restoreVisibleSwipeState
+      - `src/views/ChatView.vue` — crash buffer recovery in openChat, stale event filter in onGenerationEnded
+      - `src/views/DialogList.vue` — stale generation event filter by genId
+    - Testing:
+      - [not tested] Verify stop generation immediately closes the connection (no lingering TCP traffic)
+      - [not tested] Verify abort during streaming stops chunk reading immediately
+      - [not tested] Verify native HTTP non-stream abort works through XHR
+      - [not tested] Verify user abort does not show error toast
+      - [not tested] Verify stale completions from previous generations do not affect newer generation
+      - [not tested] Verify crash buffer recovery restores messages after force-close
+      - [not tested] Verify swipe regeneration has clean metadata (no stale genTime/isPartial)
+
 15. **Image Generation Improvements — Info Blocks & Dynamic Character State**
     - Status: `not started`
     - Complexity: hard
@@ -1248,8 +1301,9 @@ Active branch: `fast-fixes`
     - Background/location detail enrichment from lorebooks
 
 ### Branch Strategy (updated)
-- Current bugfix chain: merged and closed (`fixes/mobile-network-memorybooks-batch1` -> PR #46, `fixes/regressions-post-merge` -> PR #47)
-- Current refactor branch: `feat/network-architecture-refactor`
+- Current bugfix branch: `feat/chat-persistence-and-reasoning-fixes`
+- Previous bugfix chain: merged and closed (`fixes/mobile-network-memorybooks-batch1` -> PR #46, `fixes/regressions-post-merge` -> PR #47)
+- Previous refactor branch: `feat/network-architecture-refactor` (merged into current)
 - Previous: Merged branches deleted (bug-fixes, feat/dual-lorebook-debug)
 - Policy: **Linear chain workflow** — each feature branches from previous feature OR origin/dev for new chains
 - Never create branches from dev that contain multiple unmerged features
@@ -1263,10 +1317,10 @@ Manual Verification:
 - [not done] Verify on a narrow mobile viewport that long chat character names, session names, and lorebook/preset/persona banner text do not overlap the back button or right-side action button.
 - [not done] Verify non-chat views with long localized titles still truncate cleanly after the new safe-area padding.
 
-## Provider / Network Refactor (Active)
+## Provider / Network Refactor (Complete — merged into `feat/chat-persistence-and-reasoning-fixes`)
 
-Branch: `feat/network-architecture-refactor`
-Status: In progress
+Branch: `feat/network-architecture-refactor` → merged into `feat/chat-persistence-and-reasoning-fixes`
+Status: Done
 Goal: finish moving chat/provider request architecture toward explicit provider, assembler, and transport boundaries without changing prompt semantics or regressing mobile/network behavior.
 
 ### Current State
@@ -1316,7 +1370,8 @@ Tested status:
 
 Still not done:
 - [not done] Move more remaining direct runtime API config access behind `APISettings.js` helpers, especially lower-priority UI code and legacy toggles.
-- [not done] Extract generation session lifecycle out of `ChatView.vue` into a dedicated composable/service.
+- [done] Extract generation session lifecycle out of `ChatView.vue` into a dedicated composable/service. — Done through ~30 focused composables.
+- [done] Split `llmApi.js` into transport modules — Done in Phase 12a.
 - [done] Separate prompt preview storage from network trace storage and stop relying on singleton global last-trace state. — **Done as Candidate 4.** Prompt preview keyed by generation/session, trace history keyed by request.
 - [done] Promote explicit request use cases (`generateChat`, `generateSummary`, `generateMemoryDraft`, `calculateContext`) instead of keeping orchestration concentrated in `generationService.js`. — **Done in Phase 11.** `calculateContext.js`, `generateSummary.js`, `generateMemoryDraft.js` now own their dependency assembly locally. `generationService.js` reduced from 267 → 172 lines, only exports `generateChatResponse`.
 - [done] Split `llmApi.js` into transport modules — **Done in Phase 12a.** `llmApi.js` moved to `transport/requestOrchestrator.js`, i18n coupling extracted to `reasoningHeaders.js`, dead `requestReasoning` param removed from `streamAccumulator` and `streamingSse`.

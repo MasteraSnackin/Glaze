@@ -135,9 +135,19 @@ export function usePresetCRUD({ currentPreset, currentPresetId, editingPresetId,
         const file = event.target.files[0];
         if (!file) return;
         const reader = new FileReader();
+        reader.onerror = () => {
+            alert('Failed to read file. Please try again.');
+            event.target.value = '';
+        };
         reader.onload = (e) => {
             try {
-                const json = JSON.parse(e.target.result);
+                const text = e.target.result;
+                if (typeof text !== 'string' || !text.trim()) {
+                    alert('File is empty or could not be read.');
+                    event.target.value = '';
+                    return;
+                }
+                const json = JSON.parse(text);
                 const format = detectPresetFormat(json);
                 let preset;
                 if (format === 'latex') preset = convertLatexPreset(json, file.name.replace(/\.json$/i, ''));
@@ -149,8 +159,11 @@ export function usePresetCRUD({ currentPreset, currentPresetId, editingPresetId,
                 editingPresetId.value = preset.id;
                 updateHeaderState();
             } catch (err) {
-                console.error("Error parsing JSON:", err);
-                alert("Invalid JSON file");
+                if (err instanceof SyntaxError) {
+                    alert('Invalid JSON file: the file is not valid JSON.');
+                } else {
+                    alert('Failed to import preset: ' + (err.message || 'Unknown error'));
+                }
             }
             event.target.value = '';
         };
