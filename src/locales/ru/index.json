@@ -926,5 +926,7 @@
     "desc_use_llm_api_memory": "Использовать тот же endpoint что и LLM для генерации памяти",
     "label_memory_endpoint": "Endpoint генерации памяти",
     "label_memory_model": "Модель",
-    "label_memory_key": "API ключ"
+    "label_memory_key": "API ключ",
+    "tab_request": "Запрос",
+    "tab_response": "Ответ"
 }

@@ -920,5 +920,7 @@
     "desc_use_llm_api_memory": "Use the same endpoint as LLM for memory book generation",
     "label_memory_endpoint": "Memory Gen Endpoint",
     "label_memory_model": "Model",
-    "label_memory_key": "API Key"
+    "label_memory_key": "API Key",
+    "tab_request": "Request",
+    "tab_response": "Response"
 }
