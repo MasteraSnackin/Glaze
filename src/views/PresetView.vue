@@ -482,6 +482,26 @@ Add Block
                     <div v-if="showAdvancedSettings" class="advanced-settings-panel">
                         <div class="menu-group">
                             <div class="section-header">
+{{ t('label_reasoning_settings') || 'Reasoning' }} <HelpTip term="preset-reasoning"/>
+</div>
+                            <div class="settings-item-checkbox">
+                                <div class="settings-text-col">
+                                <label>{{ t('label_parse_inline_reasoning') || 'Parse Inline Reasoning' }} <HelpTip term="preset-reasoning-inline"/></label>
+                                <div class="settings-desc">
+{{ t('desc_parse_inline_reasoning') || 'Extracts reasoning from the message body and inserts it into the reasoning block' }}
+</div>
+                                </div>
+                                <input type="checkbox" v-model="currentPreset.parseInlineReasoning" class="vk-switch">
+                            </div>
+                            <div class="settings-item" v-if="currentPreset.parseInlineReasoning">
+                            <label>{{ t('label_reasoning_tags') || 'Reasoning Tags (Outer CoT)' }}</label>
+                                <input type="text" v-model="currentPreset.reasoningStart" placeholder="<think>" style="margin-bottom: 5px;">
+                                <input type="text" v-model="currentPreset.reasoningEnd" placeholder="</think>">
+                            </div>
+                        </div>
+
+                        <div class="menu-group">
+                            <div class="section-header">
 {{ t('section_postprocessing') || 'Prompt Postprocessing' }}
 </div>
                             <div class="settings-item-checkbox" @click.capture="currentPreset.noAssistant ? Toast.show({ text: t('hint_merge_locked') || 'Required by NoAssistant mode — single block', duration: 'short', position: 'bottom' }) : null">
@@ -537,26 +557,6 @@ Add Block
 </div>
                                 </div>
                             </template>
-                        </div>
-
-                        <div class="menu-group">
-                            <div class="section-header">
-{{ t('label_reasoning_settings') || 'Reasoning' }} <HelpTip term="preset-reasoning"/>
-</div>
-                            <div class="settings-item-checkbox">
-                                <div class="settings-text-col">
-                                <label>{{ t('label_parse_inline_reasoning') || 'Parse Inline Reasoning' }} <HelpTip term="preset-reasoning-inline"/></label>
-                                <div class="settings-desc">
-{{ t('desc_parse_inline_reasoning') || 'Extracts reasoning from the message body and inserts it into the reasoning block' }}
-</div>
-                                </div>
-                                <input type="checkbox" v-model="currentPreset.parseInlineReasoning" class="vk-switch">
-                            </div>
-                            <div class="settings-item" v-if="currentPreset.parseInlineReasoning">
-                            <label>{{ t('label_reasoning_tags') || 'Reasoning Tags (Outer CoT)' }}</label>
-                                <input type="text" v-model="currentPreset.reasoningStart" placeholder="<think>" style="margin-bottom: 5px;">
-                                <input type="text" v-model="currentPreset.reasoningEnd" placeholder="</think>">
-                            </div>
                         </div>
 
                         <!-- Function Prompts -->
