@@ -30,7 +30,25 @@ const safeContext = computed(() => props.breakdown?.safeContext || 0);
 const remaining = computed(() => Math.max(0, props.breakdown?.remaining || 0));
 const contextSize = computed(() => props.breakdown?.contextSize || safeContext.value);
 
-const usedWidth = computed(() => Math.max(0, 100 - (props.contextSegments.reserve?.percent || 0)));
+const usedWidth = computed(() => {
+  return 0; // Keeping for arbitrary compatibility if ever needed externally, but unreferenced internally
+});
+
+const combinedBreakdownItems = computed(() => {
+  const items = props.contextBreakdownItems.map(item => {
+    const legendItem = props.contextLegendItems.find(l => l.key === item.key);
+    return {
+      ...item,
+      className: legendItem ? legendItem.className : ''
+    };
+  });
+
+  const reserveKeys = ['lorebook', 'vectorLore', 'lorebookTotal', 'lorebookReserve'];
+  const mainItems = items.filter(item => !reserveKeys.includes(item.key));
+  const reserveItems = items.filter(item => reserveKeys.includes(item.key));
+
+  return [...mainItems, ...reserveItems];
+});
 
 const hideButtonLabel = computed(() => {
   const count = props.historyHidePreview.count;
@@ -39,23 +57,65 @@ const hideButtonLabel = computed(() => {
 
 const sheetTitle = computed(() => showSettings.value ? 'Context Settings' : 'Context');
 
-const reserveSegments = computed(() => {
-  if (!props.contextSegments.reserve) return null;
+const flatSegments = computed(() => {
+  const segments = [];
+  const segmentsMap = new Map();
+
+  (props.contextSegments.used || []).forEach(seg => {
+    segmentsMap.set(seg.key, seg);
+  });
+
   const reserve = props.contextSegments.reserve;
-  const innerSegments = reserve.used?.map(seg => ({
-    className: seg.className,
-    widthPercent: (seg.value / reserve.value * 100).toFixed(2)
-  })) || [];
-  const remainingPercent = reserve.remaining > 0 
-    ? ((reserve.remaining / reserve.value) * 100).toFixed(2) 
-    : 0;
-  return {
-    widthPercent: reserve.percent,
-    innerSegments,
-    remainingPercent,
-    remainingClassName: reserve.className,
-    hasRemaining: reserve.remaining > 0
-  };
+  if (reserve) {
+    (reserve.used || []).forEach(seg => {
+      segmentsMap.set(seg.key, seg);
+    });
+    if (reserve.remaining > 0) {
+      segmentsMap.set('lorebookReserveEmpty', {
+        key: 'lorebookReserveEmpty',
+        percent: (reserve.remaining / contextSize.value) * 100,
+        className: reserve.className
+      });
+    }
+  }
+
+  let usedSum = 0;
+  segmentsMap.forEach(seg => {
+    usedSum += seg.percent;
+  });
+  const globalEmptyPercent = Math.max(0, 100 - usedSum);
+
+  const orderTemplate = props.contextBreakdownItems
+    .map(item => item.key)
+    .filter(key => !['lorebook', 'vectorLore', 'lorebookReserve'].includes(key));
+
+  // 1. Main context items (at the top)
+  orderTemplate.forEach(key => {
+    if (segmentsMap.has(key)) {
+      segments.push(segmentsMap.get(key));
+      segmentsMap.delete(key);
+    }
+  });
+
+  // 2. Empty space (in the middle, pushing reserve down)
+  if (globalEmptyPercent > 0) {
+    segments.push({
+      key: 'globalEmpty',
+      percent: globalEmptyPercent,
+      className: ''
+    });
+  }
+
+  // 3. Reserve items (pressed to the bottom)
+  ['lorebook', 'vectorLore', 'lorebookReserveEmpty'].forEach(key => {
+    if (segmentsMap.has(key)) {
+      segments.push(segmentsMap.get(key));
+      segmentsMap.delete(key);
+    }
+  });
+
+  segmentsMap.forEach(seg => segments.push(seg));
+  return segments;
 });
 
 function open() {
@@ -127,64 +187,35 @@ defineExpose({ open, close });
           </div>
         </div>
 
-        <!-- Context Bar -->
-        <div class="tokenizer-bar-container">
-          <div class="tokenizer-bar">
-            <!-- Used segments -->
-            <div class="tokenizer-bar-used" :style="{ width: `${usedWidth}%` }">
+        <!-- Unified Layout -->
+        <div class="tokenizer-layout">
+          <!-- Context Bar -->
+          <div class="tokenizer-bar-container">
+            <div class="tokenizer-bar">
               <div
-                v-for="(segment, idx) in contextSegments.used"
-                :key="idx"
+                v-for="segment in flatSegments"
+                :key="segment.key"
                 class="tokenizer-segment"
                 :class="segment.className"
-                :style="{ width: `${segment.percent}%` }"
+                :style="{ height: `${segment.percent}%` }"
               />
             </div>
+          </div>
 
-            <!-- Reserve container with nested segments -->
+          <!-- Breakdown List -->
+          <div class="tokenizer-breakdown-list">
             <div
-              v-if="reserveSegments"
-              class="tokenizer-reserve-container"
-              :style="{ width: `${reserveSegments.widthPercent}%` }"
+              v-for="(item, idx) in combinedBreakdownItems"
+              :key="'item-' + idx"
+              class="tokenizer-breakdown-row"
             >
-              <div
-                v-for="(seg, idx) in reserveSegments.innerSegments"
-                :key="idx"
-                class="tokenizer-segment"
-                :class="seg.className"
-                :style="{ width: `${seg.widthPercent}%` }"
-              />
-              <div
-                v-if="reserveSegments.hasRemaining"
-                class="tokenizer-segment"
-                :class="reserveSegments.remainingClassName"
-                :style="{ width: `${reserveSegments.remainingPercent}%` }"
-              />
+              <div class="tokenizer-breakdown-row-left">
+                <span v-if="item.className" class="tokenizer-legend-swatch" :class="item.className" />
+                <span v-else class="tokenizer-legend-swatch-empty" />
+                <span>{{ item.label }}</span>
+              </div>
+              <strong class="tokenizer-breakdown-value">{{ item.value }}</strong>
             </div>
-          </div>
-        </div>
-
-        <!-- Legend -->
-        <div class="tokenizer-legend">
-          <div
-            v-for="(item, idx) in contextLegendItems"
-            :key="idx"
-            class="tokenizer-legend-item"
-          >
-            <span class="tokenizer-legend-swatch" :class="item.className" />
-            <span>{{ item.label }}</span>
-          </div>
-        </div>
-
-        <!-- Breakdown -->
-        <div class="tokenizer-breakdown">
-          <div
-            v-for="(item, idx) in contextBreakdownItems"
-            :key="idx"
-            class="tokenizer-breakdown-row"
-          >
-            <span>{{ item.label }}</span>
-            <strong>{{ item.value }}</strong>
           </div>
         </div>
 
@@ -312,76 +343,95 @@ Save
   text-align: center;
 }
 
-/* Context Bar */
+/* Layout Update */
+.tokenizer-layout {
+  display: flex;
+  flex-direction: row;
+  gap: 24px;
+  align-items: stretch;
+}
+
+/* Vertical Context Bar */
 .tokenizer-bar-container {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  justify-content: flex-end;
+  width: 48px; /* Narrower for a more elegant look */
+  flex-shrink: 0;
+  padding: 10px 0;
 }
 
 .tokenizer-bar {
-  height: 32px;
+  width: 100%;
+  flex: 1;
   display: flex;
-  border-radius: 8px;
+  flex-direction: column;
+  border-radius: 12px;
   overflow: hidden;
-  background: rgba(var(--ui-bg-rgb), 0.3);
+  background: rgba(var(--ui-bg-rgb), 0.15);
+  box-shadow: inset 1px 1px 2px rgba(255,255,255,0.05), inset -1px -1px 2px rgba(0,0,0,0.2);
+  position: relative;
 }
 
-.tokenizer-bar-used {
-  display: flex;
+.tokenizer-bar::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
   height: 100%;
+  background: linear-gradient(90deg, 
+    rgba(255,255,255,0.05) 0%, 
+    rgba(255,255,255,0.12) 20%, 
+    rgba(255,255,255,0.02) 50%, 
+    transparent 100%
+  );
+  pointer-events: none;
 }
 
 .tokenizer-segment {
-  height: 100%;
-  transition: width 0.3s ease;
+  width: 100%;
+  transition: height 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.1), inset 0 -1px 0 rgba(0,0,0,0.1);
 }
 
-.tokenizer-reserve-container {
-  display: flex;
-  height: 100%;
+/* Segment colors with cylindrical gradients */
+.tokenizer-segment.segment-character, .tokenizer-legend-swatch.segment-character { 
+  background: linear-gradient(to right, #ff6b6b, #e65b5b); 
+}
+.tokenizer-segment.segment-fixed, .tokenizer-legend-swatch.segment-fixed { 
+  background: linear-gradient(to right, #4ecdc4, #3bb5ad); 
+}
+.tokenizer-segment.segment-summary, .tokenizer-legend-swatch.segment-summary { 
+  background: linear-gradient(to right, #95e1d3, #7bcbc1); 
+}
+.tokenizer-segment.segment-memory, .tokenizer-legend-swatch.segment-memory { 
+  background: linear-gradient(to right, #a8e6cf, #8ed1b9); 
+}
+.tokenizer-segment.segment-authors-note, .tokenizer-legend-swatch.segment-authors-note { 
+  background: linear-gradient(to right, #ffd93d, #e6c135); 
+}
+.tokenizer-segment.segment-history, .tokenizer-legend-swatch.segment-history { 
+  background: linear-gradient(to right, #6c5ce7, #5a4ccb); 
+}
+.tokenizer-segment.segment-lorebook-reserve, .tokenizer-legend-swatch.segment-lorebook-reserve { 
+  background: linear-gradient(to right, #a8dadc, #8fc1c3); 
+}
+.tokenizer-segment.segment-lorebook, .tokenizer-legend-swatch.segment-lorebook { 
+  background: linear-gradient(to right, #f4a261, #d68b4d); 
+}
+.tokenizer-segment.segment-vector-lore, .tokenizer-legend-swatch.segment-vector-lore { 
+  background: linear-gradient(to right, #e76f51, #cb5d42); 
 }
 
-/* Segment colors - match ChatView.vue */
-.tokenizer-segment.chat-context-character { background-color: #ff6b6b; }
-.tokenizer-segment.chat-context-preset { background-color: #4ecdc4; }
-.tokenizer-segment.chat-context-summary { background-color: #95e1d3; }
-.tokenizer-segment.chat-context-memory { background-color: #a8e6cf; }
-.tokenizer-segment.chat-context-authors-note { background-color: #ffd93d; }
-.tokenizer-segment.chat-context-history { background-color: #6c5ce7; }
-.tokenizer-segment.chat-context-reserve { background-color: #a8dadc; }
-.tokenizer-segment.chat-context-lorebook { background-color: #f4a261; }
-.tokenizer-segment.chat-context-vector-lore { background-color: #e76f51; }
-
-/* Legend */
-.tokenizer-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  padding: 12px;
-  background: rgba(var(--ui-bg-rgb), 0.3);
-  border-radius: 8px;
-}
-
-.tokenizer-legend-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--text-gray);
-}
-
-.tokenizer-legend-swatch {
-  width: 16px;
-  height: 16px;
-  border-radius: 4px;
-}
-
-/* Breakdown */
-.tokenizer-breakdown {
+/* Breakdown List */
+.tokenizer-breakdown-list {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  flex: 1;
+  padding-right: 8px;
 }
 
 .tokenizer-breakdown-row {
@@ -394,11 +444,27 @@ Save
   font-size: 14px;
 }
 
-.tokenizer-breakdown-row span {
+.tokenizer-breakdown-row-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   color: var(--text-gray);
 }
 
-.tokenizer-breakdown-row strong {
+.tokenizer-legend-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.tokenizer-legend-swatch-empty {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+}
+
+.tokenizer-breakdown-value {
   color: var(--text-black);
   font-weight: 600;
 }
@@ -487,6 +553,15 @@ Save
 @media (max-width: 600px) {
   .tokenizer-summary {
     gap: 12px;
+  }
+
+  .tokenizer-layout {
+    gap: 16px;
+    align-items: stretch;
+  }
+  
+  .tokenizer-bar-container {
+    width: 36px;
   }
 
   .tokenizer-actions {
