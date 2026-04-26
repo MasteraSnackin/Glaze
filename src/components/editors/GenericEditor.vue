@@ -300,7 +300,7 @@ function getSelectedLabel(field) {
                     <div v-else-if="field.type === 'greeting_list'" class="greeting-list-container">
                         <div v-for="(greet, gIdx) in allGreetings" :key="gIdx" class="greeting-item">
                             <div class="greeting-header">
-                                <span class="greeting-label">{{ gIdx === 0 ? (t('label_first_mes') || 'First Message') : '#' + gIdx }}</span>
+                                <span class="greeting-label">#{{ gIdx + 1 }}</span>
                                 <div class="greeting-actions">
                                     <div class="action-btn" @click="openFsEditor('first_mes', gIdx)">
                                         <svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
