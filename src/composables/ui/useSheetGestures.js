@@ -4,6 +4,10 @@ export function useSheetGestures({ isVisible, isExpanded, isSidebarMode, fitCont
     const isDragging = ref(false);
     const startY = ref(0);
     const currentDragY = ref(0);
+    // Velocity tracking for snappy swipes
+    const lastY = ref(0);
+    const lastTime = ref(0);
+    const velocityY = ref(0);
 
     const sheetStyle = computed(() => {
         if (isSidebarMode.value) {
@@ -69,6 +73,7 @@ export function useSheetGestures({ isVisible, isExpanded, isSidebarMode, fitCont
         }
     });
 
+    // Tap on pill: collapsed → expanded, expanded → collapsed
     function toggle() {
         if (fitContent.value || isSidebarMode.value) {
             if (!isSidebarMode.value) close();
@@ -80,19 +85,30 @@ export function useSheetGestures({ isVisible, isExpanded, isSidebarMode, fitCont
 
     function onHandleTouchStart(e) {
         if (isSidebarMode.value) return;
-        // Don't start dragging if the user tapped a button in the header
         if (e.target.closest('.header-btn') || e.target.closest('.clickable-no-drag') || e.target.closest('.sub-tab-btn')) return;
         isDragging.value = true;
         startY.value = e.touches[0].clientY;
+        lastY.value = startY.value;
+        lastTime.value = Date.now();
+        velocityY.value = 0;
+        currentDragY.value = 0;
     }
 
     function onHandleTouchMove(e) {
         if (!isDragging.value || isSidebarMode.value) return;
-        const delta = e.touches[0].clientY - startY.value;
+        const now = Date.now();
+        const clientY = e.touches[0].clientY;
+        const dt = now - lastTime.value;
+        if (dt > 0) {
+            velocityY.value = (clientY - lastY.value) / dt; // px/ms
+        }
+        lastY.value = clientY;
+        lastTime.value = now;
 
-        // When expanded or fitContent, only allow dragging down (with resistance upward)
+        const delta = clientY - startY.value;
+        // When expanded, drag up adds resistance; drag down slides freely
         if ((isExpanded.value || fitContent.value) && delta < 0) {
-            currentDragY.value = delta * 0.2;
+            currentDragY.value = delta * 0.15; // rubber-band resistance upward
         } else {
             currentDragY.value = delta;
         }
@@ -102,18 +118,27 @@ export function useSheetGestures({ isVisible, isExpanded, isSidebarMode, fitCont
         if (!isDragging.value || isSidebarMode.value) return;
         isDragging.value = false;
 
-        if (currentDragY.value > 80) { // Swipe down
+        const dy = currentDragY.value;
+        const vel = velocityY.value; // px/ms, positive = downward
+        // Use velocity for snappy swipes (> 0.4 px/ms) or position threshold
+        const fastDown = vel > 0.4;
+        const fastUp = vel < -0.4;
+
+        if (fastDown || dy > 80) {
+            // Swipe down
             if (isExpanded.value) {
                 isExpanded.value = false;
                 emit('update:expanded', false);
             } else {
                 close();
             }
-        } else if (currentDragY.value < -40 && !isExpanded.value && !fitContent.value) { // Swipe up
+        } else if ((fastUp || dy < -40) && !isExpanded.value && !fitContent.value) {
+            // Swipe up → expand
             isExpanded.value = true;
             emit('update:expanded', true);
         }
         currentDragY.value = 0;
+        velocityY.value = 0;
     }
 
     return {
