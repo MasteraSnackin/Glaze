@@ -5,6 +5,7 @@ import { hideKeyboard, showKeyboard, applyKeyboardOverlap, onKeyboardShow, onKey
 import { translations, t } from '@/utils/i18n.js';
 import HelpTip from '@/components/ui/HelpTip.vue';
 import { bottomSheetState } from '@/core/states/bottomSheetState.js';
+import { sidebarState, setSidebarOccupied } from '@/core/states/sidebarState.js';
 import { APP_EVENTS } from '@/core/events/eventNames.js';
 import { publishAppEvent } from '@/core/events/eventHub.js';
 import { attachLongPress } from '@/core/services/ui.js';
@@ -67,10 +68,22 @@ function close() {
     emit('close');
 }
 
-// When visible becomes false externally (via closeBottomSheet()), reset keyboard state
+// Sync with sidebar state to ensure only one sheet/view is active at a time
 watch(() => props.visible, (newVal) => {
+    if (newVal && props.sidebarMode) {
+        setSidebarOccupied(true, 'bottom_sheet');
+    } else if (!newVal && props.sidebarMode && sidebarState.activeSheetId === 'bottom_sheet') {
+        setSidebarOccupied(false);
+    }
+    
     if (!newVal && isLocalKeyboardOpen.value) {
         isLocalKeyboardOpen.value = false;
+    }
+}, { immediate: true });
+
+watch(() => sidebarState.activeSheetId, (newId) => {
+    if (props.visible && props.sidebarMode && newId && newId !== 'bottom_sheet') {
+        close();
     }
 });
 
@@ -201,18 +214,22 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+    if (props.sidebarMode && sidebarState.activeSheetId === 'bottom_sheet') {
+        setSidebarOccupied(false);
+    }
     document.removeEventListener('focusin', onSheetFocusIn);
     kbListeners.forEach(l => l.remove());
 });
 </script>
 
 <template>
-    <Teleport to="body">
-        <div :class="{ 'modal-overlay': !sidebarMode, 'visible': !sidebarMode && visible, 'bottom-sheet-sidebar-wrapper': sidebarMode }">
-            <div v-if="!sidebarMode" class="modal-backdrop" @click="locked ? undefined : close()"></div>
-            <div class="bottom-sheet-content" @click.stop 
-                 :style="!sidebarMode && isDragging ? { transform: `translateY(${currentDragY}px)` } : ''"
-                 :class="{ 'is-dragging': isDragging, 'keyboard-open': isLocalKeyboardOpen, 'is-solid': props.isSolid || bottomSheetState.isSolid, 'is-sidebar': sidebarMode }">
+    <Teleport :to="sidebarMode ? '#desktop-sidebar-content' : 'body'">
+        <Transition name="bottom-sheet">
+            <div v-if="visible" :class="{ 'modal-overlay': !sidebarMode, 'bottom-sheet-sidebar-wrapper': sidebarMode }">
+                <div v-if="!sidebarMode" class="modal-backdrop" @click="locked ? undefined : close()"></div>
+                <div class="bottom-sheet-content" @click.stop 
+                     :style="!sidebarMode && isDragging ? { transform: `translateY(${currentDragY}px)` } : ''"
+                     :class="{ 'is-dragging': isDragging, 'keyboard-open': isLocalKeyboardOpen, 'is-solid': props.isSolid || bottomSheetState.isSolid, 'is-sidebar': sidebarMode }">
                 
                 <div v-if="!sidebarMode" class="sheet-handle-bar"
                      @touchstart="onHandleTouchStart"
@@ -225,7 +242,7 @@ onBeforeUnmount(() => {
                         <div v-if="sidebarMode" class="sheet-back-btn" @click="close">
                             <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
                         </div>
-                        {{ title }}
+                        <div class="sc-header-title">{{ title }}</div>
                         <HelpTip v-if="helpTip" :term="helpTip" />
                     </div>
                     <div class="sheet-action-btn" v-if="headerAction" @click="headerAction.onClick" v-html="headerAction.icon"></div>
@@ -366,7 +383,8 @@ onBeforeUnmount(() => {
                 </div>
             </div>
         </div>
-    </Teleport>
+    </Transition>
+</Teleport>
 </template>
 
 <style scoped>
@@ -392,17 +410,11 @@ onBeforeUnmount(() => {
     left: 0;
     width: 100%;
     height: 100%;
-    background-color: rgba(0,0,0,0.5);
+    background-color: transparent !important;
     z-index: 1000;
     display: flex;
     justify-content: center;
     align-items: flex-end;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.3s;
-}
-
-.modal-overlay.visible {
     opacity: 1;
     pointer-events: auto;
 }
@@ -414,16 +426,11 @@ onBeforeUnmount(() => {
     border-top-left-radius: 16px;
     border-top-right-radius: 16px;
     padding-bottom: calc(10px + var(--sab));
-    transform: translateY(100%);
-    transition: padding-bottom 0.25s cubic-bezier(0.2, 0.8, 0.2, 1), transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease, max-height 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+    transform: translateY(0);
     max-height: 95vh;
     box-shadow: 0 -5px 15px rgba(0,0,0,0.1);
     display: flex;
     flex-direction: column;
-}
-
-.modal-overlay.visible .bottom-sheet-content {
-    transform: translateY(0);
 }
 
 .sheet-handle-bar {
@@ -699,25 +706,39 @@ onBeforeUnmount(() => {
 .modal-overlay {
     background-color: transparent !important;
     opacity: 1 !important;
-    visibility: hidden;
-    transition: visibility 0s linear 0.3s !important;
     z-index: 12000 !important;
 }
 
-.modal-overlay.visible {
-    visibility: visible;
-    transition-delay: 0s !important;
+.bottom-sheet-enter-active,
+.bottom-sheet-leave-active {
+    transition: opacity 0.3s ease;
+}
+.bottom-sheet-enter-active .modal-backdrop,
+.bottom-sheet-leave-active .modal-backdrop {
+    transition: opacity 0.3s ease;
+}
+.bottom-sheet-enter-active .bottom-sheet-content,
+.bottom-sheet-leave-active .bottom-sheet-content {
+    transition: background-color 0.3s ease, transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.bottom-sheet-enter-from,
+.bottom-sheet-leave-to {
+    opacity: 0;
+}
+.bottom-sheet-enter-from .bottom-sheet-content:not(.is-sidebar),
+.bottom-sheet-leave-to .bottom-sheet-content:not(.is-sidebar) {
+    transform: translateY(100%);
+}
+.bottom-sheet-enter-from .bottom-sheet-content.is-sidebar,
+.bottom-sheet-leave-to .bottom-sheet-content.is-sidebar {
+    transform: translateX(100%) !important;
 }
 
 .modal-backdrop {
     position: absolute;
     top: 0; left: 0; width: 100%; height: 100%;
     background-color: rgba(0,0,0,0.5);
-    opacity: 0;
-    transition: opacity 0.3s ease;
-}
-
-.modal-overlay.visible .modal-backdrop {
     opacity: 1;
 }
 
@@ -740,13 +761,24 @@ onBeforeUnmount(() => {
     background-image: none !important;
 }
 
+.bottom-sheet-sidebar-wrapper {
+    position: absolute;
+    inset: 0;
+    background: transparent;
+    flex: none;
+    min-height: 0;
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+}
+
 .bottom-sheet-content.is-sidebar {
     height: 100% !important;
     max-height: none !important;
     border-radius: 0 !important;
     border: none !important;
     box-shadow: none !important;
-    transform: none !important;
+    transform: translateX(0) !important;
     background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8)) !important;
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
@@ -1006,11 +1038,12 @@ onBeforeUnmount(() => {
     border: none !important;
     box-shadow: none !important;
     transform: none !important;
-    background-color: transparent !important;
+    background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8)) !important;
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
+    background-image: none !important;
     position: relative !important;
-    padding-top: calc(56px + 8px);
+    padding-top: 0 !important;
 }
 
 .bottom-sheet-content.is-sidebar .sheet-scroll-container {
@@ -1021,36 +1054,48 @@ onBeforeUnmount(() => {
 
 .bottom-sheet-content.is-sidebar .sheet-header {
     background: transparent !important;
-    padding-top: 0 !important;
+    padding: 0 16px !important;
+    min-height: 56px;
 }
 
 .sheet-back-btn {
+    width: 40px;
+    height: 40px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 32px;
-    height: 32px;
-    margin-right: 8px;
+    margin-left: -8px;
     cursor: pointer;
+    flex-shrink: 0;
     border-radius: 50%;
-    transition: background 0.2s;
+    color: var(--accent-color, var(--vk-blue));
+    background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8));
+    backdrop-filter: blur(var(--element-blur, 20px));
+    -webkit-backdrop-filter: blur(var(--element-blur, 20px));
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+    transition: all 0.2s ease;
 }
 
 .sheet-back-btn:active {
-    background: rgba(var(--text-color-rgb, 255, 255, 255), 0.1);
+    opacity: 0.8;
 }
 
 .sheet-back-btn svg {
-    width: 20px;
-    height: 20px;
-    fill: currentColor;
+    width: 20px !important;
+    height: 20px !important;
+    fill: currentColor !important;
 }
 
 .bottom-sheet-sidebar-wrapper {
-    flex: 1;
+    position: absolute;
+    inset: 0;
+    z-index: 1000;
+    flex: none;
     min-height: 0;
     display: flex;
     flex-direction: column;
     width: 100%;
+    pointer-events: auto;
 }
 </style>
