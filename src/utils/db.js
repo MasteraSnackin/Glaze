@@ -172,9 +172,9 @@ export const db = {
                         allEmbeddings.forEach(emb => {
                             if (emb.vector && !emb.vectors) {
                                 // Convert legacy single vector to multi-vector format
-                                emb.vectors = [{ 
-                                    text: '(legacy full content)', 
-                                    vector: emb.vector 
+                                emb.vectors = [{
+                                    text: '(legacy full content)',
+                                    vector: emb.vector
                                 }];
                                 emb.vector = null;  // Mark as migrated
                                 embStore.put(emb);
@@ -476,6 +476,9 @@ export const db = {
         const nextId = (ids.length > 0 ? Math.max(...ids) : 0) + 1;
         data.currentId = nextId;
         data.sessions[nextId] = [];
+
+        if (!data.sessionDates) data.sessionDates = {};
+        data.sessionDates[nextId] = Date.now();
 
         await db.saveChat(charId, data);
         return nextId;

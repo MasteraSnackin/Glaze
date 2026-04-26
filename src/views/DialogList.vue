@@ -69,7 +69,7 @@ const loadData = async () => {
             const msgs = sessions[sid];
             if (!Array.isArray(msgs)) return;
             const lastMsg = msgs[msgs.length - 1];
-            const timestamp = lastMsg ? (lastMsg.timestamp || 0) : 0;
+            const timestamp = lastMsg ? (lastMsg.timestamp || 0) : (charData.sessionDates?.[sid] || 0);
                 
                 // Check generation status from localStorage
                 if (localStorage.getItem(`gz_generating_${charId}_${sessionId}`)) generating.value[`${charId}_${sessionId}`] = true;

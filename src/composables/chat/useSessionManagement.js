@@ -108,8 +108,8 @@ export function useSessionManagement(deps) {
         const sessions = data.sessions || {};
 
         const ids = Object.keys(sessions).map(Number).sort((a, b) => {
-            const lastA = sessions[a][sessions[a].length - 1]?.timestamp || 0;
-            const lastB = sessions[b][sessions[b].length - 1]?.timestamp || 0;
+            const lastA = sessions[a][sessions[a].length - 1]?.timestamp || data.sessionDates?.[a] || 0;
+            const lastB = sessions[b][sessions[b].length - 1]?.timestamp || data.sessionDates?.[b] || 0;
             return lastB - lastA;
         });
 
