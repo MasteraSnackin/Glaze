@@ -351,3 +351,40 @@
     color: var(--text-black);
     box-shadow: none;
 }
+
+/* Window close button */
+.window-close-btn {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    z-index: 10;
+}
+
+.window-close-btn:active {
+    transform: scale(0.9) translateZ(0);
+    background-color: rgba(255, 255, 255, 0.15);
+}
+
+.window-close-btn svg {
+    width: 20px;
+    height: 20px;
+    fill: var(--text-gray, #99a2ad);
+}
+
+/* Container for windows using the useWindow logic */
+.window-panel {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding-top: 12px !important;
+    padding-bottom: 16px !important;
+}
