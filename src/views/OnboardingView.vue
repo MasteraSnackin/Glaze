@@ -552,7 +552,7 @@ async function finish() {
             </div>
 
             <!-- Mobile Layout -->
-            <div v-else>
+            <div v-else class="mobile-shell">
                 <!-- Header with skip/progress -->
                 <div class="onboarding-header">
                     <div class="onboarding-header-gradient"></div>
@@ -1333,6 +1333,12 @@ async function finish() {
     flex-direction: column;
     border-radius: 0;
     border: none;
+}
+
+.mobile-shell {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
 }
 
 .onboarding-card:not(.desktop-layout) .onboarding-header {
