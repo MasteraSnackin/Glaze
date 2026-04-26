@@ -291,7 +291,7 @@ onBeforeUnmount(() => {
         </div>
 
         <!-- Guidance Block (Header) -->
-        <div v-if="currentGuidance" class="msg-guidance-block" style="margin-bottom: 4px; border-radius: 8px;">
+        <div v-if="currentGuidance" class="msg-guidance-block">
             <div class="guidance-label" style="display: flex; justify-content: space-between; align-items: center;">
                 <span>GUIDED {{ currentGuidance.type }}</span>
                 <div style="display: flex; gap: 2px; align-items: center;">
@@ -1539,7 +1539,8 @@ Memory entry
 .message-section.native-lite .msg-regenerate,
 .message-section.native-lite .msg-guided-swipe-btn,
 .message-section.native-lite .msg-actions-btn,
-.message-section.native-lite .edit-btn {
+.message-section.native-lite .edit-btn,
+.message-section.native-lite .msg-guidance-block {
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
     box-shadow: none !important;
@@ -1581,11 +1582,13 @@ Memory entry
 
 /* Guidance Block Styling */
 .msg-guidance-block {
-    margin-bottom: 8px;
+    margin-bottom: 4px;
     padding: 6px 10px;
-    border-left: 2px solid var(--vk-blue);
-    background: rgba(var(--vk-blue-rgb), 0.1);
-    border-radius: 4px;
+    border: 2px solid rgba(var(--vk-blue-rgb), 0.3);
+    background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8));
+    backdrop-filter: blur(var(--element-blur, 20px));
+    -webkit-backdrop-filter: blur(var(--element-blur, 20px));
+    border-radius: 8px;
     font-size: 13px;
     width: fit-content;
     max-width: 100%;
