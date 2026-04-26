@@ -51,13 +51,18 @@ export function useInputActions(props, emit, _chatInputRef, _isComposing, _updat
         attachedImage.value = null;
     };
 
+    const closeGuidanceSilent = () => {
+        guidanceText.value = '';
+        isGuidanceMode.value = false;
+    };
+
     const handleSend = () => {
         if (props.isGenerating) {
             emit('send');
         } else if ((props.modelValue && props.modelValue.trim()) || attachedImage.value) {
             emit('send', attachedImage.value, guidanceText.value);
             attachedImage.value = null;
-            closeGuidance();
+            closeGuidanceSilent();
         } else {
             if (!isGuidanceMode.value || guidanceType.value !== 'impersonate') {
                 isGuidanceMode.value = true;
@@ -65,7 +70,7 @@ export function useInputActions(props, emit, _chatInputRef, _isComposing, _updat
                 nextTick(() => { if (guidanceInput.value) guidanceInput.value.focus(); });
             } else {
                 emit('magic-impersonate', guidanceText.value);
-                closeGuidance();
+                closeGuidanceSilent();
             }
         }
     };
