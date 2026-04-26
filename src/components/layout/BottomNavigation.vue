@@ -67,25 +67,25 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <nav class="tabbar" ref="tabbarRef">
+  <nav class="bottom-nav" ref="tabbarRef">
       <div 
           v-for="item in navItems" 
           :key="item.id"
-          class="tab-btn" 
+          class="bottom-nav-btn" 
           :class="{ active: item.match(currentView) }" 
           @click="$emit('update:currentView', item.id)"
       >
-          <svg class="tab-icon" viewBox="0 0 24 24">
+          <svg class="bottom-nav-icon" viewBox="0 0 24 24">
               <path :d="item.icon" />
           </svg>
-          <span class="tab-label">{{ item.label }}</span>
+          <span class="bottom-nav-label">{{ item.label }}</span>
       </div>
   </nav>
 </template>
 
 <style>
-/* Tabbar Layout & Glass Effect */
-.tabbar {
+/* Bottom Navigation Layout & Glass Effect */
+.bottom-nav {
     padding: 7px 0;
     display: flex;
     justify-content: space-around;
@@ -107,7 +107,7 @@ onUnmounted(() => {
     border: 1px solid var(--border-color, rgba(255, 255, 255, 0.1));
 }
 
-.tab-btn {
+.bottom-nav-btn {
     flex: 1;
     display: flex;
     flex-direction: column;
@@ -118,11 +118,11 @@ onUnmounted(() => {
     transition: color 0.3s ease;
 }
 
-.tab-btn.active {
+.bottom-nav-btn.active {
     color: var(--vk-blue);
 }
 
-.tab-icon {
+.bottom-nav-icon {
     width: 28px;
     height: 28px;
     fill: currentColor;
@@ -130,7 +130,7 @@ onUnmounted(() => {
     transition: fill 0.3s ease;
 }
 
-.tab-label {
+.bottom-nav-label {
     font-size: 10px;
     font-weight: 500;
 }
