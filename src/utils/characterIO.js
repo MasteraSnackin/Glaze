@@ -6,6 +6,7 @@ import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { db } from '@/utils/db.js';
 import { logger } from './logger.js';
+import { generateThumbnail, generateAllThumbnails } from './thumbnailUtils.js';
 import { saveFile } from '../core/services/fileSaver.js';
 import { importSTLorebook } from '@/core/states/lorebookState.js';
 import { publishAppEvent } from '@/core/events/eventHub.js';
@@ -43,7 +44,9 @@ function parseJson(file) {
                                 avatarSrc = 'data:image/png;base64,' + avatarSrc;
                             }
                         }
-                        normalized.thumbnail = await generateThumbnail(avatarSrc);
+                        const thumbs = await generateAllThumbnails(avatarSrc);
+                        normalized.thumbnail = thumbs.thumbnail;
+                        normalized.mini_thumbnail = thumbs.mini_thumbnail;
                     } catch (e) {
                         console.error('Failed to generate thumbnail from JSON', e);
                     }
@@ -119,9 +122,11 @@ async function parsePng(file) {
     normalized.avatar = avatarBase64; // Avatar from the file takes priority
 
     try {
-        normalized.thumbnail = await generateThumbnail(avatarBase64);
+        const thumbs = await generateAllThumbnails(avatarBase64);
+        normalized.thumbnail = thumbs.thumbnail;
+        normalized.mini_thumbnail = thumbs.mini_thumbnail;
     } catch (e) {
-        console.error("Failed to generate thumbnail for PNG:", e);
+        console.error("Failed to generate thumbnails for PNG:", e);
     }
 
     return normalized;
@@ -216,44 +221,8 @@ export function triggerCharacterImport(onImport) {
  * @param {number} maxSize - Maximum width or height.
  * @returns {Promise<string>} Base64 JPEG string of the thumbnail.
  */
-export async function generateThumbnail(imageSrc, maxSize = 600) {
-    if (!imageSrc) return null;
-    return new Promise((resolve, reject) => {
-        const img = new Image();
-        img.onload = () => {
-            let width = img.width;
-            let height = img.height;
-            if (width > height) {
-                if (width > maxSize) {
-                    height *= maxSize / width;
-                    width = maxSize;
-                }
-            } else {
-                if (height > maxSize) {
-                    width *= maxSize / height;
-                    height = maxSize;
-                }
-            }
-            const canvas = document.createElement('canvas');
-            canvas.width = width;
-            canvas.height = height;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(img, 0, 0, width, height);
-            resolve(canvas.toDataURL('image/jpeg', 0.8));
-        };
-        img.onerror = () => {
-            console.warn("Could not load image for thumbnail generation", imageSrc.substring(0, 50));
-            reject(new Error("Failed to load image"));
-        };
-
-        // Handle CORS if it's an external URL
-        if (imageSrc.startsWith('http')) {
-            img.crossOrigin = 'Anonymous';
-        }
-
-        img.src = imageSrc;
-    });
-}
+// generateThumbnail is re-exported from thumbnailUtils for backwards compatibility
+export { generateThumbnail } from './thumbnailUtils.js';
 
 /**
  * Iterates over all characters in the DB and generates thumbnails for those missing one.
@@ -266,20 +235,22 @@ export async function generateMissingThumbnails() {
         let updatedCount = 0;
         for (const char of chars) {
             // Only generate if there is an avatar and no thumbnail
-            if (char.avatar && !char.thumbnail) {
+            if (char.avatar && (!char.thumbnail || !char.mini_thumbnail)) {
                 try {
                     let avatarSrc = char.avatar;
                     if (!avatarSrc.startsWith('http') && !avatarSrc.startsWith('blob:') && !avatarSrc.startsWith('data:')) {
                         avatarSrc = `/characters/${avatarSrc}`;
                     }
 
-                    char.thumbnail = await generateThumbnail(avatarSrc);
-                    if (char.thumbnail) {
+                    const thumbs = await generateAllThumbnails(avatarSrc);
+                    if (!char.thumbnail) char.thumbnail = thumbs.thumbnail;
+                    if (!char.mini_thumbnail) char.mini_thumbnail = thumbs.mini_thumbnail;
+                    if (char.thumbnail || char.mini_thumbnail) {
                         await db.saveCharacter(char, -1);
                         updatedCount++;
                     }
                 } catch (e) {
-                    console.error(`Failed to generate missing thumbnail for ${char.name}:`, e);
+                    console.error(`Failed to generate missing thumbnails for ${char.name}:`, e);
                 }
             }
         }
