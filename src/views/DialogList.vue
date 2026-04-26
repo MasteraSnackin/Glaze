@@ -8,12 +8,13 @@ import { translations, pluralize } from '@/utils/i18n.js';
 import { currentLang, dialogGrouping } from '@/core/config/APPSettings.js';
 import { attachLongPress } from '@/core/services/ui.js';
 import { attachHoverGlow } from '@/core/services/interactionEffects.js';
-import { getChatData, createNewSession, deleteSession, renameSession } from '@/utils/sessions.js';
+import { getChatData, createNewSession, deleteSession } from '@/utils/sessions.js';
 import { importSillyTavernChat, exportSillyTavernChat, exportGlazeChat, pickChatFile } from '@/core/services/chatImporter.js';
 import { allPersonas, loadPersonas } from '@/core/states/personaState.js';
 import { APP_EVENTS } from '@/core/events/eventNames.js';
 import { subscribeAppEvent, publishAppEvent } from '@/core/events/eventHub.js';
 import ToolStripTooltip from '@/components/ToolStripTooltip.vue';
+import { useSessionSheet } from '@/composables/character/useSessionSheet.js';
 
 const props = defineProps({
   activeCategory: { type: String, default: 'all' },
@@ -200,6 +201,11 @@ const vHoverGlow = {
     }
 };
 
+const { openSessionActions } = useSessionSheet({
+    openChat: ({ charId, sessionId }) => emit('open-chat', { id: charId, sessionId }),
+    onAfterAction: () => loadData()
+});
+
 const openActions = (chat, mode = 'flat') => {
     let items = [];
     let title = chat.name;
@@ -212,7 +218,7 @@ const openActions = (chat, mode = 'flat') => {
                 onClick: () => {
                     const charIndex = characters.value.findIndex(c => c.id === chat.id);
                     if (charIndex !== -1) {
-                         publishAppEvent(APP_EVENTS.nav.openCharacterEditor, { index: charIndex });
+                        publishAppEvent(APP_EVENTS.nav.openCharacterEditor, { index: charIndex });
                     }
                     closeBottomSheet();
                 }
@@ -228,43 +234,16 @@ const openActions = (chat, mode = 'flat') => {
             }
         ];
     } else {
-        if (mode !== 'session') {
-            items.push({
-                label: translations[currentLang.value]?.action_new_session || 'New Session',
-                icon: '<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>',
-                onClick: async () => {
-                    await createNewSession(chat.id);
-                    loadData();
-                    closeBottomSheet();
-                }
-            });
-        }
+        items.push({
+            label: translations[currentLang.value]?.action_new_session || 'New Session',
+            icon: '<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>',
+            onClick: async () => {
+                await createNewSession(chat.id);
+                loadData();
+                closeBottomSheet();
+            }
+        });
 
-        if (mode === 'session') {
-            items.push({
-                label: translations[currentLang.value]?.action_rename || 'Rename',
-                icon: '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>',
-                onClick: () => {
-                    closeBottomSheet();
-                    showBottomSheet({
-                        title: translations[currentLang.value]?.action_rename || 'Rename',
-                        input: {
-                            placeholder: translations[currentLang.value]?.placeholder_enter_name || 'Enter name',
-                            value: chat.sessionName || `Session #${chat.sessionId}`,
-                            confirmLabel: translations[currentLang.value]?.btn_save || 'Save',
-                            onConfirm: async (val) => {
-                                if (val) {
-                                    await renameSession(chat.id, chat.sessionId, val);
-                                    loadData();
-                                    closeBottomSheet();
-                                }
-                            }
-                        }
-                    });
-                }
-            });
-        }
-        
         items.push({
             label: 'Export Chat (Glaze)',
             icon: '<svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 14-5-5h3V8h4v4h3l-5 5z"/></svg>',
@@ -282,7 +261,7 @@ const openActions = (chat, mode = 'flat') => {
                 closeBottomSheet();
             }
         });
-        
+
         items.push({
             label: translations[currentLang.value]?.action_delete_session || 'Delete Session',
             icon: '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>',
@@ -299,32 +278,22 @@ const openActions = (chat, mode = 'flat') => {
                             iconColor: '#ff4444',
                             isDestructive: true,
                             onClick: async () => {
-                                // Check if it's the last session to prevent auto-creation of a new one
                                 const chats = await db.getChats() || {};
                                 let charData = chats[chat.id];
                                 let sessionCount = 0;
-                                
                                 if (charData) {
-                                    if (charData.sessions) {
-                                        sessionCount = Object.keys(charData.sessions).length;
-                                    } else if (Array.isArray(charData)) {
-                                        sessionCount = 1;
-                                    }
+                                    if (charData.sessions) sessionCount = Object.keys(charData.sessions).length;
+                                    else if (Array.isArray(charData)) sessionCount = 1;
                                 }
-
                                 if (sessionCount <= 1) {
                                     if (charData) {
-                                        if (Array.isArray(charData)) {
-                                            charData = { currentId: 1, sessions: {} };
-                                        } else if (charData.sessions) {
-                                            delete charData.sessions[chat.sessionId];
-                                        }
+                                        if (Array.isArray(charData)) charData = { currentId: 1, sessions: {} };
+                                        else if (charData.sessions) delete charData.sessions[chat.sessionId];
                                         await db.saveChat(chat.id, charData);
                                     }
                                 } else {
                                     await deleteSession(chat.id, chat.sessionId);
                                 }
-                                
                                 loadData();
                                 closeBottomSheet();
                             }
@@ -338,17 +307,11 @@ const openActions = (chat, mode = 'flat') => {
                 });
             }
         });
-
-        if (mode === 'session') {
-            title += ` (#${chat.sessionId})`;
-        }
     }
 
-    showBottomSheet({
-        title,
-        items
-    });
+    showBottomSheet({ title, items });
 };
+
 
 const handleHeaderClick = (event, charId) => {
     if (event.currentTarget._checkLongPress && event.currentTarget._checkLongPress()) return;
@@ -650,9 +613,9 @@ onUnmounted(() => {
                         <div class="sessions-list sheet-card-list dialog-sessions-list">
                             <div v-for="session in group.sessions" :key="session.id + '_' + session.sessionId" 
                                  class="triggered-item-card" 
-                             v-long-press="() => openActions(session, 'session')" 
+                             v-long-press="() => openSessionActions({ id: session.id, name: session.name }, session.sessionId, session.sessionName)" 
                              @click="handleItemClick($event, session)" 
-                             @contextmenu.prevent="openActions(session, 'session')">
+                             @contextmenu.prevent="openSessionActions({ id: session.id, name: session.name }, session.sessionId, session.sessionName)">
                             <div class="item-info">
                                 <div class="item-label-row">
                                     <div class="item-label" :class="{ 'unread-text': unread[session.id] && session.isCurrent }">

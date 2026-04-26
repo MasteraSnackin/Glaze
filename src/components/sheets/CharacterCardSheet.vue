@@ -8,8 +8,9 @@ import { currentLang } from '@/core/config/APPSettings.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import { db, markSyncDeletedEntry } from '@/utils/db.js';
 import { exportCharacterAsV2Json, exportCharacterAsV2Png } from '@/utils/characterIO.js';
-import { createNewSession, getChatData } from '@/utils/sessions.js';
-import { formatDate } from '@/utils/dateFormatter.js';
+import { useSessionSheet } from '@/composables/character/useSessionSheet.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
+import { publishAppEvent } from '@/core/events/eventHub.js';
 
 const props = defineProps({
     visible: Boolean,
@@ -286,56 +287,13 @@ function openActionsMenu() {
     });
 }
 
-async function openChatSession(charId, sessionId) {
-    closeBottomSheet();
-    close();
-    window.dispatchEvent(new CustomEvent('open-chat', { detail: { charId, sessionId } }));
-}
-
-async function openSessionsMenu() {
-    const char = currentCharData.value;
-    if (!char?.id) return;
-
-    const data = await getChatData(char.id);
-    if (!data) return;
-
-    const sessions = data.sessions || {};
-    const ids = Object.keys(sessions).map(Number).sort((a, b) => {
-        const lastA = sessions[a]?.[sessions[a].length - 1]?.timestamp || 0;
-        const lastB = sessions[b]?.[sessions[b].length - 1]?.timestamp || 0;
-        return lastB - lastA;
-    });
-    const currentSessionId = data.currentId;
-
-    const cardItems = ids.map((sid) => {
-        const msgs = sessions[sid] || [];
-        const lastMsg = msgs[msgs.length - 1];
-        const preview = lastMsg ? (lastMsg.text.length > 40 ? `${lastMsg.text.substring(0, 40)}...` : lastMsg.text) : 'Empty session';
-        const dateFormatted = lastMsg ? formatDate(lastMsg.timestamp, 'short') : '';
-        return {
-            label: data?.sessionNames?.[sid] || `Session #${sid}`,
-            sublabel: preview,
-            badge: `${msgs.length} msgs${dateFormatted ? ' ┬╖ ' + dateFormatted : ''}`,
-            isActive: sid === currentSessionId,
-            onClick: () => openChatSession(char.id, sid)
-        };
-    });
-
-    showBottomSheet({
-        title: `${getTranslated('history_title', 'Sessions')} `,
-        helpTip: 'sessions',
-        cardItems,
-        isSolid: true,
-        headerAction: {
-            icon: plusIcon,
-            onClick: async () => {
-                closeBottomSheet();
-                const sessionId = await createNewSession(char.id);
-                openChatSession(char.id, sessionId);
-            }
-        }
-    });
-}
+const { openSessionsSheet } = useSessionSheet({
+    openChat: ({ charId, sessionId }) => {
+        closeBottomSheet();
+        close();
+        publishAppEvent(APP_EVENTS.nav.openChat, { charId, sessionId });
+    }
+});
 
 defineExpose({ open, close });
 </script>
@@ -470,7 +428,7 @@ defineExpose({ open, close });
         </div> <!-- /char-sheet -->
         <template #floating>
             <div v-if="canOpenChat" class="chat-fab-wrap">
-                <FabButton :text="getTranslated('btn_open_chat', 'Open Chat')" @click="openSessionsMenu">
+                <FabButton :text="getTranslated('btn_open_chat', 'Open Chat')" @click="openSessionsSheet(currentCharData)">
                     <template #icon>
                         <svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
                     </template>

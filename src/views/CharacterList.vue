@@ -68,7 +68,9 @@ const loadCharacters = async () => {
 };
 
 const { onAddCharacter, onEditCharacter, openActions, setActiveMenuCharId } = useCharacterActions({ characters, loadCharacters });
-const { openSessionsSheet } = useSessionSheet({ emit });
+const { openSessionsSheet } = useSessionSheet({
+    openChat: ({ charId, sessionId }) => emit('open-chat', { id: charId, sessionId })
+});
 
 const wrappedOpenActions = (char) => {
   activeMenuCharId.value = char.id;
