@@ -11,7 +11,6 @@ export function setNetworkDebugEnabled(enabled) {
 }
 
 export function startNetworkTrace({ debugKey, requestType = 'unknown', apiUrl, stream, requestBody, headers }) {
-    if (!isNetworkDebugEnabled()) return;
 
     publishAppEvent(APP_EVENTS.debug.requestTraceStarted, {
         debugKey,
@@ -24,17 +23,14 @@ export function startNetworkTrace({ debugKey, requestType = 'unknown', apiUrl, s
 }
 
 export function updateNetworkTrace({ debugKey, patch = {} } = {}) {
-    if (!isNetworkDebugEnabled()) return;
     publishAppEvent(APP_EVENTS.debug.requestTraceUpdated, { debugKey, patch });
 }
 
 export function appendNetworkTraceLine({ debugKey, line } = {}) {
-    if (!isNetworkDebugEnabled()) return;
     publishAppEvent(APP_EVENTS.debug.requestTraceLineAppended, { debugKey, line });
 }
 
 export function finishNetworkTrace({ debugKey, rawResponse, text, reasoning, error } = {}) {
-    if (!isNetworkDebugEnabled()) return;
     publishAppEvent(APP_EVENTS.debug.requestTraceFinished, {
         debugKey,
         rawResponse,
