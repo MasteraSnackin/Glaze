@@ -54,7 +54,7 @@ const currentAvatarUrl = computed(() => {
     if (directUrl) return resolveAvatarUrl(directUrl);
 
     const char = currentCharData.value;
-    return resolveAvatarUrl(char?.thumbnail || char?.avatar || currentItem.value?.avatarUrl);
+    return resolveAvatarUrl(char?.avatar || char?.thumbnail || currentItem.value?.avatarUrl);
 });
 const canImport = computed(() => (isControlled.value ? props.importEnabled : localImportEnabled.value));
 
@@ -296,6 +296,12 @@ const { openSessionsSheet } = useSessionSheet({
 });
 
 defineExpose({ open, close });
+
+function openHeroImage() {
+    const url = currentAvatarUrl.value;
+    if (!url) return;
+    publishAppEvent(APP_EVENTS.nav.openImageViewer, { src: url });
+}
 </script>
 
 <template>
@@ -312,6 +318,7 @@ defineExpose({ open, close });
                         :src="currentAvatarUrl"
                         class="hero-img"
                         :alt="currentCharData.name"
+                        @click="openHeroImage"
                     />
                     <div v-else :key="'placeholder-'+(currentCharData.id || currentCharData.name)" class="hero-placeholder">
                         {{ currentCharData.name?.[0]?.toUpperCase() || '?' }}
@@ -664,6 +671,7 @@ defineExpose({ open, close });
     object-fit: cover;
     object-position: center top;
     display: block;
+    cursor: zoom-in;
 }
 
 .hero-placeholder {
@@ -683,9 +691,9 @@ defineExpose({ open, close });
     inset: 0;
     background: linear-gradient(
         to top,
-        rgba(0, 0, 0, 0.92) 0%,
-        rgba(0, 0, 0, 0.4) 40%,
-        transparent 70%
+        rgba(0, 0, 0, 0.75) 0%,
+        rgba(0, 0, 0, 0.2) 40%,
+        transparent 65%
     );
     pointer-events: none;
 }
