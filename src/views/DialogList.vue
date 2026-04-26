@@ -24,6 +24,7 @@ const props = defineProps({
 const emit = defineEmits(['open-chat']);
 
 const chats = ref([]);
+const isLoading = ref(true);
 const characters = ref([]);
 const searchQuery = ref('');
 const unread = ref({});
@@ -36,6 +37,7 @@ let unsubscribeCharUpdated = null;
 let unsubscribeHeaderSearch = null;
 
 const loadData = async () => {
+    isLoading.value = true;
     try {
         const [chatsDataRaw, unreadDataRaw, charsData] = await Promise.all([
             db.getChats(),
@@ -95,6 +97,8 @@ const loadData = async () => {
 
     } catch (e) {
         console.error("Error loading dialogs:", e);
+    } finally {
+        isLoading.value = false;
     }
 };
 
@@ -534,7 +538,10 @@ onUnmounted(() => {
                           </div>
                           <div class="collapsed-unread-dot" v-if="unread[group.latest.id]"></div>
                       </div>
-                      <div v-if="groupedChats.length === 0" class="collapsed-empty">
+                      <div v-if="isLoading" class="collapsed-spinner">
+                          <div class="dl-spinner-mini"></div>
+                      </div>
+                      <div v-else-if="groupedChats.length === 0" class="collapsed-empty">
                           <svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/></svg>
                       </div>
                   </template>
@@ -642,7 +649,10 @@ onUnmounted(() => {
               </div>
           </template>
 
-          <div v-if="filteredChats.length === 0 && !collapsed" class="empty-state">
+          <div v-if="!collapsed && isLoading" class="empty-state">
+              <div class="dl-spinner"></div>
+          </div>
+          <div v-else-if="filteredChats.length === 0 && !collapsed && !isLoading" class="empty-state">
               <svg class="empty-state-icon" viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/></svg>
               <div class="empty-state-text">
 {{ translations[currentLang.value]?.no_dialogs || 'No dialogs' }}
@@ -820,5 +830,34 @@ onUnmounted(() => {
     border-radius: 50%;
     margin-left: 8px;
     flex-shrink: 0;
+}
+
+.dl-spinner {
+    width: 32px;
+    height: 32px;
+    border: 3px solid rgba(255, 255, 255, 0.1);
+    border-radius: 50%;
+    border-top-color: var(--vk-blue);
+    animation: dl-spin 0.8s linear infinite;
+    margin-bottom: 12px;
+}
+
+@keyframes dl-spin {
+    to { transform: rotate(360deg); }
+}
+
+.collapsed-spinner {
+    display: flex;
+    justify-content: center;
+    padding: 12px 0;
+}
+
+.dl-spinner-mini {
+    width: 20px;
+    height: 20px;
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    border-radius: 50%;
+    border-top-color: var(--vk-blue);
+    animation: dl-spin 0.8s linear infinite;
 }
 </style>
