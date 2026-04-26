@@ -37,6 +37,7 @@ export async function restoreGenerationState({
     sessionId,
     msgId,
     isError = false,
+    expectedGenId = null,
     onAbort = null,
     restorePromptMetaOnMessages,
     clearBackgroundUpdateTimer,
@@ -48,6 +49,9 @@ export async function restoreGenerationState({
     }
 
     const generationState = getGenerationState(char.id);
+    if (!generationState) return;
+    if (expectedGenId !== null && generationState.genId !== expectedGenId) return;
+
     if (typeof generationState?.clearStreamFlushTimer === 'function') {
         generationState.clearStreamFlushTimer();
     }

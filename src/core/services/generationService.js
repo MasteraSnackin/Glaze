@@ -145,6 +145,7 @@ export async function generateChatResponse({
         result,
         requestConfig: {
             ...requestConfig,
+            controller,
             debugKey
         },
         callbacks: {

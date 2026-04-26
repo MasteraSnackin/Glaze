@@ -76,6 +76,10 @@ function resolveFinalResponse(cleanedResponse, existingText) {
     return cleanedResponse;
 }
 
+function normalizeCompletionText(text) {
+    return typeof text === 'string' ? text : '';
+}
+
 export async function handleGenerationComplete({
     response,
     finalReasoning,
@@ -150,9 +154,13 @@ export async function handleGenerationComplete({
         }
 
         if (!currentState || currentState.genId !== genId) {
-            await clearTypingStateForMessage({ charId: char.id, sessionId, msgId });
-            ensureStaleCleanup();
-            notifyGenerationEnded({ charId: char.id, sessionId });
+            // A newer generation can reuse the same message record (e.g. swipe regeneration).
+            // In that case this stale completion must not mutate typing state for the active request.
+            if (!currentState) {
+                await clearTypingStateForMessage({ charId: char.id, sessionId, msgId });
+                ensureStaleCleanup();
+            }
+            notifyGenerationEnded({ charId: char.id, sessionId, genId, type: 'chat' });
             return;
         }
 
@@ -169,7 +177,14 @@ export async function handleGenerationComplete({
         if (controller.signal.aborted && !hasCompletionPayload) {
             await clearTypingStateForMessage({ charId: char.id, sessionId, msgId });
             ensureCleanup();
-            notifyGenerationEnded({ charId: char.id, sessionId });
+            notifyGenerationEnded({ charId: char.id, sessionId, genId, type: 'chat' });
+            return;
+        }
+
+        if (controller.signal.aborted && controller.userAborted) {
+            await clearTypingStateForMessage({ charId: char.id, sessionId, msgId });
+            ensureCleanup();
+            notifyGenerationEnded({ charId: char.id, sessionId, genId, type: 'chat' });
             return;
         }
 
@@ -188,7 +203,7 @@ export async function handleGenerationComplete({
         if (activeChatChar?.value && activeChatChar.value.id === char.id) isGenerating.value = false;
 
         const now = new Date();
-        const cleanedResponse = cleanText(response);
+        const cleanedResponse = cleanText(normalizeCompletionText(response));
         const time = now.getHours() + ':' + String(now.getMinutes()).padStart(2, '0');
         const duration = ((Date.now() - startTime) / 1000).toFixed(2) + 's';
 
@@ -255,7 +270,7 @@ export async function handleGenerationComplete({
                 }
             }
 
-            notifyGenerationEnded({ charId: char.id, sessionId });
+            notifyGenerationEnded({ charId: char.id, sessionId, genId, type: 'chat' });
             return;
         }
 
@@ -325,9 +340,13 @@ export async function handleGenerationComplete({
                     notifyChatUpdated();
                 });
 
-                notifyGenerationEnded({ charId: char.id, sessionId });
+                notifyGenerationEnded({ charId: char.id, sessionId, genId, type: 'chat' });
+                return;
             }
         }
+
+        ensureCleanup();
+        notifyGenerationEnded({ charId: char.id, sessionId, genId, type: 'chat' });
     } catch (completeErr) {
         console.error('[onComplete] Completion handler failed:', completeErr);
         ensureCleanup();
@@ -337,6 +356,6 @@ export async function handleGenerationComplete({
             msgId,
             errorLabel: '[onComplete]'
         });
-        notifyGenerationEnded({ charId: char.id, sessionId });
+        notifyGenerationEnded({ charId: char.id, sessionId, genId, type: 'chat' });
     }
 }

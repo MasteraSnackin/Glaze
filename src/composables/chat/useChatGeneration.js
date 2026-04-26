@@ -113,11 +113,15 @@ export function useChatGeneration(deps) {
         const existingState = getGenerationState(char.id);
 
         if (existingState && existingState.type !== 'impersonation') {
+            if (existingState.controller?.signal?.aborted) {
+                clearGenerationState(char.id, existingState.genId);
+            } else {
             console.warn('[generation] Ignoring overlapping startGeneration call for active chat request', {
                 charId: char.id,
                 existingGenId: existingState.genId
             });
             return;
+            }
         }
 
         const activeChatChar = getActiveChatChar();
@@ -148,11 +152,28 @@ export function useChatGeneration(deps) {
         const controller = new AbortController();
         const startTime = Date.now();
         const rawStreamRef = ref(text || '');
+
+        setGenerationState(char.id, {
+            genId,
+            type: 'chat',
+            controller,
+            startTime,
+            pending: true
+        });
+
         resolveGenerationSessionContext({ char, db }).then(context => {
+            const pendingState = getGenerationState(char.id);
+            if (!pendingState || pendingState.genId !== genId || controller.signal.aborted) {
+                return;
+            }
             continueGeneration(context);
         }).catch(e => {
             console.error('Failed to load chat for generation:', e);
-            isGenerating.value = false;
+            const pendingState = getGenerationState(char.id);
+            if (pendingState?.genId === genId) {
+                clearGenerationState(char.id, genId);
+                isGenerating.value = false;
+            }
         });
 
         async function continueGeneration({ sessionId, summary, anContent }) {

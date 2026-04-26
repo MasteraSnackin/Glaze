@@ -1,6 +1,5 @@
 export function useGenerationAbort({
     getGenerationState,
-    clearGenerationState,
     isGenerating,
     isImpersonating,
     activeChatChar
@@ -15,23 +14,26 @@ export function useGenerationAbort({
 
         if (state.controller) {
             try {
+                state.userAborted = true;
+                state.controller.userAborted = true;
                 state.controller.abort();
             } catch (abortErr) {
                 console.warn('[generation] Failed to abort controller:', abortErr);
             }
         }
 
-        if (restore && state.restoreState) {
-            try {
-                await state.restoreState();
-            } catch (restoreErr) {
-                console.error('[generation] Failed to restore state after abort:', restoreErr);
-            }
+        if (typeof state.clearGenerationTimer === 'function') {
+            state.clearGenerationTimer();
+        } else if (state.timerId) {
+            clearTimeout(state.timerId);
+            state.timerId = null;
         }
 
-        clearGenerationState(charId, state.genId);
+        if (typeof state.clearStreamFlushTimer === 'function') {
+            state.clearStreamFlushTimer();
+        }
 
-        if (activeChatChar && activeChatChar.value && activeChatChar.value.id === charId) {
+        if (activeChatChar?.value && activeChatChar.value.id === charId) {
             isGenerating.value = false;
         }
 
@@ -40,9 +42,12 @@ export function useGenerationAbort({
 
     function abortImpersonation(charId, state) {
         if (state?.controller) {
-            try { state.controller.abort(); } catch (e) {}
+            try {
+                state.userAborted = true;
+                state.controller.userAborted = true;
+                state.controller.abort();
+            } catch (e) {}
         }
-        clearGenerationState(charId);
         isGenerating.value = false;
         if (isImpersonating) isImpersonating.value = false;
         return true;

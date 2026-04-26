@@ -72,6 +72,15 @@ export function setupGenerationState({
     const flushPendingUIUpdate = () => {
         streamFlushTimer = null;
 
+        const activeState = getGenerationState(char.id);
+        if (!activeState || activeState.genId !== genId || activeState.sessionId !== sessionId || activeState.msgId !== msgId) {
+            pendingText = null;
+            pendingReasoning = null;
+            pendingTyping = null;
+            pendingTextDelta = null;
+            return;
+        }
+
         if (pendingText === null && pendingReasoning === null && pendingTyping === null && pendingTextDelta === null) return;
 
         const idx = currentMessages.value.findIndex(message => message.id === msgId);
@@ -104,6 +113,11 @@ export function setupGenerationState({
     };
 
     const initialUIUpdate = (text, reasoning, isTyping, textDelta) => {
+        const activeState = getGenerationState(char.id);
+        if (!activeState || activeState.genId !== genId || activeState.sessionId !== sessionId || activeState.msgId !== msgId) {
+            return;
+        }
+
         pendingText = text;
         pendingReasoning = reasoning;
         pendingTyping = isTyping;
@@ -142,7 +156,7 @@ export function setupGenerationState({
             }
 
             const state = getGenerationState(char.id);
-            if (state && state.genId === genId) {
+            if (state && state.genId === genId && !state.controller?.signal?.aborted) {
                 scheduleGenerationTimer();
             }
         }, getGenerationTimerInterval());

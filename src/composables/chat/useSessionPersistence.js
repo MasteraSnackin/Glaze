@@ -11,9 +11,35 @@ export function useSessionPersistence({
     getScrollAnchor,
     clearMessageNotifications
 }) {
+    const buildCrashBufferKey = (charId, sessionId) => `gz_chat_recovery_${charId}_${sessionId}`;
+
+    function writeCrashBuffer(activeChatChar) {
+        if (!activeChatChar?.id || !activeChatChar?.sessionId) return;
+        try {
+            localStorage.setItem(buildCrashBufferKey(activeChatChar.id, activeChatChar.sessionId), JSON.stringify({
+                messages: currentMessages.value,
+                draft: inputValue.value,
+                authorsNote: activeChatChar.authors_note,
+                summary: activeChatChar.summary,
+                lastScrollAnchor: getScrollAnchor(),
+                savedAt: Date.now()
+            }));
+        } catch (e) {
+            console.warn('[chat] Failed to write crash buffer:', e);
+        }
+    }
+
+    function clearCrashBuffer(charId, sessionId) {
+        if (!charId || !sessionId) return;
+        try {
+            localStorage.removeItem(buildCrashBufferKey(charId, sessionId));
+        } catch (_e) {}
+    }
+
     function asyncSaveCurrentSessionState() {
         const activeChatChar = getActiveChatChar();
         if (activeChatChar && messagesContainer.value) {
+            writeCrashBuffer(activeChatChar);
             const charContext = activeChatChar;
             const sessionId = charContext.sessionId;
             const inputValueDraft = inputValue.value;
@@ -70,6 +96,7 @@ export function useSessionPersistence({
                     data.summaries[sessionId] = charContext.summary;
                 }
             });
+            clearCrashBuffer(charContext.id, sessionId);
         }
     }
 
@@ -111,6 +138,7 @@ export function useSessionPersistence({
     function onVisibilityChange() {
         const activeChatChar = getActiveChatChar();
         if (document.visibilityState === 'hidden' && activeChatChar) {
+            writeCrashBuffer(activeChatChar);
             const charId = activeChatChar.id;
             const sessionId = activeChatChar.sessionId;
             const messagesSnapshot = currentMessages.value;
@@ -134,6 +162,14 @@ export function useSessionPersistence({
         } else if (document.visibilityState === 'visible' && activeChatChar) {
             clearMessageNotifications(activeChatChar.id);
         }
+    }
+
+    function onPageHide() {
+        const activeChatChar = getActiveChatChar();
+        if (activeChatChar) {
+            writeCrashBuffer(activeChatChar);
+        }
+        asyncSaveCurrentSessionState();
     }
 
     watch(activeChar, async (newVal) => {
@@ -199,9 +235,24 @@ export function useSessionPersistence({
         }
     });
 
+    if (typeof window !== 'undefined') {
+        window.addEventListener('beforeunload', onPageHide);
+        window.addEventListener('pagehide', onPageHide);
+    }
+
+    onBeforeUnmount(() => {
+        if (typeof window !== 'undefined') {
+            window.removeEventListener('beforeunload', onPageHide);
+            window.removeEventListener('pagehide', onPageHide);
+        }
+    });
+
     return {
         asyncSaveCurrentSessionState,
         applyImageAutoHide,
-        onVisibilityChange
+        onVisibilityChange,
+        onPageHide,
+        buildCrashBufferKey,
+        clearCrashBuffer
     };
 }

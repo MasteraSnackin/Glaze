@@ -88,7 +88,7 @@ export async function executeChatGenerationUseCase({
         triggerAutoSyncCheck
     } = postprocess;
 
-    notifyGenerationStarted({ charId: char.id, sessionId });
+    notifyGenerationStarted({ charId: char.id, sessionId, genId, type: 'chat' });
 
     isGenerating.value = true;
     let msgIndex = existingMsgIndex;
@@ -155,6 +155,7 @@ export async function executeChatGenerationUseCase({
             sessionId,
             msgId,
             isError,
+            expectedGenId: genId,
             onAbort,
             restorePromptMetaOnMessages,
             clearBackgroundUpdateTimer,
