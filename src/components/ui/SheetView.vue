@@ -6,8 +6,6 @@ import { bottomSheetState, closeBottomSheet } from '@/core/states/bottomSheetSta
 import { useSheetGestures } from '@/composables/ui/useSheetGestures.js';
 import { attachKeyboardFocusHandler } from '@/core/services/keyboardHandler.js';
 
-let _sheetIdCounter = 0;
-
 const props = defineProps({
     fitContent: { type: Boolean, default: false },
     zIndex: { type: [Number, String], default: 11000 },
@@ -29,7 +27,7 @@ const isSidebarMode = computed(() => {
 const emit = defineEmits(['close', 'back', 'update:expanded', 'update:activeTab', 'tab-click']);
 
 const isVisible = ref(false);
-const instanceId = ref(`sv_${++_sheetIdCounter}`);
+const instanceId = ref(`sv_${Math.random().toString(36).substring(2, 9)}`);
 
 watch(isVisible, (val) => {
     if (isDesktop.value) {
@@ -156,71 +154,73 @@ onBeforeUnmount(() => {
     </div>
 
     <Teleport v-else :to="isSidebarMode ? '#desktop-sidebar-content' : 'body'">
-        <div class="sheet-view-overlay" :class="{ visible: isVisible, 'is-sidebar': isSidebarMode }" :style="{ zIndex: zIndex }" @click.self="close" @hw-back="onHwBack">
-            <div ref="sheetViewContentRef"
-                 class="sheet-view-content" 
-                 :class="{ 'expanded': isExpanded, 'is-dragging': isDragging, 'keyboard-open': isLocalKeyboardOpen, 'is-sidebar': isSidebarMode, 'fit-content': fitContent }"
-                 :style="sheetStyle">
-                
-                <div class="sheet-header-area"
-                     :class="{ 'no-drag': isSidebarMode }"
-                     @touchstart="isSidebarMode ? undefined : onHandleTouchStart"
-                     @touchmove.prevent="isSidebarMode ? undefined : onHandleTouchMove"
-                     @touchend="isSidebarMode ? undefined : onHandleTouchEnd"
-                >
-                    <div v-if="!isSidebarMode" class="sheet-handle-bar" @click.stop="toggle"></div>
+        <Transition name="sheet-view">
+            <div v-if="isVisible" class="sheet-view-overlay" :class="{ 'is-sidebar': isSidebarMode }" :style="{ zIndex: zIndex }" @click.self="close" @hw-back="onHwBack">
+                <div ref="sheetViewContentRef"
+                     class="sheet-view-content" 
+                     :class="{ 'expanded': isExpanded, 'is-dragging': isDragging, 'keyboard-open': isLocalKeyboardOpen, 'is-sidebar': isSidebarMode, 'fit-content': fitContent }"
+                     :style="sheetStyle">
                     
-                    <div class="sc-sheet-header-wrapper" v-if="title || showBack || isSidebarMode || actions?.length || tabs?.length || $slots['header-right'] || $slots['header-title'] || $slots['header-bottom']">
-                        <div class="sc-sheet-header" v-if="title || showBack || isSidebarMode || actions?.length || $slots['header-right'] || $slots['header-title']">
-                            <div class="sc-header-left">
-                                <div v-if="showBack || isSidebarMode" class="sc-header-btn back-btn" @click="isSidebarMode ? close() : $emit('back')">
-                                    <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+                    <div class="sheet-header-area"
+                         :class="{ 'no-drag': isSidebarMode }"
+                         @touchstart="isSidebarMode ? undefined : onHandleTouchStart"
+                         @touchmove.prevent="isSidebarMode ? undefined : onHandleTouchMove"
+                         @touchend="isSidebarMode ? undefined : onHandleTouchEnd"
+                    >
+                        <div v-if="!isSidebarMode" class="sheet-handle-bar" @click.stop="toggle"></div>
+                        
+                        <div class="sc-sheet-header-wrapper" v-if="title || showBack || isSidebarMode || actions?.length || tabs?.length || $slots['header-right'] || $slots['header-title'] || $slots['header-bottom']">
+                            <div class="sc-sheet-header" v-if="title || showBack || isSidebarMode || actions?.length || $slots['header-right'] || $slots['header-title']">
+                                <div class="sc-header-left">
+                                    <div v-if="showBack || isSidebarMode" class="sc-header-btn back-btn" @click="isSidebarMode ? close() : $emit('back')">
+                                        <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+                                    </div>
+                                    <div class="sc-header-title" v-if="title">
+    {{ title }}
+    </div>
+                                    <slot name="header-title"></slot>
                                 </div>
-                                <div class="sc-header-title" v-if="title">
-{{ title }}
-</div>
-                                <slot name="header-title"></slot>
-                            </div>
-                            <div class="sc-header-right">
-                                <template v-if="actions && actions.length">
-                                    <template v-for="(action, idx) in actions" :key="idx">
-                                        <div class="sc-header-btn" :style="{ color: action.color }" @click.stop="action.onClick" :title="action.title || action.label" v-html="action.icon"></div>
+                                <div class="sc-header-right">
+                                    <template v-if="actions && actions.length">
+                                        <template v-for="(action, idx) in actions" :key="idx">
+                                            <div class="sc-header-btn" :style="{ color: action.color }" @click.stop="action.onClick" :title="action.title || action.label" v-html="action.icon"></div>
+                                        </template>
                                     </template>
-                                </template>
-                                <slot name="header-right"></slot>
+                                    <slot name="header-right"></slot>
+                                </div>
+                            </div>
+                            
+                            <div class="sc-sheet-tabs" v-if="tabs && tabs.length">
+                                <button
+                                    v-for="tab in tabs"
+                                    :key="tab.key || tab.id"
+                                    class="sc-sheet-tab"
+                                    :class="{ active: activeTab === (tab.key || tab.id) }"
+                                    @click="$emit('update:activeTab', tab.key || tab.id); $emit('tab-click', tab)"
+                                >
+                                    <svg v-if="tab.icon" viewBox="0 0 24 24"><path :d="tab.icon"/></svg>
+                                    <span v-if="tab.label">{{ tab.label }}</span>
+                                </button>
+                            </div>
+                            
+                            <div class="sc-sheet-header-bottom" v-if="$slots['header-bottom']">
+                                <slot name="header-bottom"></slot>
                             </div>
                         </div>
                         
-                        <div class="sc-sheet-tabs" v-if="tabs && tabs.length">
-                            <button
-                                v-for="tab in tabs"
-                                :key="tab.key || tab.id"
-                                class="sc-sheet-tab"
-                                :class="{ active: activeTab === (tab.key || tab.id) }"
-                                @click="$emit('update:activeTab', tab.key || tab.id); $emit('tab-click', tab)"
-                            >
-                                <svg v-if="tab.icon" viewBox="0 0 24 24"><path :d="tab.icon"/></svg>
-                                <span v-if="tab.label">{{ tab.label }}</span>
-                            </button>
-                        </div>
-                        
-                        <div class="sc-sheet-header-bottom" v-if="$slots['header-bottom']">
-                            <slot name="header-bottom"></slot>
-                        </div>
+                        <!-- Slot for a custom header (title, buttons) -->
+                        <slot name="header"></slot>
                     </div>
-                    
-                    <!-- Slot for a custom header (title, buttons) -->
-                    <slot name="header"></slot>
-                </div>
 
-                <div class="sheet-view-body">
-                    <slot></slot>
+                    <div class="sheet-view-body">
+                        <slot></slot>
+                    </div>
+                </div>
+                <div v-if="$slots.floating" class="sheet-view-floating-layer" :class="{ 'is-sidebar': isSidebarMode }">
+                    <slot name="floating"></slot>
                 </div>
             </div>
-            <div v-if="$slots.floating" class="sheet-view-floating-layer" :class="{ 'is-sidebar': isSidebarMode }">
-                <slot name="floating"></slot>
-            </div>
-        </div>
+        </Transition>
     </Teleport>
 </template>
 
@@ -241,14 +241,6 @@ onBeforeUnmount(() => {
     display: flex;
     justify-content: center;
     align-items: flex-end;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
-    will-change: opacity;
-}
-
-.sheet-view-overlay.visible {
-    opacity: 1;
     pointer-events: auto;
 }
 
@@ -271,12 +263,12 @@ onBeforeUnmount(() => {
     border-top-right-radius: 20px;
     display: flex;
     flex-direction: column;
-    transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1), height 0.3s cubic-bezier(0.2, 0.8, 0.2, 1), border-radius 0.3s ease, padding-bottom 0.25s cubic-bezier(0.2, 0.8, 0.2, 1), max-height 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
     overflow: hidden;
     position: relative;
     box-shadow: 0 -5px 20px rgba(0,0,0,0.2);
     will-change: transform, height;
     backface-visibility: hidden;
+    transform: translateY(0);
 }
 
 
@@ -294,7 +286,7 @@ onBeforeUnmount(() => {
 }
 
 .sheet-view-content.is-dragging {
-    transition: none;
+    transition: none !important;
 }
 
 
@@ -387,7 +379,7 @@ onBeforeUnmount(() => {
     border-radius: 0 !important;
     border: none !important;
     box-shadow: none !important;
-    transform: translateX(100%) !important;
+    transform: translateX(0) !important;
     background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8)) !important;
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
@@ -395,8 +387,27 @@ onBeforeUnmount(() => {
     padding-top: 8px !important;
 }
 
-.sheet-view-overlay.visible .sheet-view-content.is-sidebar {
-    transform: translateX(0) !important;
+/* Vue Transition Classes */
+.sheet-view-enter-active,
+.sheet-view-leave-active {
+    transition: opacity 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.sheet-view-enter-active .sheet-view-content,
+.sheet-view-leave-active .sheet-view-content {
+    transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1), height 0.3s cubic-bezier(0.2, 0.8, 0.2, 1), border-radius 0.3s ease, padding-bottom 0.25s cubic-bezier(0.2, 0.8, 0.2, 1), max-height 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.sheet-view-enter-from,
+.sheet-view-leave-to {
+    opacity: 0;
+}
+.sheet-view-enter-from .sheet-view-content:not(.is-sidebar),
+.sheet-view-leave-to .sheet-view-content:not(.is-sidebar) {
+    transform: translateY(100%);
+}
+.sheet-view-enter-from .sheet-view-content.is-sidebar,
+.sheet-view-leave-to .sheet-view-content.is-sidebar {
+    transform: translateX(100%) !important;
 }
 
 
