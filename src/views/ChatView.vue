@@ -602,7 +602,11 @@ async function setupHeader(char = activeChatChar) {
                 onActionsClick: () => openSessionsSheet(char),
                 onBackClick: () => {
                     closeChat();
-                    if (currentOnBack) currentOnBack();
+                    if (typeof window !== 'undefined' && window.innerWidth >= 768) {
+                        publishAppEvent(APP_EVENTS.nav.navigateTo, 'view-characters');
+                    } else if (currentOnBack) {
+                        currentOnBack();
+                    }
                 }
             }
         }
@@ -1202,6 +1206,7 @@ defineExpose({
     openAuthorsNoteSheet: () => presetView.value?.openAuthorsNoteSheet(),
     openSummarySheet: () => presetView.value?.openSummarySheet(),
     openContextSheet: () => openContextSheet(),
+    openRequestPreviewSheet: () => chatInputRef.value?.openRequestPreview(),
 });
 
 const onGenerationEnded = (e) => {

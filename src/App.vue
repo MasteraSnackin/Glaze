@@ -439,6 +439,7 @@ function closeEditorWrapper() {
           @magic-regex="chatViewRef?.openRegexSheet()"
           @magic-image-gen="chatViewRef?.openImageGenSheet()"
           @magic-glossary="glossary.isGlossaryWindowOpen.value = true"
+          @request-preview="chatViewRef?.openRequestPreviewSheet()"
       />
 
       <!-- Floating Action Button: Positioned relative to grid on Desktop -->
@@ -458,8 +459,9 @@ function closeEditorWrapper() {
         <BottomNavigation v-model:current-view="nav.currentView.value" />
     </div>
 
-    <!-- Global Bottom Sheet -->
+    <!-- Global Bottom Sheet (disabled on desktop chat view where right sidebar takes over) -->
     <BottomSheet
+        v-if="!nav.isDesktop.value || nav.currentView.value !== 'view-chat'"
         :visible="bottomSheetState.visible"
         :locked="bottomSheetState.locked"
         :title="bottomSheetState.title"

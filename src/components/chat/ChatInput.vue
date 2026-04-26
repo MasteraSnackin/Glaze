@@ -165,7 +165,8 @@ defineExpose({
     },
     openMagicDrawer: () => {
         isMagicMenuVisible.value = true;
-    }
+    },
+    openRequestPreview
 });
 </script>
 
