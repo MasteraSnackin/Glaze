@@ -668,7 +668,7 @@ async function openChat(char, onBack, force = false) {
     await migrateStatsIfNeeded();
 
     // Hide tabbar immediately to prevent flickering
-    const tabbar = document.querySelector('.tabbar');
+    const tabbar = document.querySelector('.bottom-nav');
     if (tabbar) tabbar.style.display = 'none';
 
     if (onBack) currentOnBack = onBack;

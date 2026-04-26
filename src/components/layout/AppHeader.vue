@@ -107,7 +107,7 @@ function clearHeader(nextMode = 'default', keepSearchVisibility = false) {
 }
 
 function toggleTabbar(show) {
-    const tabbar = document.querySelector('.tabbar');
+    const tabbar = document.querySelector('.bottom-nav');
     if (tabbar) tabbar.style.display = show ? 'flex' : 'none';
 }
 

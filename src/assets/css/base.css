@@ -251,7 +251,7 @@ body.app-loaded {
     will-change: opacity, transform;
 }
 
-.tabbar {
+.bottom-nav {
     padding-bottom: 7px !important;
     transition: padding-bottom 0.3s ease, background-color 0.3s ease;
     position: relative;
