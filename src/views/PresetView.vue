@@ -595,7 +595,6 @@ Add Block
         type="file"
         id="preset-file-input"
         style="display: none" 
-        accept=".json" 
         @change="onFileSelected"
     >
     <input 
