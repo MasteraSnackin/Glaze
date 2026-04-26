@@ -114,9 +114,9 @@ export function rgbToHex(rgb) {
     let r = (+rgbVals[0]).toString(16),
         g = (+rgbVals[1]).toString(16),
         b = (+rgbVals[2]).toString(16);
-        if (r.length === 1) r = "0" + r;
-        if (g.length === 1) g = "0" + g;
-        if (b.length === 1) b = "0" + b;
+    if (r.length === 1) r = "0" + r;
+    if (g.length === 1) g = "0" + g;
+    if (b.length === 1) b = "0" + b;
     return "#" + r + g + b;
 }
 
@@ -429,6 +429,9 @@ export function initBackButton() {
     };
 
     App.addListener('backButton', handleBackButton);
+    // Handle browser back gesture/button for PWA/Web
+    window.addEventListener('popstate', handleBackButton);
+
     // For console testing: window.simulateBackButton()
     window.simulateBackButton = handleBackButton;
 
