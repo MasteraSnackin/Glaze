@@ -17,7 +17,7 @@ const isFetchingModels = ref(false);
 const fetchError = ref('');
 
 // Computed properties
-const naisteraModelSupportsReferences = computed(() => settings.value.naisteraModel !== 'novelai');
+const naisteraModelSupportsReferences = computed(() => settings.value.naisteraModel !== 'novelai' && settings.value.naisteraModel !== 'grok-pro');
 
 // Connection status
 const apiStatus = ref('idle'); // idle | connecting | connected | failed
@@ -167,7 +167,7 @@ const openResolutionSelector = () => {
 };
 
 const openNaisteraModelSelector = () => {
-    const options = ['grok', 'nano banana', 'novelai'];
+    const options = ['grok', 'grok-pro', 'nano banana', 'novelai'];
     showBottomSheet({
         title: t('imggen_model') || 'Model',
         items: options.map(v => ({
@@ -388,6 +388,12 @@ defineExpose({ open });
                 </div>
 
                 <!-- Naistera references (not supported by NovelAI model) -->
+                <div v-if="showNaisteraOptions && !naisteraModelSupportsReferences" class="hint-block" style="margin-top: -8px; margin-bottom: 24px; border-color: rgba(255, 59, 48, 0.2); background: rgba(255, 59, 48, 0.05);">
+                    <p class="hint-text" style="color: #FF3B30; opacity: 1; font-weight: 500; text-align: center; margin: 0;">
+                        {{ t('imggen_no_refs_hint') || 'Модель не поддерживает референсы' }}
+                    </p>
+                </div>
+
                 <template v-if="showNaisteraOptions && naisteraModelSupportsReferences">
                     <div class="menu-group">
                         <div class="section-header">
@@ -462,7 +468,7 @@ defineExpose({ open });
                 </template>
 
                 <!-- Image Context -->
-                <div class="menu-group">
+                <div v-if="!showNaisteraOptions || naisteraModelSupportsReferences" class="menu-group">
                     <div class="section-header">
 {{ t('imggen_image_context') || 'Image Context' }}
 </div>

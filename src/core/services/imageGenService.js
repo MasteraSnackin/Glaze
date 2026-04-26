@@ -185,6 +185,7 @@ const NAISTERA_DEFAULT_ENDPOINT = 'https://naistera.org';
 function normalizeNaisteraModel(model) {
     const raw = String(model || '').trim().toLowerCase();
     if (raw.startsWith('nano')) return 'nano banana';
+    if (raw === 'grok-pro') return 'grok-pro';
     if (raw === 'grok') return 'grok';
     if (raw === 'novelai') return 'novelai';
     return 'grok';
@@ -364,8 +365,8 @@ async function generateImageNaistera(prompt, options, settings) {
         aspect_ratio: aspectRatio,
         model,
     };
-    // NovelAI model doesn't support reference images (per Naistera API behavior)
-    const supportsReferences = model !== 'novelai';
+    // NovelAI and Grok-Pro models don't support reference images (per Naistera API behavior)
+    const supportsReferences = model !== 'novelai' && model !== 'grok-pro';
     if (supportsReferences && referenceImages.length > 0) {
         body.reference_images = referenceImages.slice(0, MAX_NAISTERA_REFS);
     }

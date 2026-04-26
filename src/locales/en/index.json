@@ -739,6 +739,7 @@
     "imggen_naistera_hint": "Learn about Naistera",
     "imggen_naistera_hint_here": "here",
     "imggen_tag_hint": "AI must include tags to trigger generation:",
+    "imggen_no_refs_hint": "Model does not support references",
     "imggen_disabled": "Image generation disabled",
     "imggen_enable_btn": "Enable and generate",
     "imggen_status_on": "On",

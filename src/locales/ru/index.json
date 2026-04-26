@@ -745,6 +745,7 @@
     "imggen_naistera_hint": "Узнать о Naistera",
     "imggen_naistera_hint_here": "здесь",
     "imggen_tag_hint": "ИИ должен вставлять теги для запуска генерации:",
+    "imggen_no_refs_hint": "Модель не поддерживает референсы",
     "imggen_disabled": "Генерация картинок выключена",
     "imggen_enable_btn": "Включить и сгенерировать",
     "imggen_status_on": "Вкл",
