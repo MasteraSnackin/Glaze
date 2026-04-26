@@ -2,8 +2,13 @@ import JSZip from 'jszip';
 import { parseCharacterCard } from '@/utils/characterIO.js';
 import { importSillyTavernChat } from '@/core/services/chatImporter.js';
 import { convertSTPreset } from '@/core/services/presetImportService.js';
-import { importSTLorebook, initLorebookState, saveLorebooks } from '@/core/states/lorebookState.js';
+import { importSTLorebook, initLorebookState, saveLorebooks, lorebookState } from '@/core/states/lorebookState.js';
 import { db } from '@/utils/db.js';
+
+// Yield to the browser's event loop to avoid freezing the UI during long loops
+function yieldToMain() {
+    return new Promise(resolve => setTimeout(resolve, 0));
+}
 
 /**
  * Imports a SillyTavern backup ZIP file.
@@ -25,21 +30,18 @@ export async function importSTBackupFromZip(zipFile, onProgress) {
         const tx = database.transaction(['characters', 'personas', 'keyvalue'], 'readwrite');
         tx.objectStore('characters').clear();
         tx.objectStore('personas').clear();
-        // Clear all keys from keyvalue (lorebooks, api presets, chats)
         tx.objectStore('keyvalue').clear();
 
         tx.oncomplete = res;
         tx.onerror = () => rej(tx.error);
     });
     database.close();
-    // Clear presets and regexes from localStorage
     localStorage.removeItem('silly_cradle_presets');
     localStorage.removeItem('regex_scripts');
 
-    // charFolderName (no extension) → characterId, populated during character import
     const charNameToId = {};
 
-    // ── Phase 1: Characters ─────────────────────────────────────────────────
+    // ── Phase 1: Characters (yield every 5 items) ───────────────────────────
     progress('characters');
     const charPaths = Object.keys(zip.files).filter(p => {
         if (!p.startsWith('characters/') || zip.files[p].dir) return false;
@@ -47,7 +49,9 @@ export async function importSTBackupFromZip(zipFile, onProgress) {
         return parts.length === 2 && parts[1].toLowerCase().endsWith('.png');
     });
 
-    for (const path of charPaths) {
+    for (let i = 0; i < charPaths.length; i++) {
+        if (i % 5 === 0) await yieldToMain();
+        const path = charPaths[i];
         try {
             const buf = await zip.files[path].async('arraybuffer');
             const filename = path.split('/').pop();
@@ -64,14 +68,16 @@ export async function importSTBackupFromZip(zipFile, onProgress) {
         }
     }
 
-    // ── Phase 2: Lorebooks ───────────────────────────────────────────────────
+    // ── Phase 2: Lorebooks (yield every 3 items, save only at end) ──────────
     progress('lorebooks');
     await initLorebookState();
     const lorebookPaths = Object.keys(zip.files).filter(p =>
         p.startsWith('worlds/') && !zip.files[p].dir && p.toLowerCase().endsWith('.json')
     );
 
-    for (const path of lorebookPaths) {
+    for (let i = 0; i < lorebookPaths.length; i++) {
+        if (i % 3 === 0) await yieldToMain();
+        const path = lorebookPaths[i];
         try {
             const text = await zip.files[path].async('string');
             const json = JSON.parse(text);
@@ -84,7 +90,7 @@ export async function importSTBackupFromZip(zipFile, onProgress) {
     }
     if (result.lorebooks > 0) await saveLorebooks();
 
-    // ── Phase 3: Presets ─────────────────────────────────────────────────────
+    // ── Phase 3: Presets (yield every 10 items) ─────────────────────────────
     progress('presets');
     const presetPaths = Object.keys(zip.files).filter(p =>
         p.startsWith('OpenAI Settings/') && !zip.files[p].dir && p.toLowerCase().endsWith('.json')
@@ -94,7 +100,9 @@ export async function importSTBackupFromZip(zipFile, onProgress) {
         const existingPresetsRaw = localStorage.getItem('silly_cradle_presets');
         const existingPresets = existingPresetsRaw ? JSON.parse(existingPresetsRaw) : {};
 
-        for (const path of presetPaths) {
+        for (let i = 0; i < presetPaths.length; i++) {
+            if (i % 10 === 0) await yieldToMain();
+            const path = presetPaths[i];
             try {
                 const text = await zip.files[path].async('string');
                 const json = JSON.parse(text);
@@ -111,7 +119,7 @@ export async function importSTBackupFromZip(zipFile, onProgress) {
         localStorage.setItem('silly_cradle_presets', JSON.stringify(existingPresets));
     }
 
-    // ── Phase 4: Chats ───────────────────────────────────────────────────────
+    // ── Phase 4: Chats (prefetch chat data once, yield every item) ─────────
     progress('chats');
     const chatPaths = Object.keys(zip.files).filter(p => {
         if (!p.startsWith('chats/') || zip.files[p].dir) return false;
@@ -119,10 +127,15 @@ export async function importSTBackupFromZip(zipFile, onProgress) {
         return ext.endsWith('.jsonl') || ext.endsWith('.json');
     });
 
-    for (const path of chatPaths) {
+    // Pre-fetch all chat data ONCE to avoid per-chat cursor scans
+    const chatDataCache = await db.getChats();
+
+    for (let i = 0; i < chatPaths.length; i++) {
+        await yieldToMain(); // yield every chat — these are heavy
+        const path = chatPaths[i];
         try {
             const parts = path.split('/');
-            if (parts.length < 3) continue; // must be chats/<folder>/<file>
+            if (parts.length < 3) continue;
             const charFolderName = parts[1];
             const characterId = charNameToId[charFolderName];
             if (!characterId) {
@@ -131,17 +144,16 @@ export async function importSTBackupFromZip(zipFile, onProgress) {
             }
             const text = await zip.files[path].async('string');
             const blob = new Blob([text], { type: 'text/plain' });
-            await importSillyTavernChat(blob, characterId, null);
+            await importSillyTavernChat(blob, characterId, null, { chatDataCache });
             result.chats++;
         } catch (err) {
             result.errors.push(`Chat ${path}: ${err.message}`);
         }
     }
 
-    // ── Phase 5: Personas ────────────────────────────────────────────────────
+    // ── Phase 5: Personas (yield every 3 items) ─────────────────────────────
     progress('personas');
 
-    // settings.json might be in the root or inside a folder if the user zipped the entire ST folder.
     const settingsPath = Object.keys(zip.files).find(p => p.toLowerCase().endsWith('settings.json') && !zip.files[p].dir);
 
     if (settingsPath) {
@@ -149,17 +161,18 @@ export async function importSTBackupFromZip(zipFile, onProgress) {
             const text = await zip.files[settingsPath].async('string');
             const settings = JSON.parse(text);
 
-            // ST stores personas under power_user, not at root level
             const pu = settings.power_user || settings;
             const personasMap = pu.personas || settings.personas || {};
             const descriptionsMap = pu.persona_descriptions || settings.persona_descriptions || {};
 
-            for (const [avatarFilename, personaName] of Object.entries(personasMap)) {
+            const entries = Object.entries(personasMap);
+            for (let i = 0; i < entries.length; i++) {
+                if (i % 3 === 0) await yieldToMain();
+                const [avatarFilename, personaName] = entries[i];
                 if (!avatarFilename) continue;
 
                 const descData = descriptionsMap[avatarFilename] || {};
 
-                // Try to load the avatar image from User Avatars/ folder
                 let avatarData = null;
                 const avatarPath = Object.keys(zip.files).find(p =>
                     p.toLowerCase().endsWith(avatarFilename.toLowerCase()) &&

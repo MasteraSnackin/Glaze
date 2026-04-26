@@ -19,13 +19,13 @@ function normalizeImportedMessage(msg) {
     return msg;
 }
 
-async function importGlazeChatPackage(json, characterId, userPersona) {
+async function importGlazeChatPackage(json, characterId, userPersona, opts) {
     if (!json || json._format !== 'glaze_chat') {
         throw new Error('Invalid Glaze chat package');
     }
 
     const sessionId = await db.createSession(characterId);
-    const chats = await db.getChats();
+    const chats = opts?.chatDataCache ?? await db.getChats();
     const chatData = chats[characterId];
     if (!chatData.sessions) chatData.sessions = {};
 
@@ -99,13 +99,13 @@ async function importGlazeChatPackage(json, characterId, userPersona) {
  * @param {Object} userPersona - The persona object to use for user messages.
  * @returns {Promise<Object>} - Result with charName and sessionId.
  */
-export async function importSillyTavernChat(file, characterId, userPersona) {
+export async function importSillyTavernChat(file, characterId, userPersona, opts) {
     const fileName = String(file?.name || '').toLowerCase();
 
     if (fileName.endsWith('.glzchat.json')) {
         const text = await readFile(file);
         const json = JSON.parse(text);
-        return importGlazeChatPackage(json, characterId, userPersona);
+        return importGlazeChatPackage(json, characterId, userPersona, opts);
     }
 
     if (!fileName.endsWith('.json') && !fileName.endsWith('.jsonl')) {
@@ -166,16 +166,16 @@ export async function importSillyTavernChat(file, characterId, userPersona) {
                 if (obj.chat_metadata) {
                     metadata = obj.chat_metadata;
                 } else {
-                const scMsg = convertMessage(obj, userPersona);
-                // Skip completely empty messages
-                if (!scMsg.text && (!scMsg.swipes || scMsg.swipes.every(s => !s))) {
-                    return;
-                }
-                if (scMsg.timestamp <= lastTimestamp) {
-                    scMsg.timestamp = lastTimestamp + 1;
-                }
-                lastTimestamp = scMsg.timestamp;
-                messages.push(scMsg);
+                    const scMsg = convertMessage(obj, userPersona);
+                    // Skip completely empty messages
+                    if (!scMsg.text && (!scMsg.swipes || scMsg.swipes.every(s => !s))) {
+                        return;
+                    }
+                    if (scMsg.timestamp <= lastTimestamp) {
+                        scMsg.timestamp = lastTimestamp + 1;
+                    }
+                    lastTimestamp = scMsg.timestamp;
+                    messages.push(scMsg);
                 }
             } catch (e) {
                 console.warn(`Skipping invalid JSON line at index ${lineIndex}`, e);
@@ -226,7 +226,7 @@ export async function importSillyTavernChat(file, characterId, userPersona) {
     // Create new session in DB
     // This adapts to db.js structure: { currentId: N, sessions: { ... } }
     const sessionId = await db.createSession(characterId);
-    const chats = await db.getChats();
+    const chats = opts?.chatDataCache ?? await db.getChats();
     const chatData = chats[characterId];
 
     // Save messages to the new session
@@ -526,7 +526,7 @@ function convertMessage(stMsg, userPersona) {
         timestamp: timestamp,
         id: stMsg.extra?.glazeMessageId || `legacy_${timestamp}_${Math.random().toString(36).slice(2, 6)}`,
         // Ensure swipes are transferred, filtering out null/undefined entries
-        swipes: Array.isArray(stMsg.swipes) 
+        swipes: Array.isArray(stMsg.swipes)
             ? stMsg.swipes.filter(s => s !== null && s !== undefined).map(s => String(s))
             : [String(stMsg.mes || "")],
         swipeId: typeof stMsg.swipe_id === 'number' ? stMsg.swipe_id : 0,
