@@ -470,7 +470,6 @@ async function pushManifestV2(adapter, key, onProgress) {
 
             const shouldUpload = !cloudEntry
                 || localEntry.deleted !== cloudEntry.deleted
-                || localEntry.updatedAt > cloudEntry.updatedAt
                 || localEntry.hash !== cloudEntry.hash;
 
             if (!shouldUpload) {
@@ -539,7 +538,7 @@ async function pullManifestV2(adapter, key, onProgress, onConflict) {
                 return;
             }
 
-            const cloudIsNewer = !localEntry || cloudEntry.updatedAt > localEntry.updatedAt || cloudEntry.hash !== localEntry.hash || cloudEntry.deleted !== localEntry.deleted;
+            const cloudIsNewer = !localEntry || cloudEntry.hash !== localEntry.hash || cloudEntry.deleted !== localEntry.deleted;
             if (!cloudIsNewer) {
                 if (onProgress) onProgress(phase, i + 1, allEntries.length);
                 return;

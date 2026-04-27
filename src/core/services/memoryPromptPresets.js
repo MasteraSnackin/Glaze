@@ -3,32 +3,26 @@ export const builtInMemoryPrompts = [
         key: 'detailed_beats',
         label: 'Detailed beats (recommended)',
         prompt: [
-            'Analyze the following roleplay segment and create a comprehensive memory entry.',
-            'Preserve the original language of the source segment. Do not translate it.',
-            'Exclude all [OOC] (out-of-character) conversation — it is not useful for memory.',
+            'Analyze the following roleplay segment and create a structured memory entry.',
+            'Preserve the original language. Exclude casual [OOC] conversation, BUT if OOC messages contain story rules, formatting instructions, backstory clarifications, or scene-setting directives, reflect those instructions in the memory entry under the relevant sections.',
             '',
-            'Create a detailed beat-by-beat summary in narrative prose. Include:',
-            '- Timeline: Date/time context if mentioned',
-            '- Story Beats: All important plot events, decisions, and developments in order',
-            '- Key Interactions: Significant character exchanges, dialogue highlights, and relationship developments',
-            '- Notable Details: Important objects, settings, revelations, memorable quotes',
-            '- Outcome: Results, resolutions, emotional states, and consequences for future continuity',
+            'Use this markdown structure (skip sections if not applicable):',
+            'Timeline: Always label as "Day N" (Day 1, Day 2, Day 3, etc.) — increment the day counter each time a new in-story day begins. Write clock times HH:MM; If the scene spans multiple days, write "Day N–M HH:MM-HH:MM".',
+            'Story Beats: Important plot events and developments',
+            'Key Interactions: Significant character exchanges and relationship shifts',
+            'Notable Details: Important objects, settings, revelations, quotes',
+            'OOC Rules & Directives: Any player-established rules, formatting requirements, backstory additions, or scene-setting instructions given through OOC',
+            'Outcome: Results, emotional states, consequences',
             '',
-            'Capture all nuance without repeating verbatim. Use concrete nouns (e.g., "rice cooker" not "appliance").',
-            'Write in past tense, third person. Focus on cause → intention → reaction → consequence.',
+            'Write in past tense, third person. Be comprehensive but avoid verbatim repetition.',
             '',
-            'For keywords: generate 15-30 concrete, scene-specific retrieval tags:',
-            '- Use proper nouns (locations: "Chinatown", "Ritz-Carlton bar")',
-            '- Use specific objects ("CPAP machine", "chocolate chip cookies")',
-            '- Use distinctive actions ("cookie baking", "piano apology")',
-            '- Use unique phrases from the scene ("pack for forever", specific nicknames)',
-            '- DO NOT use abstract themes ("intimacy", "trust", "vulnerability")',
-            '- DO NOT use character names ({{char}}, {{user}})',
-            '- DO NOT combine multiple concepts into one keyword',
+            'For keywords: generate 15-25 concrete scene-specific tags:',
+            '- Proper nouns, locations, specific objects, unique actions',
+            '- NOT abstract concepts, emotions, or character names',
             '',
             'Return plain text in this exact format:',
-            'Memory: <detailed beat-by-beat summary following the structure above>',
-            'Keys: <15-30 comma-separated concrete keywords as specified>',
+            'Memory: <structured markdown summary following the template above>',
+            'Keys: <15-25 comma-separated concrete keywords>',
             '',
             '{{history}}'
         ].join('\n')
@@ -146,14 +140,14 @@ export function getNormalizedMemoryGenerationState(settings = {}, overrides = {}
         promptPreset: getMemoryPromptOptions(settings).some(p => p.key === settings.promptPreset) ? settings.promptPreset : 'detailed_beats',
         autoCreateInterval: Number.isFinite(Number(settings.autoCreateInterval)) && Number(settings.autoCreateInterval) > 0
             ? Number(settings.autoCreateInterval)
-            : 12,
+            : 15,
         batchSize: Number.isFinite(Number(settings.batchSize)) && Number(settings.batchSize) > 0
             ? Number(settings.batchSize)
-            : 1,
+            : 3,
         useDelayedAutomation: settings.useDelayedAutomation !== false,
         maxInjectedEntries: Number.isFinite(Number(settings.maxInjectedEntries)) && Number(settings.maxInjectedEntries) > 0
             ? Number(settings.maxInjectedEntries)
-            : 3,
+            : 7,
         injectionTarget: settings.injectionTarget === 'summary_macro' ? 'summary_macro' : 'summary_block',
         ...overrides
     };

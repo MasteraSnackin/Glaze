@@ -61,6 +61,61 @@ The current roadmap is:
 - Phase 16 status: `not done` (remaining high-ROI cleanup — 16a: deduplicate memory normalization in db.js/chatImporter.js/memoryBooksService.js; 16b: split themeState.js 1224 lines into state/persistence/renderer/migration; 16c: update Phase 10 stale cancelable-event text)
 - Current slice testing: `tested` (`npm run build` + `npm run lint`)
 
+### Bugs on fix/memorybook-null-ref
+
+11. **Fix: abort not cleaning generationState or persistedGeneration flags**
+    - Status: `done`
+    - Files: `src/composables/chat/useGenerationAbort.js`, `src/views/DialogList.vue`
+    - Issue: `abortActiveChatGeneration()` and `abortImpersonation()` set `isGenerating = false` and aborted the controller, but never called `clearGenerationState(charId)` or `clearPersistedGeneration(charId, sessionId)`. The `gz_generating_` localStorage flag persisted, causing `DialogList.vue` to show the chat as still "generating" after Stop. The stale `generationStates[charId]` entry could also block new generations until the async error handler eventually ran.
+    - Fix: Added `clearGenerationState(charId)` and `clearPersistedGeneration(charId, state.sessionId)` calls in both `abortActiveChatGeneration` and `abortImpersonation`. Threaded `clearGenerationState` into the composable args (was already passed by ChatView but ignored).
+
+12. **Fix: error messages deleted on save — lost after page reload**
+    - Status: `done`
+    - Files: `src/composables/chat/useSessionPersistence.js`
+    - Issue: `asyncSaveCurrentSessionState()` self-censored error messages: if a message had `isError: true` and only 1 swipe, the entire message was spliced from the persisted session data. After a page reload, the error response (and its error text) was gone — looked like the generation never happened.
+    - Fix: Removed the `else { msgs.splice(i, 1) }` branch. Error messages with single swipes are now preserved as-is (`isError: true`) in persisted state. Multi-swipe error revert behavior (undo failed swipe, restore previous) is kept.
+
+13. **Fix: crash buffer overwriting newer DB data**
+    - Status: `done`
+    - Files: `src/views/ChatView.vue`
+    - Issue: Crash buffer restoration used `crashBuffer.messages.length >= msgs.length`, which could overwrite the DB with an equal-length but stale crash buffer snapshot (containing `isTyping` states, unsaved edits). If `asyncSaveCurrentSessionState` failed on page hide, the crash buffer could be the only surviving copy but with outdated data.
+    - Fix: Changed to strict `>` — crash buffer only wins if it has strictly more messages than the DB (i.e., it captured a message that wasn't yet flushed to IndexedDB).
+
+14. **Fix: phantom typing cleanup deleting partial content**
+    - Status: `done`
+    - Files: `src/views/ChatView.vue`
+    - Issue: On reload after a crash during streaming, the "phantom typing" cleanup in `openChat()` detected `isTyping: true` with no active generation and either reverted to previous swipe (multi-swipe) or deleted the entire message (`msgs.pop()`) for single-swipe cases. Any partial response text streamed before the crash was lost.
+    - Fix: Single-swipe phantom messages are now preserved — only `isTyping` is cleared. The partial content stays in the chat for the user to review and regenerate.
+
+15. **Fix: queueDbWrite swallowing IndexedDB errors silently**
+    - Status: `done`
+    - Files: `src/utils/db.js`
+    - Issue: `queueDbWrite(fn)` caught all errors with `.catch(err => console.error(...))` and returned the resolved queue promise. Callers `await db.saveChat()` saw success even when the underlying IndexedDB `put` failed — data loss was completely invisible.
+    - Fix: Split the promise chain — the error is caught to keep the queue operational, but the returned promise (`resultPromise`) rejects for the specific caller. Callers now see write failures.
+
+16. **Fix: cloud sync re-uploading unchanged entities due to timestamp comparison**
+    - Status: `done`
+    - Files: `src/core/services/syncEngine.js`
+    - Issue: `shouldUpload` and `cloudIsNewer` checks used `updatedAt` timestamp comparison alongside hash comparison. If an entity was synced successfully, on the next sync `localEntry.updatedAt` would be newer than the cloud's `updatedAt` even though `hash` was identical. This forced unnecessary re-upload of unchanged data.
+    - Fix: Removed `|| localEntry.updatedAt > cloudEntry.updatedAt` from `shouldUpload` and `|| cloudEntry.updatedAt > localEntry.updatedAt` from `cloudIsNewer`. Hash comparison alone now determines whether content changed. Conflict detection (`needsConflict`) still uses `updatedAt` — unaffected.
+
+17. **Memory generation defaults updated**
+    - Status: `done`
+    - Files: `src/core/services/memorySchema.js`, `src/core/services/memoryPromptPresets.js`
+    - Changes:
+      - `detailed_beats` prompt replaced with markdown-structured version (Timeline, Story Beats, Key Interactions, Notable Details, OOC Rules & Directives, Outcome; 15-25 keywords)
+      - Default interval: 12 → 15 messages
+      - Default batchSize: 1 → 3
+      - Default maxInjectedEntries: 3 → 7
+      - Dead duplicate `builtInMemoryPrompts`/`getMemoryPromptOptions`/`resolveMemoryPrompt`/`getMemoryPromptLabel` removed from `memoryBooksService.js` (was never imported)
+
+18. **Lorebook keyword/vector split slider for Combined mode**
+    - Status: `done`
+    - Files: `src/core/states/lorebookState.js`, `src/components/sheets/LorebookSheet.vue`, `src/assets/css/settings.css`
+    - Added `keywordVectorSplit: 50` to `lorebookState.globalSettings`
+    - Added range slider (0–100%) in LorebookSheet.vue, visible only when `searchType === 'both'`
+    - Added `.range-labels` CSS for split percentage display
+
 ### Bugs Found & Fixed on This Branch
 
 1. **Fix: missing `await` on `completeStructuredResponse` in `completeJsonResponse`**

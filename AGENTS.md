@@ -68,10 +68,12 @@ git checkout -b feat/memorybook-ui feat/multi-vector
 | Branch | Purpose | PR |
 |--------|---------|----|
 | `origin/dev` | Local mirror of upstream integration branch | No PR |
-| `feat/refactor-phase1-event-hub` | Phase 1–13l structural refactor (event hub, request ownership, composable extraction, transport split, use-case re-architecture, App.vue/PresetView/lorebookState/ChatMessage/ChatInput/LorebookSheet/ApiView/CharacterList/ThemeSettingsView decomposition) | Merged into `feat/chat-persistence-and-reasoning-fixes` |
-| `feat/chat-persistence-and-reasoning-fixes` | Abort signal propagation, stale generation guards, crash recovery buffer, abortable XHR, swipe metadata cleanup | Not yet |
+| `fix/memorybook-null-ref` | Memorybook null-ref fix, abort cleanup, error persistence, crash buffer, cloud sync dedup, lorebook split slider, prompt/defaults update | Not yet |
 
 ### Historical (merged & deleted)
+- `feat/refactor-phase1-event-hub` → merged into `feat/chat-persistence-and-reasoning-fixes`, then upstream/dev
+- `feat/chat-persistence-and-reasoning-fixes` → merged via PR #72+
+- `fix/import-and-preset-tap` → merged via PR #73
 - `feat/cloud-sync` → merged via PR #20
 - `feat/vectorization-v2` → merged via PR #24  
 - `feat/memorybook` → merged via PR #27

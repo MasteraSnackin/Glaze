@@ -70,8 +70,11 @@ function normalizeChatData(chatData) {
 let _dbWriteQueue = Promise.resolve();
 
 export function queueDbWrite(fn) {
-    _dbWriteQueue = _dbWriteQueue.then(fn).catch(err => console.error('[DB] Write queue error:', err));
-    return _dbWriteQueue;
+    const resultPromise = _dbWriteQueue.then(fn);
+    _dbWriteQueue = resultPromise.catch(err => {
+        console.error('[DB] Write queue error:', err);
+    });
+    return resultPromise;
 }
 
 export const db = {

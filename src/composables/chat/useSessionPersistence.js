@@ -79,8 +79,6 @@ export function useSessionPersistence({
                                     msg.reasoning = null;
                                     msg.genTime = null;
                                 }
-                            } else {
-                                msgs.splice(i, 1);
                             }
                         }
                     }

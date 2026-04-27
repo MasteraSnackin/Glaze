@@ -1,5 +1,8 @@
+import { clearPersistedGeneration } from '@/core/states/generationState.js';
+
 export function useGenerationAbort({
     getGenerationState,
+    clearGenerationState,
     isGenerating,
     isImpersonating,
     activeChatChar
@@ -37,6 +40,11 @@ export function useGenerationAbort({
             isGenerating.value = false;
         }
 
+        if (state.sessionId) {
+            clearPersistedGeneration(charId, state.sessionId);
+        }
+        clearGenerationState(charId);
+
         return true;
     }
 
@@ -50,6 +58,10 @@ export function useGenerationAbort({
         }
         isGenerating.value = false;
         if (isImpersonating) isImpersonating.value = false;
+        if (state?.sessionId) {
+            clearPersistedGeneration(charId, state.sessionId);
+        }
+        clearGenerationState(charId);
         return true;
     }
 
