@@ -128,8 +128,11 @@ const selectChar = async (id) => {
     await calculateCharStats(id);
 };
 
-const close = () => {
+const onSheetClose = () => {
     if (updateInterval) clearInterval(updateInterval);
+};
+
+const close = () => {
     sheet.value?.close();
 };
 
@@ -153,7 +156,7 @@ const setTab = (tab) => {
 </script>
 
 <template>
-    <SheetView ref="sheet" :z-index="1005" :title="t('action_chat_stats') || 'Statistics'" @close="close">
+    <SheetView ref="sheet" :z-index="1005" :title="t('action_chat_stats') || 'Statistics'" @close="onSheetClose">
         <template #header-bottom>
             <div class="tabs-row stats-tabs-row">
                 <div class="top-tabs-container tabs-3">
