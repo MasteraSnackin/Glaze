@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed } from 'vue';
 import SheetView from '@/components/ui/SheetView.vue';
+import RollingNumber from '@/components/ui/RollingNumber.vue';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 
@@ -172,18 +173,27 @@ defineExpose({ open, close });
     <div v-else class="tokenizer-content">
       <template v-if="!showSettings">
         <!-- Summary KPIs -->
-        <div class="tokenizer-summary">
-          <div class="tokenizer-kpi">
-            <strong>{{ used }}</strong>
-            <span>used / {{ contextSize }}</span>
+        <div class="tokenizer-hero">
+          <div class="hero-main">
+            <span class="hero-value">
+              <RollingNumber :value="used.toLocaleString()" />
+            </span>
+            <span class="hero-label">used / {{ contextSize.toLocaleString() }}</span>
           </div>
-          <div class="tokenizer-kpi">
-            <strong>{{ remaining }}</strong>
-            <span>remaining</span>
-          </div>
-          <div class="tokenizer-kpi">
-            <strong>{{ historyUsagePercent }}%</strong>
-            <span>history fill</span>
+          <div class="hero-row">
+            <div class="hero-mini">
+              <span class="hero-mini-value">
+                <RollingNumber :value="remaining.toLocaleString()" />
+              </span>
+              <span class="hero-mini-label">remaining</span>
+            </div>
+            <div class="hero-divider"></div>
+            <div class="hero-mini">
+              <span class="hero-mini-value">
+                <RollingNumber :value="historyUsagePercent.toString()" />%
+              </span>
+              <span class="hero-mini-label">history fill</span>
+            </div>
           </div>
         </div>
 
@@ -313,34 +323,78 @@ Save
   gap: 20px;
 }
 
-/* Summary KPIs */
-.tokenizer-summary {
+/* Summary KPIs (Hero card style) */
+.tokenizer-hero {
+  background: linear-gradient(135deg, var(--vk-blue, #7996ce), color-mix(in srgb, var(--vk-blue, #7996ce), #000 20%));
+  border-radius: 16px;
+  padding: 24px 20px 20px;
+  color: #fff;
   display: flex;
+  flex-direction: column;
+  align-items: center;
   gap: 16px;
-  justify-content: space-around;
-  padding: 16px;
-  background: rgba(var(--ui-bg-rgb), 0.5);
-  border-radius: 12px;
 }
 
-.tokenizer-kpi {
+.hero-main {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 4px;
 }
 
-.tokenizer-kpi strong {
-  font-size: 24px;
+.hero-value {
+  font-size: 40px;
   font-weight: 700;
-  color: var(--text-black);
-  line-height: 1;
+  line-height: 1.1;
+  letter-spacing: -0.5px;
 }
 
-.tokenizer-kpi span {
-  font-size: 12px;
-  color: var(--text-gray);
-  text-align: center;
+.hero-label {
+  font-size: 13px;
+  font-weight: 500;
+  opacity: 0.75;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.hero-row {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  width: 100%;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  padding: 12px 0;
+}
+
+.hero-mini {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.hero-mini-value {
+  font-size: 18px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+}
+
+.hero-mini-label {
+  font-size: 11px;
+  font-weight: 500;
+  opacity: 0.65;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.hero-divider {
+  width: 1px;
+  height: 28px;
+  background: rgba(255, 255, 255, 0.2);
+  flex-shrink: 0;
 }
 
 /* Layout Update */
@@ -551,7 +605,7 @@ Save
 }
 
 @media (max-width: 600px) {
-  .tokenizer-summary {
+  .tokenizer-hero {
     gap: 12px;
   }
 
