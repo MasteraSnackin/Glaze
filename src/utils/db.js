@@ -1,4 +1,5 @@
 import { ensureSessionMemoryBook } from '@/core/services/memorySchema.js';
+import { showToast } from '@/core/states/toastState.js';
 
 const DB_NAME = 'SillyCradleDB';
 const DB_VERSION = 8;
@@ -420,6 +421,7 @@ export const db = {
                         try {
                             await db.set(`gz_chat_${charId}`, toPlain(allChatsMap[charId]));
                             localStorage.removeItem(key);
+                            showToast('Chat data recovered from backup', 2500);
                         } catch (_e) {}
                     }
                 } catch (_e) {}
@@ -469,6 +471,7 @@ export const db = {
                     const restored = normalizeChatData(fb);
                     await db.set(`gz_chat_${charId}`, toPlain(restored));
                     try { localStorage.removeItem(`gz_fb_chat_${charId}`); } catch (_e) {}
+                    showToast('Chat data recovered from backup', 2500);
                     return restored;
                 }
             }
@@ -484,6 +487,7 @@ export const db = {
             try { localStorage.removeItem(`gz_fb_chat_${charId}`); } catch (_e) {}
         } catch (err) {
             console.error('[DB] Chat save failed, saving to localStorage fallback:', err);
+            showToast('Chat write failed, backup saved locally', 3000);
             try {
                 localStorage.setItem(`gz_fb_chat_${charId}`, JSON.stringify({
                     ...snapshot,
@@ -506,6 +510,7 @@ export const db = {
             try { localStorage.removeItem(`gz_fb_chat_${charId}`); } catch (_e) {}
         } catch (err) {
             console.error('[DB] Chat patch failed, saving to localStorage fallback:', err);
+            showToast('Chat write failed, backup saved locally', 3000);
             try {
                 localStorage.setItem(`gz_fb_chat_${charId}`, JSON.stringify({
                     ...snapshot,
