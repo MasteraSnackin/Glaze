@@ -40,7 +40,8 @@ export const lorebookState = reactive({
         searchType: 'keys',
         embeddingTarget: 'content',
         vectorThreshold: 0.45,
-        vectorTopK: 10
+        vectorTopK: 10,
+        keywordVectorSplit: 50
     },
     activations: {
         character: {},

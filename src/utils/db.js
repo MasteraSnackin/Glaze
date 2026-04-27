@@ -1,4 +1,5 @@
 import { ensureSessionMemoryBook } from '@/core/services/memorySchema.js';
+import { showToast } from '@/core/states/toastState.js';
 
 const DB_NAME = 'SillyCradleDB';
 const DB_VERSION = 8;
@@ -70,8 +71,11 @@ function normalizeChatData(chatData) {
 let _dbWriteQueue = Promise.resolve();
 
 export function queueDbWrite(fn) {
-    _dbWriteQueue = _dbWriteQueue.then(fn).catch(err => console.error('[DB] Write queue error:', err));
-    return _dbWriteQueue;
+    const resultPromise = _dbWriteQueue.then(fn);
+    _dbWriteQueue = resultPromise.catch(err => {
+        console.error('[DB] Write queue error:', err);
+    });
+    return resultPromise;
 }
 
 export const db = {
@@ -359,54 +363,79 @@ export const db = {
     // Chat specific logic
     getChats: async () => {
         const database = await db.open();
-        return new Promise((resolve, reject) => {
-            const tx = database.transaction(STORE_KEYVALUE, 'readwrite');
-            const store = tx.objectStore(STORE_KEYVALUE);
+        try {
+            const allChatsMap = await new Promise((resolve, reject) => {
+                const tx = database.transaction(STORE_KEYVALUE, 'readwrite');
+                const store = tx.objectStore(STORE_KEYVALUE);
 
-            // First, check if legacy monolithic sc_chats exists
-            const getLegacyReq = store.get('gz_chats');
-            getLegacyReq.onsuccess = () => {
-                const legacyChats = getLegacyReq.result;
-                const hasLegacy = legacyChats && Object.keys(legacyChats).length > 0;
+                // First, check if legacy monolithic sc_chats exists
+                const getLegacyReq = store.get('gz_chats');
+                getLegacyReq.onsuccess = () => {
+                    const legacyChats = getLegacyReq.result;
+                    const hasLegacy = legacyChats && Object.keys(legacyChats).length > 0;
 
-                // Fetch all granular chats
-                const allChatsMap = {};
-                const cursorReq = store.openCursor();
+                    // Fetch all granular chats
+                    const allChatsMap = {};
+                    const cursorReq = store.openCursor();
 
-                cursorReq.onsuccess = (e) => {
-                    const cursor = e.target.result;
-                    if (cursor) {
-                        if (cursor.key.toString().startsWith('gz_chat_')) {
-                            const charId = cursor.key.toString().substring(8); // remove 'gz_chat_' (8 chars)
-                            allChatsMap[charId] = cursor.value;
-                        }
-                        cursor.continue();
-                    } else {
-                        // Cursor iteration finished
-                        if (hasLegacy) {
-                            // Perform Migration
-                            const migratedCount = 0;
-                            const keysToMigrate = Object.keys(legacyChats);
-
-                            // If there are legacy chats, migrate them to granular keys if they don't exist yet
-                            for (const charId of keysToMigrate) {
-                                if (!allChatsMap[charId]) {
-                                    store.put(legacyChats[charId], `gz_chat_${charId}`);
-                                    allChatsMap[charId] = legacyChats[charId];
-                                }
+                    cursorReq.onsuccess = (e) => {
+                        const cursor = e.target.result;
+                        if (cursor) {
+                            if (cursor.key.toString().startsWith('gz_chat_')) {
+                                const charId = cursor.key.toString().substring(8);
+                                allChatsMap[charId] = cursor.value;
                             }
-                            // Delete legacy monolithic key to reclaim space
-                            store.delete('gz_chats');
+                            cursor.continue();
+                        } else {
+                            if (hasLegacy) {
+                                const keysToMigrate = Object.keys(legacyChats);
+                                for (const charId of keysToMigrate) {
+                                    if (!allChatsMap[charId]) {
+                                        store.put(legacyChats[charId], `gz_chat_${charId}`);
+                                        allChatsMap[charId] = legacyChats[charId];
+                                    }
+                                }
+                                store.delete('gz_chats');
+                            }
+                            resolve(allChatsMap);
                         }
-                        resolve(allChatsMap);
-                    }
+                    };
+                    cursorReq.onerror = () => reject(cursorReq.error);
                 };
-                cursorReq.onerror = () => reject(cursorReq.error);
-            };
-            getLegacyReq.onerror = () => reject(getLegacyReq.error);
-        }).finally(() => {
+                getLegacyReq.onerror = () => reject(getLegacyReq.error);
+            });
+
+            const fbKeys = [];
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (key && key.startsWith('gz_fb_chat_')) {
+                    fbKeys.push(key);
+                }
+            }
+            for (const key of fbKeys) {
+                try {
+                    const charId = key.substring(11);
+                    const fbRaw = localStorage.getItem(key);
+                    if (!fbRaw) continue;
+                    const fb = JSON.parse(fbRaw);
+                    if (!fb._fb) continue;
+                    const existing = allChatsMap[charId];
+                    if (!existing || !existing.updatedAt || fb._fb > existing.updatedAt) {
+                        delete fb._fb;
+                        allChatsMap[charId] = normalizeChatData(fb);
+                        try {
+                            await db.set(`gz_chat_${charId}`, toPlain(allChatsMap[charId]));
+                            localStorage.removeItem(key);
+                            showToast('Chat data recovered from backup', 2500);
+                        } catch (_e) {}
+                    }
+                } catch (_e) {}
+            }
+
+            return allChatsMap;
+        } finally {
             database.close();
-        });
+        }
     },
     getUnread: async () => {
         return (await db.get('gz_unread')) || {};
@@ -437,12 +466,43 @@ export const db = {
             const ids = Object.keys(data.sessions).map(Number);
             data.currentId = ids.length > 0 ? Math.max(...ids) : 1;
         }
+
+        try {
+            const fbRaw = localStorage.getItem(`gz_fb_chat_${charId}`);
+            if (fbRaw) {
+                const fb = JSON.parse(fbRaw);
+                if (fb._fb && (!data.updatedAt || fb._fb > data.updatedAt)) {
+                    delete fb._fb;
+                    const restored = normalizeChatData(fb);
+                    await db.set(`gz_chat_${charId}`, toPlain(restored));
+                    try { localStorage.removeItem(`gz_fb_chat_${charId}`); } catch (_e) {}
+                    showToast('Chat data recovered from backup', 2500);
+                    return restored;
+                }
+            }
+        } catch (_e) {}
+
         return data;
     },
-    saveChat: (charId, chatData) => {
+    saveChat: async (charId, chatData) => {
         const normalized = normalizeChatData(chatData);
         const snapshot = toPlain(normalized);
-        return queueDbWrite(() => db.set(`gz_chat_${charId}`, snapshot));
+        try {
+            await queueDbWrite(() => db.set(`gz_chat_${charId}`, snapshot));
+            try { localStorage.removeItem(`gz_fb_chat_${charId}`); } catch (_e) {}
+        } catch (err) {
+            console.error('[DB] Chat save failed, saving to localStorage fallback:', err);
+            showToast('Chat write failed, backup saved locally', 3000);
+            try {
+                localStorage.setItem(`gz_fb_chat_${charId}`, JSON.stringify({
+                    ...snapshot,
+                    _fb: Date.now()
+                }));
+            } catch (fbErr) {
+                console.error('[DB] Fallback save also failed:', fbErr);
+            }
+            throw err;
+        }
     },
     patchChatData: async (charId, patchFn) => {
         const data = await db.getChat(charId);
@@ -450,7 +510,22 @@ export const db = {
         patchFn(data);
         const normalized = normalizeChatData(data);
         const snapshot = toPlain(normalized);
-        await queueDbWrite(() => db.set(`gz_chat_${charId}`, snapshot));
+        try {
+            await queueDbWrite(() => db.set(`gz_chat_${charId}`, snapshot));
+            try { localStorage.removeItem(`gz_fb_chat_${charId}`); } catch (_e) {}
+        } catch (err) {
+            console.error('[DB] Chat patch failed, saving to localStorage fallback:', err);
+            showToast('Chat write failed, backup saved locally', 3000);
+            try {
+                localStorage.setItem(`gz_fb_chat_${charId}`, JSON.stringify({
+                    ...snapshot,
+                    _fb: Date.now()
+                }));
+            } catch (fbErr) {
+                console.error('[DB] Fallback save also failed:', fbErr);
+            }
+            throw err;
+        }
     },
     createSession: async (charId) => {
         let data = await db.get(`gz_chat_${charId}`);

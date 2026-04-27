@@ -28,7 +28,7 @@ export function restoreVisibleSwipeState(messages = []) {
     });
 }
 
-export function useChatMessageDisplay(activeChatChar, allPersonas) {
+export function useChatMessageDisplay(getActiveChatChar, allPersonas) {
     function getAvatar(msg) {
         if (msg.role === 'user') {
             if (msg.persona?.id) {
@@ -37,22 +37,22 @@ export function useChatMessageDisplay(activeChatChar, allPersonas) {
             }
             return msg.persona?.avatar || null;
         }
-        return activeChatChar.value?.avatar || null;
+        return getActiveChatChar()?.avatar || null;
     }
 
     function getAvatarLetter(msg) {
         if (msg.role === 'user') return (msg.persona?.name?.[0] || "U").toUpperCase();
-        return (activeChatChar.value?.name?.[0] || "?").toUpperCase();
+        return (getActiveChatChar()?.name?.[0] || "?").toUpperCase();
     }
 
     function getAvatarColor(msg) {
         if (msg.role === 'user') return 'var(--vk-blue)';
-        return activeChatChar.value?.color || '#ccc';
+        return getActiveChatChar()?.color || '#ccc';
     }
 
     function getDisplayName(msg) {
         if (msg.role === 'user') return msg.persona?.name || "User";
-        return activeChatChar.value?.name || "Character";
+        return getActiveChatChar()?.name || "Character";
     }
 
     function openAvatar(msg) {

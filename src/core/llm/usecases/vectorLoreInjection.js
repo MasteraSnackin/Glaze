@@ -18,14 +18,11 @@ function combineLoreSources(messages = []) {
     return [...sourceMap.entries()].map(([source, tokens]) => ({ source, tokens }));
 }
 
-function limitVectorLoreEntries(vectorEntries = [], keywordEntries = []) {
-    const maxInjectedEntries = Math.max(1, Math.min(100, Number(lorebookState.globalSettings?.maxInjectedEntries || 5)));
-    const remainingSlots = Math.max(0, maxInjectedEntries - keywordEntries.length);
-    if (remainingSlots <= 0) return [];
-
+function limitVectorLoreEntries(vectorEntries = [], vectorSlots = 0) {
+    if (vectorSlots <= 0) return [];
     return [...vectorEntries]
         .sort((a, b) => (b.vectorScore || 0) - (a.vectorScore || 0))
-        .slice(0, remainingSlots);
+        .slice(0, vectorSlots);
 }
 
 function buildVectorLoreBlock(entries, position) {
@@ -55,19 +52,28 @@ function resolveLateVectorLorePosition(entry) {
 export function mergeLateVectorLoreEntries(result, vectorResults = []) {
     const keywordEntries = normalizeKeywordLoreEntries(result?.loreEntries || []);
     const keywordIds = new Set(keywordEntries.map(entry => entry.id));
+
+    const maxInjectedEntries = Math.max(1, Math.min(100, Number(lorebookState.globalSettings?.maxInjectedEntries || 5)));
+    const split = Math.max(0, Math.min(100, Number(lorebookState.globalSettings?.keywordVectorSplit ?? 50)));
+    const keywordSlots = Math.round(maxInjectedEntries * split / 100);
+    const vectorSlots = maxInjectedEntries - keywordSlots;
+
+    const limitedKeywords = keywordEntries.slice(0, keywordSlots);
+    const limitedKeywordIds = new Set(limitedKeywords.map(entry => entry.id));
+
     const vectorEntries = limitVectorLoreEntries(
-        vectorResults.filter(entry => !keywordIds.has(entry.id)),
-        keywordEntries
+        vectorResults.filter(entry => !limitedKeywordIds.has(entry.id)),
+        vectorSlots
     );
 
     vectorEntries.forEach(entry => { entry._source = 'vector'; });
 
     if (Array.isArray(result?.loreEntries)) {
-        result.loreEntries = [...keywordEntries, ...vectorEntries];
+        result.loreEntries = [...limitedKeywords, ...vectorEntries];
     }
 
     return {
-        keywordEntries,
+        keywordEntries: limitedKeywords,
         vectorEntries
     };
 }

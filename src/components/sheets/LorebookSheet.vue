@@ -604,6 +604,19 @@ defineExpose({ open, openEntry, close, openLorebook });
                               </div>
                               <input type="range" v-model.number="lorebookState.globalSettings.vectorThreshold" min="0" max="1" step="0.01">
                           </div>
+
+                          <!-- Keyword/Vector Split (only when Combined mode) -->
+                          <div v-if="lorebookState.globalSettings.searchType === 'both'" class="settings-item-range">
+                              <div class="range-row">
+                                  <label>{{ t('label_kw_vector_split') || 'Keyword / Vector Split' }}</label>
+                                  <input type="number" v-model.number="lorebookState.globalSettings.keywordVectorSplit" class="range-input-val" step="1">
+                              </div>
+                              <input type="range" v-model.number="lorebookState.globalSettings.keywordVectorSplit" min="0" max="100" step="1">
+                              <div class="range-labels">
+                                  <span>Keywords ({{ lorebookState.globalSettings.keywordVectorSplit }}%)</span>
+                                  <span>Vector ({{ 100 - lorebookState.globalSettings.keywordVectorSplit }}%)</span>
+                              </div>
+                          </div>
                       </div>
                   </div>
 

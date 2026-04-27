@@ -259,7 +259,7 @@ const {
     handleMemoryBatchGenerate: handleMemoryBatchGenerate_impl,
     handleMemoryQuickModelChange: handleMemoryQuickModelChange_impl
 } = useMemoryAutomation({
-    activeChatChar,
+    getActiveChatChar: () => activeChatChar,
     currentMessages,
     activePersona,
     getGenerationState,
@@ -279,7 +279,7 @@ const {
     getAvatarColor,
     getDisplayName,
     openAvatar
-} = useChatMessageDisplay(activeChatChar, allPersonas);
+} = useChatMessageDisplay(() => activeChatChar, allPersonas);
 
 const onRegexChanged = () => { regexRevision.value++; };
 
@@ -782,7 +782,7 @@ async function openChat(char, onBack, force = false) {
         const crashBufferRaw = localStorage.getItem(buildCrashBufferKey(char.id, currentSessionId));
         if (crashBufferRaw) {
             const crashBuffer = JSON.parse(crashBufferRaw);
-            if (Array.isArray(crashBuffer?.messages) && crashBuffer.messages.length >= msgs.length) {
+            if (Array.isArray(crashBuffer?.messages) && crashBuffer.messages.length > msgs.length) {
                 msgs = crashBuffer.messages;
                 chatData.sessions[currentSessionId] = msgs;
                 if (typeof crashBuffer.draft === 'string') {
@@ -851,8 +851,9 @@ async function openChat(char, onBack, force = false) {
                 dirty = true;
                 break;
             } else {
-                msgs.pop();
+                lastMsg.isTyping = false;
                 dirty = true;
+                break;
             }
         } else {
             break;

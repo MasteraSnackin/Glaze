@@ -46,11 +46,11 @@ export function createDefaultMemorySettings() {
         enabled: true,
         autoCreateEnabled: true,
         autoGenerateEnabled: false,
-        maxInjectedEntries: 3,
-        autoCreateInterval: 12,
+        maxInjectedEntries: 7,
+        autoCreateInterval: 15,
         useDelayedAutomation: true,
         injectionTarget: 'summary_block',
-        batchSize: 1,
+        batchSize: 3,
         parallelJobs: 1,
         vectorSearchEnabled: false,
         keyMatchMode: 'glaze',
@@ -70,11 +70,11 @@ export function normalizeMemorySettings(settings) {
     if (typeof settings.enabled !== 'boolean') settings.enabled = true;
     if (typeof settings.autoCreateEnabled !== 'boolean') settings.autoCreateEnabled = true;
     if (typeof settings.autoGenerateEnabled !== 'boolean') settings.autoGenerateEnabled = false;
-    if (!Number.isFinite(Number(settings.maxInjectedEntries)) || Number(settings.maxInjectedEntries) <= 0) settings.maxInjectedEntries = 3;
-    if (!Number.isFinite(Number(settings.autoCreateInterval)) || Number(settings.autoCreateInterval) <= 0) settings.autoCreateInterval = 12;
+    if (!Number.isFinite(Number(settings.maxInjectedEntries)) || Number(settings.maxInjectedEntries) <= 0) settings.maxInjectedEntries = 7;
+    if (!Number.isFinite(Number(settings.autoCreateInterval)) || Number(settings.autoCreateInterval) <= 0) settings.autoCreateInterval = 15;
     if (typeof settings.useDelayedAutomation !== 'boolean') settings.useDelayedAutomation = true;
     settings.injectionTarget = settings.injectionTarget === 'summary_macro' ? 'summary_macro' : 'summary_block';
-    if (!Number.isFinite(Number(settings.batchSize)) || Number(settings.batchSize) <= 0) settings.batchSize = 1;
+    if (!Number.isFinite(Number(settings.batchSize)) || Number(settings.batchSize) <= 0) settings.batchSize = 3;
     if (!Number.isFinite(Number(settings.parallelJobs)) || Number(settings.parallelJobs) <= 0) settings.parallelJobs = 1;
     if (typeof settings.vectorSearchEnabled !== 'boolean') settings.vectorSearchEnabled = false;
     if (!['plain', 'glaze', 'both'].includes(settings.keyMatchMode)) settings.keyMatchMode = 'glaze';
