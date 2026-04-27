@@ -463,12 +463,12 @@ export function useMemorySheetUI({
                 </div>
                 <div class="settings-item">
                     <label>Create Memory Every N Messages</label>
-                    <input id="memory-auto-interval-input" type="number" min="1" max="200" step="1" value="${state.autoCreateInterval}" placeholder="12">
+                    <input id="memory-auto-interval-input" type="number" min="1" max="200" step="1" value="${state.autoCreateInterval}" placeholder="15">
                     <div class="context-sheet-note">User-facing interval for future automatic memory creation and import bootstrap segmentation.</div>
                 </div>
                 <div class="settings-item">
                     <label>Max Generate Batch</label>
-                    <input id="memory-batch-size-input" type="number" min="1" max="50" step="1" value="${state.batchSize}" placeholder="1">
+                    <input id="memory-batch-size-input" type="number" min="1" max="50" step="1" value="${state.batchSize}" placeholder="3">
                     <div class="context-sheet-note">Limits how many pending drafts the batch generate button starts at once.</div>
                 </div>
                 <div class="settings-item-checkbox">
@@ -480,7 +480,7 @@ export function useMemorySheetUI({
                 </div>
                 <div class="settings-item">
                     <label>Memory Entries In Prompt</label>
-                    <input id="memory-max-injected-input" type="number" min="1" max="20" step="1" value="${state.maxInjectedEntries}" placeholder="3">
+                    <input id="memory-max-injected-input" type="number" min="1" max="20" step="1" value="${state.maxInjectedEntries}" placeholder="7">
                     <div class="context-sheet-note">How many retrieved memory entries can be injected into the prompt at once.</div>
                 </div>
                 <div class="settings-item">
@@ -583,13 +583,16 @@ export function useMemorySheetUI({
                     : Math.max(200, Math.min(32000, Number.isFinite(Number(maxTokensValue)) ? Math.round(Number(maxTokensValue)) : 2000));
                 settings.autoCreateEnabled = !!content.querySelector('#memory-auto-create-toggle')?.checked;
                 settings.autoGenerateEnabled = !!content.querySelector('#memory-auto-generate-toggle')?.checked;
-                const autoIntervalValue = Number(content.querySelector('#memory-auto-interval-input')?.value || state.autoCreateInterval || 12);
-                settings.autoCreateInterval = Math.max(1, Math.min(200, Number.isFinite(autoIntervalValue) ? Math.round(autoIntervalValue) : 12));
-                const batchSizeValue = Number(content.querySelector('#memory-batch-size-input')?.value || state.batchSize || 1);
-                settings.batchSize = Math.max(1, Math.min(50, Number.isFinite(batchSizeValue) ? Math.round(batchSizeValue) : 1));
+                const autoIntervalRaw = content.querySelector('#memory-auto-interval-input')?.value?.trim();
+                const autoIntervalValue = autoIntervalRaw !== '' ? Number(autoIntervalRaw) : 15;
+                settings.autoCreateInterval = Number.isFinite(autoIntervalValue) && autoIntervalValue > 0 ? Math.max(1, Math.min(200, Math.round(autoIntervalValue))) : 15;
+                const batchSizeRaw = content.querySelector('#memory-batch-size-input')?.value?.trim();
+                const batchSizeValue = batchSizeRaw !== '' ? Number(batchSizeRaw) : 3;
+                settings.batchSize = Number.isFinite(batchSizeValue) && batchSizeValue > 0 ? Math.max(1, Math.min(50, Math.round(batchSizeValue))) : 3;
                 settings.useDelayedAutomation = !!content.querySelector('#memory-delayed-automation-toggle')?.checked;
-                const maxInjectedValue = Number(content.querySelector('#memory-max-injected-input')?.value || state.maxInjectedEntries || 3);
-                settings.maxInjectedEntries = Math.max(1, Math.min(20, Number.isFinite(maxInjectedValue) ? Math.round(maxInjectedValue) : 3));
+                const maxInjectedRaw = content.querySelector('#memory-max-injected-input')?.value?.trim();
+                const maxInjectedValue = maxInjectedRaw !== '' ? Number(maxInjectedRaw) : 7;
+                settings.maxInjectedEntries = Number.isFinite(maxInjectedValue) && maxInjectedValue > 0 ? Math.max(1, Math.min(20, Math.round(maxInjectedValue))) : 7;
                 settings.injectionTarget = state.injectionTarget === 'summary_macro' ? 'summary_macro' : 'summary_block';
                 settings.promptPreset = state.promptPreset || 'detailed_beats';
                 memoryBook.updatedAt = Date.now();

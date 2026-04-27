@@ -79,6 +79,7 @@ import GlossarySheet from '@/components/sheets/GlossarySheet.vue';
 import MemoryBooksSheet from '@/components/sheets/MemoryBooksSheet.vue';
 import { addDeletedStats, migrateStatsIfNeeded } from '@/core/services/statsService.js';
 import { showToast } from '@/core/states/toastState.js';
+import { ensureSessionMemoryBook } from '@/core/services/memorySchema.js';
 import { triggerAutoSyncCheck } from '@/composables/chat/useAutoSync.js';
 import { useMemoryBooks } from '@/composables/chat/useMemoryBooks.js';
 import { useMemoryAutomation } from '@/composables/chat/useMemoryAutomation.js';
@@ -1043,8 +1044,24 @@ async function openChat(char, onBack, force = false) {
         if (consumePendingCutoffRecalc()) {
             updateContextCutoff();
         }
-        // Update pending memory indicators
         updatePendingMemoryMessageIds(activeChatChar);
+    }
+}
+
+async function handleMemoryFlushSave() {
+    if (!activeChatChar || !currentMemoryBookData.value) return;
+    try {
+        const chatData = await getChatData(activeChatChar.id);
+        if (chatData) {
+            const sessionId = activeChatChar.sessionId || chatData.currentId;
+            const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
+            memoryBook.updatedAt = Date.now();
+            await db.saveChat(activeChatChar.id, chatData);
+            await loadCurrentMemoryBook(activeChatChar);
+            await updatePendingMemoryMessageIds(activeChatChar);
+        }
+    } catch (e) {
+        console.error('[MemoryBooks] flush-save error:', e);
     }
 }
 
@@ -1611,6 +1628,7 @@ onUnmounted(() => {
             :memory-draft-state="memoryDraftState"
             :pending-memory-message-ids="pendingMemoryMessageIds"
             @close="() => {}"
+            @flush-save="handleMemoryFlushSave"
             @open-settings="handleMemoryOpenSettings"
             @open-maintenance="handleMemoryOpenMaintenance"
             @open-preview="handleMemoryPreview"

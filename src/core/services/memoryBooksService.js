@@ -68,8 +68,8 @@ export function countCompletedExchangesSince(startCount, currentCount) {
 }
 
 export function normalizeAutoCreateInterval(memoryBook) {
-    const raw = Number(memoryBook?.settings?.autoCreateInterval || 12);
-    return Math.max(1, Math.min(200, Number.isFinite(raw) ? Math.round(raw) : 12));
+    const raw = Number(memoryBook?.settings?.autoCreateInterval || 15);
+    return Math.max(1, Math.min(200, Number.isFinite(raw) ? Math.round(raw) : 15));
 }
 
 // ============================================================================

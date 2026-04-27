@@ -65,7 +65,7 @@ export async function getMemoryReserveEstimate(char, safeContext) {
         const activeEntries = (Array.isArray(memoryBook?.entries) ? memoryBook.entries : [])
             .filter(e => e && (e.status || 'active') === 'active' && (e.content || '').trim());
         if (!settings.enabled || !activeEntries.length) return 0;
-        const maxInjected = Math.max(1, Math.min(20, settings.maxInjectedEntries || 3));
+        const maxInjected = Math.max(1, Math.min(20, settings.maxInjectedEntries || 7));
         let totalContentLen = 0;
         for (const entry of activeEntries.slice(0, maxInjected)) {
             totalContentLen += (entry.content || '').trim().length;
