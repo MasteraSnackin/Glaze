@@ -4,6 +4,7 @@ import { App } from '@capacitor/app';
 import { db } from '@/utils/db.js';
 import { DROPBOX_APP_KEY } from '@/core/config/syncConfig.js';
 import { SYNC_TOKENS_KEY } from '@/core/states/syncState.js';
+import { safeUploadFetch } from './nativeFetch.js';
 
 const REDIRECT_URI_NATIVE = import.meta.env.VITE_DROPBOX_REDIRECT_NATIVE || 'com.hydall.glaze://oauth/dropbox';
 const REDIRECT_URI_WEB = import.meta.env.VITE_DROPBOX_REDIRECT_WEB || `${window.location.origin}/oauth/dropbox/redirect.html`;
@@ -369,7 +370,7 @@ async function contentUpload(path, data, accessToken) {
 
     const body = typeof data === 'string' ? data : JSON.stringify(data);
 
-    const response = await fetch(`${CONTENT_BASE}/files/upload`, {
+    const response = await safeUploadFetch(`${CONTENT_BASE}/files/upload`, {
         method: 'POST',
         headers: {
             'Authorization': `Bearer ${accessToken}`,
@@ -408,7 +409,7 @@ async function contentDownload(path, accessToken) {
         accessToken = tokens.access_token;
     }
 
-    const response = await fetch(`${CONTENT_BASE}/files/download`, {
+    const response = await safeUploadFetch(`${CONTENT_BASE}/files/download`, {
         method: 'POST',
         headers: {
             'Authorization': `Bearer ${accessToken}`,

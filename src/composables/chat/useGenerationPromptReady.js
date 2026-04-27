@@ -2,7 +2,6 @@ function mapTriggeredLorebooks(loreEntries) {
     return loreEntries.map(entry => ({
         id: entry.id,
         name: entry.comment || entry.name || entry.keys?.[0] || 'Entry',
-        content: entry.content,
         lorebookName: entry.lorebookName,
         lorebookId: entry.lorebookId,
         _source: entry._source || 'keyword'
@@ -12,9 +11,7 @@ function mapTriggeredLorebooks(loreEntries) {
 function mapTriggeredMemories(memoryEntries) {
     return (memoryEntries || []).map(entry => ({
         id: entry.id,
-        name: entry.title || 'Memory',
-        content: entry.content || '',
-        messageIds: Array.isArray(entry.messageIds) ? entry.messageIds : []
+        name: entry.title || 'Memory'
     }));
 }
 

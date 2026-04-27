@@ -24,7 +24,16 @@ export async function handleGenerationError({
     const { getChatData, db } = persistence;
     const { notifyGenerationEnded } = app;
     const state = getGenerationState(char.id);
-    if (!state || state.genId !== genId) return;
+    if (!state || state.genId !== genId) {
+        await clearTypingStateForMessage({
+            charId: char.id,
+            sessionId,
+            msgId,
+            errorLabel: '[onError-stale]'
+        });
+        notifyGenerationEnded({ charId: char.id, sessionId, genId, type: 'chat' });
+        return;
+    }
 
     if (typeof state.clearStreamFlushTimer === 'function') {
         state.clearStreamFlushTimer();

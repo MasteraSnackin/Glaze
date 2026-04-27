@@ -1,8 +1,11 @@
 import { db, getSyncDeletedEntries, clearSyncDeletedEntry } from '@/utils/db.js';
 import { encryptForSync, decryptFromSync, hasSyncKey, getSyncKey } from '@/core/services/crypto/keyManager.js';
 import { isSyncIncludingApiKeys } from '@/core/config/ProviderProfiles.js';
+import { showToast } from '@/core/states/toastState.js';
 
 const CLOUD_BASE = '/Glaze';
+
+const MAX_SYNC_PAYLOAD_BYTES = 30 * 1024 * 1024;
 
 const ENTITY_TYPES = {
     CHARACTER: 'character',
@@ -349,6 +352,11 @@ async function readCloudEntityByEntry(adapter, entry, key) {
         result = await adapter.download(altPath);
     }
     if (!result) return null;
+    if (result.data.length > MAX_SYNC_PAYLOAD_BYTES) {
+        console.warn(`[sync] Skipping download ${entry.type} ${entry.id}: payload ${Math.round(result.data.length / 1024 / 1024)}MB exceeds limit`);
+        showToast(`Sync: ${entry.type} too large (${Math.round(result.data.length / 1024 / 1024)}MB), skipped`, 5000);
+        return null;
+    }
     const parsed = JSON.parse(result.data);
     return decryptEntity(parsed, key);
 }
@@ -491,7 +499,15 @@ async function pushManifestV2(adapter, key, onProgress) {
 
                 if (payload !== null && payload !== undefined) {
                     const encrypted = await encryptEntity(payload, key);
-                    await adapter.upload(localEntry.path, JSON.stringify(encrypted));
+                    const serialized = JSON.stringify(encrypted);
+                    if (serialized.length > MAX_SYNC_PAYLOAD_BYTES) {
+                        console.warn(`[sync] Skipping ${localEntry.type} ${localEntry.id}: payload ${Math.round(serialized.length / 1024 / 1024)}MB exceeds ${Math.round(MAX_SYNC_PAYLOAD_BYTES / 1024 / 1024)}MB limit`);
+                        showToast(`${localEntry.type} too large to sync (${Math.round(serialized.length / 1024 / 1024)}MB), skipped`, 5000);
+                        skipped++;
+                        if (onProgress) onProgress(phase, i + 1, allEntries.length);
+                        return;
+                    }
+                    await adapter.upload(localEntry.path, serialized);
                 }
             }
 

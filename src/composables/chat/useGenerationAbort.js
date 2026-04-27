@@ -1,4 +1,6 @@
 import { clearPersistedGeneration } from '@/core/states/generationState.js';
+import { publishAppEvent } from '@/core/events/eventHub.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
 
 export function useGenerationAbort({
     getGenerationState,
@@ -14,6 +16,8 @@ export function useGenerationAbort({
         if (state.type === 'impersonation') {
             return abortImpersonation(charId, state);
         }
+
+        const { sessionId, genId, type } = state;
 
         if (state.controller) {
             try {
@@ -36,19 +40,25 @@ export function useGenerationAbort({
             state.clearStreamFlushTimer();
         }
 
-        if (activeChatChar?.value && activeChatChar.value.id === charId) {
-            isGenerating.value = false;
-        }
+        isGenerating.value = false;
 
-        if (state.sessionId) {
-            clearPersistedGeneration(charId, state.sessionId);
+        if (sessionId) {
+            clearPersistedGeneration(charId, sessionId);
         }
         clearGenerationState(charId);
+
+        publishAppEvent(APP_EVENTS.domain.generation.ended, {
+            charId,
+            sessionId: sessionId ?? null,
+            genId: genId ?? null,
+            type: type || 'chat'
+        });
 
         return true;
     }
 
     function abortImpersonation(charId, state) {
+        const { sessionId, genId } = state || {};
         if (state?.controller) {
             try {
                 state.userAborted = true;
@@ -58,10 +68,18 @@ export function useGenerationAbort({
         }
         isGenerating.value = false;
         if (isImpersonating) isImpersonating.value = false;
-        if (state?.sessionId) {
-            clearPersistedGeneration(charId, state.sessionId);
+        if (sessionId) {
+            clearPersistedGeneration(charId, sessionId);
         }
         clearGenerationState(charId);
+
+        publishAppEvent(APP_EVENTS.domain.generation.ended, {
+            charId,
+            sessionId: sessionId ?? null,
+            genId: genId ?? null,
+            type: 'impersonation'
+        });
+
         return true;
     }
 
