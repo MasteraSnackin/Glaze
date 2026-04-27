@@ -706,6 +706,30 @@ export async function listFolderContinue() {
     return { entries: [], has_more: false };
 }
 
+export async function deleteFolder(path) {
+    if (path === '/Glaze' || path === `/${FOLDER_NAME}`) {
+        const folderId = await getGlazeFolderId();
+        if (!folderId) return false;
+        const response = await apiRequest(`${API_BASE}/files/${folderId}`, { method: 'DELETE' });
+        if (!response.ok && response.status !== 204) {
+            throw new Error(`Delete folder failed ${response.status}`);
+        }
+        folderIdCache = null;
+        return true;
+    }
+    const parts = path.replace(/^\//, '').split('/').filter(Boolean);
+    const folderName = parts[parts.length - 1];
+    const parentPath = '/' + parts.slice(0, -1).join('/');
+    const { parentId } = await resolvePathToParent(parentPath);
+    const folderId = await findFolderByName(folderName, parentId);
+    if (!folderId) return false;
+    const response = await apiRequest(`${API_BASE}/files/${folderId}`, { method: 'DELETE' });
+    if (!response.ok && response.status !== 204) {
+        throw new Error(`Delete folder failed ${response.status}`);
+    }
+    return true;
+}
+
 export async function deleteFile(fileOrPath) {
     let fileId = null;
 
