@@ -92,7 +92,7 @@ function buildMemoryDraftSummaryExcerpt(summary) {
 }
 
 export function useMemoryAutomation({
-    activeChatChar,
+    getActiveChatChar,
     currentMessages,
     activePersona,
     getGenerationState,
@@ -158,10 +158,10 @@ export function useMemoryAutomation({
     }
 
     async function generateMemoryDraftForMessages(selectedMessages, { openSheet = false, source = 'auto_delayed', existingDraftId = null } = {}) {
-        if (!activeChatChar.value || !Array.isArray(selectedMessages) || !selectedMessages.length) return false;
+        if (!getActiveChatChar() || !Array.isArray(selectedMessages) || !selectedMessages.length) return false;
         console.debug('[MemoryBooks] generateMemoryDraftForMessages:start', { source, existingDraftId, inputCount: selectedMessages.length });
 
-        const activeGeneration = getGenerationState(activeChatChar.value.id);
+        const activeGeneration = getGenerationState(getActiveChatChar().id);
         if (activeGeneration && activeGeneration.type !== 'impersonation') {
             showToast('Stop the current response generation before starting a memory draft');
             return false;
@@ -174,8 +174,8 @@ export function useMemoryAutomation({
             return false;
         }
 
-        const chatData = await getChatData(activeChatChar.value.id);
-        const sessionId = activeChatChar.value.sessionId || chatData.currentId;
+        const chatData = await getChatData(getActiveChatChar().id);
+        const sessionId = getActiveChatChar().sessionId || chatData.currentId;
         const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
         const automation = ensureMemoryAutomationState(memoryBook);
         const isManualDraftRequest = source === 'manual_draft' || source === 'manual_regenerate';
@@ -193,7 +193,7 @@ export function useMemoryAutomation({
         const summary = chatData?.summaries?.[sessionId] || null;
         const playerName = selected.find(msg => msg?.role === 'user')?.persona?.name || activePersona.value?.name || 'User';
         const history = selected
-            .map(msg => `${msg.role === 'user' ? (msg.persona?.name || playerName) : (activeChatChar.value?.name || 'Character')}: ${msg.text || ''}`.trim())
+            .map(msg => `${msg.role === 'user' ? (msg.persona?.name || playerName) : (getActiveChatChar()?.name || 'Character')}: ${msg.text || ''}`.trim())
             .filter(Boolean)
             .join('\n');
 
@@ -219,7 +219,7 @@ export function useMemoryAutomation({
             };
         const prompt = resolveMemoryPrompt(settings)
             .replaceAll('{{user}}', playerName)
-            .replaceAll('{{char}}', activeChatChar.value?.name || 'Character');
+            .replaceAll('{{char}}', getActiveChatChar()?.name || 'Character');
         const finalPrompt = [
             prompt,
             continuity ? `Previous approved memory context:\n${continuity}` : '',
@@ -259,7 +259,7 @@ export function useMemoryAutomation({
         try {
             automation.isGeneratingDraft = true;
             memoryBook.updatedAt = Date.now();
-            await db.saveChat(activeChatChar.value.id, chatData);
+            await db.saveChat(getActiveChatChar().id, chatData);
 
             const progressLabel = existingDraftId
                 ? `Draft ${existingDraft?.title || 'generation'}`
@@ -273,15 +273,15 @@ export function useMemoryAutomation({
             const draftText = await generateMemoryDraft({
                 history,
                 prompt: finalPrompt,
-                debugKey: `memory_draft:${activeChatChar.value.id}:${activeChatChar.value.sessionId || 'default'}:${progressDraftId}`,
+                debugKey: `memory_draft:${getActiveChatChar().id}:${getActiveChatChar().sessionId || 'default'}:${progressDraftId}`,
                 controller: memoryDraftAbortController,
                 apiConfigOverride
             });
             console.debug('[MemoryBooks] generateMemoryDraftForMessages:request-complete', { existingDraftId, textLength: draftText?.length || 0 });
-            const parsedDraft = parseMemoryDraftResponse(draftText || '', [playerName, activeChatChar.value?.name || 'Character']);
+            const parsedDraft = parseMemoryDraftResponse(draftText || '', [playerName, getActiveChatChar()?.name || 'Character']);
 
-            const latestChatData = await getChatData(activeChatChar.value.id);
-            const latestSessionId = activeChatChar.value.sessionId || latestChatData.currentId;
+            const latestChatData = await getChatData(getActiveChatChar().id);
+            const latestSessionId = getActiveChatChar().sessionId || latestChatData.currentId;
             const latestMemoryBook = ensureSessionMemoryBook(latestChatData, latestSessionId);
             const latestAutomation = ensureMemoryAutomationState(latestMemoryBook);
 
@@ -317,17 +317,17 @@ export function useMemoryAutomation({
             }
             latestAutomation.isGeneratingDraft = true;
             latestMemoryBook.updatedAt = generatedAt;
-            await db.saveChat(activeChatChar.value.id, latestChatData);
+            await db.saveChat(getActiveChatChar().id, latestChatData);
             stopMemoryDraftProgress(progressDraftId);
-            const postSaveChatData = await getChatData(activeChatChar.value.id);
-            const postSaveSessionId = activeChatChar.value.sessionId || postSaveChatData.currentId;
+            const postSaveChatData = await getChatData(getActiveChatChar().id);
+            const postSaveSessionId = getActiveChatChar().sessionId || postSaveChatData.currentId;
             const postSaveMemoryBook = ensureSessionMemoryBook(postSaveChatData, postSaveSessionId);
             const postSaveAutomation = ensureMemoryAutomationState(postSaveMemoryBook);
             postSaveAutomation.isGeneratingDraft = Object.keys(memoryDraftState.value.activeDrafts || {}).length > 0;
             postSaveMemoryBook.updatedAt = Date.now();
-            await db.saveChat(activeChatChar.value.id, postSaveChatData);
-            await updatePendingMemoryMessageIds(activeChatChar.value);
-            await loadCurrentMemoryBook(activeChatChar.value);
+            await db.saveChat(getActiveChatChar().id, postSaveChatData);
+            await updatePendingMemoryMessageIds(getActiveChatChar());
+            await loadCurrentMemoryBook(getActiveChatChar());
             showToast(latestExistingDraft ? 'Draft updated' : 'Memory draft created');
             if (openSheet) {
                 openMemoryBooksSheet();
@@ -335,14 +335,14 @@ export function useMemoryAutomation({
             return true;
         } catch (error) {
             stopMemoryDraftProgress(progressDraftId);
-            const latestChatData = await getChatData(activeChatChar.value.id);
-            const latestSessionId = activeChatChar.value.sessionId || latestChatData.currentId;
+            const latestChatData = await getChatData(getActiveChatChar().id);
+            const latestSessionId = getActiveChatChar().sessionId || latestChatData.currentId;
             const latestMemoryBook = ensureSessionMemoryBook(latestChatData, latestSessionId);
             const latestAutomation = ensureMemoryAutomationState(latestMemoryBook);
             latestAutomation.isGeneratingDraft = Object.keys(memoryDraftState.value.activeDrafts || {}).length > 0;
             latestMemoryBook.updatedAt = Date.now();
-            await db.saveChat(activeChatChar.value.id, latestChatData);
-            await loadCurrentMemoryBook(activeChatChar.value);
+            await db.saveChat(getActiveChatChar().id, latestChatData);
+            await loadCurrentMemoryBook(getActiveChatChar());
             console.error('Failed to generate memory draft:', error);
             showToast(`Memory draft failed: ${formatError(error)}`, 5000);
             return false;
@@ -350,7 +350,7 @@ export function useMemoryAutomation({
     }
 
     async function runMemoryAutomationAfterStableTurn(chatData, sessionId, messages, { allowImmediate = true, charId = null, syncUi = true } = {}) {
-        const targetCharId = charId || activeChatChar.value?.id;
+        const targetCharId = charId || getActiveChatChar()?.id;
         if (!targetCharId) return false;
 
         const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
@@ -362,7 +362,7 @@ export function useMemoryAutomation({
         const interval = normalizeAutoCreateInterval(memoryBook);
         const delayed = memoryBook.settings?.useDelayedAutomation !== false;
         const lastRole = getLastStableConversationRole(stableMessages);
-        const shouldSyncUi = syncUi && activeChatChar.value?.id === targetCharId;
+        const shouldSyncUi = syncUi && getActiveChatChar()?.id === targetCharId;
 
         if (!autoCreateEnabled) {
             automation.pendingTrigger = null;
@@ -388,7 +388,7 @@ export function useMemoryAutomation({
                 memoryBook.updatedAt = Date.now();
                 await db.saveChat(targetCharId, chatData);
                 if (shouldSyncUi) {
-                    await updatePendingMemoryMessageIds(activeChatChar.value);
+                    await updatePendingMemoryMessageIds(getActiveChatChar());
                 }
                 if (!pendingDraft) return false;
                 if (!autoGenerateEnabled) return true;
@@ -441,7 +441,7 @@ export function useMemoryAutomation({
         memoryBook.updatedAt = Date.now();
         await db.saveChat(targetCharId, chatData);
         if (shouldSyncUi) {
-            await updatePendingMemoryMessageIds(activeChatChar.value);
+            await updatePendingMemoryMessageIds(getActiveChatChar());
         }
         if (!pendingDraft) return false;
         if (!autoGenerateEnabled) return true;
@@ -509,8 +509,8 @@ export function useMemoryAutomation({
         const generated = results.filter(Boolean).length;
         const failed = results.length - generated;
 
-        await updatePendingMemoryMessageIds(activeChatChar.value);
-        await loadCurrentMemoryBook(activeChatChar.value);
+        await updatePendingMemoryMessageIds(getActiveChatChar());
+        await loadCurrentMemoryBook(getActiveChatChar());
 
         const msg = failed > 0
             ? `Batch complete: ${generated} generated, ${failed} failed`
@@ -544,8 +544,8 @@ export function useMemoryAutomation({
         const generated = results.filter(Boolean).length;
         const failed = results.length - generated;
 
-        await updatePendingMemoryMessageIds(activeChatChar.value);
-        await loadCurrentMemoryBook(activeChatChar.value);
+        await updatePendingMemoryMessageIds(getActiveChatChar());
+        await loadCurrentMemoryBook(getActiveChatChar());
 
         const msg = failed > 0
             ? `Batch complete: ${generated} generated, ${failed} failed`
@@ -556,7 +556,7 @@ export function useMemoryAutomation({
     }
 
     async function generateSingleDraft(draftId) {
-        if (!activeChatChar.value || !currentMemoryBookData) return;
+        if (!getActiveChatChar() || !currentMemoryBookData) return;
         console.debug('[MemoryBooks] generateSingleDraft:start', { draftId });
 
         if (memoryDraftState.value?.activeDrafts?.[draftId]) {
@@ -564,8 +564,8 @@ export function useMemoryAutomation({
             return;
         }
 
-        const chatData = await getChatData(activeChatChar.value.id);
-        const sessionId = activeChatChar.value.sessionId || chatData.currentId;
+        const chatData = await getChatData(getActiveChatChar().id);
+        const sessionId = getActiveChatChar().sessionId || chatData.currentId;
         const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
 
         const draft = (Array.isArray(memoryBook.pendingDrafts) ? memoryBook.pendingDrafts : [])
@@ -610,10 +610,10 @@ export function useMemoryAutomation({
     }
 
     async function handleMemoryBatchGenerate() {
-        if (!activeChatChar.value || !currentMemoryBookData) return;
+        if (!getActiveChatChar() || !currentMemoryBookData) return;
 
-        const chatData = await getChatData(activeChatChar.value.id);
-        const sessionId = activeChatChar.value.sessionId || chatData.currentId;
+        const chatData = await getChatData(getActiveChatChar().id);
+        const sessionId = getActiveChatChar().sessionId || chatData.currentId;
         const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
 
         const draftsNeedingGeneration = (Array.isArray(memoryBook.pendingDrafts) ? memoryBook.pendingDrafts : [])
@@ -635,20 +635,20 @@ export function useMemoryAutomation({
     }
 
     function handleMemoryQuickModelChange(model) {
-        if (!activeChatChar.value || !currentMemoryBookData) return;
+        if (!getActiveChatChar() || !currentMemoryBookData) return;
         const settings = currentMemoryBookData.settings || {};
         settings.generationModel = model || '';
         settings.generationUseCurrentModelOverride = false;
         currentMemoryBookData.updatedAt = Date.now();
-        getChatData(activeChatChar.value.id).then(chatData => {
-            const sessionId = activeChatChar.value.sessionId || chatData.currentId;
+        getChatData(getActiveChatChar().id).then(chatData => {
+            const sessionId = getActiveChatChar().sessionId || chatData.currentId;
             const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
             if (memoryBook.settings) {
                 memoryBook.settings.generationModel = model || '';
                 memoryBook.settings.generationUseCurrentModelOverride = false;
             }
             memoryBook.updatedAt = Date.now();
-            db.saveChat(activeChatChar.value.id, chatData);
+            db.saveChat(getActiveChatChar().id, chatData);
         });
         showToast('Memory generation model updated');
     }

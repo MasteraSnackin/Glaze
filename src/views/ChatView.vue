@@ -259,7 +259,7 @@ const {
     handleMemoryBatchGenerate: handleMemoryBatchGenerate_impl,
     handleMemoryQuickModelChange: handleMemoryQuickModelChange_impl
 } = useMemoryAutomation({
-    activeChatChar,
+    getActiveChatChar: () => activeChatChar,
     currentMessages,
     activePersona,
     getGenerationState,
@@ -279,7 +279,7 @@ const {
     getAvatarColor,
     getDisplayName,
     openAvatar
-} = useChatMessageDisplay(activeChatChar, allPersonas);
+} = useChatMessageDisplay(() => activeChatChar, allPersonas);
 
 const onRegexChanged = () => { regexRevision.value++; };
 
