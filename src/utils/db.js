@@ -405,11 +405,16 @@ export const db = {
                 getLegacyReq.onerror = () => reject(getLegacyReq.error);
             });
 
+            const fbKeys = [];
             for (let i = 0; i < localStorage.length; i++) {
                 const key = localStorage.key(i);
-                if (!key || !key.startsWith('gz_fb_chat_')) continue;
+                if (key && key.startsWith('gz_fb_chat_')) {
+                    fbKeys.push(key);
+                }
+            }
+            for (const key of fbKeys) {
                 try {
-                    const charId = key.substring(10);
+                    const charId = key.substring(11);
                     const fbRaw = localStorage.getItem(key);
                     if (!fbRaw) continue;
                     const fb = JSON.parse(fbRaw);
