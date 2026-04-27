@@ -695,24 +695,41 @@ function getChatName(localChat, cloudChat, charId) {
     return charId;
 }
 
+const WIPE_POLL_INTERVAL = 2000;
+const WIPE_MAX_POLLS = 10;
+
 export async function wipeCloudData(adapter, onProgress) {
-    const files = await listAllFiles(adapter);
-    let deleted = 0;
-    let failed = 0;
-
-    for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        try {
-            await adapter.deleteFile(file);
-            deleted++;
-        } catch (e) {
-            console.warn(`[syncEngine] Failed to delete ${file.path}:`, e);
-            failed++;
+    if (onProgress) onProgress({ phase: 'deleting', message: 'Deleting cloud data...' });
+    try {
+        const result = await adapter.deleteFolder(CLOUD_BASE);
+        if (onProgress) onProgress({ phase: 'waiting', message: 'Waiting for cloud to finalize...' });
+        let pollAttempts = 0;
+        while (pollAttempts < WIPE_MAX_POLLS) {
+            await new Promise(r => setTimeout(r, WIPE_POLL_INTERVAL));
+            const listing = await adapter.listFolder(CLOUD_BASE);
+            if (!listing || !listing.entries || listing.entries.length === 0) break;
+            pollAttempts++;
+            if (onProgress) onProgress({ phase: 'waiting', message: `Waiting for cloud... (${pollAttempts + 1})` });
         }
-        if (onProgress) onProgress(i + 1, files.length);
+        if (onProgress) onProgress({ phase: 'recreating', message: 'Recreating cloud folder...' });
+        try {
+            await adapter.ensureFolder(CLOUD_BASE);
+        } catch (e) {
+            console.warn('[syncEngine] ensureFolder after wipe failed (may already exist):', e);
+        }
+        return { deleted: 'all', failed: 0, total: 'all' };
+    } catch (e) {
+        if (e.message?.includes('not_found') || e.message?.includes('path_not_found') || e.message?.includes('does not exist')) {
+            if (onProgress) onProgress({ phase: 'recreating', message: 'Recreating cloud folder...' });
+            try {
+                await adapter.ensureFolder(CLOUD_BASE);
+            } catch (err) {
+                console.warn('[syncEngine] ensureFolder after wipe (not_found) failed:', err);
+            }
+            return { deleted: 0, failed: 0, total: 0 };
+        }
+        throw e;
     }
-
-    return { deleted, failed, total: files.length };
 }
 
 export async function resolveConflict(conflict, choice) {

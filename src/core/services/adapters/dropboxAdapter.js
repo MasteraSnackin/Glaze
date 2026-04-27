@@ -481,6 +481,10 @@ export async function download(path) {
     return contentDownload(stripAppFolderPrefix(path));
 }
 
+export async function deleteFolder(path) {
+    return apiCall('/files/delete_v2', { path: stripAppFolderPrefix(path) || '' });
+}
+
 export async function deleteFile(fileOrPath) {
     const path = typeof fileOrPath === 'string'
         ? fileOrPath

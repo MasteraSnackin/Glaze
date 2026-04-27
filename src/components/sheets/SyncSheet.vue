@@ -324,15 +324,19 @@ const doFullSync = async () => {
     }
 };
 
+const wipeProgress = ref('');
 const doWipe = async () => {
     if (!confirm(t('sync_confirm_wipe') || 'Delete ALL data from cloud? This cannot be undone. Your local data will remain intact.')) return;
     if (!confirm(t('sync_confirm_wipe_final') || 'Are you sure? Type the provider name to confirm.')) return;
     isWiping.value = true;
     syncResult.value = null;
+    wipeProgress.value = '';
     try {
         const adapter = getAdapter();
         if (!adapter) throw new Error('No provider connected');
-        const result = await wipeCloudData(adapter);
+        const result = await wipeCloudData(adapter, (p) => {
+            wipeProgress.value = p.message || '';
+        });
         await resetSyncIdentityAfterWipe();
         syncResult.value = { type: 'wipe', ...result };
         localSyncStatus.value = 'ready';
@@ -341,6 +345,7 @@ const doWipe = async () => {
         setSyncError(e.message);
     } finally {
         isWiping.value = false;
+        wipeProgress.value = '';
     }
 };
 
@@ -470,7 +475,7 @@ onMounted(async () => {
 {{ t('sync_resolve') || 'Resolve' }}
 </button>
                         </template>
-                        <span v-else-if="syncResult.type === 'wipe'">{{ t('sync_wipe_result') || 'Deleted' }}: {{ syncResult.deleted }}/{{ syncResult.total }} {{ t('sync_items') || 'items' }}</span>
+                        <span v-else-if="syncResult.type === 'wipe'">{{ syncResult.total === 'all' ? (t('sync_wipe_done') || 'Cloud data wiped') : `${t('sync_wipe_result') || 'Deleted'}: ${syncResult.deleted}/${syncResult.total} ${t('sync_items') || 'items'}` }}</span>
                         <span v-else>{{ t('sync_full_done') || 'Full sync complete' }}</span>
                     </div>
                 </div>
@@ -570,7 +575,7 @@ onMounted(async () => {
                     </button>
                     <button class="bs-btn bs-danger-btn" style="margin-top:8px; background: rgba(255,59,48,0.05); opacity:0.8" @click="doWipe" :disabled="isWiping">
                         <svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
-                        <span>{{ isWiping ? (t('sync_wiping') || 'Deleting...') : (t('sync_wipe_cloud') || 'Wipe Cloud Data') }}</span>
+                        <span>{{ isWiping ? (wipeProgress || t('sync_wiping') || 'Deleting...') : (t('sync_wipe_cloud') || 'Wipe Cloud Data') }}</span>
                     </button>
                 </div>
             </div>
