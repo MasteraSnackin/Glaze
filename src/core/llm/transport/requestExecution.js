@@ -49,7 +49,11 @@ export async function executeFetchRequest({
     requestBody,
     controller
 }) {
-    return fetch(requestUrl, {
+    const fetchFn = (typeof window !== 'undefined' && window.CapacitorWebFetch)
+        ? window.CapacitorWebFetch
+        : fetch;
+
+    return fetchFn(requestUrl, {
         method: 'POST',
         headers,
         body: JSON.stringify(requestBody),
@@ -91,7 +95,7 @@ export async function executeAbortableJsonRequest({
         const onAbort = () => {
             try {
                 xhr.abort();
-            } catch (_e) {}
+            } catch (_e) { }
             const error = new Error('Generation aborted');
             error.name = 'AbortError';
             finalizeReject(error);
@@ -160,7 +164,7 @@ export async function executeAbortableJsonRequest({
 export async function validateFetchResponse(response, debugKey) {
     if (!response.ok) {
         let errText = '';
-        try { errText = await response.text(); } catch (e) {}
+        try { errText = await response.text(); } catch (e) { }
         updateNetworkTrace({
             debugKey,
             patch: {
