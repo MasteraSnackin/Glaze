@@ -63,6 +63,17 @@ The current roadmap is:
 
 ### Bugs on fix/memorybook-null-ref
 
+26. **Fix: chat payload OOM crash on sync + message data bloat**
+    - Status: `done`
+    - Files: `src/core/services/syncEngine.js`, `src/core/services/adapters/nativeFetch.js`, `src/core/services/adapters/dropboxAdapter.js`, `src/core/services/adapters/gdriveAdapter.js`, `src/utils/db.js`, `src/composables/chat/useChatGeneration.js`, `src/composables/chat/useGenerationPromptReady.js`, `src/core/services/chatImporter.js`
+    - Issue: Chat data could reach 30+ MB per chat due to redundant heavy fields duplicated across messages: `persona.avatar` (base64 image, ~50KB each) stored on every user message; `triggeredLorebooks[].content` (full entry text) stored on every generated message; `triggeredMemories[].content` and `.messageIds` stored on every generated message. On native platforms, sync uploads/downloads through the Capacitor bridge serialize the entire payload as a JSON string in one chunk, causing OOM crashes for large chats.
+    - Fix:
+      1. **Message schema slimmed down**: `persona` on messages now stores only `{id, name}` instead of the full persona object with avatar. `triggeredLorebooks` now stores `{id, name, lorebookId, lorebookName, _source}` without `content`. `triggeredMemories` now stores `{id, name}` without `content` or `messageIds`. U resolves by `persona.id` lookup at render time.
+      2. **Migration on load**: `stripHeavyFields()` in `normalizeChatData` strips legacy heavy fields from existing messages when chat data is loaded.
+      3. **Import-time stripping**: `normalizeImportedMessage()` also strips persona avatar and triggered content from imported chats.
+      4. **Native fetch bypass**: `safeUploadFetch` in `nativeFetch.js` uses `CapacitorWebFetch` (bypasses native bridge serialization) for upload/download operations in both Dropbox and Google Drive adapters.
+      5. **Sync size guard**: `MAX_SYNC_PAYLOAD_BYTES` (30MB) check in syncEngine skips entities that exceed the limit with a console warning, preventing OOM crashes.
+
 11. **Fix: abort not cleaning generationState or persistedGeneration flags**
     - Status: `done`
     - Files: `src/composables/chat/useGenerationAbort.js`, `src/views/DialogList.vue`

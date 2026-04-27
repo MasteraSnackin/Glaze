@@ -77,7 +77,7 @@ export function useChatGeneration(deps) {
                 timestamp: now.getTime(),
                 image: attachedImage,
                 tokens: estimateTokens(processedText),
-                persona: { ...activePersona.value },
+                persona: { id: activePersona.value?.id, name: activePersona.value?.name },
                 guidanceText: effectiveGuidance,
                 guidanceType: effectiveGuidanceType,
                 ...createBaseMessageMeta()

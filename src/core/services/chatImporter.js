@@ -16,6 +16,16 @@ function normalizeImportedMessage(msg) {
     if (typeof msg.memoryCoverage.stale !== 'boolean') msg.memoryCoverage.stale = false;
     if (!Array.isArray(msg.triggeredLorebooks)) msg.triggeredLorebooks = msg.triggeredLorebooks ? msg.triggeredLorebooks : [];
     if (!Array.isArray(msg.triggeredMemories)) msg.triggeredMemories = msg.triggeredMemories ? msg.triggeredMemories : [];
+    if (msg.persona && typeof msg.persona === 'object') {
+        const { id, name } = msg.persona;
+        msg.persona = { id: id || null, name: name || null };
+    }
+    if (Array.isArray(msg.triggeredLorebooks)) {
+        msg.triggeredLorebooks = msg.triggeredLorebooks.map(({ content: _content, ...rest }) => rest);
+    }
+    if (Array.isArray(msg.triggeredMemories)) {
+        msg.triggeredMemories = msg.triggeredMemories.map(({ content: _content, messageIds: _messageIds, ...rest }) => rest);
+    }
     return msg;
 }
 
@@ -549,8 +559,8 @@ function convertMessage(stMsg, userPersona) {
     // User specific
     if (role === 'user') {
         scMsg.persona = {
-            name: userPersona?.name || stMsg.name || "User",
-            avatar: userPersona?.avatar || null
+            id: userPersona?.id || null,
+            name: userPersona?.name || stMsg.name || "User"
         };
     }
 

@@ -7,7 +7,7 @@ export const builtInMemoryPrompts = [
             'Preserve the original language. Exclude casual [OOC] conversation, BUT if OOC messages contain story rules, formatting instructions, backstory clarifications, or scene-setting directives, reflect those instructions in the memory entry under the relevant sections.',
             '',
             'Use this markdown structure (skip sections if not applicable):',
-            'Timeline: Always label as "Day N" (Day 1, Day 2, Day 3, etc.) — increment the day counter each time a new in-story day begins. Write clock times HH:MM; If the scene spans multiple days, write "Day N–M HH:MM-HH:MM".',
+            'Timeline: Always label as "Day N" (Day 1, Day 2, Day 3, etc.) — increment the day counter each time a new in-story day begins. Write clock times HH:MM;  If the scene spans multiple days, write "Day N–M HH:MM-HH:MM".',
             'Story Beats: Important plot events and developments',
             'Key Interactions: Significant character exchanges and relationship shifts',
             'Notable Details: Important objects, settings, revelations, quotes',

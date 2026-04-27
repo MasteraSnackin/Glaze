@@ -51,7 +51,6 @@ function resolveLateVectorLorePosition(entry) {
 
 export function mergeLateVectorLoreEntries(result, vectorResults = []) {
     const keywordEntries = normalizeKeywordLoreEntries(result?.loreEntries || []);
-    const keywordIds = new Set(keywordEntries.map(entry => entry.id));
 
     const maxInjectedEntries = Math.max(1, Math.min(100, Number(lorebookState.globalSettings?.maxInjectedEntries || 5)));
     const split = Math.max(0, Math.min(100, Number(lorebookState.globalSettings?.keywordVectorSplit ?? 50)));
@@ -59,11 +58,13 @@ export function mergeLateVectorLoreEntries(result, vectorResults = []) {
     const vectorSlots = maxInjectedEntries - keywordSlots;
 
     const limitedKeywords = keywordEntries.slice(0, keywordSlots);
-    const limitedKeywordIds = new Set(limitedKeywords.map(entry => entry.id));
+    const allKeywordIds = new Set(keywordEntries.map(entry => entry.id));
+    const unusedKeywordSlots = keywordSlots - limitedKeywords.length;
+    const adjustedVectorSlots = vectorSlots + unusedKeywordSlots;
 
     const vectorEntries = limitVectorLoreEntries(
-        vectorResults.filter(entry => !limitedKeywordIds.has(entry.id)),
-        vectorSlots
+        vectorResults.filter(entry => !allKeywordIds.has(entry.id)),
+        adjustedVectorSlots
     );
 
     vectorEntries.forEach(entry => { entry._source = 'vector'; });

@@ -51,7 +51,8 @@ const emit = defineEmits([
   'delete-draft',
   'delete-entry',
   'cancel-draft',
-  'change-model'
+  'change-model',
+  'flush-save'
 ]);
 
 const sheet = ref(null);
@@ -89,8 +90,8 @@ const generationSettingsSummary = computed(() => {
   const autoGenerate = props.memoryBook.settings?.autoGenerateEnabled === true ? 'auto text' : 'manual text';
   const delayed = props.memoryBook.settings?.useDelayedAutomation !== false ? 'delayed' : 'immediate';
   const target = props.memoryBook.settings?.injectionTarget === 'summary_macro' ? '{{summary}}' : 'summary block';
-  const maxEntries = Math.max(1, Math.min(20, Number(props.memoryBook.settings?.maxInjectedEntries || 3)));
-  const batchSize = Math.max(1, Math.min(50, Number(props.memoryBook.settings?.batchSize || 1)));
+  const maxEntries = Math.max(1, Math.min(20, Number(props.memoryBook.settings?.maxInjectedEntries || 7)));
+  const batchSize = Math.max(1, Math.min(50, Number(props.memoryBook.settings?.batchSize || 3)));
   const outputTokens = Number.isFinite(Number(props.memoryBook.settings?.generationMaxTokens)) && Number(props.memoryBook.settings?.generationMaxTokens) > 0
     ? `${Math.round(Number(props.memoryBook.settings.generationMaxTokens))} out`
     : 'auto out';
@@ -228,7 +229,7 @@ async function openQuickModelSelector() {
 
 // Helper functions
 function normalizeAutoCreateInterval(memoryBook) {
-  return Math.max(1, Math.min(100, Number(memoryBook?.settings?.autoCreateInterval || 12)));
+  return Math.max(1, Math.min(200, Number(memoryBook?.settings?.autoCreateInterval || 15)));
 }
 
 function formatElapsedSeconds(ms) {
@@ -271,11 +272,13 @@ function open() {
 
 // Called by SheetView @close event (user swiped down or tapped overlay)
 function onSheetClose() {
+  emit('flush-save');
   emit('close');
 }
 
 // Called programmatically from parent via ref (memoryBooksSheet.value.close())
 function close() {
+  emit('flush-save');
   sheet.value?.close();
 }
 

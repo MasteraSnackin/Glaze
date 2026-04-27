@@ -13,6 +13,30 @@ function toPlain(data) {
     return JSON.parse(JSON.stringify(data));
 }
 
+function stripHeavyFields(message) {
+    if (!message || typeof message !== 'object') return message;
+    if (message.persona && typeof message.persona === 'object') {
+        const { id, name } = message.persona;
+        message.persona = { id: id || null, name: name || null };
+    }
+    if (Array.isArray(message.triggeredLorebooks)) {
+        message.triggeredLorebooks = message.triggeredLorebooks.map(lb => ({
+            id: lb.id,
+            name: lb.name || lb.comment,
+            lorebookName: lb.lorebookName,
+            lorebookId: lb.lorebookId,
+            _source: lb._source
+        }));
+    }
+    if (Array.isArray(message.triggeredMemories)) {
+        message.triggeredMemories = message.triggeredMemories.map(mem => ({
+            id: mem.id,
+            name: mem.name || mem.title
+        }));
+    }
+    return message;
+}
+
 function ensureMessageMetadata(message) {
     if (!message || typeof message !== 'object') return message;
     if (!message.id) {
@@ -52,7 +76,10 @@ function normalizeChatData(chatData) {
 
     for (const [sessionId, messages] of Object.entries(chatData.sessions)) {
         const safeMessages = Array.isArray(messages) ? messages.filter(Boolean) : [];
-        safeMessages.forEach(ensureMessageMetadata);
+        safeMessages.forEach(msg => {
+            ensureMessageMetadata(msg);
+            stripHeavyFields(msg);
+        });
         chatData.sessions[sessionId] = safeMessages;
     }
 

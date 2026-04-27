@@ -618,7 +618,7 @@ export function useMemoryAutomation({
 
         const draftsNeedingGeneration = (Array.isArray(memoryBook.pendingDrafts) ? memoryBook.pendingDrafts : [])
             .filter(d => !d.content && d.status === 'pending_generation' && !memoryDraftState.value?.activeDrafts?.[d.id]);
-        const maxBatchSize = Math.max(1, Math.min(50, Number(memoryBook.settings?.batchSize) || 1));
+        const maxBatchSize = Math.max(1, Math.min(50, Number(memoryBook.settings?.batchSize) || 3));
 
         if (!draftsNeedingGeneration.length) {
             showToast(memoryDraftState.value?.activeCount ? 'All remaining drafts are already generating' : 'No drafts need generation');

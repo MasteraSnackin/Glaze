@@ -4,6 +4,7 @@ import { App } from '@capacitor/app';
 import { db } from '@/utils/db.js';
 import { GDRIVE_CLIENT_ID, GDRIVE_CLIENT_SECRET } from '@/core/config/syncConfig.js';
 import { SYNC_TOKENS_KEY } from '@/core/states/syncState.js';
+import { safeUploadFetch } from './nativeFetch.js';
 
 const getNativeRedirectUri = () => {
     if (import.meta.env.VITE_GDRIVE_REDIRECT_NATIVE) return import.meta.env.VITE_GDRIVE_REDIRECT_NATIVE;
@@ -544,14 +545,41 @@ export async function upload(path, data) {
     const body = typeof data === 'string' ? data : JSON.stringify(data);
 
     if (existingFile) {
-        const response = await apiRequest(
+        const accessToken = await getValidAccessToken();
+        if (!accessToken) throw new Error('Not connected to Google Drive');
+
+        const response = await safeUploadFetch(
             `${UPLOAD_BASE}/files/${existingFile.id}?uploadType=media`,
             {
                 method: 'PATCH',
-                headers: { 'Content-Type': 'application/octet-stream' },
+                headers: {
+                    'Authorization': `Bearer ${accessToken}`,
+                    'Content-Type': 'application/octet-stream'
+                },
                 body
             }
         );
+
+        if (response.status === 401) {
+            const tokens = await getTokens();
+            if (tokens?.refresh_token) {
+                const refreshed = await refreshAccessToken(tokens.refresh_token);
+                const retry = await safeUploadFetch(
+                    `${UPLOAD_BASE}/files/${existingFile.id}?uploadType=media`,
+                    {
+                        method: 'PATCH',
+                        headers: {
+                            'Authorization': `Bearer ${refreshed.access_token}`,
+                            'Content-Type': 'application/octet-stream'
+                        },
+                        body
+                    }
+                );
+                if (!retry.ok) throw new Error(`Upload failed ${retry.status}`);
+                return retry.json();
+            }
+            throw Object.assign(new Error('Session expired'), { status: 401 });
+        }
 
         if (!response.ok) {
             const err = await response.json().catch(() => ({}));
@@ -560,6 +588,9 @@ export async function upload(path, data) {
 
         return response.json();
     } else {
+        const accessToken = await getValidAccessToken();
+        if (!accessToken) throw new Error('Not connected to Google Drive');
+
         const metadata = {
             name: fileName,
             parents: [parentId]
@@ -571,14 +602,38 @@ export async function upload(path, data) {
             `--${boundary}\r\nContent-Type: application/octet-stream\r\n\r\n${body}\r\n` +
             `--${boundary}--`;
 
-        const response = await apiRequest(
+        const response = await safeUploadFetch(
             `${UPLOAD_BASE}/files?uploadType=multipart&fields=id`,
             {
                 method: 'POST',
-                headers: { 'Content-Type': `multipart/related; boundary=${boundary}` },
+                headers: {
+                    'Authorization': `Bearer ${accessToken}`,
+                    'Content-Type': `multipart/related; boundary=${boundary}`
+                },
                 body: multipartBody
             }
         );
+
+        if (response.status === 401) {
+            const tokens = await getTokens();
+            if (tokens?.refresh_token) {
+                const refreshed = await refreshAccessToken(tokens.refresh_token);
+                const retry = await safeUploadFetch(
+                    `${UPLOAD_BASE}/files?uploadType=multipart&fields=id`,
+                    {
+                        method: 'POST',
+                        headers: {
+                            'Authorization': `Bearer ${refreshed.access_token}`,
+                            'Content-Type': `multipart/related; boundary=${boundary}`
+                        },
+                        body: multipartBody
+                    }
+                );
+                if (!retry.ok) throw new Error(`Upload failed ${retry.status}`);
+                return retry.json();
+            }
+            throw Object.assign(new Error('Session expired'), { status: 401 });
+        }
 
         if (!response.ok) {
             const err = await response.json().catch(() => ({}));
