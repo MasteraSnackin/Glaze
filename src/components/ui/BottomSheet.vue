@@ -244,24 +244,26 @@ onBeforeUnmount(() => {
                      :style="!sidebarMode && isDragging ? { transform: `translateY(${currentDragY}px)` } : ''"
                      :class="{ 'is-dragging': isDragging, 'keyboard-open': isLocalKeyboardOpen, 'is-solid': props.isSolid || bottomSheetState.isSolid, 'is-sidebar': sidebarMode }">
                 
-                <div v-if="!sidebarMode" class="sheet-handle-bar"
-                     @touchstart="onHandleTouchStart"
-                     @touchmove.prevent="onHandleTouchMove"
-                     @touchend="onHandleTouchEnd"
-                ></div>
+                <div class="sheet-header-area">
+                    <div v-if="!sidebarMode" class="sheet-handle-bar"
+                         @touchstart="onHandleTouchStart"
+                         @touchmove.prevent="onHandleTouchMove"
+                         @touchend="onHandleTouchEnd"
+                    ></div>
 
-                <div class="sheet-header" v-if="title || headerAction">
-                    <div class="sheet-title">
-                        <div v-if="sidebarMode" class="sheet-back-btn" @click="close">
-                            <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+                    <div class="sheet-header" v-if="title || headerAction">
+                        <div class="sheet-title">
+                            <div v-if="sidebarMode" class="sheet-back-btn" @click="close">
+                                <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+                            </div>
+                            <div class="sc-header-title">{{ title }}</div>
+                            <HelpTip v-if="helpTip" :term="helpTip" />
                         </div>
-                        <div class="sc-header-title">{{ title }}</div>
-                        <HelpTip v-if="helpTip" :term="helpTip" />
+                        <div class="sheet-action-btn" v-if="headerAction" @click="headerAction.onClick" v-html="headerAction.icon"></div>
                     </div>
-                    <div class="sheet-action-btn" v-if="headerAction" @click="headerAction.onClick" v-html="headerAction.icon"></div>
                 </div>
                 
-                <div class="sheet-scroll-container">
+                <div class="sheet-scroll-container" :class="{ 'has-header': title || headerAction }">
                     <!-- Custom Content (HTML) -->
                     <div v-if="typeof content === 'string'" class="sheet-custom-content" v-html="content"></div>
                     <div v-else-if="content" class="sheet-custom-content" ref="domContent"></div>
@@ -448,6 +450,51 @@ onBeforeUnmount(() => {
     box-shadow: 0 -5px 15px rgba(0,0,0,0.1);
     display: flex;
     flex-direction: column;
+    position: relative;
+}
+
+.sheet-header-area {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    flex-shrink: 0;
+    touch-action: none;
+    z-index: 10;
+    padding-bottom: 12px;
+    pointer-events: none;
+}
+
+.sheet-header-area::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(to bottom, 
+        rgba(var(--ui-bg-rgb), 0.85) 0%, 
+        rgba(var(--ui-bg-rgb), 0) 100%
+    );
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    mask-image: linear-gradient(to bottom, 
+        black 0%, 
+        black 40%, 
+        transparent 100%
+    );
+    -webkit-mask-image: linear-gradient(to bottom, 
+        black 0%, 
+        black 40%, 
+        transparent 100%
+    );
+    z-index: -1;
+    border-top-left-radius: 20px;
+    border-top-right-radius: 20px;
+}
+
+.sheet-header-area > * {
+    pointer-events: auto;
 }
 
 .sheet-handle-bar {
@@ -474,6 +521,35 @@ onBeforeUnmount(() => {
     max-height: 70vh;
     width: 100%;
     overscroll-behavior: contain;
+    padding-top: 24px;
+}
+
+.sheet-scroll-container::-webkit-scrollbar-track {
+    margin-top: 24px;
+}
+
+.sheet-scroll-container.has-header {
+    padding-top: 72px;
+}
+
+.sheet-scroll-container.has-header::-webkit-scrollbar-track {
+    margin-top: 72px;
+}
+
+.bottom-sheet-content.is-sidebar .sheet-scroll-container {
+    padding-top: 0;
+}
+
+.bottom-sheet-content.is-sidebar .sheet-scroll-container::-webkit-scrollbar-track {
+    margin-top: 0;
+}
+
+.bottom-sheet-content.is-sidebar .sheet-scroll-container.has-header {
+    padding-top: 48px;
+}
+
+.bottom-sheet-content.is-sidebar .sheet-scroll-container.has-header::-webkit-scrollbar-track {
+    margin-top: 48px;
 }
 
 .sheet-header {
