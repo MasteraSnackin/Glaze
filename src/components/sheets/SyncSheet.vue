@@ -43,12 +43,16 @@ const localSyncStatus = ref('');
 const syncResult = ref(null);
 const syncIncludeApiKeys = ref(isSyncIncludingApiKeys());
 const {
+    gdriveFolderId,
     gdriveFolderStatus,
     isPickingFolder,
     isCreatingFolder,
     pickerError,
+    folderIdInput,
+    isNativePlatform,
     checkGdriveFolder,
     selectExistingFolder,
+    linkFolderById,
     createNewFolder,
     resetFolderStatus
 } = useGdriveFolderPicker();
@@ -378,6 +382,11 @@ const open = async () => {
 };
 const close = () => sheet.value?.close();
 
+const copyFolderId = () => {
+    if (!gdriveFolderId.value) return;
+    navigator.clipboard.writeText(gdriveFolderId.value).catch(() => {});
+};
+
 defineExpose({ open, close });
 
 onMounted(async () => {
@@ -460,6 +469,14 @@ onMounted(async () => {
 </div>
                     </div>
 
+                    <div v-if="syncProvider === 'gdrive' && gdriveFolderId" class="sync-folder-id-row">
+                        <span class="sync-folder-id-label">{{ t('sync_gdrive_folder_id') || 'Folder ID' }}</span>
+                        <code class="sync-folder-id-value">{{ gdriveFolderId }}</code>
+                        <button class="sync-copy-btn" @click="copyFolderId" :title="t('sync_copy') || 'Copy'">
+                            <svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>
+                        </button>
+                    </div>
+
                     <button v-if="syncConflicts.length > 0" class="sync-resolve-btn" @click="openConflictSheet">
                         <svg viewBox="0 0 24 24"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
                         <span>{{ syncConflicts.length }} {{ t('sync_conflicts') || 'conflicts' }} — {{ t('sync_resolve') || 'Resolve' }}</span>
@@ -509,7 +526,7 @@ onMounted(async () => {
                         {{ t('sync_gdrive_folder') || 'Glaze Folder' }}
                     </div>
                     <div class="bs-hint">
-                        {{ t('sync_gdrive_folder_not_found') || 'No Glaze folder found in your Google Drive. Create a new one or select an existing folder.' }}
+                        {{ t('sync_gdrive_folder_not_found') || 'No Glaze folder found in your Google Drive. Create a new one or link an existing folder.' }}
                     </div>
                     <div v-if="pickerError" class="bs-hint" style="color: var(--text-secondary, #ff9500);">
                         {{ pickerError }}
@@ -519,11 +536,34 @@ onMounted(async () => {
                         <span v-if="isCreatingFolder">{{ t('sync_creating') || 'Creating...' }}</span>
                         <span v-else>{{ t('sync_gdrive_create_folder') || 'Create New Folder' }}</span>
                     </button>
-                    <button class="bs-btn bs-secondary-btn" @click="selectExistingFolder" :disabled="isCreatingFolder || isPickingFolder">
-                        <svg viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
-                        <span v-if="isPickingFolder">{{ t('sync_selecting') || 'Selecting...' }}</span>
-                        <span v-else>{{ t('sync_gdrive_select_folder') || 'Select Existing Folder' }}</span>
-                    </button>
+                    <template v-if="!isNativePlatform">
+                        <button class="bs-btn bs-secondary-btn" @click="selectExistingFolder" :disabled="isCreatingFolder || isPickingFolder">
+                            <svg viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+                            <span v-if="isPickingFolder">{{ t('sync_selecting') || 'Selecting...' }}</span>
+                            <span v-else>{{ t('sync_gdrive_select_folder') || 'Select Existing Folder' }}</span>
+                        </button>
+                    </template>
+                    <div class="bs-section" style="margin-top: 8px;">
+                        <div class="bs-section-title" style="font-size: 0.85em;">
+                            {{ t('sync_gdrive_link_by_id') || 'Or link by folder ID' }}
+                        </div>
+                        <div class="bs-hint" style="font-size: 0.8em;">
+                            {{ t('sync_gdrive_link_hint') || 'Open the folder in Google Drive, copy the URL or ID from the address bar, and paste it here.' }}
+                        </div>
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <input
+                                v-model="folderIdInput"
+                                type="text"
+                                class="bs-input"
+                                :placeholder="t('sync_gdrive_folder_id_placeholder') || 'Folder ID or URL'"
+                                style="flex: 1; min-width: 0; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border-color, #444); background: var(--bg-tertiary, #222); color: var(--text-primary, #eee);"
+                                @keydown.enter="linkFolderById"
+                            />
+                            <button class="bs-btn bs-secondary-btn" @click="linkFolderById" :disabled="isCreatingFolder || !folderIdInput.trim()" style="padding: 6px 14px;">
+                                {{ t('sync_gdrive_link') || 'Link' }}
+                            </button>
+                        </div>
+                    </div>
                 </div>
                 <div v-else-if="syncProvider === 'gdrive' && gdriveFolderStatus === 'checking'" class="bs-section">
                     <div class="bs-hint">
@@ -855,6 +895,45 @@ onMounted(async () => {
 .sync-status-text {
     font-size: 13px;
     color: var(--text-gray, #8e8e93);
+}
+
+.sync-folder-id-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    padding: 6px 10px;
+    background: var(--bg-tertiary, #222);
+    border-radius: 8px;
+    font-size: 12px;
+}
+.sync-folder-id-label {
+    color: var(--text-gray, #8e8e93);
+    white-space: nowrap;
+}
+.sync-folder-id-value {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: monospace;
+    font-size: 11px;
+    color: var(--text-primary, #eee);
+}
+.sync-copy-btn {
+    background: none;
+    border: none;
+    color: var(--text-gray, #8e8e93);
+    cursor: pointer;
+    padding: 2px;
+    display: flex;
+    align-items: center;
+    border-radius: 4px;
+    transition: color 0.2s;
+}
+.sync-copy-btn:hover {
+    color: var(--text-primary, #eee);
 }
 
 .sync-resolve-btn {

@@ -499,6 +499,32 @@ export async function pickFolder() {
 
 export { getGlazeFolderId };
 
+export function extractFolderId(input) {
+    if (!input) return null;
+    input = input.trim();
+    const driveUrlMatch = input.match(/\/folders\/([a-zA-Z0-9_-]+)/);
+    if (driveUrlMatch) return driveUrlMatch[1];
+    const openUrlMatch = input.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+    if (openUrlMatch) return openUrlMatch[1];
+    if (/^[a-zA-Z0-9_-]{10,}$/.test(input)) return input;
+    return null;
+}
+
+export async function verifyFolderId(folderId) {
+    try {
+        const response = await apiRequest(
+            `${API_BASE}/files/${encodeURIComponent(folderId)}?fields=id,name,mimeType,trashed&supportsAllDrives=true`
+        );
+        if (!response.ok) return null;
+        const data = await response.json();
+        if (data.trashed) return null;
+        if (data.mimeType !== 'application/vnd.google-apps.folder') return null;
+        return data;
+    } catch {
+        return null;
+    }
+}
+
 async function getGlazeFolderId(invalidate = false) {
     if (invalidate) {
         folderIdCache = null;
