@@ -338,6 +338,13 @@ const handleBack = () => {
         return;
     }
 
+    // If header is in editor mode (e.g. FullScreenEditor overlay), only call onBack
+    // to close the overlay — do NOT fire global back navigation.
+    if (state.mode === 'editor' && state.onBack) {
+        state.onBack();
+        return;
+    }
+
     // Settings screens own their back behavior through explicit header state.
     // Let that run before broadcasting global back events from unrelated views.
     if (state.onBack && (props.currentView === 'view-settings' || props.currentView === 'view-theme-settings')) {
