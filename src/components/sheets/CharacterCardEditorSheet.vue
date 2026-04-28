@@ -6,6 +6,8 @@ import Editor from '@/components/editors/GenericEditor.vue';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { db } from '@/utils/db.js';
+import { publishAppEvent } from '@/core/events/eventHub.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
 import HelpTip from '@/components/ui/HelpTip.vue';
 
 const sheet = ref(null);
@@ -58,7 +60,7 @@ async function onSave(newVal) {
         delete charToSave.summary;
 
         await db.saveCharacter(charToSave);
-        window.dispatchEvent(new CustomEvent('character-updated', { detail: { character: charToSave } }));
+        publishAppEvent(APP_EVENTS.domain.character.updated, { character: charToSave });
     }
 }
 

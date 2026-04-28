@@ -1275,11 +1275,23 @@ const onGenerationEnded = (e) => {
     }
 };
 
-const onCharacterUpdated = (e) => {
-    if (activeChatChar && activeChatChar.id === e.detail.character.id) {
-        activeChatChar = e.detail.character;
-        activeChar.value = e.detail.character;
+const onCharacterUpdated = async (e) => {
+    if (!activeChatChar) return;
+    const updatedChar = e?.detail?.character;
+    if (updatedChar && updatedChar.id === activeChatChar.id) {
+        activeChatChar = updatedChar;
+        activeChar.value = updatedChar;
         publishAppEvent(APP_EVENTS.ui.header.updateAvatar, activeChatChar);
+    } else {
+        const charId = activeChatChar.id;
+        const allChars = await db.getAll('characters');
+        const freshChar = allChars.find(c => String(c.id) === String(charId));
+        if (freshChar) {
+            freshChar.sessionId = activeChatChar.sessionId;
+            activeChatChar = freshChar;
+            activeChar.value = freshChar;
+            publishAppEvent(APP_EVENTS.ui.header.updateAvatar, activeChatChar);
+        }
     }
 };
 

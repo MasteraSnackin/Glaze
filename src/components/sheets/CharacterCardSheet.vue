@@ -171,7 +171,7 @@ async function openCharacterEditor() {
     if (index !== -1) {
         closeBottomSheet();
         close();
-        window.dispatchEvent(new CustomEvent('open-character-editor', { detail: { index } }));
+        publishAppEvent(APP_EVENTS.nav.openCharacterEditor, { index });
     }
 }
 
@@ -204,6 +204,7 @@ async function toggleFavorite() {
     if (!char?.id) return;
     const updated = { ...char, fav: !char.fav };
     await db.saveCharacter(updated, -1);
+    publishAppEvent(APP_EVENTS.domain.character.updated, { character: updated });
     if (isControlled.value) {
         emit('update:visible', true);
     } else {
