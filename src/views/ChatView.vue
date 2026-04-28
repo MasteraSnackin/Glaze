@@ -1066,10 +1066,11 @@ async function handleMemoryFlushSave() {
     }
 }
 
-function closeChat() {
-    updateAppColors(true); // Revert colors
+async function closeChat() {
+    updateAppColors(true);
+    let savePromise = null;
     if (activeChatChar && messagesContainer.value) {
-        asyncSaveCurrentSessionState();
+        savePromise = asyncSaveCurrentSessionState();
         messagesContainer.value.removeEventListener('scroll', onScroll);
     }
     
@@ -1079,6 +1080,11 @@ function closeChat() {
     }
 
     publishAppEvent(APP_EVENTS.ui.header.reset);
+
+    if (savePromise) {
+        try { await savePromise; } catch (_e) {}
+    }
+
     activeChatChar = null;
     activeChar.value = null;
     setTrackedContext(null, null);

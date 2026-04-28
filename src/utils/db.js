@@ -532,27 +532,29 @@ export const db = {
         }
     },
     patchChatData: async (charId, patchFn) => {
-        const data = await db.getChat(charId);
-        if (!data) return;
-        patchFn(data);
-        const normalized = normalizeChatData(data);
-        const snapshot = toPlain(normalized);
-        try {
-            await queueDbWrite(() => db.set(`gz_chat_${charId}`, snapshot));
-            try { localStorage.removeItem(`gz_fb_chat_${charId}`); } catch (_e) {}
-        } catch (err) {
-            console.error('[DB] Chat patch failed, saving to localStorage fallback:', err);
-            showToast('Chat write failed, backup saved locally', 3000);
+        return queueDbWrite(async () => {
+            const data = await db.getChat(charId);
+            if (!data) return;
+            patchFn(data);
+            const normalized = normalizeChatData(data);
+            const snapshot = toPlain(normalized);
             try {
-                localStorage.setItem(`gz_fb_chat_${charId}`, JSON.stringify({
-                    ...snapshot,
-                    _fb: Date.now()
-                }));
-            } catch (fbErr) {
-                console.error('[DB] Fallback save also failed:', fbErr);
+                await db.set(`gz_chat_${charId}`, snapshot);
+                try { localStorage.removeItem(`gz_fb_chat_${charId}`); } catch (_e) {}
+            } catch (err) {
+                console.error('[DB] Chat patch failed, saving to localStorage fallback:', err);
+                showToast('Chat write failed, backup saved locally', 3000);
+                try {
+                    localStorage.setItem(`gz_fb_chat_${charId}`, JSON.stringify({
+                        ...snapshot,
+                        _fb: Date.now()
+                    }));
+                } catch (fbErr) {
+                    console.error('[DB] Fallback save also failed:', fbErr);
+                }
+                throw err;
             }
-            throw err;
-        }
+        });
     },
     createSession: async (charId) => {
         let data = await db.get(`gz_chat_${charId}`);

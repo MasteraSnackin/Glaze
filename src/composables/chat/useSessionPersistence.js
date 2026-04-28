@@ -46,7 +46,7 @@ export function useSessionPersistence({
             const currentAnchor = getScrollAnchor();
             const messagesSnapshot = currentMessages.value;
 
-            db.patchChatData(charContext.id, (data) => {
+            const savePromise = db.patchChatData(charContext.id, (data) => {
                 data.lastScrollAnchor = currentAnchor;
                 data.draft = inputValueDraft;
 
@@ -95,7 +95,8 @@ export function useSessionPersistence({
                     data.summaries[sessionId] = charContext.summary;
                 }
             });
-            clearCrashBuffer(charContext.id, sessionId);
+            savePromise.then(() => clearCrashBuffer(charContext.id, sessionId)).catch(() => {});
+            return savePromise;
         }
     }
 
@@ -125,10 +126,9 @@ export function useSessionPersistence({
             const charId = activeChatChar.id;
             const sessionId = activeChatChar.sessionId;
             const messageSnapshot = currentMessages.value;
-            getChatData(activeChatChar.id).then(data => {
-                if (data && sessionId && data.sessions?.[sessionId]) {
+            db.patchChatData(charId, (data) => {
+                if (sessionId && data.sessions?.[sessionId]) {
                     data.sessions[sessionId] = messageSnapshot;
-                    db.saveChat(charId, data);
                 }
             });
         }
@@ -144,7 +144,7 @@ export function useSessionPersistence({
             const draft = inputValue.value;
             const authorsNote = activeChatChar.authors_note;
             const summary = activeChatChar.summary;
-            db.patchChatData(charId, (data) => {
+            const savePromise = db.patchChatData(charId, (data) => {
                 if (sessionId) {
                     data.sessions[sessionId] = JSON.parse(JSON.stringify(messagesSnapshot));
                 }
@@ -158,6 +158,7 @@ export function useSessionPersistence({
                     data.summaries[sessionId] = summary;
                 }
             });
+            savePromise.then(() => clearCrashBuffer(charId, sessionId)).catch(() => {});
         } else if (document.visibilityState === 'visible' && activeChatChar) {
             clearMessageNotifications(activeChatChar.id);
         }
@@ -168,69 +169,54 @@ export function useSessionPersistence({
         if (activeChatChar) {
             writeCrashBuffer(activeChatChar);
         }
-        asyncSaveCurrentSessionState();
     }
 
     watch(activeChar, async (newVal) => {
         if (!newVal) return;
 
-        const chatData = await getChatData(newVal.id);
-        if (!chatData) return;
-        const sessionId = chatData.currentId;
         let changed = false;
 
         if (newVal.summary !== undefined) {
-            if (!chatData.summaries) chatData.summaries = {};
-            let currentSum = chatData.summaries[sessionId];
-            if (typeof currentSum === 'string') {
-                currentSum = { content: currentSum, depth: 4, role: 'system', insertion_mode: 'relative', prefix: 'Summary: ' };
-            } else if (!currentSum) {
-                currentSum = { content: '', depth: 4, role: 'system', insertion_mode: 'relative', prefix: 'Summary: ' };
-            }
-            if (currentSum.content !== newVal.summary) {
-                chatData.summaries[sessionId] = { ...currentSum, content: newVal.summary };
-                changed = true;
-            }
+            changed = true;
         }
 
         if (newVal.authors_note !== undefined) {
-            if (!chatData.authorsNotes) chatData.authorsNotes = {};
-            const storedAn = chatData.authorsNotes[sessionId];
-            const currentAN = typeof storedAn === 'string' ? storedAn : storedAn?.content || '';
-            if (currentAN !== newVal.authors_note) {
-                chatData.authorsNotes[sessionId] = newVal.authors_note;
-                changed = true;
-            }
+            changed = true;
         }
 
-        if (changed) await db.saveChat(newVal.id, chatData);
+        if (changed) {
+            const summary = newVal.summary;
+            const authorsNote = newVal.authors_note;
+            await db.patchChatData(newVal.id, (data) => {
+                const sessionId = data.currentId;
+                if (summary !== undefined) {
+                    if (!data.summaries) data.summaries = {};
+                    let currentSum = data.summaries[sessionId];
+                    if (typeof currentSum === 'string') {
+                        currentSum = { content: currentSum, depth: 4, role: 'system', insertion_mode: 'relative', prefix: 'Summary: ' };
+                    } else if (!currentSum) {
+                        currentSum = { content: '', depth: 4, role: 'system', insertion_mode: 'relative', prefix: 'Summary: ' };
+                    }
+                    if (currentSum.content !== summary) {
+                        data.summaries[sessionId] = { ...currentSum, content: summary };
+                    }
+                }
+                if (authorsNote !== undefined) {
+                    if (!data.authorsNotes) data.authorsNotes = {};
+                    const storedAn = data.authorsNotes[sessionId];
+                    const currentAN = typeof storedAn === 'string' ? storedAn : storedAn?.content || '';
+                    if (currentAN !== authorsNote) {
+                        data.authorsNotes[sessionId] = authorsNote;
+                    }
+                }
+            });
+        }
     }, { deep: true });
 
     onBeforeUnmount(() => {
         const activeChatChar = getActiveChatChar();
         if (activeChatChar && messagesContainer.value) {
-            const charId = activeChatChar.id;
-            const sessionId = activeChatChar.sessionId;
-            const currentAnchor = getScrollAnchor();
-            const draft = inputValue.value;
-            const messagesSnapshot = currentMessages.value;
-            const authorsNote = activeChatChar.authors_note;
-            const summary = activeChatChar.summary;
-            db.patchChatData(charId, (data) => {
-                data.lastScrollAnchor = currentAnchor;
-                data.draft = draft;
-                if (sessionId) {
-                    data.sessions[sessionId] = JSON.parse(JSON.stringify(messagesSnapshot));
-                }
-                if (authorsNote !== undefined) {
-                    if (!data.authorsNotes) data.authorsNotes = {};
-                    data.authorsNotes[sessionId] = authorsNote;
-                }
-                if (summary !== undefined) {
-                    if (!data.summaries) data.summaries = {};
-                    data.summaries[sessionId] = summary;
-                }
-            });
+            writeCrashBuffer(activeChatChar);
         }
     });
 
