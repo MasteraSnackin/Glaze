@@ -191,7 +191,7 @@ const {
     dragSrcIndex, addNewBlock, openCopyBlockPresetPicker, openCopyBlockPicker,
     stashActiveBlock, unstashBlock, openStashSheet,
     deleteActiveBlock, confirmDeleteStashedBlock,
-    onDragStart, onDragEnter, onDragEnd, onTouchStart, onTouchMove, onTouchEnd
+    onDragStart, onDragEnter, onDrop, onDragEnd, onTouchStart, onTouchMove, onTouchEnd
 } = useBlockManager({
     currentPreset, editingBlockId, isEditingBlock, activeEditBlock, stashedBlocks,
     getBlockIcon, getPresetTokens, getPresetWeight, comparePresetEntries, closeBlockEditor
