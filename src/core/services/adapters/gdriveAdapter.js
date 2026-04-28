@@ -422,21 +422,58 @@ async function folderHasContent(folderId) {
     return (data.files?.length || 0) > 0;
 }
 
-async function getGlazeFolderId() {
-    if (folderIdCache) return folderIdCache;
+export function invalidateGlazeFolderCache() {
+    folderIdCache = null;
+    _folderIdCache.clear();
+}
+
+async function getGlazeFolderId(invalidate = false) {
+    if (invalidate) {
+        folderIdCache = null;
+        _folderIdCache.clear();
+    }
+    if (folderIdCache) {
+        const check = await apiRequest(`${API_BASE}/files/${folderIdCache}?fields=id&supportsAllDrives=false`);
+        if (check.ok) return folderIdCache;
+        folderIdCache = null;
+        _folderIdCache.clear();
+    }
     const folders = await findFoldersByName(FOLDER_NAME, null);
     if (folders.length === 0) return null;
     if (folders.length === 1) {
         folderIdCache = folders[0].id;
         return folderIdCache;
     }
+    let bestFolder = null;
     for (const folder of folders) {
-        if (await folderHasContent(folder.id)) {
-            folderIdCache = folder.id;
-            return folderIdCache;
+        const manifestFile = await findFileByName('manifest.json', folder.id);
+        if (manifestFile) {
+            bestFolder = folder;
+            break;
         }
     }
-    folderIdCache = folders[0].id;
+    if (!bestFolder) {
+        for (const folder of folders) {
+            if (await folderHasContent(folder.id)) {
+                bestFolder = folder;
+                break;
+            }
+        }
+    }
+    if (!bestFolder) {
+        bestFolder = folders[0];
+    }
+    folderIdCache = bestFolder.id;
+    for (const folder of folders) {
+        if (folder.id !== bestFolder.id) {
+            const hasContent = await folderHasContent(folder.id);
+            if (!hasContent) {
+                try {
+                    await apiRequest(`${API_BASE}/files/${folder.id}`, { method: 'DELETE' });
+                } catch {}
+            }
+        }
+    }
     return folderIdCache;
 }
 
@@ -470,6 +507,8 @@ async function getOrCreateFolder(name, parentId) {
     return createFolder(name, parentId);
 }
 
+const _folderIdCache = new Map();
+
 export async function ensureFolder(path) {
     const parts = path.split('/').filter(Boolean);
     let parentId = null;
@@ -479,6 +518,7 @@ export async function ensureFolder(path) {
         if (!parentId) {
             parentId = await createFolder(FOLDER_NAME, null);
             folderIdCache = parentId;
+            _folderIdCache.clear();
         }
         for (let i = 1; i < parts.length; i++) {
             parentId = await getOrCreateFolder(parts[i], parentId);
@@ -495,8 +535,6 @@ export async function ensureFolder(path) {
 
     return parentId;
 }
-
-const _folderIdCache = new Map();
 
 async function resolvePathToParent(path) {
     const parts = path.replace(/^\//, '').split('/');
@@ -644,11 +682,17 @@ export async function upload(path, data) {
     }
 }
 
-export async function download(path) {
+export async function download(path, _retry = false) {
     const { parentId, fileName } = await resolvePathToParent(path);
     const file = await findFileByName(fileName, parentId);
 
-    if (!file) return null;
+    if (!file) {
+        if (!_retry && parentId === folderIdCache) {
+            invalidateGlazeFolderCache();
+            return download(path, true);
+        }
+        return null;
+    }
 
     const response = await apiRequest(
         `${API_BASE}/files/${file.id}?alt=media`
@@ -715,6 +759,7 @@ export async function deleteFolder(path) {
             throw new Error(`Delete folder failed ${response.status}`);
         }
         folderIdCache = null;
+        _folderIdCache.clear();
         return true;
     }
     const parts = path.replace(/^\//, '').split('/').filter(Boolean);
