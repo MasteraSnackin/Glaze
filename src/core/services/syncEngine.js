@@ -531,9 +531,14 @@ async function pushManifestV2(adapter, key, onProgress) {
 }
 
 async function pullManifestV2(adapter, key, onProgress, onConflict) {
-    const cloudManifest = await readCloudManifestV2(adapter);
+    let cloudManifest;
+    try {
+        cloudManifest = await readCloudManifestV2(adapter);
+    } catch (e) {
+        throw new Error(`Cannot access cloud data: ${e.message}`);
+    }
     if (!cloudManifest) {
-        throw new Error('Cloud manifest v2 not found');
+        throw new Error(`Cloud manifest not found. No sync data was found in the cloud folder. If this is a new device, try pushing your local data first.`);
     }
 
     const localManifest = await buildLocalManifestV2();
@@ -631,8 +636,11 @@ async function readManifest(adapter) {
         if (result) {
             return JSON.parse(result.data);
         }
-    } catch {}
-    return null;
+        return null;
+    } catch (e) {
+        console.error('[syncEngine] readManifest failed:', e);
+        throw new Error(`Failed to read cloud manifest: ${e.message}`);
+    }
 }
 
 async function listAllFiles(adapter) {

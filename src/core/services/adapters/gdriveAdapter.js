@@ -386,7 +386,21 @@ async function findFoldersByName(name, parentId) {
     }
 
     const response = await apiRequest(
-        `${API_BASE}/files?q=${encodeURIComponent(query)}&spaces=drive&fields=files(id,name)`
+        `${API_BASE}/files?q=${encodeURIComponent(query)}&spaces=drive&fields=files(id,name)&includeItemsFromAllDrives=true&supportsAllDrives=true`
+    );
+
+    if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.error?.message || `Failed to search for folder '${name}' (${response.status})`);
+    }
+    const data = await response.json();
+    return data.files || [];
+}
+
+async function findFoldersByNameBroad(name) {
+    const query = `name='${name}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+    const response = await apiRequest(
+        `${API_BASE}/files?q=${encodeURIComponent(query)}&spaces=drive&fields=files(id,name)&includeItemsFromAllDrives=true&supportsAllDrives=true`
     );
 
     if (!response.ok) {
@@ -406,7 +420,7 @@ async function findFolderByName(name, parentId) {
     }
 
     const response = await apiRequest(
-        `${API_BASE}/files?q=${encodeURIComponent(query)}&spaces=drive&fields=files(id,name)`
+        `${API_BASE}/files?q=${encodeURIComponent(query)}&spaces=drive&fields=files(id,name)&includeItemsFromAllDrives=true&supportsAllDrives=true`
     );
 
     if (!response.ok) {
@@ -420,7 +434,7 @@ async function findFolderByName(name, parentId) {
 async function folderHasContent(folderId) {
     const query = `'${folderId}' in parents and trashed=false`;
     const response = await apiRequest(
-        `${API_BASE}/files?q=${encodeURIComponent(query)}&spaces=drive&fields=files(id)&pageSize=1`
+        `${API_BASE}/files?q=${encodeURIComponent(query)}&spaces=drive&fields=files(id)&pageSize=1&includeItemsFromAllDrives=true&supportsAllDrives=true`
     );
     if (!response.ok) return false;
     const data = await response.json();
@@ -438,7 +452,7 @@ async function getGlazeFolderId(invalidate = false) {
         _folderIdCache.clear();
     }
     if (folderIdCache) {
-        const check = await apiRequest(`${API_BASE}/files/${folderIdCache}?fields=id,trashed&supportsAllDrives=false`);
+        const check = await apiRequest(`${API_BASE}/files/${folderIdCache}?fields=id,trashed&supportsAllDrives=true`);
         if (check.ok) {
             const data = await check.json();
             if (!data.trashed) return folderIdCache;
@@ -494,7 +508,7 @@ async function createFolder(name, parentId) {
         body.parents = [parentId];
     }
 
-    const response = await apiRequest(`${API_BASE}/files?fields=id`, {
+    const response = await apiRequest(`${API_BASE}/files?fields=id&supportsAllDrives=true`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
@@ -576,10 +590,14 @@ async function findFileByName(name, parentId) {
     if (!parentId) return null;
     const query = `name='${name}' and '${parentId}' in parents and trashed=false`;
     const response = await apiRequest(
-        `${API_BASE}/files?q=${encodeURIComponent(query)}&spaces=drive&fields=files(id,name,modifiedTime)`
+        `${API_BASE}/files?q=${encodeURIComponent(query)}&spaces=drive&fields=files(id,name,modifiedTime)&includeItemsFromAllDrives=true&supportsAllDrives=true`
     );
 
-    if (!response.ok) return null;
+    if (!response.ok) {
+        if (response.status === 404) return null;
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.error?.message || `Failed to search for file '${name}' (${response.status})`);
+    }
     const data = await response.json();
     return data.files?.[0] || null;
 }
@@ -595,7 +613,7 @@ export async function upload(path, data) {
         if (!accessToken) throw new Error('Not connected to Google Drive');
 
         const response = await safeUploadFetch(
-            `${UPLOAD_BASE}/files/${existingFile.id}?uploadType=media`,
+            `${UPLOAD_BASE}/files/${existingFile.id}?uploadType=media&supportsAllDrives=true`,
             {
                 method: 'PATCH',
                 headers: {
@@ -611,7 +629,7 @@ export async function upload(path, data) {
             if (tokens?.refresh_token) {
                 const refreshed = await refreshAccessToken(tokens.refresh_token);
                 const retry = await safeUploadFetch(
-                    `${UPLOAD_BASE}/files/${existingFile.id}?uploadType=media`,
+                    `${UPLOAD_BASE}/files/${existingFile.id}?uploadType=media&supportsAllDrives=true`,
                     {
                         method: 'PATCH',
                         headers: {
@@ -665,7 +683,7 @@ export async function upload(path, data) {
             if (tokens?.refresh_token) {
                 const refreshed = await refreshAccessToken(tokens.refresh_token);
                 const retry = await safeUploadFetch(
-                    `${UPLOAD_BASE}/files?uploadType=multipart&fields=id`,
+`${UPLOAD_BASE}/files?uploadType=multipart&fields=id&supportsAllDrives=true`,
                     {
                         method: 'POST',
                         headers: {
@@ -703,7 +721,7 @@ export async function download(path, _retry = false) {
     }
 
     const response = await apiRequest(
-        `${API_BASE}/files/${file.id}?alt=media`
+        `${API_BASE}/files/${file.id}?alt=media&supportsAllDrives=true`
     );
 
     if (!response.ok) {
@@ -736,7 +754,7 @@ export async function listFolder(path) {
 
     const query = `'${parentId}' in parents and trashed=false`;
     const response = await apiRequest(
-        `${API_BASE}/files?q=${encodeURIComponent(query)}&spaces=drive&fields=files(id,name,mimeType,modifiedTime)&pageSize=1000`
+        `${API_BASE}/files?q=${encodeURIComponent(query)}&spaces=drive&fields=files(id,name,mimeType,modifiedTime)&pageSize=1000&includeItemsFromAllDrives=true&supportsAllDrives=true`
     );
 
     if (!response.ok) return { entries: [] };
@@ -758,11 +776,27 @@ export async function listFolderContinue() {
     return { entries: [], has_more: false };
 }
 
+const GLAZE_PATH_PREFIX = '/Glaze';
+
+function assertGlazePath(path) {
+    if (!path || !path.startsWith(GLAZE_PATH_PREFIX)) {
+        throw new Error(`Refusing to delete outside Glaze folder: ${path}`);
+    }
+}
+
 export async function deleteFolder(path) {
+    assertGlazePath(path);
     if (path === '/Glaze' || path === `/${FOLDER_NAME}`) {
         const folderId = await getGlazeFolderId();
         if (!folderId) return false;
-        const response = await apiRequest(`${API_BASE}/files/${folderId}`, { method: 'DELETE' });
+        const verifyResponse = await apiRequest(`${API_BASE}/files/${folderId}?fields=name&supportsAllDrives=true`);
+        if (verifyResponse.ok) {
+            const verifyData = await verifyResponse.json();
+            if (verifyData.name !== FOLDER_NAME) {
+                throw new Error(`Safety check failed: folder ID ${folderId} is named "${verifyData.name}", expected "${FOLDER_NAME}". Aborting delete.`);
+            }
+        }
+        const response = await apiRequest(`${API_BASE}/files/${folderId}?supportsAllDrives=true`, { method: 'DELETE' });
         if (!response.ok && response.status !== 204) {
             throw new Error(`Delete folder failed ${response.status}`);
         }
@@ -776,7 +810,7 @@ export async function deleteFolder(path) {
     const { parentId } = await resolvePathToParent(parentPath);
     const folderId = await findFolderByName(folderName, parentId);
     if (!folderId) return false;
-    const response = await apiRequest(`${API_BASE}/files/${folderId}`, { method: 'DELETE' });
+    const response = await apiRequest(`${API_BASE}/files/${folderId}?supportsAllDrives=true`, { method: 'DELETE' });
     if (!response.ok && response.status !== 204) {
         throw new Error(`Delete folder failed ${response.status}`);
     }
@@ -785,21 +819,24 @@ export async function deleteFolder(path) {
 
 export async function deleteFile(fileOrPath) {
     let fileId = null;
+    let resolvedPath = '';
 
     if (typeof fileOrPath === 'object' && fileOrPath?.id) {
         fileId = fileOrPath.id;
+        resolvedPath = fileOrPath?.path_display || fileOrPath?.path || '';
     } else {
-        const path = typeof fileOrPath === 'string'
+        resolvedPath = typeof fileOrPath === 'string'
             ? fileOrPath
             : (fileOrPath?.path_display || fileOrPath?.path || '');
-        const { parentId, fileName } = await resolvePathToParent(path);
+        assertGlazePath(resolvedPath);
+        const { parentId, fileName } = await resolvePathToParent(resolvedPath);
         const file = await findFileByName(fileName, parentId);
         if (!file) return null;
         fileId = file.id;
     }
 
     const response = await apiRequest(
-        `${API_BASE}/files/${fileId}`,
+        `${API_BASE}/files/${fileId}?supportsAllDrives=true`,
         { method: 'DELETE' }
     );
 
