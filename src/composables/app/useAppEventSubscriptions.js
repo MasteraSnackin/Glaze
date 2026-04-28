@@ -179,6 +179,23 @@ export function useAppEventSubscriptions({
         appEventUnsubs.push(subscribeAppEvent(APP_EVENTS.ui.header.reset, onHeaderReset));
         appEventUnsubs.push(subscribeAppEvent(APP_EVENTS.domain.sync.dataRefreshed, onSyncDataRefreshed));
 
+        appEventUnsubs.push(subscribeAppEvent(APP_EVENTS.domain.character.updated, (e) => {
+            const char = e?.detail?.character;
+            if (char && activeChatCharObj.value && String(char.id) === String(activeChatCharObj.value.id)) {
+                const sessionId = activeChatCharObj.value.sessionId;
+                activeChatCharObj.value = { ...char, sessionId };
+            } else if (!char && activeChatCharObj.value) {
+                const charId = activeChatCharObj.value.id;
+                db.getAll('characters').then(chars => {
+                    const fresh = chars.find(c => String(c.id) === String(charId));
+                    if (fresh) {
+                        const sessionId = activeChatCharObj.value.sessionId;
+                        activeChatCharObj.value = { ...fresh, sessionId };
+                    }
+                });
+            }
+        }));
+
         appEventUnsubs.push(subscribeAppEvent(APP_EVENTS.nav.openGlossary, handleGlossaryOpen));
         appEventUnsubs.push(subscribeAppEvent(APP_EVENTS.ui.glossary.toggle, handleGlossaryToggle));
         appEventUnsubs.push(subscribeAppEvent(APP_EVENTS.ui.glossary.headerUpdate, ({ detail }) => onGlossaryHeaderUpdate(detail)));

@@ -3,6 +3,8 @@ import { db, markSyncDeletedEntry } from '@/utils/db.js';
 import { addPersona, updatePersona, deletePersona, allPersonas } from '@/core/states/personaState.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import { translations } from '@/utils/i18n.js';
+import { publishAppEvent } from '@/core/events/eventHub.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 
 const t = (key) => translations[currentLang.value]?.[key] || key;
@@ -90,6 +92,7 @@ export function useEditorController({ currentView, currentChatSessionId, waitFor
         if (currentView.value === 'view-character-edit') {
             if (editingCharacter.value && editingCharacter.value.name && editingCharacter.value.name.trim() !== '') {
                 await db.saveCharacter(editingCharacter.value, editingCharacterIndex.value);
+                publishAppEvent(APP_EVENTS.domain.character.updated, { character: editingCharacter.value });
                 closeEditor();
             } else {
                 showBottomSheet({
@@ -134,8 +137,10 @@ export function useEditorController({ currentView, currentChatSessionId, waitFor
                 await db.saveCharacter(val, -1);
                 const chars = (await db.getAll('characters')) || [];
                 editingCharacterIndex.value = chars.length - 1;
+                publishAppEvent(APP_EVENTS.domain.character.updated, { character: val });
             } else {
                 await db.saveCharacter(val, editingCharacterIndex.value);
+                publishAppEvent(APP_EVENTS.domain.character.updated, { character: val });
             }
         } else if (currentView.value === 'view-persona-edit') {
             if (!val.name) return;
@@ -229,7 +234,7 @@ export function useEditorController({ currentView, currentChatSessionId, waitFor
 
                     comp.openChat(activeChatCharObj.value, () => {
                         currentView.value = chatPreviousView.value || 'view-dialogs';
-                    });
+                    }, isEditingChar);
 
                     if (shouldOpenPersonasOnReturn.value) {
                         shouldOpenPersonasOnReturn.value = false;
