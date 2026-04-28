@@ -1,18 +1,13 @@
 import { ref } from 'vue';
 
-/**
- * Universal drag and drop sort-on-drop mechanic.
- * 
- * @param {Object} options
- * @param {import('vue').Ref<Array>} [options.listRef] - Array ref to mutate natively on drop.
- * @param {Function} [options.getIndex] - Function resolving an argument (like ID) to the array index.
- * @param {Function} [options.onSwap] - Callback fired after swap (fromIdx, toIdx).
- * @param {string} [options.itemSelector='.dragging-item'] - CSS selector for the draggable container.
- */
+const LONG_PRESS_MS = 350;
+
 export function useDragDrop(options = {}) {
     const { listRef, onSwap, itemSelector = '.dragging-item' } = options;
     const dragIndex = ref(-1);
     const dropTargetIndex = ref(-1);
+
+    let longPressTimer = null;
 
     function resolveIndex(arg) {
         if (typeof arg === 'number') return arg;
@@ -27,7 +22,6 @@ export function useDragDrop(options = {}) {
         if (event.dataTransfer) {
             event.dataTransfer.effectAllowed = 'move';
             event.dataTransfer.dropEffect = 'move';
-            // Allow native ghost image to generate before setting dragging class
             setTimeout(() => {
                 const el = event.target.closest ? event.target.closest(itemSelector) : event.target;
                 if (el) el.classList.add('dragging');
@@ -61,15 +55,27 @@ export function useDragDrop(options = {}) {
     function onTouchStart(event, arg) {
         const index = resolveIndex(arg);
         if (index === -1) return;
-        dragIndex.value = index;
+        cancelLongPress();
+
         const card = event.target.closest(itemSelector);
-        if (card) card.classList.add('dragging');
-        document.body.style.overflow = 'hidden';
+
+        longPressTimer = setTimeout(() => {
+            longPressTimer = null;
+            dragIndex.value = index;
+            if (card) card.classList.add('dragging');
+            document.body.style.overflow = 'hidden';
+        }, LONG_PRESS_MS);
     }
 
     function onTouchMove(event) {
+        if (longPressTimer) {
+            cancelLongPress();
+            return;
+        }
+
         if (dragIndex.value === -1) return;
         event.preventDefault();
+
         const touch = event.touches[0];
         const target = document.elementFromPoint(touch.clientX, touch.clientY);
         const card = target?.closest(itemSelector);
@@ -91,6 +97,14 @@ export function useDragDrop(options = {}) {
         }
         document.body.style.overflow = '';
         clearDrag(event);
+        cancelLongPress();
+    }
+
+    function cancelLongPress() {
+        if (longPressTimer) {
+            clearTimeout(longPressTimer);
+            longPressTimer = null;
+        }
     }
 
     function executeSwap(from, to) {
@@ -111,7 +125,6 @@ export function useDragDrop(options = {}) {
             const card = event.target.closest(itemSelector);
             if (card) card.classList.remove('dragging');
         }
-        // Fallback cleanup
         document.querySelectorAll(itemSelector + '.dragging').forEach(el => el.classList.remove('dragging'));
     }
 
