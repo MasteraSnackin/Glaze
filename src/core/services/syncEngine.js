@@ -381,9 +381,9 @@ async function applyCloudEntry(adapter, entry, key) {
     } else if (entry.type === ENTITY_TYPES.PERSONA) {
         await db.put('personas', entity);
         await clearSyncDeletedEntry(entry.type, entry.id);
-    } else if (entry.type === ENTITY_TYPES.CHAT) {
-        await db.set(`gz_chat_${entry.id}`, entity);
-        await clearSyncDeletedEntry(entry.type, entry.id);
+} else if (entry.type === ENTITY_TYPES.CHAT) {
+            await db.saveChat(entry.id, entity);
+            await clearSyncDeletedEntry(entry.type, entry.id);
     } else if (entry.type === ENTITY_TYPES.LOREBOOKS) {
         await db.set('gz_lorebooks', entity);
     } else if (entry.type === ENTITY_TYPES.API_PRESETS) {
@@ -453,6 +453,9 @@ async function runParallel(tasks, concurrency = 5) {
 }
 
 async function pushManifestV2(adapter, key, onProgress) {
+    if (adapter.ensureFolder) {
+        await adapter.ensureFolder(CLOUD_BASE);
+    }
     const cloudManifest = await readCloudManifestV2(adapter);
     const localManifest = await buildLocalManifestV2();
     const cloudEntries = cloudManifest?.entries || {};
@@ -624,9 +627,6 @@ export async function pullEntities(adapter, key, onProgress, onConflict) {
 
 async function readManifest(adapter) {
     try {
-        if (adapter.ensureFolder) {
-            await adapter.ensureFolder(CLOUD_BASE);
-        }
         const result = await adapter.download(cloudPath(ENTITY_TYPES.MANIFEST));
         if (result) {
             return JSON.parse(result.data);
@@ -702,6 +702,9 @@ const WIPE_POLL_INTERVAL = 2000;
 const WIPE_MAX_POLLS = 10;
 
 export async function wipeCloudData(adapter, onProgress) {
+    if (adapter.invalidateGlazeFolderCache) {
+        adapter.invalidateGlazeFolderCache();
+    }
     if (onProgress) onProgress({ phase: 'deleting', message: 'Deleting cloud data...' });
     try {
         const result = await adapter.deleteFolder(CLOUD_BASE);

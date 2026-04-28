@@ -482,7 +482,28 @@ export async function download(path) {
 }
 
 export async function deleteFolder(path) {
-    return apiCall('/files/delete_v2', { path: stripAppFolderPrefix(path) || '' });
+    const strippedPath = stripAppFolderPrefix(path);
+    if (!strippedPath) {
+        let cursor = null;
+        let entries = [];
+        try {
+            const result = await apiCall('/files/list_folder', { path: '', recursive: true, include_deleted: false });
+            entries = result?.entries || [];
+            cursor = result?.cursor || null;
+            while (result?.has_more && cursor) {
+                const more = await apiCall('/files/list_folder/continue', { cursor });
+                entries.push(...(more?.entries || []));
+                cursor = more?.cursor || null;
+            }
+        } catch {}
+        for (const entry of entries) {
+            try {
+                await apiCall('/files/delete_v2', { path: entry.path_lower || entry.path_display });
+            } catch {}
+        }
+        return true;
+    }
+    return apiCall('/files/delete_v2', { path: strippedPath });
 }
 
 export async function deleteFile(fileOrPath) {

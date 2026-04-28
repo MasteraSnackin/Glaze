@@ -11,6 +11,7 @@ let unsubRegexChanged = null;
 let unsubChatSearch = null;
 let unsubApiContextChanged = null;
 let unsubSettingsChanged = null;
+let unsubSyncDataRefreshed = null;
 let _appStateListener = null;
 
 import * as memoryBooksService from '@/core/services/memoryBooksService.js';
@@ -1393,8 +1394,8 @@ onMounted(() => {
                 const messagesSnapshot = currentMessages.value;
                 const draft = inputValue.value;
                 db.patchChatData(charId, (data) => {
-                    if (sessionId && messagesSnapshot.length > 0) {
-                        data.sessions[sessionId] = messagesSnapshot;
+                    if (sessionId) {
+                        data.sessions[sessionId] = JSON.parse(JSON.stringify(messagesSnapshot));
                     }
                     data.draft = draft;
                 });
@@ -1414,6 +1415,7 @@ onMounted(() => {
     unsubChatSearch = subscribeAppEvent(APP_EVENTS.ui.chatSearch, ({ detail }) => onChatSearch({ detail }));
     unsubApiContextChanged = subscribeAppEvent(APP_EVENTS.domain.settings.apiContextChanged, updateContextCutoff);
     unsubSettingsChanged = subscribeAppEvent(APP_EVENTS.domain.settings.changed, restartVisibleGenerationTimers);
+    unsubSyncDataRefreshed = subscribeAppEvent(APP_EVENTS.domain.sync.dataRefreshed, () => loadChats());
 });
 
 watch(() => currentMessages.value.length, () => {
@@ -1495,6 +1497,7 @@ onUnmounted(() => {
     if (unsubChatSearch) { unsubChatSearch(); unsubChatSearch = null; }
     if (unsubApiContextChanged) { unsubApiContextChanged(); unsubApiContextChanged = null; }
     if (unsubSettingsChanged) { unsubSettingsChanged(); unsubSettingsChanged = null; }
+    if (unsubSyncDataRefreshed) { unsubSyncDataRefreshed(); unsubSyncDataRefreshed = null; }
     clearCutoffTimers();
 
     // Reset chatViewRoot height to prevent stale inline style leaking to next mount
