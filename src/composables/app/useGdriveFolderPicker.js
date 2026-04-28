@@ -3,6 +3,7 @@ import { Capacitor } from '@capacitor/core';
 import * as gdriveAdapter from '@/core/services/adapters/gdriveAdapter.js';
 
 export function useGdriveFolderPicker() {
+    const gdriveFolderId = ref('');
     const gdriveFolderStatus = ref('unchecked');
     const isPickingFolder = ref(false);
     const isCreatingFolder = ref(false);
@@ -15,6 +16,7 @@ export function useGdriveFolderPicker() {
         pickerError.value = '';
         try {
             const folderId = await gdriveAdapter.getGlazeFolderId();
+            gdriveFolderId.value = folderId || '';
             gdriveFolderStatus.value = folderId ? 'found' : 'not_found';
         } catch (e) {
             console.error('[useGdriveFolderPicker] check failed:', e);
@@ -33,6 +35,7 @@ export function useGdriveFolderPicker() {
             const result = await gdriveAdapter.pickFolder();
             if (result) {
                 await gdriveAdapter.setGlazeFolderId(result.id);
+                gdriveFolderId.value = result.id;
                 gdriveFolderStatus.value = 'found';
             }
         } catch (e) {
@@ -65,6 +68,7 @@ export function useGdriveFolderPicker() {
                 return;
             }
             await gdriveAdapter.setGlazeFolderId(folderId);
+            gdriveFolderId.value = folderId;
             gdriveFolderStatus.value = 'found';
             folderIdInput.value = '';
         } catch (e) {
@@ -83,6 +87,7 @@ export function useGdriveFolderPicker() {
             const folderId = await gdriveAdapter.getGlazeFolderId(true);
             if (folderId) {
                 await gdriveAdapter.setGlazeFolderId(folderId);
+                gdriveFolderId.value = folderId;
             }
             gdriveFolderStatus.value = 'found';
         } catch (e) {
@@ -95,11 +100,13 @@ export function useGdriveFolderPicker() {
 
     function resetFolderStatus() {
         gdriveFolderStatus.value = 'unchecked';
+        gdriveFolderId.value = '';
         pickerError.value = '';
         folderIdInput.value = '';
     }
 
     return {
+        gdriveFolderId,
         gdriveFolderStatus,
         isPickingFolder,
         isCreatingFolder,

@@ -43,12 +43,16 @@ const localSyncStatus = ref('');
 const syncResult = ref(null);
 const syncIncludeApiKeys = ref(isSyncIncludingApiKeys());
 const {
+    gdriveFolderId,
     gdriveFolderStatus,
     isPickingFolder,
     isCreatingFolder,
     pickerError,
+    folderIdInput,
+    isNativePlatform,
     checkGdriveFolder,
     selectExistingFolder,
+    linkFolderById,
     createNewFolder,
     resetFolderStatus
 } = useGdriveFolderPicker();
@@ -378,6 +382,11 @@ const open = async () => {
 };
 const close = () => sheet.value?.close();
 
+const copyFolderId = () => {
+    if (!gdriveFolderId.value) return;
+    navigator.clipboard.writeText(gdriveFolderId.value).catch(() => {});
+};
+
 defineExpose({ open, close });
 
 onMounted(async () => {
@@ -458,6 +467,14 @@ onMounted(async () => {
                         <div class="sync-status-text">
 {{ statusLabel }}
 </div>
+                    </div>
+
+                    <div v-if="syncProvider === 'gdrive' && gdriveFolderId" class="sync-folder-id-row">
+                        <span class="sync-folder-id-label">{{ t('sync_gdrive_folder_id') || 'Folder ID' }}</span>
+                        <code class="sync-folder-id-value">{{ gdriveFolderId }}</code>
+                        <button class="sync-copy-btn" @click="copyFolderId" :title="t('sync_copy') || 'Copy'">
+                            <svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:currentColor"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>
+                        </button>
                     </div>
 
                     <button v-if="syncConflicts.length > 0" class="sync-resolve-btn" @click="openConflictSheet">
@@ -878,6 +895,45 @@ onMounted(async () => {
 .sync-status-text {
     font-size: 13px;
     color: var(--text-gray, #8e8e93);
+}
+
+.sync-folder-id-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    padding: 6px 10px;
+    background: var(--bg-tertiary, #222);
+    border-radius: 8px;
+    font-size: 12px;
+}
+.sync-folder-id-label {
+    color: var(--text-gray, #8e8e93);
+    white-space: nowrap;
+}
+.sync-folder-id-value {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: monospace;
+    font-size: 11px;
+    color: var(--text-primary, #eee);
+}
+.sync-copy-btn {
+    background: none;
+    border: none;
+    color: var(--text-gray, #8e8e93);
+    cursor: pointer;
+    padding: 2px;
+    display: flex;
+    align-items: center;
+    border-radius: 4px;
+    transition: color 0.2s;
+}
+.sync-copy-btn:hover {
+    color: var(--text-primary, #eee);
 }
 
 .sync-resolve-btn {
