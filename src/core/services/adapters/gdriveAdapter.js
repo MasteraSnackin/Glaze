@@ -433,8 +433,11 @@ async function getGlazeFolderId(invalidate = false) {
         _folderIdCache.clear();
     }
     if (folderIdCache) {
-        const check = await apiRequest(`${API_BASE}/files/${folderIdCache}?fields=id&supportsAllDrives=false`);
-        if (check.ok) return folderIdCache;
+        const check = await apiRequest(`${API_BASE}/files/${folderIdCache}?fields=id,trashed&supportsAllDrives=false`);
+        if (check.ok) {
+            const data = await check.json();
+            if (!data.trashed) return folderIdCache;
+        }
         folderIdCache = null;
         _folderIdCache.clear();
     }

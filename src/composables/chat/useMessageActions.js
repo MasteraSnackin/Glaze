@@ -9,6 +9,8 @@ import { showToast } from '@/core/states/toastState.js';
 import { getApiReasoningTags } from '@/core/config/APISettings.js';
 import { getEffectivePreset } from '@/core/states/presetState.js';
 import { reconcileSessionMemoryState } from '@/core/services/memoryBooksService.js';
+import { publishAppEvent } from '@/core/events/eventHub.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
 
 export function useMessageActions(deps) {
     const {
@@ -36,6 +38,8 @@ export function useMessageActions(deps) {
         if (!data || !sessionId) return;
         data.sessions[sessionId] = currentMessages.value;
         await db.saveChat(chatChar.id, data);
+        try { localStorage.removeItem(`gz_chat_recovery_${chatChar.id}_${sessionId}`); } catch (_e) {}
+        publishAppEvent(APP_EVENTS.domain.chat.updated);
     }
 
     function getReasoningTags() {
@@ -197,10 +201,10 @@ export function useMessageActions(deps) {
                             } else {
                                 abortActiveChatGeneration(activeChatChar.id);
                             }
-                        } else {
-                            currentMessages.value.splice(index, 1);
-                            persistCurrentSessionMessages(activeChatChar);
-                        }
+} else {
+                             currentMessages.value.splice(index, 1);
+                             persistCurrentSessionMessages(activeChatChar);
+                         }
                         closeBottomSheet();
                     }
                 }]

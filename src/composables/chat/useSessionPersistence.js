@@ -44,13 +44,14 @@ export function useSessionPersistence({
             const sessionId = charContext.sessionId;
             const inputValueDraft = inputValue.value;
             const currentAnchor = getScrollAnchor();
+            const messagesSnapshot = currentMessages.value;
 
             db.patchChatData(charContext.id, (data) => {
                 data.lastScrollAnchor = currentAnchor;
                 data.draft = inputValueDraft;
 
-                if (sessionId && data.sessions && data.sessions[sessionId]) {
-                    const msgs = data.sessions[sessionId];
+                if (sessionId) {
+                    const msgs = JSON.parse(JSON.stringify(messagesSnapshot));
                     for (let i = msgs.length - 1; i >= 0; i--) {
                         const msg = msgs[i];
                         if (msg.isEditing) {
@@ -144,8 +145,8 @@ export function useSessionPersistence({
             const authorsNote = activeChatChar.authors_note;
             const summary = activeChatChar.summary;
             db.patchChatData(charId, (data) => {
-                if (sessionId && messagesSnapshot.length > 0) {
-                    data.sessions[sessionId] = messagesSnapshot;
+                if (sessionId) {
+                    data.sessions[sessionId] = JSON.parse(JSON.stringify(messagesSnapshot));
                 }
                 data.draft = draft;
                 if (authorsNote !== undefined) {
@@ -218,8 +219,8 @@ export function useSessionPersistence({
             db.patchChatData(charId, (data) => {
                 data.lastScrollAnchor = currentAnchor;
                 data.draft = draft;
-                if (sessionId && messagesSnapshot.length > 0) {
-                    data.sessions[sessionId] = messagesSnapshot;
+                if (sessionId) {
+                    data.sessions[sessionId] = JSON.parse(JSON.stringify(messagesSnapshot));
                 }
                 if (authorsNote !== undefined) {
                     if (!data.authorsNotes) data.authorsNotes = {};
