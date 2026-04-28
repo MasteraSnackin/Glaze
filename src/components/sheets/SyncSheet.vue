@@ -509,7 +509,7 @@ onMounted(async () => {
                         {{ t('sync_gdrive_folder') || 'Glaze Folder' }}
                     </div>
                     <div class="bs-hint">
-                        {{ t('sync_gdrive_folder_not_found') || 'No Glaze folder found in your Google Drive. Create a new one or select an existing folder.' }}
+                        {{ t('sync_gdrive_folder_not_found') || 'No Glaze folder found in your Google Drive. Create a new one or link an existing folder.' }}
                     </div>
                     <div v-if="pickerError" class="bs-hint" style="color: var(--text-secondary, #ff9500);">
                         {{ pickerError }}
@@ -519,11 +519,34 @@ onMounted(async () => {
                         <span v-if="isCreatingFolder">{{ t('sync_creating') || 'Creating...' }}</span>
                         <span v-else>{{ t('sync_gdrive_create_folder') || 'Create New Folder' }}</span>
                     </button>
-                    <button class="bs-btn bs-secondary-btn" @click="selectExistingFolder" :disabled="isCreatingFolder || isPickingFolder">
-                        <svg viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
-                        <span v-if="isPickingFolder">{{ t('sync_selecting') || 'Selecting...' }}</span>
-                        <span v-else>{{ t('sync_gdrive_select_folder') || 'Select Existing Folder' }}</span>
-                    </button>
+                    <template v-if="!isNativePlatform">
+                        <button class="bs-btn bs-secondary-btn" @click="selectExistingFolder" :disabled="isCreatingFolder || isPickingFolder">
+                            <svg viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+                            <span v-if="isPickingFolder">{{ t('sync_selecting') || 'Selecting...' }}</span>
+                            <span v-else>{{ t('sync_gdrive_select_folder') || 'Select Existing Folder' }}</span>
+                        </button>
+                    </template>
+                    <div class="bs-section" style="margin-top: 8px;">
+                        <div class="bs-section-title" style="font-size: 0.85em;">
+                            {{ t('sync_gdrive_link_by_id') || 'Or link by folder ID' }}
+                        </div>
+                        <div class="bs-hint" style="font-size: 0.8em;">
+                            {{ t('sync_gdrive_link_hint') || 'Open the folder in Google Drive, copy the URL or ID from the address bar, and paste it here.' }}
+                        </div>
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <input
+                                v-model="folderIdInput"
+                                type="text"
+                                class="bs-input"
+                                :placeholder="t('sync_gdrive_folder_id_placeholder') || 'Folder ID or URL'"
+                                style="flex: 1; min-width: 0; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border-color, #444); background: var(--bg-tertiary, #222); color: var(--text-primary, #eee);"
+                                @keydown.enter="linkFolderById"
+                            />
+                            <button class="bs-btn bs-secondary-btn" @click="linkFolderById" :disabled="isCreatingFolder || !folderIdInput.trim()" style="padding: 6px 14px;">
+                                {{ t('sync_gdrive_link') || 'Link' }}
+                            </button>
+                        </div>
+                    </div>
                 </div>
                 <div v-else-if="syncProvider === 'gdrive' && gdriveFolderStatus === 'checking'" class="bs-section">
                     <div class="bs-hint">
