@@ -303,8 +303,6 @@ async function exchangeCodeForToken(code, verifier, redirectUri) {
 
     localStorage.removeItem('gz_dropbox_pkce_verifier');
     localStorage.removeItem('gz_dropbox_pkce_state');
-
-    await ensureFolder('/Glaze');
 }
 
 export async function disconnect() {

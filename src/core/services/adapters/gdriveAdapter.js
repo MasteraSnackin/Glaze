@@ -357,7 +357,6 @@ async function exchangeCodeForToken(code, verifier, redirectUri) {
     localStorage.removeItem('gz_gdrive_pkce_state');
 
     folderIdCache = null;
-    await ensureFolder('/Glaze');
 }
 
 export async function disconnect() {
@@ -390,7 +389,10 @@ async function findFoldersByName(name, parentId) {
         `${API_BASE}/files?q=${encodeURIComponent(query)}&spaces=drive&fields=files(id,name)`
     );
 
-    if (!response.ok) return [];
+    if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.error?.message || `Failed to search for folder '${name}' (${response.status})`);
+    }
     const data = await response.json();
     return data.files || [];
 }
@@ -407,7 +409,10 @@ async function findFolderByName(name, parentId) {
         `${API_BASE}/files?q=${encodeURIComponent(query)}&spaces=drive&fields=files(id,name)`
     );
 
-    if (!response.ok) return null;
+    if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.error?.message || `Failed to search for folder '${name}' (${response.status})`);
+    }
     const data = await response.json();
     return data.files?.[0]?.id || null;
 }
