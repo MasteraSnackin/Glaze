@@ -24,6 +24,7 @@ const SCOPES = 'https://www.googleapis.com/auth/drive.file';
 
 const FOLDER_NAME = 'Glaze';
 let folderIdCache = null;
+let pickerApiLoaded = false;
 
 function getRedirectUri() {
     if (Capacitor.isNativePlatform()) return REDIRECT_URI_NATIVE;
@@ -85,11 +86,13 @@ async function refreshAccessToken(refreshToken) {
         throw Object.assign(new Error(err.error_description || 'Token refresh failed'), { status: response.status });
     }
 
+    const existing = await getTokens();
     const data = await response.json();
     const newTokens = {
         access_token: data.access_token,
         refresh_token: refreshToken,
-        expires_at: Date.now() + (data.expires_in || 3600) * 1000
+        expires_at: Date.now() + (data.expires_in || 3600) * 1000,
+        ...(existing?.folderId ? { folderId: existing.folderId } : {})
     };
     await saveTokens(newTokens);
     return newTokens;
@@ -397,20 +400,6 @@ async function findFoldersByName(name, parentId) {
     return data.files || [];
 }
 
-async function findFoldersByNameBroad(name) {
-    const query = `name='${name}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
-    const response = await apiRequest(
-        `${API_BASE}/files?q=${encodeURIComponent(query)}&spaces=drive&fields=files(id,name)&includeItemsFromAllDrives=true&supportsAllDrives=true`
-    );
-
-    if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        throw new Error(err.error?.message || `Failed to search for folder '${name}' (${response.status})`);
-    }
-    const data = await response.json();
-    return data.files || [];
-}
-
 async function findFolderByName(name, parentId) {
     let query = `name='${name}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
     if (parentId) {
@@ -446,19 +435,95 @@ export function invalidateGlazeFolderCache() {
     _folderIdCache.clear();
 }
 
+export async function setGlazeFolderId(folderId) {
+    folderIdCache = folderId;
+    const tokens = await getTokens();
+    if (tokens) {
+        tokens.folderId = folderId;
+        await saveTokens(tokens);
+    }
+}
+
+async function loadPickerApi() {
+    if (pickerApiLoaded && window.google?.picker) return;
+    return new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = 'https://apis.google.com/js/api.js';
+        script.onload = () => {
+            window.gapi.load('picker', {
+                callback: () => { pickerApiLoaded = true; resolve(); },
+                onerror: () => reject(new Error('Failed to load Google Picker API'))
+            });
+        };
+        script.onerror = () => reject(new Error('Failed to load Google API script'));
+        document.head.appendChild(script);
+    });
+}
+
+export async function pickFolder() {
+    const accessToken = await getValidAccessToken();
+    if (!accessToken) throw new Error('Not connected to Google Drive');
+
+    await loadPickerApi();
+
+    return new Promise((resolve, reject) => {
+        try {
+            const appId = GDRIVE_CLIENT_ID?.split('-')[0] || '';
+            const view = new window.google.picker.DocsView(
+                window.google.picker.ViewId.DOCS
+            )
+                .setSelectFolderEnabled(true)
+                .setMimeTypes('application/vnd.google-apps.folder')
+                .setMode(window.google.picker.DocsViewMode.LIST);
+
+            const picker = new window.google.picker.PickerBuilder()
+                .setAppId(appId)
+                .setOAuthToken(accessToken)
+                .addView(view)
+                .setTitle('Select Glaze folder')
+                .setCallback((data) => {
+                    if (data.action === window.google.picker.Action.PICKED) {
+                        const folder = data.docs[0];
+                        resolve({ id: folder.id, name: folder.name });
+                    } else if (data.action === window.google.picker.Action.CANCEL) {
+                        resolve(null);
+                    }
+                })
+                .build();
+            picker.setVisible(true);
+        } catch (e) {
+            reject(e);
+        }
+    });
+}
+
+export { getGlazeFolderId };
+
 async function getGlazeFolderId(invalidate = false) {
     if (invalidate) {
         folderIdCache = null;
         _folderIdCache.clear();
     }
     if (folderIdCache) {
-        const check = await apiRequest(`${API_BASE}/files/${folderIdCache}?fields=id,trashed&supportsAllDrives=true`);
+        const check = await apiRequest(`${API_BASE}/files/${folderIdCache}?fields=id,trashed,name&supportsAllDrives=true`);
         if (check.ok) {
             const data = await check.json();
-            if (!data.trashed) return folderIdCache;
+            if (!data.trashed && data.name === FOLDER_NAME) return folderIdCache;
         }
         folderIdCache = null;
         _folderIdCache.clear();
+    }
+    const persistedTokens = await getTokens();
+    if (persistedTokens?.folderId && persistedTokens.folderId !== folderIdCache) {
+        const check = await apiRequest(`${API_BASE}/files/${persistedTokens.folderId}?fields=id,trashed,name&supportsAllDrives=true`);
+        if (check.ok) {
+            const data = await check.json();
+            if (!data.trashed && data.name === FOLDER_NAME) {
+                folderIdCache = persistedTokens.folderId;
+                _folderIdCache.clear();
+                return folderIdCache;
+            }
+        }
     }
     const folders = await findFoldersByName(FOLDER_NAME, null);
     if (folders.length === 0) return null;
