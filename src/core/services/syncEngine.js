@@ -624,6 +624,9 @@ export async function pullEntities(adapter, key, onProgress, onConflict) {
 
 async function readManifest(adapter) {
     try {
+        if (adapter.ensureFolder) {
+            await adapter.ensureFolder(CLOUD_BASE);
+        }
         const result = await adapter.download(cloudPath(ENTITY_TYPES.MANIFEST));
         if (result) {
             return JSON.parse(result.data);
