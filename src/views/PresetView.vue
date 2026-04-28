@@ -1079,7 +1079,7 @@ Add Block
 
 .preset-dashboard {
     /* Base styling for when no image is present */
-    margin: 0 16px 16px;
+    margin: 16px 16px;
     padding: 12px 0 0;
     background: rgba(var(--vk-blue-rgb), 0.05);
     border: 1px solid var(--border-color);
