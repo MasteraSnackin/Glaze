@@ -44,15 +44,33 @@ const onInput = (e) => {
 </script>
 
 <template>
-  <div id="full-screen-editor" v-show="visible" :class="{ 'anim-fade-in': visible, 'keyboard-open': isKeyboardOpen }">
-      <div class="fs-editor-body">
-          <textarea id="fs-editor-textarea" :value="modelValue" @input="onInput"></textarea>
-      </div>
-      <div id="fs-editor-close" style="display: none" @click="handleClose"></div>
-  </div>
+  <Transition name="fs-editor">
+    <div id="full-screen-editor" v-if="visible" :class="{ 'keyboard-open': isKeyboardOpen }">
+        <div class="fs-editor-body">
+            <textarea id="fs-editor-textarea" :value="modelValue" @input="onInput"></textarea>
+        </div>
+        <div id="fs-editor-close" style="display: none" @click="handleClose"></div>
+    </div>
+  </Transition>
 </template>
 
 <style scoped>
+/* Transition */
+.fs-editor-enter-active {
+    transition: opacity 0.25s ease, transform 0.28s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+}
+.fs-editor-leave-active {
+    transition: opacity 0.2s ease, transform 0.22s cubic-bezier(0.55, 0.055, 0.675, 0.19);
+}
+.fs-editor-enter-from {
+    opacity: 0;
+    transform: translateY(32px);
+}
+.fs-editor-leave-to {
+    opacity: 0;
+    transform: translateY(24px);
+}
+
 #full-screen-editor {
     position: fixed;
     top: 0;
@@ -64,7 +82,7 @@ const onInput = (e) => {
     -webkit-backdrop-filter: blur(var(--element-blur, 12px));
     display: flex;
     flex-direction: column;
-    z-index: 2000;
+    z-index: 12000;
     overflow: hidden;
 }
 

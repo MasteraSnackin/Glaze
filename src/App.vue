@@ -170,7 +170,7 @@ function onLanguageChanged() {
 
 // --- Z-index computed ---
 const headerZIndex = computed(() => {
-    if (editor.fsEditorVisible.value) return 2001;
+    if (editor.fsEditorVisible.value) return 12001;
     if (editor.isEditorView.value) return 1100;
     return 100;
 });
@@ -486,14 +486,6 @@ function closeEditorWrapper() {
     <AppToast />
   </div>
 
-  <!-- Full Screen Editor (Managed by App.vue now) -->
-  <FullScreenEditor 
-      :visible="editor.fsEditorVisible.value"
-      v-model="editor.fsEditorValue.value"
-      @save="editor.autoSaveFsEditor"
-      @close="editor.fsEditorVisible.value = false"
-  />
-
   <ConnectionsSheet ref="connectionsSheetRef" />
   <LorebookSheet ref="lorebookSheetRef" />
   <BackupSheet ref="backupSheetRef" />
@@ -501,6 +493,14 @@ function closeEditorWrapper() {
   <ConflictSheet ref="conflictSheetRef" />
   <PresetView ref="presetViewRef" />
   <ApiView ref="apiViewRef" />
+
+  <!-- Full Screen Editor (Managed by App.vue now) -->
+  <FullScreenEditor 
+      :visible="editor.fsEditorVisible.value"
+      v-model="editor.fsEditorValue.value"
+      @save="editor.autoSaveFsEditor"
+      @close="editor.fsEditorVisible.value = false"
+  />
   <NotificationsSheet />
   <DragDropOverlay />
 
