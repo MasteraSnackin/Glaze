@@ -22,6 +22,7 @@ import { isSyncIncludingApiKeys, setSyncIncludeApiKeys } from '@/core/config/Pro
 import { db } from '@/utils/db.js';
 import { APP_EVENTS } from '@/core/events/eventNames.js';
 import { publishAppEvent } from '@/core/events/eventHub.js';
+import { useGdriveFolderPicker } from '@/composables/app/useGdriveFolderPicker.js';
 
 const sheet = ref(null);
 defineProps({ zIndex: { type: Number, default: 1005 } });
@@ -41,6 +42,16 @@ const restoreSuccess = ref(false);
 const localSyncStatus = ref('');
 const syncResult = ref(null);
 const syncIncludeApiKeys = ref(isSyncIncludingApiKeys());
+const {
+    gdriveFolderStatus,
+    isPickingFolder,
+    isCreatingFolder,
+    pickerError,
+    checkGdriveFolder,
+    selectExistingFolder,
+    createNewFolder,
+    resetFolderStatus
+} = useGdriveFolderPicker();
 
 watch(syncIncludeApiKeys, (val) => {
     setSyncIncludeApiKeys(val);
@@ -168,6 +179,7 @@ const connectGdrive = async () => {
         const info = await gdriveAdapter.getAccountInfo();
         accountInfo.value = info;
         await afterConnect();
+        await checkGdriveFolder();
     } catch (e) {
         console.error('[SyncSheet] Google Drive connect failed:', e);
         setSyncError(e.message);
@@ -190,6 +202,7 @@ const disconnectProvider = async () => {
         accountInfo.value = null;
         localSyncStatus.value = '';
         syncResult.value = null;
+        resetFolderStatus();
     } catch (e) {
         console.error('[SyncSheet] Disconnect failed:', e);
     } finally {
@@ -487,6 +500,34 @@ onMounted(async () => {
 </div>
                     <div class="sync-progress-bar-container">
                         <div class="sync-progress-bar" :style="{ width: syncProgress.total > 0 ? (syncProgress.current / syncProgress.total * 100) + '%' : '0%' }"></div>
+                    </div>
+                </div>
+
+                <!-- GDrive folder picker -->
+                <div v-if="syncProvider === 'gdrive' && gdriveFolderStatus === 'not_found'" class="bs-section">
+                    <div class="bs-section-title">
+                        {{ t('sync_gdrive_folder') || 'Glaze Folder' }}
+                    </div>
+                    <div class="bs-hint">
+                        {{ t('sync_gdrive_folder_not_found') || 'No Glaze folder found in your Google Drive. Create a new one or select an existing folder.' }}
+                    </div>
+                    <div v-if="pickerError" class="bs-hint" style="color: var(--text-secondary, #ff9500);">
+                        {{ pickerError }}
+                    </div>
+                    <button class="bs-btn bs-primary-btn" @click="createNewFolder" :disabled="isCreatingFolder || isPickingFolder">
+                        <svg viewBox="0 0 24 24"><path d="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm-1 8h-3v3h-2v-3h-3v-2h3V9h2v3h3v2z"/></svg>
+                        <span v-if="isCreatingFolder">{{ t('sync_creating') || 'Creating...' }}</span>
+                        <span v-else>{{ t('sync_gdrive_create_folder') || 'Create New Folder' }}</span>
+                    </button>
+                    <button class="bs-btn bs-secondary-btn" @click="selectExistingFolder" :disabled="isCreatingFolder || isPickingFolder">
+                        <svg viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+                        <span v-if="isPickingFolder">{{ t('sync_selecting') || 'Selecting...' }}</span>
+                        <span v-else>{{ t('sync_gdrive_select_folder') || 'Select Existing Folder' }}</span>
+                    </button>
+                </div>
+                <div v-else-if="syncProvider === 'gdrive' && gdriveFolderStatus === 'checking'" class="bs-section">
+                    <div class="bs-hint">
+                        {{ t('sync_gdrive_checking') || 'Checking Google Drive for Glaze folder...' }}
                     </div>
                 </div>
 
