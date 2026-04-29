@@ -44,6 +44,13 @@ export function useAppInit({
         const wasHiddenMs = Date.now() - lastVisibilityHidden;
         if (wasHiddenMs < 5000) return;
 
+        const skipPull = localStorage.getItem('gz_skip_sync_pull');
+        if (skipPull) {
+            localStorage.removeItem('gz_skip_sync_pull');
+            publishAppEvent(APP_EVENTS.domain.sync.dataRefreshed, {});
+            return;
+        }
+
         try {
             const chars = await db.getAll('characters');
             if (chars?.length > 0) {
@@ -80,11 +87,16 @@ export function useAppInit({
         startTracking();
 
         if (syncProvider.value) {
-            checkSyncReadiness().then(ready => {
-                if (ready.ready) {
-                    fullPull().catch(e => console.warn('[App] Background pull failed:', e));
-                }
-            });
+            const skipPull = localStorage.getItem('gz_skip_sync_pull');
+            if (skipPull) {
+                localStorage.removeItem('gz_skip_sync_pull');
+            } else {
+                checkSyncReadiness().then(ready => {
+                    if (ready.ready) {
+                        fullPull().catch(e => console.warn('[App] Background pull failed:', e));
+                    }
+                });
+            }
         }
 
         initRipple();

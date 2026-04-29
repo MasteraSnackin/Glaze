@@ -781,6 +781,11 @@ async function openChat(char, onBack, force = false) {
     }
 
     try {
+        const skipCrashBuffer = localStorage.getItem('gz_backup_restored');
+        if (skipCrashBuffer) {
+            localStorage.removeItem('gz_backup_restored');
+            clearCrashBuffer(char.id, currentSessionId);
+        }
         const crashBufferRaw = localStorage.getItem(buildCrashBufferKey(char.id, currentSessionId));
         if (crashBufferRaw) {
             const crashBuffer = JSON.parse(crashBufferRaw);

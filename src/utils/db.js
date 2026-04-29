@@ -105,6 +105,10 @@ export function queueDbWrite(fn) {
     return resultPromise;
 }
 
+export function flushDbWriteQueue() {
+    return _dbWriteQueue;
+}
+
 export const db = {
     open: () => {
         return new Promise((resolve, reject) => {
