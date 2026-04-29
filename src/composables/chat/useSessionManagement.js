@@ -129,7 +129,7 @@ export function useSessionManagement(deps) {
                 isActive: isCurrent,
                 onClick: async () => {
                     if (sid !== currentSessionId) {
-                        asyncSaveCurrentSessionState();
+                        await asyncSaveCurrentSessionState();
                         await dbSwitchSession(char.id, sid);
                         await loadChats();
                         openChat({ ...char, sessionId: sid }, null, true);
@@ -236,7 +236,7 @@ export function useSessionManagement(deps) {
     }
 
     async function createNewSession(char) {
-        asyncSaveCurrentSessionState();
+        await asyncSaveCurrentSessionState();
         await dbCreateSession(char.id);
         await loadChats();
 
