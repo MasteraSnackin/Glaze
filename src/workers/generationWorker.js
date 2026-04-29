@@ -85,12 +85,19 @@ function tryCreateRegex(pattern, flags = 'g') {
 function applyRegexes(text, placementFilter, ephemeralityFilter, allScripts, options = {}) {
     if (!text) return "";
     let processedText = text;
-    const { char, persona, sessionVars, notifyObj } = options;
+    const { char, persona, sessionVars, notifyObj, depth } = options;
 
     for (const script of allScripts) {
         if (script.disabled) continue;
         if (script.placement && !script.placement.includes(placementFilter)) continue;
         if (script.ephemerality && !script.ephemerality.includes(ephemeralityFilter)) continue;
+
+        if (depth !== undefined && depth !== null) {
+            const minD = script.minDepth ?? null;
+            const maxD = script.maxDepth ?? null;
+            if (minD !== null && depth < minD) continue;
+            if (maxD !== null && depth > maxD) continue;
+        }
 
         try {
             if (script.trimOut) {
@@ -658,7 +665,8 @@ function buildPromptMessagesWorker(args) {
 
                         content = replaceMacros(content, char, personaObj, sessionVars, notifyObj);
                         const placement = m.role === 'user' ? 1 : 2;
-                        content = applyRegexes(content, placement, 2, allScripts, { char, persona: personaObj, sessionVars, charId, sessionId, notifyObj });
+                        const depth = history.length - 1 - i;
+                        content = applyRegexes(content, placement, 2, allScripts, { char, persona: personaObj, sessionVars, charId, sessionId, notifyObj, depth });
 
                         const tokens = estimateTokens(content);
                         return {
