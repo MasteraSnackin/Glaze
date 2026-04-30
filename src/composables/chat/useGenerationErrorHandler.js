@@ -25,12 +25,34 @@ export async function handleGenerationError({
     const { notifyGenerationEnded } = app;
     const state = getGenerationState(char.id);
     if (!state || state.genId !== genId) {
-        await clearTypingStateForMessage({
-            charId: char.id,
-            sessionId,
-            msgId,
-            errorLabel: '[onError-stale]'
-        });
+        if (error?.name === 'AbortError' && error?.userAborted) {
+            const idx = currentMessages.value.findIndex(m => m.id === msgId);
+            if (idx !== -1) {
+                const msg = currentMessages.value[idx];
+                const isEmptyPlaceholder = !msg.text?.trim() && msg.swipes?.length === 1 && !msg.swipes[0]?.trim();
+                if (isEmptyPlaceholder) {
+                    currentMessages.value.splice(idx, 1);
+                    try {
+                        const data = await getChatData(char.id);
+                        if (data && sessionId && data.sessions[sessionId]) {
+                            data.sessions[sessionId] = currentMessages.value;
+                            await db.saveChat(char.id, data);
+                        }
+                    } catch (dbErr) {
+                        console.error('[onError-stale] Failed to remove empty placeholder from DB:', dbErr);
+                    }
+                } else {
+                    msg.isTyping = false;
+                }
+            }
+        } else {
+            await clearTypingStateForMessage({
+                charId: char.id,
+                sessionId,
+                msgId,
+                errorLabel: '[onError-stale]'
+            });
+        }
         notifyGenerationEnded({ charId: char.id, sessionId, genId, type: 'chat' });
         return;
     }

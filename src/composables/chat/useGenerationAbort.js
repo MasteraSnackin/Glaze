@@ -17,7 +17,7 @@ export function useGenerationAbort({
             return abortImpersonation(charId, state);
         }
 
-        const { sessionId, genId, type } = state;
+        const { sessionId, type } = state;
 
         if (state.controller) {
             try {
@@ -45,14 +45,6 @@ export function useGenerationAbort({
         if (sessionId) {
             clearPersistedGeneration(charId, sessionId);
         }
-        clearGenerationState(charId);
-
-        publishAppEvent(APP_EVENTS.domain.generation.ended, {
-            charId,
-            sessionId: sessionId ?? null,
-            genId: genId ?? null,
-            type: type || 'chat'
-        });
 
         return true;
     }
