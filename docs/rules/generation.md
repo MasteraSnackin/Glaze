@@ -38,6 +38,15 @@ controller.abort()
 
 **Never break this chain.** If `controller` doesn't reach `fetch()`, stop button only clears UI while TCP stays open.
 
+### Pipeline abort propagation
+
+When `controller.signal.aborted` is true before the HTTP request starts (e.g. during
+vector search, memory injection, or context limit guard), the pipeline loop breaks
+and calls `onError(AbortError)` with `userAborted` propagated from `ctx.controller`.
+This ensures the abort chain reaches `handleGenerationError` regardless of when the
+abort fires. All early abort checks (`stepRequestExecution`, `chatRequestAssembly`,
+`chatPreparedPromptExecution`) also set `userAborted` from the controller.
+
 ## State cleanup on every exit path
 
 For every `setGenerationState(charId, ...)` there MUST be a `clearGenerationState(charId, ...)` on:

@@ -254,6 +254,8 @@ When `controller.abort()` is called:
 - The streaming SSE loop checks `throwIfAborted()` every iteration (`streamingSse.js:30`)
 - `chatPreparedPromptExecution.js:63-65` checks before running the worker
 - `chatRequestExecution.js:47-49` checks before dispatching the request
+- Pipeline loop breaks and calls `onError(AbortError)` with `userAborted` from controller (`postPromptOrchestrator.js:80-90`)
+- All early abort checks propagate `userAborted` from controller (`steps.js:128-132`, `chatRequestAssembly.js:124-128`, `chatPreparedPromptExecution.js:63-67`)
 
 ### INV-A2: Regenerate during active generation is silently rejected
 
@@ -271,6 +273,10 @@ generation is active. This is intentional — impersonation overwrites the exist
 `restoreState()` rolls back: pending swipe, placeholder message, isTyping flag,
 and prompt metadata snapshots. The chat must return to the state it was in before
 the generation started.
+
+`handleGenerationError` treats ALL `AbortError` (regardless of `userAborted` flag)
+as silent cleanup — no error toast, no error message in chat. Empty placeholder
+messages are removed; partial text is preserved via `rollbackPendingSwipe`.
 
 ---
 

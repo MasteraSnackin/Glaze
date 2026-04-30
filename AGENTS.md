@@ -68,7 +68,8 @@ git checkout -b feat/memorybook-ui feat/multi-vector
 | Branch | Purpose | PR |
 |--------|---------|----|
 | `origin/dev` | Local mirror of upstream integration branch | No PR |
-| `fix/memorybook-null-ref` | Memorybook null-ref fix, abort cleanup, error persistence, crash buffer, cloud sync dedup, lorebook split slider, prompt/defaults update | Not yet |
+| `feat/character-gallery` | Character gallery tab, CharX/ZIP import-export, gallery composable, imageUtils dedup | #91 |
+| `fix/abort-empty-message-and-dropdown-scroll` | Abort pipeline onError propagation, desktop dropdown scroll (linear chain from feat/character-gallery) | Not yet |
 
 ### Historical (merged & deleted)
 - `feat/refactor-phase1-event-hub` → merged into `feat/chat-persistence-and-reasoning-fixes`, then upstream/dev
