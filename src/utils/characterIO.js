@@ -324,7 +324,7 @@ function normalizeCharacterData(json) {
 
     if (Array.isArray(data.assets) && data.assets.length > 0) {
         data.images = data.assets
-            .filter(a => a.type === 'icon' || a.type === 'custom' || !a.type)
+            .filter(a => a.type !== 'icon' && a.type !== 'user_icon')
             .filter(a => a.uri && (a.uri.startsWith('data:image') || a.uri.startsWith('http')))
             .map(a => ({
                 id: 'img_' + Math.random().toString(36).slice(2, 10),
