@@ -73,6 +73,19 @@ npm run build && npx cap sync ios && npx cap open ios
 | App settings | localStorage | `gz_*` |
 | Session vars | localStorage | `gz_vars_{charId}_{sessionId}` |
 
+## Context-Sensitive Rules
+
+When editing files matching a pattern below, READ the corresponding rule file FIRST and apply those rules:
+
+| When editing... | Read this |
+|----------------|-----------|
+| Generation, transport, streaming, abort, use-cases | `docs/rules/generation.md` |
+| Any async boundary, callbacks from transport, DB writes | `docs/rules/race-conditions.md` |
+| Vue components, composables, state modules | `docs/rules/vue-components.md` |
+| IndexedDB reads/writes, `db.js`, `patchChatData` | `docs/rules/database.md` |
+| Architecture details, directory structure, full flow | `ARCHITECTURE.md` |
+| Formal invariants with code references | `docs/INVARIANTS.md` |
+
 ## Do NOT
 
 - Add TypeScript

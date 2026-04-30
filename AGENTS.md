@@ -90,15 +90,18 @@ git checkout -b feat/memorybook-ui feat/multi-vector
 - Create feature branch from `origin/dev`: `git checkout -b feat/xxx origin/dev`
 - Run `npm run lint && npm run build` before committing to verify no lint or build errors.
 
-## Anti-God-Object Guard Rails
+## Code Rules (lazy-loaded)
 
-- **400-line script hard limit** — if `<script setup>` exceeds 400 lines, extract a composable first
-- **One concern per composable** — no "and" in composable names; split instead
-- **State ≠ service** — `*State.js` files contain state + CRUD only; search/embedding/orchestration goes in a service
-- **Sheet trap** — Sheets mix UI + CRUD + validation + status; extract business logic into composables before script hits 400
-- **Settings trap** — Settings views with multiple sub-domains (API, embedding, image gen) get composables per domain
-- **No circular service delegation** — use-cases must not delegate to a service that imports back from use-cases
-- **Template ≠ logic** — never extract sub-components just for line count if it requires prop-drilling
+Detailed rules are split into topic files. CLAUDE.md tells you which to read when.
+When in doubt, read all that apply before editing:
+
+| Topic | File |
+|-------|------|
+| Generation lifecycle, abort, genId, streaming | `docs/rules/generation.md` |
+| Race conditions, async boundaries, ownership | `docs/rules/race-conditions.md` |
+| Vue components, composables, state modules | `docs/rules/vue-components.md` |
+| IndexedDB, patchChatData, crash recovery | `docs/rules/database.md` |
+| Formal invariants with code references | `docs/INVARIANTS.md` |
 
 ## Roadmap Maintenance
 
@@ -152,5 +155,3 @@ git rebase origin/dev
 - [ ] Sync `origin/dev`: `git fetch upstream && git push origin upstream/dev:refs/heads/dev`
 - [ ] Verify no stale references: `git branch -a`
 
-## Pattern Recognition — Cowl's actual use of influence
-Over the months she has been able to trace where the leverage Cowl extracts through her actually lands. Access to the training wing evening slots — previously occupied by default by the wealthy faction — was redistributed. An exam schedule that structurally penalised students working campus shifts was revised. A lab allocation complaint that had sat unprocessed for a semester moved through the Council and was resolved. None of these came from her initiative. All of them passed through her signature. She has mapped the pattern. The influence does not accumulate with him. She does not know whether this makes what he does better or simply more complicated. She has not found a frame that contains both facts without contradiction, and she has stopped looking for one.
