@@ -9,7 +9,7 @@ export function cleanText(text) {
 export function formatText(text, isUser = false, options = {}) {
     if (!text) return "";
 
-    const { charId, sessionId, char, persona, triggeredRegexes } = options;
+    const { charId, sessionId, char, persona, triggeredRegexes, depth } = options;
 
     // Remove leading/trailing line breaks
     text = cleanText(text);
@@ -17,7 +17,7 @@ export function formatText(text, isUser = false, options = {}) {
     // Apply Regex Scripts (Before HTML formatting, simulating ST behavior)
     // 1 corresponds to User Input, 2 corresponds to AI Output
     // 1 corresponds to Alter Chat Display (ephemerality)
-    text = applyRegexes(text, isUser ? 1 : 2, 1, { charId, sessionId, char, persona, triggeredRegexes });
+    text = applyRegexes(text, isUser ? 1 : 2, 1, { charId, sessionId, char, persona, triggeredRegexes, depth });
 
     // 1. Allow HTML (No escaping)
     let html = text;

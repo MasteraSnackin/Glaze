@@ -11,14 +11,16 @@ function escapeRegex(string) {
  * @param {string} text The input text to process.
  * @param {number} placementFilter 1=User Input, 2=AI Output, 3=Slash Commands, 4=World Info, 5=Reasoning.
  * @param {number} ephemeralityFilter 1=Alter Chat Display, 2=Alter Outgoing Prompt.
- * @param {Array} options Extra options { charId, sessionId, globalScripts, char, persona }
+ * @param {Array} options Extra options { charId, sessionId, globalScripts, char, persona, depth }
+ * @param {number} [options.depth] Optional message depth (0=newest). If provided, scripts with
+ *   minDepth/maxDepth are only applied when the message's depth falls within their range.
  * @returns {string} Processed text.
  */
 export function applyRegexes(text, placementFilter, ephemeralityFilter, options = {}) {
     if (!text) return "";
     let processedText = text;
 
-    const { charId, sessionId, globalScripts: providedGlobalScripts, char, persona } = options;
+    const { charId, sessionId, globalScripts: providedGlobalScripts, char, persona, depth } = options;
 
     // Load global scripts if not provided
     let globalScripts = providedGlobalScripts;
@@ -47,11 +49,16 @@ export function applyRegexes(text, placementFilter, ephemeralityFilter, options 
     for (const script of allScripts) {
         if (script.disabled) continue;
 
-        // Filter by placement
         if (script.placement && !script.placement.includes(placementFilter)) continue;
 
-        // Filter by ephemerality
         if (script.ephemerality && !script.ephemerality.includes(ephemeralityFilter)) continue;
+
+        if (depth !== undefined && depth !== null) {
+            const minD = script.minDepth ?? null;
+            const maxD = script.maxDepth ?? null;
+            if (minD !== null && depth < minD) continue;
+            if (maxD !== null && depth > maxD) continue;
+        }
 
         try {
             let triggered = false;

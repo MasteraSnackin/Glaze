@@ -8,6 +8,7 @@ import { saveFile } from '@/core/services/fileSaver.js';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
+import { flushDbWriteQueue } from '@/utils/db.js';
 
 const sheet = ref(null);
 const fileInput = ref(null);
@@ -128,6 +129,7 @@ const handleRestoreFile = async (event) => {
                 try {
                     importProgressStage.value = 3;
                     importProgressText.value = t('backup_progress_glaze') || "Importing Glaze data...";
+                    await flushDbWriteQueue();
                     await importFullBackupAsync(e.target.result);
                     importProgressStage.value = 5;
                     importComplete.value = true;
@@ -137,10 +139,12 @@ const handleRestoreFile = async (event) => {
             };
             reader.readAsText(file);
         } else if (ext === 'zip') {
+             await flushDbWriteQueue();
              await importSTBackupFromZip(file, updateProgress);
              importProgressStage.value = 5;
              importComplete.value = true;
         } else if (ext === 'tbk') {
+             await flushDbWriteQueue();
              await importTavoBackupFromZip(file, updateProgress);
              importProgressStage.value = 5;
              importComplete.value = true;

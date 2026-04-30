@@ -781,6 +781,11 @@ async function openChat(char, onBack, force = false) {
     }
 
     try {
+        const skipCrashBuffer = localStorage.getItem('gz_backup_restored');
+        if (skipCrashBuffer) {
+            localStorage.removeItem('gz_backup_restored');
+            clearCrashBuffer(char.id, currentSessionId);
+        }
         const crashBufferRaw = localStorage.getItem(buildCrashBufferKey(char.id, currentSessionId));
         if (crashBufferRaw) {
             const crashBuffer = JSON.parse(crashBufferRaw);
@@ -1550,6 +1555,7 @@ onUnmounted(() => {
                     :is-selected="selectedMessages.has(vItem.item.data.id)"
                     :is-pending-memory="pendingMemoryMessageIds.has(vItem.item.data.id)"
                     :is-draft-memory="draftMemoryMessageIds.has(vItem.item.data.id)"
+                    :total-messages="currentMessages.length"
                     @swipe="(dir) => changeSwipe(vItem.item.originalIndex, dir, true)"
                     @change-greeting="(dir) => changeGreeting(vItem.item.originalIndex, dir, true)"
                     @regenerate="(mode, guidanceText) => regenerateMessage(vItem.item.originalIndex, mode, guidanceText)"

@@ -2,6 +2,8 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import { Capacitor } from '@capacitor/core';
 import { formatText } from '@/utils/textFormatter.js';
+import { applyRegexes } from '@/core/services/regexService.js';
+import { estimateTokens } from '@/utils/tokenizer.js';
 import { replaceMacros } from '@/utils/macroEngine.js';
 import ShadowContent from '@/components/ui/ShadowContent.vue';
 import { translations } from '@/utils/i18n.js';
@@ -29,7 +31,8 @@ const props = defineProps({
     isSelected: { type: Boolean, default: false },
     regexRevision: { type: Number, default: 0 },
     isPendingMemory: { type: Boolean, default: false },
-    isDraftMemory: { type: Boolean, default: false }
+    isDraftMemory: { type: Boolean, default: false },
+    totalMessages: { type: Number, default: 0 }
 });
 
 const emit = defineEmits([
@@ -115,12 +118,14 @@ const formatMessageText = (text, regexTracking = undefined) => {
                     .replace(/&quot;/gi, '"')
                     .replace(/&apos;/gi, "'");
     const isUser = props.message.role === 'user';
+    const depth = props.totalMessages > 0 ? props.totalMessages - 1 - props.index : undefined;
     return formatText(clean, isUser, { 
         charId: props.activeChatChar?.id, 
         sessionId: props.activeChatChar?.sessionId,
         char: props.activeChatChar,
         persona: effPersona,
-        triggeredRegexes: regexTracking
+        triggeredRegexes: regexTracking,
+        depth
     });
 };
 
@@ -211,7 +216,17 @@ const blacklistedErrorProvider = computed(() => {
 });
 
 const tokenCount = computed(() => {
-    return props.message.tokens || 0;
+    const raw = props.message.tokens || 0;
+    if (raw === 0) return 0;
+    const text = props.message.text;
+    if (!text) return raw;
+    const isUser = props.message.role === 'user';
+    const effPersona = getEffectivePersona(props.activeChatChar?.id, props.activeChatChar?.sessionId);
+    const macroed = replaceMacros(text, props.activeChatChar, effPersona);
+    const depth = props.totalMessages > 0 ? props.totalMessages - 1 - props.index : undefined;
+    const stripped = applyRegexes(macroed, isUser ? 1 : 2, 2, { charId: props.activeChatChar?.id, sessionId: props.activeChatChar?.sessionId, char: props.activeChatChar, persona: effPersona, depth });
+    if (stripped === macroed) return raw;
+    return estimateTokens(stripped);
 });
 
 const memoryBadge = computed(() => {
