@@ -48,6 +48,11 @@ For every `setGenerationState(charId, ...)` there MUST be a `clearGenerationStat
 
 `clearGenerationState(charId, expectedGenId)` prevents double-cleanup from abort clearing a newer generation's state.
 
+**Abort path delegation:** `useGenerationAbort` does NOT call `clearGenerationState` directly.
+It delegates cleanup to `handleGenerationError → restoreState → finalizeGenerationState`,
+which calls `clearGenerationState` with the correct `expectedGenId`. Calling `clearGenerationState`
+in both abort and error handler would cause double-cleanup and race conditions with stale guards.
+
 ## Partial text on abort
 
 - Streaming: preserve partial text as completed message

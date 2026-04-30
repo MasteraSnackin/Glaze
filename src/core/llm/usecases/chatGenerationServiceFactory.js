@@ -41,7 +41,7 @@ export function createChatGenerationServices({
     const registry = useGenerationRegistry();
     const { clearTypingStateForMessage } = useTypingStateCleanup({ currentMessages, getChatData, db });
     const app = createGenerationAppAdapters();
-    const persistence = { getChatData, db };
+    const persistence = { getChatData, db, patchChatData: db.patchChatData.bind(db) };
 
     return {
         state: {

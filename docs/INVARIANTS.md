@@ -18,6 +18,10 @@ state exists, the call is silently rejected (`ChatView.vue:2221-2227`).
 For every `setGenerationState(charId, ...)`, there must be a matching
 `clearGenerationState(charId, ...)` on every exit path: completion, error, abort, or unmount.
 
+**Abort path:** `useGenerationAbort` delegates cleanup to `handleGenerationError → finalizeGenerationState`
+instead of calling `clearGenerationState` directly, to avoid double-cleanup and stale guard conflicts.
+This satisfies the invariant — `clearGenerationState` is still called, just from the error handler.
+
 **Previously violated (fixed in Phase 2):**
 - ~~Stale completion path (`useGenerationCompleteHandler.js:136-141`) calls `ensureStaleCleanup` but does NOT call `clearGenerationState`.~~ **Fixed:** `ensureStaleCleanup` now uses `finalizeGenerationState` which always calls `clearGenerationState`.
 - ~~`onUnmounted` (`ChatView.vue:3428-3455`) aborts controllers and clears timers but does NOT call `clearGenerationState`.~~ **Fixed:** `onUnmounted` now calls `clearGenerationState(charId)` after cleanup.

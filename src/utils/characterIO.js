@@ -7,6 +7,7 @@ import { currentLang } from '@/core/config/APPSettings.js';
 import { db } from '@/utils/db.js';
 import { logger } from './logger.js';
 import { generateThumbnail, generateAllThumbnails } from './thumbnailUtils.js';
+import { fileToDataUrl, blobToDataUrl } from './imageUtils.js';
 import { saveFile } from '../core/services/fileSaver.js';
 import { importSTLorebook } from '@/core/states/lorebookState.js';
 import { publishAppEvent } from '@/core/events/eventHub.js';
@@ -142,7 +143,7 @@ async function parsePng(file) {
     if (!charaData) throw new Error("No character data found in PNG (tEXt chunk 'chara' or 'ccv3')");
 
     // Convert the image to base64 for use as the avatar
-    const avatarBase64 = await fileToBase64(file);
+    const avatarBase64 = await fileToDataUrl(file);
     const normalized = normalizeCharacterData(charaData);
     normalized.avatar = avatarBase64; // Avatar from the file takes priority
 
@@ -292,17 +293,6 @@ function getEmbeddedZipPath(uri) {
     return null;
 }
 
-function blobToDataUrl(blob, ext) {
-    const mimeMap = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif', avif: 'image/avif', apng: 'image/apng', bmp: 'image/bmp', jfif: 'image/jpeg' };
-    const mime = mimeMap[ext] || 'image/png';
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = reject;
-        reader.readAsDataURL(new File([blob], 'asset', { type: mime }));
-    });
-}
-
 function normalizeCharacterData(json) {
     let data;
     if ((json.spec === 'chara_card_v2' || json.spec === 'chara_card_v3') && json.data) {
@@ -356,15 +346,6 @@ export async function extractCharacterBook(charData) {
     delete charData.character_book;
 
     return lorebook;
-}
-
-function fileToBase64(file) {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-    });
 }
 
 /**
