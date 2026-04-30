@@ -106,21 +106,118 @@ const allFirstMessages = computed(() => {
 });
 
 const activeTab = ref('info');
-const sheetTabs = computed(() => [
-    { id: 'info', label: getTranslated('tab_info', 'Information') || 'Information' },
-    { id: 'prompts', label: getTranslated('tab_prompts', 'Prompts') || 'Prompts' }
-]);
+const galleryImages = computed(() => {
+    const imgs = currentCharData.value?.images;
+    return Array.isArray(imgs) ? imgs : [];
+});
+const isLocalCharacter = computed(() => !!currentCharData.value?.id);
+const sheetTabs = computed(() => {
+    const tabs = [
+        { id: 'info', label: getTranslated('tab_info', 'Information') || 'Information' },
+        { id: 'prompts', label: getTranslated('tab_prompts', 'Prompts') || 'Prompts' }
+    ];
+    if (galleryImages.value.length > 0 || isLocalCharacter.value) {
+        tabs.push({ id: 'gallery', label: getTranslated('tab_gallery', 'Gallery') || 'Gallery' });
+    }
+    return tabs;
+});
+
+const tabSliderOffset = computed(() => {
+    const idx = sheetTabs.value.findIndex(t => t.id === activeTab.value);
+    return idx >= 0 ? idx * 100 : 0;
+});
 
 const allTags = computed(() => {
     const tags = currentCharData.value?.tags;
     return Array.isArray(tags) ? tags.filter(Boolean) : [];
 });
 
+function openGalleryImage(img) {
+    publishAppEvent(APP_EVENTS.nav.openImageViewer, { src: img.src });
+}
+
+function triggerGalleryImageUpload() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.multiple = true;
+    input.onchange = async (e) => {
+        const files = Array.from(e.target.files);
+        if (!files.length) return;
+        const char = currentCharData.value;
+        if (!char) return;
+        if (!Array.isArray(char.images)) char.images = [];
+        for (const file of files) {
+            const src = await fileToDataUrl(file);
+            let thumbnail = null;
+            try {
+                const { generateThumbnail } = await import('@/utils/thumbnailUtils.js');
+                thumbnail = await generateThumbnail(src, 300);
+            } catch (_e) { /* skip thumbnail */ }
+            char.images.push({
+                id: 'img_' + Math.random().toString(36).slice(2, 10),
+                src,
+                name: file.name || '',
+                thumbnail
+            });
+        }
+        if (char.id) {
+            await db.saveCharacter(char, -1);
+            publishAppEvent(APP_EVENTS.domain.character.updated, { character: char });
+        }
+        if (!isControlled.value) {
+            localCharData.value = { ...char };
+        }
+    };
+    input.click();
+}
+
+async function deleteGalleryImage(imgId) {
+    const char = currentCharData.value;
+    if (!char?.images) return;
+    char.images = char.images.filter(img => img.id !== imgId);
+    if (char.id) {
+        await db.saveCharacter(char, -1);
+        publishAppEvent(APP_EVENTS.domain.character.updated, { character: char });
+    }
+    if (!isControlled.value) {
+        localCharData.value = { ...char };
+    }
+}
+
+function confirmDeleteGalleryImage(img) {
+    showBottomSheet({
+        title: getTranslated('confirm_delete_image', 'Delete image?'),
+        items: [
+            {
+                label: getTranslated('btn_yes', 'Yes'),
+                icon: '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>',
+                iconColor: '#ff4444',
+                isDestructive: true,
+                onClick: () => { closeBottomSheet(); deleteGalleryImage(img.id); }
+            },
+            {
+                label: getTranslated('btn_no', 'No'),
+                icon: '<svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>',
+                onClick: () => closeBottomSheet()
+            }
+        ]
+    });
+}
+
+function fileToDataUrl(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+}
+
 const creatorProfileUrl = computed(() => {
     const char = currentCharData.value || {};
     return char.creator_id ? `https://janitorai.com/profiles/${char.creator_id}` : '';
 });
-const isLocalCharacter = computed(() => !!currentCharData.value?.id);
 const canOpenChat = computed(() => isLocalCharacter.value);
 
 const menuIcon = '<svg viewBox="0 0 24 24"><path d="M12 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm0 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4zm0 8a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"/></svg>';
@@ -361,15 +458,13 @@ function openHeroImage() {
                 </div>
 
                 <div class="tabs-row">
-                    <div class="top-tabs-container tabs-2">
-                        <div class="tab-slider" :style="{ transform: `translateX(${activeTab === 'prompts' ? '100%' : '0'})` }"></div>
-                        <div class="top-tab" :class="{ active: activeTab === 'info' }" @click="activeTab = 'info'">
-                            <svg class="tab-icon" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
-                            <span>{{ getTranslated('tab_info', 'Information') || 'Information' }}</span>
-                        </div>
-                        <div class="top-tab" :class="{ active: activeTab === 'prompts' }" @click="activeTab = 'prompts'">
-                            <svg class="tab-icon" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
-                            <span>{{ getTranslated('tab_prompts', 'Prompts') || 'Prompts' }}</span>
+                    <div class="top-tabs-container" :class="'tabs-' + sheetTabs.length">
+                        <div class="tab-slider" :style="{ transform: `translateX(${tabSliderOffset}%)` }"></div>
+                        <div v-for="tab in sheetTabs" :key="tab.id" class="top-tab" :class="{ active: activeTab === tab.id }" @click="activeTab = tab.id">
+                            <svg v-if="tab.id === 'info'" class="tab-icon" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+                            <svg v-else-if="tab.id === 'prompts'" class="tab-icon" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
+                            <svg v-else-if="tab.id === 'gallery'" class="tab-icon" viewBox="0 0 24 24"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
+                            <span>{{ tab.label }}</span>
                         </div>
                     </div>
                 </div>
@@ -393,9 +488,8 @@ function openHeroImage() {
                             <div class="section-label">Creator Notes</div>
                             <div class="char-desc" v-html="infoDescriptionHtml"></div>
                         </div>
-                    </div> <!-- /info tab -->
-                
-                <div v-else :key="'prompts-' + (currentCharData.id || currentCharData.name)" class="tab-content prompts-tab-content">
+                    </div><!-- /info tab -->
+                    <div v-else-if="activeTab === 'prompts'" :key="'prompts-' + (currentCharData.id || currentCharData.name)" class="tab-content prompts-tab-content">
                         <div class="menu-group char-desc-group" v-for="section in promptSections" :key="section.key">
                             <div class="settings-item">
                                 <div class="label-row desc-header" @click="toggleSection(section.key)">
@@ -432,7 +526,23 @@ function openHeroImage() {
                                 </div>
                             </div>
                         </div>
-                    </div> <!-- /prompts tab -->
+                    </div><!-- /prompts tab -->
+                    <div v-else-if="activeTab === 'gallery'" :key="'gallery-' + (currentCharData.id || currentCharData.name)" class="tab-content gallery-tab-content">
+                        <div class="gallery-grid" v-if="galleryImages.length > 0">
+                            <div v-for="img in galleryImages" :key="img.id" class="gallery-item" @click="openGalleryImage(img)">
+                                <img :src="img.thumbnail || img.src" class="gallery-thumb" loading="lazy" />
+                                <button v-if="isLocalCharacter" class="gallery-delete-btn" @click.stop="confirmDeleteGalleryImage(img)" v-html="deleteIcon"></button>
+                            </div>
+                        </div>
+                        <div v-if="galleryImages.length === 0" class="gallery-empty">
+                            <svg viewBox="0 0 24 24" class="gallery-empty-icon"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
+                            <span>{{ getTranslated('gallery_empty', 'No images in gallery') || 'No images in gallery' }}</span>
+                        </div>
+                        <button v-if="isLocalCharacter" class="gallery-add-btn" @click="triggerGalleryImageUpload">
+                            <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                            <span>{{ getTranslated('gallery_add', 'Add Images') || 'Add Images' }}</span>
+                        </button>
+                    </div><!-- /gallery tab -->
                 </Transition>
             </div>
         </div> <!-- /char-sheet -->
@@ -894,5 +1004,121 @@ function openHeroImage() {
     position: static;
     right: auto;
     bottom: auto;
+}
+
+.gallery-tab-content {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.gallery-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+}
+
+.gallery-item {
+    position: relative;
+    aspect-ratio: 1;
+    border-radius: 12px;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.gallery-item:active {
+    transform: scale(0.95);
+}
+
+.gallery-thumb {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.gallery-delete-btn {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    border: none;
+    color: #ff4444;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+    padding: 0;
+}
+
+.gallery-item:hover .gallery-delete-btn,
+.gallery-item:active .gallery-delete-btn {
+    opacity: 1;
+}
+
+.gallery-delete-btn :deep(svg) {
+    width: 14px !important;
+    height: 14px !important;
+    fill: currentColor !important;
+}
+
+.gallery-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 40px 16px;
+    color: rgba(255, 255, 255, 0.35);
+}
+
+.gallery-empty-icon {
+    width: 48px;
+    height: 48px;
+    fill: currentColor;
+    opacity: 0.4;
+}
+
+.gallery-empty span {
+    font-size: 14px;
+}
+
+.gallery-add-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 12px 20px;
+    border-radius: 14px;
+    background: rgba(var(--vk-blue-rgb, 64, 128, 255), 0.12);
+    color: var(--vk-blue, #4080ff);
+    border: 1px solid rgba(var(--vk-blue-rgb, 64, 128, 255), 0.2);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    width: 100%;
+}
+
+.gallery-add-btn:active {
+    transform: scale(0.97);
+    opacity: 0.85;
+}
+
+.gallery-add-btn svg {
+    width: 20px;
+    height: 20px;
+    fill: currentColor;
 }
 </style>

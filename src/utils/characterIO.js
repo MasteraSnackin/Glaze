@@ -51,6 +51,17 @@ function parseJson(file) {
                         console.error('Failed to generate thumbnail from JSON', e);
                     }
                 }
+                if (Array.isArray(normalized.images) && normalized.images.length > 0) {
+                    for (const img of normalized.images) {
+                        if (!img.thumbnail && img.src) {
+                            try {
+                                img.thumbnail = await generateThumbnail(img.src, 300);
+                            } catch (e) {
+                                console.warn('Failed to generate thumbnail for gallery image:', e);
+                            }
+                        }
+                    }
+                }
                 resolve(normalized);
             } catch (err) {
                 reject(new Error("JSON read error: " + err.message));
@@ -129,6 +140,17 @@ async function parsePng(file) {
         console.error("Failed to generate thumbnails for PNG:", e);
     }
 
+    if (Array.isArray(normalized.images) && normalized.images.length > 0) {
+        for (const img of normalized.images) {
+            try {
+                const thumb = await generateThumbnail(img.src, 300);
+                img.thumbnail = thumb;
+            } catch (e) {
+                console.warn('Failed to generate thumbnail for gallery image:', e);
+            }
+        }
+    }
+
     return normalized;
 }
 
@@ -147,10 +169,27 @@ function normalizeCharacterData(json) {
         data.name = "Unknown";
     }
 
-    // No avatar — set null so the placeholder is shown (see .avatar-placeholder in components.css)
     if (!data.avatar || data.avatar === 'none') {
         data.avatar = null;
     }
+
+    if (Array.isArray(data.assets) && data.assets.length > 0) {
+        data.images = data.assets
+            .filter(a => a.type === 'icon' || a.type === 'custom' || !a.type)
+            .filter(a => a.uri && (a.uri.startsWith('data:image') || a.uri.startsWith('http')))
+            .map(a => ({
+                id: 'img_' + Math.random().toString(36).slice(2, 10),
+                src: a.uri,
+                name: a.name || '',
+                thumbnail: null
+            }));
+    }
+    delete data.assets;
+
+    if (!Array.isArray(data.images)) {
+        data.images = [];
+    }
+
     return data;
 }
 
@@ -272,22 +311,19 @@ export async function generateMissingThumbnails() {
 function prepareV2Data(character, excludeAvatar = false) {
     const data = JSON.parse(JSON.stringify(character));
 
-    // Remove internal IDs and Glaze-specific fields if present
     delete data.id;
     delete data.sessionId;
     delete data.color;
     delete data.thumbnail;
+    delete data.mini_thumbnail;
+    delete data.images;
 
     if (excludeAvatar) {
         delete data.avatar;
     }
 
-    // character_book is excluded from export; extensions is kept as an empty object
-    // because SillyTavern may require it to be present
     delete data.character_book;
 
-    // Ensure all required V2 spec fields are present (SillyTavern)
-    // Field order follows Alice.json
     const exportData = {
         name: data.name || "",
         first_mes: data.first_mes || "",
@@ -305,21 +341,42 @@ function prepareV2Data(character, excludeAvatar = false) {
         extensions: {}
     };
 
-    // Include avatar only if not excluded
     if (!excludeAvatar && data.avatar) {
         exportData.avatar = data.avatar;
     }
 
-    // Remove undefined fields
     Object.keys(exportData).forEach(key => {
         if (exportData[key] === undefined) delete exportData[key];
     });
 
-    // Field order matters (Alice.json): data comes before spec
     return {
         data: exportData,
         spec: "chara_card_v2",
         spec_version: "2.0"
+    };
+}
+
+function prepareV3Data(character) {
+    const v2 = prepareV2Data(character, true);
+    const v3Data = { ...v2.data };
+
+    if (Array.isArray(character.images) && character.images.length > 0) {
+        v3Data.assets = character.images.map(img => ({
+            type: 'custom',
+            name: img.name || '',
+            uri: img.src,
+            ext: img.src.startsWith('data:image/png') ? 'png'
+                : img.src.startsWith('data:image/jpeg') || img.src.startsWith('data:image/jpg') ? 'jpg'
+                : img.src.startsWith('data:image/webp') ? 'webp' : 'png'
+        }));
+    } else {
+        v3Data.assets = [];
+    }
+
+    return {
+        data: v3Data,
+        spec: "chara_card_v3",
+        spec_version: "3.0"
     };
 }
 
@@ -360,7 +417,8 @@ function crc32(data) {
  * Export a character as a PNG with embedded character data.
  */
 export async function exportCharacterAsV2Png(character) {
-    const v2Data = prepareV2Data(character);
+    const hasGallery = Array.isArray(character.images) && character.images.length > 0;
+    const cardData = hasGallery ? prepareV3Data(character) : prepareV2Data(character);
     const fileName = `${(character.name || 'character').replace(/[/\\?%*:|"<>]/g, '-')}.png`;
 
     // 1. Get the base image
@@ -405,8 +463,8 @@ export async function exportCharacterAsV2Png(character) {
 
     // 2. Prepare the tEXt chunk data
     // tEXt format: Keyword + null byte + Text
-    const keyword = "chara";
-    const textData = btoa(unescape(encodeURIComponent(JSON.stringify(v2Data)))); // Base64-encoded UTF-8 string
+    const keyword = hasGallery ? "ccv3" : "chara";
+    const textData = btoa(unescape(encodeURIComponent(JSON.stringify(cardData)))); // Base64-encoded UTF-8 string
 
     const encoder = new TextEncoder();
     const keywordBytes = encoder.encode(keyword);
