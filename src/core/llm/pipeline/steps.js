@@ -127,7 +127,13 @@ export async function stepRequestExecution(ctx, deps) {
 
     if (ctx.isAborted) {
         const { onError } = ctx.callbacks;
-        if (onError) onError(new DOMException('Aborted', 'AbortError'));
+        if (onError) {
+            const abortErr = new DOMException('Aborted', 'AbortError');
+            if (ctx.controller?.userAborted) {
+                abortErr.userAborted = true;
+            }
+            onError(abortErr);
+        }
         return;
     }
 

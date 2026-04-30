@@ -77,5 +77,17 @@ export async function runChatPostPromptPipeline({
         return;
     }
 
+    if (ctx.isAborted) {
+        const { onError } = callbacks;
+        if (onError) {
+            const abortErr = new DOMException('Aborted', 'AbortError');
+            if (ctx.controller?.userAborted) {
+                abortErr.userAborted = true;
+            }
+            onError(abortErr);
+        }
+        return;
+    }
+
     return ctx;
 }

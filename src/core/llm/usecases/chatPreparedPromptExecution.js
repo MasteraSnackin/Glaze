@@ -61,7 +61,13 @@ export async function executePreparedChatPrompt({
     }
 
     if (controller?.signal?.aborted) {
-        if (onError) onError(new DOMException('Aborted', 'AbortError'));
+        if (onError) {
+            const abortErr = new DOMException('Aborted', 'AbortError');
+            if (controller?.userAborted) {
+                abortErr.userAborted = true;
+            }
+            onError(abortErr);
+        }
         return null;
     }
 

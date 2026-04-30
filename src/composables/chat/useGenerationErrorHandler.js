@@ -25,7 +25,7 @@ export async function handleGenerationError({
     const { notifyGenerationEnded } = app;
     const state = getGenerationState(char.id);
     if (!state || state.genId !== genId) {
-        if (error?.name === 'AbortError' && error?.userAborted) {
+        if (error?.name === 'AbortError') {
             const idx = currentMessages.value.findIndex(m => m.id === msgId);
             if (idx !== -1) {
                 const msg = currentMessages.value[idx];
@@ -78,7 +78,7 @@ export async function handleGenerationError({
     };
 
     try {
-        if (error?.name === 'AbortError' && error?.userAborted) {
+        if (error?.name === 'AbortError') {
             await restoreState(false);
             finalizeGenerationState({
                 charId: char.id,

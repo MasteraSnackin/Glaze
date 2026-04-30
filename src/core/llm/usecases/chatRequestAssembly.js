@@ -122,7 +122,13 @@ export async function executeFinalChatRequest({
     onPreviewReady?.(finalPreviewBody);
 
     if (requestController?.signal?.aborted) {
-        if (onError) onError(new DOMException('Aborted', 'AbortError'));
+        if (onError) {
+            const abortErr = new DOMException('Aborted', 'AbortError');
+            if (requestController?.userAborted) {
+                abortErr.userAborted = true;
+            }
+            onError(abortErr);
+        }
         return;
     }
 
