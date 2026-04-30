@@ -23,12 +23,22 @@ import JSZip from 'jszip';
 export async function parseCharacterCard(file) {
     const name = file.name.toLowerCase();
     if (name.endsWith('.charx') || name.endsWith('.zip')) {
+        const isRar = await detectRar(file);
+        if (isRar) {
+            throw new Error("RAR archives are not supported. Please re-save the archive as ZIP (.charx) and try again.");
+        }
         return await parseCharX(file);
     }
     if (file.type === 'image/png' || name.endsWith('.png')) {
         return await parsePng(file);
     }
     return await parseJson(file);
+}
+
+async function detectRar(file) {
+    const header = await file.slice(0, 7).arrayBuffer();
+    const sig = new Uint8Array(header);
+    return sig[0] === 0x52 && sig[1] === 0x61 && sig[2] === 0x72 && sig[3] === 0x21;
 }
 
 function parseJson(file) {
