@@ -161,62 +161,93 @@ async function parsePng(file) {
 async function parseCharX(file) {
     const zip = await JSZip.loadAsync(file);
 
-    const cardFile = zip.file('card.json');
-    if (!cardFile) throw new Error("No card.json found in CharX archive");
-
-    const cardText = await cardFile.async('string');
-    const cardJson = JSON.parse(cardText);
-
-    const normalized = normalizeCharacterData(cardJson);
-
-    const embeddedAssets = Array.isArray(cardJson.data?.assets) ? cardJson.data.assets : [];
-
+    let normalized;
+    let cardJson;
     const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif', 'apng', 'avif', 'bmp', 'jfif']);
-    const galleryItems = [];
 
-    for (const asset of embeddedAssets) {
-        if (!asset || asset.type === 'icon' || asset.type === 'user_icon') continue;
+    const cardFile = zip.file('card.json');
+    if (cardFile) {
+        const cardText = await cardFile.async('string');
+        cardJson = JSON.parse(cardText);
+        normalized = normalizeCharacterData(cardJson);
 
-        const ext = (asset.ext || '').toLowerCase();
-        if (!IMAGE_EXTS.has(ext)) continue;
-
-        const zipPath = getEmbeddedZipPath(asset.uri);
-        if (!zipPath) {
-            if (asset.uri && asset.uri.startsWith('data:image')) {
-                galleryItems.push({
-                    id: 'img_' + Math.random().toString(36).slice(2, 10),
-                    src: asset.uri,
-                    name: asset.name || '',
-                    thumbnail: null
-                });
+        const iconAsset = (cardJson.data?.assets || []).find(a => a && (a.type === 'icon') && a.uri);
+        if (iconAsset) {
+            const iconPath = getEmbeddedZipPath(iconAsset.uri);
+            if (iconPath) {
+                const iconFile = zip.file(iconPath);
+                if (iconFile) {
+                    const iconExt = (iconAsset.ext || 'png').toLowerCase();
+                    const iconBlob = await iconFile.async('blob');
+                    normalized.avatar = await blobToDataUrl(iconBlob, iconExt);
+                }
             }
-            continue;
         }
+    } else {
+        const pngEntry = Object.keys(zip.files).find(
+            f => f.toLowerCase().endsWith('.png') && !zip.files[f].dir
+        );
+        if (!pngEntry) throw new Error("No card.json or PNG found in archive");
 
-        const zippedFile = zip.file(zipPath);
-        if (!zippedFile) continue;
-
-        const blob = await zippedFile.async('blob');
-        const dataUrl = await blobToDataUrl(blob, ext);
-
-        galleryItems.push({
-            id: 'img_' + Math.random().toString(36).slice(2, 10),
-            src: dataUrl,
-            name: asset.name || '',
-            thumbnail: null
-        });
+        const pngBlob = await zip.file(pngEntry).async('blob');
+        const pngFile = new File([pngBlob], pngEntry, { type: 'image/png' });
+        normalized = await parsePng(pngFile);
+        cardJson = null;
     }
 
-    const iconAsset = embeddedAssets.find(a => a && (a.type === 'icon') && a.uri);
-    if (iconAsset) {
-        const iconPath = getEmbeddedZipPath(iconAsset.uri);
-        if (iconPath) {
-            const iconFile = zip.file(iconPath);
-            if (iconFile) {
-                const iconExt = (iconAsset.ext || 'png').toLowerCase();
-                const iconBlob = await iconFile.async('blob');
-                normalized.avatar = await blobToDataUrl(iconBlob, iconExt);
+    const embeddedAssets = cardJson?.data?.assets || [];
+    const galleryItems = [];
+
+    if (embeddedAssets.length > 0) {
+        for (const asset of embeddedAssets) {
+            if (!asset || asset.type === 'icon' || asset.type === 'user_icon') continue;
+
+            const ext = (asset.ext || '').toLowerCase();
+            if (!IMAGE_EXTS.has(ext)) continue;
+
+            const zipPath = getEmbeddedZipPath(asset.uri);
+            if (!zipPath) {
+                if (asset.uri && asset.uri.startsWith('data:image')) {
+                    galleryItems.push({
+                        id: 'img_' + Math.random().toString(36).slice(2, 10),
+                        src: asset.uri,
+                        name: asset.name || '',
+                        thumbnail: null
+                    });
+                }
+                continue;
             }
+
+            const zippedFile = zip.file(zipPath);
+            if (!zippedFile) continue;
+
+            const blob = await zippedFile.async('blob');
+            const dataUrl = await blobToDataUrl(blob, ext);
+
+            galleryItems.push({
+                id: 'img_' + Math.random().toString(36).slice(2, 10),
+                src: dataUrl,
+                name: asset.name || '',
+                thumbnail: null
+            });
+        }
+    } else {
+        const imageFiles = Object.keys(zip.files).filter(f => {
+            if (zip.files[f].dir) return false;
+            const ext = f.split('.').pop().toLowerCase();
+            return IMAGE_EXTS.has(ext) && f !== Object.keys(zip.files).find(p => p.toLowerCase().endsWith('.png'));
+        });
+
+        for (const imgPath of imageFiles) {
+            const ext = imgPath.split('.').pop().toLowerCase();
+            const blob = await zip.file(imgPath).async('blob');
+            const dataUrl = await blobToDataUrl(blob, ext);
+            galleryItems.push({
+                id: 'img_' + Math.random().toString(36).slice(2, 10),
+                src: dataUrl,
+                name: imgPath.split('/').pop().replace(/\.[^.]+$/, ''),
+                thumbnail: null
+            });
         }
     }
 
@@ -608,4 +639,68 @@ export async function exportCharacterAsV2Png(character) {
 
     const blob = new Blob([resultPng], { type: 'image/png' });
     await saveFile(fileName, blob, 'image/png', 'characters');
+}
+
+export async function exportCharacterAsCharX(character) {
+    const zip = new JSZip();
+    const v3Data = prepareV3Data(character);
+    const finalAssets = [];
+
+    if (character.avatar) {
+        try {
+            const avatarData = await dataUrlToBinary(character.avatar);
+            const avatarExt = guessImageExt(character.avatar, 'png');
+            zip.file(`icon.${avatarExt}`, avatarData);
+            finalAssets.push({
+                type: 'icon',
+                name: 'main',
+                uri: `embedded://icon.${avatarExt}`,
+                ext: avatarExt
+            });
+        } catch (_e) { /* skip avatar in charx */ }
+    }
+
+    if (Array.isArray(character.images)) {
+        for (let i = 0; i < character.images.length; i++) {
+            const img = character.images[i];
+            if (!img.src) continue;
+            try {
+                const imgData = await dataUrlToBinary(img.src);
+                const imgExt = guessImageExt(img.src, 'png');
+                const imgName = sanitizeAssetName(img.name || `image_${i + 1}`);
+                const zipPath = `images/${imgName}.${imgExt}`;
+                zip.file(zipPath, imgData);
+                finalAssets.push({
+                    type: 'custom',
+                    name: imgName,
+                    uri: `embedded://${zipPath}`,
+                    ext: imgExt
+                });
+            } catch (_e) { /* skip broken image */ }
+        }
+    }
+
+    v3Data.assets = finalAssets;
+    zip.file('card.json', JSON.stringify(v3Data, null, 2));
+
+    const fileName = `${(character.name || 'character').replace(/[/\\?%*:|"<>]/g, '-')}.charx`;
+    const content = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+    await saveFile(fileName, content, 'application/zip', 'characters');
+}
+
+async function dataUrlToBinary(dataUrl) {
+    const res = await fetch(dataUrl);
+    return await res.arrayBuffer();
+}
+
+function guessImageExt(dataUrl, fallback) {
+    const match = dataUrl.match(/^data:image\/(\w+)/);
+    if (!match) return fallback;
+    const raw = match[1].toLowerCase();
+    if (raw === 'jpeg') return 'jpg';
+    return raw;
+}
+
+function sanitizeAssetName(name) {
+    return name.replace(/[/\\?%*:|"<>]/g, '_').replace(/\s+/g, '_').substring(0, 64) || 'image';
 }
