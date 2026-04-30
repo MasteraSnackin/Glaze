@@ -651,7 +651,7 @@ export async function exportCharacterAsV2Png(character) {
     await saveFile(fileName, blob, 'image/png', 'characters');
 }
 
-export async function exportCharacterAsCharX(character) {
+export async function exportCharacterAsCharX(character, useZipExt = false) {
     const zip = new JSZip();
     const v3Data = prepareV3Data(character);
     const finalAssets = [];
@@ -693,7 +693,7 @@ export async function exportCharacterAsCharX(character) {
     v3Data.assets = finalAssets;
     zip.file('card.json', JSON.stringify(v3Data, null, 2));
 
-    const fileName = `${(character.name || 'character').replace(/[/\\?%*:|"<>]/g, '-')}.charx`;
+    const fileName = `${(character.name || 'character').replace(/[/\\?%*:|"<>]/g, '-')}.${useZipExt ? 'zip' : 'charx'}`;
     const content = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
     await saveFile(fileName, content, 'application/zip', 'characters');
 }
