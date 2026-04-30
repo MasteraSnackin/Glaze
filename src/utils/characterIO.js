@@ -11,6 +11,7 @@ import { saveFile } from '../core/services/fileSaver.js';
 import { importSTLorebook } from '@/core/states/lorebookState.js';
 import { publishAppEvent } from '@/core/events/eventHub.js';
 import { APP_EVENTS } from '@/core/events/eventNames.js';
+import JSZip from 'jszip';
 
 // ─── Import ──────────────────────────────────────────────────────────────────
 
@@ -20,11 +21,14 @@ import { APP_EVENTS } from '@/core/events/eventNames.js';
  * @returns {Promise<Object>} - Character data object
  */
 export async function parseCharacterCard(file) {
-    if (file.type === 'image/png' || file.name.toLowerCase().endsWith('.png')) {
-        return await parsePng(file);
-    } else {
-        return await parseJson(file);
+    const name = file.name.toLowerCase();
+    if (name.endsWith('.charx') || name.endsWith('.zip')) {
+        return await parseCharX(file);
     }
+    if (file.type === 'image/png' || name.endsWith('.png')) {
+        return await parsePng(file);
+    }
+    return await parseJson(file);
 }
 
 function parseJson(file) {
@@ -154,6 +158,110 @@ async function parsePng(file) {
     return normalized;
 }
 
+async function parseCharX(file) {
+    const zip = await JSZip.loadAsync(file);
+
+    const cardFile = zip.file('card.json');
+    if (!cardFile) throw new Error("No card.json found in CharX archive");
+
+    const cardText = await cardFile.async('string');
+    const cardJson = JSON.parse(cardText);
+
+    const normalized = normalizeCharacterData(cardJson);
+
+    const embeddedAssets = Array.isArray(cardJson.data?.assets) ? cardJson.data.assets : [];
+
+    const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif', 'apng', 'avif', 'bmp', 'jfif']);
+    const galleryItems = [];
+
+    for (const asset of embeddedAssets) {
+        if (!asset || asset.type === 'icon' || asset.type === 'user_icon') continue;
+
+        const ext = (asset.ext || '').toLowerCase();
+        if (!IMAGE_EXTS.has(ext)) continue;
+
+        const zipPath = getEmbeddedZipPath(asset.uri);
+        if (!zipPath) {
+            if (asset.uri && asset.uri.startsWith('data:image')) {
+                galleryItems.push({
+                    id: 'img_' + Math.random().toString(36).slice(2, 10),
+                    src: asset.uri,
+                    name: asset.name || '',
+                    thumbnail: null
+                });
+            }
+            continue;
+        }
+
+        const zippedFile = zip.file(zipPath);
+        if (!zippedFile) continue;
+
+        const blob = await zippedFile.async('blob');
+        const dataUrl = await blobToDataUrl(blob, ext);
+
+        galleryItems.push({
+            id: 'img_' + Math.random().toString(36).slice(2, 10),
+            src: dataUrl,
+            name: asset.name || '',
+            thumbnail: null
+        });
+    }
+
+    const iconAsset = embeddedAssets.find(a => a && (a.type === 'icon') && a.uri);
+    if (iconAsset) {
+        const iconPath = getEmbeddedZipPath(iconAsset.uri);
+        if (iconPath) {
+            const iconFile = zip.file(iconPath);
+            if (iconFile) {
+                const iconExt = (iconAsset.ext || 'png').toLowerCase();
+                const iconBlob = await iconFile.async('blob');
+                normalized.avatar = await blobToDataUrl(iconBlob, iconExt);
+            }
+        }
+    }
+
+    for (const img of galleryItems) {
+        try {
+            img.thumbnail = await generateThumbnail(img.src, 300);
+        } catch (_e) { /* skip */ }
+    }
+    normalized.images = galleryItems;
+
+    if (normalized.avatar) {
+        try {
+            const thumbs = await generateAllThumbnails(normalized.avatar);
+            normalized.thumbnail = thumbs.thumbnail;
+            normalized.mini_thumbnail = thumbs.mini_thumbnail;
+        } catch (e) {
+            console.error("Failed to generate thumbnails for CharX avatar:", e);
+        }
+    }
+
+    return normalized;
+}
+
+function getEmbeddedZipPath(uri) {
+    if (typeof uri !== 'string') return null;
+    const prefixes = ['embeded://', 'embedded://', '__asset:'];
+    for (const prefix of prefixes) {
+        if (uri.startsWith(prefix)) {
+            return uri.slice(prefix.length);
+        }
+    }
+    return null;
+}
+
+function blobToDataUrl(blob, ext) {
+    const mimeMap = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif', avif: 'image/avif', apng: 'image/apng', bmp: 'image/bmp', jfif: 'image/jpeg' };
+    const mime = mimeMap[ext] || 'image/png';
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(new File([blob], 'asset', { type: mime }));
+    });
+}
+
 function normalizeCharacterData(json) {
     let data;
     if ((json.spec === 'chara_card_v2' || json.spec === 'chara_card_v3') && json.data) {
@@ -225,7 +333,7 @@ function fileToBase64(file) {
 export function triggerCharacterImport(onImport) {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.json,application/json,.png,image/png'; // JSON and PNG
+    input.accept = '.json,application/json,.png,image/png,.charx,.zip';
 
     input.onchange = async (e) => {
         const file = e.target.files[0];
