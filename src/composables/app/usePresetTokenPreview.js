@@ -19,7 +19,10 @@ export function usePresetTokenPreview({
         return currentPreset.value?.blocks?.find(b => b.id === editingBlockId.value);
     });
 
-    const resolveBlockContent = (block, { includeHistory = false } = {}) => {
+    const CHARACTER_BLOCKS = ['char_card', 'char_personality', 'char_persona', 'scenario', 'example_dialogue'];
+    const NON_PRESET_BLOCKS = ['chat_history', 'first_message', 'authors_note', 'summary'];
+
+    const resolveBlockContent = (block, { includeHistory = false, includeNonPreset = true } = {}) => {
         if (!block) return '';
         const blockId = normalizeBlockId(block.id);
 
@@ -30,15 +33,24 @@ export function usePresetTokenPreview({
         }
         if (blockId === 'first_message') return '';
 
-        if (blockId === 'guided_generation') return block.content || '[System Note: {{guidance}}]';
-        if (blockId === 'authors_note') return activeChatChar?.value?.authors_note || '';
-        if (blockId === 'summary') return activeChatChar?.value?.summary || '';
+        if (blockId === 'authors_note') {
+            if (!includeNonPreset) return '';
+            return activeChatChar?.value?.authors_note || '';
+        }
+        if (blockId === 'summary') {
+            if (!includeNonPreset) return '';
+            return activeChatChar?.value?.summary || '';
+        }
+        if (CHARACTER_BLOCKS.includes(blockId)) {
+            if (!includeNonPreset) return '';
+            if (blockId === 'char_card') return activeChatChar?.value?.description || activeChatChar?.value?.desc || '';
+            if (blockId === 'char_personality' || blockId === 'char_persona') return activeChatChar?.value?.personality || '';
+            if (blockId === 'scenario') return activeChatChar?.value?.scenario || '';
+            if (blockId === 'example_dialogue') return activeChatChar?.value?.mes_example || '';
+        }
 
+        if (blockId === 'guided_generation') return block.content || '[System Note: {{guidance}}]';
         if (blockId === 'user_persona') return effectivePersona?.value?.prompt || '';
-        if (blockId === 'char_card') return activeChatChar?.value?.description || activeChatChar?.value?.desc || '';
-        if (blockId === 'char_personality' || blockId === 'char_persona') return activeChatChar?.value?.personality || '';
-        if (blockId === 'scenario') return activeChatChar?.value?.scenario || '';
-        if (blockId === 'example_dialogue') return activeChatChar?.value?.mes_example || '';
 
         return block.content || '';
     };
@@ -81,7 +93,7 @@ export function usePresetTokenPreview({
         if (preset.blocks) {
             preset.blocks.forEach(b => {
                 if (b.enabled && !b.isStashed) {
-                    const blockContent = resolveBlockContent(b);
+                    const blockContent = resolveBlockContent(b, { includeNonPreset: false });
                     if (blockContent) {
                         content += blockContent + "\n";
                     }
@@ -146,7 +158,7 @@ export function usePresetTokenPreview({
         const block = blockOrContent;
         if (!block) return 0;
         const blockId = normalizeBlockId(block.id);
-        const content = resolveBlockContent(block, { includeHistory: blockId === 'chat_history' });
+        const content = resolveBlockContent(block, { includeHistory: blockId === 'chat_history', includeNonPreset: true });
         if (!content) return 0;
         return estimateTokens(extendedReplaceMacros(content));
     };
