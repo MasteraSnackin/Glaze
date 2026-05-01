@@ -1628,7 +1628,7 @@ onUnmounted(() => {
         </div>
 
         <div style="display: none;"></div>
-        <PresetView ref="presetView" :active-chat-char="activeChar" :chat-history="currentMessages" :is-generating="isGenerating" @update:active-chat-char="val => { if (activeChar) Object.assign(activeChar, val) }" />
+        <PresetView ref="presetView" :active-chat-char="activeChar" :chat-history="currentMessages" :is-generating="isGenerating" :context-breakdown="contextBreakdown" @update:active-chat-char="val => { if (activeChar) Object.assign(activeChar, val) }" />
         <CharacterCardSheet ref="charCardSheet" />
         <LorebookSheet ref="lorebookSheet" />
         <RegexSheet ref="regexSheet" :active-chat-char="activeChar" />
