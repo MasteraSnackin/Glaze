@@ -347,8 +347,15 @@ export function useMessageActions(deps) {
     function enterEditMode(msg) {
         msg._iigMap = msg._iigMap || {};
         const { text, map } = prepareEditText(msg?.text || '', msg._iigMap);
-        msg.editText = text;
         msg._base64Map = map;
+
+        let editBody = text;
+        if (msg.reasoning) {
+            const { start: tagStart, end: tagEnd } = getReasoningTags();
+            editBody = tagStart + msg.reasoning + tagEnd + '\n' + text;
+        }
+
+        msg.editText = editBody;
         msg.isEditing = true;
     }
 
@@ -374,7 +381,7 @@ export function useMessageActions(deps) {
         );
         delete msg._iigMap;
 
-        let newReasoning = msg.reasoning;
+        let newReasoning = null;
 
         const { start: tagStart, end: tagEnd } = getReasoningTags();
 
@@ -391,11 +398,12 @@ export function useMessageActions(deps) {
 
         newText = cleanText(newText);
         msg.text = newText;
-        msg.reasoning = newReasoning;
+        msg.reasoning = newReasoning || null;
+        msg.isAllReasoning = !newText?.trim() && !!newReasoning;
         msg.tokens = estimateTokens(newText);
         if (msg.swipes) msg.swipes[msg.swipeId || 0] = newText;
         if (msg.swipesMeta && msg.swipesMeta[msg.swipeId || 0]) {
-            msg.swipesMeta[msg.swipeId || 0].reasoning = newReasoning;
+            msg.swipesMeta[msg.swipeId || 0].reasoning = newReasoning || null;
             msg.swipesMeta[msg.swipeId || 0].tokens = msg.tokens;
         }
         msg.isEditing = false;
