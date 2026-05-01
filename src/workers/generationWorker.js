@@ -540,7 +540,7 @@ function buildPromptMessagesWorker(args) {
             }
             else if (block.id === 'user_persona') {
                 content = `User Name: ${personaObj.name}\nUser Description: ${personaObj.prompt || ""}`;
-                primarySource = 'preset';
+                primarySource = 'persona';
             }
             else if (block.id === 'char_card') {
                 content = `Character Name: ${char.name}\nDescription: ${char.description || char.desc}`;
@@ -828,7 +828,7 @@ self.onmessage = async function (e) {
             const loreReserveTokens = getLorebookReserve(payload.globalSettings, safeContext);
             const memoryReserveTokens = Math.max(0, Math.floor(payload.memoryReserve || 0));
 
-            const sourceKeys = ['character', 'preset', 'summary', 'authorsNote', 'lorebook', 'vectorLore', 'history'];
+            const sourceKeys = ['character', 'preset', 'persona', 'summary', 'authorsNote', 'lorebook', 'vectorLore', 'history'];
             const sourceTotals = {};
             for (const k of sourceKeys) sourceTotals[k] = 0;
 
@@ -851,6 +851,7 @@ self.onmessage = async function (e) {
                 contextSize,
                 character: sourceTotals.character,
                 preset: sourceTotals.preset,
+                persona: sourceTotals.persona,
                 summary: sourceTotals.summary,
                 authorsNote: sourceTotals.authorsNote,
                 lorebook: sourceTotals.lorebook,
@@ -869,7 +870,7 @@ self.onmessage = async function (e) {
             };
 
             // Lorebook and vectorLore are inside reserve, not in fixedBase
-            breakdown.fixedBase = breakdown.character + breakdown.preset + breakdown.summary + breakdown.authorsNote;
+            breakdown.fixedBase = breakdown.character + breakdown.preset + breakdown.persona + breakdown.summary + breakdown.authorsNote;
             breakdown.fixedTotal = breakdown.fixedBase + breakdown.lorebookReserve + breakdown.memoryReserve;
 
             const availableForHistory = safeContext - breakdown.fixedTotal;

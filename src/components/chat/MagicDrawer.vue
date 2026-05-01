@@ -380,11 +380,7 @@ const notesTokens = computed(() => props.contextBreakdown?.authorsNote || 0);
 const summaryTokens = computed(() => props.contextBreakdown?.summary || 0);
 const cardTokens = computed(() => props.contextBreakdown?.character || 0);
 
-const personaTokens = computed(() => {
-    if (!props.activeChar) return 0;
-    const persona = getEffectivePersona(props.activeChar?.id, props.activeChar?.sessionId ? `${props.activeChar.id}_${props.activeChar.sessionId}` : null);
-    return estimateTokens((persona?.name || '') + '\n' + (persona?.prompt || ''));
-});
+const personaTokens = computed(() => props.contextBreakdown?.persona || 0);
 
 const generationTokens = computed(() => {
     const prompt = getLastRequestPreviewSnapshot().prompt;
