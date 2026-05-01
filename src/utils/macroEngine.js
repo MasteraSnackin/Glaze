@@ -122,24 +122,27 @@ export function replaceMacros(text, char, persona, sessionVarsIn = null, notifyO
 
 const _sessionVarsCache = new Map();
 const _globalVarsCache = { raw: null, parsed: null };
+const _hasLocalStorage = typeof localStorage !== 'undefined';
 
 function _getSessionVars(charId, sessionId) {
     const key = `gz_vars_${charId}_${sessionId}`;
     if (_sessionVarsCache.has(key)) return _sessionVarsCache.get(key);
-    try {
-        const parsed = JSON.parse(localStorage.getItem(key)) || {};
-        _sessionVarsCache.set(key, parsed);
-        return parsed;
-    } catch (e) {
-        _sessionVarsCache.set(key, {});
-        return {};
+    let parsed = {};
+    if (_hasLocalStorage) {
+        try {
+            parsed = JSON.parse(localStorage.getItem(key)) || {};
+        } catch (e) { }
     }
+    _sessionVarsCache.set(key, parsed);
+    return parsed;
 }
 
 function _saveSessionVars(charId, sessionId, vars) {
     const key = `gz_vars_${charId}_${sessionId}`;
     _sessionVarsCache.set(key, vars);
-    localStorage.setItem(key, JSON.stringify(vars));
+    if (_hasLocalStorage) {
+        try { localStorage.setItem(key, JSON.stringify(vars)); } catch (e) { }
+    }
 }
 
 export function invalidateMacroCache() {
@@ -148,33 +151,42 @@ export function invalidateMacroCache() {
     _globalVarsCache.parsed = null;
 }
 
-function _getGlobalVar(name) {
-    try {
-        const raw = localStorage.getItem('gz_global_vars') || '{}';
-        if (raw !== _globalVarsCache.raw) {
-            _globalVarsCache.raw = raw;
-            _globalVarsCache.parsed = JSON.parse(raw);
-        }
-        return _globalVarsCache.parsed[name] !== undefined ? _globalVarsCache.parsed[name] : null;
-    } catch (e) {
-        return null;
+export function seedGlobalVars(vars) {
+    if (vars && typeof vars === 'object') {
+        _globalVarsCache.parsed = { ...(_globalVarsCache.parsed || {}), ...vars };
+        _globalVarsCache.raw = JSON.stringify(_globalVarsCache.parsed);
     }
 }
 
-function _setGlobalVar(name, value) {
-    try {
-        const raw = localStorage.getItem('gz_global_vars') || '{}';
-        let globalVars;
-        if (raw === _globalVarsCache.raw && _globalVarsCache.parsed) {
-            globalVars = _globalVarsCache.parsed;
-        } else {
-            globalVars = JSON.parse(raw);
+function _getGlobalVar(name) {
+    if (_globalVarsCache.parsed && _globalVarsCache.parsed[name] !== undefined) {
+        return _globalVarsCache.parsed[name];
+    }
+    if (_hasLocalStorage) {
+        try {
+            const raw = localStorage.getItem('gz_global_vars') || '{}';
+            if (raw !== _globalVarsCache.raw) {
+                _globalVarsCache.raw = raw;
+                _globalVarsCache.parsed = JSON.parse(raw);
+            }
+            return _globalVarsCache.parsed[name] !== undefined ? _globalVarsCache.parsed[name] : null;
+        } catch (e) {
+            return null;
         }
-        globalVars[name] = value;
-        _globalVarsCache.raw = JSON.stringify(globalVars);
-        _globalVarsCache.parsed = globalVars;
-        localStorage.setItem('gz_global_vars', _globalVarsCache.raw);
-    } catch (e) { }
+    }
+    return null;
+}
+
+function _setGlobalVar(name, value) {
+    if (!_globalVarsCache.parsed) {
+        _globalVarsCache.parsed = {};
+        _globalVarsCache.raw = '{}';
+    }
+    _globalVarsCache.parsed[name] = value;
+    _globalVarsCache.raw = JSON.stringify(_globalVarsCache.parsed);
+    if (_hasLocalStorage) {
+        try { localStorage.setItem('gz_global_vars', _globalVarsCache.raw); } catch (e) { }
+    }
 }
 
 function _simpleHash(str) {

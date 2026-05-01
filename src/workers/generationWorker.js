@@ -1,4 +1,4 @@
-import { replaceMacros } from '../utils/macroEngine.js';
+import { replaceMacros, seedGlobalVars } from '../utils/macroEngine.js';
 import { normalizeBlockId } from '../utils/presetBlockIds.js';
 
 let GPTTokenizer = null;
@@ -364,7 +364,8 @@ function buildBlockSourceReplacements(char, personaObj, sessionVars, notifyObj, 
 }
 
 function buildPromptMessagesWorker(args) {
-    let { char, history, summary, activePreset, mergePrompts, mergeRole, noAssistant, userPrefix, charPrefix, squashRole, personaObj, authorsNote, guidanceText, guidanceType, lorebooks, globalSettings, activations, globalRegexes, sessionVars } = args;
+    let { char, history, summary, activePreset, mergePrompts, mergeRole, noAssistant, userPrefix, charPrefix, squashRole, personaObj, authorsNote, guidanceText, guidanceType, lorebooks, globalSettings, activations, globalRegexes, sessionVars, globalVars } = args;
+    if (globalVars) seedGlobalVars(globalVars);
     if (noAssistant) mergePrompts = true;
 
     const messages = [];

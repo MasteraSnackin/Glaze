@@ -3,6 +3,14 @@ import { getEffectivePersona } from '@/core/states/personaState.js';
 import { db } from '@/utils/db.js';
 import { estimateTokens } from '@/utils/tokenizer.js';
 
+function loadGlobalVars() {
+    try {
+        return JSON.parse(localStorage.getItem('gz_global_vars') || '{}');
+    } catch (e) {
+        return {};
+    }
+}
+
 export function getPromptWorkerOptions(char, activePreset) {
     return {
         mergePrompts: activePreset?.mergePrompts || false,
@@ -49,6 +57,7 @@ export function buildPromptWorkerPayload({
         activations: lorebookState.activations,
         globalRegexes,
         sessionVars,
+        globalVars: loadGlobalVars(),
         apiConfig,
         memoryReserve
     }));
