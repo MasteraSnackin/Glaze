@@ -846,6 +846,16 @@ self.onmessage = async function (e) {
                 }
             }
 
+            console.log('[contextBreakdown] sourceTotals:', JSON.stringify(sourceTotals));
+            console.log('[contextBreakdown] per-block preset contributions:');
+            for (const m of staticMessages) {
+                const msgSources = m._allSources || m.sources || [];
+                const presetPart = msgSources.filter(s => s.source === 'preset');
+                if (presetPart.length > 0) {
+                    console.log(`  block="${m.blockName || m.blockId}" presetTokens=${presetPart.reduce((a, s) => a + s.tokens, 0)} totalTokens=${estimateTokens(m.content)}`);
+                }
+            }
+
             const breakdown = {
                 safeContext,
                 maxTokens,
