@@ -582,6 +582,7 @@ function buildPromptMessagesWorker(args) {
                 { regex: /\{\{scenario\}\}/gi, value: char?.scenario || '', source: 'character' },
                 { regex: /\{\{personality\}\}/gi, value: char?.personality || '', source: 'character' },
                 { regex: /\{\{mesExamples\}\}/gi, value: char?.mes_example || '', source: 'character' },
+                { regex: /\{\{persona\}\}/gi, value: personaObj?.prompt || '', source: 'persona' },
                 { regex: /\{\{summary\}\}/gi, value: summaryRawContent || '', source: 'summary' },
                 { regex: /\{\{lorebooks\}\}/gi, value: getMacroLorebookContent(), source: 'lorebook' }
             ];
