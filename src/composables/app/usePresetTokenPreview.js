@@ -25,7 +25,7 @@ export function usePresetTokenPreview({
 
         if (blockId === 'chat_history') {
             if (!chatHistory?.value || chatHistory.value.length === 0) return '';
-            return chatHistory.value.map(m => `${m.role === 'user' ? (m.persona?.name || 'User') : (activeChatChar?.value?.name || 'Char')}: ${m.text}`).join('\n');
+            return chatHistory.value.filter(m => !m.isHidden && !m.isTyping).map(m => `${m.role === 'user' ? (m.persona?.name || 'User') : (activeChatChar?.value?.name || 'Char')}: ${m.text}`).join('\n');
         }
 
         if (blockId === 'guided_generation') return block.content || '[System Note: {{guidance}}]';
