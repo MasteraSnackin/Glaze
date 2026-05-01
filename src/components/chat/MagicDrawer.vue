@@ -23,7 +23,8 @@ const props = defineProps({
     activeChar: { type: Object, default: null },
     sidebarMode: { type: Boolean, default: false },
     iconOnly: { type: Boolean, default: false },
-    contextBreakdown: { type: Object, default: null }
+    contextBreakdown: { type: Object, default: null },
+    activePresetTokenCount: { type: Number, default: 0 }
 });
 
 const emit = defineEmits([
@@ -321,7 +322,7 @@ const activePreset = computed(() => {
 
 const activePresetName = computed(() => activePreset.value?.name || t('label_default'));
 
-const activePresetTokens = computed(() => props.contextBreakdown?.preset || 0);
+const activePresetTokens = computed(() => props.activePresetTokenCount);
 
 const activeRegexCount = computed(() => {
     let presetRegexes = [];

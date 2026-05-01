@@ -21,6 +21,7 @@ const props = defineProps({
     rightSidebarState: Object,
     activeChatCharObj: Object,
     contextBreakdown: { type: Object, default: null },
+    activePresetTokenCount: { type: Number, default: 0 },
     currentView: { type: String, default: '' }
 });
 
@@ -317,6 +318,7 @@ function openTool(viewId) {
               :icon-only="false"
               :active-char="activeChatCharObj"
               :context-breakdown="contextBreakdown"
+              :active-preset-token-count="activePresetTokenCount"
               @magic-notes="emit('magic-notes')"
               @magic-context="emit('magic-context')"
               @magic-summary="emit('magic-summary')"

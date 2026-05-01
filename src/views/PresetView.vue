@@ -245,7 +245,7 @@ async function openPreset(id, fromRegex = false) {
     updateHeaderState();
 }
 
-defineExpose({ open, close, openAuthorsNoteSheet, openSummarySheet, openPreset });
+defineExpose({ open, close, openAuthorsNoteSheet, openSummarySheet, openPreset, displayedActiveTokens });
 
 const regexSheetRef = ref(null);
 const presetRegexCount = computed(() => currentPreset.value?.regexes?.length || 0);

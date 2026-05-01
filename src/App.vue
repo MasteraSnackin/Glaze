@@ -424,6 +424,7 @@ function closeEditorWrapper() {
           :right-sidebar-state="sidebarState"
           :active-chat-char-obj="nav.activeChatCharObj.value"
           :context-breakdown="chatViewRef?.contextBreakdown"
+          :active-preset-token-count="chatViewRef?.presetView?.displayedActiveTokens ?? 0"
           :current-view="nav.currentView.value"
           @close-bottom-sheet="closeBottomSheet"
           @magic-notes="chatViewRef?.openAuthorsNoteSheet()"

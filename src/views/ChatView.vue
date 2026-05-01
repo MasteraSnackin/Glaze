@@ -1598,6 +1598,7 @@ onUnmounted(() => {
                 :search-match-total="searchResults.length"
                 :active-char="activeChar"
                 :context-breakdown="contextBreakdown"
+                :active-preset-token-count="presetView?.displayedActiveTokens ?? 0"
                 @send="sendMessage"
                 @scroll-to-bottom="scrollToBottom"
                 @search-next="nextSearchResult"
