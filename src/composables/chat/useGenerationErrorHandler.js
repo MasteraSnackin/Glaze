@@ -21,7 +21,7 @@ export async function handleGenerationError({
     formatError,
     sendMessageNotification
 }) {
-    const { getChatData, db } = persistence;
+    const { patchChatData } = persistence;
     const { notifyGenerationEnded } = app;
     const state = getGenerationState(char.id);
     if (!state || state.genId !== genId) {
@@ -33,11 +33,11 @@ export async function handleGenerationError({
                 if (isEmptyPlaceholder) {
                     currentMessages.value.splice(idx, 1);
                     try {
-                        const data = await getChatData(char.id);
-                        if (data && sessionId && data.sessions[sessionId]) {
-                            data.sessions[sessionId] = currentMessages.value;
-                            await db.saveChat(char.id, data);
-                        }
+                        await patchChatData(char.id, draft => {
+                            if (sessionId && draft.sessions[sessionId]) {
+                                draft.sessions[sessionId] = currentMessages.value;
+                            }
+                        });
                     } catch (dbErr) {
                         console.error('[onError-stale] Failed to remove empty placeholder from DB:', dbErr);
                     }
@@ -143,20 +143,20 @@ export async function handleGenerationError({
                 msg.swipes[msg.swipeId || 0] = msg.text;
             }
         } else {
-            const data = await getChatData(char.id);
-            if (data && data.sessions[sessionId]) {
-                const dbIdx = data.sessions[sessionId].findIndex(m => m.id === msgId);
-                if (dbIdx !== -1) {
-                    const msg = data.sessions[sessionId][dbIdx];
-                    msg.text = formatError(error, rawStreamText);
-                    msg.isError = true;
-                    msg.isTyping = false;
-                    if (msg.swipes && msg.swipes.length > 0) {
-                        msg.swipes[msg.swipeId || 0] = msg.text;
+            await patchChatData(char.id, draft => {
+                if (sessionId && draft.sessions[sessionId]) {
+                    const dbIdx = draft.sessions[sessionId].findIndex(m => m.id === msgId);
+                    if (dbIdx !== -1) {
+                        const msg = draft.sessions[sessionId][dbIdx];
+                        msg.text = formatError(error, rawStreamText);
+                        msg.isError = true;
+                        msg.isTyping = false;
+                        if (msg.swipes && msg.swipes.length > 0) {
+                            msg.swipes[msg.swipeId || 0] = msg.text;
+                        }
                     }
-                    await db.saveChat(char.id, data);
                 }
-            }
+            });
         }
 
         notifyGenerationEnded({ charId: char.id, sessionId, genId, type: 'chat' });
