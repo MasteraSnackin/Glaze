@@ -246,7 +246,16 @@ export function useContextCutoff({
             await Promise.race([calculatePromise, timeoutPromise]);
 
             if (isCalculatingCutoff) {
-                await new Promise(resolve => { setTimeout(resolve, 1000) });
+                await new Promise(resolve => { setTimeout(resolve, 3000) });
+            }
+        }
+
+        if (!contextBreakdown.value) {
+            console.warn('[openContextSheet] contextBreakdown is still null, retrying...');
+            try {
+                await updateContextCutoff();
+            } catch (e) {
+                console.error('[openContextSheet] retry failed:', e);
             }
         }
 
