@@ -42,7 +42,8 @@ import { Capacitor } from '@capacitor/core';
 import { App } from '@capacitor/app';
 import { keyboardOverlap } from '@/core/services/keyboardHandler.js';
 import { estimateTokens } from '@/utils/tokenizer.js';
-import { cleanText } from '@/utils/textFormatter.js';
+import { cleanText, invalidateFormatCache } from '@/utils/textFormatter.js';
+import { invalidateRegexCache } from '@/core/services/regexService.js';
 import { getEffectivePersona, activePersona, allPersonas } from '@/core/states/personaState.js';
 import { formatDate, formatDateSeparator } from '@/utils/dateFormatter.js';
 import { currentLang, chatMaxWidth, setChatMaxWidth, shouldUseBatterySaverUI } from '@/core/config/APPSettings.js';
@@ -283,7 +284,11 @@ const {
     openAvatar
 } = useChatMessageDisplay(() => activeChatChar, allPersonas);
 
-const onRegexChanged = () => { regexRevision.value++; };
+const onRegexChanged = () => {
+    regexRevision.value++;
+    invalidateRegexCache();
+    invalidateFormatCache();
+};
 
 let isOpeningChat = false;
 
@@ -1250,7 +1255,7 @@ defineExpose({
     startImpersonation,
     openPersonas: () => { chatInputRef.value?.openPersonas(); },
     initChat: () => {},
-    // Desktop right-panel magic handlers
+    contextBreakdown,
     openPresetView,
     openApiView,
     openLorebookSheet,
@@ -1592,6 +1597,7 @@ onUnmounted(() => {
                 :search-match-current="currentSearchIndex + 1"
                 :search-match-total="searchResults.length"
                 :active-char="activeChar"
+                :context-breakdown="contextBreakdown"
                 @send="sendMessage"
                 @scroll-to-bottom="scrollToBottom"
                 @search-next="nextSearchResult"
@@ -1622,7 +1628,7 @@ onUnmounted(() => {
         </div>
 
         <div style="display: none;"></div>
-        <PresetView ref="presetView" :active-chat-char="activeChar" :chat-history="currentMessages" :is-generating="isGenerating" @update:active-chat-char="val => { if (activeChar) Object.assign(activeChar, val) }" />
+        <PresetView ref="presetView" :active-chat-char="activeChar" :chat-history="currentMessages" :is-generating="isGenerating" :context-breakdown="contextBreakdown" @update:active-chat-char="val => { if (activeChar) Object.assign(activeChar, val) }" />
         <CharacterCardSheet ref="charCardSheet" />
         <LorebookSheet ref="lorebookSheet" />
         <RegexSheet ref="regexSheet" :active-chat-char="activeChar" />

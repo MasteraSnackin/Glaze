@@ -60,7 +60,8 @@ export function useContextCutoff({
         const activeChatChar = getActiveChatChar();
         if (!activeChatChar || !currentMessages.value) return;
 
-        console.time('[updateContextCutoff] total');
+        const currentCharId = activeChatChar.id;
+        const currentSessionId = activeChatChar.sessionId;
 
         if (isOpeningChat()) {
             pendingCutoffRecalc = true;
@@ -74,12 +75,13 @@ export function useContextCutoff({
 
         isCalculatingCutoff = true;
 
-        const currentCharId = activeChatChar.id;
         const visibleMessages = currentMessages.value.filter(m => m && !m.isTyping && !m.isHidden);
         const messageCount = visibleMessages.length;
 
         try {
             const cutoffChatData = await getChatData(activeChatChar.id);
+            if (getActiveChatChar()?.id !== currentCharId) return;
+
             const sessionId = cutoffChatData.currentId;
 
             const runtime = getApiRuntimeStorage();
@@ -108,27 +110,26 @@ export function useContextCutoff({
                 });
             }
 
+            const charSnapshot = JSON.parse(JSON.stringify(activeChatChar));
             const result = await calculateContext({
-                char: activeChatChar,
+                char: charSnapshot,
                 history,
                 authorsNote,
                 summary
             });
 
-            const currentChar = getActiveChatChar();
-            if (currentChar && currentChar.id === currentCharId) {
-                cutoffIndex.value = result?.cutoffIndex ?? 0;
-                contextBreakdown.value = result?.contextBreakdown || null;
-                contextCutoffCache = {
-                    hash: cacheKey,
-                    charId: currentCharId,
-                    sessionId,
-                    messageCount,
-                    result
-                };
-            }
+            if (getActiveChatChar()?.id !== currentCharId) return;
+
+            cutoffIndex.value = result?.cutoffIndex ?? 0;
+            contextBreakdown.value = result?.contextBreakdown || null;
+            contextCutoffCache = {
+                hash: cacheKey,
+                charId: currentCharId,
+                sessionId,
+                messageCount,
+                result
+            };
         } finally {
-            console.timeEnd('[updateContextCutoff] total');
             isCalculatingCutoff = false;
             if (pendingCutoffRecalc) {
                 pendingCutoffRecalc = false;
@@ -150,6 +151,7 @@ export function useContextCutoff({
 
     function invalidateContextCache() {
         contextCutoffCache = null;
+        contextBreakdown.value = null;
     }
 
     function handleSaveContextSettings({ fillThreshold, hidePercent }) {
@@ -244,7 +246,18 @@ export function useContextCutoff({
             await Promise.race([calculatePromise, timeoutPromise]);
 
             if (isCalculatingCutoff) {
-                await new Promise(resolve => { setTimeout(resolve, 1000) });
+                await new Promise(resolve => { setTimeout(resolve, 3000) });
+            }
+        }
+
+        if (!contextBreakdown.value) {
+            console.warn('[openContextSheet] contextBreakdown is still null, retrying...');
+            try {
+                const retryPromise = updateContextCutoff();
+                const retryTimeout = new Promise(resolve => { setTimeout(resolve, 8000) });
+                await Promise.race([retryPromise, retryTimeout]);
+            } catch (e) {
+                console.error('[openContextSheet] retry failed:', e);
             }
         }
 
@@ -265,6 +278,7 @@ export function useContextCutoff({
     }
 
     function resetCutoffState() {
+        contextCutoffCache = null;
         cutoffIndex.value = -1;
         contextBreakdown.value = null;
     }

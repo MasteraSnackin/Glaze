@@ -1,12 +1,13 @@
-import { replaceMacros } from '../utils/macroEngine.js';
+import './localStoragePolyfill.js';
+import { replaceMacros, seedGlobalVars } from '../utils/macroEngine.js';
 import { normalizeBlockId } from '../utils/presetBlockIds.js';
 
 let GPTTokenizer = null;
+let tokenizerReady = null;
 const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent);
 
 if (!isIOS) {
-    // Dynamic import to avoid stack overflow on iOS during worker initialization
-    import('../tokenizers/gp-tokenizer-9KQssiTx.js').then(module => {
+    tokenizerReady = import('../tokenizers/gp-tokenizer-9KQssiTx.js').then(module => {
         GPTTokenizer = module.T;
     }).catch(err => {
         console.error("Worker: Failed to load tokenizer:", err);
@@ -364,7 +365,8 @@ function buildBlockSourceReplacements(char, personaObj, sessionVars, notifyObj, 
 }
 
 function buildPromptMessagesWorker(args) {
-    let { char, history, summary, activePreset, mergePrompts, mergeRole, noAssistant, userPrefix, charPrefix, squashRole, personaObj, authorsNote, guidanceText, guidanceType, lorebooks, globalSettings, activations, globalRegexes, sessionVars } = args;
+    let { char, history, summary, activePreset, mergePrompts, mergeRole, noAssistant, userPrefix, charPrefix, squashRole, personaObj, authorsNote, guidanceText, guidanceType, lorebooks, globalSettings, activations, globalRegexes, sessionVars, globalVars } = args;
+    if (globalVars) seedGlobalVars(globalVars);
     if (noAssistant) mergePrompts = true;
 
     const messages = [];
@@ -540,7 +542,7 @@ function buildPromptMessagesWorker(args) {
             }
             else if (block.id === 'user_persona') {
                 content = `User Name: ${personaObj.name}\nUser Description: ${personaObj.prompt || ""}`;
-                primarySource = 'preset';
+                primarySource = 'persona';
             }
             else if (block.id === 'char_card') {
                 content = `Character Name: ${char.name}\nDescription: ${char.description || char.desc}`;
@@ -582,6 +584,7 @@ function buildPromptMessagesWorker(args) {
                 { regex: /\{\{scenario\}\}/gi, value: char?.scenario || '', source: 'character' },
                 { regex: /\{\{personality\}\}/gi, value: char?.personality || '', source: 'character' },
                 { regex: /\{\{mesExamples\}\}/gi, value: char?.mes_example || '', source: 'character' },
+                { regex: /\{\{persona\}\}/gi, value: personaObj?.prompt || '', source: 'persona' },
                 { regex: /\{\{summary\}\}/gi, value: summaryRawContent || '', source: 'summary' },
                 { regex: /\{\{lorebooks\}\}/gi, value: getMacroLorebookContent(), source: 'lorebook' }
             ];
@@ -598,7 +601,11 @@ function buildPromptMessagesWorker(args) {
             }
 
             content = replaceMacros(content, char, personaObj, sessionVars, notifyObj);
-            literalTemplate = replaceMacros(literalTemplate, char, personaObj, sessionVars, notifyObj);
+            const charName = char ? (char.macro_name || char.name) : "Character";
+            const userName = personaObj ? personaObj.name : "User";
+            literalTemplate = literalTemplate
+                .replace(/{{char}}/gi, charName)
+                .replace(/{{user}}/gi, userName);
 
             if (content.includes('{{lorebooks}}')) {
                 content = content.split('{{lorebooks}}').join(getMacroLorebookContent());
@@ -816,6 +823,8 @@ self.onmessage = async function (e) {
 
     if (type === 'calculateContext' || type === 'generateChatResponse') {
         try {
+            if (tokenizerReady) await tokenizerReady;
+
             const { messages, loreEntries, notifyObj } = buildPromptMessagesWorker(payload);
 
             const { apiConfig } = payload;
@@ -828,7 +837,7 @@ self.onmessage = async function (e) {
             const loreReserveTokens = getLorebookReserve(payload.globalSettings, safeContext);
             const memoryReserveTokens = Math.max(0, Math.floor(payload.memoryReserve || 0));
 
-            const sourceKeys = ['character', 'preset', 'summary', 'authorsNote', 'lorebook', 'vectorLore', 'history'];
+            const sourceKeys = ['character', 'preset', 'persona', 'summary', 'authorsNote', 'lorebook', 'vectorLore', 'history'];
             const sourceTotals = {};
             for (const k of sourceKeys) sourceTotals[k] = 0;
 
@@ -851,6 +860,7 @@ self.onmessage = async function (e) {
                 contextSize,
                 character: sourceTotals.character,
                 preset: sourceTotals.preset,
+                persona: sourceTotals.persona,
                 summary: sourceTotals.summary,
                 authorsNote: sourceTotals.authorsNote,
                 lorebook: sourceTotals.lorebook,
@@ -869,7 +879,7 @@ self.onmessage = async function (e) {
             };
 
             // Lorebook and vectorLore are inside reserve, not in fixedBase
-            breakdown.fixedBase = breakdown.character + breakdown.preset + breakdown.summary + breakdown.authorsNote;
+            breakdown.fixedBase = breakdown.character + breakdown.preset + breakdown.persona + breakdown.summary + breakdown.authorsNote;
             breakdown.fixedTotal = breakdown.fixedBase + breakdown.lorebookReserve + breakdown.memoryReserve;
 
             const availableForHistory = safeContext - breakdown.fixedTotal;

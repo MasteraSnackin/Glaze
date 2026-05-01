@@ -21,6 +21,9 @@ export function useContextBreakdown({
         if (breakdown.preset > 0) {
             used.push({ key: 'preset', value: breakdown.preset, percent: toPercent(breakdown.preset), className: 'segment-fixed' });
         }
+        if (breakdown.persona > 0) {
+            used.push({ key: 'persona', value: breakdown.persona, percent: toPercent(breakdown.persona), className: 'segment-persona' });
+        }
         if (breakdown.authorsNote > 0) {
             used.push({ key: 'authorsNote', value: breakdown.authorsNote, percent: toPercent(breakdown.authorsNote), className: 'segment-authors-note' });
         }
@@ -66,6 +69,7 @@ export function useContextBreakdown({
         return [
             { key: 'character', label: 'Character', value: breakdown.character || 0 },
             { key: 'preset', label: 'Preset', value: breakdown.preset || 0 },
+            { key: 'persona', label: 'Persona', value: breakdown.persona || 0 },
             { key: 'authorsNote', label: 'Author\'s Note', value: breakdown.authorsNote || 0 },
             { key: 'summary', label: 'Summary Base', value: breakdown.summaryBase ?? breakdown.summary ?? 0 },
             { key: 'memory', label: 'Memory', value: breakdown.memory || 0 },
@@ -81,6 +85,7 @@ export function useContextBreakdown({
     const contextLegendItems = computed(() => [
         { key: 'character', label: 'Character', className: 'segment-character' },
         { key: 'preset', label: 'Preset', className: 'segment-fixed' },
+        { key: 'persona', label: 'Persona', className: 'segment-persona' },
         { key: 'authorsNote', label: 'Author\'s Note', className: 'segment-authors-note' },
         { key: 'summary', label: 'Summary', className: 'segment-summary' },
         { key: 'memory', label: 'Memory', className: 'segment-memory' },

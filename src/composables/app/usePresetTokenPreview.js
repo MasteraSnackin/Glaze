@@ -1,4 +1,4 @@
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, shallowRef } from 'vue';
 import { estimateTokens } from '@/utils/tokenizer.js';
 import { replaceMacros } from '@/utils/macroEngine.js';
 import { normalizeBlockId } from '@/utils/presetBlockIds.js';
@@ -19,32 +19,48 @@ export function usePresetTokenPreview({
         return currentPreset.value?.blocks?.find(b => b.id === editingBlockId.value);
     });
 
-    const resolveBlockContent = (block) => {
+    const CHARACTER_BLOCKS = ['char_card', 'char_personality', 'char_persona', 'scenario', 'example_dialogue'];
+    const NON_PRESET_BLOCKS = ['chat_history', 'first_message', 'authors_note', 'summary', 'user_persona'];
+
+    const resolveBlockContent = (block, { includeHistory = false, includeNonPreset = true } = {}) => {
         if (!block) return '';
         const blockId = normalizeBlockId(block.id);
 
         if (blockId === 'chat_history') {
+            if (!includeHistory) return '';
             if (!chatHistory?.value || chatHistory.value.length === 0) return '';
-            return chatHistory.value.map(m => `${m.role === 'user' ? (m.persona?.name || 'User') : (activeChatChar?.value?.name || 'Char')}: ${m.text}`).join('\n');
+            return chatHistory.value.filter(m => !m.isHidden && !m.isTyping).map(m => `${m.role === 'user' ? (m.persona?.name || 'User') : (activeChatChar?.value?.name || 'Char')}: ${m.text}`).join('\n');
+        }
+        if (blockId === 'first_message') return '';
+
+        if (blockId === 'authors_note') {
+            if (!includeNonPreset) return '';
+            return activeChatChar?.value?.authors_note || '';
+        }
+        if (blockId === 'summary') {
+            if (!includeNonPreset) return '';
+            return activeChatChar?.value?.summary || '';
+        }
+        if (CHARACTER_BLOCKS.includes(blockId)) {
+            if (!includeNonPreset) return '';
+            if (blockId === 'char_card') return activeChatChar?.value?.description || activeChatChar?.value?.desc || '';
+            if (blockId === 'char_personality' || blockId === 'char_persona') return activeChatChar?.value?.personality || '';
+            if (blockId === 'scenario') return activeChatChar?.value?.scenario || '';
+            if (blockId === 'example_dialogue') return activeChatChar?.value?.mes_example || '';
         }
 
         if (blockId === 'guided_generation') return block.content || '[System Note: {{guidance}}]';
-        if (blockId === 'authors_note') return activeChatChar?.value?.authors_note || '';
-        if (blockId === 'summary') return activeChatChar?.value?.summary || '';
-
-        if (blockId === 'user_persona') return effectivePersona?.value?.prompt || '';
-        if (blockId === 'char_card') return activeChatChar?.value?.description || activeChatChar?.value?.desc || '';
-        if (blockId === 'char_personality' || blockId === 'char_persona') return activeChatChar?.value?.personality || '';
-        if (blockId === 'scenario') return activeChatChar?.value?.scenario || '';
-        if (blockId === 'example_dialogue') return activeChatChar?.value?.mes_example || '';
-        if (blockId === 'first_message') return activeChatChar?.value?.first_mes || '';
+        if (blockId === 'user_persona') {
+            if (!includeNonPreset) return '';
+            return effectivePersona?.value?.prompt || '';
+        }
 
         return block.content || '';
     };
 
     const isChatSpecific = (block) => {
         const id = normalizeBlockId(block.id);
-        return ['chat_history', 'guided_generation', 'authors_note', 'summary', 'char_card', 'scenario', 'char_personality', 'char_persona', 'example_dialogue', 'first_message'].includes(id);
+        return ['chat_history', 'guided_generation', 'authors_note', 'summary', 'char_card', 'scenario', 'char_personality', 'char_persona', 'example_dialogue'].includes(id);
     };
 
     const shouldShowTokens = (block) => {
@@ -74,20 +90,34 @@ export function usePresetTokenPreview({
     function getPresetTokens(preset) {
         if (!preset) return 0;
         let content = "";
-        if (preset.impersonationPrompt) {
-            content += preset.impersonationPrompt + "\n";
-        }
         if (preset.blocks) {
             preset.blocks.forEach(b => {
                 if (b.enabled && !b.isStashed) {
-                    const blockContent = resolveBlockContent(b);
+                    const blockContent = resolveBlockContent(b, { includeNonPreset: false });
                     if (blockContent) {
                         content += blockContent + "\n";
                     }
                 }
             });
         }
-        return estimateTokens(extendedReplaceMacros(content));
+        const resolved = extendedReplaceMacros(content);
+
+        const macroReplacements = [
+            { regex: /\{\{description\}\}/gi, value: activeChatChar?.value?.description || activeChatChar?.value?.desc || '' },
+            { regex: /\{\{scenario\}\}/gi, value: activeChatChar?.value?.scenario || '' },
+            { regex: /\{\{personality\}\}/gi, value: activeChatChar?.value?.personality || '' },
+            { regex: /\{\{char_description\}\}/gi, value: activeChatChar?.value?.description || '' },
+            { regex: /\{\{char_personality\}\}/gi, value: activeChatChar?.value?.personality || '' },
+            { regex: /\{\{mesExamples\}\}/gi, value: activeChatChar?.value?.mes_example || '' },
+            { regex: /\{\{persona\}\}/gi, value: effectivePersona?.value?.prompt || '' },
+        ];
+
+        let templateOnly = resolved;
+        for (const mr of macroReplacements) {
+            templateOnly = templateOnly.replace(mr.regex, '');
+        }
+
+        return estimateTokens(templateOnly);
     }
 
     const editingPresetTokens = computed(() => getPresetTokens(currentPreset.value));
@@ -144,18 +174,34 @@ export function usePresetTokenPreview({
         }
         const block = blockOrContent;
         if (!block) return 0;
-        const content = resolveBlockContent(block);
+        const blockId = normalizeBlockId(block.id);
+        const content = resolveBlockContent(block, { includeHistory: blockId === 'chat_history', includeNonPreset: true });
         if (!content) return 0;
         return estimateTokens(extendedReplaceMacros(content));
     };
 
-    const presetTokenCache = computed(() => {
-        const cache = {};
-        for (const [id, preset] of Object.entries(presetState.presets)) {
-            cache[id] = getPresetTokens(preset);
-        }
-        return cache;
-    });
+    const presetTokenCache = shallowRef({});
+
+    let _cacheTimer = null;
+    function refreshTokenCache() {
+        if (_cacheTimer) return;
+        _cacheTimer = setTimeout(() => {
+            _cacheTimer = null;
+            const cache = {};
+            for (const [id, preset] of Object.entries(presetState.presets)) {
+                cache[id] = getPresetTokens(preset);
+            }
+            presetTokenCache.value = cache;
+        }, 200);
+    }
+
+    watch(
+        () => presetState.presets,
+        () => refreshTokenCache(),
+        { deep: false }
+    );
+
+    refreshTokenCache();
 
     return {
         activeEditBlock,
@@ -172,6 +218,7 @@ export function usePresetTokenPreview({
         charTokens,
         chatTokens,
         getBlockTokens,
-        presetTokenCache
+        presetTokenCache,
+        refreshTokenCache
     };
 }
