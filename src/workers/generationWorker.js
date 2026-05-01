@@ -2,11 +2,11 @@ import { replaceMacros } from '../utils/macroEngine.js';
 import { normalizeBlockId } from '../utils/presetBlockIds.js';
 
 let GPTTokenizer = null;
+let tokenizerReady = null;
 const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent);
 
 if (!isIOS) {
-    // Dynamic import to avoid stack overflow on iOS during worker initialization
-    import('../tokenizers/gp-tokenizer-9KQssiTx.js').then(module => {
+    tokenizerReady = import('../tokenizers/gp-tokenizer-9KQssiTx.js').then(module => {
         GPTTokenizer = module.T;
     }).catch(err => {
         console.error("Worker: Failed to load tokenizer:", err);
@@ -622,10 +622,6 @@ function buildPromptMessagesWorker(args) {
                 }
             }
 
-            if (primarySource === 'preset' && block.name) {
-                console.log(`[preset-debug] block="${block.name}" id="${block.id}" literalTokens=${literalTokens} contentTokens=${estimateTokens(content)} sources=${JSON.stringify(sources)}`);
-            }
-
             return { content, role, sources, primarySource };
         };
 
@@ -825,6 +821,8 @@ self.onmessage = async function (e) {
 
     if (type === 'calculateContext' || type === 'generateChatResponse') {
         try {
+            if (tokenizerReady) await tokenizerReady;
+
             const { messages, loreEntries, notifyObj } = buildPromptMessagesWorker(payload);
 
             const { apiConfig } = payload;
