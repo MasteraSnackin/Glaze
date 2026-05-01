@@ -344,6 +344,12 @@ export function useMessageActions(deps) {
         showBottomSheet({ title: t('sheet_title_msg_actions'), items });
     }
 
+    function getReasoningTagsForEdit() {
+        const tags = getReasoningTags();
+        if (tags.start && tags.end) return tags;
+        return getApiReasoningTags();
+    }
+
     function enterEditMode(msg) {
         msg._iigMap = msg._iigMap || {};
         const { text, map } = prepareEditText(msg?.text || '', msg._iigMap);
@@ -351,7 +357,7 @@ export function useMessageActions(deps) {
 
         let editBody = text;
         if (msg.reasoning) {
-            const { start: tagStart, end: tagEnd } = getReasoningTags();
+            const { start: tagStart, end: tagEnd } = getReasoningTagsForEdit();
             editBody = tagStart + msg.reasoning + tagEnd + '\n' + text;
         }
 
@@ -383,7 +389,7 @@ export function useMessageActions(deps) {
 
         let newReasoning = null;
 
-        const { start: tagStart, end: tagEnd } = getReasoningTags();
+        const { start: tagStart, end: tagEnd } = getReasoningTagsForEdit();
 
         if (tagStart && tagEnd) {
             const startIndex = newText.indexOf(tagStart);
