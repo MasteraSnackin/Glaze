@@ -49,11 +49,11 @@ export function useContextCutoff({
     async function saveCurrentMessages() {
         const activeChatChar = getActiveChatChar();
         if (!activeChatChar) return;
-        const data = await getChatData(activeChatChar.id);
-        if (!data) return;
-        const sessionId = activeChatChar.sessionId || data.currentId;
-        data.sessions[sessionId] = currentMessages.value;
-        await db.saveChat(activeChatChar.id, data);
+        await db.patchChatData(activeChatChar.id, (data) => {
+            if (!data) return;
+            const sessionId = activeChatChar.sessionId || data.currentId;
+            data.sessions[sessionId] = currentMessages.value;
+        });
     }
 
     async function updateContextCutoff() {
