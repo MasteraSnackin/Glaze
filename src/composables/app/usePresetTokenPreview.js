@@ -20,7 +20,7 @@ export function usePresetTokenPreview({
     });
 
     const CHARACTER_BLOCKS = ['char_card', 'char_personality', 'char_persona', 'scenario', 'example_dialogue'];
-    const NON_PRESET_BLOCKS = ['chat_history', 'first_message', 'authors_note', 'summary'];
+    const NON_PRESET_BLOCKS = ['chat_history', 'first_message', 'authors_note', 'summary', 'user_persona'];
 
     const resolveBlockContent = (block, { includeHistory = false, includeNonPreset = true } = {}) => {
         if (!block) return '';
@@ -50,7 +50,10 @@ export function usePresetTokenPreview({
         }
 
         if (blockId === 'guided_generation') return block.content || '[System Note: {{guidance}}]';
-        if (blockId === 'user_persona') return effectivePersona?.value?.prompt || '';
+        if (blockId === 'user_persona') {
+            if (!includeNonPreset) return '';
+            return effectivePersona?.value?.prompt || '';
+        }
 
         return block.content || '';
     };

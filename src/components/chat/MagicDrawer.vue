@@ -9,8 +9,6 @@ import { lorebookState, initLorebookState } from '@/core/states/lorebookState.js
 import { estimateTokens } from '@/utils/tokenizer.js';
 import { getEffectivePersona } from '@/core/states/personaState.js';
 import { getEffectivePreset, presetState } from '@/core/states/presetState.js';
-import { replaceMacros } from '@/utils/macroEngine.js';
-import { normalizeBlockId } from '@/utils/presetBlockIds.js';
 import { db } from '@/utils/db.js';
 import { getLastRequestPreviewSnapshot } from '@/core/states/requestPreviewState.js';
 import { getImageGenSettings } from '@/core/services/imageGenService.js';
@@ -323,44 +321,7 @@ const activePreset = computed(() => {
 
 const activePresetName = computed(() => activePreset.value?.name || t('label_default'));
 
-const activePresetTokens = computed(() => {
-    const preset = activePreset.value;
-    if (!preset) return 0;
-
-    const charId = props.activeChar?.id;
-    const chatId = charId && props.activeChar?.sessionId ? `${charId}_${props.activeChar.sessionId}` : null;
-    const persona = getEffectivePersona(charId, chatId);
-    const char = props.activeChar;
-
-    const EXCLUDE = ['chat_history', 'first_message', 'authors_note', 'summary',
-                      'char_card', 'char_personality', 'char_persona', 'scenario', 'example_dialogue',
-                      'worldInfoBefore', 'worldInfoAfter', 'wi_before', 'wi_after'];
-
-    let content = '';
-    if (preset.impersonationPrompt) content += preset.impersonationPrompt + '\n';
-    if (preset.blocks) {
-        for (const b of preset.blocks) {
-            if (!b.enabled || b.isStashed) continue;
-            const blockId = normalizeBlockId(b.id);
-            if (EXCLUDE.includes(blockId)) continue;
-            if (blockId === 'user_persona') { if (persona?.prompt) content += persona.prompt + '\n'; continue; }
-            if (blockId === 'guided_generation') { content += (b.content || '') + '\n'; continue; }
-            if (b.content) content += b.content + '\n';
-        }
-    }
-    if (!content) return 0;
-
-    let res = replaceMacros(content, char, persona);
-    if (char) {
-        res = res.replace(/{{scenario}}/gi, char.scenario || '')
-                 .replace(/{{personality}}/gi, char.personality || '')
-                 .replace(/{{description}}/gi, char.description || '')
-                 .replace(/{{char_description}}/gi, char.description || '')
-                 .replace(/{{char_personality}}/gi, char.personality || '');
-    }
-    if (persona) res = res.replace(/{{persona}}/gi, persona.prompt || '');
-    return estimateTokens(res);
-});
+const activePresetTokens = computed(() => props.contextBreakdown?.preset || 0);
 
 const activeRegexCount = computed(() => {
     let presetRegexes = [];
