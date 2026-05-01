@@ -253,7 +253,9 @@ export function useContextCutoff({
         if (!contextBreakdown.value) {
             console.warn('[openContextSheet] contextBreakdown is still null, retrying...');
             try {
-                await updateContextCutoff();
+                const retryPromise = updateContextCutoff();
+                const retryTimeout = new Promise(resolve => { setTimeout(resolve, 8000) });
+                await Promise.race([retryPromise, retryTimeout]);
             } catch (e) {
                 console.error('[openContextSheet] retry failed:', e);
             }
