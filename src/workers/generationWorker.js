@@ -599,7 +599,11 @@ function buildPromptMessagesWorker(args) {
             }
 
             content = replaceMacros(content, char, personaObj, sessionVars, notifyObj);
-            literalTemplate = replaceMacros(literalTemplate, char, personaObj, sessionVars, notifyObj);
+            const charName = char ? (char.macro_name || char.name) : "Character";
+            const userName = personaObj ? personaObj.name : "User";
+            literalTemplate = literalTemplate
+                .replace(/{{char}}/gi, charName)
+                .replace(/{{user}}/gi, userName);
 
             if (content.includes('{{lorebooks}}')) {
                 content = content.split('{{lorebooks}}').join(getMacroLorebookContent());
@@ -843,16 +847,6 @@ self.onmessage = async function (e) {
                     if (sourceKeys.includes(s.source)) {
                         sourceTotals[s.source] += s.tokens;
                     }
-                }
-            }
-
-            console.log('[contextBreakdown] sourceTotals:', JSON.stringify(sourceTotals));
-            console.log('[contextBreakdown] per-block preset contributions:');
-            for (const m of staticMessages) {
-                const msgSources = m._allSources || m.sources || [];
-                const presetPart = msgSources.filter(s => s.source === 'preset');
-                if (presetPart.length > 0) {
-                    console.log(`  block="${m.blockName || m.blockId}" presetTokens=${presetPart.reduce((a, s) => a + s.tokens, 0)} totalTokens=${estimateTokens(m.content)}`);
                 }
             }
 
