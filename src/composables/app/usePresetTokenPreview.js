@@ -90,9 +90,6 @@ export function usePresetTokenPreview({
     function getPresetTokens(preset) {
         if (!preset) return 0;
         let content = "";
-        if (preset.impersonationPrompt) {
-            content += preset.impersonationPrompt + "\n";
-        }
         if (preset.blocks) {
             preset.blocks.forEach(b => {
                 if (b.enabled && !b.isStashed) {
@@ -103,7 +100,24 @@ export function usePresetTokenPreview({
                 }
             });
         }
-        return estimateTokens(extendedReplaceMacros(content));
+        const resolved = extendedReplaceMacros(content);
+
+        const macroReplacements = [
+            { regex: /\{\{description\}\}/gi, value: activeChatChar?.value?.description || activeChatChar?.value?.desc || '' },
+            { regex: /\{\{scenario\}\}/gi, value: activeChatChar?.value?.scenario || '' },
+            { regex: /\{\{personality\}\}/gi, value: activeChatChar?.value?.personality || '' },
+            { regex: /\{\{char_description\}\}/gi, value: activeChatChar?.value?.description || '' },
+            { regex: /\{\{char_personality\}\}/gi, value: activeChatChar?.value?.personality || '' },
+            { regex: /\{\{mesExamples\}\}/gi, value: activeChatChar?.value?.mes_example || '' },
+            { regex: /\{\{persona\}\}/gi, value: effectivePersona?.value?.prompt || '' },
+        ];
+
+        let templateOnly = resolved;
+        for (const mr of macroReplacements) {
+            templateOnly = templateOnly.replace(mr.regex, '');
+        }
+
+        return estimateTokens(templateOnly);
     }
 
     const editingPresetTokens = computed(() => getPresetTokens(currentPreset.value));
