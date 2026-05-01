@@ -1,3 +1,4 @@
+import './localStoragePolyfill.js';
 import { replaceMacros, seedGlobalVars } from '../utils/macroEngine.js';
 import { normalizeBlockId } from '../utils/presetBlockIds.js';
 
