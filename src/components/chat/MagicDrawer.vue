@@ -9,6 +9,8 @@ import { lorebookState, initLorebookState } from '@/core/states/lorebookState.js
 import { estimateTokens } from '@/utils/tokenizer.js';
 import { getEffectivePersona } from '@/core/states/personaState.js';
 import { getEffectivePreset, presetState } from '@/core/states/presetState.js';
+import { replaceMacros } from '@/utils/macroEngine.js';
+import { normalizeBlockId } from '@/utils/presetBlockIds.js';
 import { db } from '@/utils/db.js';
 import { getLastRequestPreviewSnapshot } from '@/core/states/requestPreviewState.js';
 import { getImageGenSettings } from '@/core/services/imageGenService.js';
@@ -23,8 +25,7 @@ const props = defineProps({
     activeChar: { type: Object, default: null },
     sidebarMode: { type: Boolean, default: false },
     iconOnly: { type: Boolean, default: false },
-    contextBreakdown: { type: Object, default: null },
-    activePresetTokenCount: { type: Number, default: 0 }
+    contextBreakdown: { type: Object, default: null }
 });
 
 const emit = defineEmits([
@@ -322,7 +323,73 @@ const activePreset = computed(() => {
 
 const activePresetName = computed(() => activePreset.value?.name || t('label_default'));
 
-const activePresetTokens = computed(() => props.activePresetTokenCount);
+const activePresetTokens = computed(() => {
+    const preset = activePreset.value;
+    if (!preset) return 0;
+
+    const charId = props.activeChar?.id;
+    const chatId = charId && props.activeChar?.sessionId ? `${charId}_${props.activeChar.sessionId}` : null;
+    const persona = getEffectivePersona(charId, chatId);
+
+    let content = "";
+    if (preset.impersonationPrompt) content += preset.impersonationPrompt + "\n";
+    if (preset.blocks) {
+        preset.blocks.forEach(b => {
+            if (b.enabled && !b.isStashed) {
+                const blockId = normalizeBlockId(b.id);
+                if (blockId === 'chat_history' || blockId === 'first_message') return;
+                if (blockId === 'user_persona') {
+                    if (persona?.prompt) content += persona.prompt + "\n";
+                    return;
+                }
+                if (blockId === 'char_card') {
+                    const desc = props.activeChar?.description || props.activeChar?.desc;
+                    if (desc) content += desc + "\n";
+                    return;
+                }
+                if (blockId === 'char_personality' || blockId === 'char_persona') {
+                    if (props.activeChar?.personality) content += props.activeChar.personality + "\n";
+                    return;
+                }
+                if (blockId === 'scenario') {
+                    if (props.activeChar?.scenario) content += props.activeChar.scenario + "\n";
+                    return;
+                }
+                if (blockId === 'example_dialogue') {
+                    if (props.activeChar?.mes_example) content += props.activeChar.mes_example + "\n";
+                    return;
+                }
+                if (blockId === 'authors_note') {
+                    if (props.activeChar?.authors_note) content += props.activeChar.authors_note + "\n";
+                    return;
+                }
+                if (blockId === 'summary') {
+                    if (props.activeChar?.summary) content += props.activeChar.summary + "\n";
+                    return;
+                }
+                if (blockId === 'guided_generation') {
+                    content += (b.content || '[System Note: {{guidance}}]') + "\n";
+                    return;
+                }
+                if (b.content) content += b.content + "\n";
+            }
+        });
+    }
+
+    if (!content) return 0;
+    let res = replaceMacros(content, props.activeChar, persona);
+    if (props.activeChar) {
+        res = res.replace(/{{scenario}}/gi, props.activeChar.scenario || '')
+                 .replace(/{{personality}}/gi, props.activeChar.personality || '')
+                 .replace(/{{description}}/gi, props.activeChar.description || '')
+                 .replace(/{{char_description}}/gi, props.activeChar.description || '')
+                 .replace(/{{char_personality}}/gi, props.activeChar.personality || '');
+    }
+    if (persona) {
+        res = res.replace(/{{persona}}/gi, persona.prompt || '');
+    }
+    return estimateTokens(res);
+});
 
 const activeRegexCount = computed(() => {
     let presetRegexes = [];

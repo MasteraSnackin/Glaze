@@ -22,8 +22,7 @@ const props = defineProps({
     selectedCount: { type: Number, default: 0 },
     canDeleteSelected: { type: Boolean, default: true },
     activeChar: { type: Object, default: null },
-    contextBreakdown: { type: Object, default: null },
-    activePresetTokenCount: { type: Number, default: 0 }
+    contextBreakdown: { type: Object, default: null }
 });
 
 const emit = defineEmits([
@@ -308,7 +307,6 @@ defineExpose({
                 :visible="isMagicMenuVisible"
                 :active-char="activeChar"
                 :context-breakdown="contextBreakdown"
-                :active-preset-token-count="activePresetTokenCount"
                 @close="isMagicMenuVisible = false"
                 @magic-notes="emit('magic-notes')"
                 @magic-context="emit('magic-context')"
