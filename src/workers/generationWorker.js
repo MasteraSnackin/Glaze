@@ -622,6 +622,10 @@ function buildPromptMessagesWorker(args) {
                 }
             }
 
+            if (primarySource === 'preset' && block.name) {
+                console.log(`[preset-debug] block="${block.name}" id="${block.id}" literalTokens=${literalTokens} contentTokens=${estimateTokens(content)} sources=${JSON.stringify(sources)}`);
+            }
+
             return { content, role, sources, primarySource };
         };
 
