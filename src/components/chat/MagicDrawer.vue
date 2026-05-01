@@ -12,8 +12,6 @@ import { getEffectivePreset, presetState } from '@/core/states/presetState.js';
 import { db } from '@/utils/db.js';
 import { getLastRequestPreviewSnapshot } from '@/core/states/requestPreviewState.js';
 import { getImageGenSettings } from '@/core/services/imageGenService.js';
-import { replaceMacros } from '@/utils/macroEngine.js';
-import { normalizeBlockId } from '@/utils/presetBlockIds.js';
 import { getApiPresets } from '@/core/config/APISettings.js';
 import { useDragDrop } from '@/composables/ui/useDragDrop.js';
 import PersonasSheet from '@/views/PersonasView.vue';
@@ -24,7 +22,8 @@ const props = defineProps({
     visible: { type: Boolean, default: false },
     activeChar: { type: Object, default: null },
     sidebarMode: { type: Boolean, default: false },
-    iconOnly: { type: Boolean, default: false }
+    iconOnly: { type: Boolean, default: false },
+    contextBreakdown: { type: Object, default: null }
 });
 
 const emit = defineEmits([
@@ -314,40 +313,6 @@ const effectivePersonaName = computed(() => {
     return persona?.name || '';
 });
 
-const resolveBlockContent = (block, preset, activeChar, persona, history) => {
-    if (!block) return '';
-    const blockId = normalizeBlockId(block.id);
-    if (blockId === 'chat_history') {
-        if (!history || history.length === 0) return '';
-        return history.map(m => `${m.role === 'user' ? (persona?.name || 'User') : (activeChar?.name || 'Char')}: ${m.text}`).join('\n');
-    }
-    if (blockId === 'authors_note') return activeChar?.authors_note || '';
-    if (blockId === 'summary') return activeChar?.summary || '';
-    if (blockId === 'user_persona') return persona?.prompt || '';
-    if (blockId === 'char_card') return activeChar?.description || activeChar?.desc || '';
-    if (blockId === 'char_personality' || blockId === 'char_persona') return activeChar?.personality || '';
-    if (blockId === 'scenario') return activeChar?.scenario || '';
-    if (blockId === 'example_dialogue') return activeChar?.mes_example || '';
-    if (blockId === 'first_message') return activeChar?.first_mes || '';
-    return block.content || '';
-};
-
-const extendedReplaceMacros = (text, activeChar, persona) => {
-    if (!text) return '';
-    let res = replaceMacros(text, activeChar, persona);
-    if (activeChar) {
-        res = res.replace(/{{scenario}}/gi, activeChar.scenario || '')
-                 .replace(/{{personality}}/gi, activeChar.personality || '')
-                 .replace(/{{description}}/gi, activeChar.description || activeChar.desc || '')
-                 .replace(/{{char_description}}/gi, activeChar.description || activeChar.desc || '')
-                 .replace(/{{char_personality}}/gi, activeChar.personality || '');
-    }
-    if (persona) {
-        res = res.replace(/{{persona}}/gi, persona.prompt || '');
-    }
-    return res;
-};
-
 const activePreset = computed(() => {
     const charId = props.activeChar?.id;
     const chatId = charId && props.activeChar?.sessionId ? `${charId}_${props.activeChar.sessionId}` : null;
@@ -356,25 +321,7 @@ const activePreset = computed(() => {
 
 const activePresetName = computed(() => activePreset.value?.name || t('label_default'));
 
-const activePresetTokens = computed(() => {
-    const preset = activePreset.value;
-    if (!preset) return 0;
-
-    const charId = props.activeChar?.id;
-    const chatId = charId && props.activeChar?.sessionId ? `${charId}_${props.activeChar.sessionId}` : null;
-    const persona = getEffectivePersona(charId, chatId);
-    let content = "";
-    if (preset.impersonationPrompt) content += preset.impersonationPrompt + "\n";
-    if (preset.blocks) {
-        preset.blocks.forEach(b => {
-            if (b.enabled && !b.isStashed) {
-                const blockContent = resolveBlockContent(b, preset, props.activeChar, persona, chatHistory.value);
-                if (blockContent) content += blockContent + "\n";
-            }
-        });
-    }
-    return estimateTokens(extendedReplaceMacros(content, props.activeChar, persona));
-});
+const activePresetTokens = computed(() => props.contextBreakdown?.preset || 0);
 
 const activeRegexCount = computed(() => {
     let presetRegexes = [];
@@ -390,24 +337,12 @@ const activeRegexCount = computed(() => {
     return all.filter(s => !s.disabled).length;
 });
 
-const notesTokens = computed(() => estimateTokens(props.activeChar?.authors_note));
-const summaryTokens = computed(() => estimateTokens(props.activeChar?.summary));
-const cardTokens = computed(() => {
-    const char = props.activeChar;
-    if (!char) return 0;
-
-    const parts = [
-        char.name,
-        char.description || char.desc,
-        char.personality,
-        char.scenario,
-        char.mes_example
-    ].filter(Boolean);
-
-    return estimateTokens(parts.join('\n\n'));
-});
+const notesTokens = computed(() => props.contextBreakdown?.authorsNote || 0);
+const summaryTokens = computed(() => props.contextBreakdown?.summary || 0);
+const cardTokens = computed(() => props.contextBreakdown?.character || 0);
 
 const personaTokens = computed(() => {
+    if (!props.activeChar) return 0;
     const persona = getEffectivePersona(props.activeChar?.id, props.activeChar?.sessionId ? `${props.activeChar.id}_${props.activeChar.sessionId}` : null);
     return estimateTokens((persona?.name || '') + '\n' + (persona?.prompt || ''));
 });

@@ -19,14 +19,16 @@ export function usePresetTokenPreview({
         return currentPreset.value?.blocks?.find(b => b.id === editingBlockId.value);
     });
 
-    const resolveBlockContent = (block) => {
+    const resolveBlockContent = (block, { includeHistory = false } = {}) => {
         if (!block) return '';
         const blockId = normalizeBlockId(block.id);
 
         if (blockId === 'chat_history') {
+            if (!includeHistory) return '';
             if (!chatHistory?.value || chatHistory.value.length === 0) return '';
             return chatHistory.value.filter(m => !m.isHidden && !m.isTyping).map(m => `${m.role === 'user' ? (m.persona?.name || 'User') : (activeChatChar?.value?.name || 'Char')}: ${m.text}`).join('\n');
         }
+        if (blockId === 'first_message') return '';
 
         if (blockId === 'guided_generation') return block.content || '[System Note: {{guidance}}]';
         if (blockId === 'authors_note') return activeChatChar?.value?.authors_note || '';
@@ -37,14 +39,13 @@ export function usePresetTokenPreview({
         if (blockId === 'char_personality' || blockId === 'char_persona') return activeChatChar?.value?.personality || '';
         if (blockId === 'scenario') return activeChatChar?.value?.scenario || '';
         if (blockId === 'example_dialogue') return activeChatChar?.value?.mes_example || '';
-        if (blockId === 'first_message') return activeChatChar?.value?.first_mes || '';
 
         return block.content || '';
     };
 
     const isChatSpecific = (block) => {
         const id = normalizeBlockId(block.id);
-        return ['chat_history', 'guided_generation', 'authors_note', 'summary', 'char_card', 'scenario', 'char_personality', 'char_persona', 'example_dialogue', 'first_message'].includes(id);
+        return ['chat_history', 'guided_generation', 'authors_note', 'summary', 'char_card', 'scenario', 'char_personality', 'char_persona', 'example_dialogue'].includes(id);
     };
 
     const shouldShowTokens = (block) => {
@@ -144,7 +145,8 @@ export function usePresetTokenPreview({
         }
         const block = blockOrContent;
         if (!block) return 0;
-        const content = resolveBlockContent(block);
+        const blockId = normalizeBlockId(block.id);
+        const content = resolveBlockContent(block, { includeHistory: blockId === 'chat_history' });
         if (!content) return 0;
         return estimateTokens(extendedReplaceMacros(content));
     };

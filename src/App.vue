@@ -423,6 +423,7 @@ function closeEditorWrapper() {
           :bottom-sheet-state="bottomSheetState"
           :right-sidebar-state="sidebarState"
           :active-chat-char-obj="nav.activeChatCharObj.value"
+          :context-breakdown="chatViewRef?.contextBreakdown"
           :current-view="nav.currentView.value"
           @close-bottom-sheet="closeBottomSheet"
           @magic-notes="chatViewRef?.openAuthorsNoteSheet()"

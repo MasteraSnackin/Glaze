@@ -1255,7 +1255,7 @@ defineExpose({
     startImpersonation,
     openPersonas: () => { chatInputRef.value?.openPersonas(); },
     initChat: () => {},
-    // Desktop right-panel magic handlers
+    contextBreakdown,
     openPresetView,
     openApiView,
     openLorebookSheet,
@@ -1597,6 +1597,7 @@ onUnmounted(() => {
                 :search-match-current="currentSearchIndex + 1"
                 :search-match-total="searchResults.length"
                 :active-char="activeChar"
+                :context-breakdown="contextBreakdown"
                 @send="sendMessage"
                 @scroll-to-bottom="scrollToBottom"
                 @search-next="nextSearchResult"
