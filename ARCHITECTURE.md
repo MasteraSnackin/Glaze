@@ -1,26 +1,18 @@
 # Architecture Audit — Tokenizer, Vectorization, MemoryBooks, Macros, Cloud Sync
 
-## 0. Refactor Transition State
+Related docs:
+- Refactor history (Phases 1–14): `docs/refactor-history.md`
+- Known gaps & deferred items: `docs/rules/known-gaps.md`
+- Vue guard rails: `docs/rules/vue-components.md`
+- Generation invariants: `docs/rules/generation.md`
+- Race condition rules: `docs/rules/race-conditions.md`
+- Formal invariants with code refs: `docs/INVARIANTS.md`
 
-### Current Refactor Slice
-- Branch: `feat/refactor-phase1-event-hub`
-- Base: latest `dev` state plus refactor-only commits
-- Status: Phases 1–14 complete
-- Testing: `npm run build` passes, `npm run lint` 0 new errors
+## 0. Architecture Overview
 
-### Before Refactor
+Refactor phases 1–14 are complete. History and details: `docs/refactor-history.md`.
 
-The app was functional, but core ownership was still too concentrated.
-
-- `src/views/ChatView.vue` owned too much chat-generation orchestration, UI coordination, and request lifecycle glue.
-- `src/core/services/generationService.js` still mixed prompt construction, enrichment, payload assembly, preview state, and request dispatch.
-- Many cross-feature reactions depended on ad-hoc `window.dispatchEvent(...)` usage with no internal catalog or explicit ownership boundary.
-
-This made the app hard to extend safely because new behavior often had to pass through the same large files.
-
-### Target Direction
-
-The refactor target is a hybrid model:
+### Target Architecture
 
 ```text
 UI
@@ -37,164 +29,11 @@ Side effects / observers
 - `Ordered Pipelines` preserve correctness-critical ordering for prompt and request flow.
 - `Event Hub` carries domain facts and optional side effects, but does not replace orchestration.
 
-### Phase 1 Event Layer Skeleton
+### Event System
 
-Files added:
-- `src/core/events/eventNames.js`
-- `src/core/events/contracts.js`
-- `src/core/events/eventHub.js`
-
-Current behavior:
-- Internal canonical event names exist for ALL custom app events (56 total across nav, domain, debug, ui namespaces).
-- ALL internal emitters publish canonical app events through `publishAppEvent()`.
-- ALL internal listeners subscribe through `subscribeAppEvent()` instead of raw `window.addEventListener()`. Unsubscriptions are collected and called in `onBeforeUnmount` (Vue) or persist for app lifetime (services/utils).
-- The legacy `windowEventBridge` (which republished app events as `window.dispatchEvent` for backward compatibility) has been removed — no consumers remained.
-
-**Event catalog (56 events, 4 namespaces):**
-
-`nav.*` (19 events):
-- `openApiSheet`, `navigateTo`, `openCharacterEditor`, `openChat`, `openOnboarding`, `openBackupSheet`, `openSyncSheet`, `openConflictSheet`, `openConnections`, `openFsRequest`, `openGlossary`, `openHolocards`, `openImageViewer`, `openItemEditor`, `openLorebookEntry`, `openNotificationsSheet`, `openPersonaEditor`, `openPresetSheet`, `triggerOpenImage`
-
-- `domain.*` (11 events):
-- `chat.updated`, `character.updated`, `generation.{started,ended,promptReady,requestDispatched}`, `lorebook.regexScriptsChanged`, `sync.dataRefreshed`, `settings.{apiContextChanged,changed,languageChanged}`
-- Generation started/ended events carry `{ charId, sessionId, genId, type }` — `genId` for stale-generation filtering, `type` for `chat`/`impersonation` disambiguation
-
-`debug.*` (6 events):
-- `promptPreviewUpdated`, `requestTrace{Started,Updated,LineAppended,Finished}`, `vueError`
-
-`ui.*` (20 events):
-- `header.{setupChat,setupEditor,setupGeneration,setupSubmenu,showLbBanner,reset,updateAvatar,updateSession,scrollHidden,forceUpdate,viewChanged}`, `chatSearchToggle`, `chatSearch`, `fsEditorClosed`, `backNavigation`, `glossary.{back,headerUpdate,toggle}`, `headerSearch`, `changeGenerationTab`
-
-**No remaining exceptions.** All app-level custom events, including the cancelable `app-back-navigation` pattern, are now routed through `publishAppEvent` / `publishCancelableAppEvent`. The event hub supports both regular and cancelable events (with `preventDefault()`/`defaultPrevented` semantics).
-
-**Dead code events (listeners with no dispatches found):**
-- `header-setup-generation` — AppHeader + App still subscribe but no source dispatches
-- `header-update-session` — AppHeader subscribes but no source dispatches
-- `change-generation-tab` — AppHeader subscribes but no source dispatches
-- `open-item-editor` — App subscribes but no source dispatches
-- `open-holocards` — HoloCardViewer subscribes but no source dispatches
-
-These were NOT removed to avoid breaking changes if dispatches are added dynamically. They should be cleaned up in a future pass.
-
-**Files fully migrated to `publishAppEvent`/`subscribeAppEvent` (Phase 10):**
-- Components: App.vue, AppHeader.vue, ChatInput.vue, ChatMessage.vue, GenericEditor.vue, DesktopLeftSidebar.vue, BottomSheet.vue, DragDropOverlay.vue, HelpTip.vue, CharacterCardSheet.vue, GlossarySheet.vue, LorebookSheet.vue, RegexSheet.vue, SyncSheet.vue, NotificationsSheet.vue, ImageViewer.vue, HoloCardViewer.vue
-- Views: ApiView.vue, CatalogView.vue, CharacterList.vue, DialogList.vue, PersonasView.vue, PresetView.vue, ToolsView.vue, Menu/MenuView.vue, Menu/Settings/SettingsView.vue, Menu/Settings/ThemeSettingsView.vue, Menu/AboutView.vue, OnboardingView.vue
-- Core: ui.js, notificationService.js, APISettings.js, catalogState.js, main.js
-- Utils: characterIO.js, errors.js
-- Composables: useChatMessageDisplay.js
-
-What has **not** changed yet:
-- Dead event subscriptions (5 events with listeners but no dispatches) have not been cleaned up.
-- `ChatView.vue` is a large composable-wiring surface (~1390 script lines, known exception to 400-line rule — see Guard Rails).
-
-### Phase 13b PresetView Decomposition
-
-Deleted:
-- `src/composables/app/usePresetEditor.js` (2080-line god-object composable — mixed all preset concerns)
-
-Files added (all in `src/composables/app/`):
-- `usePresetNavigation.js` (107 lines) — preset switching, currentPresetId, preset list, drag reorder
-- `usePresetLoader.js` (89 lines) — preset loading from DB, cache, flush save, effective preset resolution
-- `usePresetConnections.js` (33 lines) — chat/character/global preset connection queries
-- `usePresetCRUD.js` (173 lines) — preset create, delete, duplicate, rename, import, export
-- `usePresetSelectors.js` (171 lines) — bottom-sheet selectors (preset selector, options menu, add preset, merge/squash role, reasoning effort)
-- `usePresetImage.js` (40 lines) — preset image selection, compression, file picking
-- `useBlockManager.js` (141 lines) — block CRUD, stash/unstash, reorder, delete, token estimation helpers
-- `useBlockEditor.js` (94 lines) — CodeMirror editor lifecycle, open/close, config
-- `useAuthorsNoteSheet.js` (73 lines) — authors note bottom sheet
-- `useSummarySheet.js` (126 lines) — summary advanced sheet, section generation, prompts
-- `usePresetTokenPreview.js` (177 lines) — token estimation, macro preview, context breakdown
-
-Result:
-- `PresetView.vue` script: 279 lines (composable wiring + template-bound computed refs + local event handlers)
-- `PresetView.vue` total: ~1820 lines (279 script + 238 template + 1446 style)
-- Each composable has a single responsibility; max 177 lines vs original 2080-line god-object
-
-### Phase 2 Request Ownership Safety Slice
-
-Current behavior:
-- Chat-generation state now carries explicit ownership metadata:
-  - `ownerKey`
-  - `requestToken`
-  - `sessionId`
-  - `type`
-- Stream updates, completion handling, error handling, and abort cleanup now validate that they still belong to the active chat request before mutating state.
-- This makes late completions less dangerous when request lifecycle overlaps occur around abort/regenerate/session changes.
-- Impersonation keeps a separate ownership scope instead of sharing the normal chat-generation identity.
-
-What this does **not** do yet:
-- It does not move orchestration out of `ChatView.vue`.
-- It does not yet introduce automated overlap tests for abort/regenerate races.
-- It does not yet unify all generation-like flows under one final lifecycle contract.
-
-### Phase 9 State Ownership Boundaries
-
-Files added:
-- `src/core/states/generationState.js` — explicit generation state module with clear ownership API
-- `src/core/states/syncState.js` — already existed, now documented as state boundary
-
-Current behavior:
-- Generation state (`isGenerating`, `hasGenerationState`, `getGenerationState`, `clearGenerationState`, `abortActiveChatGeneration`) is now accessed through a module with explicit ownership boundaries instead of being scattered across ChatView.vue reactive refs.
-- `useGenerationRegistry.js` composable registers generation state per-session with ownership tokens.
-- `useAutoSync.js` now depends on `syncState` for sync-readiness checks instead of importing from ChatView.
-- `usePromptMetadataSnapshots.js` stores/restores prompt metadata snapshots for rollback on abort/error.
-- ChatView.vue TDZ bug fixed: `getScrollAnchor` (from `useVirtualScroll`) was used by `useSessionPersistence` before being defined. Reordered to: `displayMessages` → `useVirtualScroll` → `useSessionPersistence` → `useSessionManagement`.
-
-### Initial Use-Case Entrypoint Layer
-
-Files added:
-- `src/core/llm/usecases/generateChat.js`
-- `src/core/llm/usecases/calculateContext.js`
-- `src/core/llm/usecases/generateSummary.js`
-- `src/core/llm/usecases/generateMemoryDraft.js`
-
-Current behavior:
-- UI callers now depend on official use-case entrypoints instead of importing generation actions from `generationService.js` directly.
-- `generateChat.js` is no longer only a passthrough wrapper: it now owns the chat execution shell after session context is resolved.
-- Deterministic chat prompt-preparation now lives in `src/core/llm/usecases/chatPreparation.js` instead of being fully inlined inside `generationService.js`.
-- Vue-owned state, UI callbacks, and persistence helpers are still injected from `ChatView.vue`, so behavior remains unchanged while the dependency boundary becomes real.
-- `generationService.js` still owns late enrichment and final request execution, and acts as the compatibility layer under that use case.
-- Memory-book retrieval/index maintenance now lives in `src/core/llm/usecases/memoryBookContext.js` and is consumed both by chat/context flows and by `memoryBooksService.js`.
-
-### Phase 11 Use-Case Layer Re-architecture
-
-Files moved/renamed:
-- `src/core/llm/usecases/chatPipelineContext.js` → `src/core/llm/pipeline/pipelineContext.js`
-- `src/core/llm/usecases/chatPipelineSteps.js` → `src/core/llm/pipeline/steps.js`
-- `src/core/llm/usecases/chatPostPromptPipeline.js` → `src/core/llm/pipeline/postPromptOrchestrator.js`
-- `src/core/llm/usecases/chatContextCalculation.js` → `src/core/llm/usecases/contextCalculation.js`
-- `src/core/llm/usecases/chatRequestExecution.js` → `src/core/llm/usecases/chatRequestAssembly.js`
-- `src/core/llm/usecases/nonChatGenerationHooks.js` → `src/core/llm/usecases/sharedRequestHooks.js`
-- `src/core/llm/transport/chatCompletionsClient.js` → `src/core/llm/transport/completionsClient.js`
-
-Files split:
-- `chatLateEnrichment.js` → `vectorLoreInjection.js` + `memoryMessageInjection.js`
-- `chatPromptShared.js` → `promptConfigReaders.js` + `promptWorkerLifecycle.js` + `promptPayloadBuilder.js`
-- `memoryBookContext.js` → `memoryEmbeddingIndex.js` + `memoryKeyMatching.js` + `memoryContextInjection.js`
-
-Hollow entrypoints eliminated:
-- `calculateContext.js`, `generateSummary.js`, `generateMemoryDraft.js` now own their dependency assembly locally instead of proxying to `generationService.js`.
-- `generationService.js` reduced from 267 → 158 lines; only exports `generateChatResponse` (chat generation orchestration).
-
-UI leak sites remaining (for Phase 12):
-- `generationService.js` imports `translations`/`currentLang` (i18n) and `showBottomSheet`/`closeBottomSheet` (UI state) — these are passed as `t` and sheet callbacks into `executePreparedChatPrompt` and `runChatPostPromptPipeline`.
-- `pipeline/steps.js` `stepContextLimitGuard` receives `showBottomSheet`/`closeBottomSheet` as deps — this is UI notification from pipeline step.
-- These should become callback-style dep injection or event-driven in Phase 12.
-- `ChatView.vue` no longer dispatches raw `window` events for generation/chat lifecycle; it uses `createGenerationAppAdapters()` which publishes canonical app events through the event hub, with the bridge handling legacy compatibility.
-- `ChatView.vue` no longer manually assembles the ~30-function service injection bundle for `executeChatGenerationUseCase`. The `createChatGenerationServices` factory in `src/core/llm/usecases/chatGenerationServiceFactory.js` imports and wires all composable/service dependencies, taking only genuinely Vue-own state refs as arguments.
-- Memory automation functions (`runMemoryAutomationAfterStableTurn`, `generateMemoryDraftForMessages`, `createPendingMemoryDraft`, `bootstrapImportedMemoryDrafts`, etc.) are extracted from `ChatView.vue` into `composables/chat/useMemoryAutomation.js`, a dedicated composable that accepts only the Vue refs and callbacks it needs.
-- Auto-sync logic (`triggerAutoSyncCheck`) is extracted from `ChatView.vue` into `composables/chat/useAutoSync.js`, removing sync-state imports from the view.
-- Memory prompt presets (`builtInMemoryPrompts`, `getMemoryPromptOptions`, `resolveMemoryPrompt`, etc.) are extracted from `ChatView.vue` into `core/services/memoryPromptPresets.js`.
-- Message edit helpers (`normalizeImgGenHtmlForEditing`, `prepareEditText`, `restoreEditText`) are extracted from `ChatView.vue` into `core/utils/messageEditHelpers.js`.
-- Context breakdown computed properties (`contextSegments`, `contextBreakdownItems`, `contextLegendItems`, `visibleHistoryMessages`, `historyUsagePercent`, `historyHidePreview`, `shouldRecommendHide`) are extracted from `ChatView.vue` into `composables/chat/useContextBreakdown.js`.
-- Message selection state (`selectedMessages`, `isSelectionMode`, `selectionIncludesLast`, `toggleSelection`, `clearSelection`) is extracted from `ChatView.vue` into `composables/chat/useMessageSelection.js`.
-
-Why this slice is safe:
-- It adds a new internal boundary without removing the legacy one.
-- Runtime behavior stays compatible because all internal consumers now use `subscribeAppEvent()` directly.
-- The legacy `windowEventBridge` has been removed — no external consumers remained.
-
-What has **not** changed yet:
+56 canonical events across 4 namespaces (`nav.*`, `domain.*`, `debug.*`, `ui.*`).
+All internal events use `publishAppEvent()` / `subscribeAppEvent()`. Cancelable events via `publishCancelableAppEvent()`.
+Dead code events and known gaps: `docs/rules/known-gaps.md`.
 
 ## 0.1 Directory Tree
 
@@ -823,108 +662,11 @@ Native-only scope retained:
 - `src/core/states/requestPreviewState.js` — joins prompt preview + request trace for UI
 - `src/core/events/projections/debugStateProjection.js` — event→state projection: subscribes to debug events, routes to trace/preview state modules
 
-**ChatView Decomposition Composables (Phase 8):**
-- `src/composables/chat/useSessionManagement.js` — session creation, switching, deletion, session name editing, session data persistence
-- `src/composables/chat/useMessageActions.js` — message delete/hide, edit save/cancel, branch creation, image regeneration, guidance text patching
-- `src/composables/chat/useChatGeneration.js` — `sendMessage`, `startGeneration`, `handleImageRegenerate`, generation preflight checks, image-gen lifecycle
-- `src/composables/chat/useAutoSync.js` — auto-sync trigger logic
-- `src/composables/chat/useMemoryAutomation.js` — memory automation functions
-- `src/composables/chat/useChatMessageDisplay.js` — message display helpers
-- `src/composables/chat/useContextBreakdown.js` — context breakdown computed properties
-- `src/composables/chat/useMessageSelection.js` — message selection state and helpers
-- `src/composables/chat/useMemoryBooks.js` — reactive memory book state and UI handlers
-- `src/composables/chat/useGenerationPreparation.js` — placeholder/session context preparation
-- `src/composables/chat/useGenerationStateSetup.js` — generation state registration
-- `src/composables/chat/useGenerationStreamUpdate.js` — background persistence throttling
-- `src/composables/chat/useGenerationPromptReady.js` — prompt metadata assignment
-- `src/composables/chat/useGenerationCompleteHandler.js` — completion/finalization with stale-generation guard (genId match, userAborted fast-path)
-- `src/composables/chat/useGenerationErrorHandler.js` — error path handling with userAborted fast-path and expectedGenId
-- `src/composables/chat/useGenerationStateRestore.js` — abort/rollback restore with stale-generation guard (expectedGenId)
-- `src/composables/chat/usePromptMetadataSnapshots.js` — prompt metadata rollback snapshots
-- `src/composables/chat/useTypingStateCleanup.js` — stale typing cleanup
-- `src/composables/chat/useChatSearch.js` — search in chat
-- `src/composables/chat/useContentEditable.js` — content-editable input handling
-- `src/composables/chat/useContextCutoff.js` — context cutoff management
-- `src/composables/chat/useGenerationAbort.js` — generation abort handling, userAborted flag propagation, timer cleanup (completion handler owns state cleanup)
-- `src/composables/chat/useGenerationFinalization.js` — generation finalization with stale-generation guard (expectedGenId)
-- `src/composables/chat/useGenerationRegistry.js` — generation registry
-- `src/composables/chat/useInputActions.js` — chat input actions
-- `src/composables/chat/useMemorySheetUI.js` — memory sheet UI
-- `src/composables/chat/useMessageImageGen.js` — image generation from messages
-- `src/composables/chat/useMessageSwipe.js` — message swipe actions
-- `src/composables/chat/useSessionPersistence.js` — session persistence, crash recovery buffer (localStorage → IndexedDB restore on openChat)
-- `src/composables/chat/useSwipeNavigation.js` — swipe navigation
-- `src/composables/chat/useVirtualScroll.js` — virtual scrolling
-
-**App.vue Decomposition Composables (Phase 13a):**
-- `src/composables/app/useAppNavigation.js` — view routing, desktop/mobile detection, effectiveMainView, floating menu state
-- `src/composables/app/useEditorController.js` — character/persona editor lifecycle
-- `src/composables/app/useAppEventSubscriptions.js` — all 23 subscribeAppEvent calls + cleanup
-- `src/composables/app/useGlossaryPopup.js` — desktop glossary drag popup
-- `src/composables/app/useAppInit.js` — onMounted initialization sequence
-
-**PresetView Decomposition Composables (Phase 13b):**
-- `src/composables/app/usePresetNavigation.js` (107 lines) — preset switching, currentPresetId, preset list, drag reorder
-- `src/composables/app/usePresetLoader.js` (89 lines) — preset loading from DB, cache, flush save, effective preset resolution
-- `src/composables/app/usePresetConnections.js` (33 lines) — chat/character/global preset connection queries
-- `src/composables/app/usePresetCRUD.js` (173 lines) — preset create, delete, duplicate, rename, import, export
-- `src/composables/app/usePresetSelectors.js` (171 lines) — bottom-sheet selectors
-- `src/composables/app/usePresetImage.js` (40 lines) — preset image selection, compression, file picking
-- `src/composables/app/useBlockManager.js` (141 lines) — block CRUD, stash/unstash, reorder
-- `src/composables/app/useBlockEditor.js` (94 lines) — CodeMirror editor lifecycle
-- `src/composables/app/useAuthorsNoteSheet.js` (73 lines) — authors note bottom sheet
-- `src/composables/app/useSummarySheet.js` (126 lines) — summary advanced sheet
-- `src/composables/app/usePresetTokenPreview.js` (177 lines) — token estimation, macro preview
-
-**LorebookSheet Decomposition Composables (Phase 13f–13g):**
-- `src/composables/lorebook/useLorebookEntries.js` (157 lines) — entry CRUD, reorder, search/filter, select/duplicate, batch vector toggle
-- `src/composables/lorebook/useLorebookIndexing.js` (93 lines) — index all/single entries, retry failed, vector status counts
-
-**ApiView Decomposition Composables (Phase 13h–13i):**
-- `src/composables/api/useApiSettings.js` (237 lines) — API state/presets/connection/blacklist/debounce/model selector/reasoning
-- `src/composables/api/useServiceProviders.js` (128 lines) — embedding/imageGen/memory provider settings, load/test
-
-**CharacterList Decomposition Composables (Phase 13j–13k):**
-- `src/composables/character/useCharacterActions.js` (179 lines) — add/edit character, open actions, janitor extraction + polling
-- `src/composables/character/useSessionSheet.js` (168 lines) — open sessions sheet, delete session, chat import
-
-**ThemeSettingsView Decomposition Composables (Phase 13l):**
-- `src/composables/theme/useThemePresets.js` (267 lines) — preset CRUD/apply/export/import/options/selector/bgImage/file import
-
-**ChatMessage Decomposition Composables (Phase 13d):**
-- `src/composables/chat/useMessageSwipe.js` (262 lines) — touch handlers, swipe navigation, long-press selection
-- `src/composables/chat/useMessageImageGen.js` (149 lines) — handleContentClick, parseIIGInstruction
-
-**ChatInput Decomposition Composables (Phase 13e):**
-- `src/composables/chat/useContentEditable.js` (128 lines) — getCaretIndex, setCaretPosition, text preview
-- `src/composables/chat/useInputActions.js` (168 lines) — handleSend, guidance mode, image attach, fullscreen editor
+Composable directory listing and per-phase decomposition details: `docs/refactor-history.md`
 
 **UI Composables:**
 - `src/composables/ui/useSidebarResizer.js` — desktop sidebar resize logic
 - `src/composables/ui/useSheetGestures.js` — sheet gesture handling
-
-### Recommended Refactor Sequence
-1. Centralize runtime API config reads/writes so feature views stop reading localStorage keys directly.
-   Status: partially done via `APISettings.js` helpers; remaining callers should be migrated incrementally.
-2. Split `llmApi.js` into smaller transport-focused modules without changing external behavior.
-   Status: **done**. `llmApi.js` fully replaced by `requestOrchestrator.js` + transport modules.
-3. Extract chat/session lifecycle code out of `ChatView.vue` into dedicated composables.
-   Status: **done** through ~30 focused composables. `openChat()` remains in ChatView as a known exception.
-4. Separate prompt preview state from transport trace state, then store traces per generation/message instead of globally.
-   Status: **done**. Both `requestTraceState.js` and `promptPreviewState.js` use Map-based storage keyed by `debugKey` (up to 10 concurrent). Populated via `debugStateProjection.js` (event→state projection).
-5. Promote explicit request use cases (`chat`, `summary`, `memory_draft`) with a shared normalized transport result shape.
-   Status: **done**. Each use case owns its dependency assembly. `impersonationRequest.js` added as fourth type. `model_discovery` uses provider directly.
-6. Document the worker/service split so future prompt and retrieval changes have a stable boundary.
-   Status: partially done in this document; should be kept current as retrieval/prompt work continues.
-
-### Migration Guardrails
-- Keep streaming and non-streaming behavior functionally identical while splitting modules.
-- Preserve the native/mobile fallback where stream bodies are unavailable.
-- Preserve partial-response recovery on abort/timeout until a new event contract fully replaces callbacks.
-- Keep network trace capture optional and removable.
-- Avoid changing prompt semantics during the initial transport/config refactor.
-- Keep the embedding/vectorization stack out of this refactor until the chat/provider architecture stabilizes.
-- Keep `MemoryBooks -> generateMemoryDraft(apiConfigOverride)` behavior compatible until a later step adds explicit provider selection for custom memory generation.
 
 ---
 
@@ -1089,48 +831,7 @@ Native-only scope retained:
 
 ---
 
-## Anti-God-Object Guard Rails
-
-These rules prevent the gradual re-accumulation of responsibilities that motivated Phases 8–13.
-
-1. **Hard limit 400 lines script** — if `<script setup>` exceeds 400 lines, extract a composable before adding more logic. Template lines do not count toward this limit.
-   - **Known exception:** `ChatView.vue` (~1390 script lines) is a composable-wiring surface that coordinates ~30 composables. Further extraction would cause prop-drilling and violate Guard Rail #7. This is accepted as a permanent exception.
-
-2. **One concern per composable** — if a composable name contains "and" (e.g., `useFooAndBar`), split it. A composable should be namable by a single noun phrase.
-
-3. **State separate from services** — a reactive state module (`*State.js`) should contain state + simple CRUD. Search, embedding, and orchestration logic belongs in a dedicated service or composable, not in the state module itself.
-
-4. **Sheet pattern** — Sheet components are the most common god-object trap. A Sheet typically mixes UI rendering + CRUD actions + validation + status tracking. Extract business logic into a composable before the sheet script exceeds 400 lines.
-
-5. **Settings view pattern** — Settings views tend to accumulate sub-settings tabs (API, embedding, image gen, memory). Each sub-settings domain should be its own composable if the total script exceeds 400 lines.
-
-6. **No circular imports via services** — Use-case files must not delegate to a service that imports back from use-cases. If a service is a middleman between a use-case and lower layers, inline the service or invert the dependency.
-
-7. **Template is not logic** — 1000+ lines of template is acceptable for complex UI. The decomposition target is script logic, not HTML structure. Never extract a sub-component solely to reduce line count if it requires excessive prop-drilling.
-
-## Deferred Refactoring Items
-
-These files exceed the 400-line guard rail but are intentionally left as-is. Each entry explains why refactoring is deferred.
-
-### `ChatView.vue` — `openChat()` extraction (~400 lines inline)
-
-- **Status:** Deferred
-- **Reason:** `openChat()` has ~30+ dependency injections. Extracting it into a composable would create a massive parameter list and prop-drilling surface with no architectural gain — ChatView is already a composable-wiring shell. Accepted as permanent exception (see Guard Rail #1).
-- **Revisit if:** A new feature requires testing `openChat()` in isolation, or the function grows significantly beyond its current scope.
-
-### `themeState.js` (639 lines) — State ≠ service violation
-
-- **Status:** Deferred (next refactor pass)
-- **Problem:** Violates Guard Rail #3. File mixes reactive state + simple setters (~300 lines, correct) with preset CRUD orchestration (`initTheme`, `applyPreset`, `createPreset/switchPreset/deletePreset/updatePresetMeta/exportThemePreset/importThemePreset`, ~340 lines, should be a service).
-- **Proposed fix:** Extract preset orchestration into `themePresetService.js`. `themeState.js` would retain only `themeState` reactive + setter functions (~300 lines).
-- **Risk:** Low — preset functions already delegate to `themePersistence.js`, `themeMigration.js`, `themeRenderer.js`. The extraction boundary is clear.
-
-### `useMemorySheetUI.js` (844 lines) — imperative DOM anti-pattern
-
-- **Status:** Do not refactor
-- **Reason:** ~600 of 844 lines are `document.createElement('div')` + `innerHTML` + `querySelector` + `addEventListener`. This is a fundamental DOM approach problem, not a concern-mixing problem. Splitting the file into smaller pieces would not improve architecture — it would just scatter imperative DOM code across more files. The only meaningful refactoring would be rewriting all innerHTML sheets as Vue components, which is a large UI rewrite with zero architectural payoff.
-- **CRUD logic** mixed in (`createMemoryFromSelection`, `removeMemoryFromSelection`, save logic in `openMemoryEntryEditor`) is tightly coupled to the imperative DOM event handlers — extracting it separately would require passing the same DOM-read values through an extra layer.
-- **Revisit if:** A decision is made to rewrite the memory sheet UI as proper Vue template components.
+Guard rails and deferred items have been moved to `docs/rules/vue-components.md` and `docs/rules/known-gaps.md`.
 
 ---
 
