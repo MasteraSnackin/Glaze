@@ -4,9 +4,8 @@ import { desktopDropdownState, closeDesktopDropdown } from '@/core/states/deskto
 
 // Реактивный стиль позиционирования — пересчитывается при открытии
 const dropdownStyle = ref({});
-const DROPDOWN_WIDTH = 220;
-const ITEM_HEIGHT = 42; // approx px per item
-const PADDING = 12; // px from viewport edges
+const PADDING = 12;
+const MAX_VISIBLE_ITEMS = 12;
 
 function recalcPosition() {
     const { x, y, items, isTriggered, bigInfo } = desktopDropdownState.value;
@@ -14,8 +13,12 @@ function recalcPosition() {
     
     const width = isTriggered ? 280 : 220;
     const itemHeight = isTriggered ? 56 : 42;
-    let estimatedHeight = itemCount * itemHeight + 16;
-    if (bigInfo) estimatedHeight += 120; // Approx height for bigInfo block
+    const visibleItems = Math.min(itemCount, MAX_VISIBLE_ITEMS);
+    let estimatedHeight = visibleItems * itemHeight + 16;
+    if (bigInfo) estimatedHeight += 120;
+    if (desktopDropdownState.value.title || desktopDropdownState.value.headerAction) {
+        estimatedHeight += 32;
+    }
 
     let left = x;
     let top = y;
@@ -84,7 +87,8 @@ watch(
                     </div>
 
                     <!-- Items -->
-                    <div
+                    <div class="dd-items-scroll">
+                        <div
                         v-for="(item, idx) in desktopDropdownState.items"
                         :key="idx"
                         class="dd-item"
@@ -133,6 +137,7 @@ FEATURED
                             <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
                         </svg>
                     </div>
+                    </div>
                 </div>
             </div>
         </Transition>
@@ -160,7 +165,25 @@ FEATURED
     padding: 8px;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
     transition: background-color 0.3s ease, border-color 0.3s ease, width 0.3s ease;
-    overflow: hidden;
+    overflow: clip;
+    max-height: calc(100vh - 24px);
+    display: flex;
+    flex-direction: column;
+}
+
+.dd-items-scroll {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    flex: 1;
+    min-height: 0;
+}
+
+.dd-items-scroll::-webkit-scrollbar {
+    width: 4px;
+}
+.dd-items-scroll::-webkit-scrollbar-thumb {
+    background: rgba(128, 128, 128, 0.3);
+    border-radius: 2px;
 }
 
 .dd-panel--triggered {
