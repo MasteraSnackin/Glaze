@@ -1,4 +1,4 @@
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, shallowRef } from 'vue';
 import { estimateTokens } from '@/utils/tokenizer.js';
 import { replaceMacros } from '@/utils/macroEngine.js';
 import { normalizeBlockId } from '@/utils/presetBlockIds.js';
@@ -149,13 +149,28 @@ export function usePresetTokenPreview({
         return estimateTokens(extendedReplaceMacros(content));
     };
 
-    const presetTokenCache = computed(() => {
-        const cache = {};
-        for (const [id, preset] of Object.entries(presetState.presets)) {
-            cache[id] = getPresetTokens(preset);
-        }
-        return cache;
-    });
+    const presetTokenCache = shallowRef({});
+
+    let _cacheTimer = null;
+    function refreshTokenCache() {
+        if (_cacheTimer) return;
+        _cacheTimer = setTimeout(() => {
+            _cacheTimer = null;
+            const cache = {};
+            for (const [id, preset] of Object.entries(presetState.presets)) {
+                cache[id] = getPresetTokens(preset);
+            }
+            presetTokenCache.value = cache;
+        }, 200);
+    }
+
+    watch(
+        () => presetState.presets,
+        () => refreshTokenCache(),
+        { deep: false }
+    );
+
+    refreshTokenCache();
 
     return {
         activeEditBlock,
@@ -172,6 +187,7 @@ export function usePresetTokenPreview({
         charTokens,
         chatTokens,
         getBlockTokens,
-        presetTokenCache
+        presetTokenCache,
+        refreshTokenCache
     };
 }

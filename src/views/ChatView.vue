@@ -42,7 +42,8 @@ import { Capacitor } from '@capacitor/core';
 import { App } from '@capacitor/app';
 import { keyboardOverlap } from '@/core/services/keyboardHandler.js';
 import { estimateTokens } from '@/utils/tokenizer.js';
-import { cleanText } from '@/utils/textFormatter.js';
+import { cleanText, invalidateFormatCache } from '@/utils/textFormatter.js';
+import { invalidateRegexCache } from '@/core/services/regexService.js';
 import { getEffectivePersona, activePersona, allPersonas } from '@/core/states/personaState.js';
 import { formatDate, formatDateSeparator } from '@/utils/dateFormatter.js';
 import { currentLang, chatMaxWidth, setChatMaxWidth, shouldUseBatterySaverUI } from '@/core/config/APPSettings.js';
@@ -283,7 +284,11 @@ const {
     openAvatar
 } = useChatMessageDisplay(() => activeChatChar, allPersonas);
 
-const onRegexChanged = () => { regexRevision.value++; };
+const onRegexChanged = () => {
+    regexRevision.value++;
+    invalidateRegexCache();
+    invalidateFormatCache();
+};
 
 let isOpeningChat = false;
 

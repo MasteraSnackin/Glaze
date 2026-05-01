@@ -120,24 +120,42 @@ export function replaceMacros(text, char, persona, sessionVarsIn = null, notifyO
     return result;
 }
 
+const _sessionVarsCache = new Map();
+const _globalVarsCache = { raw: null, parsed: null };
+
 function _getSessionVars(charId, sessionId) {
     const key = `gz_vars_${charId}_${sessionId}`;
+    if (_sessionVarsCache.has(key)) return _sessionVarsCache.get(key);
     try {
-        return JSON.parse(localStorage.getItem(key)) || {};
+        const parsed = JSON.parse(localStorage.getItem(key)) || {};
+        _sessionVarsCache.set(key, parsed);
+        return parsed;
     } catch (e) {
+        _sessionVarsCache.set(key, {});
         return {};
     }
 }
 
 function _saveSessionVars(charId, sessionId, vars) {
     const key = `gz_vars_${charId}_${sessionId}`;
+    _sessionVarsCache.set(key, vars);
     localStorage.setItem(key, JSON.stringify(vars));
+}
+
+export function invalidateMacroCache() {
+    _sessionVarsCache.clear();
+    _globalVarsCache.raw = null;
+    _globalVarsCache.parsed = null;
 }
 
 function _getGlobalVar(name) {
     try {
-        const globalVars = JSON.parse(localStorage.getItem('gz_global_vars') || '{}');
-        return globalVars[name] !== undefined ? globalVars[name] : null;
+        const raw = localStorage.getItem('gz_global_vars') || '{}';
+        if (raw !== _globalVarsCache.raw) {
+            _globalVarsCache.raw = raw;
+            _globalVarsCache.parsed = JSON.parse(raw);
+        }
+        return _globalVarsCache.parsed[name] !== undefined ? _globalVarsCache.parsed[name] : null;
     } catch (e) {
         return null;
     }
@@ -145,9 +163,17 @@ function _getGlobalVar(name) {
 
 function _setGlobalVar(name, value) {
     try {
-        const globalVars = JSON.parse(localStorage.getItem('gz_global_vars') || '{}');
+        const raw = localStorage.getItem('gz_global_vars') || '{}';
+        let globalVars;
+        if (raw === _globalVarsCache.raw && _globalVarsCache.parsed) {
+            globalVars = _globalVarsCache.parsed;
+        } else {
+            globalVars = JSON.parse(raw);
+        }
         globalVars[name] = value;
-        localStorage.setItem('gz_global_vars', JSON.stringify(globalVars));
+        _globalVarsCache.raw = JSON.stringify(globalVars);
+        _globalVarsCache.parsed = globalVars;
+        localStorage.setItem('gz_global_vars', _globalVarsCache.raw);
     } catch (e) { }
 }
 

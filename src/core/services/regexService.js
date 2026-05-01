@@ -16,23 +16,36 @@ function escapeRegex(string) {
  *   minDepth/maxDepth are only applied when the message's depth falls within their range.
  * @returns {string} Processed text.
  */
+let _globalScriptsCache = null;
+let _globalScriptsCacheKey = null;
+
+function _loadGlobalScripts(providedGlobalScripts) {
+    if (providedGlobalScripts) return providedGlobalScripts;
+    try {
+        const raw = localStorage.getItem('regex_scripts');
+        if (raw === _globalScriptsCacheKey && _globalScriptsCache) return _globalScriptsCache;
+        _globalScriptsCacheKey = raw;
+        _globalScriptsCache = raw ? JSON.parse(raw) : [];
+    } catch (e) {
+        console.error('Failed to load global regex scripts', e);
+        _globalScriptsCache = [];
+        _globalScriptsCacheKey = null;
+    }
+    return _globalScriptsCache;
+}
+
+export function invalidateRegexCache() {
+    _globalScriptsCache = null;
+    _globalScriptsCacheKey = null;
+}
+
 export function applyRegexes(text, placementFilter, ephemeralityFilter, options = {}) {
     if (!text) return "";
     let processedText = text;
 
-    const { charId, sessionId, globalScripts: providedGlobalScripts, char, persona, depth } = options;
+    const { charId, sessionId, char, persona, depth } = options;
 
-    // Load global scripts if not provided
-    let globalScripts = providedGlobalScripts;
-    if (!globalScripts) {
-        try {
-            const stored = localStorage.getItem('regex_scripts');
-            globalScripts = stored ? JSON.parse(stored) : [];
-        } catch (e) {
-            console.error('Failed to load global regex scripts', e);
-            globalScripts = [];
-        }
-    }
+    const globalScripts = _loadGlobalScripts(options.globalScripts);
 
     // Load preset scripts if possible
     let presetRegexes = [];
