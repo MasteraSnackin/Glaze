@@ -861,6 +861,14 @@ C
     font-style: italic;
 }
 
+:deep(.chat-blockquote) {
+    border-left: 3px solid var(--current-italic-color, #888);
+    margin: 4px 0;
+    padding: 2px 8px;
+    color: var(--current-italic-color, #888);
+    font-style: italic;
+}
+
 .msg-footer {
     display: grid;
     grid-template-columns: 1fr auto 1fr;

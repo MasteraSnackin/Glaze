@@ -284,6 +284,14 @@ const getStyles = () => `
     font-style: italic;
   }
 
+  .chat-blockquote {
+    border-left: 3px solid var(--current-italic-color, var(--char-italic-color, #888));
+    margin: 4px 0;
+    padding: 2px 8px;
+    color: var(--current-italic-color, var(--char-italic-color, #888));
+    font-style: italic;
+  }
+
   /* RollingNumber styles */
   .rolling-number { display: inline-flex; align-items: center; vertical-align: middle; height: 1.2em; font-variant-numeric: tabular-nums; }
   .rolling-number-inner { display: inline-flex; align-items: center; }
