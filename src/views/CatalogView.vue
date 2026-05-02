@@ -13,7 +13,7 @@ import { createNewSession } from '@/utils/sessions.js';
 import { datacatGetCharacter, datacatExtract, datacatExtractionStatus } from '@/core/services/catalog/datacatProvider.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import FiltersBottomSheet from '@/components/sheets/FiltersBottomSheet.vue';
-import CharacterCardEditorSheet from '@/components/sheets/CharacterCardEditorSheet.vue';
+import CharacterCardSheet from '@/components/sheets/CharacterCardSheet.vue';
 
 // ─── Search ───────────────────────────────────────────────────────────────────
 
@@ -50,18 +50,10 @@ const previewItem = ref(null);
 const previewCharData = ref(null);
 const previewAvatarUrl = ref(null);
 
-async function openPreview(item) {
-    // Show loading sheet immediately
-    showBottomSheet({ noDropdown: true,
-        title: item.name,
-        bigInfo: {
-            icon: `<svg viewBox="0 0 24 24" style="width:100%;height:100%;fill:var(--vk-blue)"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/></svg>`,
-            description: t('catalog_loading_char'),
-            buttonText: t('btn_cancel'),
-            onButtonClick: closeBottomSheet
-        }
-    });
+const loadingCharacterId = ref(null);
 
+async function openPreview(item) {
+    loadingCharacterId.value = item.id;
     previewLoading.value = true;
     let charData = null;
     let avatarUrl = item.avatarUrl;
@@ -104,12 +96,14 @@ async function openPreview(item) {
                 // 3. Nothing found — offer DataCat extraction
                 if (!charData) {
                     previewLoading.value = false;
+                    loadingCharacterId.value = null;
                     startExtraction(item);
                     return;
                 }
             }
         }
     } catch (e) {
+        loadingCharacterId.value = null;
         showBottomSheet({ noDropdown: true,
             title: t('title_error'),
             bigInfo: {
@@ -124,7 +118,7 @@ async function openPreview(item) {
     }
 
     previewLoading.value = false;
-    closeBottomSheet();
+    loadingCharacterId.value = null;
 
     previewItem.value = item;
     previewCharData.value = charData;
@@ -418,11 +412,12 @@ onUnmounted(() => {
         </div>
 
         <FiltersBottomSheet v-model:visible="showFiltersSheet" @apply="onFiltersApply" />
-        <CharacterCardEditorSheet
+        <CharacterCardSheet
             v-model:visible="showCharSheet"
             :item="previewItem"
             :char-data="previewCharData"
             :avatar-url="previewAvatarUrl"
+            :import-enabled="true"
             @import="onSheetImport"
         />
 
@@ -514,9 +509,9 @@ onUnmounted(() => {
                         <div class="card-snippet" v-if="item.description" v-html="snippetText(item.description)"></div>
                     </div>
 
-                    <!-- Import spinner overlay -->
-                    <div v-if="importingId === item.id" class="card-importing">
-                        <div class="spinner"></div>
+                    <!-- Import or Loading spinner overlay -->
+                    <div v-if="importingId === item.id || loadingCharacterId === item.id" class="card-importing">
+                        <div class="dl-spinner" style="margin-bottom: 0;"></div>
                     </div>
                 </div>
             </div>
