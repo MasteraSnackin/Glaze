@@ -1,22 +1,117 @@
 <script setup>
-import { watch, ref } from 'vue';
-import { desktopDropdownState, closeDesktopDropdown } from '@/core/states/desktopDropdownState.js';
+import { watch, ref, computed, nextTick } from 'vue';
+import { DesktopPopupState, closeDesktopPopup, getLastClickPosition } from '@/core/states/DesktopPopupState.js';
+
+const props = defineProps({
+    visible: { type: Boolean, default: undefined },
+    title: { type: String, default: undefined },
+    headerAction: { type: Object, default: undefined },
+    bigInfo: { type: Object, default: undefined },
+    items: { type: Array, default: undefined },
+    isTriggered: { type: Boolean, default: undefined },
+    x: { type: Number, default: undefined },
+    y: { type: Number, default: undefined },
+    width: { type: Number, default: undefined },
+    sessionItems: { type: Array, default: undefined },
+    cardItems: { type: Array, default: undefined },
+    input: { type: Object, default: undefined },
+    content: { type: [String, Object], default: undefined },
+    estimatedHeight: { type: Number, default: 0 }
+});
+
+const emit = defineEmits(['close']);
+
+// When props.visible is explicitly provided, this is a LOCAL popup (e.g. BottomSheet wrapper).
+// Only fall back to global DesktopPopupState for truly global (singleton) usage.
+const isGlobal = computed(() => props.visible === undefined);
+const g = (propVal, stateKey) => propVal !== undefined ? propVal : (isGlobal.value ? DesktopPopupState.value[stateKey] : undefined);
+
+const isVisible = computed(() => g(props.visible, 'visible'));
+const resolvedTitle = computed(() => g(props.title, 'title'));
+const resolvedHeaderAction = computed(() => g(props.headerAction, 'headerAction'));
+const resolvedBigInfo = computed(() => g(props.bigInfo, 'bigInfo'));
+const resolvedItems = computed(() => g(props.items, 'items'));
+const resolvedSessionItems = computed(() => g(props.sessionItems, 'sessionItems'));
+const resolvedCardItems = computed(() => g(props.cardItems, 'cardItems'));
+const resolvedInput = computed(() => g(props.input, 'input'));
+const resolvedContent = computed(() => g(props.content, 'content'));
+const resolvedIsTriggered = computed(() => g(props.isTriggered, 'isTriggered'));
+const resolvedX = computed(() => g(props.x, 'x'));
+const resolvedY = computed(() => g(props.y, 'y'));
 
 const dropdownStyle = ref({});
 const PADDING = 12;
 const MAX_VISIBLE_ITEMS = 12;
 
-function recalcPosition() {
-    const { x, y, items, isTriggered, bigInfo, title, headerAction } = desktopDropdownState.value;
-    
-    const width = isTriggered ? 280 : 220;
+const domContent = ref(null);
+watch(() => [domContent.value, resolvedContent.value], () => {
+    if (domContent.value && resolvedContent.value && typeof resolvedContent.value !== 'string') {
+        domContent.value.innerHTML = '';
+        if (resolvedContent.value instanceof HTMLElement || resolvedContent.value instanceof DocumentFragment) {
+            domContent.value.appendChild(resolvedContent.value);
+        }
+    }
+}, { immediate: true });
 
-    // Синхронный, максимально точный подсчет высоты (estimated),
-    // чтобы сразу отрисовать окно в нужных координатах и избежать "скачков" двойного рендера
-    let height = 16; // базовые паддинги панели .dd-panel
+const inputValue = ref('');
+const inputRef = ref(null);
+
+watch(resolvedInput, (newVal) => {
+    if (newVal) {
+        inputValue.value = newVal.value || '';
+        nextTick(() => {
+            if (inputRef.value) {
+                inputRef.value.focus({ preventScroll: true });
+            }
+        });
+    }
+}, { immediate: true });
+
+function onInputConfirm() {
+    if (resolvedInput.value && resolvedInput.value.onConfirm && inputValue.value.trim()) {
+        resolvedInput.value.onConfirm(inputValue.value.trim());
+        handleClose();
+    }
+}
+
+const handleCardClick = (event, item) => {
+    if (event.currentTarget && event.currentTarget._checkLongPress && event.currentTarget._checkLongPress()) return;
+    if (item.disabled) return;
+    handleClose();
+    if (item.onClick) item.onClick(event);
+};
+
+const handleSessionClick = (event, item) => {
+    if (item.disabled) return;
+    handleClose();
+    if (item.onClick) item.onClick(event);
+};
+
+function recalcPosition() {
+    const clickPos = getLastClickPosition();
+    const x = resolvedX.value !== undefined ? resolvedX.value : clickPos.x;
+    const y = resolvedY.value !== undefined ? resolvedY.value : clickPos.y;
+    const title = resolvedTitle.value;
+    const headerAction = resolvedHeaderAction.value;
+    const bigInfo = resolvedBigInfo.value;
+    const items = resolvedItems.value;
+    const sessionItems = resolvedSessionItems.value;
+    const cardItems = resolvedCardItems.value;
+    const input = resolvedInput.value;
+    const content = resolvedContent.value;
+    const isTriggered = resolvedIsTriggered.value;
+    
+    // Explicit width prop > 'Triggered' design > Default design
+    const width = props.width ? props.width : (isTriggered ? 280 : 220);
+
+    let height = 16;
 
     if (title || headerAction) height += 32;
-    if (bigInfo) height += 120; // примерная высота dd-big-info
+    if (bigInfo) height += 120;
+    
+    if (props.estimatedHeight) {
+        height += props.estimatedHeight;
+    }
 
     const visibleItems = items ? items.slice(0, MAX_VISIBLE_ITEMS) : [];
     
@@ -25,7 +120,7 @@ function recalcPosition() {
         if (item.image) {
             itemsH += 80;
         } else {
-            let itemH = isTriggered ? 48 : 38; // Базовая высота
+            let itemH = isTriggered ? 48 : 38;
             if (item.sublabel) itemH += 15;
             if (item.hint) itemH += 15;
             itemsH += itemH;
@@ -33,10 +128,20 @@ function recalcPosition() {
     }
     
     if (isTriggered && visibleItems.length > 0) {
-        itemsH += (visibleItems.length - 1) * 8; // gap
+        itemsH += (visibleItems.length - 1) * 8;
     }
     
     height += itemsH;
+
+    if (sessionItems) height += Math.min(sessionItems.length, MAX_VISIBLE_ITEMS) * 58;
+    if (cardItems) {
+        const visibleCardItems = cardItems.slice(0, MAX_VISIBLE_ITEMS);
+        for (const item of visibleCardItems) {
+            height += item.image ? 80 : 42;
+        }
+    }
+    if (input) height += 90;
+    if (content) height += 100; // rough estimation
 
     let left = x;
     let top = y;
@@ -47,107 +152,146 @@ function recalcPosition() {
     let originX = 'left';
     let originY = 'top';
 
-    // Горизонтальная проверка (не влазит справа -> откидываем влево)
     if (left + width > windowWidth - PADDING) {
         left = x - width;
         originX = 'right';
         if (left < PADDING) {
-            // Не влазит и слева -> прижимаем к правому/левому краю
             left = windowWidth - width - PADDING;
             if (left < PADDING) left = PADDING;
         }
     }
 
-    // Вертикальная проверка (не влазит снизу -> откидываем вверх)
     if (top + height > windowHeight - PADDING) {
         top = y - height;
         originY = 'bottom';
         if (top < PADDING) {
-            // Если не влазит ни сверху, ни снизу -> жестко прижимаем к границам экрана
             top = windowHeight - height - PADDING;
             if (top < PADDING) top = PADDING;
         }
     }
 
-    // Жесткое ограничение максимальной высоты: 
-    // Гарантируем, что после всех прыжков меню НИКОГДА не пересечет нижний PADDING
     const maxAllowedHeight = windowHeight - top - PADDING;
 
     dropdownStyle.value = {
-        top: `${Math.round(top)}px`,
-        left: `${Math.round(left)}px`,
-        width: `${width}px`,
-        maxHeight: `${Math.max(100, maxAllowedHeight)}px`, 
-        transformOrigin: `${originX} ${originY}`,
+        top: Math.round(top) + 'px',
+        left: Math.round(left) + 'px',
+        width: width + 'px',
+        maxHeight: Math.max(100, maxAllowedHeight) + 'px', 
+        transformOrigin: originX + ' ' + originY,
     };
 }
 
 function handleItemClick(item) {
     if (item.disabled) return;
-    closeDesktopDropdown();
+    handleClose();
     item.onClick?.();
 }
 
-watch(
-    () => desktopDropdownState.value.visible,
-    (val) => {
-        // Синхронный вызов BEFORE mount
-        if (val) recalcPosition();
+function handleClose() {
+    if (props.visible !== undefined) {
+        emit('close');
+    } else {
+        closeDesktopPopup();
     }
-);
+}
+
+watch(isVisible, (val) => {
+    if (val) recalcPosition();
+}, { immediate: true });
 </script>
 
 <template>
     <Teleport to="body">
         <Transition name="dd-fade">
             <div
-                v-if="desktopDropdownState.visible"
+                v-if="isVisible"
                 class="dd-overlay"
-                @mousedown.self="closeDesktopDropdown"
+                @mousedown.self="handleClose"
                 @contextmenu.prevent
             >
-                <div class="dd-panel" :style="dropdownStyle" @click.stop :class="{ 'dd-panel--triggered': desktopDropdownState.isTriggered }">
-                    <div v-if="desktopDropdownState.title || desktopDropdownState.headerAction" class="dd-header">
-                        <div v-if="desktopDropdownState.title" class="dd-title">
-                            {{ desktopDropdownState.title }}
+                <div class="dd-panel" :style="dropdownStyle" @click.stop :class="{ 'dd-panel--triggered': resolvedIsTriggered }">
+                    <div v-if="resolvedTitle || resolvedHeaderAction" class="dd-header">
+                        <div v-if="resolvedTitle" class="dd-title">
+                            {{ resolvedTitle }}
                         </div>
-                        <div v-if="desktopDropdownState.headerAction" class="dd-header-action" @click="desktopDropdownState.headerAction.onClick" v-html="desktopDropdownState.headerAction.icon"></div>
+                        <div v-if="resolvedHeaderAction" class="dd-header-action" @click="resolvedHeaderAction.onClick" v-html="resolvedHeaderAction.icon"></div>
                     </div>
 
                     <!-- Big Info Block -->
-                    <div v-if="desktopDropdownState.bigInfo" class="dd-big-info">
-                        <div v-if="desktopDropdownState.bigInfo.icon" class="dd-big-info-icon" v-html="desktopDropdownState.bigInfo.icon"></div>
-                        <div class="dd-big-info-label" v-if="desktopDropdownState.bigInfo.label">
-{{ desktopDropdownState.bigInfo.label }}
-</div>
-                        <div class="dd-big-info-desc" v-if="desktopDropdownState.bigInfo.description">
-{{ desktopDropdownState.bigInfo.description }}
-</div>
-                        <div v-if="desktopDropdownState.bigInfo.buttonText" class="dd-big-info-btn" @click="desktopDropdownState.bigInfo.onButtonClick">
-                            {{ desktopDropdownState.bigInfo.buttonText }}
+                    <div v-if="resolvedBigInfo" class="dd-big-info">
+                        <div v-if="resolvedBigInfo.icon" class="dd-big-info-icon" v-html="resolvedBigInfo.icon"></div>
+                        <div class="dd-big-info-label" v-if="resolvedBigInfo.label">
+                            {{ resolvedBigInfo.label }}
+                        </div>
+                        <div class="dd-big-info-desc" v-if="resolvedBigInfo.description">
+                            {{ resolvedBigInfo.description }}
+                        </div>
+                        <div v-if="resolvedBigInfo.buttonText" class="dd-big-info-btn" @click="resolvedBigInfo.onButtonClick">
+                            {{ resolvedBigInfo.buttonText }}
                         </div>
                     </div>
 
-                    <!-- Items -->
-                    <div class="dd-items-scroll" :class="{ 'dd-items-scroll--triggered': desktopDropdownState.isTriggered }">
+                    <!-- Items & Slot -->
+                    <div class="dd-items-scroll" :class="{ 'dd-items-scroll--triggered': resolvedIsTriggered }">
+                        <!-- Custom Content (HTML) -->
+                        <div v-if="typeof resolvedContent === 'string'" class="sheet-custom-content" v-html="resolvedContent" style="padding: 12px 14px;"></div>
+                        <div v-else-if="resolvedContent" class="sheet-custom-content" ref="domContent" style="padding: 12px 14px;"></div>
+                        
+                        <slot></slot>
+
+                        <!-- Session Items (Custom Layout) -->
+                        <div v-if="resolvedSessionItems && resolvedSessionItems.length">
+                            <div v-for="(item, index) in resolvedSessionItems" :key="index" class="dd-item" style="padding: 10px 12px; align-items: flex-start;" @click="handleSessionClick($event, item)">
+                                <div class="dd-item-info" style="flex: 1;">
+                                    <div style="font-weight: 600; font-size: 15px; margin-bottom: 2px;">{{ item.title }} <span style="font-weight: 400; opacity: 0.7; font-size: 13px;">({{ item.count }})</span></div>
+                                    <div style="font-size: 12px; opacity: 0.7;">{{ item.preview }}</div>
+                                </div>
+                                <div style="display: flex; flex-direction: column; align-items: flex-end; font-size: 11px; opacity: 0.6; min-width: max-content;">
+                                    <div>{{ item.time }}</div>
+                                </div>
+                            </div>
+                        </div>
+                
+                        <!-- Card Items -->
+                        <div v-if="resolvedCardItems && resolvedCardItems.length">
+                            <div v-for="(item, index) in resolvedCardItems" :key="index" 
+                                 class="dd-item" 
+                                 :class="{ 'dd-item--has-bg': item.image }"
+                                 :style="item.image ? { backgroundImage: 'url(' + item.image + ')' } : {}"
+                                 @click="handleCardClick($event, item)">
+                                <div v-if="item.image" class="dd-card-overlay"></div>
+                                <span v-if="item.icon && !item.image" class="dd-item-icon" v-html="item.icon"></span>
+                                <div class="dd-item-info">
+                                    <span class="dd-item-label" :class="{ 'with-bg': item.image }">{{ item.label }}</span>
+                                    <span v-if="item.sublabel" class="dd-item-sublabel" :class="{ 'with-bg': item.image }">{{ item.sublabel }}</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Input Sheet -->
+                        <div v-if="resolvedInput" style="padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+                            <input type="text" ref="inputRef" v-model="inputValue" :placeholder="resolvedInput.placeholder" @keydown.enter="onInputConfirm" style="width: 100%; border-radius: 8px; border: 1px solid rgba(255,255,255,0.2); background: rgba(0,0,0,0.2); color: white; padding: 10px; font-size: 14px;">
+                            <div class="dd-big-info-btn" @click="onInputConfirm">{{ resolvedInput.confirmLabel || 'Save' }}</div>
+                        </div>
+
                         <div
-                        v-for="(item, idx) in desktopDropdownState.items"
+                        v-for="(item, idx) in resolvedItems"
                         :key="idx"
                         class="dd-item"
                         :class="{
                             'dd-item--destructive': item.isDestructive,
                             'dd-item--active': item.isActive,
                             'dd-item--disabled': item.disabled,
-                            'dd-item--triggered': desktopDropdownState.isTriggered,
+                            'dd-item--triggered': resolvedIsTriggered,
                             'dd-item--has-bg': item.image
                         }"
-                        :style="item.image ? { backgroundImage: `url(${item.image})` } : {}"
+                        :style="item.image ? { backgroundImage: 'url(' + item.image + ')' } : {}"
                         @click="handleItemClick(item)"
                     >
                         <div v-if="item.image" class="dd-card-overlay"></div>
                         <div v-if="item.isFeatured" class="dd-featured-badge">
-FEATURED
-</div>
+                            FEATURED
+                        </div>
 
                         <!-- Icon slot -->
                         <span
@@ -564,3 +708,6 @@ FEATURED
     }
 }
 </style>
+
+
+

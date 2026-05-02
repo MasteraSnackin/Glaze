@@ -1,65 +1,70 @@
 <script setup>
 import { ref, watch, computed, onMounted } from 'vue';
 import BottomSheet from '@/components/ui/BottomSheet.vue';
-import { catalogFilters } from '@/core/states/catalogState.js';
-import { fetchJanitorTags, janitorTags, fetchJanitorTopTags } from '@/core/services/catalog/janitorProvider.js';
+import { catalogFilters, activeProvider } from '@/core/states/catalogState.js';
+import { fetchDatacatTags, datacatTags } from '@/core/services/catalog/datacatProvider.js';
+import { fetchJanitorTags, janitorTags } from '@/core/services/catalog/janitorProvider.js';
+import { chubTags, fetchChubTags } from '@/core/services/catalog/chubProvider.js';
+import { t } from '@/utils/i18n.js';
+
+const useDatacatTags = computed(() => activeProvider.value === 'datacat');
+
+function normalizeTag(rawTag) {
+    if (typeof rawTag === 'string') {
+        const name = rawTag.trim();
+        return name ? { id: name, name } : null;
+    }
+
+    if (!rawTag || typeof rawTag !== 'object') return null;
+
+    const rawName = rawTag.name ?? rawTag.slug ?? rawTag.id;
+    const name = typeof rawName === 'string' ? rawName.trim() : String(rawName ?? '').trim();
+    if (!name) return null;
+
+    return {
+        id: rawTag.id ?? name,
+        name
+    };
+}
 
 const ALL_TAGS = computed(() => {
-    return [...janitorTags.value]
-        .map(t => ({ id: Number(t.id), name: t.name }))
+    const source = activeProvider.value === 'chub'
+        ? (chubTags.value || [])
+        : (useDatacatTags.value ? datacatTags.value : janitorTags.value);
+
+    return [...source]
+        .map(normalizeTag)
+        .filter(Boolean)
         .sort((a, b) => a.name.localeCompare(b.name));
 });
 
 onMounted(() => {
+    fetchDatacatTags();
     fetchJanitorTags();
+    fetchChubTags();
 });
 
 const props = defineProps({ visible: Boolean });
 const emit = defineEmits(['update:visible', 'apply']);
 
 const nsfw = ref(true);
+const nsfl = ref(false);
+const showNsflWarning = ref(false);
 const minTokens = ref(29);
 const maxTokens = ref(100000);
 const selectedTagIds = ref(new Set());
 const selectedTagNames = ref(new Set());
+const selectedExcludeTagIds = ref(new Set());
+const selectedExcludeTagNames = ref(new Set());
 const tagSearch = ref('');
 
-const customTags = ref([]);
-const isFetchingTags = ref(false);
-let searchTimeout = null;
-
-watch(tagSearch, (newVal) => {
-    clearTimeout(searchTimeout);
-    if (!newVal) {
-        customTags.value = [];
-        return;
-    }
-    searchTimeout = setTimeout(async () => {
-        isFetchingTags.value = true;
-        try {
-            customTags.value = await fetchJanitorTopTags(newVal);
-        } finally {
-            isFetchingTags.value = false;
-        }
-    }, 400);
-});
+const isChub = computed(() => activeProvider.value === 'chub');
 
 const filteredTags = computed(() => {
     const q = tagSearch.value.toLowerCase();
-    
-    // Get custom tags from API search
-    const results = customTags.value.map(name => ({ name, isCustom: true }));
-    
-    // Get matching standard tags
-    const standard = q 
+    return q
         ? ALL_TAGS.value.filter(t => t.name.toLowerCase().includes(q))
         : ALL_TAGS.value;
-
-    // Filter out standard tags that are already covered by custom names to avoid duplicates
-    const filteredStandard = standard.filter(st => !results.some(ct => ct.name.toLowerCase() === st.name.toLowerCase()));
-
-    // Custom first, then standard matching
-    return [...results, ...filteredStandard];
 });
 
 // Update global state AND trigger search ONLY when closing
@@ -68,79 +73,160 @@ watch(() => props.visible, (newVal, oldVal) => {
     if (newVal) {
         const f = catalogFilters.value;
         nsfw.value = f.nsfw !== false;
+        nsfl.value = f.nsfl === true;
         minTokens.value = f.minTokens ?? 29;
         maxTokens.value = f.maxTokens ?? 100000;
         selectedTagIds.value = new Set(f.tagIds || []);
         selectedTagNames.value = new Set(f.tagNames || []);
+        selectedExcludeTagIds.value = new Set(f.excludeTagIds || []);
+        selectedExcludeTagNames.value = new Set(f.excludeTagNames || []);
         tagSearch.value = '';
-        customTags.value = [];
+        // Refresh Chub tags when opening filters
+        if (isChub.value) fetchChubTags();
     } 
     // When closing: save local refs to global state and trigger search
     else if (oldVal === true) {
-        catalogFilters.value = {
-            ...catalogFilters.value,
-            nsfw: nsfw.value,
-            minTokens: minTokens.value,
-            maxTokens: maxTokens.value,
-            tagIds: [...selectedTagIds.value],
-            tagNames: [...selectedTagNames.value]
-        };
-        emit('apply');
+        const f = catalogFilters.value;
+        const currentTagIds = [...selectedTagIds.value].sort();
+        const currentTagNames = [...selectedTagNames.value].sort();
+        const currentExcludeTagIds = [...selectedExcludeTagIds.value].sort();
+        const currentExcludeTagNames = [...selectedExcludeTagNames.value].sort();
+        const oldTagIds = [...(f.tagIds || [])].sort();
+        const oldTagNames = [...(f.tagNames || [])].sort();
+        const oldExcludeTagIds = [...(f.excludeTagIds || [])].sort();
+        const oldExcludeTagNames = [...(f.excludeTagNames || [])].sort();
+
+        const changed = 
+            nsfw.value !== (f.nsfw !== false) ||
+            nsfl.value !== (f.nsfl === true) ||
+            minTokens.value !== (f.minTokens ?? 29) ||
+            maxTokens.value !== (f.maxTokens ?? 100000) ||
+            JSON.stringify(currentTagIds) !== JSON.stringify(oldTagIds) ||
+            JSON.stringify(currentTagNames) !== JSON.stringify(oldTagNames) ||
+            JSON.stringify(currentExcludeTagIds) !== JSON.stringify(oldExcludeTagIds) ||
+            JSON.stringify(currentExcludeTagNames) !== JSON.stringify(oldExcludeTagNames);
+
+        if (changed) {
+            catalogFilters.value = {
+                ...catalogFilters.value,
+                nsfw: nsfw.value,
+                nsfl: nsfl.value,
+                minTokens: minTokens.value,
+                maxTokens: maxTokens.value,
+                tagIds: [...selectedTagIds.value],
+                tagNames: [...selectedTagNames.value],
+                excludeTagIds: [...selectedExcludeTagIds.value],
+                excludeTagNames: [...selectedExcludeTagNames.value]
+            };
+            emit('apply');
+        }
     }
 });
 
-function toggleTag(tag) {
+function tagState(tag) {
+    // Returns 'include', 'exclude', or 'none'
     if (tag.id) {
-        const s = new Set(selectedTagIds.value);
-        if (s.has(tag.id)) s.delete(tag.id);
-        else s.add(tag.id);
-        selectedTagIds.value = s;
+        if (selectedTagIds.value.has(tag.id)) return 'include';
+        if (selectedExcludeTagIds.value.has(tag.id)) return 'exclude';
+        return 'none';
     } else {
-        const s = new Set(selectedTagNames.value);
-        if (s.has(tag.name)) s.delete(tag.name);
-        else s.add(tag.name);
-        selectedTagNames.value = s;
+        if (selectedTagNames.value.has(tag.name)) return 'include';
+        if (selectedExcludeTagNames.value.has(tag.name)) return 'exclude';
+        return 'none';
+    }
+}
+
+function cycleTag(tag) {
+    // Cycle: none → include → exclude → none
+    const state = tagState(tag);
+    if (tag.id) {
+        const incSet = new Set(selectedTagIds.value);
+        const excSet = new Set(selectedExcludeTagIds.value);
+        if (state === 'none') {
+            incSet.add(tag.id);
+        } else if (state === 'include') {
+            incSet.delete(tag.id);
+            excSet.add(tag.id);
+        } else {
+            excSet.delete(tag.id);
+        }
+        selectedTagIds.value = incSet;
+        selectedExcludeTagIds.value = excSet;
+    } else {
+        const incSet = new Set(selectedTagNames.value);
+        const excSet = new Set(selectedExcludeTagNames.value);
+        if (state === 'none') {
+            incSet.add(tag.name);
+        } else if (state === 'include') {
+            incSet.delete(tag.name);
+            excSet.add(tag.name);
+        } else {
+            excSet.delete(tag.name);
+        }
+        selectedTagNames.value = incSet;
+        selectedExcludeTagNames.value = excSet;
     }
 }
 
 function isTagActive(tag) {
-    if (tag.id) return selectedTagIds.value.has(tag.id);
-    return selectedTagNames.value.has(tag.name);
+    return tagState(tag) !== 'none';
 }
 
 function clearTags() {
     selectedTagIds.value = new Set();
     selectedTagNames.value = new Set();
+    selectedExcludeTagIds.value = new Set();
+    selectedExcludeTagNames.value = new Set();
 }
 
 function closeSheet() {
     emit('update:visible', false);
 }
 
+function onNsflToggle() {
+    if (!nsfl.value) {
+        // Trying to enable — show warning
+        showNsflWarning.value = true;
+    } else {
+        // Disabling — just toggle off
+        nsfl.value = false;
+    }
+}
+
+function confirmNsfl() {
+    nsfl.value = true;
+    showNsflWarning.value = false;
+}
+
+function cancelNsfl() {
+    showNsflWarning.value = false;
+}
+
 const selectedTags = computed(() => {
     const res = [];
-    // Add standard tags
     ALL_TAGS.value.forEach(t => {
-        if (selectedTagIds.value.has(t.id)) res.push(t);
-    });
-    // Add custom tags
-    selectedTagNames.value.forEach(name => {
-        res.push({ name, isCustom: true });
+        const st = tagState(t);
+        if (st !== 'none') {
+            res.push({ ...t, state: st });
+        }
     });
     return res;
 });
 
-const totalSelectedCount = computed(() => selectedTagIds.value.size + selectedTagNames.value.size);
+const totalSelectedCount = computed(() => 
+    selectedTagIds.value.size + selectedTagNames.value.size + 
+    selectedExcludeTagIds.value.size + selectedExcludeTagNames.value.size
+);
 </script>
 
 <template>
-    <BottomSheet :visible="visible" title="Filters" @close="closeSheet">
+    <BottomSheet :visible="visible" :title="t('catalog_filters') || 'Filters'" @close="closeSheet" :popupOnDesktop="true" :popupWidth="360">
         <div class="filters-content">
 
             <!-- NSFW Toggle -->
             <div class="filter-section nsfw-row" style="margin-bottom: 5px;">
                 <div class="filter-label" style="margin: 0;">
-Show NSFW
+{{ t('catalog_filter_nsfw') || 'Show NSFW' }}
 </div>
                 <label class="toggle-switch">
                     <input type="checkbox" v-model="nsfw">
@@ -148,21 +234,32 @@ Show NSFW
                 </label>
             </div>
 
+            <!-- NSFL Toggle (Chub only) -->
+            <div v-if="isChub" class="filter-section nsfw-row" style="margin-bottom: 5px;">
+                <div class="filter-label" style="margin: 0;">
+{{ t('catalog_filter_nsfl') || 'Show NSFL' }}
+</div>
+                <label class="toggle-switch" @click.prevent="onNsflToggle">
+                    <input type="checkbox" :checked="nsfl">
+                    <span class="slider nsfl-slider"></span>
+                </label>
+            </div>
+
             <!-- Tokens -->
             <div class="filter-section">
                 <div class="filter-label">
-Token Range
+{{ t('catalog_token_range') || 'Token Range' }}
 </div>
                 <div class="filter-row">
                     <div class="filter-input-wrap">
-                        <span class="input-label">Min</span>
+                        <span class="input-label">{{ t('catalog_min') || 'Min' }}</span>
                         <input type="number" v-model.number="minTokens" class="filter-input" />
                     </div>
                     <div class="filter-range-dash">
 —
 </div>
                     <div class="filter-input-wrap">
-                        <span class="input-label">Max</span>
+                        <span class="input-label">{{ t('catalog_max') || 'Max' }}</span>
                         <input type="number" v-model.number="maxTokens" class="filter-input" />
                     </div>
                 </div>
@@ -172,17 +269,22 @@ Token Range
             <div class="filter-section">
                 <div class="filter-label-row">
                     <div class="filter-label">
-Tags
+{{ t('catalog_tags') || 'Tags' }}
 </div>
                     <button v-if="totalSelectedCount > 0" class="clear-tags-btn" @click="clearTags">
-                        Clear ({{ totalSelectedCount }})
+                        {{ (t('catalog_clear_tags') || 'Clear ({count})').replace('{count}', totalSelectedCount) }}
                     </button>
                 </div>
 
                 <!-- Selected chips preview -->
                 <TransitionGroup name="tag-list" tag="div" v-if="selectedTags.length" class="selected-tags-preview">
-                    <span v-for="tag in selectedTags" :key="tag.id || tag.name" class="tag-chip active" @click="toggleTag(tag)">
-                        {{ tag.name }} <span class="chip-x">✕</span>
+                    <span v-for="tag in selectedTags" :key="tag.id || tag.name" class="tag-chip" :class="{
+                        active: tag.state === 'include',
+                        excluded: tag.state === 'exclude'
+                    }" @click="cycleTag(tag)">
+                        {{ tag.name }}
+                        <span class="chip-state-icon" v-if="tag.state === 'include'">✓</span>
+                        <span class="chip-state-icon" v-else-if="tag.state === 'exclude'">✕</span>
                     </span>
                 </TransitionGroup>
 
@@ -190,7 +292,7 @@ Tags
                 <input
                     type="text"
                     v-model="tagSearch"
-                    placeholder="Search tags..."
+                    :placeholder="t('catalog_search_tags') || 'Search tags...'"
                     class="filter-input tag-search"
                 />
 
@@ -200,18 +302,35 @@ Tags
                         v-for="tag in filteredTags"
                         :key="tag.id || tag.name"
                         class="tag-chip"
-                        :class="{ active: isTagActive(tag), 'custom-tag': tag.isCustom }"
-                        @click="toggleTag(tag)"
+                        :class="{
+                            active: tagState(tag) === 'include',
+                            excluded: tagState(tag) === 'exclude'
+                        }"
+                        @click="cycleTag(tag)"
                     >
-                        <span v-if="tag.isCustom" class="custom-tag-prefix">#</span>
                         {{ tag.name }}
+                        <span class="chip-state-icon" v-if="tagState(tag) === 'include'">✓</span>
+                        <span class="chip-state-icon" v-else-if="tagState(tag) === 'exclude'">✕</span>
                     </button>
                 </TransitionGroup>
-                <div v-if="isFetchingTags" class="fetching-tags-loader">
-Searching tags...
-</div>
             </div>
 
+        </div>
+    </BottomSheet>
+
+    <!-- NSFL Warning Sheet -->
+    <BottomSheet :visible="showNsflWarning" :title="t('catalog_nsfl_warning_title') || 'NSFL Content'" @close="cancelNsfl" :popupOnDesktop="true" :popupWidth="320">
+        <div class="nsfl-warning-content">
+            <div class="nsfl-warning-icon">⚠️</div>
+            <div class="nsfl-warning-desc">{{ t('catalog_nsfl_warning_desc') || "You don't want to see this." }}</div>
+            <div class="nsfl-warning-actions">
+                <button class="nsfl-btn nsfl-btn-confirm" @click="confirmNsfl">
+                    {{ t('catalog_nsfl_btn') || 'I have nothing to lose' }}
+                </button>
+                <button class="nsfl-btn nsfl-btn-cancel" @click="cancelNsfl">
+                    {{ t('catalog_nsfl_btn_cancel') || "I don't want to die" }}
+                </button>
+            </div>
         </div>
     </BottomSheet>
 </template>
@@ -337,33 +456,12 @@ input:checked + .slider {
     background: var(--vk-blue, #4080ff);
 }
 
+input:checked + .slider.nsfl-slider {
+    background: #ff4444;
+}
+
 input:checked + .slider:before {
     transform: translateX(20px);
-}
-
-/* Sort chips */
-.sort-chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-}
-
-.sort-chip {
-    padding: 7px 14px;
-    border-radius: 20px;
-    border: 1px solid rgba(255,255,255,0.15);
-    background: rgba(255,255,255,0.05);
-    color: rgba(255,255,255,0.7);
-    font-size: 13px;
-    cursor: pointer;
-    transition: background 0.15s, border-color 0.15s, color 0.15s;
-    font-family: inherit;
-}
-
-.sort-chip.active {
-    background: rgba(var(--vk-blue-rgb, 64, 128, 255), 0.2);
-    border-color: var(--vk-blue, #4080ff);
-    color: #fff;
 }
 
 /* Tag chips */
@@ -405,9 +503,16 @@ input:checked + .slider:before {
     color: #fff;
 }
 
-.chip-x {
+.tag-chip.excluded {
+    background: rgba(255, 68, 68, 0.2);
+    border-color: #ff4444;
+    color: #ff4444;
+}
+
+.chip-state-icon {
     font-size: 10px;
-    opacity: 0.7;
+    opacity: 0.8;
+    font-weight: 700;
 }
 
 .clear-tags-btn {
@@ -420,43 +525,60 @@ input:checked + .slider:before {
     font-family: inherit;
 }
 
-.filter-actions {
+/* NSFL Warning */
+.nsfl-warning-content {
+    padding: 20px 16px 24px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 16px;
+}
+
+.nsfl-warning-icon {
+    font-size: 48px;
+    line-height: 1;
+}
+
+.nsfl-warning-desc {
+    font-size: 15px;
+    color: rgba(255, 255, 255, 0.8);
+    line-height: 1.5;
+}
+
+.nsfl-warning-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
     margin-top: 4px;
 }
 
-.apply-btn {
+.nsfl-btn {
     width: 100%;
-    background: var(--vk-blue, #4080ff);
-    color: #fff;
     border: none;
     border-radius: 12px;
-    padding: 13px;
-    font-size: 15px;
+    padding: 12px;
+    font-size: 14px;
     font-weight: 600;
     cursor: pointer;
     font-family: inherit;
     transition: opacity 0.2s, transform 0.1s;
 }
 
-.apply-btn:active {
+.nsfl-btn:active {
     transform: scale(0.98);
     opacity: 0.9;
 }
 
-.custom-tag {
-    border-style: dashed;
+.nsfl-btn-confirm {
+    background: #ff4444;
+    color: #fff;
 }
 
-.custom-tag-prefix {
-    opacity: 0.5;
-    font-weight: 400;
-}
-
-.fetching-tags-loader {
-    font-size: 11px;
-    color: rgba(255,255,255,0.4);
-    padding: 4px 0;
-    font-style: italic;
+.nsfl-btn-cancel {
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.7);
 }
 
 /* Transitions */

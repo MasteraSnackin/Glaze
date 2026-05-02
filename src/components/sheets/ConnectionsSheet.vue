@@ -1,9 +1,10 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue';
 import SheetView from '@/components/ui/SheetView.vue';
+import DesktopPopup from '@/components/ui/DesktopPopup.vue';
 import HelpTip from '@/components/ui/HelpTip.vue';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
-import { getLastClickPosition } from '@/core/states/desktopDropdownState.js';
+import { getLastClickPosition } from '@/core/states/DesktopPopupState.js';
 import { lorebookState, setLorebookActivation } from '@/core/states/lorebookState.js';
 import { presetState, setPresetConnection } from '@/core/states/presetState.js';
 import { personaConnections, setPersonaConnection, activePersona, loadPersonas } from '@/core/states/personaState.js';
@@ -16,7 +17,7 @@ const t = (key) => translations[currentLang.value]?.[key] || key;
 const sheet = ref(null);
 const isDesktop = ref(window.innerWidth >= 768);
 const isMiniWindowVisible = ref(false);
-const miniWindowStyle = ref({});
+const popupCoordinates = ref({ x: 0, y: 0 });
 
 const itemId = ref('');
 const itemName = ref('');
@@ -222,22 +223,7 @@ async function open(type, id, name, contextChar = null) {
     isDesktop.value = window.innerWidth >= 768;
     if (isDesktop.value) {
         const { x, y } = getLastClickPosition();
-        const width = 280;
-        let left = x;
-        let top = y;
-        const PADDING = 12;
-        if (left < PADDING) left = PADDING;
-        if (left + width > window.innerWidth - PADDING) {
-            left = window.innerWidth - width - PADDING;
-        }
-        const estimatedHeight = 310;
-        if (top + estimatedHeight > window.innerHeight - PADDING) {
-            top = Math.max(PADDING, window.innerHeight - estimatedHeight - PADDING);
-        }
-        miniWindowStyle.value = {
-            top: top + 'px', left: left + 'px', width: width + 'px',
-            transformOrigin: 'top left'
-        };
+        popupCoordinates.value = { x, y };
         isMiniWindowVisible.value = true;
     } else {
         sheet.value?.open();
@@ -258,81 +244,77 @@ defineExpose({ open, close });
 
 <template>
     <!-- Desktop Mini Window -->
-    <Teleport to="body" v-if="isDesktop">
-        <Transition name="dd-fade">
-            <div v-if="isMiniWindowVisible" class="dd-overlay" @mousedown.self="close" @contextmenu.prevent style="z-index: 18000;">
-                <div class="dd-panel dd-panel--triggered" :style="miniWindowStyle" @click.stop style="z-index: 18001;">
-                    <div class="dd-header">
-                        <div class="dd-title" style="display:flex; align-items:center; gap:6px;">
-                            {{ sheetTitle }}
-                            <HelpTip term="connections" />
-                        </div>
+    <DesktopPopup
+        v-if="isDesktop"
+        :visible="isMiniWindowVisible"
+        :title="sheetTitle"
+        :isTriggered="true"
+        :x="popupCoordinates.x"
+        :y="popupCoordinates.y"
+        :width="280"
+        :estimatedHeight="310"
+        @close="close"
+    >
+        <div class="lbc-body" style="padding: 0 4px 6px;">
+
+            <div class="lbc-card">
+                <div class="lbc-row">
+                    <div class="lbc-row-label">
+                        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+                        {{ t('label_global_enabled') || '???????? ??? ???? ?????' }}
                     </div>
-                    <div class="dd-items-scroll">
-                        <div class="lbc-body" style="padding: 0 4px 6px;">
-
-                            <div class="lbc-card">
-                                <div class="lbc-row">
-                                    <div class="lbc-row-label">
-                                        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
-                                        {{ t('label_global_enabled') || 'Включить для всех чатов' }}
-                                    </div>
-                                    <div class="lbc-toggle" :class="{ active: isGlobalActive() }" @click="toggleGlobal">
-                                        <div class="lbc-toggle-thumb"></div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="lbc-card">
-                                <div class="lbc-section-head">
-                                    <div class="lbc-section-title">
-{{ t('lbc_section_characters') || 'Включить для персонажей' }}
-</div>
-                                    <button class="lbc-add" @click="addCharConnection">
-                                        <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
-                                    </button>
-                                </div>
-                                <div class="lbc-chips">
-                                    <div v-for="c in getCharConnections()" :key="c.id" class="lbc-chip char">
-                                        <span>{{ c.name }}</span>
-                                        <button class="lbc-chip-x" @click="removeCharConnection(c.id)">
-                                            <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
-                                        </button>
-                                    </div>
-                                    <div v-if="getCharConnections().length === 0" class="lbc-empty">
-{{ t('none') || 'None' }}
-</div>
-                                </div>
-                            </div>
-
-                            <div class="lbc-card">
-                                <div class="lbc-section-head">
-                                    <div class="lbc-section-title">
-{{ t('lbc_section_chats') || 'Включить для чатов' }}
-</div>
-                                    <button class="lbc-add" @click="addChatConnection">
-                                        <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
-                                    </button>
-                                </div>
-                                <div class="lbc-chips">
-                                    <div v-for="c in getChatConnections()" :key="c.id" class="lbc-chip chat">
-                                        <span>{{ c.charName }} #{{ c.sessionId }}</span>
-                                        <button class="lbc-chip-x" @click="removeChatConnection(c.id)">
-                                            <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
-                                        </button>
-                                    </div>
-                                    <div v-if="getChatConnections().length === 0" class="lbc-empty">
-{{ t('none') || 'None' }}
-</div>
-                                </div>
-                            </div>
-
-                        </div>
+                    <div class="lbc-toggle" :class="{ active: isGlobalActive() }" @click="toggleGlobal">
+                        <div class="lbc-toggle-thumb"></div>
                     </div>
                 </div>
             </div>
-        </Transition>
-    </Teleport>
+
+            <div class="lbc-card">
+                <div class="lbc-section-head">
+                    <div class="lbc-section-title">
+                        {{ t('lbc_section_characters') || '???????? ??? ??????????' }}
+                    </div>
+                    <button class="lbc-add" @click="addCharConnection">
+                        <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                    </button>
+                </div>
+                <div class="lbc-chips">
+                    <div v-for="c in getCharConnections()" :key="c.id" class="lbc-chip char">
+                        <span>{{ c.name }}</span>
+                        <button class="lbc-chip-x" @click="removeCharConnection(c.id)">
+                            <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                        </button>
+                    </div>
+                    <div v-if="getCharConnections().length === 0" class="lbc-empty">
+                        {{ t('none') || 'None' }}
+                    </div>
+                </div>
+            </div>
+
+            <div class="lbc-card">
+                <div class="lbc-section-head">
+                    <div class="lbc-section-title">
+                        {{ t('lbc_section_chats') || '???????? ??? ?????' }}
+                    </div>
+                    <button class="lbc-add" @click="addChatConnection">
+                        <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                    </button>
+                </div>
+                <div class="lbc-chips">
+                    <div v-for="c in getChatConnections()" :key="c.id" class="lbc-chip chat">
+                        <span>{{ c.charName }} #{{ c.sessionId }}</span>
+                        <button class="lbc-chip-x" @click="removeChatConnection(c.id)">
+                            <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                        </button>
+                    </div>
+                    <div v-if="getChatConnections().length === 0" class="lbc-empty">
+                        {{ t('none') || 'None' }}
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </DesktopPopup>
 
     <!-- Mobile Bottom Sheet -->
     <SheetView v-else ref="sheet" :z-index="11010" :title="sheetTitle" fit-content>
@@ -551,3 +533,4 @@ defineExpose({ open, close });
     line-height: 26px;
 }
 </style>
+

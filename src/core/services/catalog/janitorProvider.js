@@ -6,166 +6,8 @@
 import { catalogGet, catalogGetText, catalogPost } from './catalogHttp.js';
 import { ref } from 'vue';
 
-const SEARCH_URL = 'https://search.jannyai.com/multi-search';
-const BASE_URL = 'https://jannyai.com';
 const HAMPTER_URL = 'https://janitorai.com/hampter/characters';
-const TOKEN_KEY = 'gz_janny_token';
-
-// Hardcoded fallback token (changes rarely)
-const FALLBACK_TOKEN = '88a6463b66e04fb07ba87ee3db06af337f492ce511d93df6e2d2968cb2ff2b30';
-
-// ─── CORS Note ────────────────────────────────────────────────────────────────
-// MeiliSearch (search.jannyai.com) and Hampter (janitorai.com/hampter) both
-// respond with Access-Control-Allow-Origin: * — they can be called directly
-// from the browser. Using a CORS proxy would strip the Authorization header
-// and cause 401 errors. All calls below use useProxy=false.
-
-// ─── Token Management ─────────────────────────────────────────────────────────
-
-async function fetchSearchToken() {
-    try {
-        const html = await catalogGetText(`${BASE_URL}/characters/search`, {
-            'Origin': BASE_URL,
-            'Referer': `${BASE_URL}/`
-        });
-
-        // Try client-config JS file first
-        let configPath = null;
-        const configMatch = html.match(/client-config\.[a-zA-Z0-9_-]+\.js/);
-        if (configMatch) {
-            configPath = `/_astro/${configMatch[0]}`;
-        } else {
-            // Fallback: look for SearchPage bundle which imports client-config
-            const spMatch = html.match(/SearchPage\.[a-zA-Z0-9_-]+\.js/);
-            if (spMatch) {
-                const spJs = await catalogGetText(`${BASE_URL}/_astro/${spMatch[0]}`, {
-                    'Referer': `${BASE_URL}/`
-                });
-                const impMatch = spJs.match(/client-config\.[a-zA-Z0-9_-]+\.js/);
-                if (impMatch) configPath = `/_astro/${impMatch[0]}`;
-            }
-        }
-
-        if (configPath) {
-            const configJs = await catalogGetText(`${BASE_URL}${configPath}`, {
-                'Referer': `${BASE_URL}/`
-            });
-            // Extract 64-char hex token
-            const tokenMatch = configJs.match(/"([a-f0-9]{64})"/);
-            if (tokenMatch) return tokenMatch[1];
-        }
-
-        return FALLBACK_TOKEN;
-    } catch {
-        return FALLBACK_TOKEN;
-    }
-}
-
-async function getSearchToken() {
-    const cached = localStorage.getItem(TOKEN_KEY);
-    if (cached) return cached;
-
-    const token = await fetchSearchToken();
-    localStorage.setItem(TOKEN_KEY, token);
-    return token;
-}
-
-function clearSearchToken() {
-    localStorage.removeItem(TOKEN_KEY);
-}
-
-// ─── Search ───────────────────────────────────────────────────────────────────
-
-const JANNY_HEADERS = (token) => ({
-    'Accept': '*/*',
-    'Authorization': `Bearer ${token}`,
-    'Origin': BASE_URL,
-    'Referer': `${BASE_URL}/`,
-    'x-meilisearch-client': 'Meilisearch instant-meilisearch (v0.19.0) ; Meilisearch JavaScript (v0.41.0)'
-});
-
-/**
- * Search JanitorAI characters via MeiliSearch.
- *
- * CORS: search.jannyai.com returns Access-Control-Allow-Origin: *
- * so the request goes DIRECTLY (useProxy=false). Using a proxy would
- * strip the Authorization header and cause 401 errors.
- *
- * Sort values supported by MeiliSearch:
- *   newest       → createdAtStamp:desc (default)
- *   oldest       → createdAtStamp:asc
- *   tokens_desc  → totalToken:desc
- *   tokens_asc   → totalToken:asc
- *   relevant     → no sort (MeiliSearch relevance ranking)
- *   popular      → NOT supported here; use janitorHampterSearch instead
- *   trending     → NOT supported here; use janitorHampterSearch instead
- *
- * @param {{ query?: string, page?: number, sort?: string, filters?: object }} opts
- */
-export async function janitorSearch({ query = '', page = 1, sort = 'newest', filters = {} } = {}) {
-    let token = await getSearchToken();
-
-    const meiliFilters = [];
-    const minTok = filters.minTokens !== undefined ? filters.minTokens : 29;
-    meiliFilters.push(`totalToken >= ${minTok}`);
-    if (filters.maxTokens !== undefined) meiliFilters.push(`totalToken <= ${filters.maxTokens}`);
-    if (filters.nsfw === false) meiliFilters.push('isNsfw = false');
-    if (filters.tagIds?.length) {
-        const tagClauses = filters.tagIds.map(id => `tagIds = ${id}`);
-        meiliFilters.push(tagClauses.join(' AND '));
-    }
-
-    const activeSort = filters.sort || sort;
-    const sortMap = {
-        newest: ['createdAtStamp:desc'],
-        oldest: ['createdAtStamp:asc'],
-        tokens_desc: ['totalToken:desc'],
-        tokens_asc: ['totalToken:asc'],
-        relevant: [] // empty = MeiliSearch relevance ranking
-    };
-    const sortArr = sortMap[activeSort] ?? sortMap.newest;
-
-    const body = {
-        queries: [{
-            indexUid: 'janny-characters',
-            q: query,
-            facets: ['isLowQuality', 'isNsfw', 'tagIds', 'totalToken'],
-            attributesToCrop: ['description:300'],
-            cropMarker: '...',
-            filter: meiliFilters.length > 0 ? meiliFilters : undefined,
-            attributesToHighlight: ['name', 'description'],
-            hitsPerPage: 40,
-            page
-        }]
-    };
-    // Only attach sort when we have a non-empty array (relevant mode omits it)
-    if (sortArr.length > 0) body.queries[0].sort = sortArr;
-
-    try {
-        // useProxy=false: ACAO:* means direct fetch works; proxy strips Authorization
-        const data = await catalogPost(SEARCH_URL, body, JANNY_HEADERS(token), false);
-        const result = data.results?.[0] || {};
-        return {
-            characters: (result.hits || []).map(normalizeSearchHit),
-            total: result.totalHits || 0,
-            totalPages: result.totalPages || 1
-        };
-    } catch (e) {
-        if (e.status === 401 || e.status === 403) {
-            // Token expired — clear and retry with fallback
-            clearSearchToken();
-            token = FALLBACK_TOKEN;
-            const data = await catalogPost(SEARCH_URL, body, JANNY_HEADERS(token), false);
-            const result = data.results?.[0] || {};
-            return {
-                characters: (result.hits || []).map(normalizeSearchHit),
-                total: result.totalHits || 0,
-                totalPages: result.totalPages || 1
-            };
-        }
-        throw e;
-    }
-}
+const BASE_URL = 'https://janitorai.com';
 
 /**
  * Browse via Hampter API — used for 'trending' and 'popular' sort modes.
@@ -242,7 +84,7 @@ export async function janitorFetchCharacter(id) {
 // ─── Normalization ────────────────────────────────────────────────────────────
 
 
-function resolveJanitorAvatar(url) {
+export function resolveJanitorAvatar(url) {
     if (!url) return null;
     if (url.startsWith('http')) return url;
     if (url.startsWith('/')) return `https://ella.janitorai.com${url}?width=400`;
@@ -323,29 +165,7 @@ export async function fetchJanitorTopTags(query) {
     }
 }
 
-function tagIdsToNames(tagIds) {
-    if (!Array.isArray(tagIds)) return [];
-    return tagIds.map(id => janitorTagMap.value[id]).filter(Boolean);
-}
 
-function normalizeSearchHit(hit) {
-    const stdTags = tagIdsToNames(hit.tagIds);
-    const tags = [hit.isNsfw ? 'NSFW' : 'SFW', ...stdTags];
-
-    return {
-        id: hit.id,
-        name: hit.name || 'Unknown',
-        avatarUrl: resolveJanitorAvatar(hit.avatar),
-        description: hit.description || '',
-        tags: [...new Set(tags)],
-        tokens: hit.totalToken || 0,
-        creator: hit.creatorUsername || '',
-        creator_id: hit.creatorId || '',
-        nsfw: Boolean(hit.isNsfw),
-        slug: hit.slug || hit.name?.toLowerCase().replace(/\s+/g, '-') || hit.id,
-        source: 'janitor'
-    };
-}
 
 /**
  * Build a minimal Glaze charData from a normalized search hit (no full fetch needed).
@@ -443,3 +263,5 @@ function convertHampterToGlaze(char) {
         extensions: { janitor: { id: char.id } }
     };
 }
+
+

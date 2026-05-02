@@ -1,7 +1,7 @@
 import { ref } from 'vue';
 
 // ── Dropdown state ─────────────────────────────────────────────────────────
-export const desktopDropdownState = ref({
+export const DesktopPopupState = ref({
     visible: false,
     title: '',
     items: [],
@@ -13,8 +13,8 @@ export const desktopDropdownState = ref({
     onClose: null,
 });
 
-export function showDesktopDropdown({ title, items, bigInfo, headerAction, x, y, isTriggered = false, onClose = null }) {
-    desktopDropdownState.value = {
+export function showDesktopPopup({ title, items, bigInfo, headerAction, x, y, isTriggered = false, onClose = null }) {
+    DesktopPopupState.value = {
         visible: true,
         title: title || '',
         items: items || [],
@@ -27,12 +27,12 @@ export function showDesktopDropdown({ title, items, bigInfo, headerAction, x, y,
     };
 }
 
-export function closeDesktopDropdown() {
-    if (desktopDropdownState.value.onClose) {
-        desktopDropdownState.value.onClose();
+export function closeDesktopPopup() {
+    if (DesktopPopupState.value.onClose) {
+        DesktopPopupState.value.onClose();
     }
-    desktopDropdownState.value = {
-        ...desktopDropdownState.value,
+    DesktopPopupState.value = {
+        ...DesktopPopupState.value,
         visible: false,
     };
 }

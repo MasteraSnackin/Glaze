@@ -4,7 +4,7 @@
  * All API calls go through catalogHttp (CapacitorHttp on native, corsproxy on web).
  */
 import { catalogGet, catalogPost } from './catalogHttp.js';
-import { janitorHampterSearch } from './janitorProvider.js';
+import { ref } from 'vue';
 
 const BASE = 'https://datacat.run';
 const KEY_DEVICE = 'gz_dc_device';
@@ -105,15 +105,27 @@ const MIN_TOKENS = 889;
  * @param {{ page?: number, limit?: number, tagIds?: number[], nsfw?: boolean, filters?: object }} opts
  */
 export async function datacatBrowse({ page = 1, limit = 24, tagIds = [], nsfw = false, filters = {} } = {}) {
-    const activeSort = filters.sort;
+    const sort = filters.sort || 'recent';
 
-    // popular / trending sorts are served by JanitorAI hampter to support pagination
-    if (activeSort === 'popular' || activeSort === 'trending_week' || activeSort === 'trending_24h') {
-        const res = await janitorHampterSearch({ query: '', page, sort: activeSort, filters });
-        res.characters.forEach(c => c.source = 'datacat');
-        return res;
+    // Fresh-endpoint sorts (не поддерживают пагинацию — всегда page=1)
+    if (sort !== 'recent') {
+        const sortMap = {
+            fresh: { sortBy: 'fresh', window: 'all' },
+            score_week: { sortBy: 'score', window: 'thisWeek' },
+            score_24h: { sortBy: 'score', window: 'last24h' },
+            chat_count_week: { sortBy: 'chat_count', window: 'thisWeek' },
+            chat_count_24h: { sortBy: 'chat_count', window: 'last24h' },
+        };
+        const mapped = sortMap[sort] || sortMap.fresh;
+        const limit24 = mapped.window === 'last24h' || mapped.window === 'all' ? 80 : 0;
+        const limitWeek = mapped.window === 'thisWeek' || mapped.window === 'all' ? 40 : 0;
+
+        const isNsfw = filters.nsfw !== undefined ? filters.nsfw : nsfw;
+        const res = await datacatFresh({ sortBy: mapped.sortBy, window: mapped.window, limit24, limitWeek, nsfw: isNsfw });
+        return { characters: res.characters, total: res.total, hasMore: false };
     }
 
+    // Recent sort — offset-based pagination
     const token = await getToken();
     const offset = (page - 1) * limit;
     const minTok = filters.minTokens ?? MIN_TOKENS;
@@ -128,12 +140,13 @@ export async function datacatBrowse({ page = 1, limit = 24, tagIds = [], nsfw = 
     });
     if (filters.maxTokens) params.set('maxTotalTokens', String(filters.maxTokens));
     if (filterTagIds.length) params.set('tagIds', filterTagIds.join(','));
-    if (!isNsfw) params.set('nsfw', '0');
+    if (!isNsfw) params.set('blockedTagIds', '2');
 
     const data = await catalogGet(`${BASE}/api/characters/recent-public?${params}`, authHeaders(token));
     return {
         characters: (data.characters || []).map(normalizeListItem),
-        total: data.totalCount || 0
+        total: data.totalCount || 0,
+        hasMore: undefined  // вычислится стандартно в catalogState
     };
 }
 
@@ -149,10 +162,12 @@ export async function datacatBrowse({ page = 1, limit = 24, tagIds = [], nsfw = 
  *   window='thisWeek'   → only this week characters
  * @returns {{ characters: CatalogItem[], total: number }}
  */
-export async function datacatFresh({ sortBy = 'score', window = 'all', limit24 = 80, limitWeek = 40 } = {}) {
+export async function datacatFresh({ sortBy = 'score', window = 'all', limit24 = 80, limitWeek = 40, nsfw = true } = {}) {
     const token = await getToken();
+    let url = `${BASE}/api/characters/fresh?summary=1&sortBy=${sortBy}&limit24=${limit24}&limitWeek=${limitWeek}`;
+    if (!nsfw) url += '&blockedTagIds=2';
     const data = await catalogGet(
-        `${BASE}/api/characters/fresh?summary=1&sortBy=${sortBy}&limit24=${limit24}&limitWeek=${limitWeek}`,
+        url,
         authHeaders(token)
     );
 
@@ -191,14 +206,15 @@ export async function datacatSearch({ query, page = 1, limit = 24, filters = {} 
         minTotalTokens: String(minTok)
     });
     if (filters.maxTokens) params.set('maxTotalTokens', String(filters.maxTokens));
-    if (!isNsfw) params.set('nsfw', '0');
+    if (!isNsfw) params.set('blockedTagIds', '2');
     if (filterTagIds.length) params.set('tagIds', filterTagIds.join(','));
     if (query) params.set('search', query);
 
     const data = await catalogGet(`${BASE}/api/characters/recent-public?${params}`, authHeaders(token));
     return {
         characters: (data.characters || []).map(normalizeListItem),
-        total: data.totalCount || 0
+        total: data.totalCount || 0,
+        hasMore: undefined
     };
 }
 
@@ -213,7 +229,7 @@ export async function datacatGetCharacter(uuid) {
     const token = await getToken();
     const ts = Date.now();
     const data = await catalogGet(
-        `${BASE}/api/characters/${uuid}/download?t=${ts}`,
+        `${BASE}/api/characters/${uuid}/download?t=${ts}&variant=janitor_core`,
         authHeaders(token)
     );
 
@@ -221,7 +237,7 @@ export async function datacatGetCharacter(uuid) {
     const meta = data.metadata || {};
     return {
         charData: convertToGlaze(raw, meta),
-        avatarUrl: resolveAvatarUrl(raw.avatar)
+        avatarUrl: resolveAvatarUrl(pickAvatarSource(raw, meta))
     };
 }
 
@@ -232,40 +248,184 @@ const IDEMPOTENCY_KEY = () => 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[x
     return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
 });
 
-/**
- * Submit a JanitorAI character URL for cloud-browser extraction via DataCat.
- * @param {string} janitorUrl e.g. https://janitorai.com/characters/{uuid}
- * @param {boolean} publicFeed Whether to appear on DataCat public feed
- * @returns {Promise<{ queued: boolean, started: boolean, queuePosition: number }>}
- */
-export async function datacatExtract(janitorUrl, publicFeed = true) {
+function detectExtractionSource(url) {
+    if (/^https?:\/\/(?:www\.)?saucepan\.ai\/companion\//i.test(url)) return 'saucepan';
+    return 'janitor';
+}
+
+async function datacatGetCharacterAvatar(uuid) {
     const token = await getToken();
-    return catalogPost(
-        `${BASE}/api/character/smart-extract-v2`,
-        {
-            url: janitorUrl,
+    const ts = Date.now();
+    const data = await catalogGet(
+        `${BASE}/api/characters/${uuid}?t=${ts}`,
+        authHeaders(token)
+    );
+    return resolveAvatarUrl(pickAvatarSource(data?.character || data || {}, data?.metadata || {}));
+}
+
+function buildExtractionRequest(url, publicFeed = true) {
+    const idempotencyKey = IDEMPOTENCY_KEY();
+    const source = detectExtractionSource(url);
+
+    if (source === 'saucepan') {
+        return {
+            endpoint: `${BASE}/api/saucepan-extract/run`,
+            body: {
+                companion: url,
+                extractHidden: false,
+                includeSearch: true,
+                alwaysReextract: false,
+                netnsRole: 'general_scraper',
+                sourceKind: 'one_off',
+                sourceRef: idempotencyKey,
+                vpnNamespace: 'general_scraper',
+                idempotencyKey
+            }
+        };
+    }
+
+    return {
+        endpoint: `${BASE}/api/character/smart-extract-v2`,
+        body: {
+            url,
             appearOnPublicFeed: publicFeed,
             useSeparateWorkerServer: true,
             inlinePostExtractCreatorProfile: true,
-            idempotencyKey: IDEMPOTENCY_KEY()
-        },
+            idempotencyKey
+        }
+    };
+}
+
+async function datacatExtract(url, publicFeed = true) {
+    const token = await getToken();
+    const request = buildExtractionRequest(url, publicFeed);
+    return catalogPost(
+        request.endpoint,
+        request.body,
         authHeaders(token)
     );
 }
 
-/**
- * Poll extraction status.
- * @returns {Promise<{ inProgress: object|null, queue: object[], history: object[] }>}
- */
-export async function datacatExtractionStatus() {
+async function datacatExtractionStatus() {
     const token = await getToken();
     const ts = Date.now();
     const data = await catalogGet(`${BASE}/api/extraction/status?t=${ts}`, authHeaders(token));
     return {
         inProgress: data.inProgress || null,
         queue: data.queue || [],
-        history: data.history || []
+        history: data.history || [],
+        taskHistory: data.taskHistory || [],
+        job: data.job || null,
+        run: data.run || null,
+        latestTerminalJob: data.latestTerminalJob || null
     };
+}
+
+/**
+ * Submit a JanitorAI URL for DataCat extraction, poll until done, then fetch the card.
+ * If the character already exists on DataCat, skips polling and downloads directly.
+ *
+ * @param {string} url  JanitorAI character URL
+ * @param {object} opts
+ * @param {function} opts.onDone          - called with { charData, avatarUrl, characterId }
+ * @param {function} [opts.onError]       - called with Error on failure or timeout
+ * @param {function} [opts.onPhaseChange] - called with phase string during polling
+ * @returns {function} cancel — stops polling and suppresses callbacks
+ */
+export function datacatExtractAndPoll(url, { onDone, onError, onPhaseChange } = {}) {
+    let pollInterval = null;
+    let cancelled = false;
+
+    const cancel = () => {
+        cancelled = true;
+        if (pollInterval) { clearInterval(pollInterval); pollInterval = null; }
+    };
+
+    const finish = async (characterId) => {
+        try {
+            const result = await datacatGetCharacter(characterId);
+            const fallbackAvatarUrl = !result.avatarUrl && detectExtractionSource(url) === 'saucepan'
+                ? await datacatGetCharacterAvatar(characterId).catch(() => null)
+                : null;
+            const avatarUrl = result.avatarUrl || fallbackAvatarUrl;
+            if (!cancelled) onDone?.({ charData: result.charData, avatarUrl, characterId });
+        } catch (e) {
+            if (!cancelled) onError?.(e);
+        }
+    };
+
+    (async () => {
+        try {
+            const extractRes = await datacatExtract(url, true);
+            if (cancelled) return;
+
+            // Character already exists on DataCat — no polling needed
+            if (extractRes?.characterId) {
+                await finish(extractRes.characterId);
+                return;
+            }
+
+            // New extraction queued — poll until terminal
+            const myRequestId = extractRes?.requestId || null;
+            const preStatus = await datacatExtractionStatus().catch(() => null);
+            const prevRunId = preStatus?.run?.requestId || null;
+            const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+            const targetUuid = url.match(UUID_RE)?.[0] || null;
+            let attempts = 0;
+            const MAX = 60;
+
+            pollInterval = setInterval(async () => {
+                if (cancelled) { clearInterval(pollInterval); return; }
+                attempts++;
+                if (attempts > MAX) {
+                    clearInterval(pollInterval); pollInterval = null;
+                    if (!cancelled) onError?.(new Error('Extraction timed out'));
+                    return;
+                }
+                try {
+                    const status = await datacatExtractionStatus();
+                    if (cancelled) return;
+
+                    const run = status.run;
+                    onPhaseChange?.(status.inProgress?.phase || run?.phase || '');
+
+                    let characterId = null;
+
+                    if (myRequestId) {
+                        if (run?.requestId === myRequestId && run?.lifecycle === 'terminal')
+                            characterId = run.characterId || run.targetId;
+                        if (!characterId) {
+                            const th = status.taskHistory?.find(h => h.id === myRequestId && h.status === 'terminal');
+                            if (th) characterId = th.target?.id;
+                        }
+                        if (!characterId) {
+                            const h = status.history?.find(h => h.requestId === myRequestId);
+                            if (h) characterId = h.characterId;
+                        }
+                    }
+
+                    if (!characterId && run?.lifecycle === 'terminal' && run?.requestId !== prevRunId) {
+                        if (!targetUuid || run.targetId === targetUuid)
+                            characterId = run.characterId || run.targetId;
+                    }
+
+                    if (!characterId && targetUuid) {
+                        const h = status.history?.find(h => h.url?.includes(targetUuid));
+                        if (h?.characterId) characterId = h.characterId;
+                    }
+
+                    if (characterId) {
+                        clearInterval(pollInterval); pollInterval = null;
+                        await finish(characterId);
+                    }
+                } catch { }
+            }, 3000);
+        } catch (e) {
+            if (!cancelled) onError?.(e);
+        }
+    })();
+
+    return cancel;
 }
 
 // ─── Normalization ────────────────────────────────────────────────────────────
@@ -276,11 +436,55 @@ function stripEmoji(str) {
 }
 
 const IMAGE_BASE = 'https://ella.janitorai.com/bot-avatars/';
+const SAUCEPAN_CDN_BASE = 'https://cdn.saucepan.ai';
+
+export const datacatTags = ref([]);
+let _datacatTagsFetched = false;
+
+export async function fetchDatacatTags() {
+    if (_datacatTagsFetched) return datacatTags.value;
+    try {
+        const token = await getToken();
+        // Uses the faceted endpoint provided for tags mapping
+        const data = await catalogGet(
+            `${BASE}/api/tags/faceted?mode=recent&blockedTagIds=2&limit=250&offset=0&sort=count&includeTagIds=2`,
+            authHeaders(token)
+        );
+
+        if (data && data.tags && Array.isArray(data.tags)) {
+            datacatTags.value = data.tags.map(t => ({ id: t.id, name: t.name, slug: t.slug }));
+        }
+        _datacatTagsFetched = true;
+        return datacatTags.value;
+    } catch (e) {
+        console.warn('[datacat] Failed to fetch tags:', e);
+        return datacatTags.value;
+    }
+}
+
+function pickAvatarSource(raw = {}, meta = {}) {
+    return raw.avatar
+        || raw.image
+        || raw.image_url
+        || raw.avatar_url
+        || raw.max_res_url
+        || meta.image
+        || meta.image_url
+        || meta.avatar
+        || meta.avatar_url
+        || null;
+}
 
 function resolveAvatarUrl(url) {
     if (!url) return null;
     if (url.startsWith('http')) return url;
-    return IMAGE_BASE + url;
+    if (url.startsWith('//')) return `https:${url}`;
+    if (url.startsWith('/images/')) return `${SAUCEPAN_CDN_BASE}${url}`;
+    if (url.startsWith('images/')) return `${SAUCEPAN_CDN_BASE}/${url}`;
+    if (/^[0-9a-f-]+\/highres$/i.test(url)) return `${SAUCEPAN_CDN_BASE}/images/${url}`;
+    if (url.startsWith('/')) return `https://ella.janitorai.com${url}`;
+    if (!url.includes('/')) return IMAGE_BASE + url;
+    return `https://ella.janitorai.com/${url}`;
 }
 
 function normalizeListItem(c) {
@@ -291,7 +495,7 @@ function normalizeListItem(c) {
         // API returns character_id (UUID) as the primary identifier
         id: c.character_id || c.characterId || c.uuid || c.id,
         name: c.chat_name || c.chatName || c.name || 'Unknown',
-        avatarUrl: resolveAvatarUrl(c.avatar),
+        avatarUrl: resolveAvatarUrl(pickAvatarSource(c)),
         tags: [...new Set(tags)],
         tokens: c.total_tokens || c.totalTokens || 0,
         stats: { chat: c.chat_count || 0, message: c.message_count || 0 },

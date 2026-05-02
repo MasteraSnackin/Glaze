@@ -1,6 +1,6 @@
 import { triggerCharacterImport, extractCharacterBook, exportCharacterAsV2Json, exportCharacterAsV2Png, exportCharacterAsCharX } from '@/utils/characterIO.js';
 import { importCharacter } from '@/core/states/catalogState.js';
-import { datacatExtract, datacatExtractionStatus, datacatGetCharacter } from '@/core/services/catalog/datacatProvider.js';
+import { datacatExtractAndPoll } from '@/core/services/catalog/datacatProvider.js';
 import { db, markSyncDeletedEntry } from '@/utils/db.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import { APP_EVENTS } from '@/core/events/eventNames.js';
@@ -8,7 +8,7 @@ import { publishAppEvent } from '@/core/events/eventHub.js';
 import { t } from '@/utils/i18n.js';
 
 export function useCharacterActions({ characters, loadCharacters }) {
-    let pollInterval = null;
+    let cancelExtraction = null;
     let activeMenuCharId = null;
 
     const setActiveMenuCharId = (id) => {
@@ -19,7 +19,8 @@ export function useCharacterActions({ characters, loadCharacters }) {
         activeMenuCharId = null;
     };
 
-    const startJanitorExtraction = async (url) => {
+    const startJanitorExtraction = (url) => {
+        cancelExtraction?.();
         closeBottomSheet();
         setTimeout(() => {
             showBottomSheet({
@@ -30,66 +31,38 @@ export function useCharacterActions({ characters, loadCharacters }) {
                     description: t('catalog_extract_progress'),
                     buttonText: t('btn_cancel'),
                     onButtonClick: () => {
-                        if (pollInterval) clearInterval(pollInterval);
+                        cancelExtraction?.();
                         closeBottomSheet();
                     }
                 }
             });
         }, 300);
 
-        try {
-            await datacatExtract(url, true);
-            let attempts = 0;
-            const MAX = 60;
-            
-            pollInterval = setInterval(async () => {
-                attempts++;
-                if (attempts > MAX) {
-                    clearInterval(pollInterval);
-                    closeBottomSheet();
-                    return;
-                }
-                try {
-                    const status = await datacatExtractionStatus();
-                    const uuidMatch = url.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
-                    const searchStr = uuidMatch ? uuidMatch[0] : url;
-                    
-                    const done = status.history?.find(h => h.url?.includes(searchStr));
-                    if (done && done.characterId) {
-                        clearInterval(pollInterval);
-                        pollInterval = null;
-                        
-                        const result = await datacatGetCharacter(done.characterId);
-                        const charData = result.charData;
-                        if (!charData.id) charData.id = Date.now().toString();
-                        
-                        await importCharacter(charData, result.avatarUrl);
-                        closeBottomSheet();
-                        
-                        setTimeout(() => {
-                            const index = characters.value.findIndex(c => c.id === charData.id);
-                            if (index !== -1) {
-                                publishAppEvent(APP_EVENTS.nav.openCharacterEditor, { index });
-                            }
-                        }, 500);
-                    }
-                } catch (e) { }
-            }, 3000);
-        } catch(e) {
-            closeBottomSheet();
-            setTimeout(() => {
-                showBottomSheet({
-                    noDropdown: true,
-                    title: t('title_error'),
-                    bigInfo: {
-                        icon: `<svg viewBox="0 0 24 24" style="fill:#ff4444;width:100%;height:100%"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>`,
-                        description: e.message,
-                        buttonText: t('btn_ok'),
-                        onButtonClick: closeBottomSheet
-                    }
-                });
-            }, 300);
-        }
+        cancelExtraction = datacatExtractAndPoll(url, {
+            onDone: async ({ charData, avatarUrl }) => {
+                if (!charData.id) charData.id = Date.now().toString();
+                const charId = await importCharacter(charData, avatarUrl);
+                closeBottomSheet();
+                setTimeout(() => {
+                    publishAppEvent(APP_EVENTS.nav.openCharacterCard, { charId });
+                }, 500);
+            },
+            onError: (e) => {
+                closeBottomSheet();
+                setTimeout(() => {
+                    showBottomSheet({
+                        noDropdown: true,
+                        title: t('title_error'),
+                        bigInfo: {
+                            icon: `<svg viewBox="0 0 24 24" style="fill:#ff4444;width:100%;height:100%"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>`,
+                            description: e.message,
+                            buttonText: t('btn_ok'),
+                            onButtonClick: closeBottomSheet
+                        }
+                    });
+                }, 300);
+            }
+        });
     };
 
     const onAddCharacter = () => {

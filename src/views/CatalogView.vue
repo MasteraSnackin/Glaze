@@ -3,14 +3,17 @@ import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { publishAppEvent, subscribeAppEvent } from '@/core/events/eventHub.js';
 import { APP_EVENTS } from '@/core/events/eventNames.js';
 import { t } from '@/utils/i18n.js';
-import { janitorTagMap, janitorFetchCharacter, janitorSearch, janitorItemToPartialCharData } from '@/core/services/catalog/janitorProvider.js';
+import { janitorTagMap, janitorFetchCharacter, janitorItemToPartialCharData } from '@/core/services/catalog/janitorProvider.js';
+import { jannyFetchCharacter, jannySearch } from '@/core/services/catalog/jannyProvider.js';
 import {
     catalogResults, catalogLoading, catalogError,
     catalogHasMore, catalogQuery, catalogTotal,
-    searchCatalog, loadMore, importCharacter, catalogFilters
+    searchCatalog, loadMore, importCharacter, catalogFilters,
+    activeProvider, setActiveProvider
 } from '@/core/states/catalogState.js';
 import { createNewSession } from '@/utils/sessions.js';
-import { datacatGetCharacter, datacatExtract, datacatExtractionStatus } from '@/core/services/catalog/datacatProvider.js';
+import { datacatGetCharacter, datacatExtractAndPoll } from '@/core/services/catalog/datacatProvider.js';
+import { chubGetCharacter } from '@/core/services/catalog/chubProvider.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import FiltersBottomSheet from '@/components/sheets/FiltersBottomSheet.vue';
 import CharacterCardSheet from '@/components/sheets/CharacterCardSheet.vue';
@@ -63,13 +66,24 @@ async function openPreview(item) {
             const result = await datacatGetCharacter(item.id);
             charData = result.charData;
             avatarUrl = result.avatarUrl || avatarUrl;
+        } else if (item.source === 'chub') {
+            const result = await chubGetCharacter(item.id);
+            charData = result.charData;
+            avatarUrl = result.avatarUrl || avatarUrl;
+        } else if (item.source === 'janny') {
+            const result = await jannyFetchCharacter(item.id, item.slug);
+            charData = result.charData;
+            avatarUrl = result.avatarUrl || avatarUrl;
         } else {
             // Janitor source — try direct fetch first
             let loginRequired = false;
             try {
                 charData = await janitorFetchCharacter(item.id, item.slug);
             } catch (e) {
-                if (e.status === 401 || e.status === 403) {
+                if (e.status === 403) {
+                    throw new Error(t('catalog_error_janitor_cloudflare'));
+                }
+                if (e.status === 401) {
                     loginRequired = true;
                 } else {
                     throw e;
@@ -87,7 +101,7 @@ async function openPreview(item) {
                 // 2. Try jannyai MeiliSearch for partial public data
                 if (!charData) {
                     try {
-                        const jResult = await janitorSearch({ query: item.name, page: 1 });
+                        const jResult = await jannySearch({ query: item.name, page: 1 });
                         const hit = jResult.characters.find(c => c.id === item.id);
                         if (hit) charData = janitorItemToPartialCharData(hit);
                     } catch { /* search failed */ }
@@ -133,7 +147,7 @@ async function onSheetImport() {
     showCharSheet.value = false;
     if (!item || !charData) return;
 
-    if (item.source === 'datacat') {
+    if (item.source === 'datacat' || item.source === 'chub' || item.source === 'janny') {
         doImport(item, charData, avatarUrl);
     } else {
         startExtraction(item);
@@ -178,9 +192,10 @@ async function doImport(item, charData, avatarUrl) {
 
 const extractionItemId = ref(null);
 const extractionPhase = ref('');
-let pollInterval = null;
+let stopExtraction = null;
 
-async function startExtraction(item) {
+function startExtraction(item) {
+    stopExtraction?.();
     closeBottomSheet();
     const url = `https://janitorai.com/characters/${item.id}`;
     extractionItemId.value = item.id;
@@ -196,80 +211,73 @@ async function startExtraction(item) {
         }
     });
 
-    try {
-        await datacatExtract(url, true);
-        startPolling(item);
-    } catch (e) {
-        extractionItemId.value = null;
-        showBottomSheet({ noDropdown: true,
-            title: t('title_error'),
-            bigInfo: {
-                icon: `<svg viewBox="0 0 24 24" style="fill:#ff4444;width:100%;height:100%"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>`,
-                description: e.message || t('catalog_error_extract'),
-                buttonText: t('btn_ok'),
-                onButtonClick: closeBottomSheet
-            }
-        });
-    }
-}
-
-function startPolling(item) {
-    let attempts = 0;
-    const MAX = 60;
-
-    pollInterval = setInterval(async () => {
-        attempts++;
-        if (attempts > MAX) {
-            cancelExtraction();
-            return;
-        }
-
-        try {
-            const status = await datacatExtractionStatus();
-            if (status.inProgress) {
-                extractionPhase.value = status.inProgress.phase || 'extracting';
-                return;
-            }
-
-            // Check history for completed extraction matching our item
-            const done = status.history?.find(h => h.url?.includes(item.id));
-            if (done && done.characterId) {
-                clearInterval(pollInterval);
-                pollInterval = null;
-                extractionItemId.value = null;
-                closeBottomSheet();
-
-                // Fetch extracted data and import directly — no second preview step
-                try {
-                    const result = await datacatGetCharacter(done.characterId);
-                    const fakeItem = { id: done.characterId, source: 'datacat', avatarUrl: null, tags: [], tokens: 0, slug: '' };
-                    doImport(fakeItem, result.charData, result.avatarUrl || item.avatarUrl);
-                } catch (e) {
-                    showBottomSheet({ noDropdown: true,
-                        title: t('title_error'),
-                        bigInfo: {
-                            icon: `<svg viewBox="0 0 24 24" style="fill:#ff4444;width:100%;height:100%"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>`,
-                            description: e.message || t('catalog_error_import'),
-                            buttonText: t('btn_ok'),
-                            onButtonClick: closeBottomSheet
-                        }
-                    });
+    stopExtraction = datacatExtractAndPoll(url, {
+        onPhaseChange: (phase) => { extractionPhase.value = phase; },
+        onDone: ({ charData, avatarUrl, characterId }) => {
+            extractionItemId.value = null;
+            closeBottomSheet();
+            const fakeItem = { id: characterId, source: 'datacat', avatarUrl: null, tags: [], tokens: 0, slug: '' };
+            doImport(fakeItem, charData, avatarUrl || item.avatarUrl);
+        },
+        onError: (e) => {
+            extractionItemId.value = null;
+            showBottomSheet({ noDropdown: true,
+                title: t('title_error'),
+                bigInfo: {
+                    icon: `<svg viewBox="0 0 24 24" style="fill:#ff4444;width:100%;height:100%"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>`,
+                    description: e.message || t('catalog_error_extract'),
+                    buttonText: t('btn_ok'),
+                    onButtonClick: closeBottomSheet
                 }
-            }
-        } catch {
-            // Network error — keep polling
+            });
         }
-    }, 3000);
+    });
 }
 
 function cancelExtraction() {
-    if (pollInterval) {
-        clearInterval(pollInterval);
-        pollInterval = null;
-    }
+    stopExtraction?.();
+    stopExtraction = null;
     extractionItemId.value = null;
     closeBottomSheet();
 }
+
+// ─── Provider Selection ───────────────────────────────────────────────────────
+
+const PROVIDERS = [
+    { id: 'janitor', labelKey: 'catalog_provider_janitor_label', hintKey: 'catalog_provider_janitor_hint' },
+    { id: 'datacat', labelKey: 'catalog_provider_datacat_label', hintKey: 'catalog_provider_datacat_hint' },
+    { id: 'janny',   labelKey: 'catalog_provider_janny_label',   hintKey: 'catalog_provider_janny_hint' },
+    { id: 'chub',    labelKey: 'catalog_provider_chub_label',    hintKey: 'catalog_provider_chub_hint' }
+];
+
+
+function selectProvider(id) {
+    if (activeProvider.value === id) return;
+    setActiveProvider(id);
+    searchCatalog(true);
+}
+
+function openProviderSelector() {
+    showBottomSheet({
+        title: t('tab_catalog'),
+        items: PROVIDERS.map(p => ({
+            label: t(p.labelKey),
+            hint: t(p.hintKey),
+            isActive: activeProvider.value === p.id,
+            onClick: () => {
+                selectProvider(p.id);
+                closeBottomSheet();
+            }
+        }))
+    });
+}
+
+const currentProviderLabel = computed(() => {
+    const p = PROVIDERS.find(p => p.id === activeProvider.value);
+    return p ? t(p.labelKey) : 'JanitorAI';
+});
+
+
 
 // ─── Controls ─────────────────────────────────────────────────────────────────
 
@@ -283,17 +291,46 @@ const onFiltersApply = () => {
     searchCatalog(true);
 };
 
-const SORT_OPTIONS = [
-    { value: 'popular',       label: 'sort_popular',      hint: 'sort_popular_hint' },
-    { value: 'trending_week', label: 'sort_trending',     hint: 'sort_trending_hint' },
-    { value: 'trending_24h',  label: 'sort_trending_24h', hint: 'sort_trending_24h_hint' },
-    { value: 'latest',        label: 'sort_latest',       hint: 'sort_latest_hint' }
-];
+const PROVIDER_SORT_OPTIONS = {
+    janitor: [
+        { value: 'trending',   label: 'Trending (Week)' },
+        { value: 'trending24', label: 'Trending (24h)' },
+        { value: 'popular',    label: 'Popular All Time' },
+        { value: 'latest',     label: 'Latest' }
+    ],
+    janny: [
+        { value: 'newest',      label: 'Newest' },
+        { value: 'oldest',      label: 'Oldest' },
+        { value: 'tokens_desc', label: 'Most Tokens' },
+        { value: 'tokens_asc',  label: 'Fewest Tokens' },
+        { value: 'relevant',    label: 'Relevance' }
+    ],
+    datacat: [
+        { value: 'recent',          label: 'Recent' },
+        { value: 'fresh',           label: 'Freshest' },
+        { value: 'score_week',      label: 'Trending (Week)' },
+        { value: 'score_24h',       label: 'Trending (24h)' },
+        { value: 'chat_count_week', label: 'Popular (Week)' },
+        { value: 'chat_count_24h',  label: 'Popular (24h)' }
+    ],
+    chub: [
+        { value: 'popular',       label: 'Popular' },
+        { value: 'trending_week', label: 'Trending (Week)' },
+        { value: 'trending_24h',  label: 'Trending (24h)' },
+        { value: 'latest',        label: 'Latest' },
+        { value: 'rating',        label: 'Top Rated' },
+        { value: 'updated',       label: 'Recently Updated' }
+    ]
+};
+
+const currentSortOptions = computed(() =>
+    PROVIDER_SORT_OPTIONS[activeProvider.value] || PROVIDER_SORT_OPTIONS.janitor
+);
 
 const currentSortLabel = () => {
-    const cur = catalogFilters.value?.sort || 'latest';
-    const key = SORT_OPTIONS.find(o => o.value === cur)?.label || 'sort_latest';
-    return t(key);
+    const cur = catalogFilters.value?.sort;
+    const opts = PROVIDER_SORT_OPTIONS[activeProvider.value] || [];
+    return opts.find(o => o.value === cur)?.label || cur || '?';
 };
 
 const activeTagItems = computed(() => {
@@ -322,10 +359,9 @@ function removeTag(tag) {
 function openSortSelector() {
     showBottomSheet({
         title: t('sort_by'),
-        items: SORT_OPTIONS.map(opt => ({
-            label: t(opt.label),
-            hint: t(opt.hint),
-            isActive: (catalogFilters.value?.sort || 'latest') === opt.value,
+        items: currentSortOptions.value.map(opt => ({
+            label: opt.label,
+            isActive: (catalogFilters.value?.sort) === opt.value,
             onClick: () => {
                 catalogFilters.value = { ...catalogFilters.value, sort: opt.value };
                 searchCatalog(true);
@@ -386,31 +422,6 @@ onUnmounted(() => {
 
 <template>
     <div class="catalog-view">
-        <!-- Catalog Controls -->
-        <div class="catalog-controls">
-            <div class="active-filters-container">
-                <div class="active-filters" v-if="activeTagItems.length">
-                    <div v-for="tag in activeTagItems" :key="tag.id || tag.name" class="active-tag-chip" @click="removeTag(tag)">
-                        {{ tag.label }}
-                        <svg viewBox="0 0 24 24" class="chip-remove-icon"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
-                    </div>
-                </div>
-            </div>
-
-            <div class="sort-controls">
-                <div class="filter-icon-btn" @click="openFilters">
-                    <svg viewBox="0 0 24 24"><path d="M10 18h4v-2h-4v2zM3 6v2h18V6H3zm3 7h12v-2H6v2z"/></svg>
-                    <span v-if="(catalogFilters.tagIds?.length || 0) + (catalogFilters.tagNames?.length || 0) > 0" class="filter-badge">
-                        {{ (catalogFilters.tagIds?.length || 0) + (catalogFilters.tagNames?.length || 0) }}
-                    </span>
-                </div>
-                <div class="preset-selector" @click="openSortSelector">
-                    <span>{{ currentSortLabel() }}</span>
-                    <svg viewBox="0 0 24 24" class="selector-chevron"><path d="M7 10l5 5 5-5z"/></svg>
-                </div>
-            </div>
-        </div>
-
         <FiltersBottomSheet v-model:visible="showFiltersSheet" @apply="onFiltersApply" />
         <CharacterCardSheet
             v-model:visible="showCharSheet"
@@ -420,13 +431,6 @@ onUnmounted(() => {
             :import-enabled="true"
             @import="onSheetImport"
         />
-
-
-
-        <!-- Results Count -->
-        <div v-if="catalogTotal > 0 && !catalogLoading" class="catalog-total">
-            {{ t('catalog_total', { count: catalogTotal }) }}
-        </div>
 
         <!-- Error State -->
         <div v-if="catalogError && catalogResults.length === 0" class="catalog-empty">
@@ -445,7 +449,49 @@ onUnmounted(() => {
 
         <!-- Character Grid -->
         <div class="catalog-scroll" ref="scrollEl" @scroll.passive="onScroll">
-            <div class="character-grid" style="padding: 0; padding-bottom: calc(90px + var(--sab));">
+
+
+            <!-- Catalog Controls moved inside scroll to prevent clipping of top row cards -->
+            <div class="catalog-controls">
+                <div class="provider-selector-wrap">
+
+                    <div class="preset-selector" @click="openProviderSelector">
+                        <span>{{ currentProviderLabel }}</span>
+                        <svg viewBox="0 0 24 24" class="selector-chevron"><path d="M7 10l5 5 5-5z"/></svg>
+                    </div>
+                </div>
+
+                <div class="active-filters-container">
+                    <div class="active-filters" v-if="activeTagItems.length">
+                        <div v-for="tag in activeTagItems" :key="tag.id || tag.name" class="active-tag-chip" @click="removeTag(tag)">
+                            {{ tag.label }}
+                            <svg viewBox="0 0 24 24" class="chip-remove-icon"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="sort-controls">
+                    <div class="filter-icon-btn" @click="openFilters">
+                        <svg viewBox="0 0 24 24"><path d="M10 18h4v-2h-4v2zM3 6v2h18V6H3zm3 7h12v-2H6v2z"/></svg>
+                        <span v-if="(catalogFilters.tagIds?.length || 0) + (catalogFilters.tagNames?.length || 0) > 0" class="filter-badge">
+                            {{ (catalogFilters.tagIds?.length || 0) + (catalogFilters.tagNames?.length || 0) }}
+                        </span>
+                    </div>
+
+                    <div class="preset-selector" @click="openSortSelector">
+                        <span>{{ currentSortLabel() }}</span>
+                        <svg viewBox="0 0 24 24" class="selector-chevron"><path d="M7 10l5 5 5-5z"/></svg>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Results Count -->
+            <div v-if="catalogTotal > 0 && !catalogLoading" class="catalog-total">
+                {{ t('catalog_total', { count: catalogTotal }) }}
+            </div>
+
+            <div class="character-grid" style="padding-bottom: calc(90px + var(--sab));">
                 <div
                     v-for="item in catalogResults"
                     :key="item.source + item.id"
@@ -484,10 +530,12 @@ onUnmounted(() => {
 {{ item.name }}
 </div>
                             <div class="card-desc" v-if="item.creator">
-                                <a 
-                                    v-if="item.creator_id" 
-                                    :href="'https://janitorai.com/profiles/' + item.creator_id" 
-                                    target="_blank" 
+                                <a
+                                    v-if="item.creator_id"
+                                    :href="item.source === 'chub'
+                                        ? 'https://chub.ai/' + item.creator_id
+                                        : 'https://janitorai.com/profiles/' + item.creator_id"
+                                    target="_blank"
                                     @click.stop
                                     class="creator-link"
                                 >@{{ item.creator }}</a>
@@ -534,12 +582,11 @@ onUnmounted(() => {
 
 <style scoped>
 .catalog-view {
-    display: flex;
-    flex-direction: column;
     height: 100%;
     overflow: visible;
     box-sizing: border-box;
 }
+
 
 /* Controls */
 .catalog-controls {
@@ -547,10 +594,11 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 12px 16px;
+  padding: 12px 0;
   flex-shrink: 0;
   overflow: visible;
 }
+
 
 @media (min-width: 600px) {
   .catalog-controls {
@@ -566,7 +614,12 @@ onUnmounted(() => {
   .catalog-controls .filter-icon-btn {
     order: 2;
   }
+  .catalog-controls .provider-selector-wrap {
+    order: 3;
+    margin-left: auto;
+  }
 }
+
 
 .preset-selector {
   height: 32px;
@@ -726,15 +779,16 @@ onUnmounted(() => {
 .catalog-total {
     font-size: 11px;
     color: var(--text-secondary, rgba(255,255,255,0.45));
-    padding: 2px 16px 6px;
+    padding: 2px 0 6px;
     flex-shrink: 0;
 }
+
 
 /* Scroll container */
 .catalog-scroll {
     flex: 1;
+    height: 100%;
     overflow-y: auto;
-    overflow-x: hidden;
     padding: 0 16px 20px;
 }
 
@@ -755,7 +809,7 @@ onUnmounted(() => {
 .character-card {
   position: relative;
   border-radius: 16px;
-  overflow: hidden;
+  overflow: visible;
   display: flex;
   flex-direction: column;
   background-color: var(--bg-color-light, #2a2a2a);
@@ -787,6 +841,7 @@ onUnmounted(() => {
   flex-shrink: 0;
   z-index: 0;
   overflow: hidden;
+  border-radius: 16px 16px 0 0;
 }
 
 .card-image-wrapper::after {
@@ -843,6 +898,8 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  border-bottom-left-radius: 16px;
+  border-bottom-right-radius: 16px;
 }  
 
 .card-name-col {

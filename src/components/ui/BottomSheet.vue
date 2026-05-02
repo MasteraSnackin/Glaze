@@ -1,10 +1,12 @@
 <script setup>
 import { ref, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
 import { Capacitor } from '@capacitor/core';
+import DesktopPopup from '@/components/ui/DesktopPopup.vue';
 import { hideKeyboard, showKeyboard, applyKeyboardOverlap, onKeyboardShow, onKeyboardHide } from '@/core/services/keyboardHandler.js';
 import { translations, t } from '@/utils/i18n.js';
 import HelpTip from '@/components/ui/HelpTip.vue';
 import { bottomSheetState } from '@/core/states/bottomSheetState.js';
+import { getLastClickPosition } from '@/core/states/DesktopPopupState.js';
 import { sidebarState, setSidebarOccupied } from '@/core/states/sidebarState.js';
 import { APP_EVENTS } from '@/core/events/eventNames.js';
 import { publishAppEvent } from '@/core/events/eventHub.js';
@@ -36,7 +38,10 @@ const props = defineProps({
     cardItems: Array, // [{ label, sublabel, icon, onClick }]
     input: Object, // { placeholder, value, confirmLabel, onConfirm }
     isSolid: Boolean,
-    sidebarMode: { type: Boolean, default: false }
+    sidebarMode: { type: Boolean, default: false },
+    popupOnDesktop: { type: Boolean, default: false },
+    popupWidth: { type: Number, default: 300 },
+    estimatedHeight: { type: Number, default: 0 }
 });
 
 const emit = defineEmits(['close']);
@@ -45,6 +50,9 @@ const domContent = ref(null);
 const inputValue = ref('');
 const inputRef = ref(null);
 const isLocalKeyboardOpen = ref(false);
+
+const isDesktopPopup = ref(false);
+const popupCoordinates = ref({ x: 0, y: 0 });
 
 function openGlossaryChip(term) {
     emit('close');
@@ -71,6 +79,16 @@ function close() {
 // Sync with sidebar state to ensure only one sheet/view is active at a time
 let _historyPushed = false;
 watch(() => props.visible, (newVal) => {
+    if (newVal) {
+        if (props.popupOnDesktop && typeof window !== 'undefined' && window.innerWidth >= 768) {
+            isDesktopPopup.value = true;
+            const pos = getLastClickPosition();
+            popupCoordinates.value = { x: pos.x, y: pos.y };
+        } else {
+            isDesktopPopup.value = false;
+        }
+    }
+
     if (newVal && props.sidebarMode) {
         setSidebarOccupied(true, 'bottom_sheet');
     } else if (!newVal && props.sidebarMode && sidebarState.activeSheetId === 'bottom_sheet') {
@@ -82,8 +100,8 @@ watch(() => props.visible, (newVal) => {
     }
 
     // Support browser back gesture/button for PWA/Web
-    const isDesktop = window.innerWidth >= 768;
-    if (newVal && !isDesktop) {
+    const isDesktopEnv = window.innerWidth >= 768;
+    if (newVal && !isDesktopEnv) {
         window.history.pushState({ type: 'bottom_sheet' }, '');
         _historyPushed = true;
     } else if (!newVal && _historyPushed) {
@@ -236,7 +254,31 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-    <Teleport :to="sidebarMode ? '#desktop-sidebar-content' : 'body'">
+    <!-- Desktop Popup Window Override -->
+    <DesktopPopup
+        v-if="isDesktopPopup"
+        :visible="visible"
+        :title="title"
+        :headerAction="headerAction"
+        :bigInfo="bigInfo"
+        :items="items"
+        :sessionItems="sessionItems"
+        :cardItems="cardItems"
+        :input="input"
+        :content="content"
+        :isTriggered="true"
+        :x="popupCoordinates.x"
+        :y="popupCoordinates.y"
+        :width="popupWidth"
+        :estimatedHeight="estimatedHeight"
+        @close="close"
+    >
+        <!-- Vue Slot Content -->
+        <slot></slot>
+    </DesktopPopup>
+
+    <!-- Regular Bottom Sheet -->
+    <Teleport v-else :to="sidebarMode ? '#desktop-sidebar-content' : 'body'">
         <Transition name="bottom-sheet">
             <div v-if="visible" class="visible" :class="{ 'modal-overlay': !sidebarMode, 'bottom-sheet-sidebar-wrapper': sidebarMode }">
                 <div v-if="!sidebarMode" class="modal-backdrop" @click="locked ? undefined : close()"></div>
@@ -1222,3 +1264,5 @@ onBeforeUnmount(() => {
     pointer-events: auto;
 }
 </style>
+
+

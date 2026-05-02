@@ -3,6 +3,7 @@ export const APP_EVENTS = {
         openApiSheet: 'nav.openApiSheet',
         navigateTo: 'nav.navigateTo',
         openCharacterEditor: 'nav.openCharacterEditor',
+        openCharacterCard: 'nav.openCharacterCard',
         openChat: 'nav.openChat',
         openOnboarding: 'nav.openOnboarding',
         openBackupSheet: 'nav.openBackupSheet',

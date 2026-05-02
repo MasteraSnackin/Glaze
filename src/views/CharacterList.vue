@@ -171,6 +171,7 @@ onMounted(() => {
   loadCharacters();
   unsubs.push(subscribeAppEvent(APP_EVENTS.ui.headerSearch, ({ detail }) => searchQuery.value = detail));
   unsubs.push(subscribeAppEvent(APP_EVENTS.domain.character.updated, loadCharacters));
+  unsubs.push(subscribeAppEvent(APP_EVENTS.nav.openCharacterCard, ({ detail }) => openCharacterCardById(detail)));
   unsubscribeSyncDataRefreshed = subscribeAppEvent(APP_EVENTS.domain.sync.dataRefreshed, loadCharacters);
 });
 
@@ -194,6 +195,16 @@ const handleCharClick = (char) => {
 
 const handleSheetVisibleUpdate = (visible) => {
   if (!visible) activeSheetCharId.value = null;
+};
+
+const openCharacterCardById = async ({ charId }) => {
+  if (!charId) return;
+  await loadCharacters();
+  const char = characters.value.find(item => String(item.id) === String(charId));
+  if (!char) return;
+  activeTab.value = 'characters';
+  activeSheetCharId.value = char.id;
+  charCardSheet.value?.open(char, { importEnabled: false });
 };
 
 defineExpose({ onAddCharacter, loadCharacters });

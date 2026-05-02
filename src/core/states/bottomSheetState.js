@@ -1,7 +1,7 @@
 import { ref } from 'vue';
 import { Capacitor } from '@capacitor/core';
 import { hideKeyboard } from '@/core/services/keyboardHandler.js';
-import { showDesktopDropdown, getLastClickPosition } from '@/core/states/desktopDropdownState.js';
+import { showDesktopPopup, getLastClickPosition } from '@/core/states/DesktopPopupState.js';
 
 export const bottomSheetState = ref({
     visible: false,
@@ -42,7 +42,7 @@ export function showBottomSheet(config) {
     // On desktop, intercept "simple select" sheets and show a dropdown instead
     if (!config.noDropdown && isDesktopEnv() && isSimpleSelect(config)) {
         const { x, y } = getLastClickPosition();
-        showDesktopDropdown({
+        showDesktopPopup({
             title: config.title || '',
             items: config.items || config.cardItems,
             bigInfo: config.bigInfo,

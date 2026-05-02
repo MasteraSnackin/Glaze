@@ -5,7 +5,7 @@ import BottomNavigation from '@/components/layout/BottomNavigation.vue';
 import DialogList from '@/views/DialogList.vue';
 import BottomSheet from '@/components/ui/BottomSheet.vue';
 import FabButton from '@/components/ui/FabButton.vue';
-import DesktopDropdown from '@/components/ui/DesktopDropdown.vue';
+import DesktopPopup from '@/components/ui/DesktopPopup.vue';
 
 const CharacterList = defineAsyncComponent(() => import('@/views/CharacterList.vue'));
 const MenuView = defineAsyncComponent(() => import('@/views/Menu/MenuView.vue'));
@@ -479,7 +479,7 @@ function closeEditorWrapper() {
     />
 
     <!-- Global Desktop Dropdown (replaces bottom sheets for simple selects on PC) -->
-    <DesktopDropdown />
+    <DesktopPopup />
 
     <!-- Standard Image Viewer -->
     <ImageViewer />
