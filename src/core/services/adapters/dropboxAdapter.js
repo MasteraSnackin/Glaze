@@ -455,7 +455,7 @@ export async function ensureFolder(path) {
         try {
             await apiCall('/files/create_folder_v2', { path: currentPath, autorename: false });
         } catch (e) {
-            if (e.message?.includes('conflict') || e.message?.includes('already_exists')) {
+            if (e.status === 409 || e.message?.includes('conflict') || e.message?.includes('already_exists')) {
                 continue;
             }
             throw e;
@@ -479,29 +479,51 @@ export async function download(path) {
     return contentDownload(stripAppFolderPrefix(path));
 }
 
+async function retryApiCall(endpoint, body, accessToken, retries = 3) {
+    for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+            return await apiCall(endpoint, body, accessToken);
+        } catch (e) {
+            if (e.status === 429 && attempt < retries) {
+                const delay = 1000 * Math.pow(2, attempt);
+                await new Promise(r => setTimeout(r, delay));
+                continue;
+            }
+            throw e;
+        }
+    }
+}
+
 export async function deleteFolder(path) {
     const strippedPath = stripAppFolderPrefix(path);
     if (!strippedPath) {
-        let cursor = null;
         let entries = [];
         try {
             const result = await apiCall('/files/list_folder', { path: '', recursive: true, include_deleted: false });
             entries = result?.entries || [];
-            cursor = result?.cursor || null;
+            let cursor = result?.cursor || null;
             while (result?.has_more && cursor) {
                 const more = await apiCall('/files/list_folder/continue', { cursor });
                 entries.push(...(more?.entries || []));
                 cursor = more?.cursor || null;
             }
         } catch {}
-        for (const entry of entries) {
-            try {
-                await apiCall('/files/delete_v2', { path: entry.path_lower || entry.path_display });
-            } catch {}
+        try {
+            await apiCall('/files/delete_batch', {
+                entries: entries.map(e => ({ path: e.path_lower || e.path_display }))
+            });
+            return true;
+        } catch {
+            for (const entry of entries) {
+                try {
+                    await retryApiCall('/files/delete_v2', { path: entry.path_lower || entry.path_display });
+                } catch {}
+                await new Promise(r => setTimeout(r, 300));
+            }
+            return true;
         }
-        return true;
     }
-    return apiCall('/files/delete_v2', { path: strippedPath });
+    return retryApiCall('/files/delete_v2', { path: strippedPath });
 }
 
 export async function deleteFile(fileOrPath) {

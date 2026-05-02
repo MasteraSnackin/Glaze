@@ -436,7 +436,7 @@ async function deleteCloudFileIfExists(adapter, entry) {
     }
 }
 
-async function runParallel(tasks, concurrency = 5) {
+async function runParallel(tasks, concurrency = 5, delayMs = 200) {
     const results = [];
     let index = 0;
 
@@ -444,6 +444,9 @@ async function runParallel(tasks, concurrency = 5) {
         while (index < tasks.length) {
             const i = index++;
             results[i] = await tasks[i]();
+            if (delayMs > 0 && index < tasks.length) {
+                await new Promise(r => setTimeout(r, delayMs));
+            }
         }
     }
 
@@ -520,7 +523,7 @@ async function pushManifestV2(adapter, key, onProgress) {
         };
     });
 
-    await runParallel(tasks, 5);
+    await runParallel(tasks, 3, 300);
 
     localManifest.lastSync = Date.now();
     localManifest.createdAt = cloudManifest?.createdAt || Date.now();
@@ -606,7 +609,7 @@ async function pullManifestV2(adapter, key, onProgress, onConflict) {
         };
     });
 
-    await runParallel(tasks, 5);
+    await runParallel(tasks, 3, 300);
 
     await writeLocalManifestV2(clone(cloudManifest));
 
@@ -637,9 +640,8 @@ async function readManifest(adapter) {
             return JSON.parse(result.data);
         }
         return null;
-    } catch (e) {
-        console.error('[syncEngine] readManifest failed:', e);
-        throw new Error(`Failed to read cloud manifest: ${e.message}`);
+    } catch {
+        return null;
     }
 }
 
@@ -683,7 +685,10 @@ async function listAllFiles(adapter) {
 
 async function getLocalCharacter(id) {
     const all = await db.getAll('characters');
-    return all.find(c => c.id === id) || null;
+    const char = all.find(c => c.id === id) || null;
+    if (!char) return null;
+    const { images, ...rest } = char;
+    return rest;
 }
 
 async function getLocalPersona(id) {
