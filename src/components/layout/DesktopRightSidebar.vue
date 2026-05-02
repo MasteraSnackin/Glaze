@@ -346,7 +346,7 @@ function openTool(viewId) {
       <template v-else>
           <!-- Collapsed or has active tool: vertical tool icon strip mirroring MagicDrawer icon styling -->
           <template v-if="collapsed || activeToolComponent">
-              <div class="tools-strip magic-drawer-sidebar icon-only" :class="{ 'left-icon-strip': activeToolComponent && !collapsed }">
+              <div class="tools-strip magic-drawer-sidebar icon-only" :class="{ 'left-icon-strip': activeToolComponent && !collapsed, 'strip-closing-hidden': !sidebarState.isOccupied && !collapsed }">
                   <div class="drawer-content">
                       <ToolStripTooltip :items="toolStripItems" placement="left">
                           <template #default="{ onItemEnter, onItemLeave }">
@@ -428,6 +428,12 @@ function openTool(viewId) {
 
 .tools-strip::-webkit-scrollbar {
     display: none;
+}
+
+.strip-closing-hidden {
+    opacity: 0 !important;
+    pointer-events: none !important;
+    transition: opacity 0.2s ease !important;
 }
 
 /* Base Magic Drawer imitation classes for tools strip */

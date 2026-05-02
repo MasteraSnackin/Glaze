@@ -8,6 +8,7 @@ import { getEffectivePreset, getEffectivePresetId, savePresets } from '@/core/st
 import { exportSTRegex } from '@/core/services/regexService.js';
 import { saveFile } from '@/core/services/fileSaver.js';
 import HelpTip from '@/components/ui/HelpTip.vue';
+import FabButton from '@/components/ui/FabButton.vue';
 import { APP_EVENTS } from '@/core/events/eventNames.js';
 import { publishAppEvent, subscribeAppEvent } from '@/core/events/eventHub.js';
 
@@ -341,9 +342,6 @@ const ephemeralityOptions = computed(() => [
 const sheetTitle = computed(() => currentView.value === 'list' ? (t('menu_regex') || 'Regex Scripts') : (t('regex_editor') || 'Regex Editor'));
 const showBackBtn = computed(() => currentView.value !== 'list');
 const sheetActions = computed(() => {
-    if (currentView.value === 'list') {
-        return [{ icon: '<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>', onClick: handleAddScript, title: t('action_add_script') || 'Add Script' }];
-    }
     return [];
 });
 
@@ -492,6 +490,10 @@ defineExpose({ open, close });
                             </div>
                         </div>
                     </div>
+                    <div class="ps-add-btn desktop-only" style="margin: 0 16px 16px;" @click="handleAddScript">
+                        <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                        <span>{{ t('btn_add') || 'Add Script' }}</span>
+                    </div>
                 </div>
             </div>
 
@@ -588,11 +590,50 @@ defineExpose({ open, close });
 
             </div>
         </div>
+        <template #floating>
+            <FabButton v-if="currentView === 'list'" :text="t('btn_add') || 'Add'" class="mobile-only-fab" @click="handleAddScript">
+                <template #icon>
+                    <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                </template>
+            </FabButton>
+        </template>
     </SheetView>
     </div>
 </template>
 
 <style scoped>
+.ps-add-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 14px;
+    border-radius: 14px;
+    background: var(--accent-color, var(--vk-blue));
+    color: white;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    user-select: none;
+    margin-top: 10px;
+}
+.ps-add-btn:active {
+    transform: scale(0.97);
+    opacity: 0.85;
+}
+.ps-add-btn svg {
+    width: 20px;
+    height: 20px;
+    fill: currentColor;
+}
+
+@media (min-width: 768px) {
+    .mobile-only-fab { display: none !important; }
+}
+@media (max-width: 767px) {
+    .desktop-only { display: none !important; }
+}
 .sheet-header { height: 56px; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; border-bottom: 1px solid var(--border-color); flex-shrink: 0; }
 .header-left, .header-right { width: 40px; display: flex; justify-content: center; }
 .header-title { font-weight: 700; font-size: 18px; flex: 1; text-align: center; color: var(--text-black); }
@@ -604,7 +645,7 @@ defineExpose({ open, close });
 .edit-view { width: 100%; padding-bottom: calc(var(--footer-height, 0px) + var(--keyboard-overlap, 0px) + 20px); padding-top: 16px; }
 .list-section { margin-top: 12px; margin-bottom: 8px; }
 .section-title { padding: 0 16px 4px; font-weight: 600; font-size: 13px; color: var(--text-gray); text-transform: uppercase; }
-.empty-state { padding: 40px; text-align: center; color: var(--text-gray); }
+.empty-state { padding: 40px; text-align: center; color: var(--text-gray); min-height: 0; }
 .list-container { padding: 12px; display: flex; flex-direction: column; gap: 8px; }
 .list-item { display: flex; align-items: center; padding: 16px; background: rgba(30, 30, 32, var(--element-opacity, 0.7)); backdrop-filter: blur(10px); border-radius: 16px; border: 1px solid rgba(255,255,255,0.05); cursor: pointer; }
 .item-info { flex: 1; overflow: hidden; margin-right: 12px; }

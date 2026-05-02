@@ -165,6 +165,9 @@ onBeforeUnmount(() => {
     <div v-if="viewMode" class="sheet-view-inline" v-bind="$attrs">
         <slot name="header-bottom"></slot>
         <slot></slot>
+        <div v-if="$slots.floating" class="sheet-view-floating-layer">
+            <slot name="floating"></slot>
+        </div>
     </div>
 
     <Teleport v-else :to="isSidebarMode ? '#desktop-sidebar-content' : 'body'">
@@ -190,7 +193,7 @@ onBeforeUnmount(() => {
                         <div class="sc-sheet-header-wrapper" v-if="title || showBack || isSidebarMode || actions?.length || tabs?.length || $slots['header-right'] || $slots['header-title'] || $slots['header-bottom']">
                             <div class="sc-sheet-header" v-if="title || showBack || isSidebarMode || actions?.length || $slots['header-right'] || $slots['header-title']">
                                 <div class="sc-header-left">
-                                    <div v-if="showBack || isSidebarMode" class="sc-header-btn back-btn" @click="isSidebarMode ? close() : $emit('back')">
+                                    <div v-if="showBack || isSidebarMode" class="sc-header-btn back-btn" @click="showBack ? $emit('back') : close()">
                                         <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
                                     </div>
                                     <div class="sc-header-title" v-if="title">
@@ -429,24 +432,43 @@ onBeforeUnmount(() => {
 /* Vue Transition Classes */
 .sheet-view-enter-active,
 .sheet-view-leave-active {
-    transition: opacity 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-.sheet-view-enter-active .sheet-view-content,
-.sheet-view-leave-active .sheet-view-content {
-    transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1), height 0.3s cubic-bezier(0.2, 0.8, 0.2, 1), border-radius 0.3s ease, padding-bottom 0.25s cubic-bezier(0.2, 0.8, 0.2, 1), max-height 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+    transition: background-color 0.2s cubic-bezier(0.3, 0, 0.2, 1);
 }
 
-.sheet-view-enter-from,
-.sheet-view-leave-to {
-    opacity: 0;
+.sheet-view-enter-active .sheet-view-content,
+.sheet-view-leave-active .sheet-view-content {
+    transition: transform 0.2s cubic-bezier(0.3, 0, 0.2, 1);
 }
-.sheet-view-enter-from .sheet-view-content:not(.is-sidebar),
-.sheet-view-leave-to .sheet-view-content:not(.is-sidebar) {
-    transform: translateY(100%);
+
+/* On mobile, ensure it slides strictly from the bottom without fade on the content itself */
+@media screen and (max-width: 767px) {
+    .sheet-view-enter-from,
+    .sheet-view-leave-to {
+        background-color: transparent !important;
+    }
+    
+    .sheet-view-enter-from .sheet-view-content,
+    .sheet-view-leave-to .sheet-view-content {
+        transform: translateY(100%) !important;
+    }
 }
-.sheet-view-enter-from .sheet-view-content.is-sidebar,
-.sheet-view-leave-to .sheet-view-content.is-sidebar {
-    transform: translateX(100%) !important;
+
+/* On desktop, keep standard behavior or sidebar transitions */
+@media screen and (min-width: 768px) {
+    .sheet-view-enter-from,
+    .sheet-view-leave-to {
+        opacity: 0;
+    }
+
+    .sheet-view-enter-from .sheet-view-content:not(.is-sidebar),
+    .sheet-view-leave-to .sheet-view-content:not(.is-sidebar) {
+        transform: translateY(100%);
+    }
+
+    .sheet-view-enter-from .sheet-view-content.is-sidebar,
+    .sheet-view-leave-to .sheet-view-content.is-sidebar {
+        transform: translateX(100%) !important;
+    }
 }
 
 

@@ -6,7 +6,17 @@ import { currentLang } from '@/core/config/APPSettings.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import { showToast } from '@/core/states/toastState.js';
 import { fetchRemoteModels } from '@/core/config/APISettings.js';
-import { getActiveLLMProfile } from '@/core/config/ProviderProfiles.js';
+import { getActiveLLMProfile, SERVICE_NAMES } from '@/core/config/ProviderProfiles.js';
+import { useServiceProviders } from '@/composables/api/useServiceProviders.js';
+import ConnectionStatus from '@/components/ui/ConnectionStatus.vue';
+
+const {
+    memoryProviderSettings,
+    onMemoryProviderInput,
+    openProviderSelector,
+    getActiveProfileMeta,
+    loadAllServiceSettings
+} = useServiceProviders();
 
 const props = defineProps({
   memoryBook: {
@@ -267,6 +277,7 @@ function isDraftGenerating(draftId) {
 
 // Event handlers
 function open() {
+  loadAllServiceSettings();
   sheet.value?.open();
 }
 
@@ -444,6 +455,42 @@ Choose keyword retrieval, vector retrieval, or a combined mode for this session.
         <button type="button" class="memory-btn memory-btn-primary" @click="close">
           Close
         </button>
+      </div>
+
+      <!-- Provider Settings -->
+      <div class="memory-sheet-section" style="margin-bottom: 8px;">
+        <div class="memory-sheet-section-head">
+          <label>Provider Configuration</label>
+        </div>
+        <div class="memory-settings-item-checkbox">
+            <div class="memory-settings-text-col">
+                <label>{{ t('label_use_llm_api') || 'Use LLM API' }}</label>
+                <div class="memory-settings-desc">
+{{ t('desc_use_llm_api_memory') || 'Use the same endpoint as LLM for memory book generation' }}
+</div>
+            </div>
+            <input type="checkbox" :checked="memoryProviderSettings.useSame" @change="onMemoryProviderInput('useSame', $event.target.checked)" class="vk-switch">
+        </div>
+        <template v-if="!memoryProviderSettings.useSame">
+            <ConnectionStatus status="idle" :error-message="''" @retry="() => {}">
+                <div class="preset-selector" @click="openProviderSelector(SERVICE_NAMES.MEMORY_BOOKS)" style="margin-bottom: 8px;">
+                    <span>{{ getActiveProfileMeta(SERVICE_NAMES.MEMORY_BOOKS).name }}</span>
+                    <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                </div>
+            </ConnectionStatus>
+            <div class="memory-settings-item">
+                <label>{{ t('label_memory_endpoint') || 'Memory Gen Endpoint' }}</label>
+                <input type="text" :value="memoryProviderSettings.endpoint" @input="onMemoryProviderInput('endpoint', $event.target.value)" placeholder="http://127.0.0.1:5000/v1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="width: 100%; border: 1px solid var(--border-color); background: var(--bg-item); padding: 12px; border-radius: 12px; color: var(--text-primary); font-size: 15px;">
+            </div>
+            <div class="memory-settings-item">
+                <label>{{ t('label_memory_model') || 'Model' }}</label>
+                <input type="text" :value="memoryProviderSettings.model" @input="onMemoryProviderInput('model', $event.target.value)" placeholder="gpt-4o-mini" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="width: 100%; border: 1px solid var(--border-color); background: var(--bg-item); padding: 12px; border-radius: 12px; color: var(--text-primary); font-size: 15px;">
+            </div>
+            <div class="memory-settings-item">
+                <label>{{ t('label_memory_key') || 'API Key' }}</label>
+                <input type="password" :value="memoryProviderSettings.key" @input="onMemoryProviderInput('apiKey', $event.target.value)" placeholder="sk-..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="width: 100%; border: 1px solid var(--border-color); background: var(--bg-item); padding: 12px; border-radius: 12px; color: var(--text-primary); font-size: 15px;">
+            </div>
+        </template>
       </div>
 
       <!-- Batch Actions (Scan & Generate) -->
@@ -662,6 +709,36 @@ Choose keyword retrieval, vector retrieval, or a combined mode for this session.
   padding: 16px;
   background: rgba(var(--ui-bg-rgb), 0.5);
   border-radius: 12px;
+}
+
+.preset-selector {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--vk-blue);
+  padding: 0 14px;
+  border-radius: 16px;
+  background-color: rgba(var(--vk-blue-rgb, 82, 139, 204), 0.15);
+  backdrop-filter: blur(var(--element-blur, 12px));
+  -webkit-backdrop-filter: blur(var(--element-blur, 12px));
+  border: 1px solid rgba(var(--vk-blue-rgb, 82, 139, 204), 0.2);
+  transition: transform 0.1s ease, background-color 0.2s, opacity 0.2s;
+  overflow: hidden;
+}
+
+.preset-selector:active {
+  transform: scale(0.95);
+  opacity: 0.8;
+}
+
+.preset-selector svg {
+    width: 20px;
+    height: 20px;
+    fill: currentColor;
 }
 
 .memory-session-overview-head {

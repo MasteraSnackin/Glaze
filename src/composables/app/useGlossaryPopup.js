@@ -7,6 +7,7 @@ export function useGlossaryPopup({ isDesktop }) {
     const isDesktopGlossary = computed(() => isDesktop.value && isGlossaryWindowOpen.value);
     const glossaryPopupTitle = ref('');
     const glossaryCanGoBack = ref(false);
+    const glossaryInitialTerm = ref(null);
 
     const glossaryPos = reactive({ x: 0, y: 0 });
     const glossaryStyle = computed(() => {
@@ -76,8 +77,14 @@ export function useGlossaryPopup({ isDesktop }) {
         }
     }
 
-    function handleGlossaryOpen() {
+    function handleGlossaryOpen(e) {
         if (isDesktop.value) {
+            const wasClosed = !isGlossaryWindowOpen.value;
+
+            if (wasClosed && e?.detail?.term) {
+                glossaryInitialTerm.value = e.detail.term;
+            }
+
             isGlossaryWindowOpen.value = true;
         }
     }
@@ -87,6 +94,7 @@ export function useGlossaryPopup({ isDesktop }) {
         isDesktopGlossary,
         glossaryPopupTitle,
         glossaryCanGoBack,
+        glossaryInitialTerm,
         glossaryStyle,
         onGlossaryHeaderUpdate,
         onGlossaryBack,

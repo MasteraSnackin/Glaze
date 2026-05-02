@@ -342,7 +342,7 @@ onBeforeUnmount(() => {
         </div>
 
         <!-- Reasoning Block -->
-        <div v-if="message.reasoning" class="msg-reasoning" :class="{ collapsed: !message.isAllReasoning }">
+        <div v-if="message.reasoning && !message.isEditing" class="msg-reasoning" :class="{ collapsed: !message.isAllReasoning }">
             <div class="msg-reasoning-header" @click="$event.target.closest('.msg-reasoning').classList.toggle('collapsed')">
                 <span>Reasoning</span>
                 <svg class="reasoning-arrow" viewBox="0 0 24 24" style="width:16px;height:16px;fill:currentColor"><path d="M7 10l5 5 5-5z"/></svg>

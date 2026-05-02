@@ -7,6 +7,8 @@ import HelpTip from '@/components/ui/HelpTip.vue';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import { getImageGenSettings, saveImageGenSettings, fetchImageModels, saveAdditionalReferences, saveRoutmyAdditionalRefs, checkImageGenConnection, ROUTMY_IMAGE_MODELS, ROUTMY_ASPECT_RATIOS, ROUTMY_IMAGE_SIZES } from '@/core/services/imageGenService.js';
 import ConnectionStatus from '@/components/ui/ConnectionStatus.vue';
+import { useServiceProviders } from '@/composables/api/useServiceProviders.js';
+import { SERVICE_NAMES } from '@/core/config/ProviderProfiles.js';
 
 const sheet = ref(null);
 const t = (key) => translations[currentLang.value]?.[key] || key;
@@ -15,6 +17,14 @@ const settings = ref(getImageGenSettings());
 const models = ref([]);
 const isFetchingModels = ref(false);
 const fetchError = ref('');
+
+const {
+    imageGenSettings,
+    onImageGenInput,
+    openProviderSelector,
+    getActiveProfileMeta,
+    loadAllServiceSettings
+} = useServiceProviders();
 
 // Computed properties
 const naisteraModelSupportsReferences = computed(() => settings.value.naisteraModel !== 'novelai' && settings.value.naisteraModel !== 'grok-pro');
@@ -49,6 +59,7 @@ const pendingRoutmyRefIndex = ref(-1);
 
 const open = () => {
     settings.value = getImageGenSettings();
+    loadAllServiceSettings();
     models.value = [];
     fetchError.value = '';
     sheet.value?.open();
@@ -342,6 +353,47 @@ defineExpose({ open });
 {{ t('section_connection') || 'Connection' }}
 </div>
 
+                    <div class="settings-item-checkbox">
+                        <div class="settings-text-col">
+                            <label>{{ t('label_use_llm_api') || 'Use LLM API' }}</label>
+                            <div class="settings-desc">
+{{ t('desc_use_llm_api') || 'Use the same endpoint as LLM for image generation' }}
+</div>
+                        </div>
+                        <input type="checkbox" :checked="imageGenSettings.useSame" @change="onImageGenInput('useSame', $event.target.checked)" class="vk-switch">
+                    </div>
+
+                    <template v-if="!imageGenSettings.useSame">
+                        <ConnectionStatus status="idle" :error-message="''" @retry="() => {}">
+                            <div class="preset-selector" @click="openProviderSelector(SERVICE_NAMES.IMAGE_GEN)" style="margin-bottom: 8px;">
+                                <span>{{ getActiveProfileMeta(SERVICE_NAMES.IMAGE_GEN).name }}</span>
+                                <svg viewBox="0 0 24 24" style="width: 20px; height: 20px; fill: currentColor;"><path d="M7 10l5 5 5-5z"/></svg>
+                            </div>
+                        </ConnectionStatus>
+
+                        <div class="settings-item">
+                            <label>{{ t('imggen_endpoint') || 'Endpoint URL' }}</label>
+                            <input
+                                type="text"
+                                :value="imageGenSettings.endpoint"
+                                @input="onImageGenInput('endpoint', $event.target.value)"
+                                placeholder="https://api.openai.com/v1"
+                                autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+                            >
+                        </div>
+                        
+                        <div class="settings-item">
+                            <label>{{ t('imggen_api_key') || 'API Key' }}</label>
+                            <input
+                                type="password"
+                                :value="imageGenSettings.key"
+                                @input="onImageGenInput('apiKey', $event.target.value)"
+                                placeholder="sk-..."
+                                autocomplete="off"
+                            >
+                        </div>
+                    </template>
+
                     <!-- Naistera hint -->
                     <a v-if="showNaisteraOptions" href="https://naistera.org/prompt" target="_blank" class="naistera-hint-box">
                         {{ t('imggen_naistera_hint') || 'Learn about Naistera' }}
@@ -351,31 +403,9 @@ defineExpose({ open });
                         </span>
                     </a>
 
-                    <!-- Endpoint (hidden for rout.my — pre-configured) -->
-                    <div v-if="!showRoutmyOptions" class="settings-item">
-                        <label>{{ t('imggen_endpoint') || 'Endpoint URL' }}</label>
-                        <input
-                            type="text"
-                            v-model="settings.endpoint"
-                            :placeholder="showGeminiOptions ? 'https://generativelanguage.googleapis.com' : showNaisteraOptions ? 'https://naistera.org' : 'https://api.openai.com'"
-                            autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
-                        >
-                    </div>
-
-                    <!-- API Key (non-routmy) -->
-                    <div v-if="!showRoutmyOptions" class="settings-item">
-                        <label>{{ t('imggen_api_key') || 'API Key' }}</label>
-                        <input
-                            type="password"
-                            v-model="settings.apiKey"
-                            :placeholder="showNaisteraOptions ? 'Telegram bot token' : 'sk-...'"
-                            autocomplete="off"
-                        >
-                    </div>
-
                     <!-- rout.my API Key -->
                     <div v-if="showRoutmyOptions" class="settings-item">
-                        <label>{{ t('imggen_api_key') || 'API Key' }}</label>
+                        <label>{{ t('imggen_api_key') || 'rout.my API Key' }}</label>
                         <input
                             type="password"
                             v-model="settings.routmyApiKey"

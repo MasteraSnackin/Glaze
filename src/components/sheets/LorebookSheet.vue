@@ -7,6 +7,7 @@ import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetStat
 import { lorebookState, initLorebookState, createLorebook, deleteLorebook, importSTLorebook, exportSTLorebook, flushLorebookSave } from '@/core/states/lorebookState.js';
 import { saveFile } from '@/core/services/fileSaver.js';
 import HelpTip from '@/components/ui/HelpTip.vue';
+import FabButton from '@/components/ui/FabButton.vue';
 import { APP_EVENTS } from '@/core/events/eventNames.js';
 import { subscribeAppEvent, publishAppEvent } from '@/core/events/eventHub.js';
 import { useLorebookIndexing } from '@/composables/lorebook/useLorebookIndexing.js';
@@ -401,10 +402,7 @@ const showBackBtn = computed(() => currentView.value !== 'list');
 
 const sheetActions = computed(() => {
     const actions = [];
-    if (currentView.value === 'list') {
-        actions.push({ icon: '<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>', onClick: openLorebookMenu });
-    } else if (currentView.value === 'entries') {
-        actions.push({ icon: '<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>', onClick: handleCreateEntry });
+    if (currentView.value === 'entries') {
         actions.push({ icon: '<svg viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>', onClick: openEntriesMenu });
     }
     return actions;
@@ -443,8 +441,9 @@ defineExpose({ open, openEntry, close, openLorebook });
                         <svg :class="{ 'rotated': isGlobalSettingsExpanded }" style="width:20px; height:20px; transition: transform 0.3s;" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z" fill="currentColor"/></svg>
                     </div>
                     
-                    <div v-if="isGlobalSettingsExpanded" class="global-settings-content">
-                        <!-- Search Type Selector -->
+                    <div class="expand-wrapper" :class="{ 'expanded': isGlobalSettingsExpanded }">
+                        <div class="global-settings-content">
+                            <!-- Search Type Selector -->
                         <div class="settings-item">
                             <label>{{ t('label_search_type') || 'Search Type' }}</label>
                             <div class="clickable-selector" @click="openOptionSelector({
@@ -620,6 +619,7 @@ defineExpose({ open, openEntry, close, openLorebook });
                           </div>
                       </div>
                   </div>
+                  </div>
 
                 <div v-if="lorebookState.lorebooks.length === 0" class="empty-state">
                     <svg class="empty-icon" viewBox="0 0 24 24"><path d="M18 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 4h5v8l-2.5-1.5L6 12V4z"/></svg>
@@ -667,6 +667,10 @@ defineExpose({ open, openEntry, close, openLorebook });
                             </div>
                         </div>
                     </template>
+                    <div class="ps-add-btn desktop-only" @click="openLorebookMenu">
+                        <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                        <span>{{ t('btn_add') || 'Add Lorebook' }}</span>
+                    </div>
                 </div>
             </div>
 
@@ -759,6 +763,10 @@ defineExpose({ open, openEntry, close, openLorebook });
                             </div>
                         </div>
                     </div>
+                </div>
+                <div class="ps-add-btn desktop-only" style="margin: 0 16px 16px;" @click="handleCreateEntry">
+                    <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                    <span>{{ t('btn_add') || 'Add Entry' }}</span>
                 </div>
             </div>
 
@@ -1023,11 +1031,51 @@ defineExpose({ open, openEntry, close, openLorebook });
                 </div>
             </div>
         </div>
+        <template #floating>
+            <FabButton v-if="currentView !== 'edit_entry'" :text="t('btn_add') || 'Add'" class="mobile-only-fab" @click="currentView === 'entries' ? handleCreateEntry() : openLorebookMenu()">
+                <template #icon>
+                    <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                </template>
+            </FabButton>
+        </template>
     </SheetView>
     </div>
 </template>
 
 <style scoped>
+.ps-add-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 14px;
+    border-radius: 14px;
+    background: var(--accent-color, var(--vk-blue));
+    color: white;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    user-select: none;
+    margin-top: 10px;
+}
+.ps-add-btn:active {
+    transform: scale(0.97);
+    opacity: 0.85;
+}
+.ps-add-btn svg {
+    width: 20px;
+    height: 20px;
+    fill: currentColor;
+}
+
+@media (min-width: 768px) {
+    .mobile-only-fab { display: none !important; }
+}
+@media (max-width: 767px) {
+    .desktop-only { display: none !important; }
+}
+
 .lb-sheet-header {
     height: 56px;
     display: flex;
@@ -1098,6 +1146,7 @@ defineExpose({ open, openEntry, close, openLorebook });
     text-align: center;
 }
 
+.empty-state { padding: 40px; text-align: center; color: var(--text-gray); min-height: 0; }
 .empty-icon { width: 64px; height: 64px; fill: var(--text-gray); opacity: 0.2; margin-bottom: 24px; }
 .empty-text { font-size: 18px; font-weight: 600; color: var(--text-black); margin-bottom: 8px; }
 .empty-subtext { font-size: 14px; opacity: 0.6; margin-bottom: 24px; line-height: 1.5; }
@@ -1712,6 +1761,21 @@ defineExpose({ open, openEntry, close, openLorebook });
 
 .global-settings-group {
     margin-top: 12px;
+}
+
+.expand-wrapper {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.expand-wrapper.expanded {
+    grid-template-rows: 1fr;
+}
+
+.global-settings-content {
+    min-height: 0;
+    overflow: hidden;
 }
 
 .clickable {

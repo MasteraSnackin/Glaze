@@ -7,6 +7,7 @@ import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import SheetView from '@/components/ui/SheetView.vue';
 import HelpTip from '@/components/ui/HelpTip.vue';
+import FabButton from '@/components/ui/FabButton.vue';
 
 const sheet = ref(null);
 
@@ -88,7 +89,7 @@ onBeforeUnmount(() => {
 
 <template>
     <div class="personas-view-root">
-    <SheetView ref="sheet" :fit-content="false" :title="t('tab_personas') || 'Personas'" :view-mode="viewMode" @back="handleBack" :actions="[{ icon: '<svg viewBox=\'0 0 24 24\'><path d=\'M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z\'/></svg>', onClick: () => openEditor(-1) }]">
+    <SheetView ref="sheet" :fit-content="false" :title="t('tab_personas') || 'Personas'" :view-mode="viewMode" @back="handleBack" :actions="[]">
         <template #header-title>
             <HelpTip term="persona" />
         </template>
@@ -127,8 +128,19 @@ onBeforeUnmount(() => {
                         </button>
                     </div>
                 </div>
+                <div class="ps-add-btn desktop-only" @click="openEditor(-1)">
+                    <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                    <span>{{ t('btn_add') || 'Add Persona' }}</span>
+                </div>
             </div>
         </div>
+        <template #floating>
+            <FabButton :text="t('btn_add') || 'Add'" class="mobile-only-fab" @click="openEditor(-1)">
+                <template #icon>
+                    <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                </template>
+            </FabButton>
+        </template>
     </SheetView>
     </div>
 </template>
@@ -265,5 +277,39 @@ onBeforeUnmount(() => {
     color: var(--text-gray);
     margin-top: 40px;
     font-size: 16px;
+    min-height: 0;
+}
+
+.ps-add-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 14px;
+    border-radius: 14px;
+    background: var(--accent-color, var(--vk-blue));
+    color: white;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    user-select: none;
+    margin-top: 10px;
+}
+.ps-add-btn:active {
+    transform: scale(0.97);
+    opacity: 0.85;
+}
+.ps-add-btn svg {
+    width: 20px;
+    height: 20px;
+    fill: currentColor;
+}
+
+@media (min-width: 768px) {
+    .mobile-only-fab { display: none !important; }
+}
+@media (max-width: 767px) {
+    .desktop-only { display: none !important; }
 }
 </style>

@@ -66,7 +66,7 @@ const headerClasses = computed(() => {
     const classes = ['app-header'];
     if (state.scrollHidden && !state.isChatSearchMode && state.mode !== 'editor') classes.push('scroll-hidden');
     if (state.mode === 'chat') classes.push('fixed-header');
-    if (['generation', 'more'].includes(state.mode) || state.hasSubheader || state.lorebookBanner.show || state.lorebookBanner.isTransitioning) {
+    if (['generation', 'more'].includes(state.mode) || state.hasSubheader) {
         classes.push('header-wrap');
     }
     if (!state.showBack && (!state.showLogo || props.isWindowHeader)) {
@@ -487,24 +487,20 @@ const onShowLbBanner = (detail) => {
 
 function onBannerBeforeEnter() {
     state.lorebookBanner.isTransitioning = true;
-    onBeforeTransition();
 }
 function onBannerEnter() {
-    onStartTransition();
+    // No-op
 }
 function onBannerAfterEnter() {
-    onAfterTransition();
     state.lorebookBanner.isTransitioning = false;
 }
 function onBannerBeforeLeave() {
     state.lorebookBanner.isTransitioning = true;
-    onBeforeTransition();
 }
 function onBannerLeave() {
-    onStartTransition();
+    // No-op
 }
 function onBannerAfterLeave() {
-    onAfterTransition();
     state.lorebookBanner.isTransitioning = false;
 }
 
@@ -615,7 +611,8 @@ defineExpose({ updateHeader });
 </script>
 
 <template>
-  <header ref="headerEl" :class="headerClasses">
+  <div class="app-header-root">
+    <header ref="headerEl" :class="headerClasses">
       <!-- Left Section -->
       <div v-if="state.showBack && !state.isChatSearchMode" id="header-back" class="header-btn-left" @click="handleBack">
           <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
@@ -630,7 +627,7 @@ defineExpose({ updateHeader });
       >
           <svg viewBox="0 0 600 600" width="26" height="26" style="fill: var(--vk-blue);">
               <g transform="translate(0.000000,600.000000) scale(0.100000,-0.100000)">
-                  <path d="M2799 4916 c-2 -2 -33 -7 -69 -10 -36 -3 -76 -8 -90 -11 -14 -2 -65 -12 -115 -21 -49 -9 -116 -25 -147 -35 -32 -11 -63 -19 -71 -19 -7 0 -31 -8 -53 -19 -21 -10 -55 -22 -74 -26 -38 -8 -146 -60 -285 -136 -43 -23 -118 -79 -123 -91 -2 -5 -10 -8 -18 -8 -8 0 -14 -4 -14 -10 0 -5 -6 -10 -13 -10 -8 0 -27 -13 -43 -30 -16 -16 -34 -30 -40 -30 -7 0 -30 -20 -52 -45 -23 -25 -45 -47 -49 -48 -12 -3 -133 -139 -133 -149 0 -5 -5 -6 -10 -3 -6 3 -10 1 -10 -6 0 -6 -36 -59 -80 -117 -44 -58 -80 -111 -80 -119 0 -7 -4 -13 -9 -13 -5 0 -12 -11 -15 -24 -3 -14 -12 -31 -19 -38 -6 -7 -17 -24 -24 -38 -6 -14 -30 -64 -52 -111 -23 -48 -41 -93 -41 -101 0 -8 -4 -18 -9 -23 -4 -6 -14 -32 -20 -60 -7 -27 -21 -72 -31 -100 -17 -43 -27 -94 -55 -255 -17 -100 -27 -293 -22 -435 6 -160 38 -417 56 -439 7 -9 17 -42 26 -86 11 -56 30 -120 41 -137 8 -12 14 -31 14 -41 0 -10 4 -22 8 -28 5 -5 17 -29 26 -54 36 -92 154 -293 216 -367 5 -7 10 -16 10 -22 0 -5 7 -11 15 -15 8 -3 15 -12 15 -20 0 -9 38 -54 85 -101 47 -47 85 -90 85 -96 0 -5 4 -9 9 -9 5 0 16 -6 23 -13 7 -6 38 -32 67 -57 30 -25 65 -54 77 -65 49 -43 92 -75 102 -75 5 0 15 -7 22 -15 7 -9 15 -13 18 -11 3 3 18 -4 34 -15 36 -26 190 -103 201 -101 4 1 7 -3 7 -8 0 -6 9 -10 19 -10 11 0 21 -4 23 -8 2 -6 140 -56 183 -67 6 -1 23 -7 38 -13 15 -7 51 -16 80 -21 29 -6 72 -14 97 -19 25 -6 68 -13 95 -16 28 -4 82 -11 120 -17 46 -7 343 -9 855 -7 725 3 787 4 815 20 17 10 37 18 46 18 20 0 95 36 119 58 11 9 32 28 47 42 15 14 31 24 35 23 5 -2 8 3 8 11 0 7 11 24 23 37 51 52 100 169 108 254 2 28 4 399 4 825 0 774 0 775 -23 858 -32 115 -48 143 -140 238 -63 65 -171 122 -272 143 -37 8 -1228 5 -1278 -3 -23 -4 -61 -14 -84 -22 -47 -16 -154 -86 -181 -118 -10 -11 -15 -15 -11 -7 5 9 3 12 -4 7 -7 -4 -12 -13 -12 -21 0 -7 -6 -20 -13 -27 -7 -7 -27 -37 -45 -66 -58 -94 -77 -226 -52 -362 10 -55 38 -144 40 -125 0 6 7 -3 15 -20 7 -16 27 -45 44 -64 17 -18 31 -37 31 -40 0 -4 15 -15 33 -26 17 -10 37 -23 42 -27 100 -81 181 -96 545 -97 266 -2 296 -3 308 -19 18 -24 13 -435 -6 -454 -9 -9 -112 -12 -460 -10 -246 1 -472 6 -502 11 -30 5 -58 7 -62 4 -5 -2 -8 -1 -8 4 0 4 -13 9 -30 10 -16 1 -51 11 -77 22 -26 10 -63 25 -82 32 -18 7 -49 23 -68 36 -19 13 -38 21 -43 18 -4 -3 -10 -2 -12 3 -1 4 -25 23 -53 42 -60 42 -181 163 -201 202 -8 15 -19 28 -23 28 -5 0 -12 13 -16 30 -4 16 -11 30 -16 30 -5 0 -9 6 -9 14 0 8 -3 16 -7 18 -13 5 -43 68 -43 88 0 10 -4 20 -9 22 -22 7 -70 238 -76 366 -9 172 11 297 68 432 5 14 12 36 14 49 2 13 11 30 19 38 7 8 14 23 14 34 0 11 5 17 10 14 6 -3 10 1 10 9 0 8 6 21 13 28 8 7 26 32 40 55 14 23 49 65 76 95 28 29 51 56 51 61 0 4 4 7 10 7 10 0 38 21 76 58 13 13 28 21 33 18 4 -3 16 3 26 14 10 11 24 20 32 20 7 0 13 5 13 11 0 6 7 9 15 6 8 -4 17 -2 20 3 4 6 15 10 26 10 10 0 19 4 19 8 0 8 81 37 165 58 74 20 230 24 910 27 704 2 775 4 823 20 94 32 208 99 218 130 3 9 12 17 20 17 8 0 14 4 14 8 0 5 8 17 18 28 36 42 70 110 88 177 26 100 8 307 -32 358 -6 8 -17 29 -25 47 -8 17 -17 32 -21 32 -5 0 -8 4 -8 9 0 11 -77 91 -88 91 -4 0 -19 11 -34 25 -15 14 -29 25 -30 26 -19 0 -48 14 -48 22 0 6 -3 8 -6 4 -3 -3 -27 4 -52 16 -47 22 -50 22 -842 25 -438 2 -798 1 -801 -2z" />
+                  <path d="M2799 4916 c-2 -2 -33 -7 -69 -10 -36 -3 -76 -8 -90 -11 -14 -2 -65 -12 -115 -21 -49 -9 -116 -25 -147 -35 -32 -11 -63 -19 -71 -19 -7 0 -31 -8 -53 -19 -21 -10 -55 -22 -74 -26 -38 -8 -146 -60 -285 -136 -43 -23 -118 -79 -123 -91 -2 -5 -10 -8 -18 -8 -8 0 -14 -4 -14 -10 0 -5 -6 -10 -13 -10 -8 0 -27 -13 -43 -30 -16 -16 -34 -30 -40 -30 -7 0 -30 -20 -52 -45 -23 -25 -45 -47 -49 -48 -12 -3 -133 -139 -133 -149 0 -5 -5 -6 -10 -3 -6 3 -10 1 -10 -6 0 -6 -36 -59 -80 -117 -44 -58 -80 -111 -80 -119 0 -7 -4 -13 -9 -13 -5 0 -12 -11 -15 -24 -3 -14 -12 -31 -19 -38 -6 -7 -17 -24 -24 -38 -6 -14 -30 -64 -52 -111 -23 -48 -41 -93 -41 -101 0 -8 -4 -18 -9 -23 -4 -6 -14 -32 -20 -60 -7 -27 -21 -72 -31 -100 -17 -43 -27 -94 -55 -255 -17 -100 -27 -293 -22 -435 6 -160 38 -417 56 -439 7 -9 17 -42 26 -86 11 -56 30 -120 41 -137 8 -12 14 -31 14 -41 0 -10 4 -22 8 -28 5 -5 17 -29 26 -54 36 -92 154 -293 216 -367 5 -7 10 -16 10 -22 0 -5 7 -11 15 -15 8 -3 15 -12 15 -20 0 -9 38 -54 85 -101 47 -47 85 -90 85 -96 0 -5 4 -9 9 -9 5 0 -16 -6 23 -13 7 -6 38 -32 67 -57 30 -25 65 -54 77 -65 43 -43 92 -75 102 -75 5 0 15 -7 22 -15 7 -9 15 -13 18 -11 3 3 18 -4 34 -15 36 -26 190 -103 201 -101 4 1 7 -3 7 -8 0 -6 9 -10 19 -10 11 0 21 -4 23 -8 2 -6 140 -56 183 -67 6 -1 23 -7 38 -13 15 -7 51 -16 80 -21 29 -6 72 -14 97 -19 25 -6 68 -13 95 -16 28 -4 82 -11 120 -17 46 -7 343 -9 855 -7 725 3 787 4 815 20 17 10 37 18 46 18 20 0 95 36 119 58 11 9 32 28 47 42 15 14 31 24 35 23 5 -2 8 3 8 11 0 7 11 24 23 37 51 52 100 169 108 254 2 28 4 399 4 825 0 774 0 775 -23 858 -32 115 -48 143 -140 238 -63 65 -171 122 -272 143 -37 8 -1228 5 -1278 -3 -23 -4 -61 -14 -84 -22 -47 -16 -154 -86 -181 -118 -10 -11 -15 -15 -11 -7 5 9 3 12 -4 7 -7 -4 -12 -13 -12 -21 0 -7 -6 -20 -13 -27 -7 -7 -27 -37 -45 -66 -58 -94 -77 -226 -52 -362 10 -55 38 -144 40 -125 0 6 7 -3 15 -20 7 -16 27 -45 44 -64 17 -18 31 -37 31 -40 0 -4 15 -15 33 -26 17 -10 37 -23 42 -27 100 -81 181 -96 545 -97 266 -2 296 -3 308 -19 18 -24 13 -435 -6 -454 -9 -9 -112 -12 -460 -10 -246 1 -472 6 -502 11 -30 5 -58 7 -62 4 -5 -2 -8 -1 -8 4 0 4 -13 9 -30 10 -16 1 -51 11 -77 22 -26 10 -63 25 -82 32 -18 7 -49 23 -68 36 -19 13 -38 21 -43 18 -4 -3 -10 -2 -12 3 -1 4 -25 23 -53 42 -60 42 -181 163 -201 202 -8 15 -19 28 -23 28 -5 0 -12 13 -16 30 -4 16 -11 30 -16 30 -5 0 -9 6 -9 14 0 8 -3 16 -7 18 -13 5 -43 68 -43 88 0 10 -4 20 -9 22 -22 7 -70 238 -76 366 -9 172 11 297 68 432 5 14 12 36 14 49 2 13 11 30 19 38 7 8 14 23 14 34 0 11 5 17 10 14 6 -3 10 1 10 9 0 8 6 21 13 28 8 7 26 32 40 55 14 23 49 65 76 95 28 29 51 56 51 61 0 4 4 7 10 7 10 0 38 21 76 58 13 13 28 21 33 18 4 -3 16 3 26 14 10 11 24 20 32 20 7 0 13 5 13 11 0 6 7 9 15 6 8 -4 17 -2 20 3 4 6 15 10 26 10 10 0 19 4 19 8 0 8 81 37 165 58 74 20 230 24 910 27 704 2 775 4 823 20 94 32 208 99 218 130 3 9 12 17 20 17 8 0 14 4 14 8 0 5 8 17 18 28 36 42 70 110 88 177 26 100 8 307 -32 358 -6 8 -17 29 -25 47 -8 17 -17 32 -21 32 -5 0 -8 4 -8 9 0 11 -77 91 -88 91 -4 0 -19 11 -34 25 -15 14 -29 25 -30 26 -19 0 -48 14 -48 22 0 6 -3 8 -6 4 -3 -3 -27 4 -52 16 -47 22 -50 22 -842 25 -438 2 -798 1 -801 -2z" />
               </g>
           </svg>
       </div>
@@ -767,43 +764,52 @@ defineExpose({ updateHeader });
           <div v-if="state.showActions" v-for="(action, idx) in state.actions" :key="idx" class="header-action-btn" :id="action.id" @click.stop="action.onClick" :style="{ color: action.color }">
               <span v-html="action.icon" style="display: flex; fill: currentColor;"></span>
           </div>
-          <!-- <div class="header-action-btn notif-btn" @click.stop="openNotifications">
-              <svg viewBox="0 0 24 24" fill="currentColor" style="width:22px;height:22px;"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.9 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/></svg>
-              <span v-if="notificationsState.unreadCount > 0" class="notif-badge"></span>
-          </div> -->
       </div>
+    </header>
 
-      <!-- Lorebook Banner (Glassmorphism) -->
-      <Transition name="lb-banner-fade" 
-        @before-enter="onBannerBeforeEnter" @enter="onBannerEnter" @after-enter="onBannerAfterEnter"
-        @before-leave="onBannerBeforeLeave" @leave="onBannerLeave" @after-leave="onBannerAfterLeave"
-      >
-          <div v-if="state.lorebookBanner.show" class="header-lb-banner">
-              <div class="lb-banner-glass">
-                  <div class="lb-banner-text">
-                      <span v-if="state.lorebookBanner.presetName" class="lb-label-group">
-                          <svg viewBox="0 0 24 24" class="lb-banner-icon"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
-                          <span class="lb-banner-label">{{ t('subtab_preset') }}:</span>
-                          <span class="lb-banner-names">{{ state.lorebookBanner.presetName }}</span>
-                      </span>
-                      <span v-if="state.lorebookBanner.names.length > 0" class="lb-label-group">
-                          <svg viewBox="0 0 24 24" class="lb-banner-icon"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
-                          <span class="lb-banner-label">{{ t('label_lorebooks') }}:</span>
-                          <span class="lb-banner-names">{{ state.lorebookBanner.names.join(', ') }}</span>
-                      </span>
-                      <span v-if="state.lorebookBanner.personaName" class="lb-label-group">
-                          <svg viewBox="0 0 24 24" class="lb-banner-icon"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/></svg>
-                          <span class="lb-banner-label">{{ t('tab_personas') }}:</span>
-                          <span class="lb-banner-names">{{ state.lorebookBanner.personaName }}</span>
-                      </span>
-                  </div>
-              </div>
-          </div>
-      </Transition>
-  </header>
+    <!-- Lorebook Banner (Glassmorphism) -->
+    <Transition name="lb-banner-fade" 
+      @before-enter="onBannerBeforeEnter" @enter="onBannerEnter" @after-enter="onBannerAfterEnter"
+      @before-leave="onBannerBeforeLeave" @leave="onBannerLeave" @after-leave="onBannerAfterLeave"
+    >
+        <div v-if="state.lorebookBanner.show" class="app-header-banner">
+            <div class="lb-banner-glass">
+                <div class="lb-banner-text">
+                    <span v-if="state.lorebookBanner.presetName" class="lb-label-group">
+                        <svg viewBox="0 0 24 24" class="lb-banner-icon"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
+                        <span class="lb-banner-label">{{ t('subtab_preset') }}:</span>
+                        <span class="lb-banner-names">{{ state.lorebookBanner.presetName }}</span>
+                    </span>
+                    <span v-if="state.lorebookBanner.names.length > 0" class="lb-label-group">
+                        <svg viewBox="0 0 24 24" class="lb-banner-icon"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+                        <span class="lb-banner-label">{{ t('label_lorebooks') }}:</span>
+                        <span class="lb-banner-names">{{ state.lorebookBanner.names.join(', ') }}</span>
+                    </span>
+                    <span v-if="state.lorebookBanner.personaName" class="lb-label-group">
+                        <svg viewBox="0 0 24 24" class="lb-banner-icon"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z"/></svg>
+                        <span class="lb-banner-label">{{ t('tab_personas') }}:</span>
+                        <span class="lb-banner-names">{{ state.lorebookBanner.personaName }}</span>
+                    </span>
+                </div>
+            </div>
+        </div>
+    </Transition>
+  </div>
 </template>
 
-<style>
+<style scoped>
+.app-header-root {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    z-index: 100;
+    pointer-events: none;
+}
+
+.app-header-root > * {
+    pointer-events: auto;
+}
+
 /* Header */
 .app-header {
     --header-left-safe-space: 52px;
@@ -829,6 +835,14 @@ defineExpose({ updateHeader });
     transition: background-color var(--transition-speed) ease, margin-top var(--transition-speed) ease, transform var(--transition-speed) ease-in-out, height var(--transition-speed) ease, clip-path var(--transition-speed) ease-in-out !important;
     box-sizing: border-box;
     clip-path: inset(0 0 0 0);
+}
+
+.app-header.fixed-header {
+    position: relative !important;
+    top: auto !important;
+    left: auto !important;
+    right: auto !important;
+    width: auto !important;
 }
 
 .app-header.no-border {
@@ -1205,26 +1219,25 @@ defineExpose({ updateHeader });
 }
 
 /* Lorebook Banner Glassmorphism */
-.header-lb-banner {
-    width: 100%;
-    padding: 0 12px 12px;
-    order: 20;
-    flex-basis: 100%;
+.app-header-banner {
+    width: auto;
+    margin: 8px 16px 0 16px;
     box-sizing: border-box;
     overflow: hidden;
+    z-index: 99;
 }
 
 .lb-banner-glass {
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 8px 12px;
-    background: rgba(var(--vk-blue-rgb), 0.15);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-    border: 1px solid rgba(var(--vk-blue-rgb), 0.3);
-    border-radius: 12px;
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+    padding: 10px 16px;
+    background: rgba(var(--vk-blue-rgb), 0.12);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(var(--vk-blue-rgb), 0.25);
+    border-radius: 16px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
 }
 
 .lb-banner-text {
@@ -1273,12 +1286,11 @@ defineExpose({ updateHeader });
 }
 
 .lb-banner-fade-enter-active, .lb-banner-fade-leave-active {
-    transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+    transition: opacity 0.3s ease;
 }
 
 .lb-banner-fade-enter-from, .lb-banner-fade-leave-to {
     opacity: 0;
-    transform: translateY(-10px);
 }
 
 /* Chat Search Header */
@@ -1339,6 +1351,17 @@ defineExpose({ updateHeader });
 
     .search-field-wrapper {
         min-height: 32px;
+    }
+
+    .app-header-banner {
+        margin: 0;
+    }
+
+    .lb-banner-glass {
+        border-radius: 0;
+        border-left: none;
+        border-right: none;
+        padding: 8px 24px;
     }
 }
 </style>

@@ -12,6 +12,7 @@ import HelpTip from '@/components/ui/HelpTip.vue';
 import ConnectionStatus from '@/components/ui/ConnectionStatus.vue';
 import { useApiSettings } from '@/composables/api/useApiSettings.js';
 import { useServiceProviders } from '@/composables/api/useServiceProviders.js';
+import { SERVICE_NAMES } from '@/core/config/ProviderProfiles.js';
 
 const props = defineProps({
     viewMode: { type: Boolean, default: false }
@@ -34,11 +35,14 @@ const headerState = reactive({
 
 const TABS = [
     { id: 'llm', label: 'LLM' },
-    { id: 'embedding', label: 'Embeddings' },
-    { id: 'imagegen', label: 'Image Gen' },
-    { id: 'memory', label: 'Memory' }
+    { id: 'embedding', label: 'Embeddings' }
 ];
 const activeTab = ref('llm');
+
+const tabSliderOffset = computed(() => {
+    const idx = TABS.findIndex((t) => t.id === activeTab.value);
+    return idx >= 0 ? idx * 100 : 0;
+});
 
 const providerProfiles = ref({});
 const activeLLMProfileId = ref('default');
@@ -84,7 +88,9 @@ const {
     testEmbedding,
     onImageGenInput,
     onMemoryProviderInput,
-    loadAllServiceSettings
+    loadAllServiceSettings,
+    openProviderSelector,
+    getActiveProfileMeta
 } = useServiceProviders();
 
 function openOptionSelector({ title, options, currentValue, onSelect }) {
@@ -143,23 +149,26 @@ onBeforeUnmount(() => {
     <div class="api-view-root">
     <SheetView ref="sheet" :title="headerState.title" :view-mode="viewMode" @back="handleBack">
         <div class="gen-sheet-body">
+                <!-- Tab Bar -->
+                <div class="tabs-row">
+                    <div class="top-tabs-container" :class="'tabs-' + TABS.length">
+                        <div class="tab-slider" :style="{ transform: `translateX(${tabSliderOffset}%)` }"></div>
+                        <div v-for="tab in TABS" :key="tab.id" class="top-tab" :class="{ active: activeTab === tab.id }" @click="activeTab = tab.id">
+                            <svg v-if="tab.id === 'llm'" class="tab-icon" viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
+                            <svg v-else-if="tab.id === 'embedding'" class="tab-icon" viewBox="0 0 24 24"><path d="M11.99 18.54l-7.37-5.73L3 14.07l9 7 9-7-1.63-1.27zM12 16l7.36-5.73L21 9l-9-7-9 7 1.63 1.27L12 16z"/></svg>
+                            <svg v-else-if="tab.id === 'imagegen'" class="tab-icon" viewBox="0 0 24 24"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
+                            <svg v-else-if="tab.id === 'memory'" class="tab-icon" viewBox="0 0 24 24"><path d="M18 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 4h5v8l-2.5-1.5L6 12V4z"/></svg>
+                            <span>{{ tab.label }}</span>
+                        </div>
+                    </div>
+                </div>
+
                 <ConnectionStatus :status="apiStatus" :error-message="errorMessage" @retry="checkConnection">
                     <div class="preset-selector" @click="openApiPresetSelector">
                         <span>{{ activeApiPreset?.name || 'Default' }}</span>
                         <svg viewBox="0 0 24 24" style="width: 20px; height: 20px; fill: currentColor;"><path d="M7 10l5 5 5-5z"/></svg>
                     </div>
                 </ConnectionStatus>
-
-                <!-- Tab Bar -->
-                <div class="api-tabs">
-                    <button
-                        v-for="tab in TABS"
-                        :key="tab.id"
-                        class="api-tab-btn"
-                        :class="{ active: activeTab === tab.id }"
-                        @click="activeTab = tab.id"
-                    >{{ tab.label }}</button>
-                </div>
 
                 <!-- LLM Tab -->
                 <template v-if="activeTab === 'llm'">
@@ -293,20 +302,26 @@ onBeforeUnmount(() => {
 {{ t('desc_use_llm_api') || 'Use the same endpoint as LLM for embeddings' }}
 </div>
                             </div>
-                            <input type="checkbox" v-model="embeddingSettings.useSame" @change="onEmbeddingInput('gz_embedding_use_same', $event.target.checked)" class="vk-switch">
+                            <input type="checkbox" v-model="embeddingSettings.useSame" @change="onEmbeddingInput('useSame', $event.target.checked)" class="vk-switch">
                         </div>
                         <template v-if="!embeddingSettings.useSame">
+                            <ConnectionStatus :status="embeddingStatus" :error-message="embeddingError" @retry="testEmbedding">
+                                <div class="preset-selector" @click="openProviderSelector(SERVICE_NAMES.EMBEDDING)">
+                                    <span>{{ getActiveProfileMeta(SERVICE_NAMES.EMBEDDING).name }}</span>
+                                    <svg viewBox="0 0 24 24" style="width: 20px; height: 20px; fill: currentColor;"><path d="M7 10l5 5 5-5z"/></svg>
+                                </div>
+                            </ConnectionStatus>
                             <div class="settings-item">
                                 <label>{{ t('label_embedding_endpoint') || 'Embedding Endpoint' }}</label>
-                                <input type="text" v-model="embeddingSettings.endpoint" @input="onEmbeddingInput('gz_embedding_endpoint', $event.target.value)" placeholder="http://127.0.0.1:11434/v1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+                                <input type="text" v-model="embeddingSettings.endpoint" @input="onEmbeddingInput('endpoint', $event.target.value)" placeholder="http://127.0.0.1:11434/v1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
                             </div>
                             <div class="settings-item">
                                 <label>{{ t('label_embedding_model') || 'Model' }}</label>
-                                <input type="text" v-model="embeddingSettings.model" @input="onEmbeddingInput('gz_embedding_model', $event.target.value)" placeholder="text-embedding-3-small" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+                                <input type="text" v-model="embeddingSettings.model" @input="onEmbeddingInput('model', $event.target.value)" placeholder="text-embedding-3-small" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
                             </div>
                             <div class="settings-item">
                                 <label>{{ t('label_embedding_key') || 'API Key' }}</label>
-                                <input type="password" v-model="embeddingSettings.key" @input="onEmbeddingInput('gz_embedding_key', $event.target.value)" placeholder="sk-..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+                                <input type="password" v-model="embeddingSettings.key" @input="onEmbeddingInput('apiKey', $event.target.value)" placeholder="sk-..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
                             </div>
                         </template>
                         <div class="settings-item">
@@ -331,111 +346,31 @@ onBeforeUnmount(() => {
                 </div>
                 </template>
 
-                <!-- Image Gen Tab -->
-                <template v-if="activeTab === 'imagegen'">
-                <div class="menu-group">
-                    <div class="section-header">
-{{ t('section_image_gen') || 'Image Generation' }} <HelpTip term="image-gen"/>
-</div>
-                    <div class="settings-item-checkbox">
-                        <div class="settings-text-col">
-                            <label>{{ t('label_image_gen_enabled') || 'Enable Image Generation' }}</label>
-                            <div class="settings-desc">
-{{ t('desc_image_gen_enabled') || 'Generate images from [IMG:GEN] tags' }}
-</div>
-                        </div>
-                        <input type="checkbox" v-model="imageGenSettings.enabled" @change="onImageGenInput('enabled', $event.target.checked)" class="vk-switch">
-                    </div>
-                    <template v-if="imageGenSettings.enabled">
-                        <div class="settings-item-checkbox">
-                            <div class="settings-text-col">
-                                <label>{{ t('label_use_llm_api') || 'Use LLM API' }}</label>
-                                <div class="settings-desc">
-{{ t('desc_use_llm_api') || 'Use the same endpoint as LLM for image generation' }}
-</div>
-                            </div>
-                            <input type="checkbox" v-model="imageGenSettings.useSame" @change="onImageGenInput('useSame', $event.target.checked)" class="vk-switch">
-                        </div>
-                        <template v-if="!imageGenSettings.useSame">
-                            <div class="settings-item">
-                                <label>{{ t('label_imagegen_endpoint') || 'Image Gen Endpoint' }}</label>
-                                <input type="text" v-model="imageGenSettings.endpoint" @input="onImageGenInput('endpoint', $event.target.value)" placeholder="http://127.0.0.1:5000/v1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
-                            </div>
-                            <div class="settings-item">
-                                <label>{{ t('label_imagegen_model') || 'Model' }}</label>
-                                <input type="text" v-model="imageGenSettings.model" @input="onImageGenInput('model', $event.target.value)" placeholder="dall-e-3" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
-                            </div>
-                            <div class="settings-item">
-                                <label>{{ t('label_imagegen_key') || 'API Key' }}</label>
-                                <input type="password" v-model="imageGenSettings.key" @input="onImageGenInput('apiKey', $event.target.value)" placeholder="sk-..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
-                            </div>
-                        </template>
-                    </template>
-                </div>
-                </template>
 
-                <!-- Memory Books Provider Tab -->
-                <template v-if="activeTab === 'memory'">
-                <div class="menu-group">
-                    <div class="section-header">
-{{ t('section_memory_books_provider') || 'Memory Books Generation' }} <HelpTip term="memory-books"/>
-</div>
-                    <div class="settings-item-checkbox">
-                        <div class="settings-text-col">
-                            <label>{{ t('label_use_llm_api') || 'Use LLM API' }}</label>
-                            <div class="settings-desc">
-{{ t('desc_use_llm_api_memory') || 'Use the same endpoint as LLM for memory book generation' }}
-</div>
-                        </div>
-                        <input type="checkbox" v-model="memoryProviderSettings.useSame" @change="onMemoryProviderInput('useSame', $event.target.checked)" class="vk-switch">
-                    </div>
-                    <template v-if="!memoryProviderSettings.useSame">
-                        <div class="settings-item">
-                            <label>{{ t('label_memory_endpoint') || 'Memory Gen Endpoint' }}</label>
-                            <input type="text" v-model="memoryProviderSettings.endpoint" @input="onMemoryProviderInput('endpoint', $event.target.value)" placeholder="http://127.0.0.1:5000/v1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
-                        </div>
-                        <div class="settings-item">
-                            <label>{{ t('label_memory_model') || 'Model' }}</label>
-                            <input type="text" v-model="memoryProviderSettings.model" @input="onMemoryProviderInput('model', $event.target.value)" placeholder="gpt-4o-mini" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
-                        </div>
-                        <div class="settings-item">
-                            <label>{{ t('label_memory_key') || 'API Key' }}</label>
-                            <input type="password" v-model="memoryProviderSettings.key" @input="onMemoryProviderInput('key', $event.target.value)" placeholder="sk-..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
-                        </div>
-                    </template>
-                </div>
-                </template>
         </div>
     </SheetView>
     </div>
 </template>
 
 <style scoped>
-.api-tabs {
+.tabs-row {
   display: flex;
-  gap: 4px;
-  padding: 8px 14px 0;
-  border-bottom: 1px solid rgba(var(--text-color-rgb, 0, 0, 0), 0.08);
+  align-items: center;
+  margin: 16px 16px 8px;
 }
 
-.api-tab-btn {
-  flex: 1;
-  padding: 8px 12px;
-  border: none;
-  background: transparent;
-  color: var(--text-gray, #888);
+.top-tabs-container {
+  flex: 1 !important;
+  max-width: none !important;
+}
+
+.top-tabs-container.tabs-4 .tab-slider {
+  width: 25%;
+}
+
+.top-tabs-container.tabs-4 .top-tab {
   font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  border-radius: 8px 8px 0 0;
-  border-bottom: 2px solid transparent;
-  transition: all 0.2s ease;
-}
-
-.api-tab-btn.active {
-  color: var(--vk-blue, #528bcc);
-  border-bottom-color: var(--vk-blue, #528bcc);
-  background: rgba(var(--vk-blue-rgb, 82, 139, 204), 0.08);
+  padding: 10px 2px;
 }
 
 .preset-selector {

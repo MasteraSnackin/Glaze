@@ -289,8 +289,10 @@ onBeforeUnmount(() => {
 
                     <!-- List Items -->
                     <div v-if="items && items.length" class="sheet-list">
-                        <div class="sheet-group-card">
-                            <div v-for="(item, index) in items" :key="index" class="sheet-item" :class="{ 'centered': item.centered, 'has-hint': item.hint }" @click="item.onClick">
+                        <div :class="{ 'sheet-group-card': !sidebarMode }">
+                            <div v-for="(item, index) in items" :key="index" 
+                                 :class="[sidebarMode ? 'sheet-item-card' : 'sheet-item', { 'centered': item.centered, 'has-hint': item.hint }]" 
+                                 @click="item.onClick">
                                 <div class="sheet-item-icon" v-if="item.icon" v-html="item.icon" :style="{ color: item.iconColor }"></div>
                                 <div class="sheet-item-content">
                                     <span :class="{ 'text-destructive': item.isDestructive }">{{ item.label }}</span>
@@ -300,10 +302,10 @@ onBeforeUnmount(() => {
                                 <!-- Item Actions (Buttons on the right) -->
                                 <div class="sheet-item-actions" v-if="item.actions && item.actions.length">
                                     <div v-for="(action, aIndex) in item.actions" :key="aIndex" 
-                                         class="sheet-item-action-btn"
-                                         @click.stop="action.onClick"
-                                         v-html="action.icon"
-                                         :style="{ color: action.color }">
+                                            class="sheet-item-action-btn"
+                                            @click.stop="action.onClick"
+                                            v-html="action.icon"
+                                            :style="{ color: action.color }">
                                     </div>
                                 </div>
                             </div>
@@ -312,8 +314,8 @@ onBeforeUnmount(() => {
 
                     <!-- Session Items (Custom Layout) -->
                     <div v-if="sessionItems && sessionItems.length" class="sheet-list">
-                        <div class="sheet-group-card">
-                            <div v-for="(item, index) in sessionItems" :key="index" class="sheet-item session-item" @click="item.onClick">
+                        <div :class="{ 'sheet-group-card': !sidebarMode }">
+                            <div v-for="(item, index) in sessionItems" :key="index" :class="sidebarMode ? 'sheet-item-card' : 'sheet-item'" class="session-item" @click="item.onClick">
                                 <div class="session-content">
                                     <div class="session-title">
                                         {{ item.title }} <span class="session-count"><svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>{{ item.count }}</span>
@@ -430,7 +432,7 @@ onBeforeUnmount(() => {
     width: 100%;
     height: 100%;
     background-color: transparent !important;
-    z-index: 1000;
+    z-index: 20000;
     display: flex;
     justify-content: center;
     align-items: flex-end;
@@ -603,6 +605,24 @@ onBeforeUnmount(() => {
 
 .sheet-item:active {
     background-color: var(--bg-gray, rgba(128, 128, 128, 0.1));
+}
+
+.sheet-item-card {
+    position: relative;
+    padding: 14px 16px;
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    background: rgba(128, 128, 128, 0.12);
+    border: 1px solid rgba(128, 128, 128, 0.2);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+    border-radius: 16px;
+    margin-bottom: 10px;
+    transition: background-color 0.2s;
+}
+
+.sheet-item-card:active {
+    background-color: var(--bg-gray, rgba(128, 128, 128, 0.2));
 }
 
 .sheet-item-icon {
@@ -809,7 +829,7 @@ onBeforeUnmount(() => {
 .modal-overlay {
     background-color: transparent !important;
     opacity: 1 !important;
-    z-index: 12000 !important;
+    z-index: 20000 !important;
 }
 
 .bottom-sheet-enter-active,

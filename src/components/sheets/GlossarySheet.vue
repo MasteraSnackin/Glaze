@@ -8,16 +8,17 @@ import { publishAppEvent, subscribeAppEvent } from '@/core/events/eventHub.js';
 
 const props = defineProps({
     viewMode: { type: Boolean, default: false },
+    initialTerm: { type: String, default: null }
 });
 
 const sheet = ref(null);
-const view = ref('categories'); // 'categories' | 'terms' | 'article'
+const view = ref(props.initialTerm ? 'article' : 'categories'); // 'categories' | 'terms' | 'article'
 const selectedCategory = ref(null);
 const selectedTerm = ref(null);
 const searchQuery = ref('');
 const navDirection = ref('forward'); // 'forward' | 'back'
 const navStack = ref([]); // [{ view, selectedCategory, selectedTerm }]
-const openedViaHelptip = ref(false);
+const openedViaHelptip = ref(!!props.initialTerm);
 
 const CATEGORY_ICONS = {
     basics:     'M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5',
@@ -46,6 +47,18 @@ const CATEGORY_COLORS = {
 const DEFAULT_COLOR = { bg: 'rgba(100,149,237,0.18)', icon: 'var(--vk-blue)' };
 
 const categories = computed(() => translations[currentLang.value]?.glossary?.categories || []);
+
+if (props.initialTerm) {
+    const term = categories.value.flatMap(c => c.terms).find(t => t.id === props.initialTerm);
+    if (term) {
+        const cat = categories.value.find(c => c.terms.some(t => t.id === props.initialTerm));
+        selectedCategory.value = cat;
+        selectedTerm.value = term;
+    } else {
+        view.value = 'categories';
+        openedViaHelptip.value = false;
+    }
+}
 
 const isSearching = computed(() => searchQuery.value.trim().length > 0);
 
@@ -114,9 +127,9 @@ function goBack() {
         selectedTerm.value = prev.selectedTerm;
         return;
     }
-    // Opened via helptip — close the sheet entirely instead of navigating back
-    if (openedViaHelptip.value) {
-        if (!props.viewMode) sheet.value?.close();
+    // Opened via helptip — close the sheet entirely instead of navigating back only if it's an actual bottom sheet
+    if (openedViaHelptip.value && !props.viewMode) {
+        sheet.value?.close();
         return;
     }
     if (view.value === 'article') {
@@ -157,7 +170,7 @@ function handleGlossaryEvent(detail) {
 
 function handleGlBack() {
     if (!props.viewMode) return;
-    if (view.value === 'categories' || (openedViaHelptip.value && navStack.value.length === 0)) {
+    if (view.value === 'categories') {
         publishAppEvent(APP_EVENTS.nav.navigateTo, 'view-menu');
     } else {
         goBack();

@@ -1,5 +1,8 @@
+import { isServiceUsingLLMProfile, getEmbeddingProfile, SERVICE_NAMES } from './ProviderProfiles.js';
+
 export function getEmbeddingConfig() {
-    const useSame = localStorage.getItem('gz_embedding_use_same') !== 'false';
+    const isSame = isServiceUsingLLMProfile(SERVICE_NAMES.EMBEDDING);
+    const profile = getEmbeddingProfile() || {};
 
     const base = {
         target: localStorage.getItem('gz_embedding_target') || 'content',
@@ -10,24 +13,12 @@ export function getEmbeddingConfig() {
         enabled: localStorage.getItem('gz_embedding_enabled') === 'true'
     };
 
-    if (useSame) {
-        const rawEndpoint = (localStorage.getItem('api-endpoint') || '').trim();
-        return {
-            ...base,
-            endpoint: rawEndpoint,
-            apiKey: localStorage.getItem('api-key') || '',
-            model: localStorage.getItem('api-model') || '',
-            useSame: true
-        };
-    }
-
-    const rawEndpoint = (localStorage.getItem('gz_embedding_endpoint') || '').trim();
     return {
         ...base,
-        endpoint: rawEndpoint,
-        apiKey: localStorage.getItem('gz_embedding_key') || '',
-        model: localStorage.getItem('gz_embedding_model') || '',
-        useSame: false
+        endpoint: profile.endpoint || '',
+        apiKey: profile.apiKey || '',
+        model: profile.model || '',
+        useSame: isSame
     };
 }
 

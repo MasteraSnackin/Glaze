@@ -1,5 +1,6 @@
 <script setup>
 import { reactive, computed, ref, onBeforeUnmount, nextTick } from 'vue';
+import { forceMobileLayout } from '@/core/config/APPSettings.js';
 
 const props = defineProps({
     items: { type: Array, required: true },
@@ -76,6 +77,8 @@ function updatePosition(element) {
 }
 
 function handleItemEnter(itemId, event) {
+    if (typeof window !== 'undefined' && (window.innerWidth < 768 || forceMobileLayout.value)) return;
+
     const item = props.items.find(i => i.id === itemId);
     if (!item || !item.label) return;
 

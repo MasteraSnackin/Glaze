@@ -1,43 +1,84 @@
 <script setup>
-import { watch, nextTick, ref } from 'vue';
+import { watch, ref } from 'vue';
 import { desktopDropdownState, closeDesktopDropdown } from '@/core/states/desktopDropdownState.js';
 
-// Реактивный стиль позиционирования — пересчитывается при открытии
 const dropdownStyle = ref({});
 const PADDING = 12;
 const MAX_VISIBLE_ITEMS = 12;
 
 function recalcPosition() {
-    const { x, y, items, isTriggered, bigInfo } = desktopDropdownState.value;
-    const itemCount = items?.length ?? 0;
+    const { x, y, items, isTriggered, bigInfo, title, headerAction } = desktopDropdownState.value;
     
     const width = isTriggered ? 280 : 220;
-    const itemHeight = isTriggered ? 56 : 42;
-    const visibleItems = Math.min(itemCount, MAX_VISIBLE_ITEMS);
-    let estimatedHeight = visibleItems * itemHeight + 16;
-    if (bigInfo) estimatedHeight += 120;
-    if (desktopDropdownState.value.title || desktopDropdownState.value.headerAction) {
-        estimatedHeight += 32;
+
+    // Синхронный, максимально точный подсчет высоты (estimated),
+    // чтобы сразу отрисовать окно в нужных координатах и избежать "скачков" двойного рендера
+    let height = 16; // базовые паддинги панели .dd-panel
+
+    if (title || headerAction) height += 32;
+    if (bigInfo) height += 120; // примерная высота dd-big-info
+
+    const visibleItems = items ? items.slice(0, MAX_VISIBLE_ITEMS) : [];
+    
+    let itemsH = 0;
+    for (const item of visibleItems) {
+        if (item.image) {
+            itemsH += 80;
+        } else {
+            let itemH = isTriggered ? 48 : 38; // Базовая высота
+            if (item.sublabel) itemH += 15;
+            if (item.hint) itemH += 15;
+            itemsH += itemH;
+        }
     }
+    
+    if (isTriggered && visibleItems.length > 0) {
+        itemsH += (visibleItems.length - 1) * 8; // gap
+    }
+    
+    height += itemsH;
 
     let left = x;
     let top = y;
 
-    // Fit within viewport
-    if (left < PADDING) left = PADDING;
-    if (left + width > window.innerWidth - PADDING) {
-        left = window.innerWidth - width - PADDING;
-    }
-    if (top + estimatedHeight > window.innerHeight - PADDING) {
-        top = y - estimatedHeight; // flip above
-        if (top < PADDING) top = PADDING;
+    const windowWidth = window.innerWidth;
+    const windowHeight = window.innerHeight;
+
+    let originX = 'left';
+    let originY = 'top';
+
+    // Горизонтальная проверка (не влазит справа -> откидываем влево)
+    if (left + width > windowWidth - PADDING) {
+        left = x - width;
+        originX = 'right';
+        if (left < PADDING) {
+            // Не влазит и слева -> прижимаем к правому/левому краю
+            left = windowWidth - width - PADDING;
+            if (left < PADDING) left = PADDING;
+        }
     }
 
+    // Вертикальная проверка (не влазит снизу -> откидываем вверх)
+    if (top + height > windowHeight - PADDING) {
+        top = y - height;
+        originY = 'bottom';
+        if (top < PADDING) {
+            // Если не влазит ни сверху, ни снизу -> жестко прижимаем к границам экрана
+            top = windowHeight - height - PADDING;
+            if (top < PADDING) top = PADDING;
+        }
+    }
+
+    // Жесткое ограничение максимальной высоты: 
+    // Гарантируем, что после всех прыжков меню НИКОГДА не пересечет нижний PADDING
+    const maxAllowedHeight = windowHeight - top - PADDING;
+
     dropdownStyle.value = {
-        top: top + 'px',
-        left: left + 'px',
-        width: width + 'px',
-        transformOrigin: top < y ? 'left bottom' : 'left top',
+        top: `${Math.round(top)}px`,
+        left: `${Math.round(left)}px`,
+        width: `${width}px`,
+        maxHeight: `${Math.max(100, maxAllowedHeight)}px`, 
+        transformOrigin: `${originX} ${originY}`,
     };
 }
 
@@ -50,7 +91,8 @@ function handleItemClick(item) {
 watch(
     () => desktopDropdownState.value.visible,
     (val) => {
-        if (val) nextTick(recalcPosition);
+        // Синхронный вызов BEFORE mount
+        if (val) recalcPosition();
     }
 );
 </script>
@@ -87,7 +129,7 @@ watch(
                     </div>
 
                     <!-- Items -->
-                    <div class="dd-items-scroll">
+                    <div class="dd-items-scroll" :class="{ 'dd-items-scroll--triggered': desktopDropdownState.isTriggered }">
                         <div
                         v-for="(item, idx) in desktopDropdownState.items"
                         :key="idx"
@@ -149,12 +191,12 @@ FEATURED
 .dd-overlay {
     position: fixed;
     inset: 0;
-    z-index: 19000;
+    z-index: 21000;
 }
 
 .dd-panel {
     position: fixed;
-    z-index: 19001;
+    z-index: 21001;
     /* menu-group style: mirror base.css:359 */
     background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8));
     backdrop-filter: blur(var(--element-blur, 12px));
@@ -184,6 +226,11 @@ FEATURED
 .dd-items-scroll::-webkit-scrollbar-thumb {
     background: rgba(128, 128, 128, 0.3);
     border-radius: 2px;
+}
+
+.dd-items-scroll--triggered {
+    display: flex;
+    flex-direction: column;
 }
 
 .dd-panel--triggered {
@@ -310,6 +357,11 @@ FEATURED
     border: 1px solid rgba(128, 128, 128, 0.2);
     background: var(--menu-group-bg, rgba(255, 255, 255, 0.03));
     padding: 10px 12px;
+    margin-bottom: 8px;
+}
+
+.dd-item--triggered:last-child {
+    margin-bottom: 0;
 }
 
 .dd-item--triggered:hover {
