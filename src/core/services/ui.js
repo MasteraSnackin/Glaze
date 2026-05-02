@@ -3,16 +3,12 @@ import { translations } from '@/utils/i18n.js';
 import { formatText } from '@/utils/textFormatter.js';
 import { Capacitor } from '@capacitor/core';
 import { App } from '@capacitor/app';
-import { showToast } from '@/core/states/toastState.js';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { SafeArea } from '@capacitor-community/safe-area';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
-import { themeState, getPresets, applyPreset } from '@/core/states/themeState.js';
-import { ref } from 'vue';
-import { logger } from '../../utils/logger.js';
-import { publishAppEvent, publishCancelableAppEvent } from '@/core/events/eventHub.js';
+import { publishAppEvent } from '@/core/events/eventHub.js';
 import { APP_EVENTS } from '@/core/events/eventNames.js';
-import { isKeyboardOpen, initKeyboard, hideKeyboard } from './keyboardHandler.js';
+import { isKeyboardOpen, initKeyboard } from './keyboardHandler.js';
 
 // --- Long-press background guard ---
 const _activeLongPressTimers = new Set();
@@ -120,7 +116,7 @@ export function rgbToHex(rgb) {
     return "#" + r + g + b;
 }
 
-export async function updateAppColors(forceMainView = false) {
+export async function updateAppColors() {
     const theme = {
         body: '#19191a'
     };
@@ -328,118 +324,6 @@ export function initViewportFix() {
     initKeyboard();
 }
 
-export function initBackButton() {
-    let lastBackPress = 0;
-    const handleBackButton = async () => {
-        // --- Hierarchical Back Navigation Dispatch ---
-        const backNavEvent = publishCancelableAppEvent(APP_EVENTS.ui.backNavigation);
-        if (backNavEvent.defaultPrevented) return;
-
-        // 0. If keyboard is open — dismiss it
-        if (isKeyboardOpen.value) {
-            await hideKeyboard();
-            return;
-        }
-
-        // 1. Check for open Bottom Sheets
-        const openSheet = document.querySelector('.modal-overlay.visible');
-        if (openSheet) {
-            closeBottomSheet();
-            return;
-        }
-
-        // 1.1 Check SheetView
-        const openSheetView = document.querySelector('.sheet-view-overlay.visible');
-        if (openSheetView) {
-            const backEvent = new CustomEvent('hw-back', { cancelable: true });
-            openSheetView.dispatchEvent(backEvent);
-            if (!backEvent.defaultPrevented) {
-                openSheetView.click();
-            }
-            return;
-        }
-
-        // 1.2 Check Magic Drawer (ChatInput)
-        // Skip if it is already in the process of closing (leave animation)
-        const magicDrawer = document.querySelector('.magic-drawer');
-        if (magicDrawer && !magicDrawer.classList.contains('drawer-leave-active')) {
-            const btn = document.getElementById('btn-magic');
-            if (btn) btn.click();
-            return;
-        }
-
-        // 1.25 Check chat search mode
-        const searchBackBtn = document.querySelector('.chat-search-back');
-        if (searchBackBtn && searchBackBtn.offsetParent !== null) {
-            searchBackBtn.click();
-            return;
-        }
-
-        // 1.3 Check message selection mode
-        const cancelSelectionBtn = document.querySelector('.btn-cancel-selection');
-        if (cancelSelectionBtn && cancelSelectionBtn.offsetParent !== null) {
-            cancelSelectionBtn.click();
-            return;
-        }
-
-        // Check Viewers (Image Viewer & Holo Cards)
-        // We look for any visible element with class 'viewer-overlay'
-        const visibleViewer = document.querySelector('.viewer-overlay.visible');
-        if (visibleViewer) {
-            // Try to find a close button inside, or just dispatch a click if it has a handler
-            const closeBtn = visibleViewer.querySelector('.close-btn-trigger') || visibleViewer.querySelector('#image-viewer-close-btn') || visibleViewer.querySelector('#holocards-close-btn');
-            if (closeBtn) closeBtn.click();
-            return;
-        }
-
-        // 2. Check full-screen editor
-        const fsEditor = document.getElementById('full-screen-editor');
-        if (fsEditor && fsEditor.style.display !== 'none') {
-            const closeBtn = document.getElementById('fs-editor-close');
-            if (closeBtn) closeBtn.click();
-            return;
-        }
-
-        // 2.1 Check onboarding (back arrow)
-        const onboardingBack = document.querySelector('.onboarding-overlay .nav-back-btn');
-        if (onboardingBack) {
-            onboardingBack.click();
-            return;
-        }
-
-        // 3. Check header back button
-        const backBtn = document.getElementById('header-back');
-        if (backBtn && backBtn.offsetParent !== null) {
-            backBtn.click();
-            return;
-        }
-
-        // 4. App exit logic (main screen)
-        const now = Date.now();
-        if (now - lastBackPress < 2000) {
-            App.exitApp();
-        } else {
-            lastBackPress = now;
-            const text = (translations[currentLang.value] && translations[currentLang.value].exit_hint) || 'Press again to exit';
-            // Show custom app toast instead of native
-            showToast(text, 2500);
-        }
-    };
-
-    App.addListener('backButton', handleBackButton);
-    // Handle browser back gesture/button for PWA/Web
-    window.addEventListener('popstate', handleBackButton);
-
-    // For console testing: window.simulateBackButton()
-    window.simulateBackButton = handleBackButton;
-
-    // Handle Escape key as back button
-    window.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') {
-            handleBackButton();
-        }
-    });
-}
 
 export function animateTextChange(element, newText, direction, onUpdate) {
     const body = element.querySelector('.msg-body');

@@ -6,7 +6,7 @@ import { activePersona, allPersonas, setActivePersona } from '@/core/states/pers
 import { logger } from '../../utils/logger.js';
 import { notificationsState, clearUnread } from '@/core/states/notificationsState.js';
 import { APP_EVENTS } from '@/core/events/eventNames.js';
-import { publishAppEvent, subscribeAppEvent } from '@/core/events/eventHub.js';
+import { publishAppEvent, subscribeAppEvent, publishCancelableAppEvent } from '@/core/events/eventHub.js';
 
 const props = defineProps({
   currentView: String,
@@ -221,7 +221,12 @@ function setupSubmenuHeader(title, targetView) {
     clearHeader('default');
     state.title = title;
     state.showBack = true;
-    state.onBack = () => publishAppEvent(APP_EVENTS.nav.navigateTo, targetView);
+    state.onBack = () => {
+        const evt = publishCancelableAppEvent(APP_EVENTS.ui.backNavigation);
+        if (!evt.defaultPrevented) {
+            publishAppEvent(APP_EVENTS.nav.navigateTo, targetView);
+        }
+    };
     toggleTabbar(true);
 }
 
@@ -261,7 +266,7 @@ function updateHeader() {
     } else if (viewId === 'view-settings') {
         setupSettingsHeader(title);
     } else if (viewId === 'view-tools') {
-        setupDefaultHeader(title, false);
+        setupSubmenuHeader(title, 'view-menu');
     } else if (['view-api', 'view-presets', 'view-lorebook', 'view-regex', 'view-personas'].includes(viewId)) {
         setupSubmenuHeader(title, 'view-tools');
     } else if (viewId === 'view-character-edit') {
@@ -331,17 +336,17 @@ const t = (key) => translations[currentLang.value]?.[key] || key;
 const handleBack = () => {
     logger.debug('[AppHeader] handleBack called. currentView:', props.currentView, 'showBack:', state.showBack, 'onBack:', !!state.onBack, 'mode:', state.mode);
 
+    // If FS editor overlay is open (mode='editor'), dismiss it first regardless of view.
+    // This must run before the view-character-edit check so the overlay closes, not the whole editor.
+    if (state.mode === 'editor' && state.onBack) {
+        state.onBack();
+        return;
+    }
+
     // Editor headers have a fixed close action. Route directly to the parent
     // instead of relying on mutable header state or global back listeners.
     if (props.currentView === 'view-character-edit' || props.currentView === 'view-persona-edit') {
         emit('action-close');
-        return;
-    }
-
-    // If header is in editor mode (e.g. FullScreenEditor overlay), only call onBack
-    // to close the overlay — do NOT fire global back navigation.
-    if (state.mode === 'editor' && state.onBack) {
-        state.onBack();
         return;
     }
 

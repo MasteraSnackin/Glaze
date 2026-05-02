@@ -259,9 +259,12 @@ function openRegexSheetFromPreset() {
 // --- Lifecycle ---
 const unsubs = [];
 
-function handleBackNavigation() {
-    if (!sheet.value?.isVisible) return;
-    if (isEditingBlock.value || editingPresetId.value) goBackFromEditor();
+function handleBackNavigation(event) {
+    if (!props.viewMode && !sheet.value?.isVisible) return;
+    if (isEditingBlock.value || editingPresetId.value) {
+        event?.preventDefault();
+        goBackFromEditor();
+    }
 }
 
 onMounted(async () => {

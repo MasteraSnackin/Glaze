@@ -269,9 +269,10 @@ function goBack() {
     }
 }
 
-function handleBackNavigation() {
+function handleBackNavigation(event) {
     if (!props.viewMode && !sheet.value?.isVisible) return;
     if (currentView.value !== 'list') {
+        event?.preventDefault();
         goBack();
     }
 }

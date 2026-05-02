@@ -458,7 +458,6 @@ v{{ char.version }}
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: 12px;
   padding: 0 16px;
-  padding-bottom: calc(90px + var(--sab)); /* Space for bottom nav */
 }
 
 @media (min-width: 600px) {

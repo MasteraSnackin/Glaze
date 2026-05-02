@@ -696,7 +696,6 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-.list-container { padding-bottom: calc(80px + var(--sab)); }
 .list-container-collapsed { padding-bottom: 0; }
 
 /* Lock list-item to a fixed height so it never changes on sidebar toggle */

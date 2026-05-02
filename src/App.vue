@@ -136,6 +136,7 @@ useAppInit({
     isDesktop: nav.isDesktop,
     checkDesktop: nav.checkDesktop,
     updateLayoutMetrics: nav.updateLayoutMetrics,
+    initBackButton: nav.initBackButton,
     headerContainer,
     footerContainer,
     categories,
@@ -585,6 +586,12 @@ function closeEditorWrapper() {
     padding-top: calc(var(--header-height, 60px) + 16px) !important;
     padding-bottom: calc(var(--footer-height, 80px) + 20px) !important;
     box-sizing: border-box;
+}
+
+/* Views that own their scroll container (virtual scroll) get footer clearance here.
+   --footer-height is 0px on desktop, actual nav height on mobile. */
+#main-container .view-content-wrapper {
+    padding-bottom: calc(var(--footer-height, 80px) + 20px);
 }
 
 /* If a view contains a sub-view, delegate padding to the sub-view */

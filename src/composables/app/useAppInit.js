@@ -8,7 +8,7 @@ import { initPresetState } from '@/core/states/presetState.js';
 import { initSyncState, syncProvider } from '@/core/states/syncState.js';
 import { checkSyncReadiness, fullPull } from '@/core/services/syncService.js';
 import { startTracking } from '@/core/services/timeTracker.js';
-import { initThemeToggle, initHeaderDropdown, initBackButton, initViewportFix } from '@/core/services/ui.js';
+import { initThemeToggle, initHeaderDropdown, initViewportFix } from '@/core/services/ui.js';
 import { initRipple } from '@/core/services/interactionEffects.js';
 import { checkAndRequestNotifications, consumePendingNotificationData } from '@/core/services/notificationService.js';
 import { generateMissingThumbnails } from '@/utils/characterIO.js';
@@ -25,6 +25,7 @@ export function useAppInit({
     isDesktop,
     checkDesktop,
     updateLayoutMetrics,
+    initBackButton,
     headerContainer,
     footerContainer,
     categories,
