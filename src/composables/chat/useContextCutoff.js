@@ -87,7 +87,11 @@ export function useContextCutoff({
             const runtime = getApiRuntimeStorage();
             const contextSize = String(runtime.contextSize || 32000);
             const maxTokens = String(runtime.maxTokens || 8000);
-            const cacheKey = `${currentCharId}_${sessionId}_${messageCount}_${contextSize}_${maxTokens}`;
+            let anForCache = cutoffChatData.authorsNotes?.[sessionId];
+            if (typeof anForCache === 'object' && anForCache !== null) anForCache = anForCache.content || '';
+            else if (typeof anForCache !== 'string') anForCache = '';
+            const sumForCache = typeof cutoffChatData.summaries?.[sessionId] === 'string' ? cutoffChatData.summaries[sessionId] : (cutoffChatData.summaries?.[sessionId]?.content || '');
+            const cacheKey = `${currentCharId}_${sessionId}_${messageCount}_${contextSize}_${maxTokens}_${anForCache}_${sumForCache}`;
 
             if (contextCutoffCache && contextCutoffCache.hash === cacheKey) {
                 cutoffIndex.value = contextCutoffCache.result?.cutoffIndex ?? 0;

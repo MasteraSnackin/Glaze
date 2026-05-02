@@ -72,6 +72,7 @@ git checkout -b feat/memorybook-ui feat/multi-vector
 | `fix/abort-empty-message-and-dropdown-scroll` | Abort pipeline onError propagation, desktop dropdown scroll (linear chain from feat/character-gallery) | Not yet |
 | `fix/preset-stackoverflow-and-chat-perf` | Preset token consistency, persona breakdown, stack overflow & chat perf (linear chain from fix/abort-empty-message-and-dropdown-scroll) | Not yet |
 | `fix/summary-deletion-and-context-cutoff` | Prevent summary object destruction by asyncSave/onVisibilityChange, invalidate context cache on context limit change | Not yet |
+| `fix/authornote-regex-prompt` | findRegex→regex conversion, mergePrompts regex gap, AN save on chat switch, context cache AN invalidation, native appState AN/summary save (linear chain from fix/summary-deletion-and-context-cutoff) | Not yet |
 
 ### Historical (merged & deleted)
 - `feat/refactor-phase1-event-hub` → merged into `feat/chat-persistence-and-reasoning-fixes`, then upstream/dev

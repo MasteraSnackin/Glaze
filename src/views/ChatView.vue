@@ -673,6 +673,10 @@ async function openChat(char, onBack, force = false) {
     isLoading.value = true;
     resetCutoffState();
 
+    if (activeChatChar) {
+        await asyncSaveCurrentSessionState();
+    }
+
     try {
     // Attempt to migrate legacy stats locally
     await migrateStatsIfNeeded();
@@ -1412,11 +1416,29 @@ onMounted(() => {
                 const sessionId = activeChatChar.sessionId;
                 const messagesSnapshot = currentMessages.value;
                 const draft = inputValue.value;
+                const authorsNote = activeChatChar.authors_note;
+                const summary = activeChatChar.summary;
                 db.patchChatData(charId, (data) => {
                     if (sessionId) {
                         data.sessions[sessionId] = JSON.parse(JSON.stringify(messagesSnapshot));
                     }
                     data.draft = draft;
+                    if (authorsNote !== undefined) {
+                        if (!data.authorsNotes) data.authorsNotes = {};
+                        data.authorsNotes[sessionId] = authorsNote;
+                    }
+                    if (summary !== undefined) {
+                        if (!data.summaries) data.summaries = {};
+                        let currentSum = data.summaries[sessionId];
+                        if (typeof currentSum === 'string') {
+                            currentSum = { content: currentSum, depth: 4, role: 'system', insertion_mode: 'relative', prefix: 'Summary: ' };
+                        } else if (!currentSum) {
+                            currentSum = { content: '', depth: 4, role: 'system', insertion_mode: 'relative', prefix: 'Summary: ' };
+                        }
+                        if (currentSum.content !== summary) {
+                            data.summaries[sessionId] = { ...currentSum, content: summary };
+                        }
+                    }
                 });
             }
         }).then(handle => { _appStateListener = handle; });

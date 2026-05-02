@@ -26,6 +26,14 @@ function _loadGlobalScripts(providedGlobalScripts) {
         if (raw === _globalScriptsCacheKey && _globalScriptsCache) return _globalScriptsCache;
         _globalScriptsCacheKey = raw;
         _globalScriptsCache = raw ? JSON.parse(raw) : [];
+        for (const script of _globalScriptsCache) {
+            if (script.findRegex && !script.regex) {
+                script.regex = script.findRegex;
+            }
+            if (script.replaceString !== undefined && script.replacement === undefined) {
+                script.replacement = script.replaceString;
+            }
+        }
     } catch (e) {
         console.error('Failed to load global regex scripts', e);
         _globalScriptsCache = [];

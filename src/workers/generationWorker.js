@@ -384,12 +384,24 @@ function buildPromptMessagesWorker(args) {
 
     const flushMergeBuffer = () => {
         if (mergeContentBuffer.length > 0) {
-            const content = mergeContentBuffer.join('\n');
+            let content = mergeContentBuffer.join('\n');
             const sources = [];
             for (const s of mergeSourcesBuffer) {
                 const existing = sources.find(x => x.source === s.source);
                 if (existing) existing.tokens += s.tokens;
                 else sources.push({ ...s });
+            }
+            const preRegexTokens = estimateTokens(content);
+            content = applyRegexes(content, 4, 2, allScripts, { char, persona: personaObj, sessionVars, charId, sessionId, notifyObj });
+            const postRegexTokens = estimateTokens(content);
+            if (preRegexTokens > 0 && postRegexTokens > 0 && sources.length > 0) {
+                const scale = postRegexTokens / preRegexTokens;
+                for (const s of sources) s.tokens = Math.max(0, Math.round(s.tokens * scale));
+            } else if (postRegexTokens > 0) {
+                sources.length = 0;
+                sources.push({ source: 'merged prompt', tokens: postRegexTokens });
+            } else {
+                sources.length = 0;
             }
             messages.push({
                 role: mergeRole || 'system',
