@@ -222,11 +222,11 @@ async function handleFileSelect(event) {
             const regex = item.findRegex || item.regex || '';
             const replacement = item.replaceString || item.replacement || '';
             const trimOut = Array.isArray(item.trimStrings) ? item.trimStrings.join('\n') : (item.trimOut || '');
-            const placement = item.placement || [2];
+            const placement = Array.isArray(item.placement) ? item.placement : (typeof item.placement === 'number' ? [item.placement] : [2]);
             
             // Ephemerality: ST's promptOnly means it's ONLY for prompt (2)
             // If promptOnly is false, it's for both display (1) and prompt (2)
-            let ephemerality = item.ephemerality;
+            let ephemerality = Array.isArray(item.ephemerality) ? item.ephemerality : null;
             if (!ephemerality) {
                 if (item.markdownOnly === true && item.promptOnly === false) ephemerality = [1];
                 else if (item.markdownOnly === false && item.promptOnly === true) ephemerality = [2];

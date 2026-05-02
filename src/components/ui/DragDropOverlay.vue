@@ -104,11 +104,11 @@ const onDrop = async (e) => {
                             regex: item.findRegex || item.regex || '',
                             replacement: item.replaceString || item.replacement || '',
                             trimOut: Array.isArray(item.trimStrings) ? item.trimStrings.join('\\n') : (item.trimOut || ''),
-                            placement: item.placement || [2],
+                            placement: Array.isArray(item.placement) ? item.placement : (typeof item.placement === 'number' ? [item.placement] : [2]),
                             disabled: item.disabled ?? false,
                             runOnEdit: item.runOnEdit ?? false,
                             macroRules: (item.substituteRegex ?? 0).toString(),
-                            ephemerality: item.ephemerality || (item.promptOnly === true ? [2] : [1, 2]),
+                            ephemerality: Array.isArray(item.ephemerality) ? item.ephemerality : (item.promptOnly === true ? [2] : [1, 2]),
                             minDepth: item.minDepth ?? null,
                             maxDepth: item.maxDepth ?? null
                         });

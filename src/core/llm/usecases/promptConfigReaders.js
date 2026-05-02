@@ -48,5 +48,15 @@ export function loadSessionVars(char) {
 export function loadGlobalRegexes() {
     let globalRegexes = [];
     try { globalRegexes = JSON.parse(localStorage.getItem('regex_scripts')) || []; } catch (e) { }
+    for (const script of globalRegexes) {
+        if (script.findRegex && !script.regex) {
+            script.regex = script.findRegex;
+        }
+        if (script.replaceString !== undefined && script.replacement === undefined) {
+            script.replacement = script.replaceString;
+        }
+        if (typeof script.placement === 'number') script.placement = [script.placement];
+        if (typeof script.ephemerality === 'number') script.ephemerality = [script.ephemerality];
+    }
     return globalRegexes;
 }

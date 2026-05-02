@@ -165,13 +165,13 @@ export function convertSTPreset(data, fileName) {
         regex: r.findRegex || '',
         replacement: r.replaceString || '',
         trimOut: Array.isArray(r.trimStrings) ? r.trimStrings.join('\n') : (r.trimStrings || ''),
-        placement: r.placement || [2],
+        placement: Array.isArray(r.placement) ? r.placement : (typeof r.placement === 'number' ? [r.placement] : [2]),
         disabled: r.disabled !== undefined ? r.disabled : false,
         markdownOnly: r.markdownOnly || false,
         promptOnly: r.promptOnly || false,
         runOnEdit: r.runOnEdit || false,
         macroRules: (r.substituteRegex || 0).toString(),
-        ephemerality: r.ephemerality || (r.markdownOnly === true && r.promptOnly === false ? [1] : r.markdownOnly === false && r.promptOnly === true ? [2] : [1, 2]),
+        ephemerality: Array.isArray(r.ephemerality) ? r.ephemerality : (r.markdownOnly === true && r.promptOnly === false ? [1] : r.markdownOnly === false && r.promptOnly === true ? [2] : [1, 2]),
         minDepth: r.minDepth || null,
         maxDepth: r.maxDepth || null
     })) : [];

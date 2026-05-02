@@ -152,6 +152,12 @@ export function formatText(text, isUser = false, options = {}) {
     });
 
     // 4. Markdown Parsing (in order of precedence)
+    // Blockquote: > text at start of line
+    html = html.replace(/^>\s?(.*)$/gm, '<blockquote class="chat-blockquote">$1</blockquote>');
+
+    // Collapse consecutive blockquotes into one
+    html = html.replace(/<\/blockquote>\n*<blockquote class="chat-blockquote">/g, '<br>');
+
     // Horizontal Rule on its own line
     html = html.replace(/^(_{3,}|-{3,}|\*{3,})$/gm, '<hr>');
 

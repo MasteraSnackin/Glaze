@@ -204,7 +204,7 @@ export function useSessionPersistence({
             const summary = newVal.summary;
             const authorsNote = newVal.authors_note;
             await db.patchChatData(newVal.id, (data) => {
-                const sessionId = data.currentId;
+                const sessionId = newVal.sessionId || data.currentId;
                 if (summary !== undefined) {
                     if (!data.summaries) data.summaries = {};
                     let currentSum = data.summaries[sessionId];
