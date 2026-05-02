@@ -71,6 +71,7 @@ git checkout -b feat/memorybook-ui feat/multi-vector
 | `feat/character-gallery` | Character gallery tab, CharX/ZIP import-export, gallery composable, imageUtils dedup | #91 |
 | `fix/abort-empty-message-and-dropdown-scroll` | Abort pipeline onError propagation, desktop dropdown scroll (linear chain from feat/character-gallery) | Not yet |
 | `fix/preset-stackoverflow-and-chat-perf` | Preset token consistency, persona breakdown, stack overflow & chat perf (linear chain from fix/abort-empty-message-and-dropdown-scroll) | Not yet |
+| `fix/summary-deletion-and-context-cutoff` | Prevent summary object destruction by asyncSave/onVisibilityChange, invalidate context cache on context limit change | Not yet |
 
 ### Historical (merged & deleted)
 - `feat/refactor-phase1-event-hub` → merged into `feat/chat-persistence-and-reasoning-fixes`, then upstream/dev
