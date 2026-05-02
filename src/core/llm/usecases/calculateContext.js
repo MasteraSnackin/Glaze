@@ -21,21 +21,30 @@ function buildContextCalculationResult(result, { vectorLoreTokens = 0, memoryTok
     if (!result?.contextBreakdown) {
         return { cutoffIndex: result?.cutoffIndex ?? -1, contextBreakdown: null };
     }
-    const actualMemory = memoryTokens || memoryReserve;
+    const hasMemoryInjection = memoryTokens > 0;
+    const actualMemory = hasMemoryInjection ? memoryTokens : 0;
+    const effectiveReserve = hasMemoryInjection ? 0 : (memoryReserve || result.contextBreakdown.memoryReserve || 0);
+
+    const newFixedBase = (result.contextBreakdown.fixedBase || 0) + actualMemory;
+    const newFixedTotal = newFixedBase + (result.contextBreakdown.lorebookReserve || 0) + effectiveReserve;
+    const newHistory = result.contextBreakdown.history || 0;
+    const newTotalUsed = newFixedBase + (result.contextBreakdown.lorebookReserve || 0) + effectiveReserve + newHistory;
+    const contextSize = result.contextBreakdown.contextSize || result.contextBreakdown.safeContext || 0;
+
     return {
         cutoffIndex: result.cutoffIndex ?? -1,
         cutoffOriginalIndex: result.cutoffOriginalIndex ?? result.cutoffIndex ?? -1,
         contextBreakdown: {
             ...result.contextBreakdown,
-            memory: memoryTokens,
-            memoryReserve: memoryReserve || result.contextBreakdown.memoryReserve || 0,
+            memory: memoryTokens || 0,
+            memoryReserve: effectiveReserve,
             vectorLore: (result.contextBreakdown.vectorLore || 0) + vectorLoreTokens,
             summaryBase: result.contextBreakdown.summary || 0,
             summary: (result.contextBreakdown.summary || 0) + actualMemory,
-            fixedBase: (result.contextBreakdown.fixedBase || 0) + actualMemory,
-            fixedTotal: result.contextBreakdown.fixedTotal || 0,
-            totalUsed: result.contextBreakdown.totalUsed || 0,
-            remaining: Math.max(0, result.contextBreakdown.remaining || 0)
+            fixedBase: newFixedBase,
+            fixedTotal: newFixedTotal,
+            totalUsed: newTotalUsed,
+            remaining: Math.max(0, contextSize - newTotalUsed)
         }
     };
 }

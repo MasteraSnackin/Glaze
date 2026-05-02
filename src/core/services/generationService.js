@@ -27,19 +27,27 @@ function buildDebugKey(prefix, ...parts) {
 function buildMergedContextBreakdown(contextBreakdown, { vectorLoreTokens = 0, memoryTokens = 0, memoryReserve = 0 } = {}) {
     if (!contextBreakdown) return null;
 
-    const actualMemory = memoryTokens || memoryReserve;
+    const hasMemoryInjection = memoryTokens > 0;
+    const actualMemory = hasMemoryInjection ? memoryTokens : 0;
+    const effectiveReserve = hasMemoryInjection ? 0 : (memoryReserve || contextBreakdown.memoryReserve || 0);
+
+    const newFixedBase = (contextBreakdown.fixedBase || 0) + actualMemory;
+    const newFixedTotal = newFixedBase + (contextBreakdown.lorebookReserve || 0) + effectiveReserve;
+    const newHistory = contextBreakdown.history || 0;
+    const newTotalUsed = newFixedBase + (contextBreakdown.lorebookReserve || 0) + effectiveReserve + newHistory;
+    const contextSize = contextBreakdown.contextSize || contextBreakdown.safeContext || 0;
 
     return {
         ...contextBreakdown,
-        memory: memoryTokens,
-        memoryReserve: memoryReserve || contextBreakdown.memoryReserve || 0,
+        memory: memoryTokens || 0,
+        memoryReserve: effectiveReserve,
         vectorLore: (contextBreakdown.vectorLore || 0) + vectorLoreTokens,
         summaryBase: contextBreakdown.summary || 0,
         summary: (contextBreakdown.summary || 0) + actualMemory,
-        fixedBase: (contextBreakdown.fixedBase || 0) + actualMemory,
-        fixedTotal: (contextBreakdown.fixedTotal || 0),
-        totalUsed: (contextBreakdown.totalUsed || 0),
-        remaining: Math.max(0, (contextBreakdown.remaining || 0))
+        fixedBase: newFixedBase,
+        fixedTotal: newFixedTotal,
+        totalUsed: newTotalUsed,
+        remaining: Math.max(0, contextSize - newTotalUsed)
     };
 }
 
