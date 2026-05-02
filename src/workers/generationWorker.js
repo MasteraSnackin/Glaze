@@ -408,7 +408,7 @@ function buildPromptMessagesWorker(args) {
                 content,
                 blockName: 'merged prompt',
                 sources,
-                _allSources: mergeSourcesBuffer.slice()
+                _allSources: sources
             });
             mergeContentBuffer = [];
             mergeSourcesBuffer = [];
@@ -791,25 +791,36 @@ function buildPromptMessagesWorker(args) {
         });
         if (mergePrompts) flushMergeBuffer();
     } else {
-        const fallbackTokens = estimateTokens("You are a helpful assistant.");
+        let fbContent = "You are a helpful assistant.";
+        const fbPreTokens = estimateTokens(fbContent);
+        fbContent = applyRegexes(fbContent, 4, 2, allScripts, { char, persona: personaObj, sessionVars, charId, sessionId, notifyObj });
+        const fbPostTokens = estimateTokens(fbContent);
         messages.push({
             role: "system",
-            content: "You are a helpful assistant.",
-            sources: fallbackTokens > 0 ? [{ source: 'preset', tokens: fallbackTokens }] : [],
-            _allSources: fallbackTokens > 0 ? [{ source: 'preset', tokens: fallbackTokens }] : []
+            content: fbContent,
+            sources: fbPostTokens > 0 ? [{ source: 'preset', tokens: fbPostTokens }] : [],
+            _allSources: fbPostTokens > 0 ? [{ source: 'preset', tokens: fbPostTokens }] : []
         });
         if (summaryText) {
-            const sTokens = estimateTokens(summaryText);
+            let sContent = summaryText;
+            const sPreTokens = estimateTokens(sContent);
+            sContent = applyRegexes(sContent, 4, 2, allScripts, { char, persona: personaObj, sessionVars, charId, sessionId, notifyObj });
+            const sPostTokens = estimateTokens(sContent);
             messages.push({
                 role: "system",
-                content: summaryText,
-                sources: sTokens > 0 ? [{ source: 'summary', tokens: sTokens }] : [],
-                _allSources: sTokens > 0 ? [{ source: 'summary', tokens: sTokens }] : []
+                content: sContent,
+                sources: sPostTokens > 0 ? [{ source: 'summary', tokens: sPostTokens }] : [],
+                _allSources: sPostTokens > 0 ? [{ source: 'summary', tokens: sPostTokens }] : []
             });
         }
         if (history) {
-            for (const m of history) {
-                const content = m.content !== undefined ? m.content : (m.text || m.mes || "");
+            for (let i = 0; i < history.length; i++) {
+                const m = history[i];
+                let content = m.content !== undefined ? m.content : (m.text || m.mes || "");
+                content = replaceMacros(content, char, personaObj, sessionVars, notifyObj);
+                const placement = m.role === 'user' ? 1 : 2;
+                const depth = history.length - 1 - i;
+                content = applyRegexes(content, placement, 2, allScripts, { char, persona: personaObj, sessionVars, charId, sessionId, notifyObj, depth });
                 const tokens = estimateTokens(content);
                 messages.push({
                     ...m,
