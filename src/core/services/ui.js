@@ -396,6 +396,7 @@ export function animateOdometer(element, target) {
 }
 
 export function initHeaderScroll(messagesContainer, initialScrollTop, isGeneratingCallback) {
+    if (!messagesContainer) return () => {};
     let lastScrollTop = initialScrollTop || 0;
     let ticking = false;
     let isHidden = false;

@@ -1,3 +1,5 @@
+import { estimateTokens } from '@/utils/tokenizer.js';
+
 export async function executeChatContextCalculation({
     char,
     history,
@@ -68,10 +70,14 @@ export async function executeChatContextCalculation({
             console.warn('[calculateContext] Vector search failed:', e);
         }
 
+        const memoryMsgTokens = (memoryInjection.messages || []).reduce((acc, m) => acc + estimateTokens(m.content || ''), 0);
+        const actualPromptTokens = result.messages.reduce((acc, m) => acc + estimateTokens(m.content), 0) + memoryMsgTokens;
+
         return buildContextCalculationResult(result, {
             vectorLoreTokens,
             memoryTokens: memoryInjection.tokens || 0,
-            memoryReserve
+            memoryReserve,
+            actualPromptTokens
         });
     } catch (e) {
         console.error('Calculate context worker error', e);

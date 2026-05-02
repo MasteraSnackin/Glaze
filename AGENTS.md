@@ -73,6 +73,7 @@ git checkout -b feat/memorybook-ui feat/multi-vector
 | `fix/preset-stackoverflow-and-chat-perf` | Preset token consistency, persona breakdown, stack overflow & chat perf (linear chain from fix/abort-empty-message-and-dropdown-scroll) | Not yet |
 | `fix/summary-deletion-and-context-cutoff` | Prevent summary object destruction by asyncSave/onVisibilityChange, invalidate context cache on context limit change | Not yet |
 | `fix/authornote-regex-prompt` | findRegex→regex conversion, mergePrompts regex gap, AN save on chat switch, context cache AN invalidation, native appState AN/summary save (linear chain from fix/summary-deletion-and-context-cutoff) | Not yet |
+| `fix/memory-reserve-double-count` | Eliminate memoryReserve double-counting, add actualPromptTokens to context breakdown, null guard in initHeaderScroll (linear chain from fix/authornote-regex-prompt) | Not yet |
 
 ### Historical (merged & deleted)
 - `feat/refactor-phase1-event-hub` → merged into `feat/chat-persistence-and-reasoning-fixes`, then upstream/dev
@@ -123,11 +124,10 @@ When in doubt, read all that apply before editing:
 When feature branches accumulate unmerged changes, they diverge and create merge conflicts when upstream accepts other PRs.
 
 ### The Solution: Strict Branch Hygiene
-1. **One feature per branch** — Never combine unrelated work in a single branch
-2. **Always branch from `origin/dev`** (or previous feature if dependent)
-3. **Never branch from local `dev`** that has unmerged feature commits
-4. **Delete merged branches immediately** — both local and remote
-5. **Keep `origin/dev` in sync** with upstream before creating new branches
+1. **Always branch from `origin/dev`** (or previous feature if dependent)
+2. **Never branch from local `dev`** that has unmerged feature commits
+3. **Delete merged branches immediately** — both local and remote
+4. **Keep `origin/dev` in sync** with upstream before creating new branches
 
 ### Visual Workflow
 ```

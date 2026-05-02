@@ -1,6 +1,7 @@
 import { publishAppEvent } from '@/core/events/eventHub.js';
 import { APP_EVENTS } from '@/core/events/eventNames.js';
 import { PipelineContext } from './pipelineContext.js';
+import { estimateTokens } from '@/utils/tokenizer.js';
 
 export async function stepVectorSearch(ctx, deps) {
     const { vectorSearchLorebooks, mergeLateVectorLoreEntries } = deps;
@@ -96,10 +97,13 @@ export async function stepPromptReady(ctx, deps) {
 
     if (ctx.isAborted) return;
 
+    const actualPromptTokens = ctx.messages.reduce((acc, m) => acc + estimateTokens(m.content), 0);
+
     ctx.contextBreakdown = buildMergedContextBreakdown(ctx.result.contextBreakdown, {
         vectorLoreTokens: ctx.vectorLoreTokens,
         memoryTokens: ctx.memoryTokens,
-        memoryReserve: ctx.memoryReserve
+        memoryReserve: ctx.memoryReserve,
+        actualPromptTokens
     });
 
     const { onPromptReady } = ctx.callbacks;

@@ -24,7 +24,7 @@ function buildDebugKey(prefix, ...parts) {
 
 // --- Helpers ---
 
-function buildMergedContextBreakdown(contextBreakdown, { vectorLoreTokens = 0, memoryTokens = 0, memoryReserve = 0 } = {}) {
+function buildMergedContextBreakdown(contextBreakdown, { vectorLoreTokens = 0, memoryTokens = 0, memoryReserve = 0, actualPromptTokens = 0 } = {}) {
     if (!contextBreakdown) return null;
 
     const hasMemoryInjection = memoryTokens > 0;
@@ -47,7 +47,8 @@ function buildMergedContextBreakdown(contextBreakdown, { vectorLoreTokens = 0, m
         fixedBase: newFixedBase,
         fixedTotal: newFixedTotal,
         totalUsed: newTotalUsed,
-        remaining: Math.max(0, contextSize - newTotalUsed)
+        remaining: Math.max(0, contextSize - newTotalUsed),
+        actualPromptTokens
     };
 }
 
