@@ -16,7 +16,8 @@ const ENTITY_TYPES = {
     THEME_PRESETS: 'theme_presets',
     THEME_STATE: 'theme_state',
     LOCAL_STORAGE: 'local_storage',
-    MANIFEST: 'manifest'
+    MANIFEST: 'manifest',
+    GALLERY: 'gallery'
 };
 
 let _encryptionEnabled = false;
@@ -48,6 +49,23 @@ function cloudPath(type, id) {
         case ENTITY_TYPES.MANIFEST: return `${CLOUD_BASE}/manifest.json`;
         default: return `${CLOUD_BASE}/misc/${id}${e}`;
     }
+}
+
+function galleryCloudPath(charId, imgId, imgExt) {
+    return `${CLOUD_BASE}/gallery/${charId}/${imgId}.${imgExt}`;
+}
+
+async function dataUrlToBinary(dataUrl) {
+    const res = await fetch(dataUrl);
+    return await res.arrayBuffer();
+}
+
+function guessImageExt(dataUrl) {
+    const match = dataUrl.match(/^data:image\/([\w+]+)/);
+    if (!match) return 'png';
+    const raw = match[1].toLowerCase();
+    if (raw === 'jpeg') return 'jpg';
+    return raw;
 }
 
 function generateDeviceId() {
@@ -268,7 +286,8 @@ async function buildLocalManifestV2() {
     const characters = await db.getAll('characters');
     for (const char of characters) {
         if (!char?.id) continue;
-        const hash = await computeSyncHash(char);
+        const { images, ...charNoImages } = char;
+        const hash = await computeSyncHash(charNoImages);
         const previousEntry = previousEntries[entryKey(ENTITY_TYPES.CHARACTER, char.id)];
         manifest.entries[entryKey(ENTITY_TYPES.CHARACTER, char.id)] = {
             type: ENTITY_TYPES.CHARACTER,
@@ -278,6 +297,29 @@ async function buildLocalManifestV2() {
             hash,
             deleted: false
         };
+
+        if (Array.isArray(images)) {
+            for (const img of images) {
+                if (!img?.id || !img?.src) continue;
+                const imgExt = guessImageExt(img.src);
+                const imgHash = await computeSyncHash({ id: img.id, src: img.src });
+                const galleryKey = entryKey(ENTITY_TYPES.GALLERY, `${char.id}:${img.id}`);
+                const prevImgEntry = previousEntries[galleryKey];
+                manifest.entries[galleryKey] = {
+                    type: ENTITY_TYPES.GALLERY,
+                    id: `${char.id}:${img.id}`,
+                    charId: char.id,
+                    imgId: img.id,
+                    path: galleryCloudPath(char.id, img.id, imgExt),
+                    ext: imgExt,
+                    updatedAt: prevImgEntry?.hash === imgHash && !prevImgEntry?.deleted
+                        ? prevImgEntry.updatedAt
+                        : Date.now(),
+                    hash: imgHash,
+                    deleted: false
+                };
+            }
+        }
     }
 
     const personas = await db.getAll('personas');
@@ -376,6 +418,12 @@ async function applyCloudEntry(adapter, entry, key) {
 
     const entity = await readCloudEntityByEntry(adapter, entry, key);
     if (entry.type === ENTITY_TYPES.CHARACTER) {
+        const existing = await db.get('characters', entry.id);
+        if (existing?.images) {
+            entity.images = existing.images;
+        } else if (!entity.images) {
+            entity.images = [];
+        }
         await db.put('characters', entity);
         await clearSyncDeletedEntry(entry.type, entry.id);
     } else if (entry.type === ENTITY_TYPES.PERSONA) {
@@ -404,6 +452,7 @@ function getBreakdownBucket(type) {
     if (type === ENTITY_TYPES.CHARACTER) return 'characters';
     if (type === ENTITY_TYPES.PERSONA) return 'personas';
     if (type === ENTITY_TYPES.CHAT) return 'chats';
+    if (type === ENTITY_TYPES.GALLERY) return 'characters';
     return 'settings';
 }
 
@@ -412,7 +461,7 @@ function needsConflict(localEntry, cloudEntry) {
 }
 
 async function getLocalConflictEntity(type, id) {
-    if (type === ENTITY_TYPES.CHARACTER) return getLocalCharacter(id);
+    if (type === ENTITY_TYPES.CHARACTER) return getLocalCharacterWithImages(id);
     if (type === ENTITY_TYPES.PERSONA) return getLocalPersona(id);
     if (type === ENTITY_TYPES.CHAT) return getLocalChat(id);
     return null;
@@ -436,7 +485,7 @@ async function deleteCloudFileIfExists(adapter, entry) {
     }
 }
 
-async function runParallel(tasks, concurrency = 5) {
+async function runParallel(tasks, concurrency = 5, delayMs = 200) {
     const results = [];
     let index = 0;
 
@@ -444,6 +493,9 @@ async function runParallel(tasks, concurrency = 5) {
         while (index < tasks.length) {
             const i = index++;
             results[i] = await tasks[i]();
+            if (delayMs > 0 && index < tasks.length) {
+                await new Promise(r => setTimeout(r, delayMs));
+            }
         }
     }
 
@@ -468,6 +520,16 @@ async function pushManifestV2(adapter, key, onProgress) {
 
     const singletonEntries = await collectSingletonEntries();
 
+    const galleryDirs = new Set();
+    for (const entry of Object.values(localManifest.entries)) {
+        if (entry.type === ENTITY_TYPES.GALLERY && !entry.deleted && adapter.ensureFolder) {
+            galleryDirs.add(`${CLOUD_BASE}/gallery/${entry.charId}`);
+        }
+    }
+    for (const dir of galleryDirs) {
+        await adapter.ensureFolder(dir);
+    }
+
     const tasks = allEntries.map((keyName, i) => {
         const localEntry = localManifest.entries[keyName];
         const cloudEntry = cloudEntries[keyName];
@@ -475,6 +537,34 @@ async function pushManifestV2(adapter, key, onProgress) {
 
         return async () => {
             if (!localEntry) {
+                if (onProgress) onProgress(phase, i + 1, allEntries.length);
+                return;
+            }
+
+            if (localEntry.type === ENTITY_TYPES.GALLERY) {
+                const shouldUpload = !cloudEntry
+                    || localEntry.deleted !== cloudEntry.deleted
+                    || localEntry.hash !== cloudEntry.hash;
+
+                if (!shouldUpload) {
+                    skipped++;
+                    if (onProgress) onProgress(phase, i + 1, allEntries.length);
+                    return;
+                }
+
+                if (localEntry.deleted) {
+                    await deleteCloudFileIfExists(adapter, localEntry);
+                } else {
+                    const char = await getLocalCharacterWithImages(localEntry.charId);
+                    const img = char?.images?.find(im => im.id === localEntry.imgId);
+                    if (img?.src) {
+                        const binary = await dataUrlToBinary(img.src);
+                        await adapter.uploadBinary(localEntry.path, binary);
+                    }
+                }
+
+                pushed++;
+                breakdown[phase]++;
                 if (onProgress) onProgress(phase, i + 1, allEntries.length);
                 return;
             }
@@ -520,7 +610,7 @@ async function pushManifestV2(adapter, key, onProgress) {
         };
     });
 
-    await runParallel(tasks, 5);
+    await runParallel(tasks, 3, 300);
 
     localManifest.lastSync = Date.now();
     localManifest.createdAt = cloudManifest?.createdAt || Date.now();
@@ -568,6 +658,48 @@ async function pullManifestV2(adapter, key, onProgress, onConflict) {
                 return;
             }
 
+            if (cloudEntry.type === ENTITY_TYPES.GALLERY) {
+                try {
+                    if (cloudEntry.deleted) {
+                        const char = await getLocalCharacterWithImages(cloudEntry.charId);
+                        if (char?.images) {
+                            char.images = char.images.filter(im => im.id !== cloudEntry.imgId);
+                            await db.put('characters', char);
+                        }
+                    } else {
+                        const binary = await adapter.downloadBinary(cloudEntry.path);
+                        if (binary) {
+                            const blob = new Blob([binary]);
+                            const dataUrl = await new Promise((resolve, reject) => {
+                                const reader = new FileReader();
+                                reader.onload = () => resolve(reader.result);
+                                reader.onerror = reject;
+                                reader.readAsDataURL(blob);
+                            });
+                            const char = await getLocalCharacterWithImages(cloudEntry.charId);
+                            if (char) {
+                                if (!Array.isArray(char.images)) char.images = [];
+                                const existingIdx = char.images.findIndex(im => im.id === cloudEntry.imgId);
+                                const imgEntry = { id: cloudEntry.imgId, src: dataUrl, name: '', thumbnail: null };
+                                if (existingIdx >= 0) {
+                                    imgEntry.name = char.images[existingIdx].name || '';
+                                    char.images[existingIdx] = imgEntry;
+                                } else {
+                                    char.images.push(imgEntry);
+                                }
+                                await db.put('characters', char);
+                            }
+                        }
+                    }
+                    pulled++;
+                    breakdown[phase]++;
+                } catch (e) {
+                    decryptErrors.push({ type: cloudEntry.type, id: cloudEntry.id, error: e.message });
+                }
+                if (onProgress) onProgress(phase, i + 1, allEntries.length);
+                return;
+            }
+
             if (needsConflict(localEntry, cloudEntry)) {
                 const localEntity = await getLocalConflictEntity(cloudEntry.type, cloudEntry.id);
                 let cloudEntity = null;
@@ -606,7 +738,7 @@ async function pullManifestV2(adapter, key, onProgress, onConflict) {
         };
     });
 
-    await runParallel(tasks, 5);
+    await runParallel(tasks, 3, 300);
 
     await writeLocalManifestV2(clone(cloudManifest));
 
@@ -637,9 +769,8 @@ async function readManifest(adapter) {
             return JSON.parse(result.data);
         }
         return null;
-    } catch (e) {
-        console.error('[syncEngine] readManifest failed:', e);
-        throw new Error(`Failed to read cloud manifest: ${e.message}`);
+    } catch {
+        return null;
     }
 }
 
@@ -682,6 +813,14 @@ async function listAllFiles(adapter) {
 }
 
 async function getLocalCharacter(id) {
+    const all = await db.getAll('characters');
+    const char = all.find(c => c.id === id) || null;
+    if (!char) return null;
+    const { images: _images, ...rest } = char;
+    return rest;
+}
+
+async function getLocalCharacterWithImages(id) {
     const all = await db.getAll('characters');
     return all.find(c => c.id === id) || null;
 }
@@ -759,6 +898,10 @@ export async function resolveConflict(conflict, choice) {
         return null;
     }
     if (conflict.type === ENTITY_TYPES.CHARACTER) {
+        const existing = await db.get('characters', conflict.id);
+        if (existing?.images && !entity.images) {
+            entity.images = existing.images;
+        }
         await db.put('characters', entity);
     } else if (conflict.type === ENTITY_TYPES.PERSONA) {
         await db.put('personas', entity);

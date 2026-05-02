@@ -445,6 +445,8 @@ function stripAppFolderPrefix(path) {
     return path;
 }
 
+const _ensuredFolders = new Set();
+
 export async function ensureFolder(path) {
     const strippedPath = stripAppFolderPrefix(path);
     const parts = strippedPath.split('/').filter(Boolean);
@@ -452,10 +454,13 @@ export async function ensureFolder(path) {
     let currentPath = '';
     for (const part of parts) {
         currentPath = currentPath + '/' + part;
+        if (_ensuredFolders.has(currentPath)) continue;
         try {
             await apiCall('/files/create_folder_v2', { path: currentPath, autorename: false });
+            _ensuredFolders.add(currentPath);
         } catch (e) {
-            if (e.message?.includes('conflict') || e.message?.includes('already_exists')) {
+            if (e.status === 409 || e.message?.includes('conflict') || e.message?.includes('already_exists')) {
+                _ensuredFolders.add(currentPath);
                 continue;
             }
             throw e;
@@ -475,33 +480,144 @@ export async function upload(path, data) {
     return contentUpload(stripAppFolderPrefix(path), data);
 }
 
+export async function uploadBinary(path, arrayBuffer) {
+    const strippedPath = stripAppFolderPrefix(path);
+    if (!arrayBuffer) return null;
+    const tokens = await getTokens();
+    if (!tokens) throw new Error('Not connected to Dropbox');
+    const accessToken = tokens.access_token;
+
+    const response = await safeUploadFetch(`${CONTENT_BASE}/files/upload`, {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/octet-stream',
+            'Dropbox-API-Arg': JSON.stringify({
+                path: strippedPath,
+                mode: 'overwrite',
+                autorename: false,
+                mute: true
+            })
+        },
+        body: arrayBuffer
+    });
+
+    if (response.status === 401) {
+        if (tokens?.refresh_token) {
+            const refreshed = await refreshAccessToken(tokens.refresh_token);
+            const retry = await safeUploadFetch(`${CONTENT_BASE}/files/upload`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${refreshed.access_token}`,
+                    'Content-Type': 'application/octet-stream',
+                    'Dropbox-API-Arg': JSON.stringify({
+                        path: strippedPath,
+                        mode: 'overwrite',
+                        autorename: false,
+                        mute: true
+                    })
+                },
+                body: arrayBuffer
+            });
+            if (!retry.ok) throw Object.assign(new Error(`Binary upload failed ${retry.status}`), { status: retry.status });
+            return retry.json();
+        }
+        throw Object.assign(new Error('Session expired'), { status: 401 });
+    }
+
+    if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw Object.assign(new Error(err.error?.tag || err.error_summary || `Binary upload failed ${response.status}`), { status: response.status });
+    }
+
+    return response.json();
+}
+
+export async function downloadBinary(path) {
+    const strippedPath = stripAppFolderPrefix(path);
+    const tokens = await getTokens();
+    if (!tokens) throw new Error('Not connected to Dropbox');
+    const accessToken = tokens.access_token;
+
+    const response = await safeUploadFetch(`${CONTENT_BASE}/files/download`, {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Dropbox-API-Arg': JSON.stringify({ path: strippedPath })
+        }
+    });
+
+    if (response.status === 401) {
+        if (tokens?.refresh_token) {
+            const refreshed = await refreshAccessToken(tokens.refresh_token);
+            const retry = await safeUploadFetch(`${CONTENT_BASE}/files/download`, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${refreshed.access_token}`,
+                    'Dropbox-API-Arg': JSON.stringify({ path: strippedPath })
+                }
+            });
+            if (retry.status === 409) return null;
+            if (!retry.ok) throw Object.assign(new Error(`Binary download failed ${retry.status}`), { status: retry.status });
+            return retry.arrayBuffer();
+        }
+        throw Object.assign(new Error('Session expired'), { status: 401 });
+    }
+
+    if (response.status === 409) return null;
+    if (!response.ok) throw Object.assign(new Error(`Binary download failed ${response.status}`), { status: response.status });
+    return response.arrayBuffer();
+}
+
 export async function download(path) {
     return contentDownload(stripAppFolderPrefix(path));
+}
+
+async function retryApiCall(endpoint, body, accessToken, retries = 3) {
+    for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+            return await apiCall(endpoint, body, accessToken);
+        } catch (e) {
+            if (e.status === 429 && attempt < retries) {
+                const delay = 1000 * Math.pow(2, attempt);
+                await new Promise(r => setTimeout(r, delay));
+                continue;
+            }
+            throw e;
+        }
+    }
 }
 
 export async function deleteFolder(path) {
     const strippedPath = stripAppFolderPrefix(path);
     if (!strippedPath) {
-        let cursor = null;
         let entries = [];
         try {
             const result = await apiCall('/files/list_folder', { path: '', recursive: true, include_deleted: false });
             entries = result?.entries || [];
-            cursor = result?.cursor || null;
+            let cursor = result?.cursor || null;
             while (result?.has_more && cursor) {
                 const more = await apiCall('/files/list_folder/continue', { cursor });
                 entries.push(...(more?.entries || []));
                 cursor = more?.cursor || null;
             }
         } catch {}
-        for (const entry of entries) {
-            try {
-                await apiCall('/files/delete_v2', { path: entry.path_lower || entry.path_display });
-            } catch {}
+        try {
+            await apiCall('/files/delete_batch', {
+                entries: entries.map(e => ({ path: e.path_lower || e.path_display }))
+            });
+            return true;
+        } catch {
+            for (const entry of entries) {
+                try {
+                    await retryApiCall('/files/delete_v2', { path: entry.path_lower || entry.path_display });
+                } catch {}
+                await new Promise(r => setTimeout(r, 300));
+            }
+            return true;
         }
-        return true;
     }
-    return apiCall('/files/delete_v2', { path: strippedPath });
+    return retryApiCall('/files/delete_v2', { path: strippedPath });
 }
 
 export async function deleteFile(fileOrPath) {
