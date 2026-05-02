@@ -90,8 +90,10 @@ function applyRegexes(text, placementFilter, ephemeralityFilter, allScripts, opt
 
     for (const script of allScripts) {
         if (script.disabled) continue;
-        if (script.placement && !script.placement.includes(placementFilter)) continue;
-        if (script.ephemerality && !script.ephemerality.includes(ephemeralityFilter)) continue;
+        const sPlacement = Array.isArray(script.placement) ? script.placement : (typeof script.placement === 'number' ? [script.placement] : null);
+        if (sPlacement && !sPlacement.includes(placementFilter)) continue;
+        const sEphemerality = Array.isArray(script.ephemerality) ? script.ephemerality : (typeof script.ephemerality === 'number' ? [script.ephemerality] : null);
+        if (sEphemerality && !sEphemerality.includes(ephemeralityFilter)) continue;
 
         if (depth !== undefined && depth !== null) {
             const minD = script.minDepth ?? null;

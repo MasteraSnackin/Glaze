@@ -55,6 +55,8 @@ export function loadGlobalRegexes() {
         if (script.replaceString !== undefined && script.replacement === undefined) {
             script.replacement = script.replaceString;
         }
+        if (typeof script.placement === 'number') script.placement = [script.placement];
+        if (typeof script.ephemerality === 'number') script.ephemerality = [script.ephemerality];
     }
     return globalRegexes;
 }
