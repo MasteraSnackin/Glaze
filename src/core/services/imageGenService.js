@@ -27,12 +27,21 @@ const SETTINGS_KEY = {
     naisteraAspectRatio: 'gz_imggen_naistera_aspect_ratio',
     naisteraSendCharAvatar: 'gz_imggen_naistera_send_char_avatar',
     naisteraSendUserAvatar: 'gz_imggen_naistera_send_user_avatar',
+    // rout.my
+    routmyApiKey: 'gz_imggen_routmy_api_key',
+    routmyModel: 'gz_imggen_routmy_model',
+    routmyAspectRatio: 'gz_imggen_routmy_aspect_ratio',
+    routmyImageSize: 'gz_imggen_routmy_image_size',
+    routmyQuality: 'gz_imggen_routmy_quality',
+    routmySendCharAvatar: 'gz_imggen_routmy_send_char_avatar',
+    routmySendUserAvatar: 'gz_imggen_routmy_send_user_avatar',
     // Image context
     imageContextEnabled: 'gz_imggen_image_context_enabled',
     imageContextCount: 'gz_imggen_image_context_count',
 };
 
 const ADDITIONAL_REFS_KEY = 'gz_imggen_additional_refs';
+const ROUTMY_ADDITIONAL_REFS_KEY = 'gz_imggen_routmy_additional_refs';
 
 function sanitizeHeaderValue(val) {
     return String(val || '').replace(/[^\x20-\x7E]/g, '').trim();
@@ -67,6 +76,15 @@ export function getImageGenSettings() {
         naisteraSendCharAvatar: localStorage.getItem(SETTINGS_KEY.naisteraSendCharAvatar) === 'true',
         naisteraSendUserAvatar: localStorage.getItem(SETTINGS_KEY.naisteraSendUserAvatar) === 'true',
         additionalReferences: getAdditionalReferences(),
+        // rout.my
+        routmyApiKey: sanitizeHeaderValue(localStorage.getItem(SETTINGS_KEY.routmyApiKey)),
+        routmyModel: localStorage.getItem(SETTINGS_KEY.routmyModel) || 'google/gemini-3.1-flash-image-preview',
+        routmyAspectRatio: localStorage.getItem(SETTINGS_KEY.routmyAspectRatio) || '1:1',
+        routmyImageSize: localStorage.getItem(SETTINGS_KEY.routmyImageSize) || '1K',
+        routmyQuality: localStorage.getItem(SETTINGS_KEY.routmyQuality) || 'standard',
+        routmySendCharAvatar: localStorage.getItem(SETTINGS_KEY.routmySendCharAvatar) === 'true',
+        routmySendUserAvatar: localStorage.getItem(SETTINGS_KEY.routmySendUserAvatar) === 'true',
+        routmyAdditionalRefs: getRoutmyAdditionalRefs(),
         // Image context
         imageContextEnabled: localStorage.getItem(SETTINGS_KEY.imageContextEnabled) === 'true',
         imageContextCount: Math.min(3, Math.max(1, parseInt(localStorage.getItem(SETTINGS_KEY.imageContextCount), 10) || 1)),
@@ -81,6 +99,9 @@ export function saveImageGenSettings(partial) {
     }
     if (Object.hasOwn(partial, 'additionalReferences')) {
         saveAdditionalReferences(partial.additionalReferences);
+    }
+    if (Object.hasOwn(partial, 'routmyAdditionalRefs')) {
+        saveRoutmyAdditionalRefs(partial.routmyAdditionalRefs);
     }
 }
 
@@ -102,6 +123,26 @@ export function saveAdditionalReferences(refs) {
         matchMode: r?.matchMode === 'always' ? 'always' : 'match',
     }));
     localStorage.setItem(ADDITIONAL_REFS_KEY, JSON.stringify(clean));
+}
+
+export function getRoutmyAdditionalRefs() {
+    try {
+        const raw = localStorage.getItem(ROUTMY_ADDITIONAL_REFS_KEY);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed.slice(0, 8) : [];
+    } catch {
+        return [];
+    }
+}
+
+export function saveRoutmyAdditionalRefs(refs) {
+    const clean = (Array.isArray(refs) ? refs : []).slice(0, 8).map(r => ({
+        name: String(r?.name || '').trim(),
+        imageData: String(r?.imageData || ''),
+        matchMode: r?.matchMode === 'always' ? 'always' : 'match',
+    }));
+    localStorage.setItem(ROUTMY_ADDITIONAL_REFS_KEY, JSON.stringify(clean));
 }
 
 // ---- Image Context Extraction ----
@@ -199,6 +240,21 @@ function getNaisteraEndpoint(settings) {
 function trimTrailingSlash(url) {
     return String(url || '').trim().replace(/\/$/, '');
 }
+
+const ROUTMY_DEFAULT_ENDPOINT = 'https://api.rout.my';
+
+const ROUTMY_IMAGE_MODELS = [
+    { id: 'google/gemini-3.1-flash-image-preview', label: 'Gemini 3.1 Flash Image' },
+    { id: 'openai/gpt-image-1.5', label: 'GPT Image 1.5' },
+    { id: 'openai/gpt-image-2', label: 'GPT Image 2' },
+    { id: 'x-ai/grok-imagine-image', label: 'Grok Imagine Image' },
+    { id: 'x-ai/grok-imagine-image-pro', label: 'Grok Imagine Image Pro' },
+];
+
+const ROUTMY_ASPECT_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'];
+const ROUTMY_IMAGE_SIZES = ['1K', '2K', '4K'];
+
+export { ROUTMY_IMAGE_MODELS, ROUTMY_ASPECT_RATIOS, ROUTMY_IMAGE_SIZES };
 
 function getOpenAIImageGenerationUrl(endpoint) {
     const normalized = trimTrailingSlash(endpoint);
@@ -390,6 +446,138 @@ async function generateImageNaistera(prompt, options, settings) {
     return result.data_url;
 }
 
+async function generateImageRoutMy(prompt, options, settings) {
+    const base = trimTrailingSlash(ROUTMY_DEFAULT_ENDPOINT);
+    const model = settings.routmyModel || 'google/gemini-3.1-flash-image-preview';
+
+    let fullPrompt = options.style ? `[Style: ${options.style}] ${prompt}` : prompt;
+
+    const referenceImages = [];
+    if (options.charAvatar) referenceImages.push(options.charAvatar);
+    if (options.userAvatar) referenceImages.push(options.userAvatar);
+    if (options.additionalRefs?.length) referenceImages.push(...options.additionalRefs);
+    if (options.previousImages?.length) referenceImages.push(...options.previousImages);
+
+    if (referenceImages.length > 0) {
+        fullPrompt = `[CRITICAL: The reference image(s) above show the EXACT appearance of the character(s). You MUST precisely copy their: face structure, eye color, hair color and style, skin tone, body type, clothing, and all distinctive features. Do not deviate from the reference appearances.]\n\n${fullPrompt}`;
+    }
+
+    let aspectRatio = options.aspectRatio || settings.routmyAspectRatio || '1:1';
+    if (!ROUTMY_ASPECT_RATIOS.includes(aspectRatio)) aspectRatio = '1:1';
+
+    let imageSize = options.imageSize || settings.routmyImageSize || '1K';
+    if (!ROUTMY_IMAGE_SIZES.includes(imageSize)) imageSize = '1K';
+
+    const isGemini = model.startsWith('google/');
+
+    if (isGemini) {
+        return generateImageRoutMyGemini(base, model, fullPrompt, aspectRatio, imageSize, referenceImages, settings);
+    }
+    return generateImageRoutMyOpenAI(base, model, fullPrompt, aspectRatio, imageSize, referenceImages, settings);
+}
+
+async function generateImageRoutMyOpenAI(base, model, fullPrompt, aspectRatio, imageSize, referenceImages, settings) {
+    const url = `${base}/v1/images/generations`;
+
+    let size;
+    if (aspectRatio === '16:9') size = '1792x1024';
+    else if (aspectRatio === '9:16') size = '1024x1792';
+    else if (aspectRatio === '2:3') size = '768x1152';
+    else if (aspectRatio === '3:2') size = '1152x768';
+    else size = '1024x1024';
+
+    const body = {
+        model,
+        prompt: fullPrompt,
+        n: 1,
+        size,
+        quality: settings.routmyQuality || 'standard',
+        response_format: 'b64_json',
+    };
+
+    if (referenceImages?.length) {
+        body.image = referenceImages[0];
+    }
+
+    const response = await fetchWithTimeout(url, {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${settings.routmyApiKey}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+    }, 300000);
+
+    if (!response.ok) {
+        const txt = await response.text().catch(() => '');
+        throw new Error(`API Error (${response.status}): ${txt.slice(0, 300)}`);
+    }
+
+    const result = await response.json();
+    const dataList = result.data || [];
+    if (!dataList.length) throw new Error('No image data in response');
+
+    const imageObj = dataList[0];
+    if (imageObj.b64_json) return `data:image/png;base64,${imageObj.b64_json}`;
+    if (imageObj.url) return imageObj.url;
+    throw new Error('No image in response');
+}
+
+async function generateImageRoutMyGemini(base, model, fullPrompt, aspectRatio, imageSize, referenceImages, settings) {
+    const url = `${base}/v1/chat/completions`;
+
+    const content = [];
+    if (referenceImages?.length) {
+        for (const dataUrl of referenceImages) {
+            const commaIdx = dataUrl.indexOf(',');
+            if (commaIdx === -1) continue;
+            const meta = dataUrl.slice(5, commaIdx);
+            const mimeType = meta.split(';')[0] || 'image/png';
+            const base64Data = dataUrl.slice(commaIdx + 1);
+            content.push({ type: 'image_url', image_url: { url: `data:${mimeType};base64,${base64Data}` } });
+        }
+    }
+    content.push({ type: 'text', text: fullPrompt });
+
+    const body = {
+        model,
+        messages: [{ role: 'user', content }],
+        modalities: ['image', 'text'],
+        image_config: { aspect_ratio: aspectRatio, image_size: imageSize, quality: settings.routmyQuality || 'standard' },
+    };
+
+    const response = await fetchWithTimeout(url, {
+        method: 'POST',
+        headers: {
+            'Authorization': `Bearer ${settings.routmyApiKey}`,
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+    }, 300000);
+
+    if (!response.ok) {
+        const txt = await response.text().catch(() => '');
+        throw new Error(`API Error (${response.status}): ${txt.slice(0, 300)}`);
+    }
+
+    const result = await response.json();
+    const message = result.choices?.[0]?.message;
+    if (!message) throw new Error('No message in response');
+
+    if (message.images?.length) {
+        const imgUrl = message.images[0].image_url?.url;
+        if (imgUrl) return imgUrl;
+    }
+
+    if (message.content && typeof message.content === 'object') {
+        for (const part of (Array.isArray(message.content) ? message.content : [message.content])) {
+            if (part.type === 'image_url' && part.image_url?.url) return part.image_url.url;
+        }
+    }
+
+    throw new Error('No image in rout.my response');
+}
+
 /**
  * Generate image from instruction object { prompt, style, aspectRatio, imageSize, quality }
  * context: { charAvatar?, userAvatar? } — data URLs for reference images (naistera)
@@ -399,7 +587,8 @@ export async function generateImage(instruction, context = {}) {
     const settings = getImageGenSettings();
 
     if (!settings.apiKey) throw new Error('Image API key not configured');
-    if (settings.apiType !== 'naistera' && !settings.endpoint) throw new Error('Image endpoint not configured');
+    if (settings.apiType !== 'naistera' && settings.apiType !== 'routmy' && !settings.endpoint) throw new Error('Image endpoint not configured');
+    if (settings.apiType === 'routmy' && !settings.routmyApiKey) throw new Error('rout.my API key not configured');
     if (settings.apiType === 'openai' && !settings.model) throw new Error('Image model not configured');
     if (settings.apiType === 'gemini' && !settings.model) throw new Error('Image model not configured');
 
@@ -424,7 +613,15 @@ export async function generateImage(instruction, context = {}) {
         options.additionalRefs = matched.map(r => r.imageData).filter(Boolean);
     }
 
+    if (settings.apiType === 'routmy') {
+        if (settings.routmySendCharAvatar && context.charAvatar) options.charAvatar = context.charAvatar;
+        if (settings.routmySendUserAvatar && context.userAvatar) options.userAvatar = context.userAvatar;
+        const matched = getMatchedAdditionalReferences(prompt, settings.routmyAdditionalRefs);
+        options.additionalRefs = matched.map(r => r.imageData).filter(Boolean);
+    }
+
     if (settings.apiType === 'naistera') return generateImageNaistera(prompt, options, settings);
+    if (settings.apiType === 'routmy') return generateImageRoutMy(prompt, options, settings);
     if (settings.apiType === 'gemini') return generateImageGemini(prompt, options, settings);
     return generateImageOpenAI(prompt, options, settings);
 }
@@ -488,6 +685,16 @@ export async function checkImageGenConnection() {
         const base = (settings.endpoint || NAISTERA_DEFAULT_ENDPOINT).replace(/\/$/, '');
         const response = await fetchWithTimeout(base, {}, 10000);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    } else if (settings.apiType === 'routmy') {
+        const base = trimTrailingSlash(ROUTMY_DEFAULT_ENDPOINT);
+        const url = `${base}/v1/models`;
+        const response = await fetchWithTimeout(url, {
+            headers: { 'Authorization': `Bearer ${settings.routmyApiKey}` },
+        }, 10000);
+        if (!response.ok) {
+            const txt = await response.text().catch(() => '');
+            throw new Error(`HTTP ${response.status}: ${txt.slice(0, 200)}`);
+        }
     }
 }
 
@@ -511,7 +718,10 @@ function getPlaceholderAspectRatio() {
         const [w, h] = (s.size || '1024x1024').split('x').map(Number);
         return `${w} / ${h}`;
     }
-    const arStr = s.apiType === 'naistera' ? (s.naisteraAspectRatio || '1:1') : (s.aspectRatio || '1:1');
+    let arStr;
+    if (s.apiType === 'naistera') arStr = s.naisteraAspectRatio || '1:1';
+    else if (s.apiType === 'routmy') arStr = s.routmyAspectRatio || '1:1';
+    else arStr = s.aspectRatio || '1:1';
     const [w, h] = arStr.split(':').map(Number);
     return `${w} / ${h}`;
 }

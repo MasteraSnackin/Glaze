@@ -5,7 +5,7 @@ import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import HelpTip from '@/components/ui/HelpTip.vue';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
-import { getImageGenSettings, saveImageGenSettings, fetchImageModels, saveAdditionalReferences, checkImageGenConnection } from '@/core/services/imageGenService.js';
+import { getImageGenSettings, saveImageGenSettings, fetchImageModels, saveAdditionalReferences, saveRoutmyAdditionalRefs, checkImageGenConnection, ROUTMY_IMAGE_MODELS, ROUTMY_ASPECT_RATIOS, ROUTMY_IMAGE_SIZES } from '@/core/services/imageGenService.js';
 import ConnectionStatus from '@/components/ui/ConnectionStatus.vue';
 
 const sheet = ref(null);
@@ -44,6 +44,8 @@ function scheduleCheck() {
 // Additional references
 const refImageInput = ref(null);
 const pendingRefIndex = ref(-1);
+const routmyRefImageInput = ref(null);
+const pendingRoutmyRefIndex = ref(-1);
 
 const open = () => {
     settings.value = getImageGenSettings();
@@ -61,7 +63,7 @@ watch(settings, save, { deep: true });
 
 // Re-check connection when connectivity-relevant fields change
 watch(
-    () => [settings.value.apiType, settings.value.endpoint, settings.value.apiKey, settings.value.enabled],
+    () => [settings.value.apiType, settings.value.endpoint, settings.value.apiKey, settings.value.routmyApiKey, settings.value.enabled],
     ([, , , enabled]) => { if (enabled) scheduleCheck(); else { apiStatus.value = 'idle'; errorMessage.value = ''; } }
 );
 
@@ -82,6 +84,7 @@ const onFetchModels = async () => {
 const showGeminiOptions = computed(() => settings.value.apiType === 'gemini');
 const showOpenAIOptions = computed(() => settings.value.apiType === 'openai');
 const showNaisteraOptions = computed(() => settings.value.apiType === 'naistera');
+const showRoutmyOptions = computed(() => settings.value.apiType === 'routmy');
 
 // Dropdown selectors via bottom sheet
 const openModelSelector = () => {
@@ -99,6 +102,7 @@ const openApiTypeSelector = () => {
         { label: 'OpenAI', value: 'openai' },
         { label: 'Gemini', value: 'gemini' },
         { label: 'Naistera', value: 'naistera' },
+        { label: 'rout.my', value: 'routmy' },
     ];
     showBottomSheet({
         title: t('imggen_api_type') || 'API Type',
@@ -109,6 +113,9 @@ const openApiTypeSelector = () => {
                 settings.value.apiType = o.value;
                 if (o.value === 'naistera' && !settings.value.endpoint) {
                     settings.value.endpoint = 'https://naistera.org';
+                }
+                if (o.value === 'routmy') {
+                    settings.value.endpoint = 'https://api.rout.my';
                 }
                 closeBottomSheet();
             }
@@ -176,6 +183,80 @@ const openNaisteraModelSelector = () => {
             onClick: () => { settings.value.naisteraModel = v; closeBottomSheet(); }
         }))
     });
+};
+
+const openRoutmyModelSelector = () => {
+    showBottomSheet({
+        title: t('imggen_model') || 'Model',
+        items: ROUTMY_IMAGE_MODELS.map(m => ({
+            label: m.label,
+            sublabel: settings.value.routmyModel === m.id ? (t('preset_active') || 'Active') : '',
+            onClick: () => { settings.value.routmyModel = m.id; closeBottomSheet(); }
+        }))
+    });
+};
+
+const openRoutmyResolutionSelector = () => {
+    showBottomSheet({
+        title: t('imggen_image_size') || 'Resolution',
+        items: ROUTMY_IMAGE_SIZES.map(v => ({
+            label: v,
+            sublabel: settings.value.routmyImageSize === v ? (t('preset_active') || 'Active') : '',
+            onClick: () => { settings.value.routmyImageSize = v; closeBottomSheet(); }
+        }))
+    });
+};
+
+const openRoutmyQualitySelector = () => {
+    showBottomSheet({
+        title: t('imggen_quality') || 'Quality',
+        items: ['standard', 'hd'].map(v => ({
+            label: v === 'hd' ? 'HD' : 'Standard',
+            sublabel: settings.value.routmyQuality === v ? (t('preset_active') || 'Active') : '',
+            onClick: () => { settings.value.routmyQuality = v; closeBottomSheet(); }
+        }))
+    });
+};
+
+const openRoutmyRefMatchModeSelector = (i) => {
+    showBottomSheet({
+        title: 'Match Mode',
+        items: ['match', 'always'].map(v => ({
+            label: v,
+            sublabel: settings.value.routmyAdditionalRefs[i]?.matchMode === v ? (t('preset_active') || 'Active') : '',
+            onClick: () => { settings.value.routmyAdditionalRefs[i].matchMode = v; closeBottomSheet(); }
+        }))
+    });
+};
+
+const addRoutmyRef = () => {
+    if (settings.value.routmyAdditionalRefs.length >= 8) return;
+    settings.value.routmyAdditionalRefs.push({ name: '', imageData: '', matchMode: 'match' });
+};
+
+const removeRoutmyRef = (i) => {
+    settings.value.routmyAdditionalRefs.splice(i, 1);
+};
+
+const pickRoutmyRefImage = (i) => {
+    pendingRoutmyRefIndex.value = i;
+    routmyRefImageInput.value?.click();
+};
+
+const onRoutmyRefImageSelected = (e) => {
+    const file = e.target.files?.[0];
+    if (!file || pendingRoutmyRefIndex.value < 0) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+        const idx = pendingRoutmyRefIndex.value;
+        if (idx >= 0 && idx < settings.value.routmyAdditionalRefs.length) {
+            settings.value.routmyAdditionalRefs[idx].imageData = ev.target.result;
+            saveRoutmyAdditionalRefs(settings.value.routmyAdditionalRefs);
+        }
+        pendingRoutmyRefIndex.value = -1;
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
 };
 
 const openRefMatchModeSelector = (i) => {
@@ -251,7 +332,7 @@ defineExpose({ open });
                 <!-- Connection -->
                 <ConnectionStatus :status="apiStatus" :error-message="errorMessage" @retry="checkConnection">
                     <div class="preset-selector" @click="openApiTypeSelector">
-                        <span>{{ settings.apiType === 'openai' ? 'OpenAI' : settings.apiType === 'gemini' ? 'Gemini' : 'Naistera' }}</span>
+                        <span>{{ settings.apiType === 'openai' ? 'OpenAI' : settings.apiType === 'gemini' ? 'Gemini' : settings.apiType === 'routmy' ? 'rout.my' : 'Naistera' }}</span>
                         <svg viewBox="0 0 24 24" style="width: 20px; height: 20px; fill: currentColor;"><path d="M7 10l5 5 5-5z"/></svg>
                     </div>
                 </ConnectionStatus>
@@ -270,8 +351,8 @@ defineExpose({ open });
                         </span>
                     </a>
 
-                    <!-- Endpoint -->
-                    <div class="settings-item">
+                    <!-- Endpoint (hidden for rout.my — pre-configured) -->
+                    <div v-if="!showRoutmyOptions" class="settings-item">
                         <label>{{ t('imggen_endpoint') || 'Endpoint URL' }}</label>
                         <input
                             type="text"
@@ -281,13 +362,24 @@ defineExpose({ open });
                         >
                     </div>
 
-                    <!-- API Key -->
-                    <div class="settings-item">
+                    <!-- API Key (non-routmy) -->
+                    <div v-if="!showRoutmyOptions" class="settings-item">
                         <label>{{ t('imggen_api_key') || 'API Key' }}</label>
                         <input
                             type="password"
                             v-model="settings.apiKey"
                             :placeholder="showNaisteraOptions ? 'Telegram bot token' : 'sk-...'"
+                            autocomplete="off"
+                        >
+                    </div>
+
+                    <!-- rout.my API Key -->
+                    <div v-if="showRoutmyOptions" class="settings-item">
+                        <label>{{ t('imggen_api_key') || 'API Key' }}</label>
+                        <input
+                            type="password"
+                            v-model="settings.routmyApiKey"
+                            placeholder="sk-..."
                             autocomplete="off"
                         >
                     </div>
@@ -341,6 +433,15 @@ defineExpose({ open });
                         >
                     </div>
 
+                    <!-- rout.my model selector -->
+                    <div v-if="showRoutmyOptions" class="settings-item selector-row" @click="openRoutmyModelSelector">
+                        <label>{{ t('imggen_model') || 'Model' }}</label>
+                        <div class="selector-value">
+                            <span>{{ ROUTMY_IMAGE_MODELS.find(m => m.id === settings.routmyModel)?.label || settings.routmyModel }}</span>
+                            <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                        </div>
+                    </div>
+
                     <!-- OpenAI size & quality -->
                     <template v-if="showOpenAIOptions">
                         <div class="settings-item selector-row" @click="openSizeSelector">
@@ -385,6 +486,31 @@ defineExpose({ open });
                             <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
                         </div>
                     </div>
+
+                    <!-- rout.my aspect ratio, resolution & quality -->
+                    <template v-if="showRoutmyOptions">
+                        <div class="settings-item selector-row" @click="openAspectRatioSelector('routmyAspectRatio', ROUTMY_ASPECT_RATIOS)">
+                            <label>{{ t('imggen_aspect_ratio') || 'Aspect Ratio' }}</label>
+                            <div class="selector-value">
+                                <span>{{ settings.routmyAspectRatio || '1:1' }}</span>
+                                <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                            </div>
+                        </div>
+                        <div class="settings-item selector-row" @click="openRoutmyResolutionSelector">
+                            <label>{{ t('imggen_image_size') || 'Resolution' }}</label>
+                            <div class="selector-value">
+                                <span>{{ settings.routmyImageSize || '1K' }}</span>
+                                <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                            </div>
+                        </div>
+                        <div class="settings-item selector-row" @click="openRoutmyQualitySelector">
+                            <label>{{ t('imggen_quality') || 'Quality' }}</label>
+                            <div class="selector-value">
+                                <span>{{ settings.routmyQuality === 'hd' ? 'HD' : 'Standard' }}</span>
+                                <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                            </div>
+                        </div>
+                    </template>
                 </div>
 
                 <!-- Naistera references (not supported by NovelAI model) -->
@@ -463,6 +589,80 @@ defineExpose({ open });
                             accept="image/*"
                             style="display: none"
                             @change="onRefImageSelected"
+                        >
+                    </div>
+                </template>
+
+                <!-- rout.my Reference Images -->
+                <template v-if="showRoutmyOptions">
+                    <div class="menu-group">
+                        <div class="section-header">
+{{ t('imggen_refs') || 'Reference Images' }}
+</div>
+
+                        <div class="settings-item-checkbox">
+                            <div class="settings-text-col">
+                                <label>{{ t('imggen_send_char_avatar') || 'Send character avatar' }}</label>
+                                <div class="settings-desc">
+{{ t('imggen_send_char_avatar_desc') || 'Use character\'s avatar as visual reference' }}
+</div>
+                            </div>
+                            <input type="checkbox" v-model="settings.routmySendCharAvatar" class="vk-switch">
+                        </div>
+
+                        <div class="settings-item-checkbox">
+                            <div class="settings-text-col">
+                                <label>{{ t('imggen_send_user_avatar') || 'Send persona avatar' }}</label>
+                                <div class="settings-desc">
+{{ t('imggen_send_user_avatar_desc') || 'Use active persona\'s avatar as visual reference' }}
+</div>
+                            </div>
+                            <input type="checkbox" v-model="settings.routmySendUserAvatar" class="vk-switch">
+                        </div>
+                    </div>
+
+                    <div class="menu-group">
+                        <div class="section-header section-header-flex">
+                            <span>{{ t('imggen_additional_refs') || 'Additional References' }}</span>
+                            <span class="refs-count">{{ settings.routmyAdditionalRefs.length }}/8</span>
+                        </div>
+
+                        <div v-for="(ref, i) in settings.routmyAdditionalRefs" :key="'rm'+i" class="settings-item ref-row">
+                            <button
+                                class="ref-img-btn"
+                                :class="{ 'has-image': !!ref.imageData }"
+                                @click="pickRoutmyRefImage(i)"
+                            >
+                                <img v-if="ref.imageData" :src="ref.imageData" class="ref-thumb">
+                                <svg v-else viewBox="0 0 24 24"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
+                            </button>
+                            <input
+                                class="ref-name-input"
+                                type="text"
+                                v-model="ref.name"
+                                placeholder="keyword"
+                            >
+                            <div class="ref-mode-btn" @click="openRoutmyRefMatchModeSelector(i)">
+                                <span>{{ ref.matchMode || 'match' }}</span>
+                                <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                            </div>
+                            <button class="remove-ref-btn" @click="removeRoutmyRef(i)">
+                                <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                            </button>
+                        </div>
+
+                        <button
+                            v-if="settings.routmyAdditionalRefs.length < 8"
+                            class="add-ref-btn"
+                            @click="addRoutmyRef"
+                        >+ {{ t('imggen_add_ref') || 'Add reference' }}</button>
+
+                        <input
+                            ref="routmyRefImageInput"
+                            type="file"
+                            accept="image/*"
+                            style="display: none"
+                            @change="onRoutmyRefImageSelected"
                         >
                     </div>
                 </template>
