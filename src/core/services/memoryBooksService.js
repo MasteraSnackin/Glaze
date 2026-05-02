@@ -469,12 +469,17 @@ export function parseMemoryDraftResponse(rawText, fallbackKeys = []) {
 
     for (const line of lines) {
         const trimmed = line.trim();
-        
-        if (trimmed.startsWith('TITLE:')) {
-            title = trimmed.substring(6).trim();
-        } else if (trimmed.startsWith('KEYS:')) {
-            const keyString = trimmed.substring(5).trim();
+        const upperTrimmed = trimmed.toUpperCase();
+
+        if (upperTrimmed.startsWith('TITLE:')) {
+            title = trimmed.substring(trimmed.indexOf(':') + 1).trim();
+        } else if (upperTrimmed.startsWith('KEYS:')) {
+            const keyString = trimmed.substring(trimmed.indexOf(':') + 1).trim();
             keys = parseMemoryKeyInput(keyString);
+        } else if (upperTrimmed.startsWith('MEMORY:')) {
+            inContent = true;
+            const rest = trimmed.substring(trimmed.indexOf(':') + 1).trim();
+            if (rest) content = rest;
         } else if (trimmed === 'CONTENT:') {
             inContent = true;
         } else if (inContent && trimmed) {
@@ -482,7 +487,6 @@ export function parseMemoryDraftResponse(rawText, fallbackKeys = []) {
         }
     }
 
-    // Fallback to raw text if parsing failed
     if (!content && rawText.length > 20) {
         content = rawText;
     }

@@ -522,8 +522,20 @@ export function useMemoryBooks(deps) {
         reconcileSessionMemoryState(chatData, sessionId, currentMessages);
         chatData.sessions[sessionId] = currentMessages;
         await db.saveChat(activeChatChar.id, chatData);
-        await indexMemoryEntryIfNeeded(approvedEntry, activeChatChar.id, sessionId);
-        
+        try {
+            await indexMemoryEntryIfNeeded(approvedEntry, activeChatChar.id, sessionId);
+        } catch (e) {
+            console.warn('[memory] Embedding index failed for approved draft:', e?.message || e);
+            if (approvedEntry.vectorSearch) {
+                approvedEntry.vectorSearch = false;
+                await db.patchChatData(activeChatChar.id, (data) => {
+                    const mb = data.memoryBooks?.[sessionId];
+                    const entry = mb?.entries?.find(en => en.id === approvedEntry.id);
+                    if (entry) entry.vectorSearch = false;
+                });
+            }
+        }
+
         await updatePendingMemoryMessageIds(activeChatChar);
         await loadCurrentMemoryBook(activeChatChar);
         setTimeout(() => memoryBooksSheet.value?.open(), 50);
