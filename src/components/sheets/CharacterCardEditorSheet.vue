@@ -1,6 +1,6 @@
 <!-- src/components/sheets/CharacterCardEditorSheet.vue -->
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, computed, watch } from 'vue';
 import SheetView from '@/components/ui/SheetView.vue';
 import Editor from '@/components/editors/GenericEditor.vue';
 import { translations } from '@/utils/i18n.js';
@@ -9,6 +9,20 @@ import { db } from '@/utils/db.js';
 import { publishAppEvent } from '@/core/events/eventHub.js';
 import { APP_EVENTS } from '@/core/events/eventNames.js';
 import HelpTip from '@/components/ui/HelpTip.vue';
+
+const props = defineProps({
+    visible: Boolean,
+    item: Object,
+    charData: Object,
+    avatarUrl: String
+});
+
+const emit = defineEmits(['update:visible', 'import']);
+
+watch(() => props.visible, (val) => {
+    if (val) open(props.charData || props.item);
+    else close();
+});
 
 const sheet = ref(null);
 const character = ref({});
@@ -72,7 +86,7 @@ defineExpose({ open, close });
 </script>
 
 <template>
-    <SheetView ref="sheet" :title="t('block_char_card')">
+    <SheetView ref="sheet" :title="t('block_char_card')" @close="emit('update:visible', false)">
         <template #header-title>
             <HelpTip term="character" />
         </template>
