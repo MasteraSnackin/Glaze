@@ -101,6 +101,11 @@ src/
 - `estimateTokens(text)` — Uses GPTTokenizer with base64 media stripping
 - Stripping prevents embedded images from inflating token counts
 
+**Token Count in ChatMessage.vue:**
+- `tokenCount` computed always applies `applyRegexes(..., ephemerality=2)` (prompt-only) to the message text before estimating
+- This ensures the displayed per-message token count accounts for regex stripping that will happen during actual prompt building
+- Previously conditioned on `combinedMessageData.regexes` which only contained ephemerality=1 (both) regexes, missing prompt-only stripping
+
 **Context Calculation (`generationWorker.js`):**
 - `calculateContext()` — Computes token breakdown by source:
   - `character` — Character card content
@@ -667,6 +672,7 @@ Composable directory listing and per-phase decomposition details: `docs/refactor
 **UI Composables:**
 - `src/composables/ui/useSidebarResizer.js` — desktop sidebar resize logic
 - `src/composables/ui/useSheetGestures.js` — sheet gesture handling
+- `src/composables/chat/useSelectionAutoScroll.js` — mobile text selection auto-scroll near viewport edges, uses `isProgrammaticScrolling` guard to avoid `pointer-events: none` on messages during scroll
 
 ---
 

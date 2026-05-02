@@ -60,6 +60,7 @@ import { createNewSession as dbCreateSession, deleteSession as dbDeleteSession, 
 import { lorebookState, getActiveLorebooksForContext } from '@/core/states/lorebookState.js';
 import { presetState, getEffectivePreset, getEffectivePresetId } from '@/core/states/presetState.js';
 import { useVirtualScroll } from '@/composables/chat/useVirtualScroll.js';
+import { useSelectionAutoScroll } from '@/composables/chat/useSelectionAutoScroll.js';
 import { useGenerationRegistry } from '@/composables/chat/useGenerationRegistry.js';
 import { useTypingStateCleanup } from '@/composables/chat/useTypingStateCleanup.js';
 import { useSidebarResizer } from '@/composables/ui/useSidebarResizer.js';
@@ -452,6 +453,8 @@ const { visibleItems, paddingTop, paddingBottom, refresh: refreshVirtualScroll, 
     buffer: isBatterySaverUI.value ? 28 : 75,
     estimateHeight: 100
 });
+
+useSelectionAutoScroll(messagesContainer, isProgrammaticScrolling);
 
 const {
     asyncSaveCurrentSessionState,
