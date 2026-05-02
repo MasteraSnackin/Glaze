@@ -540,3 +540,35 @@
     opacity: 0;
     transform: scale(0.85);
 }
+
+/* Spinner for Loading Data */
+.dl-spinner {
+    width: 32px;
+    height: 32px;
+    border: 3px solid rgba(255, 255, 255, 0.1);
+    border-radius: 50%;
+    border-top-color: var(--vk-blue);
+    animation: dl-spin 0.8s linear infinite;
+    margin-bottom: 12px;
+}
+
+@keyframes dl-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.collapsed-spinner {
+    display: flex;
+    justify-content: center;
+    padding: 12px 0;
+}
+
+.dl-spinner-mini {
+    width: 20px;
+    height: 20px;
+    border: 2px solid rgba(255, 255, 255, 0.1);
+    border-radius: 50%;
+    border-top-color: var(--vk-blue);
+    animation: dl-spin 0.8s linear infinite;
+}
