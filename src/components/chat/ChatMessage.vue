@@ -220,12 +220,10 @@ const tokenCount = computed(() => {
     if (raw === 0) return 0;
     const text = props.message.text;
     if (!text) return raw;
-    const regexes = combinedMessageData.value.regexes;
-    const hasRegexStripped = regexes && regexes.length > 0;
-    if (!hasRegexStripped) return raw;
-    const macroed = replaceMacros(text, props.activeChatChar, getEffectivePersona(props.activeChatChar?.id, props.activeChatChar?.sessionId));
+    const effPersona = getEffectivePersona(props.activeChatChar?.id, props.activeChatChar?.sessionId);
+    const macroed = replaceMacros(text, props.activeChatChar, effPersona);
     const depth = props.totalMessages > 0 ? props.totalMessages - 1 - props.index : undefined;
-    const stripped = applyRegexes(macroed, props.message.role === 'user' ? 1 : 2, 2, { charId: props.activeChatChar?.id, sessionId: props.activeChatChar?.sessionId, char: props.activeChatChar, persona: getEffectivePersona(props.activeChatChar?.id, props.activeChatChar?.sessionId), depth });
+    const stripped = applyRegexes(macroed, props.message.role === 'user' ? 1 : 2, 2, { charId: props.activeChatChar?.id, sessionId: props.activeChatChar?.sessionId, char: props.activeChatChar, persona: effPersona, depth });
     if (stripped === macroed) return raw;
     return estimateTokens(stripped);
 });
