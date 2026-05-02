@@ -92,7 +92,15 @@ export function useSessionPersistence({
                 }
                 if (charContext.summary !== undefined) {
                     if (!data.summaries) data.summaries = {};
-                    data.summaries[sessionId] = charContext.summary;
+                    let currentSum = data.summaries[sessionId];
+                    if (typeof currentSum === 'string') {
+                        currentSum = { content: currentSum, depth: 4, role: 'system', insertion_mode: 'relative', prefix: 'Summary: ' };
+                    } else if (!currentSum) {
+                        currentSum = { content: '', depth: 4, role: 'system', insertion_mode: 'relative', prefix: 'Summary: ' };
+                    }
+                    if (currentSum.content !== charContext.summary) {
+                        data.summaries[sessionId] = { ...currentSum, content: charContext.summary };
+                    }
                 }
             });
             savePromise.then(() => clearCrashBuffer(charContext.id, sessionId)).catch(() => {});
@@ -155,7 +163,15 @@ export function useSessionPersistence({
                 }
                 if (summary !== undefined) {
                     if (!data.summaries) data.summaries = {};
-                    data.summaries[sessionId] = summary;
+                    let currentSum = data.summaries[sessionId];
+                    if (typeof currentSum === 'string') {
+                        currentSum = { content: currentSum, depth: 4, role: 'system', insertion_mode: 'relative', prefix: 'Summary: ' };
+                    } else if (!currentSum) {
+                        currentSum = { content: '', depth: 4, role: 'system', insertion_mode: 'relative', prefix: 'Summary: ' };
+                    }
+                    if (currentSum.content !== summary) {
+                        data.summaries[sessionId] = { ...currentSum, content: summary };
+                    }
                 }
             });
             savePromise.then(() => clearCrashBuffer(charId, sessionId)).catch(() => {});

@@ -1432,7 +1432,7 @@ onMounted(() => {
     unsubChatSearchToggle = subscribeAppEvent(APP_EVENTS.ui.chatSearchToggle, ({ detail }) => onChatSearchToggle({ detail }));
     unsubRegexChanged = subscribeAppEvent(APP_EVENTS.domain.lorebook.regexScriptsChanged, onRegexChanged);
     unsubChatSearch = subscribeAppEvent(APP_EVENTS.ui.chatSearch, ({ detail }) => onChatSearch({ detail }));
-    unsubApiContextChanged = subscribeAppEvent(APP_EVENTS.domain.settings.apiContextChanged, updateContextCutoff);
+    unsubApiContextChanged = subscribeAppEvent(APP_EVENTS.domain.settings.apiContextChanged, () => { invalidateContextCache(); updateContextCutoff(); });
     unsubSettingsChanged = subscribeAppEvent(APP_EVENTS.domain.settings.changed, restartVisibleGenerationTimers);
     unsubSyncDataRefreshed = subscribeAppEvent(APP_EVENTS.domain.sync.dataRefreshed, () => loadChats());
 });
