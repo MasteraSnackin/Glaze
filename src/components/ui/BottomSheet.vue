@@ -6,7 +6,7 @@ import { hideKeyboard, showKeyboard, applyKeyboardOverlap, onKeyboardShow, onKey
 import { translations, t } from '@/utils/i18n.js';
 import HelpTip from '@/components/ui/HelpTip.vue';
 import { bottomSheetState } from '@/core/states/bottomSheetState.js';
-import { getLastClickPosition } from '@/core/states/DesktopPopupState.js';
+import { getLastClickPosition } from '@/core/states/desktopPopupState.js';
 import { sidebarState, setSidebarOccupied } from '@/core/states/sidebarState.js';
 import { APP_EVENTS } from '@/core/events/eventNames.js';
 import { publishAppEvent } from '@/core/events/eventHub.js';

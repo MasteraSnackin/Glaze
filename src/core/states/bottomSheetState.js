@@ -1,7 +1,7 @@
 import { ref } from 'vue';
 import { Capacitor } from '@capacitor/core';
 import { hideKeyboard } from '@/core/services/keyboardHandler.js';
-import { showDesktopPopup, getLastClickPosition } from '@/core/states/DesktopPopupState.js';
+import { showDesktopPopup, getLastClickPosition } from '@/core/states/desktopPopupState.js';
 
 export const bottomSheetState = ref({
     visible: false,

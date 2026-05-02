@@ -1,6 +1,6 @@
 <script setup>
 import { watch, ref, computed, nextTick } from 'vue';
-import { DesktopPopupState, closeDesktopPopup, getLastClickPosition } from '@/core/states/DesktopPopupState.js';
+import { DesktopPopupState, closeDesktopPopup, getLastClickPosition } from '@/core/states/desktopPopupState.js';
 
 const props = defineProps({
     visible: { type: Boolean, default: undefined },

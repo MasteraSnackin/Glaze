@@ -4,7 +4,7 @@ import SheetView from '@/components/ui/SheetView.vue';
 import DesktopPopup from '@/components/ui/DesktopPopup.vue';
 import HelpTip from '@/components/ui/HelpTip.vue';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
-import { getLastClickPosition } from '@/core/states/DesktopPopupState.js';
+import { getLastClickPosition } from '@/core/states/desktopPopupState.js';
 import { lorebookState, setLorebookActivation } from '@/core/states/lorebookState.js';
 import { presetState, setPresetConnection } from '@/core/states/presetState.js';
 import { personaConnections, setPersonaConnection, activePersona, loadPersonas } from '@/core/states/personaState.js';
