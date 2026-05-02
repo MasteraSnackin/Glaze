@@ -799,6 +799,79 @@ export async function upload(path, data) {
     }
 }
 
+export async function uploadBinary(path, arrayBuffer) {
+    if (!arrayBuffer) return null;
+    const { parentId, fileName } = await resolvePathToParent(path);
+    const existingFile = await findFileByName(fileName, parentId);
+    const accessToken = await getValidAccessToken();
+    if (!accessToken) throw new Error('Not connected to Google Drive');
+
+    if (existingFile) {
+        const response = await safeUploadFetch(
+            `${UPLOAD_BASE}/files/${existingFile.id}?uploadType=media&supportsAllDrives=true`,
+            {
+                method: 'PATCH',
+                headers: {
+                    'Authorization': `Bearer ${accessToken}`,
+                    'Content-Type': 'application/octet-stream'
+                },
+                body: arrayBuffer
+            }
+        );
+        if (!response.ok) throw new Error(`Binary upload failed ${response.status}`);
+        return response.json();
+    }
+
+    const metadata = { name: fileName, parents: [parentId] };
+    const boundary = 'glaze_boundary_' + generateRandomString(16);
+    const metaPart = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n`;
+    const binaryBlob = new Blob([arrayBuffer]);
+    const multipartBody = new Blob([
+        new TextEncoder().encode(metaPart),
+        new TextEncoder().encode(`--${boundary}\r\nContent-Type: application/octet-stream\r\n\r\n`),
+        binaryBlob,
+        new TextEncoder().encode(`\r\n--${boundary}--`)
+    ]);
+
+    const response = await safeUploadFetch(
+        `${UPLOAD_BASE}/files?uploadType=multipart&fields=id&supportsAllDrives=true`,
+        {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'Content-Type': `multipart/related; boundary=${boundary}`
+            },
+            body: multipartBody
+        }
+    );
+    if (!response.ok) throw new Error(`Binary upload failed ${response.status}`);
+    return response.json();
+}
+
+export async function downloadBinary(path, _retry = false) {
+    const { parentId, fileName } = await resolvePathToParent(path);
+    const file = await findFileByName(fileName, parentId);
+
+    if (!file) {
+        if (!_retry && parentId === folderIdCache) {
+            invalidateGlazeFolderCache();
+            return downloadBinary(path, true);
+        }
+        return null;
+    }
+
+    const response = await apiRequest(
+        `${API_BASE}/files/${file.id}?alt=media&supportsAllDrives=true`
+    );
+
+    if (!response.ok) {
+        if (response.status === 404) return null;
+        throw new Error(`Binary download failed ${response.status}`);
+    }
+
+    return response.arrayBuffer();
+}
+
 export async function download(path, _retry = false) {
     const { parentId, fileName } = await resolvePathToParent(path);
     const file = await findFileByName(fileName, parentId);
