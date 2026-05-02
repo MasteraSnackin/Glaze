@@ -343,11 +343,7 @@ const cardTokens = computed(() => props.contextBreakdown?.character || 0);
 
 const personaTokens = computed(() => props.contextBreakdown?.persona || 0);
 
-const generationTokens = computed(() => {
-    const prompt = getLastRequestPreviewSnapshot().prompt;
-    if (!prompt || !prompt.messages) return 0;
-    return prompt.messages.reduce((acc, m) => acc + estimateTokens(m.content), 0);
-});
+const generationTokens = computed(() => props.contextBreakdown?.actualPromptTokens || 0);
 
 const imageGenEnabled = computed(() => getImageGenSettings().enabled);
 
