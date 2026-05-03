@@ -1,4 +1,3 @@
-import { getEffectivePreset } from '@/core/states/presetState.js';
 import { applyRegexes } from '@/core/services/regexService.js';
 
 export function cleanText(text) {
@@ -6,18 +5,46 @@ export function cleanText(text) {
     return text.trim();
 }
 
+const FORMAT_CACHE_MAX = 500;
+const _formatCache = new Map();
+let _formatCacheGeneration = 0;
+
+export function invalidateFormatCache() {
+    _formatCache.clear();
+    _formatCacheGeneration++;
+}
+
 export function formatText(text, isUser = false, options = {}) {
     if (!text) return "";
 
-    const { charId, sessionId, char, persona, triggeredRegexes } = options;
+    const { charId, sessionId, char, persona, triggeredRegexes, depth } = options;
+
+    const cacheKey = `${isUser ? 1 : 0}|${charId || ''}|${sessionId || ''}|${depth ?? ''}|${_formatCacheGeneration}|${text}`;
+    if (_formatCache.has(cacheKey)) {
+        const cached = _formatCache.get(cacheKey);
+        if (triggeredRegexes && cached.triggeredIds) {
+            for (const id of cached.triggeredIds) {
+                if (!triggeredRegexes.some(r => r.id === id)) {
+                    triggeredRegexes.push({ id, _cached: true });
+                }
+            }
+        }
+        return cached.html;
+    }
+
+    const triggeredIds = [];
 
     // Remove leading/trailing line breaks
     text = cleanText(text);
 
-    // Apply Regex Scripts (Before HTML formatting, simulating ST behavior)
-    // 1 corresponds to User Input, 2 corresponds to AI Output
-    // 1 corresponds to Alter Chat Display (ephemerality)
-    text = applyRegexes(text, isUser ? 1 : 2, 1, { charId, sessionId, char, persona, triggeredRegexes });
+    const cacheRegexes = [];
+    text = applyRegexes(text, isUser ? 1 : 2, 1, { charId, sessionId, char, persona, triggeredRegexes: cacheRegexes, depth });
+    for (const r of cacheRegexes) {
+        triggeredIds.push(r.id);
+        if (triggeredRegexes && !triggeredRegexes.some(x => x.id === r.id)) {
+            triggeredRegexes.push(r);
+        }
+    }
 
     // 1. Allow HTML (No escaping)
     let html = text;
@@ -96,14 +123,41 @@ export function formatText(text, isUser = false, options = {}) {
 
     // 5. Quotes -> Blue
     // Regex matches all block placeholders, Quotes preceded by = (to skip), OR Quotes (to color)
-    const quoteRegex = /(__[A-Z_]+_\d+__)|(=[ \t]*"(?:[^"]|\\")*?")|("((?:[^"]|\\")*?)"|“((?:[^”])*?)”|«((?:[^»])*?)»)/g;
+    const quoteRegex = /(__[A-Z_]+_\d+__)|(=[ \t]*"(?:[^"]|\\")*?")|("((?:[^"]|\\")*?)"|"((?:[^"]|\\")*?)"|«((?:[^»])*?)»)/g;
     html = html.replace(quoteRegex, (match, placeholder, skipQuote) => {
-        if (placeholder) return placeholder; // Return placeholder unchanged
-        if (skipQuote) return skipQuote; // Return quotes preceded by = unchanged
+        if (placeholder) return placeholder;
+        if (skipQuote) return skipQuote;
         return `<span class="chat-quote">${match}</span>`;
     });
 
+    // Unclosed quotes during streaming: opening quote with no closing quote
+    // Matches " or « or \u201C at end of text (streaming delta) without a matching closer
+    html = html.replace(/([ \t])("(?:[^"\\]|\\.)*?)$/gm, (fullMatch, prefix, unclosed) => {
+        return `${prefix}<span class="chat-quote">${unclosed}</span>`;
+    });
+    html = html.replace(/^(("(?:[^"\\]|\\.)*?))$/gm, (fullMatch, unclosed) => {
+        return `<span class="chat-quote">${unclosed}</span>`;
+    });
+    html = html.replace(/([ \t])(\u201C(?:[^\u201D])*?)$/gm, (fullMatch, prefix, unclosed) => {
+        return `${prefix}<span class="chat-quote">${unclosed}</span>`;
+    });
+    html = html.replace(/^(\u201C(?:[^\u201D])*?)$/gm, (fullMatch, unclosed) => {
+        return `<span class="chat-quote">${unclosed}</span>`;
+    });
+    html = html.replace(/([ \t])(\u00AB(?:[^\u00BB])*?)$/gm, (fullMatch, prefix, unclosed) => {
+        return `${prefix}<span class="chat-quote">${unclosed}</span>`;
+    });
+    html = html.replace(/^(\u00AB(?:[^\u00BB])*?)$/gm, (fullMatch, unclosed) => {
+        return `<span class="chat-quote">${unclosed}</span>`;
+    });
+
     // 4. Markdown Parsing (in order of precedence)
+    // Blockquote: > text at start of line
+    html = html.replace(/^>\s?(.*)$/gm, '<blockquote class="chat-blockquote">$1</blockquote>');
+
+    // Collapse consecutive blockquotes into one
+    html = html.replace(/<\/blockquote>\n*<blockquote class="chat-blockquote">/g, '<br>');
+
     // Horizontal Rule on its own line
     html = html.replace(/^(_{3,}|-{3,}|\*{3,})$/gm, '<hr>');
 
@@ -204,6 +258,12 @@ export function formatText(text, isUser = false, options = {}) {
         // If unclosed, we might want to add a cursor or just leave as is
         return content;
     });
+
+    if (_formatCache.size >= FORMAT_CACHE_MAX) {
+        const firstKey = _formatCache.keys().next().value;
+        _formatCache.delete(firstKey);
+    }
+    _formatCache.set(cacheKey, { html, triggeredIds });
 
     return html;
 }

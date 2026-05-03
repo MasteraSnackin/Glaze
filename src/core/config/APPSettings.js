@@ -1,3 +1,4 @@
+import { Capacitor } from '@capacitor/core';
 import { ref } from 'vue';
 import { logger } from '../../utils/logger.js';
 
@@ -24,6 +25,24 @@ export const disableSwipeRegeneration = ref(localStorage.getItem('gz_disable_swi
 export function setDisableSwipeRegeneration(value) {
     disableSwipeRegeneration.value = value;
     localStorage.setItem('gz_disable_swipe_regeneration', value);
+}
+
+export const forceMobileLayout = ref(localStorage.getItem('gz_force_mobile_layout') === 'true');
+
+export function setForceMobileLayout(value) {
+    forceMobileLayout.value = value;
+    localStorage.setItem('gz_force_mobile_layout', value);
+}
+
+export const batterySaverUI = ref(localStorage.getItem('gz_battery_saver_ui') === 'true');
+
+export function setBatterySaverUI(value) {
+    batterySaverUI.value = value;
+    localStorage.setItem('gz_battery_saver_ui', value);
+}
+
+export function shouldUseBatterySaverUI() {
+    return batterySaverUI.value;
 }
 
 export const hideMessageId = ref(localStorage.getItem('gz_hide_msg_id') === 'true');
@@ -60,4 +79,16 @@ export const dialogGrouping = ref(localStorage.getItem('gz_dialog_grouping') ===
 export function setDialogGrouping(value) {
     dialogGrouping.value = value;
     localStorage.setItem('gz_dialog_grouping', value);
+}
+
+export const chatMaxWidth = ref(parseInt(localStorage.getItem('gz_chat_max_width') || '0', 10));
+export function setChatMaxWidth(value) {
+    chatMaxWidth.value = value;
+    localStorage.setItem('gz_chat_max_width', value);
+}
+
+export const appToastPosition = ref(localStorage.getItem('gz_app_toast_position') === 'top' ? 'top' : 'bottom');
+export function setAppToastPosition(value) {
+    appToastPosition.value = value === 'top' ? 'top' : 'bottom';
+    localStorage.setItem('gz_app_toast_position', appToastPosition.value);
 }

@@ -4,6 +4,8 @@ import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import HelpTip from '@/components/ui/HelpTip.vue';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
+import { publishAppEvent } from '@/core/events/eventHub.js';
 
 const props = defineProps({
     modelValue: { type: Object, required: true },
@@ -215,7 +217,7 @@ function openFsEditor(field, index = -1) {
     emit('open-fs', payload);
     
     // Dispatch global event for App.vue to catch
-    window.dispatchEvent(new CustomEvent('open-fs-request', { detail: payload }));
+    publishAppEvent(APP_EVENTS.nav.openFsRequest, payload);
 }
 
 function openSelectSelector(field) {
@@ -243,17 +245,21 @@ function getSelectedLabel(field) {
 </script>
 
 <template>
-    <div class="view active-view editor-container">
+    <div class="editor-container">
         <div class="editor-content">
             <!-- Avatar Section (Redesigned as a window/card) -->
             <div class="menu-group avatar-card" v-if="showAvatar" @click="triggerAvatarUpload">
                 <div class="avatar-wrapper">
-                    <div class="avatar-header-overlay">{{ t('avatar') || 'Avatar' }}</div>
+                    <div class="avatar-header-overlay">
+{{ t('avatar') || 'Avatar' }}
+</div>
                     <img v-if="displayAvatar" :src="displayAvatar" class="avatar-img">
                     <div v-else class="avatar-placeholder">
                         {{ (item.name || "?")[0].toUpperCase() }}
                     </div>
-                    <div class="avatar-overlay-hint">{{ t('hint_change_avatar') }}</div>
+                    <div class="avatar-overlay-hint">
+{{ t('hint_change_avatar') }}
+</div>
                 </div>
                 <input type="file" ref="avatarInput" accept="image/*" style="display: none;" @change="handleAvatarChange">
             </div>
@@ -261,7 +267,9 @@ function getSelectedLabel(field) {
             <!-- Dynamic Sections -->
             <template v-for="(section, sIdx) in config" :key="sIdx">
                 <div class="menu-group">
-                    <div class="group-header" v-if="section.title">{{ t(section.title) || section.title }}</div>
+                    <div class="group-header" v-if="section.title">
+{{ t(section.title) || section.title }}
+</div>
                     
                 <div v-for="(field, fIdx) in section.fields" :key="fIdx" class="settings-item">
                     
@@ -270,7 +278,9 @@ function getSelectedLabel(field) {
                             {{ t(field.label) || field.label }}
                             <HelpTip v-if="field.helpTerm" :term="field.helpTerm" />
                         </label> 
-                        <div v-if="field.expandable" class="expand-btn" @click="openFsEditor(field.key)"><svg viewBox="0 0 24 24"><path d="M15 3l2.3 2.3-2.89 2.87 1.42 1.42L18.7 6.7 21 9V3zM3 9l2.3-2.3 2.87 2.89 1.42-1.42L6.7 5.3 9 3H3zm6 12l-2.3-2.3 2.89-2.87-1.42-1.42L5.3 17.3 3 15v6zm12-6l-2.3 2.3-2.87-2.89-1.42 1.42 2.89 2.87L15 21h6z"/></svg></div>
+                        <div v-if="field.expandable" class="expand-btn" @click="openFsEditor(field.key)">
+<svg viewBox="0 0 24 24"><path d="M15 3l2.3 2.3-2.89 2.87 1.42 1.42L18.7 6.7 21 9V3zM3 9l2.3-2.3 2.87 2.89 1.42-1.42L6.7 5.3 9 3H3zm6 12l-2.3-2.3 2.89-2.87-1.42-1.42L5.3 17.3 3 15v6zm12-6l-2.3 2.3-2.87-2.89-1.42 1.42 2.89 2.87L15 21h6z"/></svg>
+</div>
                     </div>
                     <label v-else-if="field.type !== 'greeting_list'">
                         {{ t(field.label) || field.label }}
@@ -290,7 +300,7 @@ function getSelectedLabel(field) {
                     <div v-else-if="field.type === 'greeting_list'" class="greeting-list-container">
                         <div v-for="(greet, gIdx) in allGreetings" :key="gIdx" class="greeting-item">
                             <div class="greeting-header">
-                                <span class="greeting-label">{{ gIdx === 0 ? (t('label_first_mes') || 'First Message') : '#' + gIdx }}</span>
+                                <span class="greeting-label">#{{ gIdx + 1 }}</span>
                                 <div class="greeting-actions">
                                     <div class="action-btn" @click="openFsEditor('first_mes', gIdx)">
                                         <svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>

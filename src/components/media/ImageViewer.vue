@@ -1,8 +1,58 @@
 <script setup>
-import { ref, computed, nextTick, watch } from 'vue';
-import { useViewer } from '@/composables/media/useViewer.js';
+import { ref, computed, nextTick, watch, onMounted, onBeforeUnmount } from 'vue';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
+import { subscribeAppEvent } from '@/core/events/eventHub.js';
 
-const { visible, src: imgSrc, description, close, onAfterLeave } = useViewer('open-image-viewer');
+const visible = ref(false);
+const imgSrc = ref('');
+const description = ref('');
+let onCloseCallback = null;
+
+const close = () => {
+    visible.value = false;
+};
+
+const onAfterLeave = () => {
+    if (onCloseCallback) onCloseCallback();
+    onCloseCallback = null;
+    imgSrc.value = '';
+    description.value = '';
+};
+
+const openViewer = (detail) => {
+    imgSrc.value = detail.src;
+    description.value = detail.description || '';
+    onCloseCallback = detail.onCloseCallback;
+    visible.value = true;
+};
+
+const onWheel = (e) => {
+    if (!visible.value) return;
+    e.preventDefault();
+    const zoomFactor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+    const newScale = Math.max(1, Math.min(scale * zoomFactor, 5));
+    if (containerRef.value) {
+        const rect = containerRef.value.getBoundingClientRect();
+        const mx = e.clientX - rect.left - rect.width / 2;
+        const my = e.clientY - rect.top - rect.height / 2;
+        const ratio = newScale / scale;
+        pointX = mx - (mx - pointX) * ratio;
+        pointY = my - (my - pointY) * ratio;
+    }
+    scale = newScale;
+    if (scale <= 1) { scale = 1; pointX = 0; pointY = 0; }
+    updateTransform();
+};
+
+let unsubImageViewer;
+onMounted(() => {
+    unsubImageViewer = subscribeAppEvent(APP_EVENTS.nav.openImageViewer, ({ detail }) => openViewer(detail));
+    window.addEventListener('wheel', onWheel, { passive: false });
+});
+onBeforeUnmount(() => {
+    unsubImageViewer?.();
+    window.removeEventListener('wheel', onWheel);
+});
 const containerRef = ref(null);
 const imgRef = ref(null);
 
@@ -24,6 +74,36 @@ let startPointX = 0;
 let startPointY = 0;
 let isInteracting = false;
 let lastTap = 0;
+
+// Mouse drag (desktop pan)
+let isMouseDragging = false;
+let mouseDragStartX = 0;
+let mouseDragStartY = 0;
+
+const onMouseDown = (e) => {
+    if (e.button !== 0) return;
+    isMouseDragging = true;
+    mouseDragStartX = e.clientX - pointX;
+    mouseDragStartY = e.clientY - pointY;
+    if (containerRef.value) containerRef.value.style.cursor = 'grabbing';
+    e.preventDefault();
+};
+
+const onMouseMove = (e) => {
+    if (!isMouseDragging) return;
+    const dx = e.clientX - mouseDragStartX;
+    const dy = e.clientY - mouseDragStartY;
+    if (Math.abs(dx - pointX) > 2 || Math.abs(dy - pointY) > 2) isInteracting = true;
+    pointX = dx;
+    pointY = dy;
+    updateTransform();
+};
+
+const onMouseUp = (e) => {
+    if (!isMouseDragging) return;
+    isMouseDragging = false;
+    if (containerRef.value) containerRef.value.style.cursor = scale > 1 ? 'grab' : 'default';
+};
 
 const updateTransform = () => {
     if (imgRef.value) {
@@ -55,8 +135,6 @@ const handleCloseClick = (e) => {
 
 const handleOverlayClick = () => {
     if (isInteracting) { isInteracting = false; return; }
-    if (scale > 1.1) return; // Don't close if zoomed in
-    closeViewer();
 };
 
 // Touch Handlers
@@ -130,9 +208,11 @@ const onTouchEnd = (e) => {
 };
 
 const onContainerClick = (e) => {
+    // Double-tap zoom only for touch events, not mouse clicks
+    const isTouch = typeof e.changedTouches !== 'undefined';
     const cur = new Date().getTime();
     const tapLen = cur - lastTap;
-    if (tapLen < 300 && tapLen > 0) {
+    if (isTouch && tapLen < 300 && tapLen > 0) {
         e.preventDefault();
         e.stopPropagation();
         if (scale > 1) resetZoom();
@@ -150,7 +230,7 @@ const onContainerClick = (e) => {
                 setTimeout(() => { if(imgRef.value) imgRef.value.style.transition = 'transform 0.1s ease-out'; }, 300);
             }
         }
-    } else if (promptText.value) {
+    } else if (promptText.value && !isTouch) {
         e.stopPropagation();
         promptVisible.value = !promptVisible.value;
     }
@@ -179,11 +259,17 @@ watch(visible, (newVal) => {
                     @touchmove.prevent="onTouchMove"
                     @touchend="onTouchEnd"
                     @click="onContainerClick"
+                    @mousedown="onMouseDown"
+                    @mousemove="onMouseMove"
+                    @mouseup="onMouseUp"
+                    @mouseleave="onMouseUp"
                 >
                     <img ref="imgRef" class="image-viewer-img" :src="imgSrc" alt="Full view">
                 </div>
                 <Transition name="prompt-fade">
-                    <div v-if="promptText && promptVisible" class="image-viewer-prompt" @click.stop>{{ promptText }}</div>
+                    <div v-if="promptText && promptVisible" class="image-viewer-prompt" @click.stop>
+{{ promptText }}
+</div>
                 </Transition>
                 <div id="image-viewer-close-btn" class="close-btn-trigger" @click="handleCloseClick" style="position: absolute; top: calc(20px + var(--sat)); right: 20px; z-index: 20020; width: 44px; height: 44px; cursor: pointer; background: rgba(0,0,0,0.5); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
                     <svg viewBox="0 0 24 24" style="width:24px;height:24px;fill:white;"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>

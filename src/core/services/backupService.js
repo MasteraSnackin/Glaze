@@ -7,7 +7,7 @@ import { db } from '@/utils/db.js';
 
 
 const DB_NAME = 'SillyCradleDB';
-const DB_VERSION = 5;
+const DB_VERSION = 8;
 const STORE_KEYVALUE = 'keyvalue';
 const STORE_CHARACTERS = 'characters';
 const STORE_PERSONAS = 'personas';
@@ -22,7 +22,7 @@ export async function exportFullBackupAsync() {
 
         const workerCode = `
             const DB_NAME = 'SillyCradleDB';
-            const DB_VERSION = 5;
+            const DB_VERSION = 8;
             const STORE_KEYVALUE = 'keyvalue';
             const STORE_CHARACTERS = 'characters';
             const STORE_PERSONAS = 'personas';
@@ -107,7 +107,7 @@ export async function importFullBackupAsync(jsonString) {
     return new Promise((resolve, reject) => {
         const workerCode = `
             const DB_NAME = 'SillyCradleDB';
-            const DB_VERSION = 5;
+            const DB_VERSION = 8;
             const STORE_KEYVALUE = 'keyvalue';
             const STORE_CHARACTERS = 'characters';
             const STORE_PERSONAS = 'personas';
@@ -191,6 +191,16 @@ export async function importFullBackupAsync(jsonString) {
                         localStorage.setItem(key, value);
                     }
                 }
+                const keysToRemove = [];
+                for (let i = 0; i < localStorage.length; i++) {
+                    const key = localStorage.key(i);
+                    if (key && key.startsWith('gz_chat_recovery_')) {
+                        keysToRemove.push(key);
+                    }
+                }
+                keysToRemove.forEach(key => localStorage.removeItem(key));
+                localStorage.setItem('gz_skip_sync_pull', Date.now().toString());
+                localStorage.setItem('gz_backup_restored', Date.now().toString());
                 resolve();
             } else {
                 reject(new Error(e.data.error));

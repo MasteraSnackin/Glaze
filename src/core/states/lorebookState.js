@@ -1,27 +1,47 @@
 import { reactive, watch } from 'vue';
 import { db } from '@/utils/db.js';
 
-function escapeRegex(string) {
-    return string.replace(/[/\-\\^$*+?.()|[\]{}]/g, '\\$&');
-}
+export { scanLorebooks } from '@/core/services/lorebookSearchService.js';
+export { vectorSearchLorebooks } from '@/core/services/lorebookVectorSearch.js';
+export {
+    indexLorebookEntry,
+    indexLorebookEntries,
+    getEmbeddingRecord,
+    getEmbeddingStatus,
+    isLorebookEmbeddingFresh,
+    deleteLorebookEntryEmbedding,
+    deleteLorebookEmbeddings,
+    getEntryIndexingText,
+    computeTextHash,
+    buildEmbeddingFingerprint
+} from '@/core/services/lorebookEmbeddingService.js';
 
 // --- State Definition ---
 export const lorebookState = reactive({
     lorebooks: [],
     globalSettings: {
-        scanDepth: 1000,
+        scanDepth: 10,
+        maxInjectedEntries: 5,
         contextPercent: 100,
         budgetCap: 0,
+        reserveMode: 'percent',
+        reserveValue: 10,
         minActivations: 0,
         maxDepth: 0,
         maxRecursionSteps: 0,
-        insertionStrategy: 'character_first', // character_first, global_first
+        insertionStrategy: 'character_first',
+        injectionPosition: 'worldInfoBefore',
         includeNames: true,
         recursiveScan: true,
         caseSensitive: false,
         matchWholeWords: false,
         useGroupScoring: false,
-        alertOnOverflow: false
+        alertOnOverflow: false,
+        searchType: 'keys',
+        embeddingTarget: 'content',
+        vectorThreshold: 0.45,
+        vectorTopK: 10,
+        keywordVectorSplit: 50
     },
     activations: {
         character: {},
@@ -32,17 +52,42 @@ export const lorebookState = reactive({
 
 // --- Actions ---
 
-export async function initLorebookState() {
-    if (lorebookState.initialized) return;
+export async function initLorebookState(force = false) {
+    if (lorebookState.initialized && !force) return;
     try {
         const data = await db.get('gz_lorebooks');
+        lorebookState.lorebooks = [];
+        lorebookState.activations = { character: {}, chat: {} };
         if (data) {
             if (Array.isArray(data)) {
                 lorebookState.lorebooks = data;
             } else if (data.lorebooks) {
-                // New format with settings
                 lorebookState.lorebooks = data.lorebooks;
                 if (data.settings) {
+                    if (data.settings.reserveMode === undefined) {
+                        data.settings.reserveMode = 'percent';
+                    }
+                    if (data.settings.reserveValue === undefined) {
+                        const legacyBudget = Number(data.settings.budgetCap || 0);
+                        const legacyPercent = Number(data.settings.contextPercent || 0);
+                        const effectivePercent = legacyPercent >= 100 ? 10 : Math.max(legacyPercent, 10);
+                        data.settings.reserveValue = legacyBudget > 0 ? legacyBudget : effectivePercent;
+                        if (legacyBudget <= 0 && legacyPercent > 0) {
+                            data.settings.reserveMode = 'percent';
+                        }
+                    }
+                    if (data.settings.reserveValue >= 100 &&
+                        data.settings.reserveMode === 'percent' &&
+                        (!data.settings.budgetCap || Number(data.settings.budgetCap) === 0) &&
+                        Number(data.settings.contextPercent || 0) >= 100) {
+                        data.settings.reserveValue = 10;
+                    }
+                    if (!data.settings.injectionPosition) {
+                        data.settings.injectionPosition = 'worldInfoBefore';
+                    }
+                    if (!Number.isFinite(Number(data.settings.maxInjectedEntries)) || Number(data.settings.maxInjectedEntries) <= 0) {
+                        data.settings.maxInjectedEntries = 5;
+                    }
                     Object.assign(lorebookState.globalSettings, data.settings);
                 }
                 if (data.activations) {
@@ -50,7 +95,6 @@ export async function initLorebookState() {
                 }
             }
 
-            // Ensure every entry has a stable ID (backfill for older data)
             lorebookState.lorebooks.forEach(lb => {
                 if (!Array.isArray(lb.entries)) return;
                 lb.entries.forEach(entry => {
@@ -59,6 +103,7 @@ export async function initLorebookState() {
                     }
                     if (entry.position === 0) entry.position = 'worldInfoBefore';
                     if (entry.position === 1) entry.position = 'worldInfoAfter';
+                    if (!entry.position) entry.position = 'matchGlobal';
                 });
             });
         }
@@ -76,7 +121,6 @@ export async function saveLorebooks() {
     });
 }
 
-// Auto-save on changes with debounce to prevent rapid IndexedDB writes on keystroke
 let _lorebookSaveTimer = null;
 watch(() => lorebookState, () => {
     if (_lorebookSaveTimer) clearTimeout(_lorebookSaveTimer);
@@ -86,7 +130,6 @@ watch(() => lorebookState, () => {
     }, 500);
 }, { deep: true });
 
-// Call when closing the lorebook editor to flush any pending debounced save
 export function flushLorebookSave() {
     if (_lorebookSaveTimer) {
         clearTimeout(_lorebookSaveTimer);
@@ -101,7 +144,7 @@ export function createLorebook(name = 'New World Info') {
         name,
         entries: [],
         enabled: true,
-        insertion_order: 100, // SillyTavern default
+        insertion_order: 100,
     };
     lorebookState.lorebooks.push(newLb);
     return newLb;
@@ -135,213 +178,25 @@ export function setLorebookActivation(lbId, scope, targetId) {
         if (idx === -1) list.push(lbId);
         else list.splice(idx, 1);
     }
-    // Watcher handles saving
 }
 
 export function getActiveLorebooksForContext(charId, chatId) {
     return lorebookState.lorebooks
         .filter(lb => {
-            if (lb.enabled) return true; // Global
-            if (charId && lorebookState.activations?.character?.[charId]?.includes(lb.id)) return true; // Character
-            if (chatId && lorebookState.activations?.chat?.[chatId]?.includes(lb.id)) return true; // Chat
+            if (lb.enabled) return true;
+            if (charId && lorebookState.activations?.character?.[charId]?.includes(lb.id)) return true;
+            if (chatId && lorebookState.activations?.chat?.[chatId]?.includes(lb.id)) return true;
             return false;
         })
         .map(lb => lb.name);
 }
 
-/**
- * Scans history for keywords in enabled lorebooks.
- * Handles recursion and advanced ST logic.
- */
-export function scanLorebooks(history = [], char = null, textToScan = "", chatId = null) {
-    const charId = char?.id;
-
-    const activeLorebooks = lorebookState.lorebooks.filter(lb => {
-        if (lb.enabled) return true; // Global
-        if (charId && lorebookState.activations?.character?.[charId]?.includes(lb.id)) return true; // Character
-        if (chatId && lorebookState.activations?.chat?.[chatId]?.includes(lb.id)) return true; // Chat
-        return false;
-    });
-
-    if (activeLorebooks.length === 0) return [];
-
-    let allRelevantEntries = [];
-
-    // 1. Get all entries from active lorebooks
-    let candidates = [];
-    activeLorebooks.forEach(lb => {
-        lb.entries.forEach(entry => {
-            if (entry.enabled !== false) {
-                // Character Filter check
-                if (char && entry.characterFilter) {
-                    const { isExclude, names } = entry.characterFilter;
-                    if (names && names.length > 0) {
-                        const charName = (char.name || "").toLowerCase();
-                        const isInCategory = names.some(n => charName.includes(n.toLowerCase()));
-                        if (isExclude && isInCategory) return; // Excluded
-                        if (!isExclude && !isInCategory) return; // Not in allowed list
-                    }
-                }
-                candidates.push({ ...entry, lorebookName: lb.name, lorebookId: lb.id });
-            }
-        });
-    });
-
-    // 2. Add Constant entries immediately
-    candidates.filter(e => e.constant).forEach(entry => {
-        if (!allRelevantEntries.some(e => e.id === entry.id)) {
-            allRelevantEntries.push(entry);
-        }
-    });
-
-    // 3. Scan Logic (with recursion support)
-    let changed = true;
-    let iteration = 0;
-    const maxIterations = (lorebookState.globalSettings.recursiveScan === false) ? 1 : 5;
-
-    while (changed && iteration < maxIterations) {
-        changed = false;
-        iteration++;
-
-        for (const entry of candidates) {
-            if (allRelevantEntries.some(e => e === entry)) continue;
-            if (entry.constant) continue; // Already added
-
-            const primaryKeys = entry.keys || [];
-            const secondaryKeys = (entry.secondary_keys || entry.keysecondary) || [];
-            const logic = entry.selectiveLogic ?? 5; // Default to Primary Only (5)
-
-            // Match settings
-            const caseSensitive = entry.caseSensitive ?? lorebookState.globalSettings.caseSensitive ?? false;
-            const wholeWords = entry.matchWholeWords ?? lorebookState.globalSettings.matchWholeWords ?? false;
-
-            const checkMatch = (key, text) => {
-                if (!key) return false;
-                const sourceText = `${text ?? ''}`;
-                const sourceKey = `${key}`;
-                let pattern = sourceKey;
-                if (wholeWords) {
-                    pattern = `\\b${pattern}\\b`;
-                }
-                const flags = caseSensitive ? '' : 'i';
-                try {
-                    const regex = new RegExp(pattern, flags);
-                    return regex.test(sourceText);
-                } catch (e) {
-                    // Prevent crashes on invalid/pathological patterns by using literal fallback.
-                    const haystack = caseSensitive ? sourceText : sourceText.toLowerCase();
-                    const needle = caseSensitive ? sourceKey : sourceKey.toLowerCase();
-                    if (!needle) return false;
-
-                    if (wholeWords) {
-                        const escaped = escapeRegex(needle);
-                        const wordRegex = new RegExp(`\\b${escaped}\\b`, caseSensitive ? '' : 'i');
-                        return wordRegex.test(haystack);
-                    }
-
-                    return haystack.includes(needle);
-                }
-            };
-
-            const scanDepth = entry.scanDepth ?? 1;
-            const messagesToScan = history.slice(-scanDepth).map(m => m.content).join("\n");
-
-            // Only scan generated text (textToScan) if recursive scan is enabled OR it's the first iteration (static scan)
-            // Wait, iteration 1 SHOULD scan textToScan (the current user input/last assistant message).
-            const scanSource = caseSensitive ?
-                (messagesToScan + textToScan) :
-                (messagesToScan.toLowerCase() + textToScan.toLowerCase());
-
-            // If recursiveScan is disabled, iteration 1 is enough. 
-            // In iteration 1, textToScan contains ONLY what was passed to scanLorebooks initially.
-            // In iteration 2+, textToScan contains added entry content.
-
-            // Temporal Logic (Simplified history-based check)
-            let isStickyActive = false;
-            let isOnCooldown = false;
-
-            if (entry.sticky > 0 || entry.cooldown > 0) {
-                // Scan history
-                for (let i = 1; i <= Math.max(entry.sticky || 0, entry.cooldown || 0); i++) {
-                    const histMsg = history[history.length - i];
-                    if (!histMsg) break;
-
-                    const histSource = caseSensitive ? histMsg.content : histMsg.content.toLowerCase();
-                    const wasMatched = primaryKeys.some(key => checkMatch(key, histSource));
-
-                    if (wasMatched) {
-                        if (i <= (entry.sticky || 0)) isStickyActive = true;
-                        if (i <= (entry.cooldown || 0)) isOnCooldown = true;
-                        break;
-                    }
-                }
-            }
-
-            if (isOnCooldown) continue;
-
-            // 1. Primary Keywords check (OR between keys)
-            const matchedPrimary = isStickyActive || primaryKeys.some(key => checkMatch(key, scanSource));
-
-            if (matchedPrimary) {
-                // 2. Secondary Keywords / Selective Logic
-                let secondaryMatches = true;
-
-                // Logic Mapping:
-                // 0: AND Any (At least one secondary must match)
-                // 1: AND All (ALL secondary must match)
-                // 2: NOT Any (None of secondary must match)
-                // 3: NOT All (Not ALL of secondary must match - i.e. at least one mismatch? Or NOT (ALL match))
-                // 4: Primary Only (Ignore secondary)
-
-                // If no secondary keys, AND/NOT logic behavior:
-                // ST behavior: if Logic is AND and no keys, usually it matches (vacuously true or fails? usually fails if requires match).
-                // Let's assume standard behavior:
-                // If input is empty, ignore logic unless strictly required?
-                // Actually, "Primary Only" means we skip this check.
-
-                if (logic === 4 || secondaryKeys.length === 0) {
-                    // Primary Only or no secondary keys - Always pass this stage
-                    secondaryMatches = true;
-                } else if (secondaryKeys.length > 0) {
-                    const matches = secondaryKeys.map(key => checkMatch(key, scanSource));
-                    const anyMatch = matches.some(m => m);
-                    const allMatch = matches.every(m => m);
-
-                    if (logic === 0) { // AND Any
-                        secondaryMatches = anyMatch;
-                    } else if (logic === 1) { // AND All
-                        secondaryMatches = allMatch;
-                    } else if (logic === 2) { // NOT Any (fail if ANY match)
-                        secondaryMatches = !anyMatch;
-                    } else if (logic === 3) { // NOT All (fail if ALL match)
-                        secondaryMatches = !allMatch;
-                    }
-                }
-
-                if (secondaryMatches) {
-                    // 3. Probability check
-                    if (entry.probability !== undefined && entry.probability < 100) {
-                        if (Math.random() * 100 > entry.probability) continue;
-                    }
-
-                    allRelevantEntries.push(entry);
-
-                    if (!entry.preventRecursion && iteration < maxIterations) {
-                        textToScan += "\n" + (entry.content || "").toLowerCase();
-                        changed = true;
-                    }
-                }
-            }
-        }
-    }
-
-    return allRelevantEntries.sort((a, b) => (a.order ?? 100) - (b.order ?? 100));
-}
-
-export async function importSTLorebook(json, fileName = 'Imported') {
+export async function importSTLorebook(json, fileName = 'Imported', options = {}) {
     try {
+        const { enabled = true, activationScope = null, activationTargetId = null } = options;
         let normalizedEntries = [];
         const entriesRaw = json.entries || [];
+        const glazeMetaEntries = json?.glazeMetadata?.entries || {};
 
         if (Array.isArray(entriesRaw)) {
             normalizedEntries = entriesRaw;
@@ -352,46 +207,72 @@ export async function importSTLorebook(json, fileName = 'Imported') {
         const newLb = {
             id: Date.now().toString(36) + Math.random().toString(36).substr(2, 5),
             name: json.name || fileName.replace('.json', ''),
-            enabled: true,
-            entries: normalizedEntries.map(entry => ({
-                id: entry.uid?.toString() || (Date.now() + Math.random()).toString(36),
-                keys: Array.isArray(entry.key) ? entry.key : (entry.key || '').split(',').map(k => k.trim()).filter(k => k),
-                content: entry.content || '',
-                enabled: entry.enabled !== false && entry.disable !== true,
-                secondary_keys: Array.isArray(entry.keysecondary) ? entry.keysecondary : (entry.keysecondary || '').split(',').map(k => k.trim()).filter(k => k),
-                comment: entry.comment || '',
-                order: entry.order !== undefined ? entry.order : 100,
-                probability: entry.probability !== undefined ? entry.probability : 100,
-                constant: entry.constant || false,
-                selectiveLogic: entry.selectiveLogic ?? 0,
-                matchWholeWords: entry.matchWholeWords ?? null,
-                caseSensitive: entry.caseSensitive ?? null,
-                useGroupScoring: entry.useGroupScoring ?? null,
-                scanDepth: entry.scanDepth,
-                position: (entry.position === 0) ? 'worldInfoBefore' : (entry.position === 1) ? 'worldInfoAfter' : (entry.position ?? 'worldInfoBefore'),
-                characterFilter: entry.characterFilter,
-                preventRecursion: entry.preventRecursion || false,
-                delayUntilRecursion: entry.delayUntilRecursion || false,
-                sticky: entry.sticky || 0,
-                cooldown: entry.cooldown || 0,
-                delay: entry.delay || 0,
-                group: entry.group || '',
-                groupProminence: entry.groupProminence || 100,
-                ignoreBudget: entry.ignoreBudget || false
-            }))
+            enabled,
+            entries: normalizedEntries.map((entry, index) => {
+                const rawKeys = entry.keys || entry.key || [];
+                const rawSecondary = entry.secondary_keys || entry.keysecondary || [];
+                const metadataPosition = glazeMetaEntries?.[index]?.position;
+                const restoredPosition = (metadataPosition === 'worldInfoBefore' || metadataPosition === 'worldInfoAfter' || metadataPosition === 'lorebooksMacro' || metadataPosition === 'matchGlobal')
+                    ? metadataPosition
+                    : null;
+                return {
+                    id: entry.uid?.toString() || (Date.now() + Math.random()).toString(36),
+                    keys: Array.isArray(rawKeys) ? rawKeys : String(rawKeys || '').split(',').map(k => k.trim()).filter(k => k),
+                    content: entry.content || '',
+                    enabled: entry.enabled !== false && entry.disable !== true,
+                    secondary_keys: Array.isArray(rawSecondary) ? rawSecondary : String(rawSecondary || '').split(',').map(k => k.trim()).filter(k => k),
+                    comment: entry.comment || '',
+                    order: entry.order !== undefined ? entry.order : 100,
+                    probability: entry.probability !== undefined ? entry.probability : 100,
+                    constant: entry.constant || false,
+                    selectiveLogic: entry.selectiveLogic ?? 0,
+                    matchWholeWords: entry.matchWholeWords ?? null,
+                    caseSensitive: entry.caseSensitive ?? null,
+                    useGroupScoring: entry.useGroupScoring ?? null,
+                    scanDepth: entry.scanDepth,
+                    position: restoredPosition || ((entry.position === 0)
+                        ? 'worldInfoBefore'
+                        : (entry.position === 1)
+                            ? 'worldInfoAfter'
+                            : ((entry.position === 'worldInfoBefore' || entry.position === 'worldInfoAfter' || entry.position === 'lorebooksMacro' || entry.position === 'matchGlobal') ? entry.position : 'matchGlobal')),
+                    characterFilter: entry.characterFilter,
+                    preventRecursion: entry.preventRecursion || false,
+                    delayUntilRecursion: entry.delayUntilRecursion || false,
+                    sticky: entry.sticky || 0,
+                    cooldown: entry.cooldown || 0,
+                    delay: entry.delay || 0,
+                    group: entry.group || '',
+                    groupProminence: entry.groupProminence || 100,
+                    ignoreBudget: entry.ignoreBudget || false
+                };
+            })
         };
 
         lorebookState.lorebooks.push(newLb);
+        if (activationScope === 'character' && activationTargetId) {
+            if (!lorebookState.activations.character) lorebookState.activations.character = {};
+            if (!lorebookState.activations.character[activationTargetId]) {
+                lorebookState.activations.character[activationTargetId] = [];
+            }
+            if (!lorebookState.activations.character[activationTargetId].includes(newLb.id)) {
+                lorebookState.activations.character[activationTargetId].push(newLb.id);
+            }
+        }
         return newLb;
     } catch (err) {
         throw new Error('Invalid SillyTavern Lorebook format: ' + err.message);
     }
 }
 
-// Exports
 export function exportSTLorebook(lorebook) {
     const entries = {};
+    const glazeMetadata = { entries: {} };
+    const globalInjectionPosition = lorebookState.globalSettings?.injectionPosition || 'worldInfoBefore';
     (lorebook.entries || []).forEach((entry, index) => {
+        const rawPosition = entry.position || 'matchGlobal';
+        const resolvedPosition = rawPosition === 'matchGlobal' ? globalInjectionPosition : rawPosition;
+        const stPosition = resolvedPosition === 'worldInfoAfter' ? 1 : 0;
+
         entries[index.toString()] = {
             uid: index,
             key: entry.keys || [],
@@ -401,7 +282,7 @@ export function exportSTLorebook(lorebook) {
             constant: entry.constant || false,
             selective: (entry.secondary_keys && entry.secondary_keys.length > 0),
             order: entry.order ?? 100,
-            position: (entry.position === 'worldInfoBefore') ? 0 : (entry.position === 'worldInfoAfter') ? 1 : (entry.position ?? 0),
+            position: stPosition,
             disable: entry.enabled === false,
             displayIndex: index,
             addMemo: true,
@@ -436,7 +317,11 @@ export function exportSTLorebook(lorebook) {
             triggers: [],
             ...(entry.characterFilter ? { characterFilter: entry.characterFilter } : {})
         };
+
+        glazeMetadata.entries[index.toString()] = {
+            position: rawPosition
+        };
     });
 
-    return { entries };
+    return { entries, glazeMetadata };
 }

@@ -1,424 +1,114 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue';
-import { normalizeEndpoint, fetchRemoteModels, getApiPresets, saveApiPresets, getApiConfig, getBlacklistedProvider } from '@/core/config/APISettings.js';
+import { publishAppEvent, subscribeAppEvent } from '@/core/events/eventHub.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
+import { getProviderProfiles, getActiveLLMProfile, setActiveLLMProfile } from '@/core/config/ProviderProfiles.js';
 import { updateLanguage, translations } from '@/utils/i18n.js';
-import { initRipple } from '@/core/services/ui.js';
+import { initRipple } from '@/core/services/interactionEffects.js';
 import { currentLang } from '@/core/config/APPSettings.js';
-import { showBottomSheet, closeBottomSheet, bottomSheetState } from '@/core/states/bottomSheetState.js';
+import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import SheetView from '@/components/ui/SheetView.vue';
 import HelpTip from '@/components/ui/HelpTip.vue';
 import ConnectionStatus from '@/components/ui/ConnectionStatus.vue';
+import { useApiSettings } from '@/composables/api/useApiSettings.js';
+import { useServiceProviders } from '@/composables/api/useServiceProviders.js';
+import { SERVICE_NAMES } from '@/core/config/ProviderProfiles.js';
+
+const props = defineProps({
+    viewMode: { type: Boolean, default: false }
+});
 
 const sheet = ref(null);
+
+function handleBack() {
+    if (props.viewMode) {
+        publishAppEvent(APP_EVENTS.nav.navigateTo, 'view-tools');
+    } else {
+        sheet.value?.close();
+    }
+}
 
 const headerState = reactive({
     title: '',
     actions: [],
 });
 
-// --- API Settings State ---
-const apiSettings = reactive({
-    endpoint: '',
-    key: '',
-    model: '',
-    maxTokens: 8000,
-    contextSize: 32000,
-    temp: 0.7,
-    topP: 0.9,
-    stream: true,
-    autoHideImages: false,
-    autoHideImagesN: 1,
-    reasoningEnabled: false,
-    reasoningEffort: 'medium'
+const TABS = [
+    { id: 'llm', label: 'LLM' },
+    { id: 'embedding', label: 'Embeddings' }
+];
+const activeTab = ref('llm');
+
+const tabSliderOffset = computed(() => {
+    const idx = TABS.findIndex((t) => t.id === activeTab.value);
+    return idx >= 0 ? idx * 100 : 0;
 });
 
-const showApiKey = ref(false);
+const providerProfiles = ref({});
+const activeLLMProfileId = ref('default');
 
-const errorMessage = ref('');
-const apiStatus = ref('idle'); // idle, connecting, connected, failed
-const availableModels = ref([]);
-const apiPresets = ref([]);
-const activeApiPresetId = ref('default');
-
-const activeApiPreset = computed(() => {
-    return apiPresets.value.find(p => p.id === activeApiPresetId.value) || apiPresets.value[0];
-});
-
-// --- Blacklist Warning ---
-let blacklistCountdownTimer = null;
-
-function showBlacklistWarning(providerName) {
-    if (blacklistCountdownTimer) clearInterval(blacklistCountdownTimer);
-    let countdown = 10;
-    showBottomSheet({
-        title: providerName,
-        locked: true,
-        bigInfo: {
-            icon: '<svg viewBox="0 0 24 24" style="fill:#ff9800"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>',
-            description: t('blacklist_warning_desc').replace('{providerName}', providerName),
-            glossaryChip: { term: 'api', hint: t('blacklist_glossary_hint') || 'Recommended providers are here:', label: t('blacklist_glossary_chip') || 'Providers' },
-            buttonText: `OK (${countdown})`,
-            buttonDisabled: true,
-            onButtonClick: closeBottomSheet
-        }
-    });
-    blacklistCountdownTimer = setInterval(() => {
-        countdown--;
-        if (bottomSheetState.value.bigInfo) {
-            bottomSheetState.value.bigInfo.buttonText = countdown > 0 ? `OK (${countdown})` : 'OK';
-            bottomSheetState.value.bigInfo.buttonDisabled = countdown > 0;
-        }
-        if (countdown <= 0) {
-            bottomSheetState.value.locked = false;
-            clearInterval(blacklistCountdownTimer);
-            blacklistCountdownTimer = null;
-        }
-    }, 1000);
+function loadProviderProfiles() {
+    providerProfiles.value = getProviderProfiles();
+    activeLLMProfileId.value = getActiveLLMProfile().id;
 }
 
-function loadApiSettings() {
-    apiSettings.endpoint = localStorage.getItem('api-endpoint') || '';
-    apiSettings.key = localStorage.getItem('api-key') || '';
-    apiSettings.model = localStorage.getItem('api-model') || '';
-    const mt = parseInt(localStorage.getItem('api-max-tokens'));
-    apiSettings.maxTokens = isNaN(mt) ? 8000 : mt;
-    apiSettings.contextSize = parseInt(localStorage.getItem('api-context')) || 32000;
-    apiSettings.temp = parseFloat(localStorage.getItem('gz_api_temp')) || 0.7;
-    apiSettings.topP = parseFloat(localStorage.getItem('gz_api_topp')) || 0.9;
-    apiSettings.stream = localStorage.getItem('gz_api_stream') === 'true';
-    apiSettings.autoHideImages = localStorage.getItem('gz_api_auto_hide_images') === 'true';
-    apiSettings.autoHideImagesN = parseInt(localStorage.getItem('gz_api_auto_hide_images_n') || '1', 10);
-    apiSettings.reasoningEnabled = localStorage.getItem('gz_api_request_reasoning') === 'true';
-    apiSettings.reasoningEffort = localStorage.getItem('gz_api_reasoning_effort') || 'medium';
-}
+const {
+    apiSettings,
+    showApiKey,
+    errorMessage,
+    apiStatus,
+    availableModels,
+    apiPresets,
+    activeApiPresetId,
+    activeApiPreset,
+    loadApiSettings,
+    onApiInput,
+    flushApiDebounce,
+    checkConnection,
+    openModelSelector,
+    openReasoningEffortSelector,
+    createNewApiPreset,
+    applyApiPreset,
+    confirmDeleteApiPreset,
+    openApiPresetOptions,
+    openApiPresetSelector,
+    getPresetIcon,
+    initPresets,
+    cleanup: cleanupApiSettings
+} = useApiSettings();
 
-function saveApiSetting(key, value) {
-    if (key === 'api-endpoint') {
-        const normalized = normalizeEndpoint(value);
-        localStorage.setItem('gz_api_endpoint_normalized', normalized);
-    }
-    localStorage.setItem(key, value);
-    
-    // Update current preset
-    if (activeApiPreset.value) {
-        const map = {
-            'api-endpoint': 'endpoint',
-            'api-key': 'key',
-            'api-model': 'model',
-            'api-max-tokens': 'max_tokens',
-            'api-context': 'context',
-            'gz_api_temp': 'temp',
-            'gz_api_topp': 'topp',
-            'gz_api_stream': 'stream',
-            'gz_api_auto_hide_images': 'auto_hide_images',
-            'gz_api_auto_hide_images_n': 'auto_hide_images_n',
-            'gz_api_request_reasoning': 'reasoning_enabled',
-            'gz_api_reasoning_effort': 'reasoning_effort'
-        };
-        if (map[key]) {
-            activeApiPreset.value[map[key]] = value;
-            saveApiPresets(apiPresets.value);
-        }
-    }
-}
+const {
+    embeddingSettings,
+    embeddingStatus,
+    embeddingDimension,
+    embeddingError,
+    imageGenSettings,
+    memoryProviderSettings,
+    onEmbeddingInput,
+    testEmbedding,
+    onImageGenInput,
+    onMemoryProviderInput,
+    loadAllServiceSettings,
+    openProviderSelector,
+    getActiveProfileMeta
+} = useServiceProviders();
 
-let debounceTimer = null;
-function onApiInput(key, value) {
-    saveApiSetting(key, value);
-    if (key === 'api-endpoint' || key === 'api-key') {
-        if (debounceTimer) clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(() => {
-            if (key === 'api-endpoint') {
-                const endpoint = localStorage.getItem('gz_api_endpoint_normalized') || value;
-                const blacklisted = getBlacklistedProvider(endpoint);
-                if (blacklisted) showBlacklistWarning(blacklisted.name);
-            }
-            checkConnection();
-        }, 1000);
-    }
-}
-
-function flushApiDebounce() {
-    if (debounceTimer) {
-        clearTimeout(debounceTimer);
-        debounceTimer = null;
-        checkConnection();
-    }
-}
-
-async function checkConnection() {
-    const endpoint = localStorage.getItem('gz_api_endpoint_normalized') || apiSettings.endpoint;
-
-    if (!endpoint) {
-        apiStatus.value = 'failed';
-        return;
-    }
-    
-    apiStatus.value = 'connecting';
-    try {
-        const models = await fetchRemoteModels(endpoint, apiSettings.key);
-        availableModels.value = models;
-        apiStatus.value = 'connected';
-    } catch (e) {
-        console.warn(e);
-        apiStatus.value = 'failed';
-        errorMessage.value = e.message || 'Connection failed';
-    }
-}
-
-function openModelSelector() {
-    const items = availableModels.value.length > 0 ? availableModels.value.map(m => ({
-        label: m,
-        onClick: () => {
-            apiSettings.model = m;
-            saveApiSetting('api-model', m);
-            closeBottomSheet();
-        }
-    })) : [{ label: t('no_models_found') || "No models found", onClick: closeBottomSheet }];
-
-    showBottomSheet({ title: "Select Model", items });
-}
-
-function openReasoningEffortSelector() {
-    const options = [
-        { value: 'low', label: t('reasoning_effort_low') || 'Low' },
-        { value: 'medium', label: t('reasoning_effort_medium') || 'Medium' },
-        { value: 'high', label: t('reasoning_effort_high') || 'High' }
-    ];
-
+function openOptionSelector({ title, options, currentValue, onSelect }) {
     const items = options.map(opt => ({
         label: opt.label,
-        icon: apiSettings.reasoningEffort === opt.value ? '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>' : null,
+        icon: currentValue === opt.value ? '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>' : null,
         onClick: () => {
-            apiSettings.reasoningEffort = opt.value;
-            saveApiSetting('gz_api_reasoning_effort', opt.value);
+            onSelect(opt.value);
             closeBottomSheet();
         }
     }));
-
-    showBottomSheet({
-        title: t('label_reasoning_effort') || 'Reasoning Effort',
-        items
-    });
+    showBottomSheet({ title, items });
 }
 
-function createNewApiPreset() {
-    showBottomSheet({
-        title: t('new_preset') || 'New Preset',
-        input: {
-            placeholder: t('placeholder_preset_name') || 'Enter preset name',
-            value: '',
-            confirmLabel: t('btn_create') || 'Create',
-            onConfirm: (name) => {
-                const newPreset = {
-                    id: Date.now().toString(36),
-                    name: name,
-                    endpoint: apiSettings.endpoint,
-                    key: apiSettings.key,
-                    model: apiSettings.model,
-                    max_tokens: apiSettings.maxTokens,
-                    context: apiSettings.contextSize,
-                    temp: apiSettings.temp,
-                    topp: apiSettings.topP,
-                    stream: apiSettings.stream,
-                    auto_hide_images: apiSettings.autoHideImages,
-                    auto_hide_images_n: apiSettings.autoHideImagesN,
-                    reasoning_effort: apiSettings.reasoningEffort
-                };
-
-                apiPresets.value.push(newPreset);
-                saveApiPresets(apiPresets.value);
-                
-                activeApiPresetId.value = newPreset.id;
-                localStorage.setItem('gz_active_api_preset_id', newPreset.id);
-                closeBottomSheet();
-            }
-        }
-    });
-}
-
-function applyApiPreset(p) {
-    activeApiPresetId.value = p.id;
-    localStorage.setItem('gz_active_api_preset_id', p.id);
-    
-    apiSettings.endpoint = p.endpoint;
-    apiSettings.key = p.key;
-    apiSettings.model = p.model;
-    apiSettings.maxTokens = p.max_tokens;
-    apiSettings.contextSize = p.context;
-    apiSettings.temp = p.temp;
-    apiSettings.topP = p.topp;
-    apiSettings.stream = p.stream;
-    
-    apiSettings.autoHideImages = (p.auto_hide_images === true || p.auto_hide_images === 'true');
-    apiSettings.autoHideImagesN = parseInt(p.auto_hide_images_n || '1', 10);
-    apiSettings.reasoningEffort = p.reasoning_effort || 'medium';
-    
-    saveApiSetting('api-endpoint', p.endpoint);
-    saveApiSetting('api-key', p.key);
-    saveApiSetting('api-model', p.model);
-    saveApiSetting('api-max-tokens', p.max_tokens);
-    saveApiSetting('api-context', p.context);
-    saveApiSetting('gz_api_temp', p.temp);
-    saveApiSetting('gz_api_topp', p.topp);
-    saveApiSetting('gz_api_stream', p.stream);
-    saveApiSetting('gz_api_auto_hide_images', apiSettings.autoHideImages.toString());
-    saveApiSetting('gz_api_auto_hide_images_n', apiSettings.autoHideImagesN.toString());
-    saveApiSetting('gz_api_reasoning_effort', apiSettings.reasoningEffort);
-    
-    checkConnection();
-}
-
-function confirmDeleteApiPreset(id) {
-    const preset = apiPresets.value.find(p => p.id === id);
-    if (!preset) return;
-
-    showBottomSheet({
-        title: `${t('confirm_delete_preset')} "${preset.name}"?`,
-        items: [
-            {
-                label: t('btn_delete') || 'Delete',
-                icon: '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>',
-                iconColor: '#ff4444',
-                isDestructive: true,
-                onClick: () => {
-                    const index = apiPresets.value.findIndex(p => p.id === id);
-                    if (index !== -1) {
-                        apiPresets.value.splice(index, 1);
-                        saveApiPresets(apiPresets.value);
-
-                        if (activeApiPresetId.value === id) {
-                            const defaultPreset = apiPresets.value.find(p => p.id === 'default') || apiPresets.value[0];
-                            if (defaultPreset) {
-                                applyApiPreset(defaultPreset);
-                            }
-                        }
-                    }
-                    closeBottomSheet();
-                }
-            },
-            {
-                label: t('btn_cancel') || 'Cancel',
-                icon: '<svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>',
-                onClick: closeBottomSheet
-            }
-        ]
-    });
-}
-
-function openApiPresetOptions(preset) {
-    const items = [];
-
-    items.push({
-        label: t('action_edit_name') || 'Change Name',
-        icon: '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>',
-        onClick: () => {
-            closeBottomSheet();
-            showBottomSheet({
-                title: t('action_edit_name') || 'Change Name',
-                input: {
-                    placeholder: t('placeholder_preset_name') || 'Enter name',
-                    value: preset.name,
-                    confirmLabel: t('btn_save') || 'Save',
-                    onConfirm: (val) => {
-                        if (val) {
-                            preset.name = val;
-                            saveApiPresets(apiPresets.value);
-                            closeBottomSheet();
-                        }
-                    }
-                }
-            });
-        }
-    });
-
-    items.push({
-        label: t('btn_delete') || 'Delete',
-        icon: '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>',
-        iconColor: '#ff4444',
-        isDestructive: true,
-        onClick: () => {
-            closeBottomSheet();
-            confirmDeleteApiPreset(preset.id);
-        }
-    });
-
-    showBottomSheet({
-        title: preset.name,
-        items
-    });
-}
-
-function openApiPresetSelector() {
-    const cardItems = apiPresets.value.map(p => {
-        const isActive = activeApiPresetId.value === p.id;
-        const item = {
-            label: p.name,
-            sublabel: isActive ? (t('preset_active') || 'Active') : '',
-            icon: getPresetIcon(p.endpoint, isActive),
-            onClick: () => {
-                applyApiPreset(p);
-                closeBottomSheet();
-            }
-        };
-
-        if (p.id !== 'default') {
-            item.actions = [{
-                icon: '<svg viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>',
-                color: 'var(--text-gray)',
-                onClick: (e) => {
-                    e.stopPropagation();
-                    closeBottomSheet();
-                    openApiPresetOptions(p);
-                }
-            }];
-        }
-
-        return item;
-    });
-
-    cardItems.push({
-        label: t('action_create_new') || 'Create New',
-        sublabel: t('api_create_preset_desc') || 'Add new preset',
-        icon: '<svg viewBox="0 0 24 24" style="fill:currentColor;"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>',
-        onClick: () => {
-            closeBottomSheet();
-            createNewApiPreset();
-        }
-    });
-
-    showBottomSheet({
-        title: t('api_presets') || 'API Presets',
-        cardItems
-    });
-}
-
-// --- Favicon helper ---
-function getPresetIcon(endpoint, isActive) {
-    const dotColor = isActive ? 'var(--vk-blue)' : 'var(--text-gray)';
-    const dotSvg = `<svg viewBox="0 0 24 24" style="fill:currentColor;"><circle cx="12" cy="12" r="10" fill="${dotColor}"/></svg>`;
-
-    if (!endpoint) return dotSvg;
-
-    let origin;
-    try {
-        const href = /^https?:\/\//i.test(endpoint) ? endpoint : 'http://' + endpoint;
-        origin = new URL(href).origin;
-    } catch {
-        return dotSvg;
-    }
-
-    const faviconUrl = origin + '/favicon.ico';
-    const escapedDot = dotSvg.replace(/'/g, '&#39;');
-    return `<span style="display:inline-flex;align-items:center;justify-content:center;width:100%;height:100%;"><img src="${faviconUrl}" style="width:100%;height:100%;border-radius:6px;object-fit:contain;" onerror="this.style.display='none';this.nextElementSibling.style.display='block'"><svg style="display:none;fill:currentColor;width:100%;height:100%;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="${dotColor}"/></svg></span>`;
-}
-
-// --- Helpers ---
 const t = (key) => {
     return translations[currentLang.value] ? translations[currentLang.value][key] : key;
 };
 
-// --- Lifecycle ---
 async function open() {
     sheet.value?.open();
     headerState.title = t('tab_api') || 'API';
@@ -428,38 +118,65 @@ function close() {
     sheet.value?.close();
 }
 
+const unsubs = [];
+
 defineExpose({ open, close });
+
+const handleBackNavigation = () => {
+    if (!props.viewMode && !sheet.value?.isVisible) return;
+    handleBack();
+};
 
 onMounted(async () => {
     initRipple();
+    loadProviderProfiles();
     loadApiSettings();
-    
-    apiPresets.value = await getApiPresets();
-    activeApiPresetId.value = localStorage.getItem('gz_active_api_preset_id') || 'default';
-    
+    loadAllServiceSettings();
+    await initPresets();
     checkConnection();
     updateLanguage();
     headerState.title = t('tab_api') || 'API';
+    unsubs.push(subscribeAppEvent(APP_EVENTS.ui.backNavigation, handleBackNavigation));
 });
 
 onBeforeUnmount(() => {
-    flushApiDebounce();
-    if (blacklistCountdownTimer) clearInterval(blacklistCountdownTimer);
+    cleanupApiSettings();
+    unsubs.forEach(unsub => unsub());
 });
 </script>
 
 <template>
-    <SheetView ref="sheet" :title="headerState.title">
+    <div class="api-view-root">
+    <SheetView ref="sheet" :title="headerState.title" :view-mode="viewMode" @back="handleBack">
         <div class="gen-sheet-body">
-                <ConnectionStatus :status="apiStatus" :error-message="errorMessage" @retry="checkConnection">
+                <!-- Tab Bar -->
+                <div class="tabs-row">
+                    <div class="top-tabs-container" :class="'tabs-' + TABS.length">
+                        <div class="tab-slider" :style="{ transform: `translateX(${tabSliderOffset}%)` }"></div>
+                        <div v-for="tab in TABS" :key="tab.id" class="top-tab" :class="{ active: activeTab === tab.id }" @click="activeTab = tab.id">
+                            <svg v-if="tab.id === 'llm'" class="tab-icon" viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>
+                            <svg v-else-if="tab.id === 'embedding'" class="tab-icon" viewBox="0 0 24 24"><path d="M11.99 18.54l-7.37-5.73L3 14.07l9 7 9-7-1.63-1.27zM12 16l7.36-5.73L21 9l-9-7-9 7 1.63 1.27L12 16z"/></svg>
+                            <svg v-else-if="tab.id === 'imagegen'" class="tab-icon" viewBox="0 0 24 24"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
+                            <svg v-else-if="tab.id === 'memory'" class="tab-icon" viewBox="0 0 24 24"><path d="M18 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 4h5v8l-2.5-1.5L6 12V4z"/></svg>
+                            <span>{{ tab.label }}</span>
+                        </div>
+                    </div>
+                </div>
+
+                <ConnectionStatus v-if="activeTab === 'llm'" :status="apiStatus" :error-message="errorMessage" @retry="checkConnection">
                     <div class="preset-selector" @click="openApiPresetSelector">
                         <span>{{ activeApiPreset?.name || 'Default' }}</span>
                         <svg viewBox="0 0 24 24" style="width: 20px; height: 20px; fill: currentColor;"><path d="M7 10l5 5 5-5z"/></svg>
                     </div>
                 </ConnectionStatus>
 
+                <!-- LLM Tab -->
+                <template v-if="activeTab === 'llm'">
+
                 <div class="menu-group">
-                    <div class="section-header">{{ t('section_connection') || 'Connection' }} <HelpTip term="api"/></div>
+                    <div class="section-header">
+{{ t('section_connection') || 'Connection' }} <HelpTip term="api"/>
+</div>
                     <div class="settings-item">
                         <label>API Endpoint</label>
                         <input type="text" v-model="apiSettings.endpoint" @input="onApiInput('api-endpoint', $event.target.value)" placeholder="http://127.0.0.1:5000/v1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
@@ -486,14 +203,18 @@ onBeforeUnmount(() => {
                     <div class="settings-item-checkbox">
                         <div class="settings-text-col">
                             <label>{{ t('label_stream') || 'Streaming response' }} <HelpTip term="streaming"/></label>
-                            <div class="settings-desc">{{ t('desc_stream') || 'Show text as it is being generated' }}</div>
+                            <div class="settings-desc">
+{{ t('desc_stream') || 'Show text as it is being generated' }}
+</div>
                         </div>
                         <input type="checkbox" v-model="apiSettings.stream" @change="onApiInput('gz_api_stream', $event.target.checked)" class="vk-switch">
                     </div>
                 </div>
 
                 <div class="menu-group">
-                    <div class="section-header">{{ t('section_gen_params') || 'Generation Parameters' }} <HelpTip term="guided"/></div>
+                    <div class="section-header">
+{{ t('section_gen_params') || 'Generation Parameters' }} <HelpTip term="guided"/>
+</div>
                     <div class="settings-item-range">
                         <div class="range-row">
                             <label data-i18n="label_temperature">Temperature</label>
@@ -520,7 +241,9 @@ onBeforeUnmount(() => {
                     <div class="settings-item-checkbox">
                         <div class="settings-text-col">
                             <label>{{ t('label_auto_hide_images') || 'Auto-hide images' }} <HelpTip term="image-gen"/></label>
-                            <div class="settings-desc">{{ t('desc_auto_hide_images') || 'Hide images after N assistant responses' }}</div>
+                            <div class="settings-desc">
+{{ t('desc_auto_hide_images') || 'Hide images after N assistant responses' }}
+</div>
                         </div>
                         <input type="checkbox" v-model="apiSettings.autoHideImages" @change="onApiInput('gz_api_auto_hide_images', $event.target.checked)" class="vk-switch">
                     </div>
@@ -534,11 +257,15 @@ onBeforeUnmount(() => {
                 </div>
 
                 <div class="menu-group">
-                    <div class="section-header">{{ t('label_reasoning_settings') || 'Reasoning' }} <HelpTip term="preset-reasoning"/></div>
+                    <div class="section-header">
+{{ t('label_reasoning_settings') || 'Reasoning' }} <HelpTip term="preset-reasoning"/>
+</div>
                     <div class="settings-item-checkbox">
                         <div class="settings-text-col">
                             <label>{{ t('label_show_reasoning') || 'Show Native Reasoning' }}</label>
-                            <div class="settings-desc">{{ t('desc_show_reasoning') || "Shows reasoning_content. Doesn't affect model's reasoning." }}</div>
+                            <div class="settings-desc">
+{{ t('desc_show_reasoning') || "Shows reasoning_content. Doesn't affect model's reasoning." }}
+</div>
                         </div>
                         <input type="checkbox" v-model="apiSettings.reasoningEnabled" @change="onApiInput('gz_api_request_reasoning', $event.target.checked)" class="vk-switch">
                     </div>
@@ -550,12 +277,96 @@ onBeforeUnmount(() => {
                         </div>
                     </div>
                 </div>
+                </template>
+
+                <!-- Embeddings Tab -->
+                <template v-if="activeTab === 'embedding'">
+                <div class="menu-group">
+                    <div class="section-header">
+{{ t('section_embeddings') || 'Embeddings' }} <HelpTip term="embeddings"/>
+</div>
+                    <div class="settings-item-checkbox">
+                        <div class="settings-text-col">
+                            <label>{{ t('label_vector_search') || 'Vector Search' }}</label>
+                            <div class="settings-desc">
+{{ t('desc_vector_search') || 'Enable semantic search for lorebook entries' }}
+</div>
+                        </div>
+                        <input type="checkbox" v-model="embeddingSettings.enabled" @change="onEmbeddingInput('gz_embedding_enabled', $event.target.checked)" class="vk-switch">
+                    </div>
+                    <template v-if="embeddingSettings.enabled">
+                        <div class="settings-item-checkbox">
+                            <div class="settings-text-col">
+                                <label>{{ t('label_use_llm_api') || 'Use LLM API' }}</label>
+                                <div class="settings-desc">
+{{ t('desc_use_llm_api') || 'Use the same endpoint as LLM for embeddings' }}
+</div>
+                            </div>
+                            <input type="checkbox" v-model="embeddingSettings.useSame" @change="onEmbeddingInput('useSame', $event.target.checked)" class="vk-switch">
+                        </div>
+                        <template v-if="!embeddingSettings.useSame">
+                            <div class="settings-item">
+                                <label>{{ t('label_embedding_endpoint') || 'Embedding Endpoint' }}</label>
+                                <input type="text" v-model="embeddingSettings.endpoint" @input="onEmbeddingInput('endpoint', $event.target.value)" placeholder="http://127.0.0.1:11434/v1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+                            </div>
+                            <div class="settings-item">
+                                <label>{{ t('label_embedding_model') || 'Model' }}</label>
+                                <input type="text" v-model="embeddingSettings.model" @input="onEmbeddingInput('model', $event.target.value)" placeholder="text-embedding-3-small" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+                            </div>
+                            <div class="settings-item">
+                                <label>{{ t('label_embedding_key') || 'API Key' }}</label>
+                                <input type="password" v-model="embeddingSettings.key" @input="onEmbeddingInput('apiKey', $event.target.value)" placeholder="sk-..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+                            </div>
+                        </template>
+                        <div class="settings-item">
+                                <label>{{ t('label_max_chunk_tokens') || 'Max Tokens Per Chunk' }}</label>
+                            <input type="number" v-model.number="embeddingSettings.maxChunkTokens" @input="onEmbeddingInput('gz_embedding_max_chunk_tokens', $event.target.value)" min="128" max="32768">
+                            <div class="settings-desc" style="margin-top:4px;">
+{{ t('desc_max_chunk_tokens') || 'Auto-splits long texts into chunks' }}
+</div>
+                        </div>
+                        <div class="settings-item">
+                            <button class="vk-btn-action" style="width:100%;" @click="testEmbedding" :disabled="embeddingStatus === 'connecting'">
+                                {{ embeddingStatus === 'connecting' ? (t('btn_testing') || 'Testing...') : (t('btn_test_connection') || 'Test Connection') }}
+                            </button>
+                            <div v-if="embeddingStatus === 'connected'" class="settings-desc" style="margin-top:8px; color: #34c759;">
+{{ t('embedding_connected') || 'Connected' }} (dim: {{ embeddingDimension }})
+</div>
+                            <div v-if="embeddingStatus === 'failed'" class="settings-desc" style="margin-top:8px; color: #ff3b30;">
+{{ embeddingError || t('embedding_failed') || 'Connection failed' }}
+</div>
+                        </div>
+                    </template>
+                </div>
+                </template>
+
+
         </div>
     </SheetView>
-
+    </div>
 </template>
 
 <style scoped>
+.tabs-row {
+  display: flex;
+  align-items: center;
+  margin: 16px 16px 8px;
+}
+
+.top-tabs-container {
+  flex: 1 !important;
+  max-width: none !important;
+}
+
+.top-tabs-container.tabs-4 .tab-slider {
+  width: 25%;
+}
+
+.top-tabs-container.tabs-4 .top-tab {
+  font-size: 13px;
+  padding: 10px 2px;
+}
+
 .preset-selector {
   height: 32px;
   display: flex;
@@ -601,7 +412,10 @@ onBeforeUnmount(() => {
     font-size: 17px;
 }
 
-.gen-sheet-body { position: relative; }
+.gen-sheet-body { 
+    position: relative; 
+    padding-bottom: calc(var(--footer-height, 0px) + var(--keyboard-overlap, 0px) + 20px);
+}
 
 .clickable-selector {
     display: flex;

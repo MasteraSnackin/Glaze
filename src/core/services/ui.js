@@ -3,14 +3,12 @@ import { translations } from '@/utils/i18n.js';
 import { formatText } from '@/utils/textFormatter.js';
 import { Capacitor } from '@capacitor/core';
 import { App } from '@capacitor/app';
-import { Toast } from '@capacitor/toast';
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { SafeArea } from '@capacitor-community/safe-area';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
-import { themeState, getPresets, applyPreset } from '@/core/states/themeState.js';
-import { ref } from 'vue';
-import { logger } from '../../utils/logger.js';
-import { isKeyboardOpen, initKeyboard, hideKeyboard } from './keyboardHandler.js';
+import { publishAppEvent } from '@/core/events/eventHub.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
+import { isKeyboardOpen, initKeyboard } from './keyboardHandler.js';
 
 // --- Long-press background guard ---
 const _activeLongPressTimers = new Set();
@@ -103,97 +101,6 @@ export function attachLongPress(element, callback) {
     return () => isLongPress;
 }
 
-export function attachRipple(el) {
-    if (el.dataset.rippleInit) return;
-    el.dataset.rippleInit = 'true';
-
-    const style = window.getComputedStyle(el);
-    if (style.position === 'static') {
-        el.style.position = 'relative';
-    }
-
-    el.style.overflow = 'hidden';
-
-    el.addEventListener('pointerdown', function (e) {
-        const circle = document.createElement('span');
-        const diameter = Math.max(this.clientWidth, this.clientHeight);
-        const radius = diameter / 2;
-
-        const rect = this.getBoundingClientRect();
-
-        circle.style.width = circle.style.height = `${diameter}px`;
-        circle.style.left = `${e.clientX - rect.left - radius}px`;
-        circle.style.top = `${e.clientY - rect.top - radius}px`;
-        circle.classList.add('ripple');
-
-        circle.style.background = `radial-gradient(circle, rgba(var(--vk-blue-rgb), 0.15) 0%, transparent 70%)`;
-
-        circle.addEventListener('animationend', () => {
-            circle.remove();
-        });
-
-        this.appendChild(circle);
-    });
-}
-
-let _rippleDelegationAdded = false;
-
-export function initRipple() {
-    // Inject styles for the new ripple if not present
-    if (!document.getElementById('ripple-effect-styles')) {
-        const style = document.createElement('style');
-        style.id = 'ripple-effect-styles';
-        style.textContent = `
-            @keyframes ripple-glow {
-                0% { transform: scale(0.2); opacity: 1; }
-                100% { transform: scale(2.5); opacity: 0; }
-            }
-            .ripple {
-                position: absolute;
-                border-radius: 50%;
-                pointer-events: none;
-                filter: blur(10px);
-                animation: ripple-glow 0.8s ease-out forwards;
-                z-index: -1;
-            }
-        `;
-        document.head.appendChild(style);
-    }
-
-    const elements = document.querySelectorAll('.tabbar, .app-header, .menu-group, .preset-selector, .conn-badge, .glass-panel, .segmented-control, .bottom-sheet-content');
-    elements.forEach(attachRipple);
-
-    if (!_rippleDelegationAdded) {
-        _rippleDelegationAdded = true;
-        document.addEventListener('pointerdown', function (e) {
-            const trigger = e.target.closest('.list-item, .triggered-item-card, .list-container');
-            if (!trigger || trigger.dataset.rippleInit) return;
-
-            const bgContainer = trigger.closest('.view-content-wrapper') || document.body;
-
-            const circle = document.createElement('span');
-            const diameter = Math.max(window.innerWidth, window.innerHeight) * 2;
-            const radius = diameter / 2;
-
-            circle.style.width = circle.style.height = `${diameter}px`;
-            circle.style.left = `${e.clientX - radius}px`;
-            circle.style.top = `${e.clientY - radius}px`;
-            circle.style.position = 'fixed';
-            circle.style.zIndex = '0';
-            circle.style.pointerEvents = 'none';
-            circle.classList.add('ripple');
-
-            circle.style.background = `radial-gradient(circle, rgba(var(--vk-blue-rgb), 0.1) 0%, transparent 70%)`;
-
-            circle.addEventListener('animationend', () => {
-                circle.remove();
-            });
-
-            bgContainer.appendChild(circle);
-        });
-    }
-}
-
 export function rgbToHex(rgb) {
     if (!rgb || rgb.startsWith('#')) return rgb || '#ffffff';
     const start = rgb.indexOf('(') + 1;
@@ -203,13 +110,13 @@ export function rgbToHex(rgb) {
     let r = (+rgbVals[0]).toString(16),
         g = (+rgbVals[1]).toString(16),
         b = (+rgbVals[2]).toString(16);
-    if (r.length == 1) r = "0" + r;
-    if (g.length == 1) g = "0" + g;
-    if (b.length == 1) b = "0" + b;
+    if (r.length === 1) r = "0" + r;
+    if (g.length === 1) g = "0" + g;
+    if (b.length === 1) b = "0" + b;
     return "#" + r + g + b;
 }
 
-export async function updateAppColors(forceMainView = false) {
+export async function updateAppColors() {
     const theme = {
         body: '#19191a'
     };
@@ -417,113 +324,6 @@ export function initViewportFix() {
     initKeyboard();
 }
 
-export function initBackButton() {
-    let lastBackPress = 0;
-    const handleBackButton = async () => {
-        // 0. If keyboard is open — dismiss it
-        if (isKeyboardOpen.value) {
-            await hideKeyboard();
-            return;
-        }
-
-        // 1. Check for open Bottom Sheets
-        const openSheet = document.querySelector('.modal-overlay.visible');
-        if (openSheet) {
-            closeBottomSheet();
-            return;
-        }
-
-        // 1.1 Check SheetView
-        const openSheetView = document.querySelector('.sheet-view-overlay.visible');
-        if (openSheetView) {
-            const backEvent = new CustomEvent('hw-back', { cancelable: true });
-            openSheetView.dispatchEvent(backEvent);
-            if (!backEvent.defaultPrevented) {
-                openSheetView.click();
-            }
-            return;
-        }
-
-        // 1.2 Check Magic Drawer (ChatInput)
-        // Skip if it is already in the process of closing (leave animation)
-        const magicDrawer = document.querySelector('.magic-drawer');
-        if (magicDrawer && !magicDrawer.classList.contains('drawer-leave-active')) {
-            const btn = document.getElementById('btn-magic');
-            if (btn) btn.click();
-            return;
-        }
-
-        // 1.25 Check chat search mode
-        const searchBackBtn = document.querySelector('.chat-search-back');
-        if (searchBackBtn && searchBackBtn.offsetParent !== null) {
-            searchBackBtn.click();
-            return;
-        }
-
-        // 1.3 Check message selection mode
-        const cancelSelectionBtn = document.querySelector('.btn-cancel-selection');
-        if (cancelSelectionBtn && cancelSelectionBtn.offsetParent !== null) {
-            cancelSelectionBtn.click();
-            return;
-        }
-
-        // Check Viewers (Image Viewer & Holo Cards)
-        // We look for any visible element with class 'viewer-overlay'
-        const visibleViewer = document.querySelector('.viewer-overlay.visible');
-        if (visibleViewer) {
-            // Try to find a close button inside, or just dispatch a click if it has a handler
-            const closeBtn = visibleViewer.querySelector('.close-btn-trigger') || visibleViewer.querySelector('#image-viewer-close-btn') || visibleViewer.querySelector('#holocards-close-btn');
-            if (closeBtn) closeBtn.click();
-            return;
-        }
-
-        // 2. Check full-screen editor
-        const fsEditor = document.getElementById('full-screen-editor');
-        if (fsEditor && fsEditor.style.display !== 'none') {
-            const closeBtn = document.getElementById('fs-editor-close');
-            if (closeBtn) closeBtn.click();
-            return;
-        }
-
-        // 2.1 Check onboarding (back arrow)
-        const onboardingBack = document.querySelector('.onboarding-overlay .nav-back-btn');
-        if (onboardingBack) {
-            onboardingBack.click();
-            return;
-        }
-
-        // 3. Check header back button
-        const backBtn = document.getElementById('header-back');
-        if (backBtn && backBtn.offsetParent !== null) {
-            backBtn.click();
-            return;
-        }
-
-        // 4. App exit logic (main screen)
-        const now = Date.now();
-        if (now - lastBackPress < 2000) {
-            App.exitApp();
-        } else {
-            lastBackPress = now;
-            await Toast.show({
-                text: (translations[currentLang.value] && translations[currentLang.value]['exit_hint']) || 'Press again to exit',
-                duration: 'short',
-                position: 'bottom'
-            });
-        }
-    };
-
-    App.addListener('backButton', handleBackButton);
-    // For console testing: window.simulateBackButton()
-    window.simulateBackButton = handleBackButton;
-
-    // Handle Escape key as back button
-    window.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') {
-            handleBackButton();
-        }
-    });
-}
 
 export function animateTextChange(element, newText, direction, onUpdate) {
     const body = element.querySelector('.msg-body');
@@ -596,6 +396,7 @@ export function animateOdometer(element, target) {
 }
 
 export function initHeaderScroll(messagesContainer, initialScrollTop, isGeneratingCallback) {
+    if (!messagesContainer) return () => {};
     let lastScrollTop = initialScrollTop || 0;
     let ticking = false;
     let isHidden = false;
@@ -618,12 +419,12 @@ export function initHeaderScroll(messagesContainer, initialScrollTop, isGenerati
 
         if (st > lastScrollTop + 3 && st > 50) {
             if (!isHidden) {
-                window.dispatchEvent(new CustomEvent('header-scroll-hidden', { detail: true }));
+                publishAppEvent(APP_EVENTS.ui.header.scrollHidden, true);
                 isHidden = true;
             }
         } else if (st < lastScrollTop - 3) {
             if (isHidden) {
-                window.dispatchEvent(new CustomEvent('header-scroll-hidden', { detail: false }));
+                publishAppEvent(APP_EVENTS.ui.header.scrollHidden, false);
                 isHidden = false;
             }
         }

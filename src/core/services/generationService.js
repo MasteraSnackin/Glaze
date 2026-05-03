@@ -1,102 +1,71 @@
-import { getApiConfig } from '@/core/config/APISettings.js';
-import { estimateTokens } from '@/utils/tokenizer.js';
-import { replaceMacros } from '@/utils/macroEngine.js';
+import { publishAppEvent } from '@/core/events/eventHub.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
+import { runGenerationHook } from '@/core/extensions/extensionRegistry.js';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
-import { executeRequest } from '@/core/services/llmApi.js';
-import { sendMessageNotification } from '@/core/services/notificationService.js';
-import { presetState, initPresetState, getEffectivePreset } from '@/core/states/presetState.js';
-import { lorebookState, scanLorebooks, initLorebookState } from '@/core/states/lorebookState.js';
-import { getEffectivePersona } from '@/core/states/personaState.js';
-import { applyRegexes } from '@/core/services/regexService.js';
-import { logger } from '../../utils/logger.js';
+import { vectorSearchLorebooks } from '@/core/states/lorebookState.js';
+import { executeFinalChatRequest } from '@/core/llm/usecases/chatRequestAssembly.js';
+import {
+    mergeLateVectorLoreEntries,
+    injectLateVectorLoreMessages
+} from '@/core/llm/usecases/vectorLoreInjection.js';
+import { injectMemoryMessages } from '@/core/llm/usecases/memoryMessageInjection.js';
+import { runChatPostPromptPipeline } from '@/core/llm/pipeline/postPromptOrchestrator.js';
+import { executePreparedChatPrompt } from '@/core/llm/usecases/chatPreparedPromptExecution.js';
+import { prepareChatPromptRequest } from '@/core/llm/usecases/chatPreparation.js';
+import {
+    buildMemoryInjection
+} from '@/core/llm/usecases/memoryContextInjection.js';
 
-let lastPrompt = null;
-
-export function getLastPrompt() {
-    return lastPrompt;
-}
-
-/**
- * Strips embedded base64 media from text so it doesn't inflate token counts limits.
- */
-function stripEmbeddedMedia(text) {
-    if (!text || text.length < 256) return text;
-    let cleaned = text.replace(/<img\s[^>]*src\s*=\s*["']data:image\/[^"']{256,}["'][^>]*\/?>/gi, '');
-    cleaned = cleaned.replace(/data:image\/[a-z+]+;base64,[A-Za-z0-9+/=\n\r]{256,}/gi, '');
-    return cleaned;
+function buildDebugKey(prefix, ...parts) {
+    return [prefix, ...parts.filter(Boolean), Date.now(), Math.random().toString(36).slice(2, 8)].join(':');
 }
 
 // --- Helpers ---
 
-function getEffectiveApiConfig() {
-    let config = getApiConfig();
-    let { maxTokens, contextSize } = config;
+function buildMergedContextBreakdown(contextBreakdown, { vectorLoreTokens = 0, memoryTokens = 0, memoryReserve = 0, actualPromptTokens = 0 } = {}) {
+    if (!contextBreakdown) return null;
 
-    // Fallback if contextSize is not returned by getApiConfig
-    if (!contextSize) contextSize = parseInt(localStorage.getItem('api-context')) || 32000;
-    if (maxTokens === undefined || maxTokens === null) {
-        const mt = parseInt(localStorage.getItem('api-max-tokens'));
-        maxTokens = isNaN(mt) ? 8000 : mt;
-    }
+    const hasMemoryInjection = memoryTokens > 0;
+    const actualMemory = hasMemoryInjection ? memoryTokens : 0;
+    const effectiveReserve = hasMemoryInjection ? 0 : (memoryReserve || contextBreakdown.memoryReserve || 0);
 
-    return { ...config, maxTokens, contextSize };
+    const newFixedBase = (contextBreakdown.fixedBase || 0) + actualMemory;
+    const newFixedTotal = newFixedBase + (contextBreakdown.lorebookReserve || 0) + effectiveReserve;
+    const newHistory = contextBreakdown.history || 0;
+    const newTotalUsed = newFixedBase + (contextBreakdown.lorebookReserve || 0) + effectiveReserve + newHistory;
+    const contextSize = contextBreakdown.contextSize || contextBreakdown.safeContext || 0;
+
+    return {
+        ...contextBreakdown,
+        memory: memoryTokens || 0,
+        memoryReserve: effectiveReserve,
+        vectorLore: (contextBreakdown.vectorLore || 0) + vectorLoreTokens,
+        summaryBase: contextBreakdown.summary || 0,
+        summary: (contextBreakdown.summary || 0) + actualMemory,
+        fixedBase: newFixedBase,
+        fixedTotal: newFixedTotal,
+        totalUsed: newTotalUsed,
+        remaining: Math.max(0, contextSize - newTotalUsed),
+        actualPromptTokens
+    };
 }
 
-function loadActivePreset(char, sessionId) {
-    if (!presetState.initialized) {
-        // Synchronous-ish check or just init (will be handled by reactive update anyway mostly)
-    }
-    const charId = char?.id;
-    const chatId = charId && sessionId ? `${charId}_${sessionId}` : null;
-    return getEffectivePreset(charId, chatId);
+function resolvePromptCutoffIndex(result) {
+    if (!result) return -1;
+    return result.cutoffOriginalIndex !== undefined && result.cutoffOriginalIndex !== -1
+        ? result.cutoffOriginalIndex
+        : (result.cutoffIndex !== undefined ? result.cutoffIndex : -1);
 }
 
-function getWorker() {
-    if (!globalThis._genWorker) {
-        globalThis._genWorker = new Worker(new URL('../../workers/generationWorker.js', import.meta.url), { type: 'module' });
-        globalThis._workerQueue = new Map();
-        globalThis._msgIdCounter = 0;
-
-        globalThis._genWorker.onmessage = (e) => {
-            const { id, success, data, error } = e.data;
-            if (globalThis._workerQueue.has(id)) {
-                if (success) globalThis._workerQueue.get(id).resolve(data);
-                else globalThis._workerQueue.get(id).reject(new Error(error));
-                globalThis._workerQueue.delete(id);
-            }
-        };
-
-        globalThis._genWorker.onerror = (e) => {
-            console.error("Generation worker crashed:", e);
-            for (const [id, { reject }] of globalThis._workerQueue) {
-                reject(new Error("Worker crashed: " + (e.message || "Unknown error")));
-            }
-            globalThis._workerQueue.clear();
-            globalThis._genWorker.terminate();
-            globalThis._genWorker = null;
-        };
-    }
-    return globalThis._genWorker;
-}
-
-function processPromptAsync(payload) {
-    const worker = getWorker();
-    const WORKER_TIMEOUT = 30000;
-    return new Promise((resolve, reject) => {
-        const id = ++globalThis._msgIdCounter;
-
-        const timer = setTimeout(() => {
-            globalThis._workerQueue.delete(id);
-            reject(new Error("Prompt building timed out (worker did not respond within 30s)"));
-        }, WORKER_TIMEOUT);
-
-        globalThis._workerQueue.set(id, {
-            resolve: (data) => { clearTimeout(timer); resolve(data); },
-            reject: (err) => { clearTimeout(timer); reject(err); }
-        });
-        worker.postMessage({ id, type: 'generateChatResponse', payload });
+async function buildPromptMemoryInjection({ char, history, summary, safeContext, result }) {
+    return buildMemoryInjection({
+        char,
+        history,
+        summary,
+        safeContext,
+        cutoffOriginalIndex: resolvePromptCutoffIndex(result)
     });
 }
 
@@ -108,306 +77,106 @@ export async function generateChatResponse({
     summary,
     guidanceText,
     type = 'normal',
+    debugKey: providedDebugKey,
     controller,
     callbacks
 }) {
     const { onUpdate, onComplete, onError } = callbacks;
-    let apiConfig = getEffectiveApiConfig();
-    let { apiKey, apiUrl, model, stream, requestReasoning, reasoningEffort, temp, topP, maxTokens, contextSize } = apiConfig;
+    const debugKey = providedDebugKey || buildDebugKey('chat', char?.id, char?.sessionId, type);
+
+    await runGenerationHook('beforePromptBuild', {
+        requestType: 'chat',
+        debugKey,
+        char,
+        text,
+        history,
+        authorsNote,
+        summary,
+        guidanceText,
+        type
+    });
+
+    const preparedRequest = await prepareChatPromptRequest({
+        text,
+        char,
+        history,
+        authorsNote,
+        summary,
+        guidanceText,
+        type
+    });
 
     const t = (key) => translations[currentLang.value]?.[key] || key;
-
-    if (!apiUrl || !model) {
-        showBottomSheet({
-            title: t('section_connection') || "Connection",
-            bigInfo: {
-                icon: '<svg viewBox="0 0 24 24" style="fill:currentColor;width:100%;height:100%;"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.04.24.24.41.48.41h3.84c.24 0 .43-.17.47-.41l.36-2.54c.59-.24 1.13-.57 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>',
-                description: t('api_not_configured') || "API Not Configured",
-                buttonText: t('btn_configure') || "Configure",
-                onButtonClick: () => {
-                    closeBottomSheet();
-                    window.dispatchEvent(new CustomEvent('open-api-sheet'));
-                }
+    const preparedPromptExecution = await executePreparedChatPrompt({
+        preparedRequest,
+        onError,
+        deps: {
+            t,
+            showBottomSheet,
+            closeBottomSheet,
+            openApiSheet: () => {
+                publishAppEvent(APP_EVENTS.nav.openApiSheet);
             }
-        });
-        if (onError) onError(new Error("API Not Configured"));
-        return;
-    }
-
-    // --- Prompt Construction based on Preset ---
-    const activePreset = loadActivePreset(char, char?.sessionId);
-
-    // Reasoning Tags from Preset
-    const tagStart = activePreset?.reasoningStart || localStorage.getItem('gz_api_reasoning_start');
-    const tagEnd = activePreset?.reasoningEnd || localStorage.getItem('gz_api_reasoning_end');
-
-    // Merge Settings from Preset
-    const mergePrompts = activePreset?.mergePrompts || false;
-    const mergeRole = activePreset?.mergeRole || 'system';
-
-    // NoAssistant Settings from Preset
-    const noAssistant = activePreset?.noAssistant || false;
-    const stopString = activePreset?.stopString || '';
-    const userPrefix = activePreset?.userPrefix || '';
-    const charPrefix = activePreset?.charPrefix || '';
-    const squashRole = activePreset?.squashRole || 'assistant';
-
-    if (activePreset && typeof activePreset.reasoningEnabled === 'boolean') {
-        requestReasoning = activePreset.reasoningEnabled;
-    }
-    if (activePreset && activePreset.reasoningEffort) {
-        reasoningEffort = activePreset.reasoningEffort;
-    }
-
-    // Get Persona object for macros
-    const personaObj = getEffectivePersona(char?.id, char?.sessionId) || { name: "User", prompt: "" };
-
-    const charId = char?.id || "default";
-    const sessionId = char?.sessionId || "current";
-    const varsKey = `gz_vars_${charId}_${sessionId}`;
-    let sessionVars = {};
-    try { sessionVars = JSON.parse(localStorage.getItem(varsKey)) || {}; } catch (e) { }
-
-    let globalRegexes = [];
-    try { globalRegexes = JSON.parse(localStorage.getItem('regex_scripts')) || []; } catch (e) { }
-
-    let result;
-    try {
-        const safeContextLimit = contextSize - maxTokens > 0 ? contextSize - maxTokens : 8000;
-        const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent || '');
-        const memoryLimitFactor = isIOS ? 15 : 5;
-        const maxHistoryRetention = Math.max(100, Math.ceil(safeContextLimit / memoryLimitFactor));
-
-        let safeHistory = history;
-        if (history && history.length > maxHistoryRetention) {
-            safeHistory = history.slice(-maxHistoryRetention);
         }
+    });
+    if (!preparedPromptExecution) return;
 
-        const payload = JSON.parse(JSON.stringify({
-            char,
-            history: safeHistory,
-            summary,
-            activePreset,
-            mergePrompts,
-            mergeRole,
-            noAssistant,
-            userPrefix,
-            charPrefix,
-            squashRole,
-            personaObj,
-            authorsNote: (authorsNote && authorsNote.enabled) ? authorsNote : null,
-            guidanceText,
-            guidanceType: type,
-            lorebooks: lorebookState.lorebooks,
-            globalSettings: lorebookState.globalSettings,
-            activations: lorebookState.activations,
-            globalRegexes,
-            sessionVars,
-            apiConfig
-        }));
-
-        result = await processPromptAsync(payload);
-    } catch (e) {
-        console.error("Worker error:", e);
-        if (onError) onError(e);
-        return;
-    }
-
-    // Guard: if aborted while worker was building prompt, don't send API request
-    if (controller?.signal?.aborted) {
-        if (onError) onError(new DOMException('Aborted', 'AbortError'));
-        return;
-    }
-
-    if (result.needsVarsSave) {
-        localStorage.setItem(varsKey, JSON.stringify(result.sessionVars));
-    }
-
-    if (callbacks.onPromptReady) {
-        callbacks.onPromptReady({ loreEntries: result.loreEntries });
-    }
-
-    let messages = result.messages;
-
-    const safeContext = contextSize - maxTokens;
-
-    if (result.staticTokens >= safeContext) {
-        showBottomSheet({
-            title: t('error_context_limit') || "Context Limit Exceeded",
-            bigInfo: {
-                icon: '<svg viewBox="0 0 24 24" style="fill:currentColor;width:100%;height:100%;color:#ff4444"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>',
-                description: t('msg_context_limit') || "The preset prompts exceed the context limit. Please increase Context Size or reduce prompt length.",
-                glossaryChip: { term: 'context', hint: t('context_limit_glossary_hint') || 'Learn more:', label: t('context_limit_glossary_chip') || 'Context' },
-                buttonText: t('btn_ok') || "OK",
-                onButtonClick: () => closeBottomSheet()
-            }
-        });
-        if (onError) onError(new Error("Context limit exceeded"));
-        return;
-    }
-
-    const requestBody = {
-        model: model,
-        messages: messages,
-        temperature: temp,
-        top_p: topP,
-        stream: stream,
-        reasoning_effort: reasoningEffort || 'medium'
-    };
-
-    if (maxTokens > 0) {
-        requestBody.max_tokens = maxTokens;
-    }
-
-    if (stopString) {
-        requestBody.stop = [stopString];
-    }
-
-
-    // Save for preview
-    lastPrompt = JSON.parse(JSON.stringify(requestBody));
-
-    // Sanitize messages for API (strict OpenAI compliance: only role, content, name)
-    requestBody.messages = requestBody.messages.map(m => {
-        const cleanMsg = {
-            role: m.role,
-            content: stripEmbeddedMedia(m.content)
-        };
-
-        if (m.image) {
-            cleanMsg.content = [
-                { type: "text", text: m.content || "" },
-                { type: "image_url", image_url: { url: m.image } }
-            ];
-        }
-
-        if (m.name) cleanMsg.name = m.name;
-        return cleanMsg;
+    const extendedPreparedPromptExecution = await runGenerationHook('afterPromptBuild', {
+        ...preparedPromptExecution,
+        requestType: 'chat',
+        debugKey,
+        char,
+        text,
+        summary,
+        guidanceText,
+        type,
+        preparedRequest
     });
 
-    // Call LLM API
-    try {
-        logger.debug('[GenerationService] Final Request:', requestBody);
-        await executeRequest({
-            apiUrl,
-            apiKey,
-            requestBody,
-            stream,
+    const {
+        result,
+        safeHistory,
+        contextSize,
+        maxTokens,
+        memoryReserve,
+        requestConfig
+    } = extendedPreparedPromptExecution;
+
+    await runChatPostPromptPipeline({
+        text,
+        char,
+        history,
+        safeHistory,
+        summary,
+        contextSize,
+        maxTokens,
+        memoryReserve,
+        result,
+        requestConfig: {
+            ...requestConfig,
             controller,
-            requestReasoning,
-            tagStart,
-            tagEnd,
-            callbacks: { onUpdate, onComplete, onError }
-        });
-    } catch (e) {
-        console.error("Generation error:", e);
-        sendMessageNotification(
-            t('error_generation') || "Generation Error",
-            e.message,
-            null,
-            char?.id,
-            null, // sessionId unknown here in catch block context easily without refactor
-            null  // msgId
-        );
-        if (onError) onError(e);
-    }
-}
-
-export async function calculateContext({ char, history, authorsNote, summary }) {
-    const apiConfig = getEffectiveApiConfig();
-    const activePreset = loadActivePreset(char, char?.sessionId);
-
-    const mergePrompts = activePreset?.mergePrompts || false;
-    const mergeRole = activePreset?.mergeRole || 'system';
-    const noAssistant = activePreset?.noAssistant || false;
-    const userPrefix = activePreset?.userPrefix || '';
-    const charPrefix = activePreset?.charPrefix || '';
-    const squashRole = activePreset?.squashRole || 'assistant';
-    const personaObj = getEffectivePersona(char?.id, char?.sessionId) || { name: "User", prompt: "" };
-
-    const anData = authorsNote;
-
-    const charId = char?.id || "default";
-    const sessionId = char?.sessionId || "current";
-    const varsKey = `gz_vars_${charId}_${sessionId}`;
-    let sessionVars = {};
-    try { sessionVars = JSON.parse(localStorage.getItem(varsKey)) || {}; } catch (e) { }
-
-    let globalRegexes = [];
-    try { globalRegexes = JSON.parse(localStorage.getItem('regex_scripts')) || []; } catch (e) { }
-
-    try {
-        const safeContextLimit = apiConfig.contextSize - apiConfig.maxTokens > 0 ? apiConfig.contextSize - apiConfig.maxTokens : 8000;
-        const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent || '');
-        const memoryLimitFactor = isIOS ? 15 : 5;
-        const maxHistoryRetention = Math.max(100, Math.ceil(safeContextLimit / memoryLimitFactor));
-
-        let safeHistory = history;
-        if (history && history.length > maxHistoryRetention) {
-            safeHistory = history.slice(-maxHistoryRetention);
-        }
-
-        const payload = JSON.parse(JSON.stringify({
-            char,
-            history: safeHistory,
-            summary,
-            activePreset,
-            mergePrompts,
-            mergeRole,
-            noAssistant,
-            userPrefix,
-            charPrefix,
-            squashRole,
-            personaObj,
-            authorsNote: (anData && anData.enabled) ? anData : null,
-            lorebooks: lorebookState.lorebooks,
-            globalSettings: lorebookState.globalSettings,
-            activations: lorebookState.activations,
-            globalRegexes,
-            sessionVars,
-            apiConfig
-        }));
-
-        const result = await processPromptAsync(payload);
-        return result.cutoffOriginalIndex !== undefined && result.cutoffOriginalIndex !== -1
-            ? result.cutoffOriginalIndex
-            : result.cutoffIndex;
-    } catch (e) {
-        console.error("Calculate context worker error", e);
-        return 0;
-    }
-}
-
-export async function generateSummary({ history, prompt, controller }) {
-    const { apiKey, apiUrl, model, temp } = getEffectiveApiConfig();
-
-    if (!apiUrl || !model) {
-        throw new Error("API Not Configured");
-    }
-
-    const defaultPrompt = "Summarize the following roleplay conversation concisely, focusing on the current situation and key events:\n\n{{history}}";
-    const template = prompt || defaultPrompt;
-
-    let finalPrompt = template.replace('{{history}}', history);
-    if (!template.includes('{{history}}')) {
-        finalPrompt = `${template}\n\n${history}`;
-    }
-
-    let result = "";
-
-    await executeRequest({
-        apiUrl,
-        apiKey,
-        requestBody: {
-            model,
-            messages: [{ role: 'user', content: finalPrompt }],
-            temperature: temp
+            debugKey
         },
-        controller,
         callbacks: {
-            onComplete: (text) => { result = text; }
+            ...callbacks,
+            onUpdate,
+            onComplete,
+            onError
+        },
+        deps: {
+            t,
+            showBottomSheet,
+            closeBottomSheet,
+            vectorSearchLorebooks,
+            mergeLateVectorLoreEntries,
+            injectMemoryMessages,
+            injectLateVectorLoreMessages,
+            buildPromptMemoryInjection,
+            buildMergedContextBreakdown,
+            executeFinalChatRequest,
+            setLastPrompt: (prompt) => {
+                publishAppEvent(APP_EVENTS.debug.promptPreviewUpdated, { debugKey, prompt });
+            }
         }
     });
-
-    return result;
 }

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import { db } from '@/utils/db.js';
 import { formatDate } from '@/utils/dateFormatter.js';
 import { formatText } from '@/utils/textFormatter.js';
@@ -7,23 +7,39 @@ import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetStat
 import { translations, pluralize } from '@/utils/i18n.js';
 import { currentLang, dialogGrouping } from '@/core/config/APPSettings.js';
 import { attachLongPress } from '@/core/services/ui.js';
-import { getChatData, createNewSession, deleteSession, renameSession } from '@/utils/sessions.js';
-import { importSillyTavernChat, exportSillyTavernChat, pickChatFile } from '@/core/services/chatImporter.js';
+import { attachHoverGlow } from '@/core/services/interactionEffects.js';
+import { getChatData, createNewSession, deleteSession } from '@/utils/sessions.js';
+import { importSillyTavernChat, exportSillyTavernChat, exportGlazeChat, pickChatFile } from '@/core/services/chatImporter.js';
 import { allPersonas, loadPersonas } from '@/core/states/personaState.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
+import { subscribeAppEvent, publishAppEvent } from '@/core/events/eventHub.js';
+import ToolStripTooltip from '@/components/ToolStripTooltip.vue';
+import { useSessionSheet } from '@/composables/character/useSessionSheet.js';
+import { useVirtualScroll } from '@/composables/chat/useVirtualScroll.js';
+import { getGenerationState } from '@/core/states/generationState.js';
 
 const props = defineProps({
-  activeCategory: { type: String, default: 'all' }
+  activeCategory: { type: String, default: 'all' },
+  collapsed: { type: Boolean, default: false }
 });
 
 const emit = defineEmits(['open-chat']);
 
 const chats = ref([]);
+const isLoading = ref(true);
 const characters = ref([]);
 const searchQuery = ref('');
 const unread = ref({});
 const generating = ref({}); // { charName: boolean }
+let unsubscribeSyncDataRefreshed = null;
+let unsubscribeChatUpdated = null;
+let unsubscribeGenerationStarted = null;
+let unsubscribeGenerationEnded = null;
+let unsubscribeCharUpdated = null;
+let unsubscribeHeaderSearch = null;
 
 const loadData = async () => {
+    isLoading.value = true;
     try {
         const [chatsDataRaw, unreadDataRaw, charsData] = await Promise.all([
             db.getChats(),
@@ -43,16 +59,17 @@ const loadData = async () => {
         Object.keys(chatsData).forEach(charId => {
             const charData = chatsData[charId];
             const char = charMap.get(charId);
-            if (!char) return;
+            if (!char || !charData) return;
 
             const sessions = charData.sessions || (Array.isArray(charData) ? { 1: charData } : {});
             const currentId = charData.currentId || 1;
 
-            Object.keys(sessions).forEach(sid => {
-                const sessionId = parseInt(sid);
-                const msgs = sessions[sid];
-                const lastMsg = msgs[msgs.length - 1];
-                const timestamp = lastMsg ? (lastMsg.timestamp || 0) : 0;
+        Object.keys(sessions).forEach(sid => {
+            const sessionId = parseInt(sid);
+            const msgs = sessions[sid];
+            if (!Array.isArray(msgs)) return;
+            const lastMsg = msgs[msgs.length - 1];
+            const timestamp = lastMsg ? (lastMsg.timestamp || 0) : (charData.sessionDates?.[sid] || 0);
                 
                 // Check generation status from localStorage
                 if (localStorage.getItem(`gz_generating_${charId}_${sessionId}`)) generating.value[`${charId}_${sessionId}`] = true;
@@ -68,6 +85,7 @@ const loadData = async () => {
                     messagesCount: msgs.length,
                     avatar: char.avatar,
                     thumbnail: char.thumbnail,
+                    mini_thumbnail: char.mini_thumbnail,
                     color: char.color,
                     category: char.category || 'all',
                     tags: char.tags || [],
@@ -82,6 +100,8 @@ const loadData = async () => {
 
     } catch (e) {
         console.error("Error loading dialogs:", e);
+    } finally {
+        isLoading.value = false;
     }
 };
 
@@ -112,11 +132,30 @@ const getAvatarUrl = (avatar) => {
 
 const formatPreview = (text) => {
     let formatted = formatText(text);
-    formatted = formatted.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]*>/g, '');
+    formatted = formatted.replace(/<br\s*\/?>/gi, ' ').replace(/<[^>]*>/g, '');
+    // Replace multiple newlines with space
+    formatted = formatted.replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim();
     // Only first line
     const firstLine = formatted.split('\n').find(l => l.trim()) || '';
     return firstLine.length > 100 ? firstLine.substring(0, 100) + '...' : firstLine;
 };
+
+// Tooltip items for collapsed mode
+const collapsedTooltipItems = computed(() => {
+    return groupedChats.value.map(group => {
+        const preview = formatPreview(group.latest.msg);
+        const sessionInfo = dialogGrouping.value 
+            ? `${group.sessions.length} ${pluralize(group.sessions.length, 'count_sessions')}`
+            : (group.latest.sessionName || `Session #${group.latest.sessionId}`);
+        
+        return {
+            id: group.latest.id,
+            label: group.latest.name,
+            meta: sessionInfo,
+            subtitle: preview
+        };
+    });
+});
 
 // Grouped view: accordion groups per character
 const expandedGroups = ref(new Set());
@@ -145,6 +184,21 @@ const groupedChats = computed(() => {
     return [...map.values()].sort((a, b) => b.latest.timestamp - a.latest.timestamp);
 });
 
+const activeScrollItems = computed(() => {
+    if (props.collapsed) return groupedChats.value;
+    if (dialogGrouping.value) return groupedChats.value;
+    return filteredChats.value;
+});
+
+const scrollContainer = ref(null);
+const { visibleItems, paddingTop, paddingBottom, refresh: refreshScroll } = useVirtualScroll(activeScrollItems, scrollContainer, {
+    estimateHeight: 72
+});
+
+watch([() => props.collapsed, dialogGrouping], () => {
+    refreshScroll();
+});
+
 const onOpenChat = (chat) => {
     emit('open-chat', chat.charObj);
 };
@@ -161,6 +215,19 @@ const vLongPress = {
     }
 };
 
+const vHoverGlow = {
+    mounted: (el) => {
+        if (window.innerWidth >= 600) {
+            attachHoverGlow(el);
+        }
+    }
+};
+
+const { openSessionActions } = useSessionSheet({
+    openChat: ({ charId, sessionId }) => emit('open-chat', { id: charId, sessionId }),
+    onAfterAction: () => loadData()
+});
+
 const openActions = (chat, mode = 'flat') => {
     let items = [];
     let title = chat.name;
@@ -173,7 +240,7 @@ const openActions = (chat, mode = 'flat') => {
                 onClick: () => {
                     const charIndex = characters.value.findIndex(c => c.id === chat.id);
                     if (charIndex !== -1) {
-                        window.dispatchEvent(new CustomEvent('open-character-editor', { detail: { index: charIndex } }));
+                        publishAppEvent(APP_EVENTS.nav.openCharacterEditor, { index: charIndex });
                     }
                     closeBottomSheet();
                 }
@@ -189,43 +256,25 @@ const openActions = (chat, mode = 'flat') => {
             }
         ];
     } else {
-        if (mode !== 'session') {
-            items.push({
-                label: translations[currentLang.value]?.action_new_session || 'New Session',
-                icon: '<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>',
-                onClick: async () => {
-                    await createNewSession(chat.id);
-                    loadData();
-                    closeBottomSheet();
-                }
-            });
-        }
+        items.push({
+            label: translations[currentLang.value]?.action_new_session || 'New Session',
+            icon: '<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>',
+            onClick: async () => {
+                await createNewSession(chat.id);
+                loadData();
+                closeBottomSheet();
+            }
+        });
 
-        if (mode === 'session') {
-            items.push({
-                label: translations[currentLang.value]?.action_rename || 'Rename',
-                icon: '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>',
-                onClick: () => {
-                    closeBottomSheet();
-                    showBottomSheet({
-                        title: translations[currentLang.value]?.action_rename || 'Rename',
-                        input: {
-                            placeholder: translations[currentLang.value]?.placeholder_enter_name || 'Enter name',
-                            value: chat.sessionName || `Session #${chat.sessionId}`,
-                            confirmLabel: translations[currentLang.value]?.btn_save || 'Save',
-                            onConfirm: async (val) => {
-                                if (val) {
-                                    await renameSession(chat.id, chat.sessionId, val);
-                                    loadData();
-                                    closeBottomSheet();
-                                }
-                            }
-                        }
-                    });
-                }
-            });
-        }
-        
+        items.push({
+            label: 'Export Chat (Glaze)',
+            icon: '<svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 14-5-5h3V8h4v4h3l-5 5z"/></svg>',
+            onClick: () => {
+                exportGlazeChat(chat);
+                closeBottomSheet();
+            }
+        });
+
         items.push({
             label: translations[currentLang.value]?.action_export_chat || 'Export Chat (JSONL)',
             icon: '<svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>',
@@ -234,7 +283,7 @@ const openActions = (chat, mode = 'flat') => {
                 closeBottomSheet();
             }
         });
-        
+
         items.push({
             label: translations[currentLang.value]?.action_delete_session || 'Delete Session',
             icon: '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>',
@@ -251,32 +300,22 @@ const openActions = (chat, mode = 'flat') => {
                             iconColor: '#ff4444',
                             isDestructive: true,
                             onClick: async () => {
-                                // Check if it's the last session to prevent auto-creation of a new one
                                 const chats = await db.getChats() || {};
                                 let charData = chats[chat.id];
                                 let sessionCount = 0;
-                                
                                 if (charData) {
-                                    if (charData.sessions) {
-                                        sessionCount = Object.keys(charData.sessions).length;
-                                    } else if (Array.isArray(charData)) {
-                                        sessionCount = 1;
-                                    }
+                                    if (charData.sessions) sessionCount = Object.keys(charData.sessions).length;
+                                    else if (Array.isArray(charData)) sessionCount = 1;
                                 }
-
                                 if (sessionCount <= 1) {
                                     if (charData) {
-                                        if (Array.isArray(charData)) {
-                                            charData = { currentId: 1, sessions: {} };
-                                        } else if (charData.sessions) {
-                                            delete charData.sessions[chat.sessionId];
-                                        }
+                                        if (Array.isArray(charData)) charData = { currentId: 1, sessions: {} };
+                                        else if (charData.sessions) delete charData.sessions[chat.sessionId];
                                         await db.saveChat(chat.id, charData);
                                     }
                                 } else {
                                     await deleteSession(chat.id, chat.sessionId);
                                 }
-                                
                                 loadData();
                                 closeBottomSheet();
                             }
@@ -290,17 +329,11 @@ const openActions = (chat, mode = 'flat') => {
                 });
             }
         });
-
-        if (mode === 'session') {
-            title += ` (#${chat.sessionId})`;
-        }
     }
 
-    showBottomSheet({
-        title,
-        items
-    });
+    showBottomSheet({ title, items });
 };
+
 
 const handleHeaderClick = (event, charId) => {
     if (event.currentTarget._checkLongPress && event.currentTarget._checkLongPress()) return;
@@ -316,42 +349,6 @@ const startChatImport = async () => {
     if (allPersonas.value.length === 0) {
         await loadPersonas();
     }
-
-    // 1. Select Persona
-    const selectPersona = () => {
-        const items = allPersonas.value.map(p => ({
-            label: p.name,
-            icon: p.avatar ? `<img src="${p.avatar}" style="width:24px;height:24px;border-radius:50%;object-fit:cover;">` : 
-                  `<div style="width:24px;height:24px;border-radius:50%;background-color:var(--vk-blue);display:flex;align-items:center;justify-content:center;color:white;font-size:12px;font-weight:bold;">${(p.name && p.name[0] ? p.name[0] : '?').toUpperCase()}</div>`,
-            onClick: () => {
-                closeBottomSheet();
-                setTimeout(() => selectCharacter(p), 300);
-            }
-        }));
-
-        showBottomSheet({
-            title: translations[currentLang.value]?.select_persona_import || 'Select User Persona',
-            items: items
-        });
-    };
-
-    // 2. Select Character
-    const selectCharacter = (persona) => {
-        const items = characters.value.map(char => ({
-            label: char.name || "Unknown",
-            icon: (char.thumbnail || char.avatar) ? `<img src="${getAvatarUrl(char.thumbnail || char.avatar)}" style="width:24px;height:24px;border-radius:50%;object-fit:cover;">` : 
-                  `<div style="width:24px;height:24px;border-radius:50%;background-color:${char.color||'#ccc'};display:flex;align-items:center;justify-content:center;color:white;font-size:12px;font-weight:bold;">${(char.name && char.name[0] ? char.name[0] : '?').toUpperCase()}</div>`,
-            onClick: () => {
-                closeBottomSheet();
-                performImport(persona, char.id);
-            }
-        }));
-
-        showBottomSheet({
-            title: translations[currentLang.value]?.select_char_import || 'Select Character',
-            items: items
-        });
-    };
 
     // 3. Perform Import
     const performImport = async (persona, charId) => {
@@ -374,6 +371,42 @@ const startChatImport = async () => {
             console.error("Chat import failed", err);
             alert("Import error: " + err.message);
         }
+    };
+
+    // 2. Select Character
+    const selectCharacter = (persona) => {
+        const items = characters.value.map(char => ({
+            label: char.name || "Unknown",
+            icon: (char.thumbnail || char.avatar) ? `<img src="${getAvatarUrl(char.thumbnail || char.avatar)}" style="width:24px;height:24px;border-radius:50%;object-fit:cover;">` : 
+                  `<div style="width:24px;height:24px;border-radius:50%;background-color:${char.color||'#ccc'};display:flex;align-items:center;justify-content:center;color:white;font-size:12px;font-weight:bold;">${(char.name && char.name[0] ? char.name[0] : '?').toUpperCase()}</div>`,
+            onClick: () => {
+                closeBottomSheet();
+                performImport(persona, char.id);
+            }
+        }));
+
+        showBottomSheet({
+            title: translations[currentLang.value]?.select_char_import || 'Select Character',
+            items: items
+        });
+    };
+
+    // 1. Select Persona
+    const selectPersona = () => {
+        const items = allPersonas.value.map(p => ({
+            label: p.name,
+            icon: p.avatar ? `<img src="${p.avatar}" style="width:24px;height:24px;border-radius:50%;object-fit:cover;">` : 
+                  `<div style="width:24px;height:24px;border-radius:50%;background-color:var(--vk-blue);display:flex;align-items:center;justify-content:center;color:white;font-size:12px;font-weight:bold;">${(p.name && p.name[0] ? p.name[0] : '?').toUpperCase()}</div>`,
+            onClick: () => {
+                closeBottomSheet();
+                setTimeout(() => selectCharacter(p), 300);
+            }
+        }));
+
+        showBottomSheet({
+            title: translations[currentLang.value]?.select_persona_import || 'Select User Persona',
+            items: items
+        });
     };
 
     selectPersona();
@@ -414,6 +447,15 @@ const onGenerationStarted = (e) => {
 
 const onGenerationEnded = (e) => {
     if (e.detail && e.detail.charId && e.detail.sessionId) {
+        const activeState = getGenerationState(e.detail.charId);
+        const endedGenId = e.detail.genId ?? null;
+        if (
+            activeState?.type === 'chat' &&
+            String(activeState.sessionId) === String(e.detail.sessionId) &&
+            (endedGenId === null || activeState.genId !== endedGenId)
+        ) {
+            return;
+        }
         generating.value[`${e.detail.charId}_${e.detail.sessionId}`] = false;
         loadData(); // Reload to show new message and unread status
     }
@@ -473,37 +515,88 @@ defineExpose({ openNewChatPicker });
 
 onMounted(() => {
     loadData();
-    window.addEventListener('chat-updated', loadData);
-    window.addEventListener('character-updated', loadData);
-    window.addEventListener('chat-generation-started', onGenerationStarted);
-    window.addEventListener('chat-generation-ended', onGenerationEnded);
-    window.addEventListener('header-search', (e) => searchQuery.value = e.detail);
+    unsubscribeSyncDataRefreshed = subscribeAppEvent(APP_EVENTS.domain.sync.dataRefreshed, loadData);
+    unsubscribeChatUpdated = subscribeAppEvent(APP_EVENTS.domain.chat.updated, loadData);
+    unsubscribeCharUpdated = subscribeAppEvent(APP_EVENTS.domain.character.updated, loadData);
+    unsubscribeGenerationStarted = subscribeAppEvent(APP_EVENTS.domain.generation.started, onGenerationStarted);
+    unsubscribeGenerationEnded = subscribeAppEvent(APP_EVENTS.domain.generation.ended, onGenerationEnded);
+    unsubscribeHeaderSearch = subscribeAppEvent(APP_EVENTS.ui.headerSearch, ({ detail }) => searchQuery.value = detail);
 });
 
 onUnmounted(() => {
-    window.removeEventListener('chat-updated', loadData);
-    window.removeEventListener('character-updated', loadData);
-    window.removeEventListener('chat-generation-started', onGenerationStarted);
-    window.removeEventListener('chat-generation-ended', onGenerationEnded);
-    // Note: anonymous listener for header-search is fine as component is unmounted
+    unsubscribeSyncDataRefreshed?.();
+    unsubscribeSyncDataRefreshed = null;
+    unsubscribeChatUpdated?.();
+    unsubscribeChatUpdated = null;
+    unsubscribeCharUpdated?.();
+    unsubscribeCharUpdated = null;
+    unsubscribeGenerationStarted?.();
+    unsubscribeGenerationStarted = null;
+    unsubscribeGenerationEnded?.();
+    unsubscribeGenerationEnded = null;
+    unsubscribeHeaderSearch?.();
+    unsubscribeHeaderSearch = null;
 });
 </script>
 
 <template>
-  <div class="view-content-wrapper">
-      <div class="list-container">
-          <!-- Flat list mode -->
-          <template v-if="!dialogGrouping">
-              <div v-for="chat in filteredChats" :key="chat.id + '_' + chat.sessionId" class="list-item" :class="{ unread: unread[chat.id] && chat.isCurrent }" v-long-press="() => openActions(chat)" @click="handleItemClick($event, chat)" @contextmenu.prevent="openActions(chat)">
+  <div class="view-content-wrapper" ref="scrollContainer">
+      <div class="list-container" :class="{ 'list-container-collapsed': collapsed }">
+
+          <!-- Collapsed: icon-only avatar strip -->
+          <template v-if="collapsed">
+              <ToolStripTooltip :items="collapsedTooltipItems" placement="right">
+                  <template #default="{ onItemEnter, onItemLeave }">
+                      <div :style="{ paddingTop: paddingTop + 'px', paddingBottom: paddingBottom + 'px' }">
+                      <div v-for="{ item: group, index, key } in visibleItems" :key="key" :data-index="index"
+                           class="collapsed-avatar-item"
+                           :class="{ unread: unread[group.latest.id] }"
+                           :data-tooltip-id="group.latest.id"
+                           @click="onOpenChat(group.latest)"
+                           @mouseenter="(e) => onItemEnter(group.latest.id, e)"
+                           @mouseleave="onItemLeave">
+                          <div class="collapsed-avatar-circle">
+                              <img v-if="group.latest.mini_thumbnail || group.latest.thumbnail || group.latest.avatar"
+                                   :src="getAvatarUrl(group.latest.mini_thumbnail || group.latest.thumbnail || group.latest.avatar)"
+                                   :alt="group.latest.name" loading="lazy">
+                              <div v-else class="avatar-placeholder"
+                                   :style="{ backgroundColor: group.latest.color || '#66ccff' }">
+                                  {{ group.latest.name && group.latest.name[0] ? group.latest.name[0].toUpperCase() : '?' }}
+                              </div>
+                          </div>
+                          <div class="collapsed-unread-dot" v-if="unread[group.latest.id]"></div>
+                      </div>
+                      </div>
+                      <div v-if="isLoading" class="collapsed-spinner">
+                          <div class="dl-spinner-mini"></div>
+                      </div>
+                      <div v-else-if="groupedChats.length === 0" class="collapsed-empty">
+                          <svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/></svg>
+                      </div>
+                  </template>
+              </ToolStripTooltip>
+          </template>
+
+          <template v-if="!dialogGrouping && !collapsed">
+              <div :style="{ paddingTop: paddingTop + 'px', paddingBottom: paddingBottom + 'px' }">
+              <div v-for="{ item: chat, index, key } in visibleItems" :key="key" :data-index="index" class="list-item" :class="{ unread: unread[chat.id] && chat.isCurrent }" v-long-press="() => openActions(chat)" v-hover-glow @click="handleItemClick($event, chat)" @contextmenu.prevent="openActions(chat)">
                 <div class="avatar">
-                    <img v-if="chat.thumbnail || chat.avatar" :src="getAvatarUrl(chat.thumbnail || chat.avatar)" :alt="chat.name" loading="lazy">
-                    <div v-else class="avatar-placeholder" :style="{ backgroundColor: chat.color || '#66ccff' }">{{ chat.name && chat.name[0] ? chat.name[0].toUpperCase() : '?' }}</div>
+                    <img v-if="chat.mini_thumbnail || chat.thumbnail || chat.avatar" :src="getAvatarUrl(chat.mini_thumbnail || chat.thumbnail || chat.avatar)" :alt="chat.name" loading="lazy">
+                    <div v-else class="avatar-placeholder" :style="{ backgroundColor: chat.color || '#66ccff' }">
+{{ chat.name && chat.name[0] ? chat.name[0].toUpperCase() : '?' }}
+</div>
                 </div>
                 <div class="item-content">
-                    <div class="item-header"><span class="item-title">{{ chat.name }}</span><span class="item-meta">{{ chat.time }}</span></div>
+                    <div class="item-header">
+<span class="item-title">{{ chat.name }}</span><span class="item-meta">{{ chat.time }}</span>
+</div>
                     <div class="item-subtitle">
-                        <div class="session-label">{{ chat.sessionName || 'Session #' + chat.sessionId }}</div>
-                        <div class="msg-preview" v-if="!generating[`${chat.id}_${chat.sessionId}`]">{{ formatPreview(chat.msg) }}</div>
+                        <div class="session-label">
+{{ chat.sessionName || 'Session #' + chat.sessionId }}
+</div>
+                        <div class="msg-preview" v-if="!generating[`${chat.id}_${chat.sessionId}`]">
+{{ formatPreview(chat.msg) }}
+</div>
                         <div class="msg-preview generating" v-else>
                             <svg class="typing-icon-mini" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
                             <span>{{ translations[currentLang.value]?.model_typing || 'Generating...' }}</span>
@@ -512,16 +605,20 @@ onUnmounted(() => {
                 </div>
                 <div class="unread-dot" v-if="unread[chat.id] && chat.isCurrent"></div>
               </div>
+              </div>
           </template>
 
           <!-- Grouped mode -->
-          <template v-else>
-              <div v-for="group in groupedChats" :key="'g_' + group.latest.id" class="group-block">
+          <template v-else-if="dialogGrouping && !collapsed">
+              <div :style="{ paddingTop: paddingTop + 'px', paddingBottom: paddingBottom + 'px' }">
+              <div v-for="{ item: group, index, key } in visibleItems" :key="key" :data-index="index" class="group-block">
                 <!-- Character group header -->
-                <div class="list-item group-header" :class="{ unread: unread[group.latest.id] && !expandedGroups.has(group.latest.id) }" v-long-press="() => openActions(group.latest, 'header')" @click="handleHeaderClick($event, group.latest.id)" @contextmenu.prevent="openActions(group.latest, 'header')">
+                <div class="list-item group-header" :class="{ unread: unread[group.latest.id] && !expandedGroups.has(group.latest.id) }" v-long-press="() => openActions(group.latest, 'header')" v-hover-glow @click="handleHeaderClick($event, group.latest.id)" @contextmenu.prevent="openActions(group.latest, 'header')">
                     <div class="avatar">
-                        <img v-if="group.latest.thumbnail || group.latest.avatar" :src="getAvatarUrl(group.latest.thumbnail || group.latest.avatar)" :alt="group.latest.name" loading="lazy">
-                        <div v-else class="avatar-placeholder" :style="{ backgroundColor: group.latest.color || '#66ccff' }">{{ group.latest.name && group.latest.name[0] ? group.latest.name[0].toUpperCase() : '?' }}</div>
+                        <img v-if="group.latest.mini_thumbnail || group.latest.thumbnail || group.latest.avatar" :src="getAvatarUrl(group.latest.mini_thumbnail || group.latest.thumbnail || group.latest.avatar)" :alt="group.latest.name" loading="lazy">
+                        <div v-else class="avatar-placeholder" :style="{ backgroundColor: group.latest.color || '#66ccff' }">
+{{ group.latest.name && group.latest.name[0] ? group.latest.name[0].toUpperCase() : '?' }}
+</div>
                     </div>
                     <div class="item-content">
                         <div class="item-header">
@@ -530,13 +627,17 @@ onUnmounted(() => {
                         </div>
                         <div class="item-subtitle">
                             <div class="session-labels-row">
-                                <div class="session-count-label">{{ group.sessions.length }} {{ pluralize(group.sessions.length, 'count_sessions') }}</div>
+                                <div class="session-count-label">
+{{ group.sessions.length }} {{ pluralize(group.sessions.length, 'count_sessions') }}
+</div>
                                 <div class="group-right-icons">
                                     <div class="unread-dot" v-if="unread[group.latest.id] && !expandedGroups.has(group.latest.id)"></div>
                                     <svg class="group-chevron" :class="{ expanded: expandedGroups.has(group.latest.id) }" viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6z"/></svg>
                                 </div>
                             </div>
-                            <div class="msg-preview" v-if="!generating[`${group.latest.id}_${group.latest.sessionId}`]">{{ formatPreview(group.latest.msg) }}</div>
+                            <div class="msg-preview" v-if="!generating[`${group.latest.id}_${group.latest.sessionId}`]">
+{{ formatPreview(group.latest.msg) }}
+</div>
                             <div class="msg-preview generating" v-else>
                                 <svg class="typing-icon-mini" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
                                 <span>{{ translations[currentLang.value]?.model_typing || 'Generating...' }}</span>
@@ -551,18 +652,22 @@ onUnmounted(() => {
                         <div class="sessions-list sheet-card-list dialog-sessions-list">
                             <div v-for="session in group.sessions" :key="session.id + '_' + session.sessionId" 
                                  class="triggered-item-card" 
-                             v-long-press="() => openActions(session, 'session')" 
+                             v-long-press="() => openSessionActions({ id: session.id, name: session.name }, session.sessionId, session.sessionName)" 
                              @click="handleItemClick($event, session)" 
-                             @contextmenu.prevent="openActions(session, 'session')">
+                             @contextmenu.prevent="openSessionActions({ id: session.id, name: session.name }, session.sessionId, session.sessionName)">
                             <div class="item-info">
                                 <div class="item-label-row">
-                                    <div class="item-label" :class="{ 'unread-text': unread[session.id] && session.isCurrent }">{{ session.sessionName || 'Session #' + session.sessionId }}</div>
+                                    <div class="item-label" :class="{ 'unread-text': unread[session.id] && session.isCurrent }">
+{{ session.sessionName || 'Session #' + session.sessionId }}
+</div>
                                     <div class="item-badge">
                                         <svg viewBox="0 0 24 24" class="badge-icon"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
                                         {{ session.messagesCount || '0' }} {{ pluralize(session.messagesCount || 0, 'count_messages') }}{{ session.time ? ' · ' + session.time : '' }}
                                     </div>
                                 </div>
-                                <div class="item-sublabel" :class="{ 'unread-text': unread[session.id] && session.isCurrent }" v-if="!generating[`${session.id}_${session.sessionId}`]">{{ formatPreview(session.msg) }}</div>
+                                <div class="item-sublabel" :class="{ 'unread-text': unread[session.id] && session.isCurrent }" v-if="!generating[`${session.id}_${session.sessionId}`]">
+{{ formatPreview(session.msg) }}
+</div>
                                 <div class="item-sublabel generating" v-else>
                                     <svg class="typing-icon-mini" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
                                     <span>{{ translations[currentLang.value]?.model_typing || 'Generating...' }}</span>
@@ -574,18 +679,98 @@ onUnmounted(() => {
                     </div>
                 </Transition>
               </div>
+              </div>
           </template>
 
-          <div v-if="filteredChats.length === 0" class="empty-state">
+          <div v-if="!collapsed && isLoading" class="empty-state">
+              <div class="dl-spinner"></div>
+          </div>
+          <div v-else-if="filteredChats.length === 0 && !collapsed && !isLoading" class="empty-state">
               <svg class="empty-state-icon" viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/></svg>
-              <div class="empty-state-text">{{ translations[currentLang.value]?.no_dialogs || 'No dialogs' }}</div>
+              <div class="empty-state-text">
+{{ translations[currentLang.value]?.no_dialogs || 'No dialogs' }}
+</div>
           </div>
       </div>
   </div>
 </template>
 
 <style scoped>
-.list-container { padding-bottom: calc(80px + var(--sab)); }
+.list-container-collapsed { padding-bottom: 0; }
+
+/* Lock list-item to a fixed height so it never changes on sidebar toggle */
+.list-item {
+    height: 72px;
+    box-sizing: border-box;
+    overflow: hidden;
+}
+.list-item .item-content {
+    overflow: hidden;
+}
+
+/* Collapsed avatar strip — mirrors .list-item padding and .avatar size */
+.collapsed-avatar-item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px 0;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background-color 0.15s ease;
+}
+.collapsed-avatar-item:hover { background-color: rgba(255, 255, 255, 0.05); }
+.collapsed-avatar-item.unread .collapsed-avatar-circle {
+    box-shadow: 0 0 0 2px var(--vk-blue);
+}
+.collapsed-avatar-circle {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.collapsed-avatar-circle img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+.collapsed-avatar-circle .avatar-placeholder {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: 1.5em;
+    font-weight: 500;
+}
+.collapsed-unread-dot {
+    position: absolute;
+    top: 10px;
+    /* avatar centered in 64px: starts at 8px, ends at 56px → dot at ~52px */
+    left: 52px;
+    width: 9px;
+    height: 9px;
+    background-color: var(--vk-blue);
+    border-radius: 50%;
+    border: 1.5px solid var(--ui-bg, #1e1e1e);
+}
+.collapsed-empty {
+    display: flex;
+    justify-content: center;
+    padding: 12px 0;
+    opacity: 0.3;
+}
+.collapsed-empty svg {
+    width: 22px;
+    height: 22px;
+    fill: var(--text-color, #fff);
+}
 .session-label { color: var(--text-gray); font-size: 0.8em; margin-bottom: 2px; }
 .msg-preview { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .session-count-label { color: var(--text-gray); font-size: 0.8em; margin-bottom: 2px; }
@@ -678,4 +863,5 @@ onUnmounted(() => {
     margin-left: 8px;
     flex-shrink: 0;
 }
+
 </style>

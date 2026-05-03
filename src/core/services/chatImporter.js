@@ -4,6 +4,103 @@ import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { saveFile } from './fileSaver.js';
 import { addMessageStats, addRegenerationStats } from './statsService.js';
+import { createEmptyMemoryCoverage } from './memorySchema.js';
+
+function normalizeImportedMessage(msg) {
+    if (!msg || typeof msg !== 'object') return msg;
+    if (!msg.id) msg.id = `legacy_${msg.timestamp || Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    if (!Array.isArray(msg.contextRefs)) msg.contextRefs = [];
+    if (!msg.memoryCoverage || typeof msg.memoryCoverage !== 'object') msg.memoryCoverage = createEmptyMemoryCoverage();
+    if (!Array.isArray(msg.memoryCoverage.entryIds)) msg.memoryCoverage.entryIds = [];
+    if (typeof msg.memoryCoverage.needsRebuild !== 'boolean') msg.memoryCoverage.needsRebuild = false;
+    if (typeof msg.memoryCoverage.stale !== 'boolean') msg.memoryCoverage.stale = false;
+    if (!Array.isArray(msg.triggeredLorebooks)) msg.triggeredLorebooks = msg.triggeredLorebooks ? msg.triggeredLorebooks : [];
+    if (!Array.isArray(msg.triggeredMemories)) msg.triggeredMemories = msg.triggeredMemories ? msg.triggeredMemories : [];
+    if (msg.persona && typeof msg.persona === 'object') {
+        const { id, name } = msg.persona;
+        msg.persona = { id: id || null, name: name || null };
+    }
+    if (Array.isArray(msg.triggeredLorebooks)) {
+        msg.triggeredLorebooks = msg.triggeredLorebooks.map(({ content: _content, ...rest }) => rest);
+    }
+    if (Array.isArray(msg.triggeredMemories)) {
+        msg.triggeredMemories = msg.triggeredMemories.map(({ content: _content, messageIds: _messageIds, ...rest }) => rest);
+    }
+    return msg;
+}
+
+async function importGlazeChatPackage(json, characterId, userPersona, opts) {
+    if (!json || json._format !== 'glaze_chat') {
+        throw new Error('Invalid Glaze chat package');
+    }
+
+    const sessionId = await db.createSession(characterId);
+    const chats = opts?.chatDataCache ?? await db.getChats();
+    const chatData = chats[characterId];
+    if (!chatData.sessions) chatData.sessions = {};
+
+    const importedMessages = Array.isArray(json.messages)
+        ? json.messages.map(message => normalizeImportedMessage(JSON.parse(JSON.stringify(message))))
+        : [];
+    if (!importedMessages.length) throw new Error('No valid messages found in Glaze chat package');
+
+    chatData.sessions[sessionId] = importedMessages;
+
+    if (json.summary) {
+        if (!chatData.summaries) chatData.summaries = {};
+        chatData.summaries[sessionId] = JSON.parse(JSON.stringify(json.summary));
+    }
+    if (json.authorsNote) {
+        if (!chatData.authorsNotes) chatData.authorsNotes = {};
+        chatData.authorsNotes[sessionId] = typeof json.authorsNote === 'object'
+            ? (json.authorsNote.content || '')
+            : (json.authorsNote || '');
+    }
+    if (json.memoryBook) {
+        if (!chatData.memoryBooks) chatData.memoryBooks = {};
+        const importedBook = JSON.parse(JSON.stringify(json.memoryBook));
+        // Clear transient state from imported memory book — drafts and automation
+        // should not carry over; user must manually scan and generate after import
+        importedBook.pendingDrafts = [];
+        if (importedBook.automation) {
+            importedBook.automation.pendingTrigger = null;
+            importedBook.automation.isGeneratingDraft = false;
+            importedBook.automation.plannedSegments = [];
+        }
+        // Reset generation settings that may be invalid on another device
+        if (importedBook.settings) {
+            const validPresets = ['detailed_beats', 'concise_narrative', 'structured_markdown', 'minimal_factual'];
+            const preset = importedBook.settings.promptPreset;
+            const isCustom = Array.isArray(importedBook.settings.customPrompts) &&
+                importedBook.settings.customPrompts.some(p => p.id === preset);
+            if (preset && !validPresets.includes(preset) && !isCustom) {
+                importedBook.settings.promptPreset = 'detailed_beats';
+            }
+            // Clear model override — imported model may not be available
+            delete importedBook.settings.generationModel;
+            importedBook.settings.generationUseCurrentModelOverride = false;
+        }
+        chatData.memoryBooks[sessionId] = importedBook;
+    }
+
+    await db.saveChat(characterId, chatData);
+
+    for (const msg of importedMessages) {
+        const chars = msg.text?.length || 0;
+        const tokens = Math.ceil(chars / 4);
+        addMessageStats(characterId, sessionId, tokens, chars, msg.timestamp);
+        if (msg.swipes && msg.swipes.length > 1) {
+            for (let i = 0; i < msg.swipes.length; i++) {
+                if (i === msg.swipeId) continue;
+                const sChars = (msg.swipes[i] || '').length;
+                const sTokens = Math.ceil(sChars / 4);
+                addRegenerationStats(characterId, sessionId, sTokens, sChars);
+            }
+        }
+    }
+
+    return { characterId, sessionId, messageCount: importedMessages.length };
+}
 
 /**
  * Imports a SillyTavern chat file (JSONL) into the application database.
@@ -12,7 +109,19 @@ import { addMessageStats, addRegenerationStats } from './statsService.js';
  * @param {Object} userPersona - The persona object to use for user messages.
  * @returns {Promise<Object>} - Result with charName and sessionId.
  */
-export async function importSillyTavernChat(file, characterId, userPersona) {
+export async function importSillyTavernChat(file, characterId, userPersona, opts) {
+    const fileName = String(file?.name || '').toLowerCase();
+
+    if (fileName.endsWith('.glzchat.json')) {
+        const text = await readFile(file);
+        const json = JSON.parse(text);
+        return importGlazeChatPackage(json, characterId, userPersona, opts);
+    }
+
+    if (!fileName.endsWith('.json') && !fileName.endsWith('.jsonl')) {
+        throw new Error('Unsupported file format. Supported formats: JSON, JSONL, .glzchat.json');
+    }
+
     let messages = [];
     let metadata = null;
     let isJsonArray = false;
@@ -39,12 +148,16 @@ export async function importSillyTavernChat(file, characterId, userPersona) {
                 let lastTimestamp = 0;
                 messages = json.map(obj => {
                     const scMsg = convertMessage(obj, userPersona);
+                    // Skip completely empty messages
+                    if (!scMsg.text && (!scMsg.swipes || scMsg.swipes.every(s => !s))) {
+                        return null;
+                    }
                     if (scMsg.timestamp <= lastTimestamp) {
                         scMsg.timestamp = lastTimestamp + 1;
                     }
                     lastTimestamp = scMsg.timestamp;
                     return scMsg;
-                });
+                }).filter(Boolean);
             }
         } catch (e) {
             console.warn("Failed to parse JSON array mode, proceeding to JSONL stream", e);
@@ -64,6 +177,10 @@ export async function importSillyTavernChat(file, characterId, userPersona) {
                     metadata = obj.chat_metadata;
                 } else {
                     const scMsg = convertMessage(obj, userPersona);
+                    // Skip completely empty messages
+                    if (!scMsg.text && (!scMsg.swipes || scMsg.swipes.every(s => !s))) {
+                        return;
+                    }
                     if (scMsg.timestamp <= lastTimestamp) {
                         scMsg.timestamp = lastTimestamp + 1;
                     }
@@ -119,7 +236,7 @@ export async function importSillyTavernChat(file, characterId, userPersona) {
     // Create new session in DB
     // This adapts to db.js structure: { currentId: N, sessions: { ... } }
     const sessionId = await db.createSession(characterId);
-    const chats = await db.getChats();
+    const chats = opts?.chatDataCache ?? await db.getChats();
     const chatData = chats[characterId];
 
     // Save messages to the new session
@@ -244,6 +361,8 @@ export async function exportSillyTavernChat(chat) {
     // 2. Message Lines
     for (const msg of messages) {
         if (!msg) continue;
+        // Skip empty messages that have no meaningful content
+        if (!msg.text && (!msg.swipes || msg.swipes.every(s => !s))) continue;
         const isUser = msg.role === 'user';
         const name = isUser ? (msg.persona?.name || userName) : charName;
         const dateObj = new Date(msg.timestamp || Date.now());
@@ -262,6 +381,18 @@ export async function exportSillyTavernChat(chat) {
 
         if (msg.reasoning) {
             stMsg.extra.reasoning = msg.reasoning;
+        }
+        if (msg.id) {
+            stMsg.extra.glazeMessageId = msg.id;
+        }
+        if (Array.isArray(msg.contextRefs) && msg.contextRefs.length) {
+            stMsg.extra.glazeContextRefs = msg.contextRefs;
+        }
+        if (msg.memoryCoverage && typeof msg.memoryCoverage === 'object') {
+            stMsg.extra.glazeMemoryCoverage = msg.memoryCoverage;
+        }
+        if (Array.isArray(msg.triggeredMemories) && msg.triggeredMemories.length) {
+            stMsg.extra.glazeTriggeredMemories = msg.triggeredMemories;
         }
 
         // Reconstruct swipe_info
@@ -306,6 +437,31 @@ export async function exportSillyTavernChat(chat) {
     await saveFile(filename, fileContent, 'application/jsonl', 'chats');
 }
 
+export async function exportGlazeChat(chat) {
+    const fullChatData = await db.getChat(chat.id);
+    if (!fullChatData || !fullChatData.sessions || !fullChatData.sessions[chat.sessionId]) {
+        throw new Error('Chat data not found');
+    }
+
+    const payload = {
+        _format: 'glaze_chat',
+        _version: 1,
+        exportedAt: Date.now(),
+        characterId: chat.id,
+        characterName: chat.name,
+        sessionId: chat.sessionId,
+        messages: JSON.parse(JSON.stringify(fullChatData.sessions[chat.sessionId] || [])),
+        summary: fullChatData.summaries?.[chat.sessionId] ?? null,
+        authorsNote: fullChatData.authorsNotes?.[chat.sessionId] ?? null,
+        memoryBook: fullChatData.memoryBooks?.[chat.sessionId] ?? null
+    };
+
+    const safeName = String(chat.name || 'Chat').replace(/[\\/:*?"<>|]/g, '_');
+    const dateStr = new Date().toISOString().replace(/[:T]/g, '-').split('.')[0];
+    const filename = `${safeName} - ${dateStr}.glzchat.json`;
+    await saveFile(filename, JSON.stringify(payload, null, 2), 'application/json', 'chats');
+}
+
 /**
  * Opens a file picker for chat files.
  * @returns {Promise<File|null>}
@@ -314,9 +470,9 @@ export function pickChatFile() {
     return new Promise((resolve) => {
         const input = document.createElement('input');
         input.type = 'file';
-        input.accept = '.json,.jsonl,application/json,text/plain,*/*';
         input.onchange = (e) => {
-            resolve(e.target.files[0] || null);
+            const file = e.target.files[0] || null;
+            resolve(file);
         };
         input.click();
     });
@@ -327,7 +483,9 @@ export function pickChatFile() {
  */
 export function triggerChatImport(characterId, userPersona, onImport) {
     pickChatFile().then(async (file) => {
-        if (!file) return;
+        if (!file) {
+            return;
+        }
         try {
             const result = await importSillyTavernChat(file, characterId, userPersona);
             if (onImport) {
@@ -376,16 +534,33 @@ function convertMessage(stMsg, userPersona) {
         text: stMsg.mes || "",
         time: time,
         timestamp: timestamp,
-        // Ensure swipes are transferred
-        swipes: Array.isArray(stMsg.swipes) ? stMsg.swipes : [stMsg.mes || ""],
+        id: stMsg.extra?.glazeMessageId || `legacy_${timestamp}_${Math.random().toString(36).slice(2, 6)}`,
+        // Ensure swipes are transferred, filtering out null/undefined entries
+        swipes: Array.isArray(stMsg.swipes)
+            ? stMsg.swipes.filter(s => s !== null && s !== undefined).map(s => String(s))
+            : [String(stMsg.mes || "")],
         swipeId: typeof stMsg.swipe_id === 'number' ? stMsg.swipe_id : 0,
+        contextRefs: Array.isArray(stMsg.extra?.glazeContextRefs) ? stMsg.extra.glazeContextRefs : [],
+        memoryCoverage: stMsg.extra?.glazeMemoryCoverage || createEmptyMemoryCoverage(),
+        triggeredMemories: Array.isArray(stMsg.extra?.glazeTriggeredMemories) ? stMsg.extra.glazeTriggeredMemories : []
     };
+
+    // Normalize swipesMeta length to match swipes
+    if (scMsg.swipes.length > 0) {
+        if (!scMsg.swipesMeta) scMsg.swipesMeta = [];
+        while (scMsg.swipesMeta.length < scMsg.swipes.length) {
+            scMsg.swipesMeta.push({});
+        }
+        if (scMsg.swipesMeta.length > scMsg.swipes.length) {
+            scMsg.swipesMeta.length = scMsg.swipes.length;
+        }
+    }
 
     // User specific
     if (role === 'user') {
         scMsg.persona = {
-            name: userPersona?.name || stMsg.name || "User",
-            avatar: userPersona?.avatar || null
+            id: userPersona?.id || null,
+            name: userPersona?.name || stMsg.name || "User"
         };
     }
 

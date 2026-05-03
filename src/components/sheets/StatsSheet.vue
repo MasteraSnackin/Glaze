@@ -52,22 +52,6 @@ const formatDate = (timestamp) => {
     return new Date(timestamp).toLocaleString();
 };
 
-const calculateStats = async (charId, currentSessionId, history) => {
-    // Only calculate chat stats if we have a charId
-    if (charId && currentSessionId) {
-        const cStats = getChatStats(charId, currentSessionId);
-        if (cStats) {
-            statsData.value.chat = cStats;
-            if (cStats.firstMessage !== '-') {
-                statsData.value.chat.firstMessage = formatDate(parseInt(cStats.firstMessage, 10));
-            }
-        }
-    }
-
-    await calculateCharStats(selectedCharId.value);
-    await calculateGlobalStats();
-};
-
 const calculateCharStats = async (charId) => {
     if (!charId) return;
     const cStats = getCharStats(charId);
@@ -85,6 +69,22 @@ const calculateGlobalStats = async () => {
     if (gStats.firstMessage !== '-') {
         statsData.value.general.firstMessage = formatDate(parseInt(gStats.firstMessage, 10));
     }
+};
+
+const calculateStats = async (charId, currentSessionId, history) => {
+    // Only calculate chat stats if we have a charId
+    if (charId && currentSessionId) {
+        const cStats = getChatStats(charId, currentSessionId);
+        if (cStats) {
+            statsData.value.chat = cStats;
+            if (cStats.firstMessage !== '-') {
+                statsData.value.chat.firstMessage = formatDate(parseInt(cStats.firstMessage, 10));
+            }
+        }
+    }
+
+    await calculateCharStats(selectedCharId.value);
+    await calculateGlobalStats();
 };
 
 let updateInterval = null;
@@ -128,8 +128,11 @@ const selectChar = async (id) => {
     await calculateCharStats(id);
 };
 
-const close = () => {
+const onSheetClose = () => {
     if (updateInterval) clearInterval(updateInterval);
+};
+
+const close = () => {
     sheet.value?.close();
 };
 
@@ -153,7 +156,24 @@ const setTab = (tab) => {
 </script>
 
 <template>
-    <SheetView ref="sheet" :z-index="1005" :title="t('action_chat_stats') || 'Statistics'" :tabs="statsTabs" :active-tab="currentTab" @update:activeTab="setTab">
+    <SheetView ref="sheet" :z-index="1005" :title="t('action_chat_stats') || 'Statistics'" @close="onSheetClose">
+        <template #header-bottom>
+            <div class="tabs-row stats-tabs-row">
+                <div class="top-tabs-container tabs-3">
+                    <div class="tab-slider" :style="{ transform: `translateX(${currentTab === 'chat' ? '0%' : currentTab === 'char' ? '100%' : '200%'})` }"></div>
+                    <div 
+                        v-for="tab in statsTabs" 
+                        :key="tab.key" 
+                        class="top-tab" 
+                        :class="{ active: currentTab === tab.key }"
+                        @click="setTab(tab.key)"
+                    >
+                        <svg class="tab-icon" viewBox="0 0 24 24"><path :d="tab.icon"/></svg>
+                        <span>{{ tab.label }}</span>
+                    </div>
+                </div>
+            </div>
+        </template>
         <div class="stats-body">
             <!-- Character selector (char tab only) — above hero -->
             <div v-if="currentTab === 'char'" class="char-picker" @click="showCharDropdown = !showCharDropdown">
@@ -513,5 +533,8 @@ const setTab = (tab) => {
 .dropdown-leave-to {
     opacity: 0;
     transform: scaleY(0.95) translateY(-4px);
+}
+.stats-tabs-row {
+    margin: 0 16px 12px;
 }
 </style>

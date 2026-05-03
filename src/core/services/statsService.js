@@ -135,7 +135,7 @@ export const migrateStatsIfNeeded = async () => {
 
     // Gather global deleted from legacy localStorage keys since it already exists
     for (let i = 0; i < localStorage.length; i++) {
-        let key = localStorage.key(i);
+        const key = localStorage.key(i);
         if (key && key.startsWith('gz_deleted_char_')) {
             globalDeleted += parseInt(localStorage.getItem(key) || '0', 10);
         }

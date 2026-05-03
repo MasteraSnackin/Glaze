@@ -3,10 +3,13 @@ import { logger } from '../../utils/logger.js';
 import { ForegroundService } from '@capawesome-team/capacitor-android-foreground-service';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { getActiveContext } from '@/core/services/timeTracker.js';
+import { publishAppEvent } from '@/core/events/eventHub.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
 
 const MessagingStyleNotification = registerPlugin('MessagingStyleNotification');
 
 let pendingNotificationData = null;
+const avatarBase64Cache = new Map();
 
 function stableIdFromString(str) {
     let hash = 0;
@@ -26,7 +29,7 @@ if (Capacitor.getPlatform() === 'android') {
         if (data && data.charId) {
             pendingNotificationData = data;
             logger.debug("[NotificationService] Dispatching open-chat for:", data);
-            window.dispatchEvent(new CustomEvent('open-chat', { detail: data }));
+            publishAppEvent(APP_EVENTS.nav.openChat, data);
         }
     });
 
@@ -35,7 +38,7 @@ if (Capacitor.getPlatform() === 'android') {
         if (data && data.charId) {
             pendingNotificationData = data;
             logger.debug("[MessagingStyleNotificationPlugin] Dispatching open-chat for:", data);
-            window.dispatchEvent(new CustomEvent('open-chat', { detail: data }));
+            publishAppEvent(APP_EVENTS.nav.openChat, data);
         }
     });
 }
@@ -171,22 +174,31 @@ export async function sendMessageNotification(title, body, icon, charId, session
         if (Capacitor.getPlatform() === 'android') {
             let avatarBase64 = null;
             if (icon) {
+                const cacheKey = `${charId || 'unknown'}:${icon}`;
+                if (avatarBase64Cache.has(cacheKey)) {
+                    avatarBase64 = avatarBase64Cache.get(cacheKey);
+                }
                 let url = icon;
                 if (!url.startsWith('http') && !url.startsWith('data:') && !url.startsWith('blob:')) {
                     url = `/characters/${url}`;
                 }
-                try {
-                    const res = await fetch(url);
-                    const blob = await res.blob();
-                    await new Promise((resolve) => {
-                        const reader = new FileReader();
-                        reader.onloadend = () => {
-                            avatarBase64 = reader.result;
-                            resolve();
-                        };
-                        reader.readAsDataURL(blob);
-                    });
-                } catch (e) { console.warn("Failed to convert avatar to base64", e); }
+                if (!avatarBase64) {
+                    try {
+                        const res = await fetch(url);
+                        const blob = await res.blob();
+                        await new Promise((resolve) => {
+                            const reader = new FileReader();
+                            reader.onloadend = () => {
+                                avatarBase64 = reader.result;
+                                resolve();
+                            };
+                            reader.readAsDataURL(blob);
+                        });
+                        if (avatarBase64) {
+                            avatarBase64Cache.set(cacheKey, avatarBase64);
+                        }
+                    } catch (e) { console.warn("Failed to convert avatar to base64", e); }
+                }
             }
 
             await MessagingStyleNotification.showMessagingNotification({
@@ -210,7 +222,7 @@ export async function sendMessageNotification(title, body, icon, charId, session
             });
             n.onclick = () => {
                 window.focus();
-                if (charId) window.dispatchEvent(new CustomEvent('open-chat', { detail: { charId, sessionId, msgId } }));
+                if (charId) publishAppEvent(APP_EVENTS.nav.openChat, { charId, sessionId, msgId });
                 n.close();
             };
         }

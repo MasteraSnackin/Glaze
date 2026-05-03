@@ -6,7 +6,13 @@ import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { db } from '@/utils/db.js';
 import { logger } from './logger.js';
+import { generateThumbnail, generateAllThumbnails } from './thumbnailUtils.js';
+import { fileToDataUrl, blobToDataUrl } from './imageUtils.js';
 import { saveFile } from '../core/services/fileSaver.js';
+import { importSTLorebook } from '@/core/states/lorebookState.js';
+import { publishAppEvent } from '@/core/events/eventHub.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
+import JSZip from 'jszip';
 
 // ─── Import ──────────────────────────────────────────────────────────────────
 
@@ -16,11 +22,24 @@ import { saveFile } from '../core/services/fileSaver.js';
  * @returns {Promise<Object>} - Character data object
  */
 export async function parseCharacterCard(file) {
-    if (file.type === 'image/png' || file.name.toLowerCase().endsWith('.png')) {
-        return await parsePng(file);
-    } else {
-        return await parseJson(file);
+    const name = file.name.toLowerCase();
+    if (name.endsWith('.charx') || name.endsWith('.zip')) {
+        const isRar = await detectRar(file);
+        if (isRar) {
+            throw new Error("RAR archives are not supported. Please re-save the archive as ZIP (.charx) and try again.");
+        }
+        return await parseCharX(file);
     }
+    if (file.type === 'image/png' || name.endsWith('.png')) {
+        return await parsePng(file);
+    }
+    return await parseJson(file);
+}
+
+async function detectRar(file) {
+    const header = await file.slice(0, 7).arrayBuffer();
+    const sig = new Uint8Array(header);
+    return sig[0] === 0x52 && sig[1] === 0x61 && sig[2] === 0x72 && sig[3] === 0x21;
 }
 
 function parseJson(file) {
@@ -40,9 +59,22 @@ function parseJson(file) {
                                 avatarSrc = 'data:image/png;base64,' + avatarSrc;
                             }
                         }
-                        normalized.thumbnail = await generateThumbnail(avatarSrc);
+                        const thumbs = await generateAllThumbnails(avatarSrc);
+                        normalized.thumbnail = thumbs.thumbnail;
+                        normalized.mini_thumbnail = thumbs.mini_thumbnail;
                     } catch (e) {
                         console.error('Failed to generate thumbnail from JSON', e);
+                    }
+                }
+                if (Array.isArray(normalized.images) && normalized.images.length > 0) {
+                    for (const img of normalized.images) {
+                        if (!img.thumbnail && img.src) {
+                            try {
+                                img.thumbnail = await generateThumbnail(img.src, 300);
+                            } catch (e) {
+                                console.warn('Failed to generate thumbnail for gallery image:', e);
+                            }
+                        }
                     }
                 }
                 resolve(normalized);
@@ -111,17 +143,154 @@ async function parsePng(file) {
     if (!charaData) throw new Error("No character data found in PNG (tEXt chunk 'chara' or 'ccv3')");
 
     // Convert the image to base64 for use as the avatar
-    const avatarBase64 = await fileToBase64(file);
+    const avatarBase64 = await fileToDataUrl(file);
     const normalized = normalizeCharacterData(charaData);
     normalized.avatar = avatarBase64; // Avatar from the file takes priority
 
     try {
-        normalized.thumbnail = await generateThumbnail(avatarBase64);
+        const thumbs = await generateAllThumbnails(avatarBase64);
+        normalized.thumbnail = thumbs.thumbnail;
+        normalized.mini_thumbnail = thumbs.mini_thumbnail;
     } catch (e) {
-        console.error("Failed to generate thumbnail for PNG:", e);
+        console.error("Failed to generate thumbnails for PNG:", e);
+    }
+
+    if (Array.isArray(normalized.images) && normalized.images.length > 0) {
+        for (const img of normalized.images) {
+            try {
+                const thumb = await generateThumbnail(img.src, 300);
+                img.thumbnail = thumb;
+            } catch (e) {
+                console.warn('Failed to generate thumbnail for gallery image:', e);
+            }
+        }
     }
 
     return normalized;
+}
+
+async function parseCharX(file) {
+    const zip = await JSZip.loadAsync(file);
+
+    let normalized;
+    let cardJson;
+    const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif', 'apng', 'avif', 'bmp', 'jfif']);
+
+    const cardFile = zip.file('card.json');
+    if (cardFile) {
+        const cardText = await cardFile.async('string');
+        cardJson = JSON.parse(cardText);
+        normalized = normalizeCharacterData(cardJson);
+
+        const iconAsset = (cardJson.data?.assets || []).find(a => a && (a.type === 'icon') && a.uri);
+        if (iconAsset) {
+            const iconPath = getEmbeddedZipPath(iconAsset.uri);
+            if (iconPath) {
+                const iconFile = zip.file(iconPath);
+                if (iconFile) {
+                    const iconExt = (iconAsset.ext || 'png').toLowerCase();
+                    const iconBlob = await iconFile.async('blob');
+                    normalized.avatar = await blobToDataUrl(iconBlob, iconExt);
+                }
+            }
+        }
+    } else {
+        const pngEntry = Object.keys(zip.files).find(
+            f => f.toLowerCase().endsWith('.png') && !zip.files[f].dir
+        );
+        if (!pngEntry) throw new Error("No card.json or PNG found in archive");
+
+        const pngBlob = await zip.file(pngEntry).async('blob');
+        const pngFile = new File([pngBlob], pngEntry, { type: 'image/png' });
+        normalized = await parsePng(pngFile);
+        cardJson = null;
+    }
+
+    const embeddedAssets = cardJson?.data?.assets || [];
+    const galleryItems = [];
+
+    if (embeddedAssets.length > 0) {
+        for (const asset of embeddedAssets) {
+            if (!asset || asset.type === 'icon' || asset.type === 'user_icon') continue;
+
+            const ext = (asset.ext || '').toLowerCase();
+            if (!IMAGE_EXTS.has(ext)) continue;
+
+            const zipPath = getEmbeddedZipPath(asset.uri);
+            if (!zipPath) {
+                if (asset.uri && asset.uri.startsWith('data:image')) {
+                    galleryItems.push({
+                        id: 'img_' + Math.random().toString(36).slice(2, 10),
+                        src: asset.uri,
+                        name: asset.name || '',
+                        thumbnail: null
+                    });
+                }
+                continue;
+            }
+
+            const zippedFile = zip.file(zipPath);
+            if (!zippedFile) continue;
+
+            const blob = await zippedFile.async('blob');
+            const dataUrl = await blobToDataUrl(blob, ext);
+
+            galleryItems.push({
+                id: 'img_' + Math.random().toString(36).slice(2, 10),
+                src: dataUrl,
+                name: asset.name || '',
+                thumbnail: null
+            });
+        }
+    } else {
+        const imageFiles = Object.keys(zip.files).filter(f => {
+            if (zip.files[f].dir) return false;
+            const ext = f.split('.').pop().toLowerCase();
+            return IMAGE_EXTS.has(ext) && f !== Object.keys(zip.files).find(p => p.toLowerCase().endsWith('.png'));
+        });
+
+        for (const imgPath of imageFiles) {
+            const ext = imgPath.split('.').pop().toLowerCase();
+            const blob = await zip.file(imgPath).async('blob');
+            const dataUrl = await blobToDataUrl(blob, ext);
+            galleryItems.push({
+                id: 'img_' + Math.random().toString(36).slice(2, 10),
+                src: dataUrl,
+                name: imgPath.split('/').pop().replace(/\.[^.]+$/, ''),
+                thumbnail: null
+            });
+        }
+    }
+
+    for (const img of galleryItems) {
+        try {
+            img.thumbnail = await generateThumbnail(img.src, 300);
+        } catch (_e) { /* skip */ }
+    }
+    normalized.images = galleryItems;
+
+    if (normalized.avatar) {
+        try {
+            const thumbs = await generateAllThumbnails(normalized.avatar);
+            normalized.thumbnail = thumbs.thumbnail;
+            normalized.mini_thumbnail = thumbs.mini_thumbnail;
+        } catch (e) {
+            console.error("Failed to generate thumbnails for CharX avatar:", e);
+        }
+    }
+
+    return normalized;
+}
+
+function getEmbeddedZipPath(uri) {
+    if (typeof uri !== 'string') return null;
+    const prefixes = ['embeded://', 'embedded://', '__asset:'];
+    for (const prefix of prefixes) {
+        if (uri.startsWith(prefix)) {
+            return uri.slice(prefix.length);
+        }
+    }
+    return null;
 }
 
 function normalizeCharacterData(json) {
@@ -139,20 +308,44 @@ function normalizeCharacterData(json) {
         data.name = "Unknown";
     }
 
-    // No avatar — set null so the placeholder is shown (see .avatar-placeholder in components.css)
     if (!data.avatar || data.avatar === 'none') {
         data.avatar = null;
     }
+
+    if (Array.isArray(data.assets) && data.assets.length > 0) {
+        data.images = data.assets
+            .filter(a => a.type !== 'icon' && a.type !== 'user_icon')
+            .filter(a => a.uri && (a.uri.startsWith('data:image') || a.uri.startsWith('http')))
+            .map(a => ({
+                id: 'img_' + Math.random().toString(36).slice(2, 10),
+                src: a.uri,
+                name: a.name || '',
+                thumbnail: null
+            }));
+    }
+    delete data.assets;
+
+    if (!Array.isArray(data.images)) {
+        data.images = [];
+    }
+
     return data;
 }
 
-function fileToBase64(file) {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-    });
+export async function extractCharacterBook(charData) {
+    const cb = charData.character_book;
+    if (!cb || (!cb.entries && !cb.name)) return null;
+
+    const lbName = cb.name || `${charData.name || 'Character'} Lorebook`;
+    const lorebook = await importSTLorebook(
+        { ...cb, name: lbName },
+        lbName,
+        { enabled: false, activationScope: 'character', activationTargetId: charData.id }
+    );
+
+    delete charData.character_book;
+
+    return lorebook;
 }
 
 /**
@@ -162,7 +355,7 @@ function fileToBase64(file) {
 export function triggerCharacterImport(onImport) {
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.json,application/json,.png,image/png'; // JSON and PNG
+    input.accept = '.json,application/json,.png,image/png,.charx,.zip';
 
     input.onchange = async (e) => {
         const file = e.target.files[0];
@@ -197,44 +390,8 @@ export function triggerCharacterImport(onImport) {
  * @param {number} maxSize - Maximum width or height.
  * @returns {Promise<string>} Base64 JPEG string of the thumbnail.
  */
-export async function generateThumbnail(imageSrc, maxSize = 600) {
-    if (!imageSrc) return null;
-    return new Promise((resolve, reject) => {
-        const img = new Image();
-        img.onload = () => {
-            let width = img.width;
-            let height = img.height;
-            if (width > height) {
-                if (width > maxSize) {
-                    height *= maxSize / width;
-                    width = maxSize;
-                }
-            } else {
-                if (height > maxSize) {
-                    width *= maxSize / height;
-                    height = maxSize;
-                }
-            }
-            const canvas = document.createElement('canvas');
-            canvas.width = width;
-            canvas.height = height;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(img, 0, 0, width, height);
-            resolve(canvas.toDataURL('image/jpeg', 0.8));
-        };
-        img.onerror = () => {
-            console.warn("Could not load image for thumbnail generation", imageSrc.substring(0, 50));
-            reject(new Error("Failed to load image"));
-        };
-
-        // Handle CORS if it's an external URL
-        if (imageSrc.startsWith('http')) {
-            img.crossOrigin = 'Anonymous';
-        }
-
-        img.src = imageSrc;
-    });
-}
+// generateThumbnail is re-exported from thumbnailUtils for backwards compatibility
+export { generateThumbnail } from './thumbnailUtils.js';
 
 /**
  * Iterates over all characters in the DB and generates thumbnails for those missing one.
@@ -247,27 +404,29 @@ export async function generateMissingThumbnails() {
         let updatedCount = 0;
         for (const char of chars) {
             // Only generate if there is an avatar and no thumbnail
-            if (char.avatar && !char.thumbnail) {
+            if (char.avatar && (!char.thumbnail || !char.mini_thumbnail)) {
                 try {
                     let avatarSrc = char.avatar;
                     if (!avatarSrc.startsWith('http') && !avatarSrc.startsWith('blob:') && !avatarSrc.startsWith('data:')) {
                         avatarSrc = `/characters/${avatarSrc}`;
                     }
 
-                    char.thumbnail = await generateThumbnail(avatarSrc);
-                    if (char.thumbnail) {
+                    const thumbs = await generateAllThumbnails(avatarSrc);
+                    if (!char.thumbnail) char.thumbnail = thumbs.thumbnail;
+                    if (!char.mini_thumbnail) char.mini_thumbnail = thumbs.mini_thumbnail;
+                    if (char.thumbnail || char.mini_thumbnail) {
                         await db.saveCharacter(char, -1);
                         updatedCount++;
                     }
                 } catch (e) {
-                    console.error(`Failed to generate missing thumbnail for ${char.name}:`, e);
+                    console.error(`Failed to generate missing thumbnails for ${char.name}:`, e);
                 }
             }
         }
         if (updatedCount > 0) {
             logger.debug(`Generated thumbnails for ${updatedCount} characters.`);
             // Dispatch event to reload character list if needed
-            window.dispatchEvent(new Event('character-updated'));
+            publishAppEvent(APP_EVENTS.domain.character.updated);
         }
     } catch (e) {
         console.error("Error generating missing thumbnails:", e);
@@ -282,22 +441,19 @@ export async function generateMissingThumbnails() {
 function prepareV2Data(character, excludeAvatar = false) {
     const data = JSON.parse(JSON.stringify(character));
 
-    // Remove internal IDs and Glaze-specific fields if present
     delete data.id;
     delete data.sessionId;
     delete data.color;
     delete data.thumbnail;
+    delete data.mini_thumbnail;
+    delete data.images;
 
     if (excludeAvatar) {
         delete data.avatar;
     }
 
-    // character_book is excluded from export; extensions is kept as an empty object
-    // because SillyTavern may require it to be present
     delete data.character_book;
 
-    // Ensure all required V2 spec fields are present (SillyTavern)
-    // Field order follows Alice.json
     const exportData = {
         name: data.name || "",
         first_mes: data.first_mes || "",
@@ -315,21 +471,42 @@ function prepareV2Data(character, excludeAvatar = false) {
         extensions: {}
     };
 
-    // Include avatar only if not excluded
     if (!excludeAvatar && data.avatar) {
         exportData.avatar = data.avatar;
     }
 
-    // Remove undefined fields
     Object.keys(exportData).forEach(key => {
         if (exportData[key] === undefined) delete exportData[key];
     });
 
-    // Field order matters (Alice.json): data comes before spec
     return {
         data: exportData,
         spec: "chara_card_v2",
         spec_version: "2.0"
+    };
+}
+
+function prepareV3Data(character) {
+    const v2 = prepareV2Data(character, true);
+    const v3Data = { ...v2.data };
+
+    if (Array.isArray(character.images) && character.images.length > 0) {
+        v3Data.assets = character.images.map(img => ({
+            type: 'custom',
+            name: img.name || '',
+            uri: img.src,
+            ext: img.src.startsWith('data:image/png') ? 'png'
+                : img.src.startsWith('data:image/jpeg') || img.src.startsWith('data:image/jpg') ? 'jpg'
+                : img.src.startsWith('data:image/webp') ? 'webp' : 'png'
+        }));
+    } else {
+        v3Data.assets = [];
+    }
+
+    return {
+        data: v3Data,
+        spec: "chara_card_v3",
+        spec_version: "3.0"
     };
 }
 
@@ -370,7 +547,8 @@ function crc32(data) {
  * Export a character as a PNG with embedded character data.
  */
 export async function exportCharacterAsV2Png(character) {
-    const v2Data = prepareV2Data(character);
+    const hasGallery = Array.isArray(character.images) && character.images.length > 0;
+    const cardData = hasGallery ? prepareV3Data(character) : prepareV2Data(character);
     const fileName = `${(character.name || 'character').replace(/[/\\?%*:|"<>]/g, '-')}.png`;
 
     // 1. Get the base image
@@ -415,8 +593,8 @@ export async function exportCharacterAsV2Png(character) {
 
     // 2. Prepare the tEXt chunk data
     // tEXt format: Keyword + null byte + Text
-    const keyword = "chara";
-    const textData = btoa(unescape(encodeURIComponent(JSON.stringify(v2Data)))); // Base64-encoded UTF-8 string
+    const keyword = hasGallery ? "ccv3" : "chara";
+    const textData = btoa(unescape(encodeURIComponent(JSON.stringify(cardData)))); // Base64-encoded UTF-8 string
 
     const encoder = new TextEncoder();
     const keywordBytes = encoder.encode(keyword);
@@ -452,4 +630,68 @@ export async function exportCharacterAsV2Png(character) {
 
     const blob = new Blob([resultPng], { type: 'image/png' });
     await saveFile(fileName, blob, 'image/png', 'characters');
+}
+
+export async function exportCharacterAsCharX(character, useZipExt = false) {
+    const zip = new JSZip();
+    const v3Data = prepareV3Data(character);
+    const finalAssets = [];
+
+    if (character.avatar) {
+        try {
+            const avatarData = await dataUrlToBinary(character.avatar);
+            const avatarExt = guessImageExt(character.avatar, 'png');
+            zip.file(`icon.${avatarExt}`, avatarData);
+            finalAssets.push({
+                type: 'icon',
+                name: 'main',
+                uri: `embedded://icon.${avatarExt}`,
+                ext: avatarExt
+            });
+        } catch (_e) { /* skip avatar in charx */ }
+    }
+
+    if (Array.isArray(character.images)) {
+        for (let i = 0; i < character.images.length; i++) {
+            const img = character.images[i];
+            if (!img.src) continue;
+            try {
+                const imgData = await dataUrlToBinary(img.src);
+                const imgExt = guessImageExt(img.src, 'png');
+                const imgName = sanitizeAssetName(img.name || `image_${i + 1}`);
+                const zipPath = `images/${imgName}.${imgExt}`;
+                zip.file(zipPath, imgData);
+                finalAssets.push({
+                    type: 'custom',
+                    name: imgName,
+                    uri: `embedded://${zipPath}`,
+                    ext: imgExt
+                });
+            } catch (_e) { /* skip broken image */ }
+        }
+    }
+
+    v3Data.assets = finalAssets;
+    zip.file('card.json', JSON.stringify(v3Data, null, 2));
+
+    const fileName = `${(character.name || 'character').replace(/[/\\?%*:|"<>]/g, '-')}.${useZipExt ? 'zip' : 'charx'}`;
+    const content = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
+    await saveFile(fileName, content, 'application/zip', 'characters');
+}
+
+async function dataUrlToBinary(dataUrl) {
+    const res = await fetch(dataUrl);
+    return await res.arrayBuffer();
+}
+
+function guessImageExt(dataUrl, fallback) {
+    const match = dataUrl.match(/^data:image\/(\w+)/);
+    if (!match) return fallback;
+    const raw = match[1].toLowerCase();
+    if (raw === 'jpeg') return 'jpg';
+    return raw;
+}
+
+function sanitizeAssetName(name) {
+    return name.replace(/[/\\?%*:|"<>]/g, '_').replace(/\s+/g, '_').substring(0, 64) || 'image';
 }

@@ -11,26 +11,51 @@ function escapeRegex(string) {
  * @param {string} text The input text to process.
  * @param {number} placementFilter 1=User Input, 2=AI Output, 3=Slash Commands, 4=World Info, 5=Reasoning.
  * @param {number} ephemeralityFilter 1=Alter Chat Display, 2=Alter Outgoing Prompt.
- * @param {Array} options Extra options { charId, sessionId, globalScripts, char, persona }
+ * @param {Array} options Extra options { charId, sessionId, globalScripts, char, persona, depth }
+ * @param {number} [options.depth] Optional message depth (0=newest). If provided, scripts with
+ *   minDepth/maxDepth are only applied when the message's depth falls within their range.
  * @returns {string} Processed text.
  */
+let _globalScriptsCache = null;
+let _globalScriptsCacheKey = null;
+
+function _loadGlobalScripts(providedGlobalScripts) {
+    if (providedGlobalScripts) return providedGlobalScripts;
+    try {
+        const raw = localStorage.getItem('regex_scripts');
+        if (raw === _globalScriptsCacheKey && _globalScriptsCache) return _globalScriptsCache;
+        _globalScriptsCacheKey = raw;
+        _globalScriptsCache = raw ? JSON.parse(raw) : [];
+        for (const script of _globalScriptsCache) {
+            if (script.findRegex && !script.regex) {
+                script.regex = script.findRegex;
+            }
+            if (script.replaceString !== undefined && script.replacement === undefined) {
+                script.replacement = script.replaceString;
+            }
+            if (typeof script.placement === 'number') script.placement = [script.placement];
+            if (typeof script.ephemerality === 'number') script.ephemerality = [script.ephemerality];
+        }
+    } catch (e) {
+        console.error('Failed to load global regex scripts', e);
+        _globalScriptsCache = [];
+        _globalScriptsCacheKey = null;
+    }
+    return _globalScriptsCache;
+}
+
+export function invalidateRegexCache() {
+    _globalScriptsCache = null;
+    _globalScriptsCacheKey = null;
+}
+
 export function applyRegexes(text, placementFilter, ephemeralityFilter, options = {}) {
     if (!text) return "";
     let processedText = text;
 
-    const { charId, sessionId, globalScripts: providedGlobalScripts, char, persona } = options;
+    const { charId, sessionId, char, persona, depth } = options;
 
-    // Load global scripts if not provided
-    let globalScripts = providedGlobalScripts;
-    if (!globalScripts) {
-        try {
-            const stored = localStorage.getItem('regex_scripts');
-            globalScripts = stored ? JSON.parse(stored) : [];
-        } catch (e) {
-            console.error('Failed to load global regex scripts', e);
-            globalScripts = [];
-        }
-    }
+    const globalScripts = _loadGlobalScripts(options.globalScripts);
 
     // Load preset scripts if possible
     let presetRegexes = [];
@@ -39,6 +64,10 @@ export function applyRegexes(text, placementFilter, ephemeralityFilter, options 
         const preset = getEffectivePreset(charId, chatId);
         if (preset && preset.regexes) {
             presetRegexes = preset.regexes;
+            for (const script of presetRegexes) {
+                if (typeof script.placement === 'number') script.placement = [script.placement];
+                if (typeof script.ephemerality === 'number') script.ephemerality = [script.ephemerality];
+            }
         }
     }
 
@@ -47,11 +76,18 @@ export function applyRegexes(text, placementFilter, ephemeralityFilter, options 
     for (const script of allScripts) {
         if (script.disabled) continue;
 
-        // Filter by placement
-        if (script.placement && !script.placement.includes(placementFilter)) continue;
+        const sPlacement = Array.isArray(script.placement) ? script.placement : (typeof script.placement === 'number' ? [script.placement] : null);
+        if (sPlacement && !sPlacement.includes(placementFilter)) continue;
 
-        // Filter by ephemerality
-        if (script.ephemerality && !script.ephemerality.includes(ephemeralityFilter)) continue;
+        const sEphemerality = Array.isArray(script.ephemerality) ? script.ephemerality : (typeof script.ephemerality === 'number' ? [script.ephemerality] : null);
+        if (sEphemerality && !sEphemerality.includes(ephemeralityFilter)) continue;
+
+        if (depth !== undefined && depth !== null) {
+            const minD = script.minDepth ?? null;
+            const maxD = script.maxDepth ?? null;
+            if (minD !== null && depth < minD) continue;
+            if (maxD !== null && depth > maxD) continue;
+        }
 
         try {
             let triggered = false;
@@ -61,7 +97,7 @@ export function applyRegexes(text, placementFilter, ephemeralityFilter, options 
                 const trimTokens = script.trimOut.split('\n').filter(t => t.trim());
                 for (const token of trimTokens) {
                     const before = processedText;
-                    processedText = processedText.replace(new RegExp(token, 'g'), '');
+                    processedText = processedText.replaceAll(token, '');
                     if (processedText !== before) triggered = true;
                 }
             }

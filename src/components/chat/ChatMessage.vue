@@ -1,19 +1,24 @@
 <script setup>
-import { ref, computed, nextTick, watch, onMounted, onUnmounted } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
+import { Capacitor } from '@capacitor/core';
 import { formatText } from '@/utils/textFormatter.js';
+import { applyRegexes } from '@/core/services/regexService.js';
+import { estimateTokens } from '@/utils/tokenizer.js';
 import { replaceMacros } from '@/utils/macroEngine.js';
 import ShadowContent from '@/components/ui/ShadowContent.vue';
 import { translations } from '@/utils/i18n.js';
-import { currentLang, disableSwipeRegeneration } from '@/core/config/APPSettings.js';
+import { currentLang, hideMessageId, hideGenerationTime, hideTokenCount } from '@/core/config/APPSettings.js';
 import { themeState } from '@/core/states/themeState.js';
 import { getAllGreetings } from '@/utils/sessions.js';
 import { getEffectivePersona, allPersonas } from '@/core/states/personaState.js';
-import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
-import { hideMessageId, hideGenerationTime, hideTokenCount } from '@/core/config/APPSettings.js';
 import RollingNumber from '@/components/ui/RollingNumber.vue';
 import SheetView from '@/components/ui/SheetView.vue';
-import { getBlacklistedProvider } from '@/core/config/APISettings.js';
-import { saveFile } from '@/core/services/fileSaver.js';
+import { getBlacklistedProvider, getApiRuntimeStorage } from '@/core/config/APISettings.js';
+import { showDesktopPopup, getLastClickPosition } from '@/core/states/desktopPopupState.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
+import { publishAppEvent, subscribeAppEvent } from '@/core/events/eventHub.js';
+import { useMessageSwipe } from '@/composables/chat/useMessageSwipe.js';
+import { useMessageImageGen } from '@/composables/chat/useMessageImageGen.js';
 
 const props = defineProps({
     message: { type: Object, required: true },
@@ -25,83 +30,41 @@ const props = defineProps({
     activeSearchMatchIndex: { type: Number, default: -1 },
     isSelectionMode: { type: Boolean, default: false },
     isSelected: { type: Boolean, default: false },
-    regexRevision: { type: Number, default: 0 }
+    regexRevision: { type: Number, default: 0 },
+    isPendingMemory: { type: Boolean, default: false },
+    isDraftMemory: { type: Boolean, default: false },
+    totalMessages: { type: Number, default: 0 }
 });
 
 const emit = defineEmits([
     'swipe', 'change-greeting', 'regenerate', 'edit', 'save-edit', 'cancel-edit',
     'open-actions', 'open-avatar', 'delete', 'toggle-selection', 'toggle-image-hidden',
-    'save-guidance', 'regenerate-image'
+    'save-guidance', 'regenerate-image', 'open-memory-coverage', 'update:editText'
 ]);
+
+const localEditText = computed({
+    get: () => props.message.editText ?? '',
+    set: (val) => emit('update:editText', val)
+});
 
 const triggeredItemsSheet = ref(null);
 const t = (key) => translations[currentLang.value]?.[key] || key;
+const _isNativePlatform = Capacitor.isNativePlatform();
 
-const isGuidedSwipeOpen = ref(false);
-const guidedSwipeText = ref('');
-const guidedSwipeInput = ref(null);
+const {
+    isGuidedSwipeOpen, guidedSwipeText, guidedSwipeInput,
+    useLiteNativeRenderer, swipeTransitionName, fadeTransitionName,
+    toggleGuidedSwipe, submitGuidedSwipe,
+    isGuidanceEditing, guidanceEditText, currentGuidance,
+    startGuidanceEdit, cancelGuidanceEdit, saveGuidanceEdit,
+    handleTouchStart, handleTouchMove, handleTouchEnd,
+    handleMessageClick,
+} = useMessageSwipe(props, emit);
 
-const toggleGuidedSwipe = () => {
-    isGuidedSwipeOpen.value = !isGuidedSwipeOpen.value;
-    if (isGuidedSwipeOpen.value) {
-        nextTick(() => { if (guidedSwipeInput.value) guidedSwipeInput.value.focus(); });
-    } else {
-        guidedSwipeText.value = '';
-    }
-};
-
-const submitGuidedSwipe = () => {
-    emit('regenerate', 'guided', guidedSwipeText.value);
-    isGuidedSwipeOpen.value = false;
-    guidedSwipeText.value = '';
-};
-
-const isGuidanceEditing = ref(false);
-const guidanceEditText = ref('');
-
-const startGuidanceEdit = () => {
-    guidanceEditText.value = currentGuidance.value?.text || '';
-    isGuidanceEditing.value = true;
-};
-
-const cancelGuidanceEdit = () => {
-    isGuidanceEditing.value = false;
-};
-
-const saveGuidanceEdit = () => {
-    emit('save-guidance', guidanceEditText.value.trim() || null);
-    isGuidanceEditing.value = false;
-};
-
-const currentGuidance = computed(() => {
-    // If it's a character message, ONLY show if it's explicitly a SWIPE
-    if (props.message.role === 'char') {
-        const meta = props.message.swipesMeta?.[props.message.swipeId || 0];
-        if (meta && meta.guidanceText && meta.guidanceType === 'SWIPE') {
-            return {
-                text: meta.guidanceText,
-                type: 'SWIPE'
-            };
-        }
-        // Fallback for typing/initial swipe state
-        if (props.message.isTyping && props.message.guidanceText && props.message.guidanceType === 'SWIPE') {
-            return {
-                text: props.message.guidanceText,
-                type: 'SWIPE'
-            };
-        }
-        return null; // Don't show redundant headers for GENERATION or IMPERSONATION on bot side
-    }
-
-    // User message: Show if it has any guidance
-    if (props.message.role === 'user' && props.message.guidanceText) {
-        return {
-            text: props.message.guidanceText,
-            type: props.message.guidanceType || 'GENERATION'
-        };
-    }
-    return null;
-});
+const {
+    handleContentClick: imgGenContentClick,
+    openImage,
+} = useMessageImageGen(emit);
 
 // --- Helpers ---
 const getAvatar = () => {
@@ -149,206 +112,25 @@ const formatMessageText = (text, regexTracking = undefined) => {
     if (!text) return '';
     const effPersona = getEffectivePersona(props.activeChatChar?.id, props.activeChatChar?.sessionId);
     text = replaceMacros(text, props.activeChatChar, effPersona);
-    // Fix: Clean artifacts and trim leading whitespace immediately
-    let clean = text.replace(/^\s+/, '')
+    const clean = text.replace(/^\s+/, '')
                     .replace(/&gt;/gi, '>')
                     .replace(/&lt;/gi, '<')
                     .replace(/&amp;/gi, '&')
                     .replace(/&quot;/gi, '"')
                     .replace(/&apos;/gi, "'");
     const isUser = props.message.role === 'user';
+    const depth = props.totalMessages > 0 ? props.totalMessages - 1 - props.index : undefined;
     return formatText(clean, isUser, { 
         charId: props.activeChatChar?.id, 
         sessionId: props.activeChatChar?.sessionId,
         char: props.activeChatChar,
         persona: effPersona,
-        triggeredRegexes: regexTracking
+        triggeredRegexes: regexTracking,
+        depth
     });
 };
 
-// --- Swipe & Long Press Logic ---
-let swipeStartX = 0;
-let swipeStartY = 0;
-let isSwipeScrolling = false;
-let currentSwipeElement = null;
-let longPressTimer = null;
-let isLongPressTriggered = false;
-
-let hadSelectionOnStart = false;
- 
-function handleTouchStart(e) {
-    hadSelectionOnStart = false;
-    const sel = window.getSelection();
-    if (sel && sel.toString().trim().length > 0) {
-        hadSelectionOnStart = true;
-    }
-
-    if (props.isSelectionMode) return;
-    if (props.message.role !== 'char' || props.message.isEditing || props.isGenerating) {
-        // Still allow long press for selection on user messages or non-editing states
-        if (props.message.isEditing || props.isGenerating) return;
-    } else {
-        swipeStartX = e.touches[0].clientX;
-        swipeStartY = e.touches[0].clientY;
-        isSwipeScrolling = false;
-        
-        const section = e.currentTarget;
-        const body = section.querySelector('.msg-body');
-        if (body) {
-            body.style.transition = 'none';
-            currentSwipeElement = body;
-        }
-    }
-
-    // Long press logic
-    isLongPressTriggered = false;
-    longPressTimer = setTimeout(() => {
-        isLongPressTriggered = true;
-        emit('toggle-selection');
-        if (currentSwipeElement) {
-            currentSwipeElement.style.transform = '';
-            currentSwipeElement = null;
-        }
-    }, 500);
-}
-
-function handleTouchMove(e) {
-    if (isLongPressTriggered) return;
-    
-    const dX = e.touches[0].clientX - (swipeStartX || e.touches[0].clientX);
-    const dY = e.touches[0].clientY - (swipeStartY || e.touches[0].clientY);
-
-    // If moved significantly, cancel long press
-    if (Math.abs(dX) > 10 || Math.abs(dY) > 10) {
-        if (longPressTimer) {
-            clearTimeout(longPressTimer);
-            longPressTimer = null;
-        }
-    }
-
-    if (!currentSwipeElement || props.message.role !== 'char' || props.message.isEditing) return;
-    if (isSwipeScrolling) return;
-
-    const deltaX = e.touches[0].clientX - swipeStartX;
-    const deltaY = e.touches[0].clientY - swipeStartY;
-
-    if (Math.abs(deltaY) > Math.abs(deltaX)) {
-        isSwipeScrolling = true;
-        return;
-    }
-
-    if (e.cancelable) e.preventDefault();
-
-    const isFirstMsg = props.index === 0;
-    const canSwitchGreeting = isFirstMsg && getAllGreetings(props.activeChatChar).length > 1;
-    
-    if (deltaX < 0) { // Left (Next)
-        if (!canSwitchGreeting) {
-            if (!props.isLast && (props.message.swipeId || 0) >= (props.message.swipes?.length || 1) - 1) return;
-        }
-    } else if (deltaX > 0) { // Right (Prev)
-        if (!canSwitchGreeting) {
-            if ((props.message.swipeId || 0) <= 0) return;
-        }
-    }
-
-    currentSwipeElement.style.transform = `translateX(${deltaX}px)`;
-}
-
-function handleTouchEnd(e) {
-    if (longPressTimer) {
-        clearTimeout(longPressTimer);
-        longPressTimer = null;
-    }
-
-    if (isLongPressTriggered) {
-        isLongPressTriggered = false;
-        return;
-    }
-
-    if (!currentSwipeElement) return;
-    
-    const deltaX = e.changedTouches[0].clientX - swipeStartX;
-    const body = currentSwipeElement;
-    currentSwipeElement = null;
-    
-    if (isSwipeScrolling) {
-        body.style.transform = '';
-        return;
-    }
-
-    const isFirstMsg = props.index === 0;
-    const canSwitchGreeting = isFirstMsg && getAllGreetings(props.activeChatChar).length > 1;
-
-    const resetStyle = () => {
-        body.style.transition = 'transform 0.3s ease';
-        body.style.transform = '';
-    };
-
-    const animateChange = (callback) => {
-        body.style.opacity = '0';
-        callback();
-        nextTick(() => {
-            body.style.transform = '';
-            setTimeout(() => {
-                body.style.transition = 'opacity 0.2s ease';
-                body.style.opacity = '1';
-                setTimeout(() => { body.style.transition = ''; }, 200);
-            }, 50);
-        });
-    };
-
-    if (canSwitchGreeting) {
-        if (deltaX < -100) animateChange(() => emit('change-greeting', 1));
-        else if (deltaX > 100) animateChange(() => emit('change-greeting', -1));
-        else resetStyle();
-        return;
-    }
-
-    if (deltaX < -100) {
-        if ((props.message.swipeId || 0) < (props.message.swipes?.length || 1) - 1) {
-            animateChange(() => emit('swipe', 1));
-        } else if (props.isLast && !disableSwipeRegeneration.value) {
-            body.style.transition = 'transform 0.1s';
-            body.style.transform = `translateX(-20px)`;
-            setTimeout(() => { 
-                body.style.transform = ''; 
-                emit('regenerate', 'new_variant');
-            }, 100);
-        } else {
-            resetStyle();
-        }
-    } else if (deltaX > 100) {
-        if ((props.message.swipeId || 0) > 0) animateChange(() => emit('swipe', -1));
-        else resetStyle();
-    } else {
-        resetStyle();
-    }
-}
- 
-const handleMessageClick = () => {
-    if (!props.isSelectionMode) return;
-    
-    if (hadSelectionOnStart) {
-        hadSelectionOnStart = false;
-        window.getSelection()?.removeAllRanges();
-        return;
-    }
-    
-    emit('toggle-selection');
-};
-
-const handleBubbleClick = (e) => {
-    if (layoutMode.value !== 'bubble') return;
-    if (props.isSelectionMode) return;
-    
-    const sel = window.getSelection();
-    if (sel && sel.toString().trim().length > 0) return;
-    
-    emit('open-actions');
-};
-
-
+const layoutMode = computed(() => themeState.chatLayout);
 
 const focusAndResize = (el) => {
     if (!el) return;
@@ -362,7 +144,6 @@ const copyText = (text) => {
 };
 
 const combinedMessageData = computed(() => {
-    // Adding regexRevision as a dependency to trigger re-render
     const _rev = props.regexRevision;
     const triggeredRegexes = [];
     let html = formatMessageText(props.message.text, triggeredRegexes);
@@ -379,193 +160,124 @@ const combinedMessageData = computed(() => {
     }
 
     if (props.message.isTyping) {
-        html += ` <span class="typing-dots-bounce"><span>.</span><span>.</span><span>.</span></span>`;
+        html += useLiteNativeRenderer.value
+            ? ' <span class="typing-dots-static">...</span>'
+            : ` <span class="typing-dots-bounce"><span>.</span><span>.</span><span>.</span></span>`;
     }
     return { html, regexes: triggeredRegexes };
 });
 
+const onContentClick = (e) => {
+    imgGenContentClick(e, layoutMode, props.isSelectionMode);
+};
+
 const openTriggeredSheet = () => {
+    if (typeof window !== 'undefined' && window.innerWidth >= 768) {
+        const items = [];
+
+        for (const lb of (props.message.triggeredLorebooks || [])) {
+            const source = lb._source === 'keyword' ? ' · keyword' : lb._source === 'vector' ? ' · vector' : '';
+            items.push({
+                label: lb.name,
+                sublabel: lb.lorebookName + source,
+                icon: `<svg viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9H9V9h10v2zm-4 4H9v-2h6v2zm4-8H9V5h10v2z"/></svg>`,
+                onClick: () => publishAppEvent(APP_EVENTS.nav.openLorebookEntry, { lorebookId: lb.lorebookId, entryId: lb.id }),
+            });
+        }
+
+        for (const mem of (props.message.triggeredMemories || [])) {
+            items.push({
+                label: mem.name,
+                sublabel: t('label_memory_entry') || 'Memory entry',
+                icon: `<svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 14H7v-2h10v2zm0-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>`,
+                disabled: true,
+            });
+        }
+
+        for (const r of (combinedMessageData.value.regexes || [])) {
+            items.push({
+                label: r.name || 'Unnamed Script',
+                sublabel: r.regex ? `/${r.regex}/` : 'Trim Out',
+                icon: `<svg viewBox="0 0 24 24"><path d="M14.6 16.6l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4m-5.2 0L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4z"/></svg>`,
+                disabled: true,
+            });
+        }
+
+        const { x, y } = getLastClickPosition();
+        showDesktopPopup({ title: t('sheet_triggered_items') || 'Triggered Items', items, isTriggered: true, x, y });
+        return;
+    }
+
     triggeredItemsSheet.value?.open();
 };
 
 const openLorebookEntry = (lb) => {
     triggeredItemsSheet.value?.close();
-    window.dispatchEvent(new CustomEvent('open-lorebook-entry', {
-        detail: { lorebookId: lb.lorebookId, entryId: lb.id }
-    }));
+    publishAppEvent(APP_EVENTS.nav.openLorebookEntry, { lorebookId: lb.lorebookId, entryId: lb.id });
 };
+
 const copyErrorText = (text) => {
     if (!text) return;
     const div = document.createElement('div');
-    // Convert <br> to newlines before stripping tags
     div.innerHTML = text.replace(/<br\s*\/?>/gi, '\n');
     const cleanText = div.textContent || div.innerText || text;
     copyText(cleanText.trim());
 };
 
-const openImage = (src, instruction = null) => {
-    if (!src) return;
-    window.dispatchEvent(new CustomEvent('trigger-open-image', {
-        detail: { src, name: 'Attachment', description: instruction?.prompt || '' }
-    }));
-};
-
-const parseIIGInstruction = (el) => {
-    if (!el?.dataset?.iigInstruction) return null;
-    try {
-        return JSON.parse(el.dataset.iigInstruction
-            .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&'));
-    } catch { return null; }
-};
-
-const handleContentClick = (e) => {
-    const path = e.composedPath();
-
-    // Loading block — tap to expand/collapse prompt text
-    const loadingBlock = path.find(el => el?.classList?.contains('imggen-loading'));
-    if (loadingBlock) {
-        e.stopPropagation();
-        loadingBlock.classList.toggle('expanded');
-        return;
-    }
-
-    // Options button on janitor image → bottom sheet with 2 actions
-    const janitorOptionsBtn = path.find(el => el?.classList?.contains('janitor-options-btn'));
-    if (janitorOptionsBtn) {
-        e.stopPropagation();
-        const wrapper = path.find(el => el?.classList?.contains('janitor-img-wrapper'));
-        const img = wrapper?.querySelector?.('img.janitor-img');
-        if (!img) return;
-        const src = img.src;
-        showBottomSheet({
-            items: [
-                {
-                    label: t('imggen_expand_image') || 'Expand image',
-                    hint: t('expand_image_hint') || 'Открыть картинку в полноэкранном режиме',
-                    icon: '<svg viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zm0 12.5c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>',
-                    onClick: () => { closeBottomSheet(); openImage(src); }
-                },
-                {
-                    label: t('action_save_image') || 'Save image',
-                    hint: t('imggen_save_hint') || 'Сохранить картинку на устройство',
-                    icon: '<svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>',
-                    onClick: async () => {
-                        closeBottomSheet();
-                        try {
-                            const response = await fetch(src);
-                            const blob = await response.blob();
-                            await saveFile(`Image_${Date.now()}.png`, blob, 'image/png');
-                        } catch (err) {
-                            console.error('Failed to save image:', err);
-                        }
-                    }
-                },
-            ]
-        });
-        return;
-    }
-
-    // Options button on generated image → bottom sheet with 3 actions
-    const optionsBtn = path.find(el => el?.classList?.contains('imggen-options-btn'));
-    if (optionsBtn) {
-        e.stopPropagation();
-        const wrapper = path.find(el => el?.classList?.contains('imggen-result-wrapper'));
-        const img = wrapper?.querySelector?.('img.imggen-result');
-        if (!img) return;
-        const instr = parseIIGInstruction(img);
-        const id = img.dataset?.iigId;
-        const src = img.src;
-        showBottomSheet({
-            items: [
-                {
-                    label: t('imggen_expand_image') || 'Expand image',
-                    hint: t('imggen_expand_image_hint') || 'Открыть картинку в полноэкранном режиме и посмотреть промпт',
-                    icon: '<svg viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zm0 12.5c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>',
-                    onClick: () => { closeBottomSheet(); openImage(src, instr); }
-                },
-                {
-                    label: t('action_save_image') || 'Save image',
-                    hint: t('imggen_save_hint') || 'Сохранить картинку на устройство',
-                    icon: '<svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>',
-                    onClick: async () => {
-                        closeBottomSheet();
-                        try {
-                            const response = await fetch(src);
-                            const blob = await response.blob();
-                            await saveFile(`Image_${Date.now()}.png`, blob, 'image/png');
-                        } catch (err) {
-                            console.error('Failed to save image:', err);
-                        }
-                    }
-                },
-                {
-                    label: t('action_regenerate') || 'Regenerate',
-                    hint: t('imggen_regenerate_hint') || 'Повторно сгенерировать картинку',
-                    icon: '<svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>',
-                    onClick: () => { closeBottomSheet(); if (instr && id) emit('regenerate-image', { instruction: instr, id }); }
-                },
-            ]
-        });
-        return;
-    }
-
-    // Error retry button
-    const retryBtn = path.find(el => el?.classList?.contains('imggen-error-retry'));
-    if (retryBtn) {
-        e.stopPropagation();
-        const errorBlock = path.find(el => el?.classList?.contains('imggen-error'));
-        if (errorBlock) {
-            const instr = parseIIGInstruction(errorBlock);
-            const id = errorBlock.dataset?.iigId;
-            if (instr && id) emit('regenerate-image', { instruction: instr, id });
-        }
-        return;
-    }
-
-    // Enable and generate button
-    const enableBtn = path.find(el => el?.classList?.contains('imggen-enable-retry'));
-    if (enableBtn) {
-        e.stopPropagation();
-        const disabledBlock = path.find(el => el?.classList?.contains('imggen-disabled'));
-        if (disabledBlock) {
-            import('@/core/services/imageGenService.js').then(module => {
-                const settings = module.getImageGenSettings();
-                settings.enabled = true;
-                module.saveImageGenSettings(settings);
-                
-                const instr = parseIIGInstruction(disabledBlock);
-                const id = disabledBlock.dataset?.iigId;
-                if (instr && id) emit('regenerate-image', { instruction: instr, id });
-            });
-        }
-        return;
-    }
-
-    handleBubbleClick(e);
-};
-const layoutMode = computed(() => themeState.chatLayout);
 const showFooter = computed(() => {
-    // In bubble layout, meta and actions are hidden, so we only show footer if there are actual controls
     if (layoutMode.value === 'bubble') {
         const hasSwipes = props.message.role === 'char' && props.message.swipes?.length > 1;
         const hasGreetings = props.index === 0 && props.message.role === 'char' && getAllGreetings(props.activeChatChar).length > 1;
         const hasRegenerate = ((props.message.role === 'user' && props.isLast) || props.message.isError) && !props.isGenerating && !props.message.isEditing;
-        const hasTriggeredItems = props.message.triggeredLorebooks?.length || combinedMessageData.value.regexes?.length;
-        return hasSwipes || hasGreetings || hasRegenerate || props.message.isEditing || hasTriggeredItems;
+        const hasTriggeredItems = props.message.triggeredLorebooks?.length || props.message.triggeredMemories?.length || combinedMessageData.value.regexes?.length;
+        return hasSwipes || hasGreetings || hasRegenerate || props.message.isEditing || hasTriggeredItems || !props.isSelectionMode;
     }
-    return true; // Always show in other layouts for meta/actions
+    return true;
 });
 
 const blacklistedErrorProvider = computed(() => {
     if (!props.message.isError) return null;
-    const endpoint = localStorage.getItem('gz_api_endpoint_normalized')
-        || localStorage.getItem('api-endpoint') || '';
+    const endpoint = getApiRuntimeStorage().normalizedEndpoint || '';
     return getBlacklistedProvider(endpoint);
 });
 
 const tokenCount = computed(() => {
-    return props.message.tokens || 0;
+    const raw = props.message.tokens || 0;
+    if (raw === 0) return 0;
+    const text = props.message.text;
+    if (!text) return raw;
+    const effPersona = getEffectivePersona(props.activeChatChar?.id, props.activeChatChar?.sessionId);
+    const macroed = replaceMacros(text, props.activeChatChar, effPersona);
+    const depth = props.totalMessages > 0 ? props.totalMessages - 1 - props.index : undefined;
+    const stripped = applyRegexes(macroed, props.message.role === 'user' ? 1 : 2, 2, { charId: props.activeChatChar?.id, sessionId: props.activeChatChar?.sessionId, char: props.activeChatChar, persona: effPersona, depth });
+    if (stripped === macroed) return raw;
+    return estimateTokens(stripped);
 });
+
+const memoryBadge = computed(() => {
+    const coverage = props.message.memoryCoverage;
+    if (!coverage || typeof coverage !== 'object') {
+        if (props.isPendingMemory) return { label: 'PENDING', className: 'pending' };
+        if (props.isDraftMemory) return { label: 'DRAFT', className: 'draft-memory' };
+        return null;
+    }
+    if (coverage.needsRebuild) return { label: 'REBUILD', className: 'needs-rebuild' };
+    if (coverage.stale) return { label: 'STALE', className: 'stale' };
+    if (Array.isArray(coverage.entryIds) && coverage.entryIds.length > 0) {
+        return { label: 'MEM', className: 'covered' };
+    }
+    if (props.isPendingMemory) return { label: 'PENDING', className: 'pending' };
+    if (props.isDraftMemory) return { label: 'DRAFT', className: 'draft-memory' };
+    return null;
+});
+
+const openMemoryCoverage = () => {
+    const coverage = props.message.memoryCoverage;
+    if (!coverage || typeof coverage !== 'object') return;
+    const entryIds = Array.isArray(coverage.entryIds) ? coverage.entryIds : [];
+    if (!entryIds.length && !coverage.needsRebuild && !coverage.stale) return;
+    emit('open-memory-coverage', props.message);
+};
 
 const uiHideMsgId = ref(hideMessageId.value);
 const uiHideGenTime = ref(hideGenerationTime.value);
@@ -577,12 +289,13 @@ const onSettingsChanged = () => {
     uiHideTokenCnt.value = hideTokenCount.value;
 };
 
+const unsubs = [];
 onMounted(() => {
-    window.addEventListener('settings-changed', onSettingsChanged);
+    unsubs.push(subscribeAppEvent(APP_EVENTS.domain.settings.changed, onSettingsChanged));
 });
 
-onUnmounted(() => {
-    window.removeEventListener('settings-changed', onSettingsChanged);
+onBeforeUnmount(() => {
+    unsubs.forEach(fn => fn?.());
 });
 </script>
 
@@ -590,7 +303,7 @@ onUnmounted(() => {
     <div 
         class="message-section"
         v-bind="$attrs"
-        :class="[message.role, `layout-${layoutMode}`, { error: message.isError, selected: isSelected, 'selection-mode': isSelectionMode, 'msg-hidden': message.isHidden }]"
+        :class="[message.role, `layout-${layoutMode}`, { error: message.isError, selected: isSelected, 'selection-mode': isSelectionMode, 'msg-hidden': message.isHidden, 'native-lite': useLiteNativeRenderer }]"
         @touchstart.passive="handleTouchStart"
         @touchmove="handleTouchMove"
         @touchend="handleTouchEnd"
@@ -606,7 +319,8 @@ onUnmounted(() => {
                 <span class="msg-name-label">{{ getDisplayName() }}</span>
                 <span class="msg-index gen-stat header-idx" v-if="!uiHideMsgId">#{{ index + 1 }}</span>
                 <sup v-if="message.role === 'char' && activeChatChar?.version" class="item-version">#{{ activeChatChar.version }}</sup>
-                <div v-if="message.triggeredLorebooks?.length || combinedMessageData.regexes?.length" class="msg-lb-trigger-menu" @click.stop="openTriggeredSheet">
+                <button v-if="memoryBadge" type="button" class="msg-memory-badge" :class="memoryBadge.className" @click.stop="openMemoryCoverage">{{ memoryBadge.label }}</button>
+                <div v-if="message.triggeredLorebooks?.length || message.triggeredMemories?.length || combinedMessageData.regexes?.length" class="msg-lb-trigger-menu" @click.stop="openTriggeredSheet">
                     <svg viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9H9V9h10v2zm-4 4H9v-2h6v2zm4-8H9V5h10v2z"/></svg>
                 </div>
             </span>
@@ -617,7 +331,7 @@ onUnmounted(() => {
         </div>
 
         <!-- Guidance Block (Header) -->
-        <div v-if="currentGuidance" class="msg-guidance-block" style="margin-bottom: 4px; border-radius: 8px;">
+        <div v-if="currentGuidance" class="msg-guidance-block">
             <div class="guidance-label" style="display: flex; justify-content: space-between; align-items: center;">
                 <span>GUIDED {{ currentGuidance.type }}</span>
                 <div style="display: flex; gap: 2px; align-items: center;">
@@ -646,18 +360,20 @@ onUnmounted(() => {
                     </div>
                 </div>
             </div>
-            <div v-else class="guidance-content">{{ currentGuidance.text }}</div>
+            <div v-else class="guidance-content">
+{{ currentGuidance.text }}
+</div>
         </div>
 
         <!-- Reasoning Block -->
-        <div v-if="message.reasoning" class="msg-reasoning collapsed">
+        <div v-if="message.reasoning && !message.isEditing" class="msg-reasoning" :class="{ collapsed: !message.isAllReasoning }">
             <div class="msg-reasoning-header" @click="$event.target.closest('.msg-reasoning').classList.toggle('collapsed')">
                 <span>Reasoning</span>
                 <svg class="reasoning-arrow" viewBox="0 0 24 24" style="width:16px;height:16px;fill:currentColor"><path d="M7 10l5 5 5-5z"/></svg>
             </div>
             <div class="msg-reasoning-content">
                 <div class="msg-transition-wrapper" style="min-height: 0;">
-                    <Transition :name="message.swipeDirection || 'slide-next'">
+                    <Transition :name="swipeTransitionName">
                         <ShadowContent 
                             class="msg-reasoning-inner" 
                             :key="(message.swipeId || 0) + '-' + (message.greetingIndex || 0)" 
@@ -669,12 +385,13 @@ onUnmounted(() => {
             </div>
         </div>
 
+        <div class="msg-content-stack">
         <div class="msg-transition-wrapper">
-            <Transition :name="message.swipeDirection || 'slide-next'">
+            <Transition :name="swipeTransitionName">
                 <!-- Edit Mode -->
                 <div class="msg-body" v-if="message.isEditing" key="edit">
                     <textarea 
-                        v-model="message.editText" 
+                        v-model="localEditText" 
                         class="edit-textarea" 
                         rows="1" 
                         @vue:mounted="({ el }) => focusAndResize(el)"
@@ -686,7 +403,7 @@ onUnmounted(() => {
                     class="msg-body" 
                     v-else-if="message.text || (!message.isTyping && !message.text)" 
                     :key="(message.swipeId || 0) + '-' + (message.greetingIndex || 0)"
-                    @click="handleContentClick"
+                    @click="onContentClick"
                 >
                     <div v-if="message.isError" class="error-window">
                         <div class="error-header">
@@ -717,11 +434,12 @@ onUnmounted(() => {
                             <template v-if="!uiHideGenTime && message.genTime && message.genTime !== '0s'">
                                 <svg viewBox="0 0 24 24" style="width:12px;height:12px;fill:currentColor;margin-right:2px;"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg>
                                 <div class="gen-time-wrapper">
-                                    <RollingNumber class="gen-time" :value="message.genTime" />
+                                    <span v-if="useLiteNativeRenderer" class="gen-time">{{ message.genTime }}</span>
+                                    <RollingNumber v-else class="gen-time" :value="message.genTime" />
                                 </div>
                             </template>
-                            <Transition name="fade">
-                                <div class="token-count-inline" v-if="!uiHideTokenCnt && tokenCount > 0 && !isGenerating" style="display: flex; align-items: center;" :style="(!uiHideGenTime && message.genTime && message.genTime !== '0s') ? 'margin-left: 6px;' : ''" :title="t('label_tokens') || 'Tokens'">
+                            <Transition :name="fadeTransitionName">
+                                <div class="token-count-inline" v-if="!uiHideTokenCnt && tokenCount > 0 && !message.isTyping" style="display: flex; align-items: center;" :style="(!uiHideGenTime && message.genTime && message.genTime !== '0s') ? 'margin-left: 6px;' : ''" :title="t('label_tokens') || 'Tokens'">
                                     <svg viewBox="0 0 24 24" style="width:12px;height:12px;fill:currentColor;margin-right:2px;"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
                                     <span>{{ tokenCount }}t</span>
                                 </div>
@@ -749,11 +467,12 @@ onUnmounted(() => {
                             <template v-if="!uiHideGenTime && message.genTime && message.genTime !== '0s'">
                                 <svg viewBox="0 0 24 24" style="width:12px;height:12px;fill:currentColor;margin-right:2px;"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg>
                                 <div class="gen-time-wrapper">
-                                    <RollingNumber class="gen-time" :value="message.genTime" />
+                                    <span v-if="useLiteNativeRenderer" class="gen-time">{{ message.genTime }}</span>
+                                    <RollingNumber v-else class="gen-time" :value="message.genTime" />
                                 </div>
                             </template>
-                            <Transition name="fade">
-                                <div class="token-count-inline" v-if="!uiHideTokenCnt && tokenCount > 0 && !isGenerating" style="display: flex; align-items: center;" :style="(!uiHideGenTime && message.genTime && message.genTime !== '0s') ? 'margin-left: 6px;' : ''" :title="t('label_tokens') || 'Tokens'">
+                            <Transition :name="fadeTransitionName">
+                                <div class="token-count-inline" v-if="!uiHideTokenCnt && tokenCount > 0 && !message.isTyping" style="display: flex; align-items: center;" :style="(!uiHideGenTime && message.genTime && message.genTime !== '0s') ? 'margin-left: 6px;' : ''" :title="t('label_tokens') || 'Tokens'">
                                     <svg viewBox="0 0 24 24" style="width:12px;height:12px;fill:currentColor;margin-right:2px;"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
                                     <span>{{ tokenCount }}t</span>
                                 </div>
@@ -774,11 +493,12 @@ onUnmounted(() => {
                     <template v-if="!uiHideGenTime && message.genTime && message.genTime !== '0s'">
                         <svg viewBox="0 0 24 24" style="width:12px;height:12px;fill:currentColor;margin-right:4px;"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg>
                         <div class="gen-time-wrapper">
-                            <RollingNumber class="gen-time" :value="message.genTime" />
+                            <span v-if="useLiteNativeRenderer" class="gen-time">{{ message.genTime }}</span>
+                            <RollingNumber v-else class="gen-time" :value="message.genTime" />
                         </div>
                     </template>
-                    <Transition name="fade">
-                        <div class="token-count-inline" v-if="!uiHideTokenCnt && tokenCount > 0 && !isGenerating" style="display: flex; align-items: center;" :style="(!uiHideGenTime && message.genTime && message.genTime !== '0s') ? 'margin-left: 6px;' : ''" :title="t('label_tokens') || 'Tokens'">
+                    <Transition :name="fadeTransitionName">
+                        <div class="token-count-inline" v-if="!uiHideTokenCnt && tokenCount > 0 && !message.isTyping" style="display: flex; align-items: center;" :style="(!uiHideGenTime && message.genTime && message.genTime !== '0s') ? 'margin-left: 6px;' : ''" :title="t('label_tokens') || 'Tokens'">
                             <svg viewBox="0 0 24 24" style="width:12px;height:12px;fill:currentColor;margin-right:2px;"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
                             <span>{{ tokenCount }}t</span>
                         </div>
@@ -793,7 +513,7 @@ onUnmounted(() => {
                         <svg viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
                     </div>
                     <div class="msg-switcher-count">
-                        <Transition :name="message.swipeDirection || 'slide-next'" mode="out-in">
+                        <Transition :name="swipeTransitionName" mode="out-in">
                             <span :key="message.swipeId || 0" style="display: inline-block; min-width: 24px; text-align: center;">{{ (message.swipeId || 0) + 1 }}/{{ message.swipes.length }}</span>
                         </Transition>
                     </div>
@@ -808,7 +528,7 @@ onUnmounted(() => {
                         <svg viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
                     </div>
                     <div class="msg-switcher-count">
-                        <Transition :name="message.swipeDirection || 'slide-next'" mode="out-in">
+                        <Transition :name="swipeTransitionName" mode="out-in">
                             <span :key="message.greetingIndex || 0" style="display: inline-block; min-width: 24px; text-align: center;">{{ (message.greetingIndex || 0) + 1 }}/{{ getAllGreetings(activeChatChar).length }}</span>
                         </Transition>
                     </div>
@@ -817,7 +537,7 @@ onUnmounted(() => {
                     </div>
                 </div>
 
-                <div v-if="layoutMode === 'bubble' && (message.triggeredLorebooks?.length || combinedMessageData.regexes?.length)" class="msg-lb-trigger-menu" @click.stop="openTriggeredSheet">
+                <div v-if="layoutMode === 'bubble' && (message.triggeredLorebooks?.length || message.triggeredMemories?.length || combinedMessageData.regexes?.length)" class="msg-lb-trigger-menu" @click.stop="openTriggeredSheet">
                     <svg viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9H9V9h10v2zm-4 4H9v-2h6v2zm4-8H9V5h10v2z"/></svg>
                 </div>
 
@@ -848,10 +568,13 @@ onUnmounted(() => {
             </div>
 
         </div>
+        </div>
 
         <div class="guided-swipe-container" v-if="isGuidedSwipeOpen">
             <div class="guidance-main">
-                <div class="guidance-header">{{ t('guided_swipe') || 'GUIDED SWIPE' }}</div>
+                <div class="guidance-header">
+{{ t('guided_swipe') || 'GUIDED SWIPE' }}
+</div>
                 <textarea 
                     class="guided-swipe-textarea"
                     v-model="guidedSwipeText"
@@ -875,27 +598,60 @@ onUnmounted(() => {
     <SheetView ref="triggeredItemsSheet" fit-content :title="t('sheet_triggered_items') || 'Triggered Items'">
         <div class="triggered-items-list">
             <div v-if="message.triggeredLorebooks?.length" class="triggered-group">
-                <div class="triggered-group-title">{{ t('menu_lorebooks') || 'World Info' }}</div>
+                <div class="triggered-group-title">
+{{ t('menu_lorebooks') || 'World Info' }}
+</div>
                 <div v-for="lb in message.triggeredLorebooks" :key="lb.id" class="triggered-item-card" @click="openLorebookEntry(lb)">
                     <div class="item-icon">
                         <svg viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9H9V9h10v2zm-4 4H9v-2h6v2zm4-8H9V5h10v2z"/></svg>
                     </div>
                     <div class="item-info">
-                        <div class="item-label">{{ lb.name }}</div>
-                        <div class="item-sublabel">{{ lb.lorebookName }}</div>
+                        <div class="item-label">
+                            {{ lb.name }}
+                            <span v-if="lb._source === 'keyword'" class="retrieval-badge keyword-badge">keyword</span>
+                            <span v-else-if="lb._source === 'vector'" class="retrieval-badge vector-badge">vector</span>
+                        </div>
+                        <div class="item-sublabel">
+{{ lb.lorebookName }}
+</div>
+                    </div>
+                </div>
+            </div>
+
+            <div v-if="message.triggeredMemories?.length" class="triggered-group">
+                <div class="triggered-group-title">
+Memory Books
+</div>
+                <div v-for="mem in message.triggeredMemories" :key="mem.id" class="triggered-item-card static">
+                    <div class="item-icon">
+                        <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 14H7v-2h10v2zm0-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
+                    </div>
+                    <div class="item-info">
+                        <div class="item-label">
+{{ mem.name }}
+</div>
+                        <div class="item-sublabel">
+Memory entry
+</div>
                     </div>
                 </div>
             </div>
             
             <div v-if="combinedMessageData.regexes?.length" class="triggered-group">
-                <div class="triggered-group-title">{{ t('menu_regex') || 'Regex Extensions' }}</div>
+                <div class="triggered-group-title">
+{{ t('menu_regex') || 'Regex Extensions' }}
+</div>
                 <div v-for="(r, idx) in combinedMessageData.regexes" :key="idx" class="triggered-item-card static">
                     <div class="item-icon">
                         <svg viewBox="0 0 24 24"><path d="M14.6 16.6l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4m-5.2 0L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4z"/></svg>
                     </div>
                     <div class="item-info">
-                        <div class="item-label">{{ r.name || 'Unnamed Script' }}</div>
-                        <div class="item-sublabel">{{ r.regex ? `/${r.regex}/` : 'Trim Out' }}</div>
+                        <div class="item-label">
+{{ r.name || 'Unnamed Script' }}
+</div>
+                        <div class="item-sublabel">
+{{ r.regex ? `/${r.regex}/` : 'Trim Out' }}
+</div>
                     </div>
                 </div>
             </div>
@@ -1050,6 +806,57 @@ onUnmounted(() => {
     fill: currentColor;
 }
 
+.msg-memory-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 36px;
+    height: 18px;
+    padding: 0 6px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    border: 1px solid transparent;
+    flex-shrink: 0;
+}
+
+.msg-memory-badge.covered {
+    color: #1ec8ff;
+    background: rgba(30, 200, 255, 0.12);
+    border-color: rgba(30, 200, 255, 0.35);
+}
+
+.msg-memory-badge.pending {
+    color: #ffd700;
+    background: rgba(255, 215, 0, 0.12);
+    border-color: rgba(255, 215, 0, 0.4);
+    animation: pending-pulse 2s ease-in-out infinite;
+}
+
+@keyframes pending-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+.msg-memory-badge.draft-memory {
+    color: #c79cff;
+    background: rgba(199, 156, 255, 0.12);
+    border-color: rgba(199, 156, 255, 0.35);
+}
+
+.msg-memory-badge.needs-rebuild {
+    color: #ffb347;
+    background: rgba(255, 179, 71, 0.12);
+    border-color: rgba(255, 179, 71, 0.35);
+}
+
+.msg-memory-badge.stale {
+    color: #ff7b7b;
+    background: rgba(255, 123, 123, 0.12);
+    border-color: rgba(255, 123, 123, 0.35);
+}
+
 .triggered-sheet-header {
     padding: 0 20px 10px;
 }
@@ -1131,6 +938,31 @@ onUnmounted(() => {
     font-size: 14px;
     font-weight: 500;
     color: var(--text-black);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.retrieval-badge {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.keyword-badge {
+    background: rgba(52, 199, 89, 0.15);
+    color: #34c759;
+    border: 1px solid rgba(52, 199, 89, 0.3);
+}
+
+.vector-badge {
+    background: rgba(191, 90, 242, 0.15);
+    color: #bf5af2;
+    border: 1px solid rgba(191, 90, 242, 0.3);
 }
 
 .item-sublabel {
@@ -1464,6 +1296,14 @@ onUnmounted(() => {
   opacity: 0;
 }
 
+.transition-none-enter-active, .transition-none-leave-active {
+  transition: none !important;
+}
+.transition-none-enter-from, .transition-none-leave-to {
+  opacity: 1;
+  transform: none;
+}
+
 /* Error State (Glassmorphism) */
 .message-section.error {
     background-color: transparent;
@@ -1577,6 +1417,14 @@ onUnmounted(() => {
     margin-left: 4px;
 }
 
+.msg-body :deep(.typing-dots-static) {
+    display: inline-block;
+    margin-left: 4px;
+    color: var(--text-gray);
+    font-size: 1em;
+    letter-spacing: 1px;
+}
+
 .msg-body :deep(.typing-dots-bounce span) {
     display: inline-block;
     animation: dotBounce 1.4s infinite ease-in-out both;
@@ -1640,8 +1488,7 @@ onUnmounted(() => {
 .message-section.layout-bubble .msg-avatar,
 .message-section.layout-bubble .msg-header .msg-time,
 .message-section.layout-bubble .msg-footer .msg-index,
-.message-section.layout-bubble .msg-footer .gen-stat,
-.message-section.layout-bubble .msg-actions-btn {
+.message-section.layout-bubble .msg-footer .gen-stat {
     display: none !important;
 }
 .message-section.layout-bubble .msg-header {
@@ -1649,6 +1496,17 @@ onUnmounted(() => {
 }
 .message-section.layout-bubble.user .msg-header {
     flex-direction: row-reverse;
+}
+.message-section.layout-bubble .msg-content-stack {
+    display: flex;
+    flex-direction: column;
+    width: fit-content;
+    max-width: 88%;
+    align-self: flex-start;
+}
+.message-section.layout-bubble.user .msg-content-stack {
+    align-self: flex-end;
+    margin-left: auto;
 }
 .message-section.layout-bubble .msg-body {
     background-color: rgba(var(--char-bubble-color-rgb, var(--vk-blue-rgb)), var(--element-opacity, 0.8));
@@ -1659,9 +1517,7 @@ onUnmounted(() => {
     border-top-left-radius: 4px;
     padding: 10px 14px 6px 14px;
     width: fit-content;
-    max-width: 88%;
-    margin-left: 0;
-    cursor: pointer;
+    max-width: 100%;
     min-width: 0;
     display: flex;
     flex-direction: column;
@@ -1674,7 +1530,9 @@ onUnmounted(() => {
     border-radius: 18px;
     border-top-right-radius: 4px;
     margin-left: auto;
-    margin-right: 0;
+}
+.message-section.layout-bubble .msg-footer {
+    width: 100%;
 }
 .message-section.layout-bubble .bubble-meta {
     display: flex;
@@ -1718,14 +1576,74 @@ onUnmounted(() => {
 .message-section.layout-bubble.msg-hidden .msg-body {
     opacity: 0.45;
 }
+.message-section.layout-bubble .msg-actions-btn {
+    margin-left: auto;
+}
+
+.message-section.native-lite .msg-transition-wrapper {
+    display: block;
+}
+
+.message-section.native-lite .msg-transition-wrapper > * {
+    grid-area: auto;
+}
+
+.message-section.native-lite .msg-body,
+.message-section.native-lite .msg-reasoning,
+.message-section.native-lite .msg-switcher,
+.message-section.native-lite .msg-regenerate,
+.message-section.native-lite .msg-guided-swipe-btn,
+.message-section.native-lite .msg-actions-btn,
+.message-section.native-lite .edit-btn,
+.message-section.native-lite .msg-guidance-block {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    box-shadow: none !important;
+}
+
+.message-section.native-lite .msg-body,
+.message-section.native-lite .msg-reasoning {
+    border-color: rgba(255, 255, 255, 0.08);
+}
+
+.message-section.native-lite .msg-memory-badge.pending {
+    animation: none;
+}
+
+.message-section.native-lite .msg-reasoning-content {
+    transition: none;
+}
+
+.message-section.native-lite .reasoning-arrow,
+.message-section.native-lite .msg-guided-swipe-btn,
+.message-section.native-lite .edit-btn,
+.message-section.native-lite .msg-lb-trigger-menu,
+.message-section.native-lite .triggered-item-card,
+.message-section.native-lite .error-copy-btn,
+.message-section.native-lite :global(.search-highlight) {
+    transition: none !important;
+}
+
+.message-section.native-lite .guided-swipe-container {
+    animation: none;
+}
+
+.message-section.native-lite .typing-container,
+.message-section.native-lite .bubble-meta,
+.message-section.native-lite .msg-footer,
+.message-section.native-lite .msg-header {
+    will-change: auto;
+}
 
 /* Guidance Block Styling */
 .msg-guidance-block {
-    margin-bottom: 8px;
+    margin-bottom: 4px;
     padding: 6px 10px;
-    border-left: 2px solid var(--vk-blue);
-    background: rgba(var(--vk-blue-rgb), 0.1);
-    border-radius: 4px;
+    border: 2px solid rgba(var(--vk-blue-rgb), 0.3);
+    background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8));
+    backdrop-filter: blur(var(--element-blur, 20px));
+    -webkit-backdrop-filter: blur(var(--element-blur, 20px));
+    border-radius: 8px;
     font-size: 13px;
     width: fit-content;
     max-width: 100%;

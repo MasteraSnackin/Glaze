@@ -1,13 +1,13 @@
 <script setup>
 import { ref, watch, nextTick, onMounted, onBeforeUnmount, computed } from 'vue';
-import { formatInputPreview } from '@/utils/textFormatter.js';
 import RequestPreviewSheet from '@/components/sheets/RequestPreviewSheet.vue';
 import MagicDrawer from '@/components/chat/MagicDrawer.vue';
 import { translations } from '@/utils/i18n.js';
 import { currentLang, enterToSubmit } from '@/core/config/APPSettings.js';
-import { hideKeyboard, onKeyboardShow, onKeyboardHide, isNativeKeyboard } from '@/core/services/keyboardHandler.js';
 import { Capacitor } from '@capacitor/core';
-import { attachRipple } from '@/core/services/ui.js';
+import { attachRipple } from '@/core/services/interactionEffects.js';
+import { getCaretIndex, getTextFromContentEditable, updateInputPreview } from '@/composables/chat/useContentEditable.js';
+import { useInputActions, useMagicDrawer } from '@/composables/chat/useInputActions.js';
 
 const props = defineProps({
     modelValue: { type: String, default: '' },
@@ -20,51 +20,40 @@ const props = defineProps({
     searchMatchTotal: { type: Number, default: 0 },
     isSelectionMode: { type: Boolean, default: false },
     selectedCount: { type: Number, default: 0 },
-    activeChar: { type: Object, default: null }
+    canDeleteSelected: { type: Boolean, default: true },
+    activeChar: { type: Object, default: null },
+    contextBreakdown: { type: Object, default: null }
 });
 
 const emit = defineEmits([
     'update:modelValue', 'send', 'scroll-to-bottom', 
-    'magic-regenerate', 'magic-impersonate', 'magic-notes', 'magic-stats', 'magic-sessions', 'magic-summary', 'magic-api', 'magic-presets', 'magic-char-card', 'magic-lorebooks', 'magic-regex', 'magic-image-gen', 'magic-glossary',
-    'search-next', 'search-prev', 'delete-selected', 'hide-selected', 'cancel-selection'
+    'magic-regenerate', 'magic-impersonate', 'magic-notes', 'magic-context', 'magic-stats', 'magic-sessions', 'magic-summary', 'magic-api', 'magic-presets', 'magic-char-card', 'magic-lorebooks', 'magic-memory-books', 'magic-regex', 'magic-image-gen', 'magic-glossary',
+    'search-next', 'search-prev', 'delete-selected', 'hide-selected', 'cancel-selection', 'create-memory-selected', 'remove-memory-selected', 'generate-memory-draft-selected'
 ]);
 
 const t = (key) => translations[currentLang.value]?.[key] || key;
 
 const chatInput = ref(null);
 const isComposing = ref(false);
-const isMagicMenuVisible = ref(false);
-const magicDrawerRef = ref(null);
-const isKeyboardOpen = ref(document.body.classList.contains('keyboard-open'));
-const isSwitchingToDrawer = ref(false);
-const inputWrapper = ref(null);
-const kbListeners = [];
-const isMainFocused = ref(false);
-const isGuidanceFocused = ref(false);
 
-const isGuidanceMode = ref(false);
-const guidanceType = ref('send');
-const guidanceText = ref('');
-const guidanceInput = ref(null);
+const {
+    isMagicMenuVisible, magicDrawerRef, isKeyboardOpen, isSwitchingToDrawer,
+    inputWrapper, kbListeners, toggleMagicMenu, closeMagicMenu,
+} = useMagicDrawer();
 
-const closeGuidance = () => {
-    if (guidanceText.value.trim() !== '') {
-        const confirmMsg = t('confirm_discard_changes') || 'Discard changes?';
-        if (!confirm(confirmMsg)) return;
-    }
-    isGuidanceMode.value = false;
-    guidanceText.value = '';
+const doUpdatePreview = (forcedCaretPos = null) => {
+    updateInputPreview(chatInput.value, props.modelValue, isComposing.value, forcedCaretPos);
 };
 
-const toggleGuidanceMode = () => {
-    if (isGuidanceMode.value && guidanceType.value === 'send') {
-        closeGuidance();
-    } else {
-        isGuidanceMode.value = true;
-        guidanceType.value = 'send';
-        nextTick(() => { if (guidanceInput.value) guidanceInput.value.focus(); });
-    }
-};
+const {
+    attachedImage, imageInput,
+    isGuidanceMode, guidanceType, guidanceText, guidanceInput,
+    isGuidanceFocused, isMainFocused,
+    closeGuidance, toggleGuidanceMode,
+    triggerImageUpload, onImageSelected, clearImage,
+    handleSend, openFullScreenEditor,
+    onFocus, onBlur, onGuidanceFocus, onGuidanceBlur,
+} = useInputActions(props, emit, chatInput, isComposing, doUpdatePreview);
 
 const currentAction = computed(() => {
     if (props.isGenerating) return 'stop';
@@ -72,163 +61,10 @@ const currentAction = computed(() => {
     return 'impersonate';
 });
 
-const attachedImage = ref(null);
-const imageInput = ref(null);
-
-const triggerImageUpload = () => {
-    if (imageInput.value) imageInput.value.click();
-};
-
-const onImageSelected = (event) => {
-    const file = event.target.files[0];
-    if (file) {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            attachedImage.value = e.target.result;
-        };
-        reader.readAsDataURL(file);
-    }
-    if (imageInput.value) imageInput.value.value = '';
-};
-
-const clearImage = () => {
-    attachedImage.value = null;
-};
-
-const handleSend = () => {
-    if (props.isGenerating) {
-        emit('send');
-    } else if ((props.modelValue && props.modelValue.trim()) || attachedImage.value) {
-        emit('send', attachedImage.value, guidanceText.value);
-        attachedImage.value = null;
-        closeGuidance();
-    } else {
-        if (!isGuidanceMode.value || guidanceType.value !== 'impersonate') {
-            isGuidanceMode.value = true;
-            guidanceType.value = 'impersonate';
-            nextTick(() => { if (guidanceInput.value) guidanceInput.value.focus(); });
-        } else {
-            emit('magic-impersonate', guidanceText.value);
-            closeGuidance();
-        }
-    }
-};
-
-
 const requestPreviewSheet = ref(null);
-
 const openRequestPreview = () => {
     if (requestPreviewSheet.value) requestPreviewSheet.value.open();
 };
-
-// Keyboard listeners are set up in onMounted and cleaned up in onBeforeUnmount
-
-// --- Input Logic ---
-function getCaretIndex(element) {
-    let position = 0;
-    try {
-        const selection = window.getSelection?.();
-        if (!selection || selection.rangeCount === 0) return position;
-        const range = selection.getRangeAt(0);
-        if (!range) return position;
-        const preCaretRange = range.cloneRange();
-        preCaretRange.selectNodeContents(element);
-        preCaretRange.setEnd(range.endContainer, range.endOffset);
-        const tempDiv = document.createElement('div');
-        tempDiv.appendChild(preCaretRange.cloneContents());
-        const visualBrs = tempDiv.querySelectorAll('.visual-br');
-        visualBrs.forEach(br => br.remove());
-        const brs = tempDiv.querySelectorAll('br');
-        brs.forEach(br => {
-            const textNode = document.createTextNode('\n');
-            br.parentNode.replaceChild(textNode, br);
-        });
-        let text = tempDiv.textContent || '';
-        text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-        position = text.length;
-    } catch (e) {
-        // Selection API can throw on iOS/WKWebView during keyboard transitions
-    }
-    return position;
-}
-
-function setCaretPosition(element, pos) {
-    try {
-        const sel = window.getSelection?.();
-        if (!sel) return;
-        const range = document.createRange();
-        let currentPos = 0;
-        function traverse(node) {
-            if (node.nodeType === 3) {
-                const len = node.nodeValue.length;
-                if (currentPos + len >= pos) {
-                    range.setStart(node, pos - currentPos);
-                    range.collapse(true);
-                    sel.removeAllRanges();
-                    sel.addRange(range);
-                    return true;
-                }
-                currentPos += len;
-            } else if (node.nodeName === 'BR') {
-                if (node.classList.contains('visual-br')) return false;
-                if (currentPos === pos) {
-                    const index = Array.from(node.parentNode.childNodes).indexOf(node);
-                    range.setStart(node.parentNode, index);
-                    range.collapse(true);
-                    sel.removeAllRanges();
-                    sel.addRange(range);
-                    return true;
-                }
-                currentPos += 1;
-                if (currentPos === pos) {
-                    const index = Array.from(node.parentNode.childNodes).indexOf(node);
-                    range.setStart(node.parentNode, index + 1);
-                    range.collapse(true);
-                    sel.removeAllRanges();
-                    sel.addRange(range);
-                    return true;
-                }
-            } else {
-                for (let i = 0; i < node.childNodes.length; i++) {
-                    if (traverse(node.childNodes[i])) return true;
-                }
-            }
-            return false;
-        }
-        if (!traverse(element)) {
-            range.selectNodeContents(element);
-            range.collapse(false);
-            sel.removeAllRanges();
-            sel.addRange(range);
-        }
-    } catch (e) {
-        // Selection API can throw on iOS/WKWebView during keyboard transitions
-    }
-}
-
-function getTextFromContentEditable(el) {
-    const clone = el.cloneNode(true);
-    const hasVisualBr = !!clone.querySelector('.visual-br');
-    const visualBrs = clone.querySelectorAll('.visual-br');
-    visualBrs.forEach(br => br.remove());
-    
-    const originalText = clone.textContent || '';
-    const brs = clone.querySelectorAll('br');
-    brs.forEach(br => {
-        const textNode = document.createTextNode('\n');
-        br.parentNode.replaceChild(textNode, br);
-    });
-    
-    let text = clone.textContent || '';
-    text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-    
-    // If we have a single newline that came from a single <br>, 
-    // and we didn't have a visual-br, it's likely a browser ghost.
-    if (originalText === '' && text === '\n' && !hasVisualBr) {
-        return '';
-    }
-    return text;
-}
 
 function onInput(e) {
     if (isComposing.value) return;
@@ -238,7 +74,7 @@ function onInput(e) {
             e.target.innerHTML = '';
         }
         emit('update:modelValue', text);
-    } catch (err) {
+    } catch (_err) {
         // Guard against DOM exceptions on iOS during keyboard transitions
     }
 }
@@ -270,32 +106,9 @@ function onKeyDown(e) {
                 const before = text.slice(0, caret);
                 const after = text.slice(caret);
                 emit('update:modelValue', before + '\n' + after);
-                nextTick(() => updateInputPreview(caret + 1));
+                nextTick(() => doUpdatePreview(caret + 1));
             }
         }
-    }
-}
-
-function updateInputPreview(forcedCaretPos = null) {
-    if (!chatInput.value || isComposing.value) return;
-    const el = chatInput.value;
-    // Skip if element is detached from DOM (prevents iOS crash)
-    if (!el.isConnected) return;
-    const isActive = document.activeElement === el;
-    const currentCaret = (isActive || forcedCaretPos !== null) ? (forcedCaretPos !== null ? forcedCaretPos : getCaretIndex(el)) : 0;
-    
-    let formatted = props.modelValue ? formatInputPreview(props.modelValue) : '';
-    if (props.modelValue && props.modelValue.endsWith('\n')) {
-        formatted += '<br class="visual-br">';
-    }
-    
-    if (el.innerHTML !== formatted) {
-        el.innerHTML = formatted;
-        if (isActive || forcedCaretPos !== null) {
-            nextTick(() => { if (el.isConnected && document.activeElement === el) setCaretPosition(el, currentCaret); });
-        }
-    } else if (forcedCaretPos !== null && isActive) {
-        nextTick(() => { if (el.isConnected && document.activeElement === el) setCaretPosition(el, currentCaret); });
     }
 }
 
@@ -303,63 +116,11 @@ watch(() => props.modelValue, (newVal) => {
     if (chatInput.value) {
         const currentText = getTextFromContentEditable(chatInput.value);
         if (currentText !== newVal || (newVal === '' && chatInput.value.innerHTML !== '')) {
-            updateInputPreview();
+            doUpdatePreview();
         }
     }
 });
 
-const toggleMagicMenu = async () => {
-    if (isMagicMenuVisible.value) {
-        isMagicMenuVisible.value = false;
-    } else {
-        if (isKeyboardOpen.value || document.body.classList.contains('keyboard-open')) {
-            isSwitchingToDrawer.value = true;
-            await hideKeyboard();
-        } else {
-            isMagicMenuVisible.value = true;
-        }
-    }
-};
-
-const onFocus = () => {
-    isMainFocused.value = true;
-    // Close drawer when user focuses input to type
-    // isMagicMenuVisible.value = false; // Don't close, let keyboard cover it
-};
-
-const onBlur = () => {
-    isMainFocused.value = false;
-};
-
-const onGuidanceFocus = () => {
-    isGuidanceFocused.value = true;
-};
-
-const onGuidanceBlur = () => {
-    isGuidanceFocused.value = false;
-};
-
-const closeMagicMenu = (e) => {
-    // Do not close if clicking on a bottom sheet (overlay or content)
-    if (e && e.target && e.target.closest && e.target.closest('.modal-overlay')) {
-        return;
-    }
-    isMagicMenuVisible.value = false; 
-};
-
-const openFullScreenEditor = async () => {
-    if (isKeyboardOpen.value || document.body.classList.contains('keyboard-open')) {
-        await hideKeyboard();
-    }
-    window.dispatchEvent(new CustomEvent('open-fs-request', {
-        detail: {
-            value: props.modelValue,
-            onSave: (newVal) => {
-                emit('update:modelValue', newVal);
-            }
-        }
-    }));
-};
 onMounted(async () => {
     window.addEventListener('click', closeMagicMenu);
     
@@ -367,14 +128,13 @@ onMounted(async () => {
         attachRipple(inputWrapper.value);
     }
     
-    // On mount: if the visual viewport is significantly smaller than the screen, the keyboard is open
-    if (window.visualViewport && window.visualViewport.height < window.innerHeight * 0.75) {
+    if (Capacitor.isNativePlatform() && window.visualViewport && window.visualViewport.height < window.innerHeight * 0.75) {
         isKeyboardOpen.value = true;
         isMagicMenuVisible.value = false;
     }
 
-    // Register keyboard listeners with proper lifecycle management
     if (Capacitor.isNativePlatform()) {
+        const { onKeyboardShow, onKeyboardHide } = await import('@/core/services/keyboardHandler.js');
         kbListeners.push(await onKeyboardShow(() => {
             isKeyboardOpen.value = true;
             isMagicMenuVisible.value = false;
@@ -403,7 +163,11 @@ defineExpose({
         nextTick(() => {
             magicDrawerRef.value?.openPersonas();
         });
-    }
+    },
+    openMagicDrawer: () => {
+        isMagicMenuVisible.value = true;
+    },
+    openRequestPreview
 });
 </script>
 
@@ -425,7 +189,9 @@ defineExpose({
                     <div class="input-wrapper" ref="inputWrapper" v-show="!isSelectionMode" :class="{ 'with-guidance': isGuidanceMode && guidanceType === 'send' }">
                         <div v-if="isGuidanceMode && guidanceType === 'send'" class="guidance-input-container" :class="{ 'dimmed': isMainFocused }">
                             <div class="guidance-main">
-                                <div class="guidance-header">{{ t('guided_generation') || 'GUIDED GENERATION' }}</div>
+                                <div class="guidance-header">
+{{ t('guided_generation') || 'GUIDED GENERATION' }}
+</div>
                                 <textarea
                                     class="guidance-editable"
                                     v-model="guidanceText"
@@ -457,7 +223,9 @@ defineExpose({
                         </template>
                         <div v-else-if="isGuidanceMode && guidanceType === 'impersonate'" class="impersonate-inline-container" :class="{ 'dimmed': isMainFocused }">
                             <div class="guidance-main" style="width: 100%;">
-                                <div class="guidance-header">{{ t('guided_impersonation') || 'GUIDED IMPERSONATION' }}</div>
+                                <div class="guidance-header">
+{{ t('guided_impersonation') || 'GUIDED IMPERSONATION' }}
+</div>
                                 <textarea
                                     class="guidance-editable"
                                     v-model="guidanceText"
@@ -477,7 +245,9 @@ defineExpose({
                         </div>
                         <template v-else>
                             <div id="chat-input" ref="chatInput" class="chat-input-editable" :class="{'dimmed': isGuidanceMode && !isMainFocused}" :contenteditable="!isImpersonating" role="textbox" aria-multiline="true" enterkeyhint="enter" :data-placeholder="isImpersonating ? '' : t('chat_placeholder')" @input="onInput" @keydown="onKeyDown" @focus="onFocus" @blur="onBlur" @paste="onPaste" @compositionstart="isComposing = true" @compositionend="(e) => { isComposing = false; onInput(e); }"></div>
-                            <div v-if="isImpersonating && !modelValue" class="impersonation-overlay" style="padding-left: 18px;"><svg class="typing-icon" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg><span>{{ t('impersonating') }}</span></div>
+                            <div v-if="isImpersonating && !modelValue" class="impersonation-overlay" style="padding-left: 18px;">
+<svg class="typing-icon" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg><span>{{ t('impersonating') }}</span>
+</div>
                         </template>
                     </div>
                 </div>
@@ -491,10 +261,11 @@ defineExpose({
                             {{ selectedCount }} {{ t('selected_count') || 'Selected' }}
                         </div>
                         <div class="selection-actions-group">
+                            <!-- Memory selection buttons temporarily hidden — pending UX polish -->
                             <div class="selection-circle-btn btn-hide-selection" :class="{ disabled: selectedCount === 0 }" @click="emit('hide-selected')">
                                 <svg viewBox="0 0 24 24"><path d="M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.43-4.75-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46C3.08 8.3 1.78 10.02 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3 .22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53-2.76 0-5-2.24-5-5 0-.79.2-1.53.53-2.2zm4.31-.78l3.15 3.15.02-.16c0-1.66-1.34-3-3-3l-.17.01z"/></svg>
                             </div>
-                            <div class="selection-circle-btn btn-delete-selection" :class="{ disabled: selectedCount === 0 }" @click="emit('delete-selected')">
+                            <div v-if="canDeleteSelected" class="selection-circle-btn btn-delete-selection" :class="{ disabled: selectedCount === 0 }" @click="emit('delete-selected')">
                                 <svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
                             </div>
                         </div>
@@ -517,6 +288,7 @@ defineExpose({
 
                         <div class="send-btn-wrapper">
                             <div class="chat-action-btn" @click="handleSend">
+                                <span class="btn-text-pc">{{ currentAction === 'stop' ? (t('btn_stop') || 'Stop') : (currentAction === 'send' ? (t('btn_send') || 'Send') : (t('btn_impersonate') || 'Impersonate')) }}</span>
                                 <div class="btn-icon-wrapper">
                                     <Transition name="btn-icon-fade">
                                         <svg v-if="currentAction === 'stop'" key="stop" viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg>
@@ -534,8 +306,10 @@ defineExpose({
                 ref="magicDrawerRef"
                 :visible="isMagicMenuVisible"
                 :active-char="activeChar"
+                :context-breakdown="contextBreakdown"
                 @close="isMagicMenuVisible = false"
                 @magic-notes="emit('magic-notes')"
+                @magic-context="emit('magic-context')"
                 @magic-summary="emit('magic-summary')"
                 @magic-sessions="emit('magic-sessions')"
                 @magic-stats="emit('magic-stats')"
@@ -544,6 +318,7 @@ defineExpose({
                 @magic-api="emit('magic-api')"
                 @magic-presets="emit('magic-presets')"
                 @magic-lorebooks="emit('magic-lorebooks')"
+                @magic-memory-books="emit('magic-memory-books')"
                 @magic-regex="emit('magic-regex')"
                 @magic-image-gen="emit('magic-image-gen')"
                 @magic-glossary="emit('magic-glossary')"
@@ -719,7 +494,30 @@ defineExpose({
     color: var(--text-gray);
 }
 
+.selection-circle-btn.btn-memory-selection {
+    color: #1ec8ff;
+}
+
+.selection-circle-btn.btn-memory-draft-selection {
+    color: #9b8cff;
+}
+
+.selection-circle-btn.btn-memory-config-selection {
+    color: #7a6cff;
+}
+
+.selection-circle-btn.btn-memory-remove-selection {
+    color: #ffb347;
+}
+
 .selection-circle-btn.btn-hide-selection.disabled {
+    opacity: 0.3;
+    pointer-events: none;
+}
+
+.selection-circle-btn.btn-memory-selection.disabled,
+.selection-circle-btn.btn-memory-remove-selection.disabled,
+.selection-circle-btn.btn-memory-draft-selection.disabled {
     opacity: 0.3;
     pointer-events: none;
 }
@@ -1004,6 +802,33 @@ defineExpose({
 }
 
 .guidance-editable { color: var(--text-black); }
+
+.btn-text-pc {
+    display: none;
+    font-size: 15px;
+    font-weight: normal;
+    margin-left: 14px;
+    margin-right: 6px;
+    white-space: nowrap;
+}
+
+@media (min-width: 600px) {
+    .btn-text-pc {
+        display: block;
+    }
+    
+    .chat-action-btn {
+        width: auto !important;
+        padding-right: 14px !important;
+        border-radius: 20px !important;
+        background-color: rgba(var(--vk-blue-rgb), 0.5) !important;
+        backdrop-filter: blur(var(--element-blur, 12px)) !important;
+        -webkit-backdrop-filter: blur(var(--element-blur, 12px)) !important;
+        border: 1px solid rgba(255, 255, 255, 0.1) !important;
+        color: #fff !important;
+        transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+    }
+}
 
 .chat-action-btn:active {
     transform: scale(0.95);

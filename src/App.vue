@@ -1,10 +1,11 @@
 <script setup>
-import { ref, reactive, onMounted, nextTick, computed, watch, onBeforeUnmount, defineAsyncComponent } from 'vue';
+import { ref, reactive, computed, watch, nextTick, defineAsyncComponent } from 'vue';
 import AppHeader from '@/components/layout/AppHeader.vue';
 import BottomNavigation from '@/components/layout/BottomNavigation.vue';
 import DialogList from '@/views/DialogList.vue';
 import BottomSheet from '@/components/ui/BottomSheet.vue';
 import FabButton from '@/components/ui/FabButton.vue';
+import DesktopPopup from '@/components/ui/DesktopPopup.vue';
 
 const CharacterList = defineAsyncComponent(() => import('@/views/CharacterList.vue'));
 const MenuView = defineAsyncComponent(() => import('@/views/Menu/MenuView.vue'));
@@ -18,85 +19,57 @@ const ApiView = defineAsyncComponent(() => import('@/views/ApiView.vue'));
 const Editor = defineAsyncComponent(() => import('@/components/editors/GenericEditor.vue'));
 const FullScreenEditor = defineAsyncComponent(() => import('@/components/editors/FullScreenEditor.vue'));
 
-// const HoloCardViewer = defineAsyncComponent(() => import('@/components/media/HoloCardViewer.vue'));
 const ImageViewer = defineAsyncComponent(() => import('@/components/media/ImageViewer.vue'));
 import AppToast from '@/components/ui/AppToast.vue';
+import MagicDrawer from '@/components/chat/MagicDrawer.vue';
+import DesktopLeftSidebar from '@/components/layout/DesktopLeftSidebar.vue';
+import DesktopRightSidebar from '@/components/layout/DesktopRightSidebar.vue';
+import WindowView from '@/components/ui/WindowView.vue';
 
 const ConnectionsSheet = defineAsyncComponent(() => import('@/components/sheets/ConnectionsSheet.vue'));
 const LorebookSheet = defineAsyncComponent(() => import('@/components/sheets/LorebookSheet.vue'));
 const BackupSheet = defineAsyncComponent(() => import('@/components/sheets/BackupSheet.vue'));
 const NotificationsSheet = defineAsyncComponent(() => import('@/components/sheets/NotificationsSheet.vue'));
+const SyncSheet = defineAsyncComponent(() => import('@/components/sheets/SyncSheet.vue'));
+const ConflictSheet = defineAsyncComponent(() => import('@/components/sheets/ConflictSheet.vue'));
 const GlossaryView = defineAsyncComponent(() => import('@/components/sheets/GlossarySheet.vue'));
 const DragDropOverlay = defineAsyncComponent(() => import('@/components/ui/DragDropOverlay.vue'));
-import { Capacitor } from '@capacitor/core';
-import { isKeyboardOpen, onKeyboardShow, onKeyboardHide } from '@/core/services/keyboardHandler.js';
-import { initSettings } from '@/core/config/APISettings.js';
-import { initTheme, themeState } from '@/core/states/themeState.js';
-import { updateLanguage } from '@/utils/i18n.js';
-import { currentLang, imageViewerMode } from '@/core/config/APPSettings.js';
-import { initRipple, initThemeToggle, initHeaderDropdown, initBackButton, initViewportFix } from '@/core/services/ui.js';
-import { bottomSheetState, closeBottomSheet, showBottomSheet } from '@/core/states/bottomSheetState.js';
-import { db, migrateScToGz } from '@/utils/db.js';
+const ToolsView = defineAsyncComponent(() => import('@/views/ToolsView.vue'));
+const PersonasView = defineAsyncComponent(() => import('@/views/PersonasView.vue'));
+const RegexSheet = defineAsyncComponent(() => import('@/components/sheets/RegexSheet.vue'));
+
+import { isKeyboardOpen } from '@/core/services/keyboardHandler.js';
+import { themeState } from '@/core/states/themeState.js';
 import { translations } from '@/utils/i18n.js';
-import { addPersona, updatePersona, deletePersona, allPersonas, loadPersonas } from '@/core/states/personaState.js';
-import { checkAndRequestNotifications, consumePendingNotificationData } from '@/core/services/notificationService.js';
-import { logger } from './utils/logger.js';
-import { generateMissingThumbnails } from '@/utils/characterIO.js';
-import { initLorebookState } from '@/core/states/lorebookState.js';
-import { initPresetState } from '@/core/states/presetState.js';
-import { startTracking } from '@/core/services/timeTracker.js';
+import { currentLang } from '@/core/config/APPSettings.js';
+import { bottomSheetState, closeBottomSheet } from '@/core/states/bottomSheetState.js';
+import { sidebarState } from '@/core/states/sidebarState.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
+import { publishAppEvent } from '@/core/events/eventHub.js';
 
-const t = (key) => translations[currentLang.value]?.[key] || key;
-// Initialize error handling
+import { useAppNavigation } from '@/composables/app/useAppNavigation.js';
+import { useEditorController, characterEditorConfig, personaEditorConfig } from '@/composables/app/useEditorController.js';
+import { useGlossaryPopup } from '@/composables/app/useGlossaryPopup.js';
+import { useAppEventSubscriptions } from '@/composables/app/useAppEventSubscriptions.js';
+import { useAppInit } from '@/composables/app/useAppInit.js';
 
-// --- Navigation state ---
-const currentView = ref('view-dialogs');
-const headerRef = ref(null); // Reference to the AppHeader component
+// --- Template refs ---
+const headerRef = ref(null);
 const headerContainer = ref(null);
 const footerContainer = ref(null);
-const isChatInitialized = ref(false); // Whether the chat has been initialized
-const isDataLoaded = ref(false);
 const dialogListRef = ref(null);
 const characterListRef = ref(null);
 const chatViewRef = ref(null);
 const connectionsSheetRef = ref(null);
 const lorebookSheetRef = ref(null);
 const backupSheetRef = ref(null);
+const syncSheetRef = ref(null);
+const conflictSheetRef = ref(null);
 const presetViewRef = ref(null);
 const apiViewRef = ref(null);
+const isDataLoaded = ref(false);
 
-const isHeaderEditorMode = ref(false);
-
-const waitForComponent = (refVar, callback) => {
-    if (refVar.value) {
-        callback(refVar.value);
-    } else {
-        const unwatch = watch(refVar, (val) => {
-            if (val) {
-                callback(val);
-                unwatch();
-            }
-        });
-    }
-};
-
-// --- Editor State ---
-const editingCharacter = ref(null);
-const editingCharacterIndex = ref(-1);
-const editingPersona = ref(null);
-const editingPersonaIndex = ref(-1);
-const previousViewForEditor = ref(null);
-const previousSessionIdForEditor = ref(null);
-const currentChatSessionId = ref(null);
-const activeChatCharObj = ref(null);
-const chatPreviousView = ref(null);
-const shouldOpenPersonasOnReturn = ref(false);
-
-const isDeleting = ref(false); // Guard flag to prevent auto-save during deletion
-const isOnboarding = ref(false);
-let kbListeners = [];
-
-// --- Categories ---
+// --- Categories (must be before useAppInit which uses them) ---
 const activeCategories = reactive({
     'view-dialogs': 'all',
     'view-characters': 'all'
@@ -115,247 +88,132 @@ const categories = {
     ]
 };
 
-const isEditorView = computed(() => currentView.value === 'view-character-edit' || currentView.value === 'view-persona-edit');
+// --- Composables ---
+const nav = useAppNavigation();
+const editor = useEditorController({
+    currentView: nav.currentView,
+    currentChatSessionId: nav.currentChatSessionId,
+    waitForComponent,
+    chatViewRef
+});
+const glossary = useGlossaryPopup({ isDesktop: nav.isDesktop });
 
-const headerZIndex = computed(() => {
-    if (fsEditorVisible.value) return 2001;
-    if (isEditorView.value) return 1100;
-    return 100;
+const events = useAppEventSubscriptions({
+    isDesktop: nav.isDesktop,
+    currentView: nav.currentView,
+    isHeaderEditorMode: nav.isHeaderEditorMode,
+    activeChatCharObj: nav.activeChatCharObj,
+    currentChatSessionId: nav.currentChatSessionId,
+    chatPreviousView: nav.chatPreviousView,
+    isGlossaryWindowOpen: glossary.isGlossaryWindowOpen,
+    openCharacterEditor: editor.openCharacterEditor,
+    onOpenPersonaEditor: editor.onOpenPersonaEditor,
+    openChatWrapper: (char) => nav.openChatWrapper(char, { chatViewRef, waitForComponent }),
+    openFsEditor: editor.openFsEditor,
+    waitForComponent,
+    chatViewRef,
+    connectionsSheetRef,
+    lorebookSheetRef,
+    backupSheetRef,
+    syncSheetRef,
+    conflictSheetRef,
+    presetViewRef,
+    apiViewRef,
+    characterListRef,
+    headerRef,
+    fsEditorVisible: editor.fsEditorVisible,
+    closeAndSaveFsEditor: editor.closeAndSaveFsEditor,
+    handleGlossaryOpen: glossary.handleGlossaryOpen,
+    handleGlossaryToggle: glossary.handleGlossaryToggle,
+    onGlossaryHeaderUpdate: glossary.onGlossaryHeaderUpdate,
+    onLanguageChanged,
+    isOnboarding: nav.isOnboarding
 });
 
-const mainZIndex = computed(() => {
-    if (isEditorView.value) return 1000;
-    return 1;
+useAppInit({
+    isOnboarding: nav.isOnboarding,
+    isDataLoaded,
+    isDesktop: nav.isDesktop,
+    checkDesktop: nav.checkDesktop,
+    updateLayoutMetrics: nav.updateLayoutMetrics,
+    initBackButton: nav.initBackButton,
+    headerContainer,
+    footerContainer,
+    categories,
+    activeCategories,
+    appEventUnsubs: events.appEventUnsubs,
+    handleOpenChatEvent: events.handleOpenChatEvent
 });
 
-function openChatWrapper(char) {
-    currentChatSessionId.value = char.sessionId || null;
-    activeChatCharObj.value = char;
-    const previousView = currentView.value;
-    chatPreviousView.value = previousView;
-    currentView.value = 'view-chat';
-    isChatInitialized.value = true;
-    
-    waitForComponent(chatViewRef, (comp) => {
-        comp.openChat(char, () => {
-            currentView.value = previousView;
-            // DialogList updates automatically via events
+events.registerAll();
+
+// --- Local helpers ---
+function waitForComponent(refVar, callback) {
+    if (refVar.value) {
+        callback(refVar.value);
+    } else {
+        const unwatch = watch(refVar, (val) => {
+            if (val) {
+                callback(val);
+                unwatch();
+            }
         });
-    });
+    }
+}
+
+function openChatFromTemplate(char) {
+    nav.openChatWrapper(char, { chatViewRef, waitForComponent });
 }
 
 function onLanguageChanged() {
     if (headerRef.value) headerRef.value.updateHeader();
 }
 
-// --- Editor Logic ---
-async function openCharacterEditor(index) {
-    previousViewForEditor.value = currentView.value;
-    if (currentView.value === 'view-chat') {
-        previousSessionIdForEditor.value = currentChatSessionId.value;
-    } else {
-        previousSessionIdForEditor.value = null;
+// --- Z-index computed ---
+const headerZIndex = computed(() => {
+    if (editor.fsEditorVisible.value) return 12001;
+    if (editor.isEditorView.value) return 1100;
+    return 100;
+});
+
+const mainZIndex = computed(() => {
+    if (editor.isEditorView.value) return 1000;
+    return 1;
+});
+
+// --- Layout metrics ---
+nav.setLayoutMetricsUpdater(() => {
+    if (headerContainer.value) {
+        const h = headerContainer.value.offsetHeight;
+        document.documentElement.style.setProperty('--header-height', `${h}px`);
     }
-    isDeleting.value = false;
-    editingCharacterIndex.value = index;
-    if (index === -1) {
-        editingCharacter.value = null; // New character
-    } else {
-        const chars = (await db.getAll('characters')) || [];
-        editingCharacter.value = chars[index];
+    if (nav.isDesktop.value) {
+        document.documentElement.style.setProperty('--footer-height', '0px');
+    } else if (footerContainer.value) {
+        document.documentElement.style.setProperty('--footer-height', `${footerContainer.value.offsetHeight}px`);
     }
-    currentView.value = 'view-character-edit';
-}
+});
 
-async function handleHeaderSave() {
-    if (currentView.value === 'view-character-edit') {
-        if (editingCharacter.value && editingCharacter.value.name && editingCharacter.value.name.trim() !== '') {
-            await db.saveCharacter(editingCharacter.value, editingCharacterIndex.value);
-            closeEditor();
-        } else {
-            showBottomSheet({
-                title: t('title_error') || 'Error',
-                bigInfo: {
-                    icon: '<svg viewBox="0 0 24 24" style="fill:#ff4444;width:100%;height:100%;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>',
-                    description: t('error_name_required') || 'Name is required.',
-                    buttonText: t('btn_ok') || 'OK',
-                    onButtonClick: closeBottomSheet
-                }
-            });
-        }
-    } else if (currentView.value === 'view-persona-edit') {
-        if (editingPersona.value && editingPersona.value.name && editingPersona.value.name.trim() !== '') {
-            if (editingPersonaIndex.value === -1) {
-                await addPersona(editingPersona.value);
-            } else {
-                await updatePersona(editingPersonaIndex.value, editingPersona.value);
-            }
-            closeEditor();
-        } else {
-            showBottomSheet({
-                title: t('title_error') || 'Error',
-                bigInfo: {
-                    icon: '<svg viewBox="0 0 24 24" style="fill:#ff4444;width:100%;height:100%;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>',
-                    description: t('error_name_required') || 'Name is required.',
-                    buttonText: t('btn_ok') || 'OK',
-                    onButtonClick: closeBottomSheet
-                }
-            });
-        }
+// --- FAB Logic ---
+const fabConfig = computed(() => {
+    if (nav.currentView.value === 'view-dialogs' && !nav.isDesktop.value) {
+        return {
+            text: translations[currentLang.value]?.btn_new_chat || 'New Chat',
+            action: () => dialogListRef.value?.openNewChatPicker()
+        };
+    } else if (nav.currentView.value === 'view-characters' && !nav.isDesktop.value) {
+        return {
+            text: translations[currentLang.value]?.btn_add || 'Add',
+            action: () => characterListRef.value?.onAddCharacter()
+        };
     }
-}
+    return null;
+});
 
-async function handleEditorAutoSave(val) {
-    // CRITICAL: Do not save if we are in the process of deleting
-    if (isDeleting.value) return;
-
-    if (currentView.value === 'view-character-edit') {
-        if (!val || !val.name || val.name.trim() === '') return; // Don't auto-save character without name
-
-        if (editingCharacterIndex.value === -1) {
-            // Create new character
-            await db.saveCharacter(val, -1);
-            // Retrieve new index (assuming added to end) to prevent duplicates on next save
-            const chars = (await db.getAll('characters')) || [];
-            editingCharacterIndex.value = chars.length - 1;
-        } else {
-            await db.saveCharacter(val, editingCharacterIndex.value);
-        }
-    } else if (currentView.value === 'view-persona-edit') {
-        if (!val.name) return; // Don't save empty personas on exit
-
-        if (editingPersonaIndex.value === -1) {
-            // Create new persona
-            const newPersona = await addPersona(val);
-            // Update index to point to the new persona (last one)
-            editingPersonaIndex.value = allPersonas.value.length - 1;
-            // Update the editing object to include the generated ID to prevent duplicates on next save
-            editingPersona.value = JSON.parse(JSON.stringify(newPersona));
-        } else {
-            await updatePersona(editingPersonaIndex.value, val);
-        }
-    }
-}
-
-async function handleHeaderDelete() {
-    const isPersona = currentView.value === 'view-persona-edit';
-    const title = isPersona ? (t('confirm_delete_persona') || 'Delete persona?') : (t('confirm_delete_title') || 'Delete character?');
-
-    showBottomSheet({
-        title: title,
-        items: [
-            {
-                label: t('btn_delete') || 'Delete',
-                icon: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>',
-                iconColor: '#ff4444',
-                isDestructive: true,
-                onClick: async () => {
-                    isDeleting.value = true; // Set flag BEFORE deletion
-                    try {
-                        if (isPersona) {
-                            await deletePersona(editingPersonaIndex.value);
-                        } else {
-                            const char = editingCharacter.value;
-                            if (char && char.id && db.deleteCharacter) {
-                                await db.deleteCharacter(char.id);
-                            } else {
-                                console.error('[App] Character ID is missing or db.deleteCharacter not found');
-                            }
-                        }
-                    } catch (e) {
-                        console.error('[App] Error deleting item:', e);
-                    }
-                    closeBottomSheet();
-                    
-                    if (isPersona) {
-                        currentView.value = 'view-menu';
-                    } else {
-                        currentView.value = 'view-characters';
-                    }
-                    previousViewForEditor.value = null;
-                    // isDeleting remains true until the view changes and editor unmounts, 
-                    // effectively blocking the 'save' emit on unmount.
-                }
-            },
-            {
-                label: t('btn_cancel') || 'Cancel',
-                icon: '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>',
-                onClick: closeBottomSheet
-            }
-        ]
-    });
-}
-
-async function closeEditor() {
-    const prev = previousViewForEditor.value;
-    previousViewForEditor.value = null;
-    const prevSessionId = previousSessionIdForEditor.value;
-    previousSessionIdForEditor.value = null;
-
-    if (prev === 'view-chat') {
-        const isEditingChar = currentView.value === 'view-character-edit';
-        currentView.value = 'view-chat';
-        
-        waitForComponent(chatViewRef, async (comp) => {
-            if (activeChatCharObj.value) {
-                // If we were editing character, update the active object
-                if (isEditingChar && editingCharacter.value) {
-                    activeChatCharObj.value = { ...editingCharacter.value };
-                }
-
-                if (prevSessionId) {
-                    activeChatCharObj.value.sessionId = prevSessionId;
-                }
-
-                comp.openChat(activeChatCharObj.value, () => {
-                    currentView.value = chatPreviousView.value || 'view-dialogs';
-                });
-
-                if (shouldOpenPersonasOnReturn.value) {
-                    shouldOpenPersonasOnReturn.value = false;
-                    await nextTick();
-                    if (typeof comp.openPersonas === 'function') {
-                        comp.openPersonas();
-                    }
-                }
-            }
-        });
-    } else if (prev) {
-        currentView.value = prev;
-    } else {
-        // Fallback if previousView was not set
-        if (currentView.value === 'view-persona-edit') {
-            currentView.value = 'view-menu';
-        } else {
-            currentView.value = 'view-characters';
-        }
-    }
-}
-
-function finishOnboarding() {
-    localStorage.setItem('glaze_onboarding_completed', 'true');
-    isOnboarding.value = false;
-}
-
-// Full Screen Editor Logic
-const fsEditorVisible = ref(false);
-const fsEditorValue = ref("");
-let fsEditorCallback = null;
-
-function openFsEditor({ value, onSave }) {
-    fsEditorValue.value = value;
-    fsEditorCallback = onSave;
-    fsEditorVisible.value = true;
-}
-
-function closeAndSaveFsEditor() {
-    if (fsEditorCallback) fsEditorCallback(fsEditorValue.value);
-    fsEditorVisible.value = false;
-}
-
-function autoSaveFsEditor(val) {
-    if (fsEditorCallback) fsEditorCallback(val);
-}
+const showLogo = computed(() => {
+    return !['view-chat', 'view-character-edit', 'view-persona-edit', 'view-theme-settings', 'view-settings',
+             'view-tools', 'view-api', 'view-presets', 'view-lorebook', 'view-regex', 'view-personas'].includes(nav.currentView.value) && !nav.isHeaderEditorMode.value;
+});
 
 const mainStyle = computed(() => {
     if (!themeState.hasBackgroundImage) return {};
@@ -367,417 +225,247 @@ const mainStyle = computed(() => {
     };
 });
 
-watch(fsEditorVisible, (val) => {
+// --- FS editor header watcher ---
+watch(editor.fsEditorVisible, (val) => {
     if (val) {
-        window.dispatchEvent(new CustomEvent('header-setup-editor', {
-            detail: {
-                title: translations[currentLang.value]?.header_editor || 'Editor',
-                onBack: () => { fsEditorVisible.value = false; },
-                actions: [{
-                    icon: '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>',
-                    onClick: closeAndSaveFsEditor
-                }]
-            }
-        }));
+        publishAppEvent(APP_EVENTS.ui.header.setupEditor, {
+            title: translations[currentLang.value]?.header_editor || 'Editor',
+            onBack: () => { editor.fsEditorVisible.value = false; },
+            actions: [{
+                icon: '<svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>',
+                onClick: editor.closeAndSaveFsEditor
+            }]
+        });
     } else {
         if (headerRef.value) headerRef.value.updateHeader();
-        window.dispatchEvent(new CustomEvent('fs-editor-closed'));
+        publishAppEvent(APP_EVENTS.ui.fsEditorClosed);
     }
 });
 
-// --- Character Editor Config ---
-const characterEditorConfig = [
-    {
-        title: 'section_basic_info',
-        fields: [
-            { key: 'name', label: 'label_name', type: 'text' },
-            { key: 'description', label: 'label_description', type: 'textarea', rows: 3, expandable: true },
-            { key: 'creator_notes', label: 'label_creator_notes', type: 'textarea', rows: 2 },
-            { key: 'tags', label: 'label_tags', type: 'tags' }
-        ]
-    },
-    {
-        title: 'section_personality',
-        fields: [
-            { key: 'personality', label: 'label_personality', type: 'textarea', rows: 4, expandable: true },
-            { key: 'scenario', label: 'label_scenario', type: 'textarea', rows: 3, expandable: true }
-        ]
-    },
-    {
-        title: 'section_dialogue',
-        fields: [
-            { key: 'first_mes', label: 'label_first_mes', type: 'greeting_list', rows: 4 },
-            { key: 'mes_example', label: 'label_mes_example', type: 'textarea', rows: 6, expandable: true }
-        ]
-    }
-];
-
-const personaEditorConfig = [
-    {
-        title: 'section_basic_info',
-        fields: [
-            { key: 'name', label: 'label_name', type: 'text' },
-            { key: 'prompt', label: 'label_description', type: 'textarea', rows: 4, expandable: true }
-        ]
-    }
-];
-
-// --- FAB Logic ---
-const fabConfig = computed(() => {
-    if (currentView.value === 'view-dialogs') {
-        return {
-            text: translations[currentLang.value]?.btn_new_chat || 'New Chat',
-            action: () => dialogListRef.value?.openNewChatPicker()
-        };
-    } else if (currentView.value === 'view-characters') {
-        return {
-            text: translations[currentLang.value]?.btn_add || 'Add',
-            action: () => characterListRef.value?.onAddCharacter()
-        };
-    }
-    return null;
-});
-
-const headerEditingIndex = computed(() => {
-    if (currentView.value === 'view-character-edit') return editingCharacterIndex.value;
-    if (currentView.value === 'view-persona-edit') return editingPersonaIndex.value;
-    return -1;
-});
-
-const showLogo = computed(() => {
-    return !['view-chat', 'view-character-edit', 'view-persona-edit', 'view-theme-settings', 'view-settings'].includes(currentView.value) && !isHeaderEditorMode.value;
-});
-
-const updateLayoutMetrics = () => {
-    if (headerContainer.value) {
-        document.documentElement.style.setProperty('--header-height', `${headerContainer.value.offsetHeight}px`);
-    }
-    if (footerContainer.value) {
-        document.documentElement.style.setProperty('--footer-height', `${footerContainer.value.offsetHeight}px`);
-    }
-};
-
-let layoutObserver = null;
-
-const onOpenCharacterEditor = (e) => { openCharacterEditor(e.detail.index); };
-
-const onOpenPersonaEditor = (e) => {
-    previousViewForEditor.value = currentView.value;
-    if (currentView.value === 'view-chat') {
-        shouldOpenPersonasOnReturn.value = true;
-    }
-    isDeleting.value = false;
-    editingPersonaIndex.value = e.detail.index;
-    editingPersona.value = e.detail.persona ? JSON.parse(JSON.stringify(e.detail.persona)) : { name: '', description: '', avatar: '' };
-    currentView.value = 'view-persona-edit';
-};
-
-const onNavigateTo = (e) => { currentView.value = e.detail; };
-
-const onOpenOnboarding = () => { isOnboarding.value = true; };
-
-const onTriggerOpenImage = (e) => {
-    const { src, name, description, onCloseCallback } = e.detail;
-    logger.debug('[App] trigger-open-image. Current Mode:', imageViewerMode.value);
-    logger.debug('[App] trigger-open-image. Always using default viewer.');
-    window.dispatchEvent(new CustomEvent('open-image-viewer', {
-        detail: { src, description, onCloseCallback }
-    }));
-};
-
-const onOpenFsRequest = (e) => { openFsEditor(e.detail); };
-
-const onOpenConnections = (e) => {
-    const { type, id, name } = e.detail || {};
-    waitForComponent(connectionsSheetRef, (comp) => {
-        comp.open(type, id, name, activeChatCharObj.value);
+// --- Editor close wrapper (needs nav + editor cross-refs) ---
+function closeEditorWrapper() {
+    editor.closeEditor({
+        activeChatCharObj: nav.activeChatCharObj,
+        currentChatSessionId: nav.currentChatSessionId,
+        chatPreviousView: nav.chatPreviousView,
+        isHeaderEditorMode: nav.isHeaderEditorMode
     });
-};
-
-const onOpenItemEditor = (e) => {
-    const { type, id } = e.detail;
-    if (type === 'lorebook') {
-        waitForComponent(lorebookSheetRef, (comp) => {
-            comp.openLorebook(id);
-        });
-    } else if (type === 'preset') {
-        waitForComponent(presetViewRef, (comp) => {
-            comp.openPreset(id);
-        });
-    } else if (type === 'persona') {
-        const index = allPersonas.value.findIndex(p => p.id === id);
-        if (index !== -1) {
-            const persona = allPersonas.value[index];
-            window.dispatchEvent(new CustomEvent('open-persona-editor', { detail: { index, persona } }));
-        }
-    }
-};
-
-const onOpenLorebookEntry = (e) => {
-    const { lorebookId, entryId } = e.detail;
-    if (currentView.value === 'view-chat') {
-        waitForComponent(chatViewRef, (comp) => {
-            comp.openLorebookEntry(lorebookId, entryId);
-        });
-    }
-};
-
-const onOpenBackupSheet = () => {
-    waitForComponent(backupSheetRef, (comp) => {
-        comp.open();
-    });
-};
-
-const onOpenPresetSheet = (e) => {
-    waitForComponent(presetViewRef, (comp) => {
-        const presetId = e?.detail?.presetId;
-        if (presetId) {
-            comp.openPreset(presetId, true);
-        } else {
-            comp.open();
-        }
-    });
-};
-
-const onOpenApiSheet = () => {
-    waitForComponent(apiViewRef, (comp) => {
-        comp.open();
-    });
-};
-
-const onHeaderSetupEditor = () => { isHeaderEditorMode.value = true; };
-const onHeaderSetupGeneration = () => { isHeaderEditorMode.value = false; };
-const onHeaderReset = () => { isHeaderEditorMode.value = false; };
-
-const handleOpenChatEvent = async (e) => {
-    logger.debug("[App] Received open-chat event:", e.detail);
-    const data = e.detail;
-    // Handle both object (new) and string (legacy/fallback) formats
-    const charId = typeof data === 'object' ? data.charId : data;
-    const sessionId = typeof data === 'object' ? data.sessionId : null;
-    const msgId = typeof data === 'object' ? data.msgId : null;
-
-    if (!charId) return;
-
-    const chars = await db.getAll('characters');
-    const char = chars.find(c => c.id === charId);
-    if (char) {
-        if (sessionId) char.sessionId = sessionId;
-        if (msgId) char.msgId = msgId;
-        // Force back destination to dialogs — user may be on any view when tapping notification
-        currentView.value = 'view-dialogs';
-        openChatWrapper(char);
-    }
-};
-
-onMounted(async () => {
-    await migrateScToGz(); // One-time migration: sc_ -> gz_ storage keys
-
-    isOnboarding.value = localStorage.getItem('glaze_onboarding_completed') !== 'true';
-
-    initSettings();
-    await initTheme();
-    await Promise.all([
-        initLorebookState(),
-        initPresetState(),
-        loadPersonas()
-    ]);
-    
-    startTracking();
-    
-    initRipple();
-    initThemeToggle();
-    initViewportFix();
-    initBackButton();
-    
-    initHeaderDropdown(categories, activeCategories, (viewId, itemId) => {
-        // view-dialogs is handled reactively via props to DialogList component
-        // view-characters is handled reactively via props to CharacterList component
-    });
-
-    
-    // Listen for editor events
-    window.addEventListener('open-character-editor', onOpenCharacterEditor);
-    window.addEventListener('open-persona-editor', onOpenPersonaEditor);
-    window.addEventListener('navigate-to', onNavigateTo);
-    window.addEventListener('language-changed', onLanguageChanged);
-    window.addEventListener('open-chat', handleOpenChatEvent);
-    window.addEventListener('open-onboarding', onOpenOnboarding);
-
-    const pendingData = consumePendingNotificationData();
-    if (pendingData) {
-        handleOpenChatEvent({ detail: pendingData });
-    }
-
-    window.addEventListener('trigger-open-image', onTriggerOpenImage);
-    window.addEventListener('open-fs-request', onOpenFsRequest);
-    window.addEventListener('open-connections', onOpenConnections);
-    window.addEventListener('open-item-editor', onOpenItemEditor);
-    window.addEventListener('open-lorebook-entry', onOpenLorebookEntry);
-    window.addEventListener('open-backup-sheet', onOpenBackupSheet);
-    window.addEventListener('open-preset-sheet', onOpenPresetSheet);
-    window.addEventListener('open-api-sheet', onOpenApiSheet);
-    window.addEventListener('header-setup-editor', onHeaderSetupEditor);
-    window.addEventListener('header-setup-generation', onHeaderSetupGeneration);
-    window.addEventListener('header-reset', onHeaderReset);
-
-    // Initialize ResizeObserver for layout metrics
-    layoutObserver = new ResizeObserver(() => {
-        requestAnimationFrame(updateLayoutMetrics);
-    });
-    if (headerContainer.value) layoutObserver.observe(headerContainer.value);
-    if (footerContainer.value) layoutObserver.observe(footerContainer.value);
-    updateLayoutMetrics();
-
-    updateLanguage();
-    // AppHeader updates itself when it mounts
-    isDataLoaded.value = true;
-    
-    // Asynchronously generate missing thumbnails without blocking UI
-    generateMissingThumbnails();
-
-    setTimeout(() => {
-        document.body.classList.remove('preload');
-        document.body.classList.add('app-loaded');
-    }, 100);
-
-    // Check and prompt to enable notifications on first run
-    setTimeout(checkAndRequestNotifications, 1000);
-
-    if (Capacitor.isNativePlatform()) {
-        kbListeners.push(await onKeyboardShow(() => { isKeyboardOpen.value = true; }));
-        kbListeners.push(await onKeyboardHide(() => { isKeyboardOpen.value = false; }));
-    }
-});
-
-onBeforeUnmount(() => {
-    if (layoutObserver) layoutObserver.disconnect();
-    window.removeEventListener('open-character-editor', onOpenCharacterEditor);
-    window.removeEventListener('open-persona-editor', onOpenPersonaEditor);
-    window.removeEventListener('navigate-to', onNavigateTo);
-    window.removeEventListener('language-changed', onLanguageChanged);
-    window.removeEventListener('open-chat', handleOpenChatEvent);
-    window.removeEventListener('open-onboarding', onOpenOnboarding);
-    window.removeEventListener('trigger-open-image', onTriggerOpenImage);
-    window.removeEventListener('open-fs-request', onOpenFsRequest);
-    window.removeEventListener('open-connections', onOpenConnections);
-    window.removeEventListener('open-item-editor', onOpenItemEditor);
-    window.removeEventListener('open-lorebook-entry', onOpenLorebookEntry);
-    window.removeEventListener('open-backup-sheet', onOpenBackupSheet);
-    window.removeEventListener('open-preset-sheet', onOpenPresetSheet);
-    window.removeEventListener('open-api-sheet', onOpenApiSheet);
-    window.removeEventListener('header-setup-editor', onHeaderSetupEditor);
-    window.removeEventListener('header-setup-generation', onHeaderSetupGeneration);
-    window.removeEventListener('header-reset', onHeaderReset);
-    kbListeners.forEach(l => l.remove());
-});
-
-watch(currentView, () => {
-    isHeaderEditorMode.value = false;
-});
+}
 </script>
 
 <template>
-  <div class="app-layout" :style="mainStyle">
+  <div class="app-layout" :class="{ 'desktop-mode': nav.isDesktop.value }" :style="mainStyle">
     <!-- Onboarding Overlay -->
     <Transition name="fade">
-        <OnboardingView v-if="isOnboarding" @finish="finishOnboarding" />
+        <OnboardingView v-if="nav.isOnboarding.value" @finish="nav.finishOnboarding" />
     </Transition>
 
     <!-- Header Component -->
     <div class="header-container" ref="headerContainer" :style="{ zIndex: headerZIndex }">
-        <AppHeader 
-            ref="headerRef" 
-            :current-view="currentView" 
+        <AppHeader
+            ref="headerRef"
+            :current-view="nav.effectiveMainView.value"
+            :is-active="!nav.isDesktopFloating.value"
             :categories="categories"
-            :editing-index="headerEditingIndex"
-            @action-save="handleHeaderSave"
-            @action-delete="handleHeaderDelete"
-            @action-close="closeEditor"
+            :editing-index="editor.headerEditingIndex.value"
+            @action-save="editor.handleHeaderSave"
+            @action-delete="editor.handleHeaderDelete"
+            @action-close="closeEditorWrapper"
         />
     </div>
 
-    <!-- Main Content Area -->
-    <main id="main-container" v-if="isDataLoaded" :style="{ zIndex: mainZIndex }" :class="{ 'keyboard-open': isKeyboardOpen && currentView !== 'view-chat', 'chat-view-main': currentView === 'view-chat' }">
-      
-      <Transition name="fade">
-          <!-- VIEW 1: DIALOGS -->
-          <div id="view-dialogs" class="view active-view" v-if="currentView === 'view-dialogs'">
-              <DialogList 
-                  ref="dialogListRef"
-                  :active-category="activeCategories['view-dialogs']"
-                  @open-chat="openChatWrapper"
-              />
+    <!-- App Body: flex row on desktop (sidebars + main) -->
+    <div class="app-body">
+
+      <!-- Desktop Left Sidebar: always-visible chat list + nav -->
+      <DesktopLeftSidebar 
+          v-if="nav.isDesktop.value"
+          :current-view="nav.currentView.value"
+          :active-categories="activeCategories"
+          :is-desktop-floating="nav.isDesktopFloating.value"
+          :is-glossary-open="glossary.isGlossaryWindowOpen.value"
+          @update:current-view="nav.currentView.value = $event"
+          @open-chat="openChatFromTemplate"
+      />
+
+      <!-- Main Content Area -->
+      <main id="main-container" v-if="isDataLoaded" :style="{ zIndex: mainZIndex }" :class="{ 'keyboard-open': isKeyboardOpen && nav.effectiveMainView.value !== 'view-chat', 'chat-view-main': nav.effectiveMainView.value === 'view-chat' }">
+
+        <Transition name="fade">
+            <!-- VIEW 1: DIALOGS -->
+            <div id="view-dialogs" class="view active-view" v-if="nav.effectiveMainView.value === 'view-dialogs' && !nav.isDesktop.value">
+                <DialogList
+                    ref="dialogListRef"
+                    :active-category="activeCategories['view-dialogs']"
+                    @open-chat="openChatFromTemplate"
+                />
+            </div>
+
+            <!-- VIEW 2: CHARACTERS -->
+            <div id="view-characters" class="view active-view" v-else-if="nav.effectiveMainView.value === 'view-characters'">
+                <CharacterList
+                    ref="characterListRef"
+                    :active-category="activeCategories['view-characters']"
+                    @open-chat="openChatFromTemplate"
+                />
+            </div>
+
+            <!-- VIEW 3: MENU -->
+            <MenuView
+                class="view active-view view-gray-bg"
+                v-else-if="nav.effectiveMainView.value === 'view-menu' && !nav.isDesktopFloating.value"
+            />
+
+            <!-- VIEW: GLOSSARY -->
+            <GlossaryView
+                class="view active-view view-gray-bg"
+                v-else-if="nav.effectiveMainView.value === 'view-glossary' && !nav.isDesktopFloating.value"
+                :view-mode="true"
+            />
+
+            <!-- VIEW: THEME SETTINGS -->
+            <ThemeSettingsView
+                class="view active-view view-gray-bg"
+                v-else-if="nav.effectiveMainView.value === 'view-theme-settings' && !nav.isDesktopFloating.value"
+            />
+
+            <!-- VIEW: SETTINGS -->
+            <SettingsView
+                class="view active-view view-gray-bg"
+                v-else-if="nav.effectiveMainView.value === 'view-settings' && !nav.isDesktopFloating.value"
+            />
+
+            <!-- VIEW: TOOLS HUB -->
+            <ToolsView
+                class="view active-view view-gray-bg"
+                v-else-if="nav.effectiveMainView.value === 'view-tools'"
+            />
+
+            <!-- VIEW: API (fullscreen) -->
+            <ApiView
+                class="view active-view view-gray-bg"
+                v-else-if="nav.effectiveMainView.value === 'view-api'"
+                :view-mode="true"
+            />
+
+            <!-- VIEW: PRESETS (fullscreen) -->
+            <PresetView
+                class="view active-view view-gray-bg"
+                v-else-if="nav.effectiveMainView.value === 'view-presets'"
+                :view-mode="true"
+            />
+
+            <!-- VIEW: LOREBOOK (fullscreen) -->
+            <LorebookSheet
+                class="view active-view view-gray-bg"
+                v-else-if="nav.effectiveMainView.value === 'view-lorebook'"
+                :view-mode="true"
+            />
+
+            <!-- VIEW: REGEX (fullscreen) -->
+            <RegexSheet
+                class="view active-view view-gray-bg"
+                v-else-if="nav.effectiveMainView.value === 'view-regex'"
+                :view-mode="true"
+            />
+
+            <!-- VIEW: PERSONAS (fullscreen) -->
+            <PersonasView
+                class="view active-view view-gray-bg"
+                v-else-if="nav.effectiveMainView.value === 'view-personas'"
+                :view-mode="true"
+            />
+
+            <!-- VIEW 5: CHAT -->
+            <ChatView class="view active-view" v-else-if="nav.effectiveMainView.value === 'view-chat'" ref="chatViewRef" />
+
+            <!-- VIEW 6: CHARACTER / PERSONA EDITOR -->
+            <Editor
+                class="view active-view"
+                v-else-if="nav.effectiveMainView.value === 'view-character-edit' || nav.effectiveMainView.value === 'view-persona-edit'"
+                :model-value="nav.effectiveMainView.value === 'view-character-edit' ? (editor.editingCharacter.value || {}) : (editor.editingPersona.value || {})"
+                :config="nav.effectiveMainView.value === 'view-character-edit' ? characterEditorConfig : personaEditorConfig"
+                :show-avatar="true"
+                @update:model-value="(val) => nav.effectiveMainView.value === 'view-character-edit' ? editor.editingCharacter.value = val : editor.editingPersona.value = val"
+                @save="editor.handleEditorAutoSave"
+                @close="closeEditorWrapper"
+                @open-fs="editor.openFsEditor"
+            />
+        </Transition>
+      </main>
+
+      <!-- Desktop: Floating menu overlay -->
+      <WindowView :nav="nav">
+          <MenuView v-if="nav.currentView.value === 'view-menu'" class="view-gray-bg window-panel" />
+          <SyncSheet v-else-if="nav.currentView.value === 'view-sync'" class="view active-view view-gray-bg window-panel" :view-mode="true" />
+          <BackupSheet v-else-if="nav.currentView.value === 'view-backup'" class="view active-view view-gray-bg window-panel" :view-mode="true" />
+          <!-- glossary has its own corner popup, not shown here -->
+          <ThemeSettingsView v-else-if="nav.currentView.value === 'view-theme-settings'" class="view-gray-bg window-panel" />
+          <SettingsView v-else-if="nav.currentView.value === 'view-settings'" class="view-gray-bg window-panel" />
+      </WindowView>
+
+      <!-- Desktop: Glossary corner popup -->
+      <Transition name="glossary-popup">
+          <div v-if="glossary.isDesktopGlossary.value" class="desktop-glossary-popup" :style="glossary.glossaryStyle.value">
+              <div class="desktop-glossary-popup-header" @mousedown="glossary.startGlossaryDrag">
+                  <button v-if="glossary.glossaryCanGoBack.value" class="desktop-glossary-popup-back" @click="glossary.onGlossaryBack">
+                      <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+                  </button>
+                  <span class="desktop-glossary-popup-title" :class="{ 'pl-3': !glossary.glossaryCanGoBack.value }">{{ glossary.glossaryPopupTitle.value }}</span>
+                  <button class="desktop-glossary-popup-close" @click="glossary.isGlossaryWindowOpen.value = false">
+                      <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                  </button>
+              </div>
+              <GlossaryView class="view view-gray-bg" :view-mode="true" :initial-term="glossary.glossaryInitialTerm.value" />
           </div>
-
-          <!-- VIEW 2: CHARACTERS -->
-          <div id="view-characters" class="view active-view" v-else-if="currentView === 'view-characters'">
-              <CharacterList 
-                  ref="characterListRef"
-                  :active-category="activeCategories['view-characters']"
-                  @open-chat="openChatWrapper"
-              />
-          </div>
-
-          <!-- VIEW 3: MENU -->
-          <MenuView
-              class="view active-view view-gray-bg"
-              v-else-if="currentView === 'view-menu'"
-          />
-
-          <!-- VIEW: GLOSSARY -->
-          <GlossaryView
-              class="view active-view view-gray-bg"
-              v-else-if="currentView === 'view-glossary'"
-              :view-mode="true"
-          />
-
-          <!-- VIEW: THEME SETTINGS -->
-          <ThemeSettingsView 
-              class="view active-view view-gray-bg"
-              v-else-if="currentView === 'view-theme-settings'"
-          />
-
-          <!-- VIEW: SETTINGS -->
-          <SettingsView 
-              class="view active-view view-gray-bg"
-              v-else-if="currentView === 'view-settings'"
-          />
-
-          <!-- VIEW 5: CHAT -->
-          <ChatView class="view active-view" v-else-if="currentView === 'view-chat'" ref="chatViewRef" />
-
-          <!-- VIEW 6: CHARACTER / PERSONA EDITOR -->
-          <Editor 
-              class="view active-view"
-              v-else-if="currentView === 'view-character-edit' || currentView === 'view-persona-edit'"
-              :model-value="currentView === 'view-character-edit' ? (editingCharacter || {}) : (editingPersona || {})"
-              :config="currentView === 'view-character-edit' ? characterEditorConfig : personaEditorConfig"
-              :show-avatar="true"
-              @update:modelValue="(val) => currentView === 'view-character-edit' ? editingCharacter = val : editingPersona = val"
-              @save="handleEditorAutoSave"
-              @close="closeEditor"
-              @open-fs="openFsEditor"
-          />
       </Transition>
-    </main>
 
-    <!-- Floating Action Button -->
-    <Transition name="fab">
-        <FabButton v-if="fabConfig" :text="fabConfig.text" @click="fabConfig.action">
-            <template #icon>
-                <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
-            </template>
-        </FabButton>
-    </Transition>
+      <!-- Desktop Right Sidebar: MagicDrawer panel -->
+      <DesktopRightSidebar
+          v-if="nav.isDesktop.value"
+          :bottom-sheet-state="bottomSheetState"
+          :right-sidebar-state="sidebarState"
+          :active-chat-char-obj="nav.activeChatCharObj.value"
+          :context-breakdown="chatViewRef?.contextBreakdown"
+          :current-view="nav.currentView.value"
+          @close-bottom-sheet="closeBottomSheet"
+          @magic-notes="chatViewRef?.openAuthorsNoteSheet()"
+          @magic-context="chatViewRef?.openContextSheet()"
+          @magic-summary="chatViewRef?.openSummarySheet()"
+          @magic-sessions="chatViewRef?.openSessionsSheet()"
+          @magic-stats="chatViewRef?.openChatStatsSheet()"
+          @magic-impersonate="chatViewRef?.startImpersonation()"
+          @magic-char-card="chatViewRef?.openCharCard()"
+          @magic-api="chatViewRef?.openApiView()"
+          @magic-presets="chatViewRef?.openPresetView()"
+          @magic-lorebooks="chatViewRef?.openLorebookSheet()"
+          @magic-memory-books="chatViewRef?.openMemoryBooksSheet()"
+          @magic-regex="chatViewRef?.openRegexSheet()"
+          @magic-image-gen="chatViewRef?.openImageGenSheet()"
+          @magic-glossary="glossary.isGlossaryWindowOpen.value = true"
+          @request-preview="chatViewRef?.openRequestPreviewSheet()"
+      />
 
-    <!-- Bottom Navigation Bar -->
-    <div class="footer-container" ref="footerContainer">
-        <BottomNavigation v-model:currentView="currentView" />
+      <!-- Floating Action Button: Positioned relative to grid on Desktop -->
+      <Transition name="fab">
+          <div v-if="fabConfig" class="desktop-fab-container">
+            <FabButton :text="fabConfig.text" @click="fabConfig.action">
+                <template #icon>
+                    <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                </template>
+            </FabButton>
+          </div>
+      </Transition>
     </div>
 
-    <!-- Global Bottom Sheet -->
+    <!-- Bottom Navigation Bar (mobile only — desktop uses left sidebar) -->
+    <div v-if="!nav.isDesktop.value" class="footer-container" ref="footerContainer">
+        <BottomNavigation v-model:current-view="nav.currentView.value" />
+    </div>
+
+    <!-- Global Bottom Sheet (disabled on desktop chat view where right sidebar takes over) -->
     <BottomSheet
+        v-if="!nav.isDesktop.value || nav.currentView.value !== 'view-chat'"
         :visible="bottomSheetState.visible"
         :locked="bottomSheetState.locked"
         :title="bottomSheetState.title"
@@ -792,8 +480,8 @@ watch(currentView, () => {
         @close="closeBottomSheet"
     />
 
-    <!-- Holo Cards Viewer -->
-    <!-- <HoloCardViewer /> -->
+    <!-- Global Desktop Dropdown (replaces bottom sheets for simple selects on PC) -->
+    <DesktopPopup />
 
     <!-- Standard Image Viewer -->
     <ImageViewer />
@@ -802,25 +490,42 @@ watch(currentView, () => {
     <AppToast />
   </div>
 
-  <!-- Full Screen Editor (Managed by App.vue now) -->
-  <FullScreenEditor 
-      :visible="fsEditorVisible"
-      v-model="fsEditorValue"
-      @save="autoSaveFsEditor"
-      @close="fsEditorVisible = false"
-  />
-
   <ConnectionsSheet ref="connectionsSheetRef" />
   <LorebookSheet ref="lorebookSheetRef" />
   <BackupSheet ref="backupSheetRef" />
+  <SyncSheet ref="syncSheetRef" />
+  <ConflictSheet ref="conflictSheetRef" />
   <PresetView ref="presetViewRef" />
   <ApiView ref="apiViewRef" />
+
+  <!-- Full Screen Editor (Managed by App.vue now) -->
+  <FullScreenEditor 
+      :visible="editor.fsEditorVisible.value"
+      v-model="editor.fsEditorValue.value"
+      @save="editor.autoSaveFsEditor"
+      @close="editor.fsEditorVisible.value = false"
+  />
   <NotificationsSheet />
   <DragDropOverlay />
 
 </template>
 
 <style>
+.desktop-mode .desktop-fab-container {
+    grid-column: 2;
+    grid-row: 1;
+    position: relative;
+    pointer-events: none;
+    z-index: 1000;
+}
+
+.desktop-mode .desktop-fab-container .fab-add {
+    position: absolute !important;
+    bottom: 24px;
+    right: 24px;
+    pointer-events: auto;
+}
+
 .header-container {
     position: absolute;
     top: 0;
@@ -883,6 +588,12 @@ watch(currentView, () => {
     padding-top: calc(var(--header-height, 60px) + 16px) !important;
     padding-bottom: calc(var(--footer-height, 80px) + 20px) !important;
     box-sizing: border-box;
+}
+
+/* Views that own their scroll container (virtual scroll) get footer clearance here.
+   --footer-height is 0px on desktop, actual nav height on mobile. */
+#main-container .view-content-wrapper {
+    padding-bottom: calc(var(--footer-height, 80px) + 20px);
 }
 
 /* If a view contains a sub-view, delegate padding to the sub-view */

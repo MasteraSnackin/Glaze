@@ -3,19 +3,22 @@ import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue';
 import SheetView from '@/components/ui/SheetView.vue';
 import { translations, t } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
+import { publishAppEvent, subscribeAppEvent } from '@/core/events/eventHub.js';
 
 const props = defineProps({
     viewMode: { type: Boolean, default: false },
+    initialTerm: { type: String, default: null }
 });
 
 const sheet = ref(null);
-const view = ref('categories'); // 'categories' | 'terms' | 'article'
+const view = ref(props.initialTerm ? 'article' : 'categories'); // 'categories' | 'terms' | 'article'
 const selectedCategory = ref(null);
 const selectedTerm = ref(null);
 const searchQuery = ref('');
 const navDirection = ref('forward'); // 'forward' | 'back'
 const navStack = ref([]); // [{ view, selectedCategory, selectedTerm }]
-const openedViaHelptip = ref(false);
+const openedViaHelptip = ref(!!props.initialTerm);
 
 const CATEGORY_ICONS = {
     basics:     'M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5',
@@ -44,6 +47,18 @@ const CATEGORY_COLORS = {
 const DEFAULT_COLOR = { bg: 'rgba(100,149,237,0.18)', icon: 'var(--vk-blue)' };
 
 const categories = computed(() => translations[currentLang.value]?.glossary?.categories || []);
+
+if (props.initialTerm) {
+    const term = categories.value.flatMap(c => c.terms).find(t => t.id === props.initialTerm);
+    if (term) {
+        const cat = categories.value.find(c => c.terms.some(t => t.id === props.initialTerm));
+        selectedCategory.value = cat;
+        selectedTerm.value = term;
+    } else {
+        view.value = 'categories';
+        openedViaHelptip.value = false;
+    }
+}
 
 const isSearching = computed(() => searchQuery.value.trim().length > 0);
 
@@ -112,9 +127,9 @@ function goBack() {
         selectedTerm.value = prev.selectedTerm;
         return;
     }
-    // Opened via helptip — close the sheet entirely instead of navigating back
-    if (openedViaHelptip.value) {
-        if (!props.viewMode) sheet.value?.close();
+    // Opened via helptip — close the sheet entirely instead of navigating back only if it's an actual bottom sheet
+    if (openedViaHelptip.value && !props.viewMode) {
+        sheet.value?.close();
         return;
     }
     if (view.value === 'article') {
@@ -149,37 +164,35 @@ async function open(termId) {
 }
 
 
-function handleGlossaryEvent(e) {
-    open(e.detail?.term);
+function handleGlossaryEvent(detail) {
+    open(detail?.term);
 }
 
 function handleGlBack() {
     if (!props.viewMode) return;
-    if (view.value === 'categories' || (openedViaHelptip.value && navStack.value.length === 0)) {
-        window.dispatchEvent(new CustomEvent('navigate-to', { detail: 'view-menu' }));
+    if (view.value === 'categories') {
+        publishAppEvent(APP_EVENTS.nav.navigateTo, 'view-menu');
     } else {
         goBack();
     }
 }
 
-// Sync header title when navigating inside viewMode (watches sheetTitle to catch chip-to-chip article nav)
-watch(sheetTitle, () => {
+// Sync header title when navigating inside viewMode (watches sheetTitle and view to catch chip-to-chip article nav)
+watch([sheetTitle, view], () => {
     if (!props.viewMode) return;
-    window.dispatchEvent(new CustomEvent('gl-header-update', { detail: { title: sheetTitle.value } }));
+    publishAppEvent(APP_EVENTS.ui.glossary.headerUpdate, { title: sheetTitle.value, canGoBack: view.value !== 'categories' });
 });
 
+const unsubs = [];
 onMounted(() => {
-    window.addEventListener('open-glossary', handleGlossaryEvent);
-    window.addEventListener('gl-back', handleGlBack);
+    unsubs.push(subscribeAppEvent(APP_EVENTS.nav.openGlossary, ({ detail }) => handleGlossaryEvent(detail)));
+    unsubs.push(subscribeAppEvent(APP_EVENTS.ui.glossary.back, handleGlBack));
     if (props.viewMode) {
-        window.dispatchEvent(new CustomEvent('gl-header-update', {
-            detail: { title: sheetTitle.value }
-        }));
+        publishAppEvent(APP_EVENTS.ui.glossary.headerUpdate, { title: sheetTitle.value, canGoBack: view.value !== 'categories' });
     }
 });
 onBeforeUnmount(() => {
-    window.removeEventListener('open-glossary', handleGlossaryEvent);
-    window.removeEventListener('gl-back', handleGlBack);
+    unsubs.forEach(fn => fn?.());
 });
 
 const INLINE_ICONS = {
@@ -263,7 +276,9 @@ defineExpose({ open });
                             <div v-for="cat in categories" :key="cat.id" class="gl-cat-card"
                                 :style="{ '--gl-cat-bg': getCategoryColor(cat.id).bg, '--gl-cat-icon': getCategoryColor(cat.id).icon }"
                                 @click="selectCategory(cat)">
-                                <div class="gl-cat-icon-wrap"><svg viewBox="0 0 24 24"><path :d="getCategoryIcon(cat.id)"/></svg></div>
+                                <div class="gl-cat-icon-wrap">
+<svg viewBox="0 0 24 24"><path :d="getCategoryIcon(cat.id)"/></svg>
+</div>
                                 <div class="gl-cat-info">
                                     <span class="gl-cat-label">{{ cat.label }}</span>
                                     <span class="gl-cat-count">{{ cat.terms.length }} {{ t('glossary_terms') || 'terms' }}</span>
@@ -286,15 +301,21 @@ defineExpose({ open });
 
                 <div v-else-if="view === 'article'" :key="'article-' + selectedTerm?.id" class="gl-article">
                     <div class="gl-article-header">
-                        <h1 class="gl-article-title">{{ selectedTerm.name }}</h1>
+                        <h1 class="gl-article-title">
+{{ selectedTerm.name }}
+</h1>
                         <span v-if="selectedTerm.alt" class="gl-article-badge">{{ selectedTerm.alt }}</span>
                     </div>
                     <div class="gl-article-divider"></div>
                     <p class="gl-article-desc">
                         <template v-for="(part, i) in parsedDesc" :key="i">
                             <span v-if="part.type === 'text'">{{ part.value }}</span>
-                            <button v-else-if="part.type === 'chip'" class="gl-chip" @click="navigateToChipTerm(part.termId)">{{ part.label }}</button>
-                            <button v-else-if="part.type === 'link'" class="gl-ext-link" @click="openLink(part.url)">{{ part.label }}</button>
+                            <button v-else-if="part.type === 'chip'" class="gl-chip" @click="navigateToChipTerm(part.termId)">
+{{ part.label }}
+</button>
+                            <button v-else-if="part.type === 'link'" class="gl-ext-link" @click="openLink(part.url)">
+{{ part.label }}
+</button>
                             <span v-else-if="part.type === 'icon'" class="gl-inline-icon"><svg viewBox="0 0 24 24"><path :d="getInlineIconPath(part.id)"/></svg></span>
                         </template>
                     </p>

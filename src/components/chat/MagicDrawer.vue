@@ -1,30 +1,35 @@
 <script setup>
 import { ref, watch, nextTick, onMounted, computed } from 'vue';
+import Tooltip from '@/components/ui/Tooltip.vue';
 import { translations, pluralize } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
-import { attachRipple } from '@/core/services/ui.js';
+import { attachRipple } from '@/core/services/interactionEffects.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import { lorebookState, initLorebookState } from '@/core/states/lorebookState.js';
 import { estimateTokens } from '@/utils/tokenizer.js';
 import { getEffectivePersona } from '@/core/states/personaState.js';
 import { getEffectivePreset, presetState } from '@/core/states/presetState.js';
 import { db } from '@/utils/db.js';
-import { getLastPrompt } from '@/core/services/generationService.js';
+import { getLastRequestPreviewSnapshot } from '@/core/states/requestPreviewState.js';
 import { getImageGenSettings } from '@/core/services/imageGenService.js';
-import { replaceMacros } from '@/utils/macroEngine.js';
 import { getApiPresets } from '@/core/config/APISettings.js';
+import { useDragDrop } from '@/composables/ui/useDragDrop.js';
 import PersonasSheet from '@/views/PersonasView.vue';
 
 const personasSheet = ref(null);
 
 const props = defineProps({
     visible: { type: Boolean, default: false },
-    activeChar: { type: Object, default: null }
+    activeChar: { type: Object, default: null },
+    sidebarMode: { type: Boolean, default: false },
+    iconOnly: { type: Boolean, default: false },
+    contextBreakdown: { type: Object, default: null }
 });
 
 const emit = defineEmits([
     'close',
     'magic-notes',
+    'magic-context',
     'magic-summary',
     'magic-sessions',
     'magic-stats',
@@ -33,6 +38,7 @@ const emit = defineEmits([
     'magic-api',
     'magic-presets',
     'magic-lorebooks',
+    'magic-memory-books',
     'magic-regex',
     'request-preview',
     'add-block',
@@ -43,16 +49,17 @@ const emit = defineEmits([
 const t = (key) => translations[currentLang.value]?.[key] || key;
 
 const isEditing = ref(false);
-const dragSrcIndex = ref(-1);
 let longPressTimer = null;
 
 const allAvailableItems = [
     { id: 'notes', i18n: 'magic_authors_notes', icon: 'M3 10h11v2H3v-2zm0-2h11V6H3v2zm0 8h7v-2H3v2zm15.01-3.13l.71-.71c.39-.39 1.02-.39 1.41 0l.71.71c.39.39.39 1.02 0 1.41l-.71.71-2.12-2.12zm-.71.71l-5.3 5.3V21h2.12l5.3-5.3-2.12-2.12z', event: 'magic-notes' },
+    { id: 'context', i18n: 'label_tokenizer', fallback: 'Tokenizer', icon: 'M4 11h16v2H4zm0-6h16v2H4zm0 12h10v2H4z', event: 'magic-context' },
     { id: 'summary', i18n: 'magic_summary', icon: 'M14 17H4v2h10v-2zm6-8H4v2h16V9zM4 15h16v-2H4v2zM4 5v2h16V5H4z', event: 'magic-summary' },
     { id: 'sessions', i18n: 'history_title', fallback: 'Sessions', icon: 'M13 3a9 9 0 0 0-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42C8.27 19.99 10.51 21 13 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z', event: 'magic-sessions' },
     { id: 'stats', i18n: 'action_chat_stats', icon: 'M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zM9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4z', event: 'magic-stats' },
     { id: 'char-card', i18n: 'block_char_card', icon: 'M3 5v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2H5c-1.11 0-2 .9-2 2zm12 4c0 1.66-1.34 3-3 3s-3-1.34-3-3 1.34-3 3-3 3 1.34 3 3zm-9 8c0-2 4-3.1 6-3.1s6 1.1 6 3.1v1H6v-1z', event: 'magic-char-card' },
     { id: 'lorebooks', i18n: 'menu_lorebooks', fallback: 'World Info', icon: 'M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9H9V9h10v2zm-4 4H9v-2h6v2zm4-8H9V5h10v2z', event: 'magic-lorebooks' },
+    { id: 'memory-books', i18n: 'magic_memory_books', fallback: 'Memory Books', icon: 'M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 10h-4v4h-2v-4H7v-2h4V7h2v4h4v2z', event: 'magic-memory-books' },
     { id: 'regex', i18n: 'menu_regex', fallback: 'Regex Scripts', icon: 'M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z', event: 'magic-regex' },
     { id: 'api', i18n: 'tab_api', fallback: 'API', icon: 'M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z', event: 'magic-api' },
     { id: 'presets', i18n: 'subtab_preset', fallback: 'Presets', icon: 'M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6h-6V2zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z', event: 'magic-presets' },
@@ -62,9 +69,12 @@ const allAvailableItems = [
     { id: 'glossary', i18n: 'menu_glossary', fallback: 'Glossary', icon: 'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z', event: 'magic-glossary' }
 ];
 
+const itemsKey = computed(() => props.sidebarMode ? 'magic_drawer_items_desktop' : 'magic_drawer_items');
+const deletedItemsKey = computed(() => props.sidebarMode ? 'magic_drawer_deleted_items_desktop' : 'magic_drawer_deleted_items');
+
 const loadDeletedItems = () => {
     try {
-        const stored = localStorage.getItem('magic_drawer_deleted_items');
+        const stored = localStorage.getItem(deletedItemsKey.value);
         return stored ? JSON.parse(stored) : [];
     } catch (e) {
         return [];
@@ -74,13 +84,13 @@ const loadDeletedItems = () => {
 const deletedItems = ref(loadDeletedItems());
 
 watch(deletedItems, (newVal) => {
-    localStorage.setItem('magic_drawer_deleted_items', JSON.stringify(newVal));
+    localStorage.setItem(deletedItemsKey.value, JSON.stringify(newVal));
 }, { deep: true });
 
 const loadItems = () => {
     const deleted = loadDeletedItems();
     try {
-        const stored = localStorage.getItem('magic_drawer_items');
+        const stored = localStorage.getItem(itemsKey.value);
         if (stored) {
             const parsed = JSON.parse(stored);
             // Filter out items that are no longer available (e.g. impersonate moved to ChatInput)
@@ -102,24 +112,31 @@ const loadItems = () => {
 
 const items = ref(loadItems());
 
+const canAdd = computed(() => {
+    return allAvailableItems.some(i => !items.value.some(existing => existing.id === i.id));
+});
+
 const displayItems = computed(() => {
-    const list = items.value.map((item, index) => {
+    const list = items.value
+        .filter(item => !(props.sidebarMode && item.id === 'glossary'))
+        .map((item, index) => {
         const canonical = allAvailableItems.find(a => a.id === item.id);
         return { ...item, ...(canonical || {}), originalIndex: index };
     });
-    if (isEditing.value && canAdd.value) {
+    if ((isEditing.value || (props.sidebarMode && !props.iconOnly)) && canAdd.value) {
         list.push({ isAddBtn: true, id: 'add-btn' });
     }
     return list;
 });
 
-const canAdd = computed(() => {
-    return allAvailableItems.some(i => !items.value.some(existing => existing.id === i.id));
-});
-
 watch(items, (newVal) => {
-    localStorage.setItem('magic_drawer_items', JSON.stringify(newVal));
+    localStorage.setItem(itemsKey.value, JSON.stringify(newVal));
 }, { deep: true });
+
+watch(() => props.sidebarMode, () => {
+    deletedItems.value = loadDeletedItems();
+    items.value = loadItems();
+});
 
 watch(() => props.visible, (val) => {
     if (val) {
@@ -133,14 +150,17 @@ watch(() => props.visible, (val) => {
 });
 
 const handleAction = (item) => {
-    if (isEditing.value) return;
-    if (item.id === 'personas') {
+    if (isEditing.value && !props.sidebarMode) return;
+    
+    const canonicalItem = allAvailableItems.find(i => i.id === item.id) || item;
+
+    if (canonicalItem.id === 'personas') {
         personasSheet.value?.open();
-    } else if (item.id === 'image-gen') {
+    } else if (canonicalItem.id === 'image-gen') {
         emit('magic-image-gen');
         emit('close');
-    } else {
-        emit(item.event);
+    } else if (canonicalItem.event) {
+        emit(canonicalItem.event);
         emit('close');
     }
 };
@@ -179,22 +199,24 @@ const addItem = () => {
 };
 
 // Drag and Drop Logic
+const {
+    dragIndex: dragSrcIndex,
+    dropTargetIndex: dragHoverIndex,
+    onDragStart: rawDragStart,
+    onDragEnter,
+    onDrop,
+    onDragEnd,
+    onTouchStart: rawTouchStart,
+    onTouchMove: rawTouchMove,
+    onTouchEnd: rawTouchEnd
+} = useDragDrop({
+    listRef: items,
+    itemSelector: '.magic-item'
+});
+
 const onDragStart = (e, index) => {
-    if (!isEditing.value) return;
-    dragSrcIndex.value = index;
-    e.dataTransfer.effectAllowed = 'move';
-    e.dataTransfer.dropEffect = 'move';
-};
-
-const onDragEnter = (e, index) => {
-    if (dragSrcIndex.value === -1 || dragSrcIndex.value === index) return;
-    const item = items.value.splice(dragSrcIndex.value, 1)[0];
-    items.value.splice(index, 0, item);
-    dragSrcIndex.value = index;
-};
-
-const onDragEnd = (e) => {
-    dragSrcIndex.value = -1;
+    if (!isEditing.value && !props.sidebarMode) return;
+    rawDragStart(e, index);
 };
 
 let touchStartX = 0;
@@ -208,9 +230,8 @@ const onTouchStart = (e, index) => {
         if (!isEditing.value) {
             isEditing.value = true;
         }
-        dragSrcIndex.value = index;
+        rawTouchStart(e, index);
         if (navigator.vibrate) navigator.vibrate(50);
-        document.body.style.overflow = 'hidden';
     }, 300);
 };
 
@@ -221,27 +242,13 @@ const onTouchMove = (e) => {
         }
         return;
     }
-    e.preventDefault();
-    const touch = e.touches[0];
-    
-    const target = document.elementFromPoint(touch.clientX, touch.clientY);
-    
-    const el = target?.closest('.magic-item');
-    if (el && el.dataset.index !== undefined) {
-        const index = parseInt(el.dataset.index);
-        if (!isNaN(index) && index !== -1 && index !== dragSrcIndex.value) {
-             const item = items.value.splice(dragSrcIndex.value, 1)[0];
-             items.value.splice(index, 0, item);
-             dragSrcIndex.value = index;
-        }
-    }
+    rawTouchMove(e);
 };
 
 const onTouchEnd = (e) => {
     clearTimeout(longPressTimer);
     if (dragSrcIndex.value !== -1) {
-        dragSrcIndex.value = -1;
-        document.body.style.overflow = '';
+        rawTouchEnd(e);
     }
 };
 
@@ -306,39 +313,6 @@ const effectivePersonaName = computed(() => {
     return persona?.name || '';
 });
 
-const resolveBlockContent = (block, preset, activeChar, persona, history) => {
-    if (!block) return '';
-    if (block.id === 'chat_history') {
-        if (!history || history.length === 0) return '';
-        return history.map(m => `${m.role === 'user' ? (persona?.name || 'User') : (activeChar?.name || 'Char')}: ${m.text}`).join('\n');
-    }
-    if (block.id === 'authors_note') return activeChar?.authors_note || '';
-    if (block.id === 'summary') return activeChar?.summary || '';
-    if (block.id === 'user_persona') return persona?.prompt || '';
-    if (block.id === 'char_card') return activeChar?.description || activeChar?.desc || '';
-    if (block.id === 'char_personality' || block.id === 'char_persona') return activeChar?.personality || '';
-    if (block.id === 'scenario') return activeChar?.scenario || '';
-    if (block.id === 'example_dialogue') return activeChar?.mes_example || '';
-    if (block.id === 'first_message') return activeChar?.first_mes || '';
-    return block.content || '';
-};
-
-const extendedReplaceMacros = (text, activeChar, persona) => {
-    if (!text) return '';
-    let res = replaceMacros(text, activeChar, persona);
-    if (activeChar) {
-        res = res.replace(/{{scenario}}/gi, activeChar.scenario || '')
-                 .replace(/{{personality}}/gi, activeChar.personality || '')
-                 .replace(/{{description}}/gi, activeChar.description || activeChar.desc || '')
-                 .replace(/{{char_description}}/gi, activeChar.description || activeChar.desc || '')
-                 .replace(/{{char_personality}}/gi, activeChar.personality || '');
-    }
-    if (persona) {
-        res = res.replace(/{{persona}}/gi, persona.prompt || '');
-    }
-    return res;
-};
-
 const activePreset = computed(() => {
     const charId = props.activeChar?.id;
     const chatId = charId && props.activeChar?.sessionId ? `${charId}_${props.activeChar.sessionId}` : null;
@@ -347,25 +321,7 @@ const activePreset = computed(() => {
 
 const activePresetName = computed(() => activePreset.value?.name || t('label_default'));
 
-const activePresetTokens = computed(() => {
-    const preset = activePreset.value;
-    if (!preset) return 0;
-
-    const charId = props.activeChar?.id;
-    const chatId = charId && props.activeChar?.sessionId ? `${charId}_${props.activeChar.sessionId}` : null;
-    const persona = getEffectivePersona(charId, chatId);
-    let content = "";
-    if (preset.impersonationPrompt) content += preset.impersonationPrompt + "\n";
-    if (preset.blocks) {
-        preset.blocks.forEach(b => {
-            if (b.enabled && !b.isStashed) {
-                const blockContent = resolveBlockContent(b, preset, props.activeChar, persona, chatHistory.value);
-                if (blockContent) content += blockContent + "\n";
-            }
-        });
-    }
-    return estimateTokens(extendedReplaceMacros(content, props.activeChar, persona));
-});
+const activePresetTokens = computed(() => props.contextBreakdown?.preset || 0);
 
 const activeRegexCount = computed(() => {
     let presetRegexes = [];
@@ -381,20 +337,13 @@ const activeRegexCount = computed(() => {
     return all.filter(s => !s.disabled).length;
 });
 
-const notesTokens = computed(() => estimateTokens(props.activeChar?.authors_note));
-const summaryTokens = computed(() => estimateTokens(props.activeChar?.summary));
-const cardTokens = computed(() => estimateTokens((props.activeChar?.name || '') + '\n' + (props.activeChar?.description || props.activeChar?.desc || '')));
+const notesTokens = computed(() => props.contextBreakdown?.authorsNote || 0);
+const summaryTokens = computed(() => props.contextBreakdown?.summary || 0);
+const cardTokens = computed(() => props.contextBreakdown?.character || 0);
 
-const personaTokens = computed(() => {
-    const persona = getEffectivePersona(props.activeChar?.id, props.activeChar?.sessionId ? `${props.activeChar.id}_${props.activeChar.sessionId}` : null);
-    return estimateTokens((persona?.name || '') + '\n' + (persona?.prompt || ''));
-});
+const personaTokens = computed(() => props.contextBreakdown?.persona || 0);
 
-const generationTokens = computed(() => {
-    const prompt = getLastPrompt();
-    if (!prompt || !prompt.messages) return 0;
-    return prompt.messages.reduce((acc, m) => acc + estimateTokens(m.content), 0);
-});
+const generationTokens = computed(() => props.contextBreakdown?.actualPromptTokens || 0);
 
 const imageGenEnabled = computed(() => getImageGenSettings().enabled);
 
@@ -410,16 +359,21 @@ watch(() => props.visible, (val) => {
 defineExpose({
     openPersonas: () => {
         personasSheet.value?.open();
-    }
+    },
+    getDisplayItems: () => displayItems.value,
+    getAllAvailableItems: () => allAvailableItems,
+    handleAction: (item) => handleAction(item)
 });
 </script>
 
 <template>
-    <Transition name="drawer">
-        <div v-if="visible" class="magic-drawer" @click.stop>
-            <div class="drawer-header">
-                <div class="drawer-title">{{ t('sheet_title_magic_drawer') || 'Magic Drawer' }}</div>
-                <div class="edit-toggle" @click="toggleEdit">
+    <Transition :name="sidebarMode ? '' : 'drawer'">
+        <div v-if="visible" class="magic-drawer" :class="{ 'magic-drawer-sidebar': sidebarMode, 'icon-only': iconOnly }" @click.stop>
+            <div class="drawer-header" v-show="!iconOnly">
+                <div class="drawer-title">
+{{ t('sheet_title_magic_drawer') || 'Magic Drawer' }}
+</div>
+                <div class="edit-toggle" @click="toggleEdit" v-if="!sidebarMode">
                     <svg v-if="!isEditing" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
                     <svg v-else viewBox="0 0 24 24"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg>
                     <span>{{ isEditing ? t('btn_save') : t('action_edit') }}</span>
@@ -428,15 +382,26 @@ defineExpose({
             
             <div class="drawer-content">
                 <template v-for="(item) in displayItems" :key="item.id">
-                    <div v-if="!item.isAddBtn"
-                            class="magic-item" 
+                    <Tooltip
+                        v-if="!item.isAddBtn"
+                        :text="t(item.i18n) || item.fallback || ''"
+                        placement="left"
+                        :disabled="sidebarMode || isEditing"
+                    >
+                    <div
+                            class="magic-item"
                             :data-index="item.originalIndex"
-                            :class="{ 'editing': isEditing, 'dragging': item.originalIndex === dragSrcIndex }"
-                            :draggable="isEditing"
+                            :class="{ 
+                                'editing': isEditing, 
+                                'dragging': item.originalIndex === dragSrcIndex,
+                                'drag-hover': dragHoverIndex !== -1 && dragHoverIndex === item.originalIndex && dragSrcIndex !== dragHoverIndex
+                            }"
+                            :draggable="isEditing || sidebarMode"
                             @click="handleAction(item)"
                             @dragstart="onDragStart($event, item.originalIndex)"
                             @dragenter.prevent="onDragEnter($event, item.originalIndex)"
                             @dragover.prevent
+                            @drop="onDrop($event, item.originalIndex)"
                             @dragend="onDragEnd"
                             @touchstart="onTouchStart($event, item.originalIndex)"
                             @touchmove="onTouchMove($event)"
@@ -445,7 +410,7 @@ defineExpose({
                             <div class="card-icon">
                                 <svg viewBox="0 0 24 24"><path :d="item.icon"/></svg>
                             </div>
-                            <div class="card-info">
+                            <div class="card-info" v-show="!iconOnly">
                                 <span class="item-label">{{ t(item.i18n) }}</span>
                                 <span class="item-status" v-if="item.id === 'lorebooks'"><span>{{ lorebookEntryCount }} {{ pluralize(lorebookEntryCount, 'count_entries') }}</span></span>
                                 <span class="item-status" v-else-if="item.id === 'notes'"><span>{{ notesTokens }} {{ pluralize(notesTokens, 'count_tokens') }}</span></span>
@@ -461,18 +426,19 @@ defineExpose({
                                 <span class="item-status" v-else-if="item.id === 'preview' && generationTokens > 0"><span>{{ generationTokens }} {{ pluralize(generationTokens, 'count_tokens') }}</span></span>
                             </div>
                         </div>
-                        
-                        <div v-if="isEditing" class="delete-btn" @click.stop="removeItem(item.originalIndex)">
+
+                        <div v-if="isEditing || (sidebarMode && !iconOnly)" class="delete-btn" @click.stop="removeItem(item.originalIndex)">
                             <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
                         </div>
                     </div>
+                    </Tooltip>
 
                     <div v-else class="magic-item add-btn" @click="addItem">
                         <div class="magic-item-content">
                             <div class="card-icon add-icon">
                                 <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
                             </div>
-                            <div class="card-info">
+                            <div class="card-info" v-show="!iconOnly">
                                 <span class="item-label">{{ t('btn_add') }}</span>
                             </div>
                         </div>
@@ -550,6 +516,26 @@ defineExpose({
     z-index: -1;
 }
 
+.magic-drawer-sidebar .drawer-header {
+    position: relative !important;
+    top: auto !important;
+    left: auto !important;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    padding: 0 16px !important;
+    z-index: 10 !important;
+    background: transparent !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    mask-image: none !important;
+    -webkit-mask-image: none !important;
+}
+
+.magic-drawer-sidebar.icon-only .drawer-header {
+    display: none !important;
+}
+
 .drawer-header > * {
     pointer-events: auto;
     opacity: 1 !important;
@@ -566,7 +552,6 @@ defineExpose({
     flex: 1;
     overflow-y: auto;
     overflow-x: hidden;
-    scrollbar-gutter: stable;
     scroll-padding-top: 60px;
     padding: 60px 10px calc(20px + var(--sab)) 10px;
     display: grid;
@@ -575,8 +560,52 @@ defineExpose({
     align-content: start;
 }
 
+.magic-drawer-sidebar .drawer-content {
+    display: flex;
+    flex-direction: column;
+    padding: 0 !important;
+    scroll-padding-top: 0;
+    gap: 0 !important;
+}
+
+.magic-drawer-sidebar .magic-item {
+    background-color: transparent !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    border: none !important;
+    border-radius: 0 !important;
+    padding: 14px 16px !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+    margin: 0 !important;
+}
+
+.magic-drawer-sidebar .magic-item:hover {
+    background-color: rgba(255, 255, 255, 0.04) !important;
+}
+
+.magic-drawer-sidebar .magic-item:active {
+    transform: none !important;
+    background-color: rgba(255, 255, 255, 0.08) !important;
+}
+
+.magic-drawer-sidebar .magic-item-content {
+    gap: 12px;
+}
+
+.magic-drawer-sidebar.icon-only .magic-item {
+    justify-content: flex-start !important;
+}
+
+.magic-drawer-sidebar.icon-only .magic-item-content {
+    justify-content: flex-start !important;
+}
+
 .drawer-content::-webkit-scrollbar-track {
     margin-top: 60px;
+}
+
+.magic-drawer-sidebar .drawer-content::-webkit-scrollbar-track {
+    margin-top: 0;
 }
 
 .drawer-enter-active,
@@ -606,6 +635,12 @@ defineExpose({
     transition: transform 0.2s cubic-bezier(0.2, 0, 0.2, 1), background-color 0.2s ease, border-color 0.2s ease;
     display: flex;
     align-items: center;
+}
+
+.magic-item.drag-hover {
+    transform: scale(1.02);
+    box-shadow: 0 0 0 2px var(--vk-blue), 0 5px 15px rgba(0,0,0,0.2) !important;
+    z-index: 2;
 }
 
 .magic-item:active {
@@ -750,6 +785,17 @@ defineExpose({
     width: 14px;
     height: 14px;
     fill: currentColor;
+}
+
+.magic-drawer-sidebar .delete-btn {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+}
+
+.magic-drawer-sidebar .magic-item:hover .delete-btn {
+    opacity: 1;
+    pointer-events: auto;
 }
 
 

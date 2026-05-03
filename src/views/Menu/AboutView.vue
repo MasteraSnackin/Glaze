@@ -7,7 +7,7 @@ import bmcLogo from '@/assets/logos/bmc-logo.svg';
 import boostyLogo from '@/assets/logos/boosty.svg';
 
 const visible = ref(false);
-const version = `${__APP_VERSION__}\nCaramel Apple`;
+const version = `${__APP_VERSION__}`;
 
 const open = () => {
     visible.value = true;
@@ -53,7 +53,7 @@ defineExpose({ open });
                 <!-- Content card -->
                 <div class="menu-group about-card">
                     <!-- Close X inside the card -->
-                    <div class="about-close-btn" @click="close">
+                    <div class="window-close-btn" @click="close">
                         <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
                     </div>
 
@@ -66,8 +66,12 @@ defineExpose({ open });
                                 </g>
                             </svg>
                         </div>
-                        <h2 class="app-name">Glaze</h2>
-                        <p class="app-version">{{ version }}</p>
+                        <h2 class="app-name">
+Glaze
+</h2>
+                        <p class="app-version">
+{{ version }}
+</p>
                     </div>
 
                     <!-- Telegram & Donate pill buttons -->
@@ -114,7 +118,9 @@ defineExpose({ open });
     left: 0;
     width: 100%;
     height: 100%;
-    background: transparent;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
     z-index: 30000;
     display: flex;
     align-items: center;

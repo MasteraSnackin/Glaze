@@ -5,8 +5,10 @@ import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import HelpTip from '@/components/ui/HelpTip.vue';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
-import { getImageGenSettings, saveImageGenSettings, fetchImageModels, saveAdditionalReferences, checkImageGenConnection } from '@/core/services/imageGenService.js';
+import { getImageGenSettings, saveImageGenSettings, fetchImageModels, saveAdditionalReferences, saveRoutmyAdditionalRefs, checkImageGenConnection, ROUTMY_IMAGE_MODELS, ROUTMY_ASPECT_RATIOS, ROUTMY_IMAGE_SIZES } from '@/core/services/imageGenService.js';
 import ConnectionStatus from '@/components/ui/ConnectionStatus.vue';
+import { useServiceProviders } from '@/composables/api/useServiceProviders.js';
+import { SERVICE_NAMES } from '@/core/config/ProviderProfiles.js';
 
 const sheet = ref(null);
 const t = (key) => translations[currentLang.value]?.[key] || key;
@@ -15,6 +17,17 @@ const settings = ref(getImageGenSettings());
 const models = ref([]);
 const isFetchingModels = ref(false);
 const fetchError = ref('');
+
+const {
+    imageGenSettings,
+    onImageGenInput,
+    openProviderSelector,
+    getActiveProfileMeta,
+    loadAllServiceSettings
+} = useServiceProviders();
+
+// Computed properties
+const naisteraModelSupportsReferences = computed(() => settings.value.naisteraModel !== 'novelai' && settings.value.naisteraModel !== 'grok-pro');
 
 // Connection status
 const apiStatus = ref('idle'); // idle | connecting | connected | failed
@@ -41,9 +54,12 @@ function scheduleCheck() {
 // Additional references
 const refImageInput = ref(null);
 const pendingRefIndex = ref(-1);
+const routmyRefImageInput = ref(null);
+const pendingRoutmyRefIndex = ref(-1);
 
 const open = () => {
     settings.value = getImageGenSettings();
+    loadAllServiceSettings();
     models.value = [];
     fetchError.value = '';
     sheet.value?.open();
@@ -58,7 +74,7 @@ watch(settings, save, { deep: true });
 
 // Re-check connection when connectivity-relevant fields change
 watch(
-    () => [settings.value.apiType, settings.value.endpoint, settings.value.apiKey, settings.value.enabled],
+    () => [settings.value.apiType, settings.value.endpoint, settings.value.apiKey, settings.value.routmyApiKey, settings.value.enabled],
     ([, , , enabled]) => { if (enabled) scheduleCheck(); else { apiStatus.value = 'idle'; errorMessage.value = ''; } }
 );
 
@@ -79,13 +95,14 @@ const onFetchModels = async () => {
 const showGeminiOptions = computed(() => settings.value.apiType === 'gemini');
 const showOpenAIOptions = computed(() => settings.value.apiType === 'openai');
 const showNaisteraOptions = computed(() => settings.value.apiType === 'naistera');
+const showRoutmyOptions = computed(() => settings.value.apiType === 'routmy');
 
 // Dropdown selectors via bottom sheet
 const openModelSelector = () => {
     const items = models.value.length > 0
         ? models.value.map(m => ({
             label: m,
-            onClick: () => { settings.value.model = m; closeBottomSheet(); }
+            onClick: () => { onImageGenInput('model', m); closeBottomSheet(); }
         }))
         : [{ label: t('imggen_no_models') || 'No models found — tap refresh', onClick: closeBottomSheet }];
     showBottomSheet({ title: t('imggen_model') || 'Model', items });
@@ -96,6 +113,7 @@ const openApiTypeSelector = () => {
         { label: 'OpenAI', value: 'openai' },
         { label: 'Gemini', value: 'gemini' },
         { label: 'Naistera', value: 'naistera' },
+        { label: 'rout.my', value: 'routmy' },
     ];
     showBottomSheet({
         title: t('imggen_api_type') || 'API Type',
@@ -104,9 +122,6 @@ const openApiTypeSelector = () => {
             sublabel: settings.value.apiType === o.value ? (t('preset_active') || 'Active') : '',
             onClick: () => {
                 settings.value.apiType = o.value;
-                if (o.value === 'naistera' && !settings.value.endpoint) {
-                    settings.value.endpoint = 'https://naistera.org';
-                }
                 closeBottomSheet();
             }
         }))
@@ -164,7 +179,7 @@ const openResolutionSelector = () => {
 };
 
 const openNaisteraModelSelector = () => {
-    const options = ['grok', 'nano banana'];
+    const options = ['grok', 'grok-pro', 'nano banana', 'novelai'];
     showBottomSheet({
         title: t('imggen_model') || 'Model',
         items: options.map(v => ({
@@ -173,6 +188,80 @@ const openNaisteraModelSelector = () => {
             onClick: () => { settings.value.naisteraModel = v; closeBottomSheet(); }
         }))
     });
+};
+
+const openRoutmyModelSelector = () => {
+    showBottomSheet({
+        title: t('imggen_model') || 'Model',
+        items: ROUTMY_IMAGE_MODELS.map(m => ({
+            label: m.label,
+            sublabel: settings.value.routmyModel === m.id ? (t('preset_active') || 'Active') : '',
+            onClick: () => { settings.value.routmyModel = m.id; closeBottomSheet(); }
+        }))
+    });
+};
+
+const openRoutmyResolutionSelector = () => {
+    showBottomSheet({
+        title: t('imggen_image_size') || 'Resolution',
+        items: ROUTMY_IMAGE_SIZES.map(v => ({
+            label: v,
+            sublabel: settings.value.routmyImageSize === v ? (t('preset_active') || 'Active') : '',
+            onClick: () => { settings.value.routmyImageSize = v; closeBottomSheet(); }
+        }))
+    });
+};
+
+const openRoutmyQualitySelector = () => {
+    showBottomSheet({
+        title: t('imggen_quality') || 'Quality',
+        items: ['standard', 'hd'].map(v => ({
+            label: v === 'hd' ? 'HD' : 'Standard',
+            sublabel: settings.value.routmyQuality === v ? (t('preset_active') || 'Active') : '',
+            onClick: () => { settings.value.routmyQuality = v; closeBottomSheet(); }
+        }))
+    });
+};
+
+const openRoutmyRefMatchModeSelector = (i) => {
+    showBottomSheet({
+        title: 'Match Mode',
+        items: ['match', 'always'].map(v => ({
+            label: v,
+            sublabel: settings.value.routmyAdditionalRefs[i]?.matchMode === v ? (t('preset_active') || 'Active') : '',
+            onClick: () => { settings.value.routmyAdditionalRefs[i].matchMode = v; closeBottomSheet(); }
+        }))
+    });
+};
+
+const addRoutmyRef = () => {
+    if (settings.value.routmyAdditionalRefs.length >= 8) return;
+    settings.value.routmyAdditionalRefs.push({ name: '', imageData: '', matchMode: 'match' });
+};
+
+const removeRoutmyRef = (i) => {
+    settings.value.routmyAdditionalRefs.splice(i, 1);
+};
+
+const pickRoutmyRefImage = (i) => {
+    pendingRoutmyRefIndex.value = i;
+    routmyRefImageInput.value?.click();
+};
+
+const onRoutmyRefImageSelected = (e) => {
+    const file = e.target.files?.[0];
+    if (!file || pendingRoutmyRefIndex.value < 0) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+        const idx = pendingRoutmyRefIndex.value;
+        if (idx >= 0 && idx < settings.value.routmyAdditionalRefs.length) {
+            settings.value.routmyAdditionalRefs[idx].imageData = ev.target.result;
+            saveRoutmyAdditionalRefs(settings.value.routmyAdditionalRefs);
+        }
+        pendingRoutmyRefIndex.value = -1;
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
 };
 
 const openRefMatchModeSelector = (i) => {
@@ -248,13 +337,78 @@ defineExpose({ open });
                 <!-- Connection -->
                 <ConnectionStatus :status="apiStatus" :error-message="errorMessage" @retry="checkConnection">
                     <div class="preset-selector" @click="openApiTypeSelector">
-                        <span>{{ settings.apiType === 'openai' ? 'OpenAI' : settings.apiType === 'gemini' ? 'Gemini' : 'Naistera' }}</span>
+                        <span>{{ settings.apiType === 'openai' ? 'OpenAI' : settings.apiType === 'gemini' ? 'Gemini' : settings.apiType === 'routmy' ? 'rout.my' : 'Naistera' }}</span>
                         <svg viewBox="0 0 24 24" style="width: 20px; height: 20px; fill: currentColor;"><path d="M7 10l5 5 5-5z"/></svg>
                     </div>
                 </ConnectionStatus>
 
                 <div class="menu-group">
-                    <div class="section-header">{{ t('section_connection') || 'Connection' }}</div>
+                    <div class="section-header">
+{{ t('section_connection') || 'Connection' }}
+</div>
+
+                    <!-- Naistera: only API key, endpoint is hardcoded -->
+                    <template v-if="showNaisteraOptions">
+                        <div class="settings-item">
+                            <label>{{ t('imggen_api_key') || 'API Key' }}</label>
+                            <input
+                                type="password"
+                                v-model="settings.naisteraApiKey"
+                                placeholder="sk-..."
+                                autocomplete="off"
+                            >
+                        </div>
+                    </template>
+
+                    <!-- rout.my: only API key, endpoint is hardcoded -->
+                    <template v-else-if="showRoutmyOptions">
+                        <div class="settings-item">
+                            <label>{{ t('imggen_api_key') || 'rout.my API Key' }}</label>
+                            <input
+                                type="password"
+                                v-model="settings.routmyApiKey"
+                                placeholder="sk-..."
+                                autocomplete="off"
+                            >
+                        </div>
+                    </template>
+
+                    <!-- Other providers: Use LLM API toggle + endpoint/key fields -->
+                    <template v-else>
+                        <div class="settings-item-checkbox">
+                            <div class="settings-text-col">
+                                <label>{{ t('label_use_llm_api') || 'Use LLM API' }}</label>
+                                <div class="settings-desc">
+{{ t('desc_use_llm_api') || 'Use the same endpoint as LLM for image generation' }}
+</div>
+                            </div>
+                            <input type="checkbox" :checked="imageGenSettings.useSame" @change="onImageGenInput('useSame', $event.target.checked)" class="vk-switch">
+                        </div>
+
+                        <template v-if="!imageGenSettings.useSame">
+                            <div class="settings-item">
+                                <label>{{ t('imggen_endpoint') || 'Endpoint URL' }}</label>
+                                <input
+                                    type="text"
+                                    :value="imageGenSettings.endpoint"
+                                    @input="onImageGenInput('endpoint', $event.target.value)"
+                                    placeholder="https://api.openai.com/v1"
+                                    autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+                                >
+                            </div>
+
+                            <div class="settings-item">
+                                <label>{{ t('imggen_api_key') || 'API Key' }}</label>
+                                <input
+                                    type="password"
+                                    :value="imageGenSettings.key"
+                                    @input="onImageGenInput('apiKey', $event.target.value)"
+                                    placeholder="sk-..."
+                                    autocomplete="off"
+                                >
+                            </div>
+                        </template>
+                    </template>
 
                     <!-- Naistera hint -->
                     <a v-if="showNaisteraOptions" href="https://naistera.org/prompt" target="_blank" class="naistera-hint-box">
@@ -264,33 +418,13 @@ defineExpose({ open });
                             {{ t('imggen_naistera_hint_here') || 'here' }}
                         </span>
                     </a>
-
-                    <!-- Endpoint -->
-                    <div class="settings-item">
-                        <label>{{ t('imggen_endpoint') || 'Endpoint URL' }}</label>
-                        <input
-                            type="text"
-                            v-model="settings.endpoint"
-                            :placeholder="showGeminiOptions ? 'https://generativelanguage.googleapis.com' : showNaisteraOptions ? 'https://naistera.org' : 'https://api.openai.com'"
-                            autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
-                        >
-                    </div>
-
-                    <!-- API Key -->
-                    <div class="settings-item">
-                        <label>{{ t('imggen_api_key') || 'API Key' }}</label>
-                        <input
-                            type="password"
-                            v-model="settings.apiKey"
-                            :placeholder="showNaisteraOptions ? 'Telegram bot token' : 'sk-...'"
-                            autocomplete="off"
-                        >
-                    </div>
                 </div>
 
                 <!-- Model & Parameters -->
                 <div class="menu-group">
-                    <div class="section-header">{{ t('imggen_model') || 'Model' }}</div>
+                    <div class="section-header">
+{{ t('imggen_model') || 'Model' }}
+</div>
 
                     <!-- Naistera model selector row -->
                     <div v-if="showNaisteraOptions" class="settings-item selector-row" @click="openNaisteraModelSelector">
@@ -307,7 +441,8 @@ defineExpose({ open });
                         <div class="model-row">
                             <input
                                 type="text"
-                                v-model="settings.model"
+                                :value="imageGenSettings.model"
+                                @input="onImageGenInput('model', $event.target.value)"
                                 :placeholder="t('imggen_model_placeholder') || 'dall-e-3'"
                                 style="width: 100%; padding-right: 44px;"
                                 autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
@@ -328,10 +463,20 @@ defineExpose({ open });
                         <label>{{ t('imggen_model') || 'Model' }}</label>
                         <input
                             type="text"
-                            v-model="settings.model"
+                            :value="imageGenSettings.model"
+                            @input="onImageGenInput('model', $event.target.value)"
                             placeholder="imagen-3.0-generate-002"
                             autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
                         >
+                    </div>
+
+                    <!-- rout.my model selector -->
+                    <div v-if="showRoutmyOptions" class="settings-item selector-row" @click="openRoutmyModelSelector">
+                        <label>{{ t('imggen_model') || 'Model' }}</label>
+                        <div class="selector-value">
+                            <span>{{ ROUTMY_IMAGE_MODELS.find(m => m.id === settings.routmyModel)?.label || settings.routmyModel }}</span>
+                            <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                        </div>
                     </div>
 
                     <!-- OpenAI size & quality -->
@@ -378,17 +523,52 @@ defineExpose({ open });
                             <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
                         </div>
                     </div>
+
+                    <!-- rout.my aspect ratio, resolution & quality -->
+                    <template v-if="showRoutmyOptions">
+                        <div class="settings-item selector-row" @click="openAspectRatioSelector('routmyAspectRatio', ROUTMY_ASPECT_RATIOS)">
+                            <label>{{ t('imggen_aspect_ratio') || 'Aspect Ratio' }}</label>
+                            <div class="selector-value">
+                                <span>{{ settings.routmyAspectRatio || '1:1' }}</span>
+                                <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                            </div>
+                        </div>
+                        <div class="settings-item selector-row" @click="openRoutmyResolutionSelector">
+                            <label>{{ t('imggen_image_size') || 'Resolution' }}</label>
+                            <div class="selector-value">
+                                <span>{{ settings.routmyImageSize || '1K' }}</span>
+                                <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                            </div>
+                        </div>
+                        <div class="settings-item selector-row" @click="openRoutmyQualitySelector">
+                            <label>{{ t('imggen_quality') || 'Quality' }}</label>
+                            <div class="selector-value">
+                                <span>{{ settings.routmyQuality === 'hd' ? 'HD' : 'Standard' }}</span>
+                                <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                            </div>
+                        </div>
+                    </template>
                 </div>
 
-                <!-- Naistera references -->
-                <template v-if="showNaisteraOptions">
+                <!-- Naistera references (not supported by NovelAI model) -->
+                <div v-if="showNaisteraOptions && !naisteraModelSupportsReferences" class="hint-block" style="margin-top: -8px; margin-bottom: 24px; border-color: rgba(255, 59, 48, 0.2); background: rgba(255, 59, 48, 0.05);">
+                    <p class="hint-text" style="color: #FF3B30; opacity: 1; font-weight: 500; text-align: center; margin: 0;">
+                        {{ t('imggen_no_refs_hint') || 'Модель не поддерживает референсы' }}
+                    </p>
+                </div>
+
+                <template v-if="showNaisteraOptions && naisteraModelSupportsReferences">
                     <div class="menu-group">
-                        <div class="section-header">{{ t('imggen_refs') || 'Reference Images' }}</div>
+                        <div class="section-header">
+{{ t('imggen_refs') || 'Reference Images' }}
+</div>
 
                         <div class="settings-item-checkbox">
                             <div class="settings-text-col">
                                 <label>{{ t('imggen_send_char_avatar') || 'Send character avatar' }}</label>
-                                <div class="settings-desc">{{ t('imggen_send_char_avatar_desc') || 'Use character\'s avatar as visual reference' }}</div>
+                                <div class="settings-desc">
+{{ t('imggen_send_char_avatar_desc') || 'Use character\'s avatar as visual reference' }}
+</div>
                             </div>
                             <input type="checkbox" v-model="settings.naisteraSendCharAvatar" class="vk-switch">
                         </div>
@@ -396,7 +576,9 @@ defineExpose({ open });
                         <div class="settings-item-checkbox">
                             <div class="settings-text-col">
                                 <label>{{ t('imggen_send_user_avatar') || 'Send persona avatar' }}</label>
-                                <div class="settings-desc">{{ t('imggen_send_user_avatar_desc') || 'Use active persona\'s avatar as visual reference' }}</div>
+                                <div class="settings-desc">
+{{ t('imggen_send_user_avatar_desc') || 'Use active persona\'s avatar as visual reference' }}
+</div>
                             </div>
                             <input type="checkbox" v-model="settings.naisteraSendUserAvatar" class="vk-switch">
                         </div>
@@ -448,14 +630,92 @@ defineExpose({ open });
                     </div>
                 </template>
 
+                <!-- rout.my Reference Images -->
+                <template v-if="showRoutmyOptions">
+                    <div class="menu-group">
+                        <div class="section-header">
+{{ t('imggen_refs') || 'Reference Images' }}
+</div>
+
+                        <div class="settings-item-checkbox">
+                            <div class="settings-text-col">
+                                <label>{{ t('imggen_send_char_avatar') || 'Send character avatar' }}</label>
+                                <div class="settings-desc">
+{{ t('imggen_send_char_avatar_desc') || 'Use character\'s avatar as visual reference' }}
+</div>
+                            </div>
+                            <input type="checkbox" v-model="settings.routmySendCharAvatar" class="vk-switch">
+                        </div>
+
+                        <div class="settings-item-checkbox">
+                            <div class="settings-text-col">
+                                <label>{{ t('imggen_send_user_avatar') || 'Send persona avatar' }}</label>
+                                <div class="settings-desc">
+{{ t('imggen_send_user_avatar_desc') || 'Use active persona\'s avatar as visual reference' }}
+</div>
+                            </div>
+                            <input type="checkbox" v-model="settings.routmySendUserAvatar" class="vk-switch">
+                        </div>
+                    </div>
+
+                    <div class="menu-group">
+                        <div class="section-header section-header-flex">
+                            <span>{{ t('imggen_additional_refs') || 'Additional References' }}</span>
+                            <span class="refs-count">{{ settings.routmyAdditionalRefs.length }}/8</span>
+                        </div>
+
+                        <div v-for="(ref, i) in settings.routmyAdditionalRefs" :key="'rm'+i" class="settings-item ref-row">
+                            <button
+                                class="ref-img-btn"
+                                :class="{ 'has-image': !!ref.imageData }"
+                                @click="pickRoutmyRefImage(i)"
+                            >
+                                <img v-if="ref.imageData" :src="ref.imageData" class="ref-thumb">
+                                <svg v-else viewBox="0 0 24 24"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
+                            </button>
+                            <input
+                                class="ref-name-input"
+                                type="text"
+                                v-model="ref.name"
+                                placeholder="keyword"
+                            >
+                            <div class="ref-mode-btn" @click="openRoutmyRefMatchModeSelector(i)">
+                                <span>{{ ref.matchMode || 'match' }}</span>
+                                <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+                            </div>
+                            <button class="remove-ref-btn" @click="removeRoutmyRef(i)">
+                                <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                            </button>
+                        </div>
+
+                        <button
+                            v-if="settings.routmyAdditionalRefs.length < 8"
+                            class="add-ref-btn"
+                            @click="addRoutmyRef"
+                        >+ {{ t('imggen_add_ref') || 'Add reference' }}</button>
+
+                        <input
+                            ref="routmyRefImageInput"
+                            type="file"
+                            accept="image/*"
+                            style="display: none"
+                            @change="onRoutmyRefImageSelected"
+                        >
+                    </div>
+                </template>
+
                 <!-- Image Context -->
-                <div class="menu-group">
-                    <div class="section-header">{{ t('imggen_image_context') || 'Image Context' }}</div>
+                <div v-if="!showNaisteraOptions || naisteraModelSupportsReferences" class="menu-group">
+                    <div class="section-header">
+{{ t('imggen_image_context') || 'Image Context' }}
+</div>
 
                     <div class="settings-item-checkbox">
                         <div class="settings-text-col">
                             <label>{{ t('imggen_image_context_enabled') || 'Send previous images as context' }}</label>
-                            <div class="settings-desc">{{ t('imggen_image_context_desc') || 'Include recently generated images as visual reference for new generations' }}</div>
+                            <div class="settings-desc">
+{{ t('imggen_image_context_desc') || 'Include recently generated images as visual reference for new generations' }}
+</div>
                         </div>
                         <input type="checkbox" v-model="settings.imageContextEnabled" class="vk-switch">
                     </div>
@@ -471,7 +731,9 @@ defineExpose({ open });
 
                 <!-- Tag format hint -->
                 <div class="hint-block">
-                    <p class="hint-text">{{ t('imggen_tag_hint') || 'AI must include image tags to trigger generation:' }}</p>
+                    <p class="hint-text">
+{{ t('imggen_tag_hint') || 'AI must include image tags to trigger generation:' }}
+</p>
                     <code class="hint-code">[IMG:GEN:{"prompt":"...","style":"anime"}]</code>
                 </div>
 

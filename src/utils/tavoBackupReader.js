@@ -28,20 +28,20 @@ function extractStringsAndJson(uint8Array) {
     const items = [];
     let i = 0;
     const len = uint8Array.length;
-    let decoder = new TextDecoder("utf-8");
+    const decoder = new TextDecoder("utf-8");
 
     while (i < len) {
         if (uint8Array[i] >= 32 || uint8Array[i] === 10 || uint8Array[i] === 13 || uint8Array[i] === 9) {
-            let start = i;
+            const start = i;
             while (i < len && (uint8Array[i] >= 32 || uint8Array[i] === 10 || uint8Array[i] === 13 || uint8Array[i] === 9)) {
                 i++;
             }
             try {
-                let text = decoder.decode(uint8Array.subarray(start, i)).trim();
+                const text = decoder.decode(uint8Array.subarray(start, i)).trim();
                 if (text.length >= 2) {
                     if (text.startsWith("[") || text.startsWith("{")) {
                         try {
-                            let parsed = JSON.parse(text);
+                            const parsed = JSON.parse(text);
                             items.push({ type: "json", data: parsed });
                             continue;
                         } catch (e) {
@@ -65,95 +65,113 @@ function extractStringsAndJson(uint8Array) {
 export function parseTavoLMDB(arrayBuffer) {
     const dv = new DataView(arrayBuffer);
     const buffer = new Uint8Array(arrayBuffer);
+    const bufLen = buffer.length;
     const pageSize = 4096;
 
     const categories = {};
-    for (let k of Object.values(TYPE_NAMES)) categories[k] = new Map();
+    for (const k of Object.values(TYPE_NAMES)) categories[k] = new Map();
 
     let bigCount = 0;
 
-    for (let pOffset = 0; pOffset < buffer.length; pOffset += pageSize) {
-        if (pOffset + 16 > buffer.length) break;
+    for (let pOffset = 0; pOffset < bufLen; pOffset += pageSize) {
+        if (pOffset + 16 > bufLen) break;
         const flags = dv.getUint16(pOffset + 10, true);
-        if ((flags & 0x02) === 0x02) { // P_LEAF
-            const lower = dv.getUint16(pOffset + 12, true);
-            const numNodes = (lower - 16) / 2;
+        if ((flags & 0x02) !== 0x02) continue; // P_LEAF
 
-            for (let i = 0; i < numNodes; i++) {
-                const nodeOffset = dv.getUint16(pOffset + 16 + (i * 2), true);
-                if (nodeOffset === 0) continue;
+        const lower = dv.getUint16(pOffset + 12, true);
+        // Validate lower: must be within [16, pageSize] and not beyond buffer
+        if (lower < 16 || lower > pageSize || pOffset + lower > bufLen) continue;
 
-                const ptr = pOffset + nodeOffset;
+        const numNodes = (lower - 16) / 2;
+        // Sanity check on node count (max ~2032 for a full 4K page)
+        if (numNodes <= 0 || numNodes > (pageSize - 16) / 2) continue;
 
-                const mn_dsize = dv.getUint32(ptr, true);
-                const mn_flags = dv.getUint16(ptr + 4, true);
-                const mn_ksize = dv.getUint16(ptr + 6, true);
+        for (let i = 0; i < numNodes; i++) {
+            const nodePtrOff = pOffset + 16 + (i * 2);
+            if (nodePtrOff + 2 > bufLen) break;
 
-                // Ensure valid Isar key (18 prefix) -> 1 byte 0x18 + 7 bytes
-                if (mn_ksize >= 8 && buffer[ptr + 8] === 0x18) {
-                    const type_id = (buffer[ptr + 10] << 8) | buffer[ptr + 11];
-                    const type_name = TYPE_NAMES[type_id];
-                    if (!type_name) continue;
+            const nodeOffset = dv.getUint16(nodePtrOff, true);
+            // Node offset must point into the page (after header, before page end)
+            if (nodeOffset === 0 || nodeOffset < 16 || nodeOffset >= pageSize) continue;
 
-                    const entity_id = dv.getUint32(ptr + 12, false); // BIG ENDIAN
+            const ptr = pOffset + nodeOffset;
+            // Need at least 16 bytes for node header + key prefix (8 + 8)
+            if (ptr + 16 > bufLen) continue;
 
-                    let dataBuffer = null;
-                    const keyOffset = ptr + 8;
-                    const dataOffset = keyOffset + mn_ksize;
+            const mn_dsize = dv.getUint32(ptr, true);
+            const mn_flags = dv.getUint16(ptr + 4, true);
+            const mn_ksize = dv.getUint16(ptr + 6, true);
 
-                    // Inline data
-                    if (mn_flags === 0) {
-                        dataBuffer = buffer.subarray(dataOffset, dataOffset + mn_dsize);
-                    }
-                    // Overflow pages (F_BIGDATA)
-                    else if (mn_flags === 1) {
-                        bigCount++;
-                        const pgno = dv.getUint32(dataOffset, true);
-                        if (pgno * pageSize < buffer.length) {
-                            const ovfOffset = pgno * pageSize;
-                            const ovfFlags = dv.getUint16(ovfOffset + 10, true);
-                            if ((ovfFlags & 0x04) === 0x04) { // P_OVERFLOW
-                                dataBuffer = buffer.subarray(ovfOffset + 16, ovfOffset + 16 + mn_dsize);
-                            }
+            // Ensure valid Isar key (0x18 prefix) and key fits in buffer
+            if (mn_ksize < 8 || ptr + 8 + mn_ksize > bufLen) continue;
+            if (buffer[ptr + 8] !== 0x18) continue;
+
+            const type_id = (buffer[ptr + 10] << 8) | buffer[ptr + 11];
+            const type_name = TYPE_NAMES[type_id];
+            if (!type_name) continue;
+
+            const entity_id = dv.getUint32(ptr + 12, false); // BIG ENDIAN
+
+            let dataBuffer = null;
+            const keyOffset = ptr + 8;
+            const dataOffset = keyOffset + mn_ksize;
+
+            // Inline data
+            if (mn_flags === 0) {
+                if (dataOffset + mn_dsize <= bufLen) {
+                    dataBuffer = buffer.subarray(dataOffset, dataOffset + mn_dsize);
+                }
+            }
+            // Overflow pages (F_BIGDATA)
+            else if (mn_flags === 1) {
+                bigCount++;
+                if (dataOffset + 4 <= bufLen) {
+                    const pgno = dv.getUint32(dataOffset, true);
+                    const ovfOffset = pgno * pageSize;
+                    // Ensure overflow page header + data fits in buffer
+                    if (ovfOffset + 16 + mn_dsize <= bufLen) {
+                        const ovfFlags = dv.getUint16(ovfOffset + 10, true);
+                        if ((ovfFlags & 0x04) === 0x04) { // P_OVERFLOW
+                            dataBuffer = buffer.subarray(ovfOffset + 16, ovfOffset + 16 + mn_dsize);
                         }
-                    }
-
-                    if (dataBuffer) {
-                        const fields = extractStringsAndJson(dataBuffer);
-                        const entry = { entity_id, fields };
-
-                        if (type_name === 'message' && dataBuffer.length >= 88) {
-                            try {
-                                const msgDv = new DataView(dataBuffer.buffer, dataBuffer.byteOffset, dataBuffer.byteLength);
-                                entry.timestamp = Number(msgDv.getBigInt64(48, true));
-                                entry.conversationId = Number(msgDv.getBigInt64(64, true));
-                                entry.characterId = Number(msgDv.getBigInt64(80, true));
-                            } catch (e) { }
-                        }
-
-                        categories[type_name].set(entity_id, entry);
                     }
                 }
+            }
+
+            if (dataBuffer && dataBuffer.length > 0) {
+                const fields = extractStringsAndJson(dataBuffer);
+                const entry = { entity_id, fields };
+
+                if (type_name === 'message' && dataBuffer.length >= 88) {
+                    try {
+                        const msgDv = new DataView(dataBuffer.buffer, dataBuffer.byteOffset, dataBuffer.byteLength);
+                        entry.timestamp = Number(msgDv.getBigInt64(48, true));
+                        entry.conversationId = Number(msgDv.getBigInt64(64, true));
+                        entry.characterId = Number(msgDv.getBigInt64(80, true));
+                    } catch (e) { }
+                }
+
+                categories[type_name].set(entity_id, entry);
             }
         }
     }
 
     // Convert maps back to arrays
-    for (let k in categories) {
+    for (const k in categories) {
         categories[k] = Array.from(categories[k].values());
     }
 
     // Group chats
     const chats = [];
-    if (categories['conversation'] && categories['message']) {
+    if (categories.conversation && categories.message) {
         const msgByConv = {};
-        for (const msg of categories['message']) {
+        for (const msg of categories.message) {
             if (msg.conversationId) {
                 if (!msgByConv[msg.conversationId]) msgByConv[msg.conversationId] = [];
                 msgByConv[msg.conversationId].push(msg);
             }
         }
-        for (const conv of categories['conversation']) {
+        for (const conv of categories.conversation) {
             const cid = conv.entity_id;
             const msgs = msgByConv[cid] || [];
             msgs.sort((a, b) => (a.timestamp || a.entity_id) - (b.timestamp || b.entity_id));
@@ -231,7 +249,7 @@ export async function importTavoBackupFromZip(zipFile, onProgress) {
     localStorage.removeItem('silly_cradle_presets');
     localStorage.removeItem('regex_scripts');
 
-    let mdbFile = Object.keys(zip.files).find(p => p.toLowerCase().endsWith('data.mdb'));
+    const mdbFile = Object.keys(zip.files).find(p => p.toLowerCase().endsWith('data.mdb'));
     if (!mdbFile) throw new Error("No data.mdb found in Tavo backup zip.");
 
     progress('reading DB');
@@ -368,7 +386,7 @@ export async function importTavoBackupFromZip(zipFile, onProgress) {
                                     disabled: rule.enabled === false,
                                     markdownOnly: false,
                                     runOnEdit: false,
-                                    substituteRegex: rule.substitution === "none" ? 0 : 1,
+                                    macroRules: rule.substitution === "none" ? "0" : "1",
                                     ephemerality: [1, 2],
                                     minDepth: rule.minDepth || null,
                                     maxDepth: rule.maxDepth || null
@@ -558,13 +576,13 @@ export async function importTavoBackupFromZip(zipFile, onProgress) {
                 if (!firstCharMsg) continue;
                 const charEntityId = firstCharMsg.characterId;
 
-                let glazeCharId = charNameToId[charEntityId];
+                const glazeCharId = charNameToId[charEntityId];
                 if (!glazeCharId) {
                     continue;
                 }
 
                 // Convert messages to ST format JSONL and use existing importer
-                let lines = [];
+                const lines = [];
                 const metadata = {
                     user_name: "User",
                     character_name: "Char",

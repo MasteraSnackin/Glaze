@@ -1,16 +1,33 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
+import { publishAppEvent, subscribeAppEvent } from '@/core/events/eventHub.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
 import { allPersonas, activePersona, setActivePersona, loadPersonas, personaConnections } from '@/core/states/personaState.js';
 import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import SheetView from '@/components/ui/SheetView.vue';
 import HelpTip from '@/components/ui/HelpTip.vue';
+import FabButton from '@/components/ui/FabButton.vue';
 
 const sheet = ref(null);
 
 const props = defineProps({
-    activeChatChar: { type: Object, default: null }
+    activeChatChar: { type: Object, default: null },
+    viewMode: { type: Boolean, default: false }
 });
+
+function handleBack() {
+    if (props.viewMode) {
+        publishAppEvent(APP_EVENTS.nav.navigateTo, 'view-tools');
+    } else {
+        sheet.value?.close();
+    }
+}
+
+const handleBackNavigation = () => {
+    if (!props.viewMode && !sheet.value?.isVisible) return;
+    handleBack();
+};
 
 const t = (key) => translations[currentLang.value]?.[key] || key;
 
@@ -30,16 +47,14 @@ function getPersonaConnectionType(personaId) {
 }
 
 const openEditor = (index) => {
-    window.dispatchEvent(new CustomEvent('open-persona-editor', {
-        detail: {
-            index: index,
-            persona: index === -1 ? null : allPersonas.value[index]
-        }
-    }));
+    publishAppEvent(APP_EVENTS.nav.openPersonaEditor, {
+        index: index,
+        persona: index === -1 ? null : allPersonas.value[index]
+    });
 };
 
 const openConnectionManager = (persona) => {
-    window.dispatchEvent(new CustomEvent('open-connections', { detail: { type: 'persona', id: persona.id, name: persona.name } }));
+    publishAppEvent(APP_EVENTS.nav.openConnections, { type: 'persona', id: persona.id, name: persona.name });
 };
 
 const selectPersona = (index) => {
@@ -60,13 +75,21 @@ const close = () => sheet.value?.close();
 
 defineExpose({ open, close });
 
+const unsubs = [];
+
 onMounted(() => {
     loadPersonas();
+    unsubs.push(subscribeAppEvent(APP_EVENTS.ui.backNavigation, handleBackNavigation));
+});
+
+onBeforeUnmount(() => {
+    unsubs.forEach(unsub => unsub());
 });
 </script>
 
 <template>
-    <SheetView ref="sheet" :fit-content="false" :title="t('tab_personas') || 'Personas'" :actions="[{ icon: '<svg viewBox=\'0 0 24 24\'><path d=\'M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z\'/></svg>', onClick: () => openEditor(-1) }]">
+    <div class="personas-view-root">
+    <SheetView ref="sheet" :fit-content="false" :title="t('tab_personas') || 'Personas'" :view-mode="viewMode" @back="handleBack" :actions="[]">
         <template #header-title>
             <HelpTip term="persona" />
         </template>
@@ -84,11 +107,17 @@ onMounted(() => {
                 >
                     <div class="persona-avatar">
                         <img v-if="getAvatar(persona)" :src="getAvatar(persona)" />
-                        <div v-else class="avatar-placeholder">{{ getInitial(persona) }}</div>
+                        <div v-else class="avatar-placeholder">
+{{ getInitial(persona) }}
+</div>
                     </div>
                     <div class="persona-info">
-                        <div class="persona-name">{{ persona.name }}</div>
-                        <div class="persona-prompt">{{ persona.prompt || t('no_prompt') || 'No prompt' }}</div>
+                        <div class="persona-name">
+{{ persona.name }}
+</div>
+                        <div class="persona-prompt">
+{{ persona.prompt || t('no_prompt') || 'No prompt' }}
+</div>
                     </div>
                     <div class="persona-actions">
                         <button class="activation-btn" :class="getPersonaConnectionType(persona.id) || 'disabled'" @click.stop="openConnectionManager(persona)">
@@ -99,9 +128,21 @@ onMounted(() => {
                         </button>
                     </div>
                 </div>
+                <div class="ps-add-btn desktop-only" @click="openEditor(-1)">
+                    <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                    <span>{{ t('btn_add') || 'Add Persona' }}</span>
+                </div>
             </div>
         </div>
+        <template #floating>
+            <FabButton :text="t('btn_add') || 'Add'" class="mobile-only-fab" @click="openEditor(-1)">
+                <template #icon>
+                    <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                </template>
+            </FabButton>
+        </template>
     </SheetView>
+    </div>
 </template>
 
 <style scoped>
@@ -109,6 +150,7 @@ onMounted(() => {
 
 .view-content {
     padding: 16px;
+    padding-bottom: calc(var(--footer-height, 0px) + var(--keyboard-overlap, 0px) + 20px);
     box-sizing: border-box;
 }
 
@@ -235,5 +277,39 @@ onMounted(() => {
     color: var(--text-gray);
     margin-top: 40px;
     font-size: 16px;
+    min-height: 0;
+}
+
+.ps-add-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 14px;
+    border-radius: 14px;
+    background: var(--accent-color, var(--vk-blue));
+    color: white;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    user-select: none;
+    margin-top: 10px;
+}
+.ps-add-btn:active {
+    transform: scale(0.97);
+    opacity: 0.85;
+}
+.ps-add-btn svg {
+    width: 20px;
+    height: 20px;
+    fill: currentColor;
+}
+
+@media (min-width: 768px) {
+    .mobile-only-fab { display: none !important; }
+}
+@media (max-width: 767px) {
+    .desktop-only { display: none !important; }
 }
 </style>

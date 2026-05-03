@@ -1,10 +1,30 @@
 <script setup>
 import { ref, watch, nextTick, onMounted, onBeforeUnmount } from 'vue';
 import { Capacitor } from '@capacitor/core';
+import DesktopPopup from '@/components/ui/DesktopPopup.vue';
 import { hideKeyboard, showKeyboard, applyKeyboardOverlap, onKeyboardShow, onKeyboardHide } from '@/core/services/keyboardHandler.js';
 import { translations, t } from '@/utils/i18n.js';
 import HelpTip from '@/components/ui/HelpTip.vue';
 import { bottomSheetState } from '@/core/states/bottomSheetState.js';
+import { getLastClickPosition } from '@/core/states/desktopPopupState.js';
+import { sidebarState, setSidebarOccupied } from '@/core/states/sidebarState.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
+import { publishAppEvent } from '@/core/events/eventHub.js';
+import { attachLongPress } from '@/core/services/ui.js';
+
+const vLongPress = {
+    mounted: (el, binding) => {
+        if (binding.value) {
+            const check = attachLongPress(el, binding.value);
+            el._checkLongPress = check;
+        }
+    }
+};
+
+const handleCardClick = (event, item) => {
+    if (event.currentTarget._checkLongPress && event.currentTarget._checkLongPress()) return;
+    if (item.onClick) item.onClick(event);
+};
 const props = defineProps({
     visible: Boolean,
     locked: { type: Boolean, default: false }, // when true, prevents backdrop/drag dismiss
@@ -17,15 +37,27 @@ const props = defineProps({
     sessionItems: Array, // [{ title, count, time, preview, isActive, onClick, onDelete }]
     cardItems: Array, // [{ label, sublabel, icon, onClick }]
     input: Object, // { placeholder, value, confirmLabel, onConfirm }
-    isSolid: Boolean
+    isSolid: Boolean,
+    sidebarMode: { type: Boolean, default: false },
+    popupOnDesktop: { type: Boolean, default: false },
+    popupWidth: { type: Number, default: 300 },
+    estimatedHeight: { type: Number, default: 0 }
 });
 
 const emit = defineEmits(['close']);
 
+const domContent = ref(null);
+const inputValue = ref('');
+const inputRef = ref(null);
+const isLocalKeyboardOpen = ref(false);
+
+const isDesktopPopup = ref(false);
+const popupCoordinates = ref({ x: 0, y: 0 });
+
 function openGlossaryChip(term) {
     emit('close');
     nextTick(() => {
-        window.dispatchEvent(new CustomEvent('open-glossary', { detail: { term } }));
+        publishAppEvent(APP_EVENTS.nav.openGlossary, { term });
     });
 }
 
@@ -44,28 +76,61 @@ function close() {
     emit('close');
 }
 
-const domContent = ref(null);
-const inputValue = ref('');
-const inputRef = ref(null);
-
-// When visible becomes false externally (via closeBottomSheet()), reset keyboard state
+// Sync with sidebar state to ensure only one sheet/view is active at a time
+let _historyPushed = false;
 watch(() => props.visible, (newVal) => {
+    if (newVal) {
+        if (props.popupOnDesktop && typeof window !== 'undefined' && window.innerWidth >= 768) {
+            isDesktopPopup.value = true;
+            const pos = getLastClickPosition();
+            popupCoordinates.value = { x: pos.x, y: pos.y };
+        } else {
+            isDesktopPopup.value = false;
+        }
+    }
+
+    if (newVal && props.sidebarMode) {
+        setSidebarOccupied(true, 'bottom_sheet');
+    } else if (!newVal && props.sidebarMode && sidebarState.activeSheetId === 'bottom_sheet') {
+        setSidebarOccupied(false);
+    }
+    
     if (!newVal && isLocalKeyboardOpen.value) {
         isLocalKeyboardOpen.value = false;
+    }
+
+    // Support browser back gesture/button for PWA/Web
+    const isDesktopEnv = window.innerWidth >= 768;
+    if (newVal && !isDesktopEnv) {
+        window.history.pushState({ type: 'bottom_sheet' }, '');
+        _historyPushed = true;
+    } else if (!newVal && _historyPushed) {
+        if (window.history.state?.type === 'bottom_sheet') {
+            window.history.back();
+        }
+        _historyPushed = false;
+    }
+}, { immediate: true });
+
+watch(() => sidebarState.activeSheetId, (newId) => {
+    if (props.visible && props.sidebarMode && newId && newId !== 'bottom_sheet') {
+        close();
     }
 });
 
 watch(() => props.input, (newVal) => {
     if (newVal) {
         inputValue.value = newVal.value || '';
-        isLocalKeyboardOpen.value = true;
         
-        // Pre-emptively set overlap if it's 0 to avoid delay in sheet raising
-        applyKeyboardOverlap();
+        if (Capacitor.isNativePlatform()) {
+            isLocalKeyboardOpen.value = true;
+            // Pre-emptively set overlap if it's 0 to avoid delay in sheet raising
+            applyKeyboardOverlap();
+        }
 
         nextTick(() => {
             if (inputRef.value) {
-                inputRef.value.focus();
+                inputRef.value.focus({ preventScroll: true });
                 if (Capacitor.isNativePlatform()) {
                     showKeyboard();
                 }
@@ -116,8 +181,6 @@ function onHandleTouchEnd() {
     currentDragY.value = 0;
 }
 
-const isLocalKeyboardOpen = ref(false);
-
 function checkFocus() {
     const active = document.activeElement;
     if (!active) return;
@@ -138,17 +201,13 @@ function checkFocus() {
             isTextEntry = true;
         }
 
-        if (isTextEntry) {
+        // Only apply keyboard logic on native mobile platforms
+        if (isTextEntry && Capacitor.isNativePlatform()) {
             isLocalKeyboardOpen.value = true;
-            
-            // Ensure overlap is set so the sheet can actually rise
             applyKeyboardOverlap();
-
-            // Force keyboard on Android if needed
-            if (Capacitor.isNativePlatform()) {
-                showKeyboard();
-            }
+            showKeyboard();
         } else {
+            // On desktop or non-text fields: never treat as keyboard open
             isLocalKeyboardOpen.value = false;
         }
     } else {
@@ -156,7 +215,7 @@ function checkFocus() {
     }
 }
 
-let kbListeners = [];
+const kbListeners = [];
 
 function onSheetFocusIn() {
     checkFocus();
@@ -186,141 +245,209 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+    if (props.sidebarMode && sidebarState.activeSheetId === 'bottom_sheet') {
+        setSidebarOccupied(false);
+    }
     document.removeEventListener('focusin', onSheetFocusIn);
     kbListeners.forEach(l => l.remove());
 });
 </script>
 
 <template>
-    <div class="modal-overlay" :class="{ visible: visible }">
-        <div class="modal-backdrop" @click="locked ? undefined : close()"></div>
-        <div class="bottom-sheet-content" @click.stop 
-             :style="{ transform: isDragging ? `translateY(${currentDragY}px)` : '' }"
-             :class="{ 'is-dragging': isDragging, 'keyboard-open': isLocalKeyboardOpen, 'is-solid': props.isSolid || bottomSheetState.isSolid }">
-            <div class="sheet-handle-bar"
-                 @touchstart="onHandleTouchStart"
-                 @touchmove.prevent="onHandleTouchMove"
-                 @touchend="onHandleTouchEnd"
-            ></div>
-            <div class="sheet-header" v-if="title || headerAction">
-                <div class="sheet-title">
-                    {{ title }}
-                    <HelpTip v-if="helpTip" :term="helpTip" />
-                </div>
-                <div class="sheet-action-btn" v-if="headerAction" @click="headerAction.onClick" v-html="headerAction.icon"></div>
-            </div>
-            
-            <div class="sheet-scroll-container">
-                <!-- Custom Content (HTML) -->
-                <div v-if="typeof content === 'string'" class="sheet-custom-content" v-html="content"></div>
-                <div v-else-if="content" class="sheet-custom-content" ref="domContent"></div>
+    <!-- Desktop Popup Window Override -->
+    <DesktopPopup
+        v-if="isDesktopPopup"
+        :visible="visible"
+        :title="title"
+        :headerAction="headerAction"
+        :bigInfo="bigInfo"
+        :items="items"
+        :sessionItems="sessionItems"
+        :cardItems="cardItems"
+        :input="input"
+        :content="content"
+        :isTriggered="true"
+        :x="popupCoordinates.x"
+        :y="popupCoordinates.y"
+        :width="popupWidth"
+        :estimatedHeight="estimatedHeight"
+        @close="close"
+    >
+        <!-- Vue Slot Content -->
+        <slot></slot>
+    </DesktopPopup>
+
+    <!-- Regular Bottom Sheet -->
+    <Teleport v-else :to="sidebarMode ? '#desktop-sidebar-content' : 'body'">
+        <Transition name="bottom-sheet">
+            <div v-if="visible" class="visible" :class="{ 'modal-overlay': !sidebarMode, 'bottom-sheet-sidebar-wrapper': sidebarMode }">
+                <div v-if="!sidebarMode" class="modal-backdrop" @click="locked ? undefined : close()"></div>
+                <div class="bottom-sheet-content" @click.stop 
+                     :style="!sidebarMode && isDragging ? { transform: `translateY(${currentDragY}px)` } : ''"
+                     :class="{ 'is-dragging': isDragging, 'keyboard-open': isLocalKeyboardOpen, 'is-solid': props.isSolid || bottomSheetState.isSolid, 'is-sidebar': sidebarMode }">
                 
-                <!-- Vue Slot Content -->
-                <slot></slot>
+                <div class="sheet-header-area">
+                    <div v-if="!sidebarMode" class="sheet-handle-bar"
+                         @touchstart="onHandleTouchStart"
+                         @touchmove.prevent="onHandleTouchMove"
+                         @touchend="onHandleTouchEnd"
+                    ></div>
 
-                <!-- Big Info Sheet (Moved out of else-if chain to allow combination) -->
-                <div v-if="bigInfo" class="sheet-big-info">
-                    <div class="big-info-icon" v-html="bigInfo.icon"></div>
-                    <div class="big-info-desc">{{ bigInfo.description }}</div>
-                    <div v-if="bigInfo.glossaryChip" class="big-info-chip-line">{{ bigInfo.glossaryChip.hint }} <button class="big-info-chip" @click.stop="openGlossaryChip(bigInfo.glossaryChip.term)">{{ bigInfo.glossaryChip.label }}</button></div>
-                    <div class="sheet-big-info-btn" :class="{ disabled: bigInfo.buttonDisabled }" @click="!bigInfo.buttonDisabled && bigInfo.onButtonClick()">{{ bigInfo.buttonText }}</div>
-                </div>
-
-                <!-- List Items -->
-                <div v-if="items && items.length" class="sheet-list">
-                    <div v-for="(item, index) in items" :key="index" class="sheet-item" :class="{ 'centered': item.centered, 'has-hint': item.hint }" @click="item.onClick">
-                        <div class="sheet-item-icon" v-if="item.icon" v-html="item.icon" :style="{ color: item.iconColor }"></div>
-                        <div class="sheet-item-content">
-                            <span :class="{ 'text-destructive': item.isDestructive }">{{ item.label }}</span>
-                            <span v-if="item.hint" class="sheet-item-hint">{{ item.hint }}</span>
-                        </div>
-                        
-                        <!-- Item Actions (Buttons on the right) -->
-                        <div class="sheet-item-actions" v-if="item.actions && item.actions.length">
-                            <div v-for="(action, aIndex) in item.actions" :key="aIndex" 
-                                 class="sheet-item-action-btn"
-                                 @click.stop="action.onClick"
-                                 v-html="action.icon"
-                                 :style="{ color: action.color }">
+                    <div class="sheet-header" v-if="title || headerAction">
+                        <div class="sheet-title">
+                            <div v-if="sidebarMode" class="sheet-back-btn" @click="close">
+                                <svg viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
                             </div>
+                            <div class="sc-header-title">{{ title }}</div>
+                            <HelpTip v-if="helpTip" :term="helpTip" />
                         </div>
+                        <div class="sheet-action-btn" v-if="headerAction" @click="headerAction.onClick" v-html="headerAction.icon"></div>
                     </div>
                 </div>
+                
+                <div class="sheet-scroll-container" :class="{ 'has-header': title || headerAction }">
+                    <!-- Custom Content (HTML) -->
+                    <div v-if="typeof content === 'string'" class="sheet-custom-content" v-html="content"></div>
+                    <div v-else-if="content" class="sheet-custom-content" ref="domContent"></div>
+                    
+                    <!-- Vue Slot Content -->
+                    <slot></slot>
 
-                <!-- Session Items (Custom Layout) -->
-                <div v-if="sessionItems && sessionItems.length" class="sheet-list">
-                    <div v-for="(item, index) in sessionItems" :key="index" class="sheet-item session-item" @click="item.onClick">
-                        <div class="session-content">
-                            <div class="session-title">{{ item.title }} <span class="session-count"><svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>{{ item.count }}</span></div>
-                            <div class="session-preview">{{ item.preview }}</div>
-                        </div>
-                        <div class="session-right">
-                            <div class="session-meta-right">
-                                <div class="session-time">{{ item.time }}</div>
-                                <div v-if="item.isActive" class="active-dot"></div>
-                            </div>
-                            <div class="session-delete-btn" @click.stop="item.onDelete"><svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg></div>
-                        </div>
+                    <!-- Big Info Sheet -->
+                    <div v-if="bigInfo" class="sheet-big-info">
+                        <div class="big-info-icon" v-html="bigInfo.icon"></div>
+                        <div class="big-info-desc">
+{{ bigInfo.description }}
+</div>
+                        <div v-if="bigInfo.glossaryChip" class="big-info-chip-line">
+{{ bigInfo.glossaryChip.hint }} <button class="big-info-chip" @click.stop="openGlossaryChip(bigInfo.glossaryChip.term)">
+{{ bigInfo.glossaryChip.label }}
+</button>
+</div>
+                        <div v-if="bigInfo.buttonText" class="sheet-big-info-btn" :class="{ disabled: bigInfo.buttonDisabled }" @click="!bigInfo.buttonDisabled && bigInfo.onButtonClick()">
+{{ bigInfo.buttonText }}
+</div>
                     </div>
-                </div>
 
-                <!-- Card Items (Triggered style) -->
-                <div v-if="cardItems && cardItems.length" class="sheet-card-list">
-                    <div v-for="(item, index) in cardItems" :key="index" 
-                         class="triggered-item-card" 
-                         :class="{ 'has-bg': item.image, 'is-active': item.isActive }"
-                         :style="item.image ? { backgroundImage: `url(${item.image})` } : {}"
-                         @click="item.onClick">
-                        <div class="card-overlay" v-if="item.image"></div>
-                        <div v-if="item.isFeatured" class="featured-badge">
-                            {{ t('label_featured_preset') || 'FEATURED PRESET' }}
-                        </div>
-                        <div class="item-icon" v-if="item.icon">
-                            <div v-if="item.icon.startsWith('<')" v-html="item.icon"></div>
-                            <svg v-else viewBox="0 0 24 24"><path :d="item.icon"/></svg>
-                        </div>
-                        <div class="item-info">
-                            <div class="item-label-row">
-                                <div class="item-label" :class="{ 'with-bg': item.image }">{{ item.label }}</div>
-                                <div v-if="item.badge" class="item-badge" :class="{ 'with-bg': item.image }">
-                                    <svg viewBox="0 0 24 24" class="badge-icon"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
-                                    {{ item.badge }}
+                    <!-- List Items -->
+                    <div v-if="items && items.length" class="sheet-list">
+                        <div :class="{ 'sheet-group-card': !sidebarMode }">
+                            <div v-for="(item, index) in items" :key="index" 
+                                 :class="[sidebarMode ? 'sheet-item-card' : 'sheet-item', { 'centered': item.centered, 'has-hint': item.hint }]" 
+                                 @click="item.onClick">
+                                <div class="sheet-item-icon" v-if="item.icon" v-html="item.icon" :style="{ color: item.iconColor }"></div>
+                                <div class="sheet-item-content">
+                                    <span :class="{ 'text-destructive': item.isDestructive }">{{ item.label }}</span>
+                                    <span v-if="item.hint" class="sheet-item-hint">{{ item.hint }}</span>
+                                </div>
+                                
+                                <!-- Item Actions (Buttons on the right) -->
+                                <div class="sheet-item-actions" v-if="item.actions && item.actions.length">
+                                    <div v-for="(action, aIndex) in item.actions" :key="aIndex" 
+                                            class="sheet-item-action-btn"
+                                            @click.stop="action.onClick"
+                                            v-html="action.icon"
+                                            :style="{ color: action.color }">
+                                    </div>
                                 </div>
                             </div>
-                            <div v-if="item.sublabel" class="item-sublabel" :class="{ 'with-bg': item.image }">{{ item.sublabel }}</div>
                         </div>
-                        
-                        <!-- Item Actions (Buttons on the right) -->
-                        <div class="sheet-item-actions" :class="{ 'card-actions-right': item.actions && item.actions.length }" v-if="item.actions && item.actions.length">
-                            <div v-for="(action, aIndex) in item.actions" :key="aIndex" 
-                                 class="sheet-item-action-btn card-action-btn"
-                                 :class="{ 'with-bg': item.image }"
-                                 @click.stop="action.onClick"
-                                 v-html="action.icon"
-                                 :style="{ color: action.color }">
+                    </div>
+
+                    <!-- Session Items (Custom Layout) -->
+                    <div v-if="sessionItems && sessionItems.length" class="sheet-list">
+                        <div :class="{ 'sheet-group-card': !sidebarMode }">
+                            <div v-for="(item, index) in sessionItems" :key="index" :class="sidebarMode ? 'sheet-item-card' : 'sheet-item'" class="session-item" @click="item.onClick">
+                                <div class="session-content">
+                                    <div class="session-title">
+                                        {{ item.title }} <span class="session-count"><svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>{{ item.count }}</span>
+                                    </div>
+                                    <div class="session-preview">
+                                        {{ item.preview }}
+                                    </div>
+                                </div>
+                                <div class="session-right">
+                                    <div class="session-meta-right">
+                                        <div class="session-time">
+                                            {{ item.time }}
+                                        </div>
+                                        <div v-if="item.isActive" class="active-dot"></div>
+                                    </div>
+                                    <div class="session-delete-btn" @click.stop="item.onDelete">
+                                        <svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
-                </div>
 
-                <!-- Input Sheet -->
-                <div v-if="input" class="sheet-input-container">
-                    <div class="settings-item">
-                        <input 
-                            ref="inputRef"
-                            type="text" 
-                            v-model="inputValue" 
-                            :placeholder="input.placeholder"
-                            @keydown.enter="onInputConfirm"
-                        >
+                    <!-- Card Items (Triggered style) -->
+                    <div v-if="cardItems && cardItems.length" class="sheet-card-list">
+                        <div v-for="(item, index) in cardItems" :key="index" 
+                             class="triggered-item-card" 
+                             :class="{ 'has-bg': item.image, 'is-active': item.isActive }"
+                             :style="item.image ? { backgroundImage: `url(${item.image})` } : {}"
+                             v-long-press="item.onLongPress"
+                             @click="handleCardClick($event, item)"
+                             @contextmenu.prevent="item.onLongPress ? item.onLongPress() : undefined">
+                            <div class="card-overlay" v-if="item.image"></div>
+                            <div v-if="item.isFeatured" class="featured-badge">
+                                {{ t('label_featured_preset') || 'FEATURED PRESET' }}
+                            </div>
+                            <div class="item-icon" v-if="item.icon">
+                                <div v-if="item.icon.startsWith('<')" v-html="item.icon"></div>
+                                <svg v-else viewBox="0 0 24 24"><path :d="item.icon"/></svg>
+                            </div>
+                            <div class="item-info">
+                                <div class="item-label-row">
+                                    <div class="item-label" :class="{ 'with-bg': item.image }">
+{{ item.label }}
+</div>
+                                    <div v-if="item.badge" class="item-badge" :class="{ 'with-bg': item.image }">
+                                        <svg viewBox="0 0 24 24" class="badge-icon"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
+                                        {{ item.badge }}
+                                    </div>
+                                </div>
+                                <div v-if="item.sublabel" class="item-sublabel" :class="{ 'with-bg': item.image }">
+{{ item.sublabel }}
+</div>
+                            </div>
+                            
+                            <!-- Item Actions (Buttons on the right) -->
+                            <div class="sheet-item-actions" :class="{ 'card-actions-right': item.actions && item.actions.length }" v-if="item.actions && item.actions.length">
+                                <div v-for="(action, aIndex) in item.actions" :key="aIndex" 
+                                     class="sheet-item-action-btn card-action-btn"
+                                     :class="{ 'with-bg': item.image }"
+                                     @click.stop="action.onClick"
+                                     v-html="action.icon"
+                                     :style="{ color: action.color }">
+                                </div>
+                            </div>
+                        </div>
                     </div>
-                    <div class="settings-padding" style="padding-top: 0;">
-                        <div class="btn-save" style="margin-top: 10px;" @click="onInputConfirm">{{ input.confirmLabel || 'Save' }}</div>
+
+                    <!-- Input Sheet -->
+                    <div v-if="input" class="sheet-input-container">
+                        <div class="settings-item">
+                            <input 
+                                ref="inputRef"
+                                type="text" 
+                                v-model="inputValue" 
+                                :placeholder="input.placeholder"
+                                @keydown.enter="onInputConfirm"
+                            >
+                        </div>
+                        <div class="settings-padding" style="padding-top: 0;">
+                            <div class="btn-save" style="margin-top: 10px;" @click="onInputConfirm">
+{{ input.confirmLabel || 'Save' }}
+</div>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
-    </div>
+    </Transition>
+</Teleport>
 </template>
 
 <style scoped>
@@ -346,17 +473,11 @@ onBeforeUnmount(() => {
     left: 0;
     width: 100%;
     height: 100%;
-    background-color: rgba(0,0,0,0.5);
-    z-index: 1000;
+    background-color: transparent !important;
+    z-index: 20000;
     display: flex;
     justify-content: center;
     align-items: flex-end;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.3s;
-}
-
-.modal-overlay.visible {
     opacity: 1;
     pointer-events: auto;
 }
@@ -368,16 +489,56 @@ onBeforeUnmount(() => {
     border-top-left-radius: 16px;
     border-top-right-radius: 16px;
     padding-bottom: calc(10px + var(--sab));
-    transform: translateY(100%);
-    transition: padding-bottom 0.25s cubic-bezier(0.2, 0.8, 0.2, 1), transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease, max-height 0.25s cubic-bezier(0.2, 0.8, 0.2, 1);
+    transform: translateY(0);
     max-height: 95vh;
     box-shadow: 0 -5px 15px rgba(0,0,0,0.1);
     display: flex;
     flex-direction: column;
+    position: relative;
 }
 
-.modal-overlay.visible .bottom-sheet-content {
-    transform: translateY(0);
+.sheet-header-area {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    flex-shrink: 0;
+    touch-action: none;
+    z-index: 10;
+    padding-bottom: 12px;
+    pointer-events: none;
+}
+
+.sheet-header-area::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(to bottom, 
+        rgba(var(--ui-bg-rgb), 0.85) 0%, 
+        rgba(var(--ui-bg-rgb), 0) 100%
+    );
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    mask-image: linear-gradient(to bottom, 
+        black 0%, 
+        black 40%, 
+        transparent 100%
+    );
+    -webkit-mask-image: linear-gradient(to bottom, 
+        black 0%, 
+        black 40%, 
+        transparent 100%
+    );
+    z-index: -1;
+    border-top-left-radius: 20px;
+    border-top-right-radius: 20px;
+}
+
+.sheet-header-area > * {
+    pointer-events: auto;
 }
 
 .sheet-handle-bar {
@@ -404,6 +565,35 @@ onBeforeUnmount(() => {
     max-height: 70vh;
     width: 100%;
     overscroll-behavior: contain;
+    padding-top: 24px;
+}
+
+.sheet-scroll-container::-webkit-scrollbar-track {
+    margin-top: 24px;
+}
+
+.sheet-scroll-container.has-header {
+    padding-top: 72px;
+}
+
+.sheet-scroll-container.has-header::-webkit-scrollbar-track {
+    margin-top: 72px;
+}
+
+.bottom-sheet-content.is-sidebar .sheet-scroll-container {
+    padding-top: 0;
+}
+
+.bottom-sheet-content.is-sidebar .sheet-scroll-container::-webkit-scrollbar-track {
+    margin-top: 0;
+}
+
+.bottom-sheet-content.is-sidebar .sheet-scroll-container.has-header {
+    padding-top: 48px;
+}
+
+.bottom-sheet-content.is-sidebar .sheet-scroll-container.has-header::-webkit-scrollbar-track {
+    margin-top: 48px;
 }
 
 .sheet-header {
@@ -436,17 +626,45 @@ onBeforeUnmount(() => {
 
 .sheet-list {
     overflow-y: auto;
+    padding: 8px 16px 24px 16px;
+}
+
+.sheet-group-card {
+    background: rgba(128, 128, 128, 0.12);
+    border: 1px solid rgba(128, 128, 128, 0.2);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+    border-radius: 16px;
+    overflow: clip;
 }
 
 .sheet-item {
-    padding: 12px 16px;
+    position: relative;
+    padding: 14px 16px;
     display: flex;
     align-items: center;
     cursor: pointer;
 }
 
 .sheet-item:active {
-    background-color: var(--bg-gray);
+    background-color: var(--bg-gray, rgba(128, 128, 128, 0.1));
+}
+
+.sheet-item-card {
+    position: relative;
+    padding: 14px 16px;
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    background: rgba(128, 128, 128, 0.12);
+    border: 1px solid rgba(128, 128, 128, 0.2);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+    border-radius: 16px;
+    margin-bottom: 10px;
+    transition: background-color 0.2s;
+}
+
+.sheet-item-card:active {
+    background-color: var(--bg-gray, rgba(128, 128, 128, 0.2));
 }
 
 .sheet-item-icon {
@@ -653,25 +871,39 @@ onBeforeUnmount(() => {
 .modal-overlay {
     background-color: transparent !important;
     opacity: 1 !important;
-    visibility: hidden;
-    transition: visibility 0s linear 0.3s !important;
-    z-index: 12000 !important;
+    z-index: 20000 !important;
 }
 
-.modal-overlay.visible {
-    visibility: visible;
-    transition-delay: 0s !important;
+.bottom-sheet-enter-active,
+.bottom-sheet-leave-active {
+    transition: opacity 0.3s ease;
+}
+.bottom-sheet-enter-active .modal-backdrop,
+.bottom-sheet-leave-active .modal-backdrop {
+    transition: opacity 0.3s ease;
+}
+.bottom-sheet-enter-active .bottom-sheet-content,
+.bottom-sheet-leave-active .bottom-sheet-content {
+    transition: background-color 0.3s ease, transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.bottom-sheet-enter-from,
+.bottom-sheet-leave-to {
+    opacity: 0;
+}
+.bottom-sheet-enter-from .bottom-sheet-content:not(.is-sidebar),
+.bottom-sheet-leave-to .bottom-sheet-content:not(.is-sidebar) {
+    transform: translateY(100%);
+}
+.bottom-sheet-enter-from .bottom-sheet-content.is-sidebar,
+.bottom-sheet-leave-to .bottom-sheet-content.is-sidebar {
+    transform: translateX(100%) !important;
 }
 
 .modal-backdrop {
     position: absolute;
     top: 0; left: 0; width: 100%; height: 100%;
     background-color: rgba(0,0,0,0.5);
-    opacity: 0;
-    transition: opacity 0.3s ease;
-}
-
-.modal-overlay.visible .modal-backdrop {
     opacity: 1;
 }
 
@@ -692,6 +924,63 @@ onBeforeUnmount(() => {
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
     background-image: none !important;
+}
+
+.bottom-sheet-sidebar-wrapper {
+    position: absolute;
+    inset: 0;
+    background: transparent;
+    flex: none;
+    min-height: 0;
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+}
+
+.bottom-sheet-content.is-sidebar {
+    height: 100% !important;
+    max-height: none !important;
+    border-radius: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    transform: translateX(0) !important;
+    background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8)) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    padding-bottom: 20px !important;
+    background-image: none !important;
+}
+
+.bottom-sheet-content.is-sidebar .sheet-scroll-container {
+    max-height: none !important;
+    flex: 1;
+}
+
+.bottom-sheet-content.is-sidebar .sheet-header {
+    padding: 16px 16px 16px;
+}
+
+.sheet-back-btn {
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 8px;
+    border-radius: 50%;
+    cursor: pointer;
+    color: var(--text-gray);
+    transition: background 0.2s;
+}
+
+.sheet-back-btn:active {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.sheet-back-btn svg {
+    width: 20px;
+    height: 20px;
+    fill: currentColor;
 }
 
 .bottom-sheet-content.keyboard-open {
@@ -905,4 +1194,75 @@ onBeforeUnmount(() => {
     border-radius: 50%;
     backdrop-filter: blur(4px);
 }
+
+/* Sidebar Mode Styles */
+.bottom-sheet-content.is-sidebar {
+    height: 100% !important;
+    max-height: none !important;
+    border-radius: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    transform: none !important;
+    background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8)) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    background-image: none !important;
+    position: relative !important;
+    padding-top: 0 !important;
+}
+
+.bottom-sheet-content.is-sidebar .sheet-scroll-container {
+    max-height: none !important;
+    flex: 1;
+    min-height: 0;
+}
+
+.bottom-sheet-content.is-sidebar .sheet-header {
+    background: transparent !important;
+    padding: 0 16px !important;
+    min-height: 56px;
+}
+
+.sheet-back-btn {
+    width: 40px;
+    height: 40px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: -8px;
+    cursor: pointer;
+    flex-shrink: 0;
+    border-radius: 50%;
+    color: var(--accent-color, var(--vk-blue));
+    background-color: rgba(var(--ui-bg-rgb), var(--element-opacity, 0.8));
+    backdrop-filter: blur(var(--element-blur, 20px));
+    -webkit-backdrop-filter: blur(var(--element-blur, 20px));
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+    transition: all 0.2s ease;
+}
+
+.sheet-back-btn:active {
+    opacity: 0.8;
+}
+
+.sheet-back-btn svg {
+    width: 20px !important;
+    height: 20px !important;
+    fill: currentColor !important;
+}
+
+.bottom-sheet-sidebar-wrapper {
+    position: absolute;
+    inset: 0;
+    z-index: 1000;
+    flex: none;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    pointer-events: auto;
+}
 </style>
+
+

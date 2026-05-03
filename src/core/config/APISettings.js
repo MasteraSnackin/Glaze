@@ -1,5 +1,8 @@
-import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import { db } from '@/utils/db.js';
+import { DEFAULT_PROVIDER_ID } from '@/core/llm/contracts/providerContracts.js';
+import { getProviderById } from '@/core/llm/providers/providerRegistry.js';
+import { publishAppEvent } from '@/core/events/eventHub.js';
+import { APP_EVENTS } from '@/core/events/eventNames.js';
 
 export const PROVIDER_BLACKLIST = [
     { name: 'EllyAI', match: 'ellyai' },
@@ -14,6 +17,7 @@ export function getBlacklistedProvider(url) {
 
 export async function initSettings() {
     // Ensure defaults exist
+    if (localStorage.getItem('gz_api_provider') === null) localStorage.setItem('gz_api_provider', DEFAULT_PROVIDER_ID);
     if (localStorage.getItem('gz_api_temp') === null) localStorage.setItem('gz_api_temp', '0.7');
     if (localStorage.getItem('gz_api_topp') === null) localStorage.setItem('gz_api_topp', '0.9');
     if (localStorage.getItem('gz_api_stream') === null) localStorage.setItem('gz_api_stream', 'true');
@@ -25,71 +29,106 @@ export async function initSettings() {
 }
 
 export function normalizeEndpoint(url) {
-    if (!url) return '';
-    let normalized = url.trim();
-    if (!/^https?:\/\//i.test(normalized)) {
-        normalized = 'https://' + normalized;
-    }
-    if (normalized.endsWith('/')) normalized = normalized.slice(0, -1);
-
-    const suffix = '/chat/completions';
-    if (normalized.toLowerCase().endsWith(suffix)) {
-        normalized = normalized.slice(0, -suffix.length);
-    }
-    if (normalized.endsWith('/')) normalized = normalized.slice(0, -1);
-
-    return normalized;
+    return getProviderById(getApiProviderId()).normalizeEndpoint(url);
 }
 
-export function getApiConfig() {
-    const mt = parseInt(localStorage.getItem('api-max-tokens'));
+export function getApiProviderId() {
+    return localStorage.getItem('gz_api_provider') || DEFAULT_PROVIDER_ID;
+}
+
+export function getApiReasoningTags() {
     return {
-        apiKey: localStorage.getItem('api-key') || '',
-        apiUrl: localStorage.getItem('gz_api_endpoint_normalized') || localStorage.getItem('api-endpoint') || '',
-        model: localStorage.getItem('api-model') || '',
-        stream: localStorage.getItem('gz_api_stream') === 'true',
-        requestReasoning: localStorage.getItem('gz_api_request_reasoning') === 'true',
-        temp: parseFloat(localStorage.getItem('gz_api_temp')) || 0.7,
-        topP: parseFloat(localStorage.getItem('gz_api_topp')) || 0.9,
-        maxTokens: isNaN(mt) ? 8000 : mt,
-        autoHideImages: localStorage.getItem('gz_api_auto_hide_images') === 'true',
-        autoHideImagesN: parseInt(localStorage.getItem('gz_api_auto_hide_images_n') || '1', 10),
-        reasoningEffort: localStorage.getItem('gz_api_reasoning_effort') || 'medium'
+        start: localStorage.getItem('gz_api_reasoning_start') || '<think>',
+        end: localStorage.getItem('gz_api_reasoning_end') || '</think>'
     };
 }
 
-export async function fetchRemoteModels(endpoint, key) {
-    if (!endpoint) throw new Error("No endpoint");
+export function getApiRuntimeStorage() {
+    const maxTokens = parseInt(localStorage.getItem('api-max-tokens'));
+    const contextSize = parseInt(localStorage.getItem('api-context'));
+    return {
+        providerId: getApiProviderId(),
+        endpoint: localStorage.getItem('api-endpoint') || '',
+        normalizedEndpoint: localStorage.getItem('gz_api_endpoint_normalized') || localStorage.getItem('api-endpoint') || '',
+        key: localStorage.getItem('api-key') || '',
+        model: localStorage.getItem('api-model') || '',
+        maxTokens: isNaN(maxTokens) ? 8000 : maxTokens,
+        contextSize: isNaN(contextSize) ? 32000 : contextSize,
+        temp: parseFloat(localStorage.getItem('gz_api_temp')) || 0.7,
+        topP: parseFloat(localStorage.getItem('gz_api_topp')) || 0.9,
+        stream: localStorage.getItem('gz_api_stream') === 'true',
+        requestReasoning: localStorage.getItem('gz_api_request_reasoning') === 'true',
+        autoHideImages: localStorage.getItem('gz_api_auto_hide_images') === 'true',
+        autoHideImagesN: parseInt(localStorage.getItem('gz_api_auto_hide_images_n') || '1', 10),
+        reasoningEffort: localStorage.getItem('gz_api_reasoning_effort') || 'medium',
+        reasoningTags: getApiReasoningTags()
+    };
+}
 
-    let url = endpoint;
-    if (url.endsWith('/chat/completions')) url = url.replace('/chat/completions', '');
-    if (url.endsWith('/')) url = url.slice(0, -1);
-    if (!url.endsWith('/models')) url += '/models';
-
-    const headers = {};
-    if (key) headers['Authorization'] = `Bearer ${key}`;
-
-    let data;
-    if (Capacitor.isNativePlatform()) {
-        const response = await CapacitorHttp.get({
-            url: url,
-            headers: headers
-        });
-        if (response.status >= 400) throw new Error(`HTTP ${response.status}`);
-        data = response.data;
-    } else {
-        const res = await fetch(url, { headers });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        data = await res.json();
+export function saveApiRuntimeSetting(key, value) {
+    if (key === 'api-endpoint') {
+        localStorage.setItem('gz_api_endpoint_normalized', normalizeEndpoint(value));
     }
 
-    let models = [];
-    if (data.data && Array.isArray(data.data)) {
-        models = data.data.map(m => m.id);
-    } else if (Array.isArray(data)) {
-        models = data.map(m => m.id);
+    localStorage.setItem(key, value);
+
+    if (key === 'api-context' || key === 'api-max-tokens') {
+        publishAppEvent(APP_EVENTS.domain.settings.apiContextChanged);
     }
-    return models.sort();
+}
+
+export function applyApiRuntimeConfig({
+    providerId,
+    endpoint,
+    apiKey,
+    model,
+    maxTokens,
+    contextSize,
+    temp,
+    topP,
+    stream,
+    autoHideImages,
+    autoHideImagesN,
+    requestReasoning,
+    reasoningEffort
+} = {}) {
+    if (providerId !== undefined) localStorage.setItem('gz_api_provider', providerId);
+    if (endpoint !== undefined) saveApiRuntimeSetting('api-endpoint', endpoint);
+    if (apiKey !== undefined) saveApiRuntimeSetting('api-key', apiKey);
+    if (model !== undefined) saveApiRuntimeSetting('api-model', model);
+    if (maxTokens !== undefined) saveApiRuntimeSetting('api-max-tokens', String(maxTokens));
+    if (contextSize !== undefined) saveApiRuntimeSetting('api-context', String(contextSize));
+    if (temp !== undefined) saveApiRuntimeSetting('gz_api_temp', String(temp));
+    if (topP !== undefined) saveApiRuntimeSetting('gz_api_topp', String(topP));
+    if (stream !== undefined) saveApiRuntimeSetting('gz_api_stream', String(stream));
+    if (autoHideImages !== undefined) saveApiRuntimeSetting('gz_api_auto_hide_images', String(autoHideImages));
+    if (autoHideImagesN !== undefined) saveApiRuntimeSetting('gz_api_auto_hide_images_n', String(autoHideImagesN));
+    if (requestReasoning !== undefined) saveApiRuntimeSetting('gz_api_request_reasoning', String(requestReasoning));
+    if (reasoningEffort !== undefined) saveApiRuntimeSetting('gz_api_reasoning_effort', String(reasoningEffort));
+}
+
+export function getApiConfig() {
+    const runtime = getApiRuntimeStorage();
+    return {
+        providerId: runtime.providerId,
+        apiKey: runtime.key,
+        apiUrl: runtime.normalizedEndpoint,
+        model: runtime.model,
+        stream: runtime.stream,
+        requestReasoning: runtime.requestReasoning,
+        temp: runtime.temp,
+        topP: runtime.topP,
+        maxTokens: runtime.maxTokens,
+        contextSize: runtime.contextSize,
+        autoHideImages: runtime.autoHideImages,
+        autoHideImagesN: runtime.autoHideImagesN,
+        reasoningEffort: runtime.reasoningEffort
+    };
+}
+
+export async function fetchRemoteModels(endpoint, key, providerId = getApiProviderId()) {
+    const provider = getProviderById(providerId);
+    return provider.listModels({ endpoint, apiKey: key });
 }
 
 export async function getApiPresets() {
@@ -101,6 +140,7 @@ export async function getApiPresets() {
     return [{
         id: 'default',
         name: 'Default',
+        providerId: getApiProviderId(),
         endpoint: localStorage.getItem('api-endpoint') || '',
         key: localStorage.getItem('api-key') || '',
         model: localStorage.getItem('api-model') || '',
