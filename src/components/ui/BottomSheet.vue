@@ -324,7 +324,7 @@ onBeforeUnmount(() => {
 {{ bigInfo.glossaryChip.label }}
 </button>
 </div>
-                        <div class="sheet-big-info-btn" :class="{ disabled: bigInfo.buttonDisabled }" @click="!bigInfo.buttonDisabled && bigInfo.onButtonClick()">
+                        <div v-if="bigInfo.buttonText" class="sheet-big-info-btn" :class="{ disabled: bigInfo.buttonDisabled }" @click="!bigInfo.buttonDisabled && bigInfo.onButtonClick()">
 {{ bigInfo.buttonText }}
 </div>
                     </div>
