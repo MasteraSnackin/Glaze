@@ -18,7 +18,6 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue', 'save', 'open-fs']);
 
 const item = ref({});
-const avatarInput = ref(null);
 const t = (key) => translations[currentLang.value]?.[key] || key;
 
 // Specific state for greetings cycling
@@ -165,7 +164,11 @@ onBeforeUnmount(() => {
 });
 
 function triggerAvatarUpload() {
-    if (avatarInput.value) avatarInput.value.click();
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = (e) => handleAvatarChange(e);
+    input.click();
 }
 
 function handleAvatarChange(e) {
@@ -261,7 +264,6 @@ function getSelectedLabel(field) {
 {{ t('hint_change_avatar') }}
 </div>
                 </div>
-                <input type="file" ref="avatarInput" accept="image/*" style="display: none;" @change="handleAvatarChange">
             </div>
             
             <!-- Dynamic Sections -->

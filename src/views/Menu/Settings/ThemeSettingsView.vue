@@ -72,15 +72,12 @@ const onColorSelected = (color) => {
     }
 };
 
-const bgInput = ref(null);
-const fontInput = ref(null);
-const chatFontInput = ref(null);
 const activeTab = ref('general');
 const activeChatSubTab = ref('font');
 
 const {
     presets,
-    themeImportInput,
+    triggerThemeImport,
     activePresetName,
     activePresetAuthor,
     loadPresetsList,
@@ -120,7 +117,6 @@ const getCustomColorStyle = (colorValue) => {
 
 const handleResetBackground = async () => {
     await setBackgroundImage(null);
-    if (bgInput.value) bgInput.value.value = '';
     
     const index = presets.value.findIndex(p => p.id === themeState.activePresetId);
     if (index !== -1) {
@@ -130,12 +126,10 @@ const handleResetBackground = async () => {
 
 const handleResetFont = async () => {
     await setCustomFont(null);
-    if (fontInput.value) fontInput.value.value = '';
 };
 
 const handleResetChatFont = async () => {
     await setChatFont(null);
-    if (chatFontInput.value) chatFontInput.value.value = '';
 };
 
 const checkIcon = '<svg viewBox="0 0 24 24" style="fill:currentColor"><path d="M9 16.2L4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4L9 16.2z"/></svg>';
@@ -174,7 +168,7 @@ const openUiFontSelector = () => {
             {
                 label: t('theme_font_custom') || 'Custom...',
                 icon: themeState.uiFontMode === 'custom' ? checkIcon : null,
-                onClick: () => { closeBottomSheet(); fontInput.value.click(); }
+                onClick: () => { closeBottomSheet(); const i = document.createElement('input'); i.type = 'file'; i.accept = '.ttf,.otf,.woff,.woff2'; i.onchange = (e) => setCustomFont(e.target.files[0]); i.click(); }
             }
         ]
     });
@@ -202,7 +196,7 @@ const openChatFontSelector = () => {
             {
                 label: t('theme_font_custom') || 'Custom...',
                 icon: themeState.chatFontMode === 'custom' ? checkIcon : null,
-                onClick: () => { closeBottomSheet(); chatFontInput.value.click(); }
+                onClick: () => { closeBottomSheet(); const i = document.createElement('input'); i.type = 'file'; i.accept = '.ttf,.otf,.woff,.woff2'; i.onchange = (e) => setChatFont(e.target.files[0]); i.click(); }
             }
         ]
     });
@@ -251,7 +245,6 @@ const chatPreviewStyle = computed(() => ({
                     <svg viewBox="0 0 24 24" style="width: 20px; height: 20px; fill: currentColor;"><path d="M7 10l5 5 5-5z"/></svg>
                 </div>
             </div>
-            <input type="file" ref="themeImportInput" accept=".json" style="display: none;" @change="onThemeFileSelected">
         </div>
 
         <!-- Tab Switcher -->
@@ -299,7 +292,6 @@ const chatPreviewStyle = computed(() => ({
 {{ t('theme_reset_font') || 'Reset Font' }}
 </div>
                     </div>
-                    <input type="file" ref="fontInput" accept=".ttf,.otf,.woff,.woff2" style="display: none;" @change="(e) => setCustomFont(e.target.files[0])">
 
                     <div class="menu-item color-item" @click="openColorPicker('uiText', t('theme_ui_text_color') || 'Text Color', themeState.uiTextColor, PRESET_UI_COLORS, true)">
                         <div class="menu-text" style="flex:1;">
@@ -433,7 +425,7 @@ const chatPreviewStyle = computed(() => ({
                     <div class="section-header">
 {{ t('theme_background_image') }}
 </div>
-                    <div class="menu-item" @click="bgInput.click()">
+                    <div class="menu-item" @click="() => { const i = document.createElement('input'); i.type = 'file'; i.accept = 'image/*'; i.onchange = (e) => onBackgroundImageSelected(e); i.click(); }">
                         <svg class="menu-icon" viewBox="0 0 24 24"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
                         <div class="menu-text">
 {{ t('theme_select_image') }}
@@ -445,7 +437,6 @@ const chatPreviewStyle = computed(() => ({
 {{ t('theme_reset_background') }}
 </div>
                     </div>
-                    <input type="file" ref="bgInput" accept="image/*" style="display: none;" @change="onBackgroundImageSelected">
                     <div v-if="themeState.hasBackgroundImage">
                         <div style="height: 1px; background: rgba(128,128,128,0.1); margin: 0 16px;"></div>
                         <div style="padding: 16px;">
@@ -593,7 +584,6 @@ C
 {{ t('theme_reset_font') || 'Reset Font' }}
 </div>
                         </div>
-                        <input type="file" ref="chatFontInput" accept=".ttf,.otf,.woff,.woff2" style="display: none;" @change="(e) => setChatFont(e.target.files[0])">
 
                         <div style="height: 1px; background: rgba(128,128,128,0.1); margin: 0 16px;"></div>
 

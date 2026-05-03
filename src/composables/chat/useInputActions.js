@@ -5,7 +5,6 @@ import { publishAppEvent } from '@/core/events/eventHub.js';
 
 export function useInputActions(props, emit, _chatInputRef, _isComposing, _updatePreview) {
     const attachedImage = ref(null);
-    const imageInput = ref(null);
     const isGuidanceMode = ref(false);
     const guidanceType = ref('send');
     const guidanceText = ref('');
@@ -32,7 +31,11 @@ export function useInputActions(props, emit, _chatInputRef, _isComposing, _updat
     };
 
     const triggerImageUpload = () => {
-        if (imageInput.value) imageInput.value.click();
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/png, image/jpeg, image/webp';
+        input.onchange = (e) => onImageSelected(e);
+        input.click();
     };
 
     const onImageSelected = (event) => {
@@ -44,7 +47,6 @@ export function useInputActions(props, emit, _chatInputRef, _isComposing, _updat
             };
             reader.readAsDataURL(file);
         }
-        if (imageInput.value) imageInput.value.value = '';
     };
 
     const clearImage = () => {
@@ -106,7 +108,6 @@ export function useInputActions(props, emit, _chatInputRef, _isComposing, _updat
 
     return {
         attachedImage,
-        imageInput,
         isGuidanceMode,
         guidanceType,
         guidanceText,
