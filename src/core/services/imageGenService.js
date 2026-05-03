@@ -2,6 +2,7 @@ import { t } from '@/utils/i18n.js';
 import { startGenerationNotification, stopGenerationNotification } from '@/core/services/notificationService.js';
 import { addNotification } from '@/core/states/notificationsState.js';
 import { getImageGenProfile } from '@/core/config/ProviderProfiles.js';
+import { setImageGenState, clearImageGenState, hasImageGenState } from '@/core/states/imageGenState.js';
 
 /**
  * Image Generation Service for Glaze
@@ -799,6 +800,11 @@ export async function processMessageImages(text, onUpdate, context = {}) {
     const tags = parseImageGenTags(text);
     if (!tags.length) return text;
 
+    const externalSignal = context.abortSignal || null;
+    if (externalSignal?.aborted) return text;
+
+    const msgId = context.msgId || null;
+
     if (!settings.enabled) {
         let current = text;
         for (const tag of tags) {
@@ -809,7 +815,6 @@ export async function processMessageImages(text, onUpdate, context = {}) {
         return current;
     }
 
-    // Collect previous generated images as context if the setting is enabled
     if (settings.imageContextEnabled && context.messages && context.currentMsgIndex != null) { // eslint-disable-line eqeqeq
         const prevImages = extractPreviousGeneratedImages(
             context.messages,
@@ -821,7 +826,13 @@ export async function processMessageImages(text, onUpdate, context = {}) {
         }
     }
 
-    // Replace all pending tags with loading placeholders
+    const controller = new AbortController();
+    const abortHandler = () => controller.abort();
+    if (externalSignal) {
+        if (externalSignal.aborted) return text;
+        externalSignal.addEventListener('abort', abortHandler);
+    }
+
     let current = text;
     const placeholders = [];
     for (const tag of tags) {
@@ -830,7 +841,18 @@ export async function processMessageImages(text, onUpdate, context = {}) {
         current = current.replace(tag.fullMatch, placeholder);
         placeholders.push({ placeholder, id, instruction: tag.instruction, fullMatch: tag.fullMatch });
     }
-    onUpdate(current);
+
+    if (msgId) {
+        setImageGenState(msgId, { controller, msgId });
+    }
+
+    const guardedOnUpdate = (updatedText) => {
+        if (controller.signal.aborted) return;
+        if (msgId && !hasImageGenState(msgId)) return;
+        onUpdate(updatedText);
+    };
+
+    guardedOnUpdate(current);
 
     if (placeholders.length > 0) {
         addNotification(t('imggen_notification_body') || 'Generating image...', 'info');
@@ -838,18 +860,26 @@ export async function processMessageImages(text, onUpdate, context = {}) {
     }
 
     try {
-        // Generate images one by one
         for (const { placeholder, id, instruction } of placeholders) {
+            if (controller.signal.aborted) break;
             try {
                 const dataUrl = await generateImage(instruction, context);
+                if (controller.signal.aborted) break;
                 current = current.replace(placeholder, makeResultHtml(instruction, id, dataUrl));
             } catch (err) {
+                if (controller.signal.aborted) break;
                 console.error('[ImageGen]', err);
                 current = current.replace(placeholder, makeErrorHtml(instruction, id, err.message));
             }
-            onUpdate(current);
+            guardedOnUpdate(current);
         }
     } finally {
+        if (externalSignal) {
+            externalSignal.removeEventListener('abort', abortHandler);
+        }
+        if (msgId) {
+            clearImageGenState(msgId);
+        }
         if (placeholders.length > 0) {
             stopGenerationNotification();
         }

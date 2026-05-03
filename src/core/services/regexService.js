@@ -97,7 +97,7 @@ export function applyRegexes(text, placementFilter, ephemeralityFilter, options 
                 const trimTokens = script.trimOut.split('\n').filter(t => t.trim());
                 for (const token of trimTokens) {
                     const before = processedText;
-                    processedText = processedText.replace(new RegExp(token, 'g'), '');
+                    processedText = processedText.replaceAll(token, '');
                     if (processedText !== before) triggered = true;
                 }
             }

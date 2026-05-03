@@ -240,7 +240,8 @@ export async function handleGenerationComplete({
                 charAvatar: char.avatar || null,
                 userAvatar,
                 messages: currentMessages.value,
-                currentMsgIndex: foundIndex
+                currentMsgIndex: foundIndex,
+                msgId: msg.id
             }).then(finalText => {
                 if (finalText !== msg.text) {
                     msg.text = finalText;
@@ -308,7 +309,8 @@ export async function handleGenerationComplete({
                 charAvatar: char.avatar || null,
                 userAvatar,
                 messages: bgData.sessions[sessionId],
-                currentMsgIndex: bIdx
+                currentMsgIndex: bIdx,
+                msgId: msg.id
             }).then(finalText => {
                     if (finalText !== msg.text) {
                         msg.text = finalText;

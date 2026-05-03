@@ -11,6 +11,7 @@ import { getEffectivePreset } from '@/core/states/presetState.js';
 import { reconcileSessionMemoryState } from '@/core/services/memoryBooksService.js';
 import { publishAppEvent } from '@/core/events/eventHub.js';
 import { APP_EVENTS } from '@/core/events/eventNames.js';
+import { abortImageGenForMessage } from '@/core/states/imageGenState.js';
 
 export function useMessageActions(deps) {
     const {
@@ -351,6 +352,7 @@ export function useMessageActions(deps) {
     }
 
     function enterEditMode(msg) {
+        abortImageGenForMessage(msg.id);
         msg._iigMap = msg._iigMap || {};
         const { text, map } = prepareEditText(msg?.text || '', msg._iigMap);
         msg._base64Map = map;
@@ -417,6 +419,7 @@ export function useMessageActions(deps) {
         delete msg.editText;
 
         if (newText.includes('[IMG:GEN]')) {
+            abortImageGenForMessage(msg.id);
             processMessageImages(msg.text, (updatedText) => {
                 const mIdx = currentMessages.value.findIndex(m => m.id === msg.id);
                 if (mIdx !== -1) {
@@ -427,7 +430,8 @@ export function useMessageActions(deps) {
                 }
             }, {
                 messages: currentMessages.value,
-                currentMsgIndex: index
+                currentMsgIndex: index,
+                msgId: msg.id
             }).catch(e => console.error('[ImageGen] processMessageImages failed:', e));
         }
     }

@@ -1466,19 +1466,10 @@ watch(() => currentMessages.value.length, () => {
 onUnmounted(() => {
     setScrollLock(false);
     stopMemoryDraftProgress();
-    // Cleanup UI timers AND abort active generations for ALL generating states
-    // This prevents leaked intervals, closures referencing unmounted reactive state, and stuck isTyping flags
     for (const charId of listGeneratingCharIds()) {
         const state = getGenerationState(charId);
-        // Abort controller to stop ongoing API requests
-        if (state.controller) {
-            try {
-                state.controller.abort();
-            } catch (e) {
-                console.warn('[onUnmounted] Failed to abort controller:', e);
-            }
-        }
-        // Clear UI timer
+        if (!state) continue;
+        state.onUIUpdate = null;
         if (state.timerId) {
             clearTimeout(state.timerId);
             state.timerId = null;
@@ -1489,15 +1480,9 @@ onUnmounted(() => {
         if (typeof state.streamFlush === 'function') {
             state.streamFlush();
         }
-        // Disconnect UI updater to prevent updates to unmounted component
-        state.onUIUpdate = null;
-        // Clean localStorage flag
-        const sessionId = activeChatChar?.sessionId;
-        if (sessionId) {
-            clearPersistedGeneration(charId, sessionId);
+        if (typeof state.clearGenerationTimer === 'function') {
+            state.clearGenerationTimer();
         }
-        // Clear registry entry to prevent stale state from blocking future generations
-        clearGenerationState(charId);
     }
     if (unsubCharacterUpdated) { unsubCharacterUpdated(); unsubCharacterUpdated = null; }
     document.removeEventListener('visibilitychange', onVisibilityChange);
