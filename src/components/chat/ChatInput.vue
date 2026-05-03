@@ -46,7 +46,7 @@ const doUpdatePreview = (forcedCaretPos = null) => {
 };
 
 const {
-    attachedImage, imageInput,
+    attachedImage,
     isGuidanceMode, guidanceType, guidanceText, guidanceInput,
     isGuidanceFocused, isMainFocused,
     closeGuidance, toggleGuidanceMode,
@@ -325,7 +325,6 @@ defineExpose({
                 @request-preview="openRequestPreview"
                 @add-block="() => {}"
             />
-            <input type="file" ref="imageInput" accept="image/png, image/jpeg, image/webp" style="display: none" @change="onImageSelected" />
         </div>
     </div>
     <RequestPreviewSheet ref="requestPreviewSheet" />

@@ -67,10 +67,12 @@ const personaConfig = reactive({
     avatar: null
 });
 
-const avatarInput = ref(null);
-
 function triggerAvatarUpload() {
-    if (avatarInput.value) avatarInput.value.click();
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.onchange = (e) => handleAvatarChange(e);
+    input.click();
 }
 
 function handleAvatarChange(e) {
@@ -428,7 +430,6 @@ async function finish() {
                                             <span class="hint-desktop">{{ t('hint_change_avatar_desktop') || 'Click to change' }}</span>
                                             <span class="hint-mobile">{{ t('hint_change_avatar_mobile') || t('hint_change_avatar') || 'Tap to change' }}</span>
                                         </div>
-                                        <input type="file" ref="avatarInput" accept="image/*" style="display: none;" @change="handleAvatarChange">
                                     </div>
                                     <div v-else class="icon-wrapper" v-html="slides[currentSlide].icon || introContent[0].icon"></div>
                                 </div>
@@ -658,7 +659,6 @@ async function finish() {
                                             </div>
                                             <div class="avatar-overlay-hint">{{ t('hint_change_avatar') || 'Tap to change' }}</div>
                                         </div>
-                                        <input type="file" ref="avatarInput" accept="image/*" style="display: none;" @change="handleAvatarChange">
                                     </div>
                                     <div class="settings-item">
                                         <label>{{ t('onboarding_label_name') }}</label>
