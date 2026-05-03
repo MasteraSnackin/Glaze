@@ -26,7 +26,6 @@ const t = (key) => translations[currentLang.value]?.[key] || key;
 const currentView = ref('list'); // list, edit
 const activeScript = ref(null);
 const isPresetScript = ref(false);
-const fileInput = ref(null);
 
 const presetRegexes = computed(() => {
     const charId = props.activeChatChar?.id;
@@ -188,7 +187,7 @@ function handleAddScript() {
                             {
                                 label: t('action_import') || 'Import from file',
                                 icon: '<svg viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>',
-                                onClick: () => { closeBottomSheet(); importTargetPreset.value = true; fileInput.value?.click(); }
+                                onClick: () => { closeBottomSheet(); triggerFileImport(true); }
                             }
                         ]
                     });
@@ -210,7 +209,7 @@ function handleAddScript() {
                             {
                                 label: t('action_import') || 'Import from file',
                                 icon: '<svg viewBox="0 0 24 24"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>',
-                                onClick: () => { closeBottomSheet(); importTargetPreset.value = false; fileInput.value?.click(); }
+                                onClick: () => { closeBottomSheet(); triggerFileImport(false); }
                             }
                         ]
                     });
@@ -219,6 +218,15 @@ function handleAddScript() {
         ]
     });
 }
+
+const triggerFileImport = (isPreset) => {
+    importTargetPreset.value = isPreset;
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.onchange = (e) => handleFileSelect(e);
+    input.click();
+};
 
 async function handleFileSelect(event) {
     const file = event.target.files?.[0];
@@ -438,7 +446,6 @@ defineExpose({ open, close });
             <HelpTip term="regex" />
         </template>
         <template #header>
-            <input type="file" ref="fileInput" accept=".json" style="display: none;" @change="handleFileSelect">
         </template>
 
         <div class="sheet-body">

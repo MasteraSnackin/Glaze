@@ -11,7 +11,6 @@ import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetStat
 import { flushDbWriteQueue } from '@/utils/db.js';
 
 const sheet = ref(null);
-const fileInput = ref(null);
 
 defineProps({
     zIndex: {
@@ -66,9 +65,11 @@ const performExport = async () => {
 };
 
 const triggerImport = () => {
-    if (fileInput.value) {
-        fileInput.value.click();
-    }
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '*/*';
+    input.onchange = (e) => handleRestoreFile(e);
+    input.click();
 };
 
 const stageMap = {
@@ -210,8 +211,6 @@ Export
 {{ t('backup_hint_export') || 'Create a full backup of your current application state.' }}
 </div>
                 </div>
-                
-                <input type="file" ref="fileInput" style="display: none" accept="*/*" @change="handleRestoreFile">
             </div>
 
             <!-- Importing View -->
