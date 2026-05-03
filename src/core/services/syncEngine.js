@@ -264,6 +264,8 @@ async function collectSingletonEntries() {
         'gz_imggen_size', 'gz_imggen_quality', 'gz_imggen_aspect_ratio', 'gz_imggen_image_size',
         'gz_imggen_naistera_model', 'gz_imggen_naistera_aspect_ratio',
         'gz_imggen_naistera_send_char_avatar', 'gz_imggen_naistera_send_user_avatar',
+        'gz_imggen_routmy_model', 'gz_imggen_routmy_aspect_ratio', 'gz_imggen_routmy_image_size',
+        'gz_imggen_routmy_quality', 'gz_imggen_routmy_send_char_avatar', 'gz_imggen_routmy_send_user_avatar',
         'gz_imggen_image_context_enabled', 'gz_imggen_image_context_count',
         'gz_imggen_additional_refs',
         // Provider profiles (metadata only; the JSON with keys is conditional below)
@@ -272,8 +274,7 @@ async function collectSingletonEntries() {
     ];
     const includeKeys = isSyncIncludingApiKeys();
     if (includeKeys) {
-        lsKeys.push('api-key', 'api-model', 'gz_embedding_key', 'gz_embedding_model', 'gz_embedding_endpoint');
-        lsKeys.push('gz_provider_profiles', 'gz_imggen_api_key');
+        lsKeys.push('api-key', 'api-model', 'gz_provider_profiles', 'gz_imggen_api_key', 'gz_imggen_naistera_api_key', 'gz_imggen_routmy_api_key');
     }
     for (const k of lsKeys) {
         const v = localStorage.getItem(k);
