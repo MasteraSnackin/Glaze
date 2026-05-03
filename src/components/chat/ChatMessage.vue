@@ -14,6 +14,7 @@ import { getEffectivePersona, allPersonas } from '@/core/states/personaState.js'
 import RollingNumber from '@/components/ui/RollingNumber.vue';
 import SheetView from '@/components/ui/SheetView.vue';
 import { getBlacklistedProvider, getApiRuntimeStorage } from '@/core/config/APISettings.js';
+import { showDesktopPopup, getLastClickPosition } from '@/core/states/desktopPopupState.js';
 import { APP_EVENTS } from '@/core/events/eventNames.js';
 import { publishAppEvent, subscribeAppEvent } from '@/core/events/eventHub.js';
 import { useMessageSwipe } from '@/composables/chat/useMessageSwipe.js';
@@ -131,16 +132,6 @@ const formatMessageText = (text, regexTracking = undefined) => {
 
 const layoutMode = computed(() => themeState.chatLayout);
 
-const handleBubbleClick = (e) => {
-    if (layoutMode.value !== 'bubble') return;
-    if (props.isSelectionMode) return;
-    
-    const sel = window.getSelection();
-    if (sel && sel.toString().trim().length > 0) return;
-    
-    emit('open-actions');
-};
-
 const focusAndResize = (el) => {
     if (!el) return;
     requestAnimationFrame(() => el.focus());
@@ -177,11 +168,46 @@ const combinedMessageData = computed(() => {
 });
 
 const onContentClick = (e) => {
-    const handled = imgGenContentClick(e, layoutMode, props.isSelectionMode);
-    if (handled === true) handleBubbleClick(e);
+    imgGenContentClick(e, layoutMode, props.isSelectionMode);
 };
 
 const openTriggeredSheet = () => {
+    if (typeof window !== 'undefined' && window.innerWidth >= 768) {
+        const items = [];
+
+        for (const lb of (props.message.triggeredLorebooks || [])) {
+            const source = lb._source === 'keyword' ? ' · keyword' : lb._source === 'vector' ? ' · vector' : '';
+            items.push({
+                label: lb.name,
+                sublabel: lb.lorebookName + source,
+                icon: `<svg viewBox="0 0 24 24"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-1 9H9V9h10v2zm-4 4H9v-2h6v2zm4-8H9V5h10v2z"/></svg>`,
+                onClick: () => publishAppEvent(APP_EVENTS.nav.openLorebookEntry, { lorebookId: lb.lorebookId, entryId: lb.id }),
+            });
+        }
+
+        for (const mem of (props.message.triggeredMemories || [])) {
+            items.push({
+                label: mem.name,
+                sublabel: t('label_memory_entry') || 'Memory entry',
+                icon: `<svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 14H7v-2h10v2zm0-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>`,
+                disabled: true,
+            });
+        }
+
+        for (const r of (combinedMessageData.value.regexes || [])) {
+            items.push({
+                label: r.name || 'Unnamed Script',
+                sublabel: r.regex ? `/${r.regex}/` : 'Trim Out',
+                icon: `<svg viewBox="0 0 24 24"><path d="M14.6 16.6l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4m-5.2 0L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4z"/></svg>`,
+                disabled: true,
+            });
+        }
+
+        const { x, y } = getLastClickPosition();
+        showDesktopPopup({ title: t('sheet_triggered_items') || 'Triggered Items', items, isTriggered: true, x, y });
+        return;
+    }
+
     triggeredItemsSheet.value?.open();
 };
 
@@ -204,7 +230,7 @@ const showFooter = computed(() => {
         const hasGreetings = props.index === 0 && props.message.role === 'char' && getAllGreetings(props.activeChatChar).length > 1;
         const hasRegenerate = ((props.message.role === 'user' && props.isLast) || props.message.isError) && !props.isGenerating && !props.message.isEditing;
         const hasTriggeredItems = props.message.triggeredLorebooks?.length || props.message.triggeredMemories?.length || combinedMessageData.value.regexes?.length;
-        return hasSwipes || hasGreetings || hasRegenerate || props.message.isEditing || hasTriggeredItems;
+        return hasSwipes || hasGreetings || hasRegenerate || props.message.isEditing || hasTriggeredItems || !props.isSelectionMode;
     }
     return true;
 });
@@ -359,6 +385,7 @@ onBeforeUnmount(() => {
             </div>
         </div>
 
+        <div class="msg-content-stack">
         <div class="msg-transition-wrapper">
             <Transition :name="swipeTransitionName">
                 <!-- Edit Mode -->
@@ -540,6 +567,7 @@ onBeforeUnmount(() => {
                 <svg viewBox="0 0 24 24"><path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/></svg>
             </div>
 
+        </div>
         </div>
 
         <div class="guided-swipe-container" v-if="isGuidedSwipeOpen">
@@ -1460,8 +1488,7 @@ Memory entry
 .message-section.layout-bubble .msg-avatar,
 .message-section.layout-bubble .msg-header .msg-time,
 .message-section.layout-bubble .msg-footer .msg-index,
-.message-section.layout-bubble .msg-footer .gen-stat,
-.message-section.layout-bubble .msg-actions-btn {
+.message-section.layout-bubble .msg-footer .gen-stat {
     display: none !important;
 }
 .message-section.layout-bubble .msg-header {
@@ -1469,6 +1496,17 @@ Memory entry
 }
 .message-section.layout-bubble.user .msg-header {
     flex-direction: row-reverse;
+}
+.message-section.layout-bubble .msg-content-stack {
+    display: flex;
+    flex-direction: column;
+    width: fit-content;
+    max-width: 88%;
+    align-self: flex-start;
+}
+.message-section.layout-bubble.user .msg-content-stack {
+    align-self: flex-end;
+    margin-left: auto;
 }
 .message-section.layout-bubble .msg-body {
     background-color: rgba(var(--char-bubble-color-rgb, var(--vk-blue-rgb)), var(--element-opacity, 0.8));
@@ -1479,9 +1517,7 @@ Memory entry
     border-top-left-radius: 4px;
     padding: 10px 14px 6px 14px;
     width: fit-content;
-    max-width: 88%;
-    margin-left: 0;
-    cursor: pointer;
+    max-width: 100%;
     min-width: 0;
     display: flex;
     flex-direction: column;
@@ -1494,7 +1530,9 @@ Memory entry
     border-radius: 18px;
     border-top-right-radius: 4px;
     margin-left: auto;
-    margin-right: 0;
+}
+.message-section.layout-bubble .msg-footer {
+    width: 100%;
 }
 .message-section.layout-bubble .bubble-meta {
     display: flex;
@@ -1537,6 +1575,9 @@ Memory entry
 }
 .message-section.layout-bubble.msg-hidden .msg-body {
     opacity: 0.45;
+}
+.message-section.layout-bubble .msg-actions-btn {
+    margin-left: auto;
 }
 
 .message-section.native-lite .msg-transition-wrapper {

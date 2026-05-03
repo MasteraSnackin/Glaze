@@ -102,7 +102,7 @@ const openModelSelector = () => {
     const items = models.value.length > 0
         ? models.value.map(m => ({
             label: m,
-            onClick: () => { settings.value.model = m; closeBottomSheet(); }
+            onClick: () => { onImageGenInput('model', m); closeBottomSheet(); }
         }))
         : [{ label: t('imggen_no_models') || 'No models found — tap refresh', onClick: closeBottomSheet }];
     showBottomSheet({ title: t('imggen_model') || 'Model', items });
@@ -122,12 +122,6 @@ const openApiTypeSelector = () => {
             sublabel: settings.value.apiType === o.value ? (t('preset_active') || 'Active') : '',
             onClick: () => {
                 settings.value.apiType = o.value;
-                if (o.value === 'naistera' && !settings.value.endpoint) {
-                    settings.value.endpoint = 'https://naistera.org';
-                }
-                if (o.value === 'routmy') {
-                    settings.value.endpoint = 'https://api.rout.my';
-                }
                 closeBottomSheet();
             }
         }))
@@ -353,41 +347,61 @@ defineExpose({ open });
 {{ t('section_connection') || 'Connection' }}
 </div>
 
-                    <div class="settings-item-checkbox">
-                        <div class="settings-text-col">
-                            <label>{{ t('label_use_llm_api') || 'Use LLM API' }}</label>
-                            <div class="settings-desc">
-{{ t('desc_use_llm_api') || 'Use the same endpoint as LLM for image generation' }}
-</div>
-                        </div>
-                        <input type="checkbox" :checked="imageGenSettings.useSame" @change="onImageGenInput('useSame', $event.target.checked)" class="vk-switch">
-                    </div>
-
-                    <template v-if="!imageGenSettings.useSame">
-                        <ConnectionStatus status="idle" :error-message="''" @retry="() => {}">
-                            <div class="preset-selector" @click="openProviderSelector(SERVICE_NAMES.IMAGE_GEN)" style="margin-bottom: 8px;">
-                                <span>{{ getActiveProfileMeta(SERVICE_NAMES.IMAGE_GEN).name }}</span>
-                                <svg viewBox="0 0 24 24" style="width: 20px; height: 20px; fill: currentColor;"><path d="M7 10l5 5 5-5z"/></svg>
-                            </div>
-                        </ConnectionStatus>
-
-                        <div class="settings-item">
-                            <label>{{ t('imggen_endpoint') || 'Endpoint URL' }}</label>
-                            <input
-                                type="text"
-                                :value="imageGenSettings.endpoint"
-                                @input="onImageGenInput('endpoint', $event.target.value)"
-                                placeholder="https://api.openai.com/v1"
-                                autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
-                            >
-                        </div>
-                        
+                    <!-- Naistera: only API key, endpoint is hardcoded -->
+                    <template v-if="showNaisteraOptions">
                         <div class="settings-item">
                             <label>{{ t('imggen_api_key') || 'API Key' }}</label>
                             <input
                                 type="password"
-                                :value="imageGenSettings.key"
-                                @input="onImageGenInput('apiKey', $event.target.value)"
+                                v-model="settings.naisteraApiKey"
+                                placeholder="sk-..."
+                                autocomplete="off"
+                            >
+                        </div>
+                    </template>
+
+                    <!-- Other providers: Use LLM API toggle + endpoint/key fields -->
+                    <template v-else>
+                        <div class="settings-item-checkbox">
+                            <div class="settings-text-col">
+                                <label>{{ t('label_use_llm_api') || 'Use LLM API' }}</label>
+                                <div class="settings-desc">
+{{ t('desc_use_llm_api') || 'Use the same endpoint as LLM for image generation' }}
+</div>
+                            </div>
+                            <input type="checkbox" :checked="imageGenSettings.useSame" @change="onImageGenInput('useSame', $event.target.checked)" class="vk-switch">
+                        </div>
+
+                        <template v-if="!imageGenSettings.useSame">
+                            <div class="settings-item">
+                                <label>{{ t('imggen_endpoint') || 'Endpoint URL' }}</label>
+                                <input
+                                    type="text"
+                                    :value="imageGenSettings.endpoint"
+                                    @input="onImageGenInput('endpoint', $event.target.value)"
+                                    placeholder="https://api.openai.com/v1"
+                                    autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+                                >
+                            </div>
+
+                            <div v-if="!showRoutmyOptions" class="settings-item">
+                                <label>{{ t('imggen_api_key') || 'API Key' }}</label>
+                                <input
+                                    type="password"
+                                    :value="imageGenSettings.key"
+                                    @input="onImageGenInput('apiKey', $event.target.value)"
+                                    placeholder="sk-..."
+                                    autocomplete="off"
+                                >
+                            </div>
+                        </template>
+
+                        <!-- rout.my API Key -->
+                        <div v-if="showRoutmyOptions" class="settings-item">
+                            <label>{{ t('imggen_api_key') || 'rout.my API Key' }}</label>
+                            <input
+                                type="password"
+                                v-model="settings.routmyApiKey"
                                 placeholder="sk-..."
                                 autocomplete="off"
                             >
@@ -402,17 +416,6 @@ defineExpose({ open });
                             {{ t('imggen_naistera_hint_here') || 'here' }}
                         </span>
                     </a>
-
-                    <!-- rout.my API Key -->
-                    <div v-if="showRoutmyOptions" class="settings-item">
-                        <label>{{ t('imggen_api_key') || 'rout.my API Key' }}</label>
-                        <input
-                            type="password"
-                            v-model="settings.routmyApiKey"
-                            placeholder="sk-..."
-                            autocomplete="off"
-                        >
-                    </div>
                 </div>
 
                 <!-- Model & Parameters -->
@@ -436,7 +439,8 @@ defineExpose({ open });
                         <div class="model-row">
                             <input
                                 type="text"
-                                v-model="settings.model"
+                                :value="imageGenSettings.model"
+                                @input="onImageGenInput('model', $event.target.value)"
                                 :placeholder="t('imggen_model_placeholder') || 'dall-e-3'"
                                 style="width: 100%; padding-right: 44px;"
                                 autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
@@ -457,7 +461,8 @@ defineExpose({ open });
                         <label>{{ t('imggen_model') || 'Model' }}</label>
                         <input
                             type="text"
-                            v-model="settings.model"
+                            :value="imageGenSettings.model"
+                            @input="onImageGenInput('model', $event.target.value)"
                             placeholder="imagen-3.0-generate-002"
                             autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
                         >

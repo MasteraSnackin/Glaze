@@ -89,7 +89,18 @@ export function useAppNavigation() {
     function initBackButton() {
         let lastBackPress = 0;
 
-        const handleBackButton = async () => {
+        const handleBackButton = async (event) => {
+            // When triggered by popstate, check if we're going back TO one of our
+            // own states (not FROM it). This happens when the browser (e.g. Android
+            // Chrome) pushes its own history entry for a native <select> picker and
+            // then pops it on selection — landing us back on our state while the
+            // sheet is still open. Treating that as "user pressed back" is wrong.
+            if (event instanceof PopStateEvent) {
+                const t = event.state?.type;
+                if (t === 'bottom_sheet' && document.querySelector('.modal-overlay.visible')) return;
+                if (t === 'sheet' && document.querySelector('.sheet-view-overlay.visible')) return;
+            }
+
             // --- Hierarchical Back Navigation Dispatch ---
             const backNavEvent = publishCancelableAppEvent(APP_EVENTS.ui.backNavigation);
             if (backNavEvent.defaultPrevented) return;

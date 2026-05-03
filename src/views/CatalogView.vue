@@ -488,7 +488,8 @@ onUnmounted(() => {
                     </div>
                 </div>
 
-                <div class="active-filters-container">
+                <!-- active-filters inline: desktop only -->
+                <div class="active-filters-container active-filters-desktop">
                     <div class="active-filters" v-if="activeTagItems.length">
                         <div v-for="tag in activeTagItems" :key="tag.id || tag.name" class="active-tag-chip" :class="{'nsfw-active-chip': tag.id === 'nsfw_filter'}" @click="removeTag(tag)">
                             {{ tag.label }}
@@ -511,6 +512,16 @@ onUnmounted(() => {
                     </div>
                 </div>
 
+            </div>
+
+            <!-- active-filters row: mobile only -->
+            <div class="active-filters-container active-filters-mobile" v-if="activeTagItems.length">
+                <div class="active-filters">
+                    <div v-for="tag in activeTagItems" :key="tag.id || tag.name" class="active-tag-chip" :class="{'nsfw-active-chip': tag.id === 'nsfw_filter'}" @click="removeTag(tag)">
+                        {{ tag.label }}
+                        <svg viewBox="0 0 24 24" class="chip-remove-icon"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                    </div>
+                </div>
             </div>
 
             <!-- Results Count -->
@@ -739,6 +750,24 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   overflow: hidden;
+}
+
+/* Mobile: hide inline version, show row version */
+@media (max-width: 599px) {
+  .active-filters-desktop {
+    display: none;
+  }
+  .active-filters-mobile {
+    display: flex;
+    padding-bottom: 4px;
+  }
+}
+
+/* Desktop: hide row version, show inline version */
+@media (min-width: 600px) {
+  .active-filters-mobile {
+    display: none;
+  }
 }
 
 .active-filters {

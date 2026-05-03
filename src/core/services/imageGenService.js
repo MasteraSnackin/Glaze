@@ -1,6 +1,7 @@
 import { t } from '@/utils/i18n.js';
 import { startGenerationNotification, stopGenerationNotification } from '@/core/services/notificationService.js';
 import { addNotification } from '@/core/states/notificationsState.js';
+import { getImageGenProfile } from '@/core/config/ProviderProfiles.js';
 
 /**
  * Image Generation Service for Glaze
@@ -23,6 +24,7 @@ const SETTINGS_KEY = {
     aspectRatio: 'gz_imggen_aspect_ratio',
     imageSize: 'gz_imggen_image_size',
     // Naistera
+    naisteraApiKey: 'gz_imggen_naistera_api_key',
     naisteraModel: 'gz_imggen_naistera_model',
     naisteraAspectRatio: 'gz_imggen_naistera_aspect_ratio',
     naisteraSendCharAvatar: 'gz_imggen_naistera_send_char_avatar',
@@ -71,6 +73,7 @@ export function getImageGenSettings() {
         aspectRatio: localStorage.getItem(SETTINGS_KEY.aspectRatio) || '1:1',
         imageSize: localStorage.getItem(SETTINGS_KEY.imageSize) || '1K',
         // Naistera
+        naisteraApiKey: sanitizeHeaderValue(localStorage.getItem(SETTINGS_KEY.naisteraApiKey)),
         naisteraModel: localStorage.getItem(SETTINGS_KEY.naisteraModel) || 'grok',
         naisteraAspectRatio: localStorage.getItem(SETTINGS_KEY.naisteraAspectRatio) || '1:1',
         naisteraSendCharAvatar: localStorage.getItem(SETTINGS_KEY.naisteraSendCharAvatar) === 'true',
@@ -89,6 +92,18 @@ export function getImageGenSettings() {
         imageContextEnabled: localStorage.getItem(SETTINGS_KEY.imageContextEnabled) === 'true',
         imageContextCount: Math.min(3, Math.max(1, parseInt(localStorage.getItem(SETTINGS_KEY.imageContextCount), 10) || 1)),
     };
+
+    // If using profile-based provider (OpenAI or Gemini), merge profile data
+    if (s.apiType === 'openai' || s.apiType === 'gemini') {
+        const profile = getImageGenProfile();
+        if (profile) {
+            s.endpoint = profile.endpoint || s.endpoint;
+            s.apiKey = profile.apiKey || s.apiKey;
+            s.model = profile.model || s.model;
+        }
+    }
+
+    return s;
 }
 
 export function saveImageGenSettings(partial) {
@@ -232,9 +247,8 @@ function normalizeNaisteraModel(model) {
     return 'grok';
 }
 
-function getNaisteraEndpoint(settings) {
-    const base = (settings.endpoint || NAISTERA_DEFAULT_ENDPOINT).replace(/\/$/, '').replace(/\/api\/generate$/i, '');
-    return `${base}/api/generate`;
+function getNaisteraEndpoint() {
+    return `${NAISTERA_DEFAULT_ENDPOINT}/api/generate`;
 }
 
 function trimTrailingSlash(url) {
@@ -430,7 +444,7 @@ async function generateImageNaistera(prompt, options, settings) {
     const response = await fetchWithTimeout(url, {
         method: 'POST',
         headers: {
-            'Authorization': `Bearer ${settings.apiKey}`,
+            'Authorization': `Bearer ${settings.naisteraApiKey || settings.apiKey}`,
             'Content-Type': 'application/json',
         },
         body: JSON.stringify(body),
@@ -586,7 +600,8 @@ async function generateImageRoutMyGemini(base, model, fullPrompt, aspectRatio, i
 export async function generateImage(instruction, context = {}) {
     const settings = getImageGenSettings();
 
-    if (!settings.apiKey) throw new Error('Image API key not configured');
+    if (settings.apiType === 'naistera' && !settings.naisteraApiKey) throw new Error('Naistera API key not configured');
+    if (settings.apiType !== 'naistera' && settings.apiType !== 'routmy' && !settings.apiKey) throw new Error('Image API key not configured');
     if (settings.apiType !== 'naistera' && settings.apiType !== 'routmy' && !settings.endpoint) throw new Error('Image endpoint not configured');
     if (settings.apiType === 'routmy' && !settings.routmyApiKey) throw new Error('rout.my API key not configured');
     if (settings.apiType === 'openai' && !settings.model) throw new Error('Image model not configured');
@@ -682,7 +697,7 @@ export async function checkImageGenConnection() {
             throw new Error(`HTTP ${response.status}: ${txt.slice(0, 200)}`);
         }
     } else if (settings.apiType === 'naistera') {
-        const base = (settings.endpoint || NAISTERA_DEFAULT_ENDPOINT).replace(/\/$/, '');
+        const base = NAISTERA_DEFAULT_ENDPOINT.replace(/\/$/, '');
         const response = await fetchWithTimeout(base, {}, 10000);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
     } else if (settings.apiType === 'routmy') {

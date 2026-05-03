@@ -163,7 +163,7 @@ onBeforeUnmount(() => {
                     </div>
                 </div>
 
-                <ConnectionStatus :status="apiStatus" :error-message="errorMessage" @retry="checkConnection">
+                <ConnectionStatus v-if="activeTab === 'llm'" :status="apiStatus" :error-message="errorMessage" @retry="checkConnection">
                     <div class="preset-selector" @click="openApiPresetSelector">
                         <span>{{ activeApiPreset?.name || 'Default' }}</span>
                         <svg viewBox="0 0 24 24" style="width: 20px; height: 20px; fill: currentColor;"><path d="M7 10l5 5 5-5z"/></svg>
@@ -305,12 +305,6 @@ onBeforeUnmount(() => {
                             <input type="checkbox" v-model="embeddingSettings.useSame" @change="onEmbeddingInput('useSame', $event.target.checked)" class="vk-switch">
                         </div>
                         <template v-if="!embeddingSettings.useSame">
-                            <ConnectionStatus :status="embeddingStatus" :error-message="embeddingError" @retry="testEmbedding">
-                                <div class="preset-selector" @click="openProviderSelector(SERVICE_NAMES.EMBEDDING)">
-                                    <span>{{ getActiveProfileMeta(SERVICE_NAMES.EMBEDDING).name }}</span>
-                                    <svg viewBox="0 0 24 24" style="width: 20px; height: 20px; fill: currentColor;"><path d="M7 10l5 5 5-5z"/></svg>
-                                </div>
-                            </ConnectionStatus>
                             <div class="settings-item">
                                 <label>{{ t('label_embedding_endpoint') || 'Embedding Endpoint' }}</label>
                                 <input type="text" v-model="embeddingSettings.endpoint" @input="onEmbeddingInput('endpoint', $event.target.value)" placeholder="http://127.0.0.1:11434/v1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">

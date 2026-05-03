@@ -8,7 +8,6 @@ import { showToast } from '@/core/states/toastState.js';
 import { fetchRemoteModels } from '@/core/config/APISettings.js';
 import { getActiveLLMProfile, SERVICE_NAMES } from '@/core/config/ProviderProfiles.js';
 import { useServiceProviders } from '@/composables/api/useServiceProviders.js';
-import ConnectionStatus from '@/components/ui/ConnectionStatus.vue';
 
 const {
     memoryProviderSettings,
@@ -96,16 +95,16 @@ const stableConversationCount = computed(() => {
 
 const generationSettingsSummary = computed(() => {
   const interval = normalizeAutoCreateInterval(props.memoryBook);
-  const autoCreate = props.memoryBook.settings?.autoCreateEnabled !== false ? 'auto on' : 'auto off';
-  const autoGenerate = props.memoryBook.settings?.autoGenerateEnabled === true ? 'auto text' : 'manual text';
-  const delayed = props.memoryBook.settings?.useDelayedAutomation !== false ? 'delayed' : 'immediate';
-  const target = props.memoryBook.settings?.injectionTarget === 'summary_macro' ? '{{summary}}' : 'summary block';
+  const autoCreate = props.memoryBook.settings?.autoCreateEnabled !== false ? t('memory_books_summary_auto_on') : t('memory_books_summary_auto_off');
+  const autoGenerate = props.memoryBook.settings?.autoGenerateEnabled === true ? t('memory_books_summary_auto_text') : t('memory_books_summary_manual_text');
+  const delayed = props.memoryBook.settings?.useDelayedAutomation !== false ? t('memory_books_summary_delayed') : t('memory_books_summary_immediate');
+  const target = props.memoryBook.settings?.injectionTarget === 'summary_macro' ? '{{summary}}' : t('memory_books_summary_summary_block');
   const maxEntries = Math.max(1, Math.min(20, Number(props.memoryBook.settings?.maxInjectedEntries || 7)));
   const batchSize = Math.max(1, Math.min(50, Number(props.memoryBook.settings?.batchSize || 3)));
   const outputTokens = Number.isFinite(Number(props.memoryBook.settings?.generationMaxTokens)) && Number(props.memoryBook.settings?.generationMaxTokens) > 0
-    ? `${Math.round(Number(props.memoryBook.settings.generationMaxTokens))} out`
-    : 'auto out';
-  return `${interval} msgs • batch ${batchSize} • ${outputTokens} • ${autoCreate} • ${autoGenerate} • ${delayed} • ${target} • ${maxEntries} in prompt`;
+    ? `${Math.round(Number(props.memoryBook.settings.generationMaxTokens))} ${t('memory_books_summary_out')}`
+    : t('memory_books_summary_auto_out');
+  return `${interval} ${t('memory_books_summary_msgs')} • ${t('memory_books_summary_batch')} ${batchSize} • ${outputTokens} • ${autoCreate} • ${autoGenerate} • ${delayed} • ${target} • ${maxEntries} ${t('memory_books_summary_in_prompt')}`;
 });
 
 const statusSummary = computed(() => {
@@ -185,13 +184,13 @@ async function openQuickModelSelector() {
   }
 
   if (!endpoint) {
-    showToast('Endpoint not configured. Set it in Generation Settings.');
+    showToast(t('memory_books_endpoint_not_configured'));
     return;
   }
 
   showBottomSheet({
-    title: 'Loading models...',
-    items: [{ label: 'Fetching available models...', onClick: () => {} }]
+    title: t('memory_books_loading_models'),
+    items: [{ label: t('memory_books_fetching_models'), onClick: () => {} }]
   });
 
   try {
@@ -206,19 +205,19 @@ async function openQuickModelSelector() {
       }
     }));
     if (!models.length) {
-      items.push({ label: 'No models found', onClick: closeBottomSheet });
+      items.push({ label: t('memory_books_no_models'), onClick: closeBottomSheet });
     }
     items.push({
-      label: 'Enter model name manually',
+      label: t('memory_books_enter_model_manually'),
       onClick: () => {
         closeBottomSheet();
         setTimeout(() => {
           showBottomSheet({
-            title: 'Enter Model Name',
+            title: t('memory_books_enter_model_name'),
             input: {
-              placeholder: 'Model name',
+              placeholder: t('memory_books_model_placeholder'),
               value: currentModel,
-              confirmLabel: 'Save',
+              confirmLabel: t('btn_save'),
               onConfirm: (value) => {
                 closeBottomSheet();
                 emit('change-model', value.trim());
@@ -229,11 +228,11 @@ async function openQuickModelSelector() {
       }
     });
     closeBottomSheet();
-    setTimeout(() => showBottomSheet({ title: 'Select Model', items }), 50);
+    setTimeout(() => showBottomSheet({ title: t('label_model'), items }), 50);
   } catch (e) {
     console.warn('Failed to fetch models for quick memory model switch:', e);
     closeBottomSheet();
-    showToast('Failed to fetch models: ' + (e.message || String(e)));
+    showToast(t('memory_books_no_models') + ': ' + (e.message || String(e)));
   }
 }
 
@@ -299,14 +298,10 @@ function handleBack() {
 
 function handleOpenSettings() {
   emit('open-settings');
-  // Don't close, just go back to magic drawer
-  handleBack();
 }
 
 function handleOpenMaintenance() {
   emit('open-maintenance');
-  // Don't close, just go back to magic drawer
-  handleBack();
 }
 
 function handleReindexAll() {
@@ -332,18 +327,15 @@ function handleCancelDraft(draftId) {
 
 function handleSearchTypeClick() {
   emit('update-search-type');
-  close();
 }
 
 function handleEntryClick(entry) {
   emit('open-preview', { entry, kind: 'Memory Entry' });
-  close();
 }
 
 function handleDraftClick(draft) {
   if (!draft?.content) return;
   emit('open-preview', { entry: draft, kind: 'Memory Draft' });
-  close();
 }
 
 function handleApproveDraft(draftId) {
@@ -368,7 +360,7 @@ defineExpose({ open, close });
 <template>
   <SheetView
     ref="sheet"
-    title="Memory Books"
+    :title="t('magic_memory_books')"
     :show-back="true"
     :fit-content="false"
     @close="onSheetClose"
@@ -383,66 +375,62 @@ defineExpose({ open, close });
 {{ characterName }}
 </div>
             <div class="memory-session-note">
-Session {{ sessionId }}
+{{ t('memory_books_session') }} {{ sessionId }}
 </div>
           </div>
           <div class="memory-session-chip">
-{{ stableConversationCount }} stable msgs
+{{ stableConversationCount }} {{ t('memory_books_stable_msgs') }}
 </div>
         </div>
         <div class="memory-session-overview-meta">
 {{ generationSettingsSummary }}
 </div>
         <div class="memory-quick-model-row" @click="openQuickModelSelector">
-          <span class="memory-quick-model-label">Model</span>
+          <span class="memory-quick-model-label">{{ t('label_model') }}</span>
           <span class="memory-quick-model-value">{{ currentMemoryModelLabel }}</span>
           <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
         </div>
       </div>
 
       <div class="memory-settings-item">
-        <label>Search Type</label>
+        <label>{{ t('label_search_type') }}</label>
         <div class="memory-clickable-selector" @click="handleSearchTypeClick">
           <span>
-            {{ memorySearchType === 'both' ? 'Combined' : memorySearchType === 'vector' ? 'Vector' : 'Keys' }}
+            {{ memorySearchType === 'both' ? t('memory_books_search_combined') : memorySearchType === 'vector' ? t('memory_books_search_vector') : t('memory_books_search_keys') }}
           </span>
           <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
         </div>
-        <div class="memory-note">
-Choose keyword retrieval, vector retrieval, or a combined mode for this session.
-</div>
+        <div class="memory-note">{{ t('memory_books_search_type_note') }}</div>
       </div>
-      <div v-if="!shouldEnableVectorSearch" class="memory-note">
-        Embeddings are not configured, so vector search is unavailable.
-      </div>
+      <div v-if="!shouldEnableVectorSearch" class="memory-note">{{ t('memory_books_no_embeddings') }}</div>
 
       <!-- Status Summary -->
       <div class="memory-status-summary">
         <div class="memory-status-summary-item ok">
           <strong>{{ statusSummary.active || 0 }}</strong>
-          <span>active</span>
+          <span>{{ t('memory_books_status_active') }}</span>
         </div>
         <div class="memory-status-summary-item warning">
           <strong>{{ statusSummary.needs_rebuild || 0 }}</strong>
-          <span>needs rebuild</span>
+          <span>{{ t('memory_books_status_needs_rebuild') }}</span>
         </div>
         <div class="memory-status-summary-item danger">
           <strong>{{ staleCoverageCount || 0 }}</strong>
-          <span>stale messages</span>
+          <span>{{ t('memory_books_status_stale') }}</span>
         </div>
         <div class="memory-status-summary-item draft">
           <strong>{{ pendingDrafts.length || 0 }}</strong>
-          <span>drafts</span>
+          <span>{{ t('memory_books_status_drafts') }}</span>
         </div>
       </div>
 
       <!-- Action Buttons -->
       <div class="memory-actions">
         <button type="button" class="memory-btn memory-btn-secondary" @click="handleOpenSettings">
-          Generation Settings
+          {{ t('memory_books_btn_gen_settings') }}
         </button>
         <button type="button" class="memory-btn memory-btn-secondary" @click="handleOpenMaintenance">
-          Maintenance
+          {{ t('memory_books_btn_maintenance') }}
         </button>
         <button
           type="button"
@@ -450,17 +438,17 @@ Choose keyword retrieval, vector retrieval, or a combined mode for this session.
           :disabled="!vectorEnabled"
           @click="handleReindexAll"
         >
-          Reindex All
+          {{ t('memory_books_btn_reindex') }}
         </button>
         <button type="button" class="memory-btn memory-btn-primary" @click="close">
-          Close
+          {{ t('btn_close') }}
         </button>
       </div>
 
       <!-- Provider Settings -->
       <div class="memory-sheet-section" style="margin-bottom: 8px;">
         <div class="memory-sheet-section-head">
-          <label>Provider Configuration</label>
+          <label>{{ t('memory_books_provider_config') }}</label>
         </div>
         <div class="memory-settings-item-checkbox">
             <div class="memory-settings-text-col">
@@ -472,12 +460,6 @@ Choose keyword retrieval, vector retrieval, or a combined mode for this session.
             <input type="checkbox" :checked="memoryProviderSettings.useSame" @change="onMemoryProviderInput('useSame', $event.target.checked)" class="vk-switch">
         </div>
         <template v-if="!memoryProviderSettings.useSame">
-            <ConnectionStatus status="idle" :error-message="''" @retry="() => {}">
-                <div class="preset-selector" @click="openProviderSelector(SERVICE_NAMES.MEMORY_BOOKS)" style="margin-bottom: 8px;">
-                    <span>{{ getActiveProfileMeta(SERVICE_NAMES.MEMORY_BOOKS).name }}</span>
-                    <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
-                </div>
-            </ConnectionStatus>
             <div class="memory-settings-item">
                 <label>{{ t('label_memory_endpoint') || 'Memory Gen Endpoint' }}</label>
                 <input type="text" :value="memoryProviderSettings.endpoint" @input="onMemoryProviderInput('endpoint', $event.target.value)" placeholder="http://127.0.0.1:5000/v1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="width: 100%; border: 1px solid var(--border-color); background: var(--bg-item); padding: 12px; border-radius: 12px; color: var(--text-primary); font-size: 15px;">
@@ -498,16 +480,16 @@ Choose keyword retrieval, vector retrieval, or a combined mode for this session.
         <template v-if="draftsNeedingGeneration.length > 0 || memoryDraftState.active">
           <div class="memory-batch-info">
             <template v-if="memoryDraftState.active">
-              <strong>Generating</strong>
+              <strong>{{ t('memory_books_batch_generating') }}</strong>
               <template v-if="memoryDraftState.activeCount > 1">
-                {{ memoryDraftState.activeCount }} drafts in parallel
+                {{ memoryDraftState.activeCount }} {{ t('memory_books_drafts_in_parallel') }}
               </template>
               <template v-else>
-                {{ memoryDraftState.label || 'memory draft' }}
+                {{ memoryDraftState.label || t('memory_books_draft_label') }}
               </template>
             </template>
             <template v-else>
-              <strong>{{ draftsNeedingGeneration.length }}</strong> draft{{ draftsNeedingGeneration.length > 1 ? 's' : '' }} need generation
+              <strong>{{ draftsNeedingGeneration.length }}</strong> {{ draftsNeedingGeneration.length > 1 ? t('memory_books_drafts_need_gen').split('|')[1].trim() : t('memory_books_drafts_need_gen').split('|')[0].trim() }}
             </template>
           </div>
           <div class="memory-batch-buttons">
@@ -518,20 +500,20 @@ Choose keyword retrieval, vector retrieval, or a combined mode for this session.
               @click.stop.prevent="handleBatchGenerate"
               @touchend.stop.prevent="handleBatchGenerate"
             >
-              {{ memoryDraftState.active ? 'Generate Remaining' : 'Generate Batch' }}
+              {{ memoryDraftState.active ? t('memory_books_btn_generate_remaining') : t('memory_books_btn_generate_batch') }}
             </button>
           </div>
         </template>
         <template v-else-if="uncoveredSegments.count > 0">
           <div class="memory-batch-info">
-            <strong>{{ uncoveredSegments.count }}</strong> uncovered messages ({{ uncoveredSegments.segmentsNeeded }} full segments of {{ uncoveredSegments.interval }})
+            <strong>{{ uncoveredSegments.count }}</strong> {{ t('memory_books_uncovered_msgs') }} ({{ uncoveredSegments.segmentsNeeded }} {{ t('memory_books_full_segments_of') }} {{ uncoveredSegments.interval }})
             <template v-if="uncoveredSegments.remainder > 0">
-• {{ uncoveredSegments.remainder }} left over
+• {{ uncoveredSegments.remainder }} {{ t('memory_books_batch_left_over') }}
 </template>
           </div>
           <div class="memory-batch-buttons">
             <button type="button" class="memory-btn memory-btn-secondary" :disabled="uncoveredSegments.segmentsNeeded === 0" @click.stop.prevent="handleScanChat" @touchend.stop.prevent="handleScanChat">
-              Scan Chat
+              {{ t('memory_books_btn_scan_chat') }}
             </button>
           </div>
         </template>
@@ -540,10 +522,10 @@ Choose keyword retrieval, vector retrieval, or a combined mode for this session.
       <!-- Pending Drafts Section -->
       <div v-if="pendingDrafts.length > 0" class="memory-sheet-section">
         <div class="memory-sheet-section-head">
-          <label>Pending Drafts</label>
+          <label>{{ t('memory_books_section_pending') }}</label>
           <div class="memory-section-head-actions">
             <button type="button" class="memory-head-btn destructive" @click.stop.prevent="handleDeleteAllDrafts">
-              Delete All Pending
+              {{ t('memory_books_delete_all_pending') }}
             </button>
             <span>{{ pendingDrafts.length }}</span>
           </div>
@@ -559,29 +541,29 @@ Choose keyword retrieval, vector retrieval, or a combined mode for this session.
             <div class="memory-entry-head">
               <div>
                 <div class="memory-entry-title">
-{{ draft.title || 'Untitled draft' }}
+{{ draft.title || t('memory_books_untitled_draft') }}
 </div>
                 <div class="memory-entry-meta">
                   <template v-if="isDraftGenerating(draft.id)">
-                    <span style="color:#ffd700;">generating...</span>
+                    <span style="color:#ffd700;">{{ t('memory_books_generating') }}</span>
                     <template v-if="getDraftProgress(draft.id)?.elapsedMs > 0">
 • {{ formatElapsedSeconds(getDraftProgress(draft.id).elapsedMs) }}
 </template>
                   </template>
                   <template v-else-if="!draft.content && draft.status === 'pending_generation'">
-                    <span style="color:#ffd700;">needs generation</span>
+                    <span style="color:#ffd700;">{{ t('memory_books_needs_generation') }}</span>
                     <template v-if="draft.messageRange">
-• messages {{ draft.messageRange.start }}-{{ draft.messageRange.end }}
+• {{ t('memory_books_msg_range') }} {{ draft.messageRange.start }}-{{ draft.messageRange.end }}
 </template>
                   </template>
                   <template v-else>
-                    <span>pending approval</span>
+                    <span>{{ t('memory_books_pending_approval') }}</span>
                     <template v-if="draft.generatedAt">
-• generated {{ formatGenerationTime(draft.generatedAt) }}
+• {{ t('memory_books_generated_at') }} {{ formatGenerationTime(draft.generatedAt) }}
 </template>
                   </template>
                   <template v-if="vectorEnabled && draft.content">
-• hybrid
+• {{ t('memory_books_badge_hybrid') }}
 </template>
                   <template v-if="draft.keys && draft.keys.length && draft.content">
                     • {{ draft.keys.slice(0, 3).join(', ') }}
@@ -589,9 +571,9 @@ Choose keyword retrieval, vector retrieval, or a combined mode for this session.
                 </div>
               </div>
               <div class="memory-draft-actions" @click.stop>
-                <span v-if="isDraftGenerating(draft.id)" class="memory-status-badge" style="background:rgba(255,215,0,0.1);color:#ffd700;">generating</span>
-                <span v-else-if="!draft.content && draft.status === 'pending_generation'" class="memory-status-badge" style="background:rgba(255,215,0,0.1);color:#ffd700;">needs gen</span>
-                <span v-else class="memory-status-badge draft">draft</span>
+                <span v-if="isDraftGenerating(draft.id)" class="memory-status-badge" style="background:rgba(255,215,0,0.1);color:#ffd700;">{{ t('memory_books_badge_generating') }}</span>
+                <span v-else-if="!draft.content && draft.status === 'pending_generation'" class="memory-status-badge" style="background:rgba(255,215,0,0.1);color:#ffd700;">{{ t('memory_books_badge_needs_gen') }}</span>
+                <span v-else class="memory-status-badge draft">{{ t('memory_books_badge_draft') }}</span>
                 <span v-if="vectorEnabled" class="memory-status-badge vector">vec</span>
                 <button
                   v-if="isDraftGenerating(draft.id)"
@@ -600,7 +582,7 @@ Choose keyword retrieval, vector retrieval, or a combined mode for this session.
                   @click.stop.prevent="handleCancelDraft(draft.id)"
                   @touchend.stop.prevent="handleCancelDraft(draft.id)"
                 >
-                  Stop
+                  {{ t('memory_books_btn_stop') }}
                 </button>
                 <button
                   v-else-if="!draft.content && draft.status === 'pending_generation'"
@@ -609,7 +591,7 @@ Choose keyword retrieval, vector retrieval, or a combined mode for this session.
                   @click.stop.prevent="handleGenerateDraft(draft.id)"
                   @touchend.stop.prevent="handleGenerateDraft(draft.id)"
                 >
-                  Generate
+                  {{ t('memory_books_btn_generate') }}
                 </button>
                 <button
                   v-else
@@ -619,7 +601,7 @@ Choose keyword retrieval, vector retrieval, or a combined mode for this session.
                   @click.stop.prevent="handleApproveDraft(draft.id)"
                   @touchend.stop.prevent="handleApproveDraft(draft.id)"
                 >
-                  Approve
+                  {{ t('memory_books_btn_approve') }}
                 </button>
                 <button
                   type="button"
@@ -627,7 +609,7 @@ Choose keyword retrieval, vector retrieval, or a combined mode for this session.
                   @click.stop.prevent="handleDeleteDraft(draft.id)"
                   @touchend.stop.prevent="handleDeleteDraft(draft.id)"
                 >
-                  Delete
+                  {{ t('btn_delete') }}
                 </button>
               </div>
             </div>
@@ -635,8 +617,8 @@ Choose keyword retrieval, vector retrieval, or a combined mode for this session.
               <template v-if="draft.content">
                 {{ draft.content.slice(0, 180) }}
               </template>
-              <span v-else-if="isDraftGenerating(draft.id)" style="color:#ffd700;">Generating... {{ formatElapsedSeconds(getDraftProgress(draft.id)?.elapsedMs || 0) }}</span>
-              <span v-else style="color:var(--text-gray);">No content yet — click Generate to create</span>
+              <span v-else-if="isDraftGenerating(draft.id)" style="color:#ffd700;">{{ t('memory_books_generating_elapsed') }} {{ formatElapsedSeconds(getDraftProgress(draft.id)?.elapsedMs || 0) }}</span>
+              <span v-else style="color:var(--text-gray);">{{ t('memory_books_no_content') }}</span>
             </div>
           </div>
         </div>
@@ -645,7 +627,7 @@ Choose keyword retrieval, vector retrieval, or a combined mode for this session.
       <!-- Approved Memories Section -->
       <div class="memory-sheet-section">
         <div class="memory-sheet-section-head">
-          <label>Approved Memories</label>
+          <label>{{ t('memory_books_section_approved') }}</label>
           <span>{{ entries.length }}</span>
         </div>
         <div v-if="entries.length > 0" class="memory-entry-list">
@@ -659,11 +641,11 @@ Choose keyword retrieval, vector retrieval, or a combined mode for this session.
             <div class="memory-entry-head">
               <div>
                 <div class="memory-entry-title">
-{{ entry.title || 'Untitled memory' }}
+{{ entry.title || t('memory_books_untitled_memory') }}
 </div>
                 <div class="memory-entry-meta">
-                  {{ entry.status || 'active' }} • {{ normalizeEntryMessageIds(entry).length }} messages
-                  {{ vectorEnabled ? ' • hybrid' : ' • keys' }}
+                  {{ entry.status === 'needs_rebuild' ? t('memory_books_entry_needs_rebuild') : t('memory_books_entry_active') }} • {{ normalizeEntryMessageIds(entry).length }} {{ t('memory_books_entry_messages') }}
+                  {{ vectorEnabled ? ' • ' + t('memory_books_badge_hybrid') : ' • ' + t('memory_books_search_keys') }}
                   <template v-if="entry.keys && entry.keys.length">
                     • {{ entry.keys.slice(0, 3).join(', ') }}
                   </template>
@@ -674,19 +656,19 @@ Choose keyword retrieval, vector retrieval, or a combined mode for this session.
                   class="memory-status-badge"
                   :class="entry.status === 'needs_rebuild' ? 'warning' : 'ok'"
                 >
-                  {{ entry.status === 'needs_rebuild' ? 'needs rebuild' : 'active' }}
+                  {{ entry.status === 'needs_rebuild' ? t('memory_books_entry_needs_rebuild') : t('memory_books_entry_active') }}
                 </span>
                 <span v-if="vectorEnabled" class="memory-status-badge vector">vec</span>
                 <span v-if="entry.id" class="memory-status-badge indexed">idx</span>
               </div>
             </div>
             <div class="memory-entry-preview">
-              {{ entry.content ? entry.content.slice(0, 180) : 'No content yet' }}
+              {{ entry.content ? entry.content.slice(0, 180) : t('memory_books_entry_no_content') }}
             </div>
           </div>
         </div>
         <div v-else class="memory-note">
-          No memory entries in this session yet.
+          {{ t('memory_books_no_entries') }}
         </div>
       </div>
     </div>
