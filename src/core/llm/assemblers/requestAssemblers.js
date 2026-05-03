@@ -1,7 +1,7 @@
 import { buildProviderPayload } from '@/core/llm/assemblers/payloadBuilderRegistry.js';
 import { createChatRequestIntent, createSummaryRequestIntent, createMemoryDraftRequestIntent } from '@/core/llm/assemblers/requestIntents.js';
 
-export function buildChatRequestPayload({ providerId, model, messages, temperature, topP, stream, reasoningEffort, maxTokens, stopString }) {
+export function buildChatRequestPayload({ providerId, model, messages, temperature, topP, stream, reasoningEffort, maxTokens, stopString, requestReasoning, omitTemperature, omitTopP, omitReasoning, omitReasoningEffort }) {
     const intent = createChatRequestIntent({
         model,
         messages,
@@ -9,8 +9,13 @@ export function buildChatRequestPayload({ providerId, model, messages, temperatu
         topP,
         stream,
         reasoningEffort,
+        requestReasoning,
         maxTokens,
-        stopString
+        stopString,
+        omitTemperature,
+        omitTopP,
+        omitReasoning,
+        omitReasoningEffort
     });
 
     return buildProviderPayload(providerId, intent);

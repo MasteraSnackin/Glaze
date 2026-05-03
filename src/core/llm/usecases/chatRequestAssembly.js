@@ -45,7 +45,11 @@ export async function executeFinalChatRequest({
     tagStart,
     tagEnd,
     callbacks,
-    onPreviewReady
+    onPreviewReady,
+    omitTemperature,
+    omitTopP,
+    omitReasoning,
+    omitReasoningEffort
 }) {
     const { onUpdate, onComplete, onError } = callbacks;
     const requestAssembly = await runGenerationHook('beforeRequestAssembly', {
@@ -83,8 +87,13 @@ export async function executeFinalChatRequest({
         topP: effectiveTopP,
         stream: effectiveStream,
         reasoningEffort: effectiveReasoningEffort,
+        requestReasoning,
         maxTokens: effectiveMaxTokens,
-        stopString: effectiveStopString
+        stopString: effectiveStopString,
+        omitTemperature,
+        omitTopP,
+        omitReasoning,
+        omitReasoningEffort
     });
 
     const requestEnvelopeRaw = await runGenerationHook('beforeRequestSend', {
