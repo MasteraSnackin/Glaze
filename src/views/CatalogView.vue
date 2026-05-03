@@ -459,20 +459,6 @@ onUnmounted(() => {
             @import="onSheetImport"
         />
 
-        <!-- Error State -->
-        <div v-if="catalogError && catalogResults.length === 0" class="catalog-empty">
-            <svg viewBox="0 0 24 24" class="empty-icon"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
-            <p>{{ catalogError }}</p>
-            <button class="retry-btn" @click="searchCatalog(true)">
-{{ t('btn_retry') }}
-</button>
-        </div>
-
-        <!-- Empty State -->
-        <div v-else-if="!catalogLoading && catalogResults.length === 0 && !catalogError" class="catalog-empty">
-            <svg viewBox="0 0 24 24" class="empty-icon"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
-            <p>{{ t('catalog_empty') }}</p>
-        </div>
 
         <!-- Character Grid -->
         <div class="catalog-scroll" ref="scrollEl" @scroll.passive="onScroll">
@@ -522,6 +508,21 @@ onUnmounted(() => {
                         <svg viewBox="0 0 24 24" class="chip-remove-icon"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
                     </div>
                 </div>
+            </div>
+
+            <!-- Error State -->
+            <div v-if="catalogError && catalogResults.length === 0" class="catalog-empty">
+                <svg viewBox="0 0 24 24" class="empty-icon"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+                <p>{{ catalogError }}</p>
+                <button class="retry-btn" @click="searchCatalog(true)">
+    {{ t('btn_retry') }}
+    </button>
+            </div>
+
+            <!-- Empty State -->
+            <div v-else-if="!catalogLoading && catalogResults.length === 0 && !catalogError" class="catalog-empty">
+                <svg viewBox="0 0 24 24" class="empty-icon"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+                <p>{{ t('catalog_empty') }}</p>
             </div>
 
             <!-- Results Count -->
