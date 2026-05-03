@@ -1,14 +1,14 @@
 /**
- * Pure JS LMDB reader for Isar-based Tavo backups.
- * Heuristically extracts JSON and texts without WebAssembly or native bindings.
+ * Pure JS LMDB/ObjectBox reader for Tavo backups.
+ * Uses FlatBuffer format for structured field extraction.
  */
 import JSZip from 'jszip';
 import { db } from '@/utils/db.js';
 import { importSillyTavernChat } from '@/core/services/chatImporter.js';
 import { convertSTPreset } from '@/core/services/presetImportService.js';
 
-// Basic Type Mapping from Isar Schema (extracted via heuristic)
 const TYPE_NAMES = {
+    0x0000: "_meta",
     0x0004: "character",
     0x0018: "conversation",
     0x001c: "model_setting",
@@ -20,9 +20,211 @@ const TYPE_NAMES = {
     0x0058: "ltm_settings",
     0x0060: "ltm",
     0x0064: "regex",
-    0x006c: "regex_conversation_ref",
-    0x0080: "lorebook"
+    0x0068: "regex_conversation_ref",
+    0x006c: "lorebook_entry",
+    0x0080: "lorebook",
+    0x0084: "lorebook_character_ref",
+    0x00a0: "ltm_conversation_ref",
+    0x00c0: "conversation_settings",
+    0x00dc: "ltm_settings_ref",
+    0x00e0: "message_metadata",
+    0x00e4: "vision_settings",
+    0x00e8: "vision_conversation_ref",
+    0x00ec: "ltm_personality",
+    0x00f0: "_unknown_f0"
 };
+
+function readFieldString(buf, offset) {
+    if (offset + 4 > buf.length) return null;
+    const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+    const strOffset = dv.getUint32(offset, true);
+    if (strOffset < 4) return null;
+    const strAbs = offset + strOffset;
+    if (strAbs + 4 > buf.length) return null;
+    const slen = dv.getUint32(strAbs, true);
+    if (slen === 0) return '';
+    if (slen > 1000000 || strAbs + 4 + slen > buf.length) return null;
+    try {
+        return new TextDecoder("utf-8").decode(buf.subarray(strAbs + 4, strAbs + 4 + slen)).replace(/\0+$/, '');
+    } catch { return null; }
+}
+
+function readFieldStringVector(buf, offset) {
+    if (offset + 4 > buf.length) return null;
+    const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+    const vecOffset = dv.getUint32(offset, true);
+    if (vecOffset < 4) return null;
+    const vecAbs = offset + vecOffset;
+    if (vecAbs + 4 > buf.length) return null;
+    const vlen = dv.getUint32(vecAbs, true);
+    if (vlen > 100000 || vecAbs + 4 + vlen * 4 > buf.length) return null;
+    const result = [];
+    for (let i = 0; i < vlen; i++) {
+        const elemPos = vecAbs + 4 + i * 4;
+        if (elemPos + 4 > buf.length) break;
+        const elemOff = dv.getUint32(elemPos, true);
+        if (elemOff < 4) break;
+        const elemAbs = elemPos + elemOff;
+        if (elemAbs + 4 > buf.length) break;
+        const eslen = dv.getUint32(elemAbs, true);
+        if (elemAbs + 4 + eslen > buf.length) break;
+        try {
+            result.push(new TextDecoder("utf-8").decode(buf.subarray(elemAbs + 4, elemAbs + 4 + eslen)).replace(/\0+$/, ''));
+        } catch { break; }
+    }
+    return result;
+}
+
+function readFieldInt64(buf, offset) {
+    if (offset + 8 > buf.length) return null;
+    const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+    return Number(dv.getBigInt64(offset, true));
+}
+
+function readFieldInt32(buf, offset) {
+    if (offset + 4 > buf.length) return null;
+    const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+    return dv.getInt32(offset, true);
+}
+
+function readFieldFloat64(buf, offset) {
+    if (offset + 8 > buf.length) return null;
+    const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+    return dv.getFloat64(offset, true);
+}
+
+function readFieldBool(buf, offset) {
+    if (offset >= buf.length) return null;
+    return buf[offset] !== 0;
+}
+
+function parseObjectBoxEntity(dataBuf, fieldDefs) {
+    if (dataBuf.length < 8) return {};
+    const dv = new DataView(dataBuf.buffer, dataBuf.byteOffset, dataBuf.byteLength);
+
+    const rootOffset = dv.getUint32(0, true);
+    if (rootOffset < 4 || rootOffset >= dataBuf.length) return {};
+
+    const tableStart = rootOffset;
+    if (tableStart + 4 > dataBuf.length) return {};
+    const soffset = dv.getInt32(tableStart, true);
+    const vtableStart = tableStart - soffset;
+    if (vtableStart < 0 || vtableStart + 4 > dataBuf.length) return {};
+
+    const vtableSize = dv.getUint16(vtableStart, true);
+    if (vtableSize < 4 || vtableSize > dataBuf.length) return {};
+    const numFields = (vtableSize - 4) / 2;
+
+    const offsets = [];
+    for (let j = 0; j < numFields; j++) {
+        const offPos = vtableStart + 4 + j * 2;
+        if (offPos + 2 > dataBuf.length) break;
+        offsets.push(dv.getUint16(offPos, true));
+    }
+
+    const result = {};
+    for (const def of fieldDefs) {
+        if (def.index >= offsets.length) continue;
+        const fieldOffset = offsets[def.index];
+        if (fieldOffset === 0) continue;
+
+        const absPos = tableStart + fieldOffset;
+
+        let val;
+        switch (def.type) {
+            case 'string': val = readFieldString(dataBuf, absPos); break;
+            case 'string_vector': val = readFieldStringVector(dataBuf, absPos); break;
+            case 'int64': val = readFieldInt64(dataBuf, absPos); break;
+            case 'int32': val = readFieldInt32(dataBuf, absPos); break;
+            case 'float64': val = readFieldFloat64(dataBuf, absPos); break;
+            case 'bool': val = readFieldBool(dataBuf, absPos); break;
+            default: val = null;
+        }
+        if (val !== null && val !== undefined) {
+            result[def.name] = val;
+        }
+    }
+    return result;
+}
+
+const CHARACTER_FIELDS = [
+    { index: 1, name: 'name', type: 'string' },
+    { index: 3, name: 'creatorNotesMultilingual', type: 'string' },
+    { index: 4, name: 'scenario', type: 'string' },
+    { index: 5, name: 'first_mes', type: 'string' },
+    { index: 6, name: 'alternate_greetings', type: 'string' },
+    { index: 13, name: 'avatarPath', type: 'string' },
+    { index: 14, name: 'description', type: 'string' },
+    { index: 15, name: 'creator_notes', type: 'string' },
+    { index: 16, name: 'fav', type: 'bool' },
+    { index: 21, name: 'mes_example', type: 'string' },
+    { index: 22, name: 'personality', type: 'string' },
+    { index: 23, name: 'system_prompt', type: 'string' },
+    { index: 24, name: 'post_history_instructions', type: 'string' },
+    { index: 25, name: 'creator', type: 'string' },
+    { index: 26, name: 'character_version', type: 'string' },
+    { index: 27, name: 'extensions_json', type: 'string' },
+];
+
+const MESSAGE_FIELDS = [
+    { index: 1, name: 'characterId', type: 'int64' },
+    { index: 2, name: 'text', type: 'string' },
+    { index: 4, name: 'swipe_text', type: 'string' },
+    { index: 5, name: 'charName', type: 'string' },
+    { index: 6, name: 'avatarPath', type: 'string' },
+    { index: 7, name: 'timestamp', type: 'int64' },
+    { index: 8, name: 'isHidden', type: 'bool' },
+    { index: 10, name: 'extras_json', type: 'string' },
+];
+
+const CONVERSATION_FIELDS = [
+    { index: 2, name: 'createdAt', type: 'int64' },
+    { index: 3, name: 'updatedAt', type: 'int64' },
+    { index: 17, name: 'presetId', type: 'int64' },
+    { index: 18, name: 'characterId', type: 'int64' },
+];
+
+const ENDPOINT_FIELDS = [
+    { index: 1, name: 'name', type: 'string' },
+    { index: 3, name: 'model', type: 'string' },
+    { index: 4, name: 'protocol', type: 'string' },
+    { index: 5, name: 'url', type: 'string' },
+    { index: 6, name: 'stream', type: 'bool' },
+    { index: 13, name: 'params_json', type: 'string' },
+];
+
+const PRESET_FIELDS = [
+    { index: 1, name: 'name', type: 'string' },
+    { index: 4, name: 'format_json', type: 'string' },
+    { index: 5, name: 'prompts_json', type: 'string' },
+];
+
+const PERSONA_FIELDS = [
+    { index: 1, name: 'avatarPath', type: 'string' },
+    { index: 3, name: 'name', type: 'string' },
+    { index: 4, name: 'description', type: 'string' },
+];
+
+const LOREBOOK_FIELDS = [
+    { index: 1, name: 'name', type: 'string' },
+    { index: 4, name: 'entries_json', type: 'string' },
+];
+
+const REGEX_FIELDS = [
+    { index: 1, name: 'name', type: 'string' },
+    { index: 4, name: 'rules_json', type: 'string' },
+];
+
+const LTM_SETTINGS_FIELDS = [
+    { index: 1, name: 'summaryPrompt', type: 'string' },
+    { index: 2, name: 'memoryPrompt', type: 'string' },
+    { index: 4, name: 'maxTokens', type: 'int64' },
+    { index: 11, name: 'role', type: 'string' },
+];
+
+const LTM_FIELDS = [
+    { index: 4, name: 'updatedAt', type: 'int64' },
+];
 
 function extractStringsAndJson(uint8Array) {
     const items = [];
@@ -44,17 +246,13 @@ function extractStringsAndJson(uint8Array) {
                             const parsed = JSON.parse(text);
                             items.push({ type: "json", data: parsed });
                             continue;
-                        } catch (e) {
-                            // fall back to text
-                        }
+                        } catch (e) { }
                     }
                     if (!text.includes('\ufffd')) {
                         items.push({ type: "text", data: text });
                     }
                 }
-            } catch (e) {
-                // Ignore decoding errors
-            }
+            } catch (e) { }
         } else {
             i++;
         }
@@ -69,21 +267,32 @@ export function parseTavoLMDB(arrayBuffer) {
     const pageSize = 4096;
 
     const categories = {};
-    for (const k of Object.values(TYPE_NAMES)) categories[k] = new Map();
+    for (const k of Object.values(TYPE_NAMES)) {
+        if (!k.startsWith('_')) categories[k] = new Map();
+    }
 
-    let bigCount = 0;
+    const STRUCTURED_PARSERS = {
+        character: CHARACTER_FIELDS,
+        message: MESSAGE_FIELDS,
+        conversation: CONVERSATION_FIELDS,
+        endpoint: ENDPOINT_FIELDS,
+        preset: PRESET_FIELDS,
+        persona_ref: PERSONA_FIELDS,
+        lorebook: LOREBOOK_FIELDS,
+        regex: REGEX_FIELDS,
+        ltm_settings: LTM_SETTINGS_FIELDS,
+        ltm: LTM_FIELDS,
+    };
 
     for (let pOffset = 0; pOffset < bufLen; pOffset += pageSize) {
         if (pOffset + 16 > bufLen) break;
         const flags = dv.getUint16(pOffset + 10, true);
-        if ((flags & 0x02) !== 0x02) continue; // P_LEAF
+        if ((flags & 0x02) !== 0x02) continue;
 
         const lower = dv.getUint16(pOffset + 12, true);
-        // Validate lower: must be within [16, pageSize] and not beyond buffer
         if (lower < 16 || lower > pageSize || pOffset + lower > bufLen) continue;
 
         const numNodes = (lower - 16) / 2;
-        // Sanity check on node count (max ~2032 for a full 4K page)
         if (numNodes <= 0 || numNodes > (pageSize - 16) / 2) continue;
 
         for (let i = 0; i < numNodes; i++) {
@@ -91,47 +300,39 @@ export function parseTavoLMDB(arrayBuffer) {
             if (nodePtrOff + 2 > bufLen) break;
 
             const nodeOffset = dv.getUint16(nodePtrOff, true);
-            // Node offset must point into the page (after header, before page end)
             if (nodeOffset === 0 || nodeOffset < 16 || nodeOffset >= pageSize) continue;
 
             const ptr = pOffset + nodeOffset;
-            // Need at least 16 bytes for node header + key prefix (8 + 8)
             if (ptr + 16 > bufLen) continue;
 
             const mn_dsize = dv.getUint32(ptr, true);
             const mn_flags = dv.getUint16(ptr + 4, true);
             const mn_ksize = dv.getUint16(ptr + 6, true);
 
-            // Ensure valid Isar key (0x18 prefix) and key fits in buffer
             if (mn_ksize < 8 || ptr + 8 + mn_ksize > bufLen) continue;
             if (buffer[ptr + 8] !== 0x18) continue;
 
             const type_id = (buffer[ptr + 10] << 8) | buffer[ptr + 11];
             const type_name = TYPE_NAMES[type_id];
-            if (!type_name) continue;
+            if (!type_name || type_name.startsWith('_')) continue;
 
-            const entity_id = dv.getUint32(ptr + 12, false); // BIG ENDIAN
+            const entity_id = dv.getUint32(ptr + 12, false);
 
             let dataBuffer = null;
             const keyOffset = ptr + 8;
             const dataOffset = keyOffset + mn_ksize;
 
-            // Inline data
             if (mn_flags === 0) {
                 if (dataOffset + mn_dsize <= bufLen) {
                     dataBuffer = buffer.subarray(dataOffset, dataOffset + mn_dsize);
                 }
-            }
-            // Overflow pages (F_BIGDATA)
-            else if (mn_flags === 1) {
-                bigCount++;
+            } else if (mn_flags === 1) {
                 if (dataOffset + 4 <= bufLen) {
                     const pgno = dv.getUint32(dataOffset, true);
                     const ovfOffset = pgno * pageSize;
-                    // Ensure overflow page header + data fits in buffer
                     if (ovfOffset + 16 + mn_dsize <= bufLen) {
                         const ovfFlags = dv.getUint16(ovfOffset + 10, true);
-                        if ((ovfFlags & 0x04) === 0x04) { // P_OVERFLOW
+                        if ((ovfFlags & 0x04) === 0x04) {
                             dataBuffer = buffer.subarray(ovfOffset + 16, ovfOffset + 16 + mn_dsize);
                         }
                     }
@@ -139,16 +340,18 @@ export function parseTavoLMDB(arrayBuffer) {
             }
 
             if (dataBuffer && dataBuffer.length > 0) {
-                const fields = extractStringsAndJson(dataBuffer);
-                const entry = { entity_id, fields };
+                const entry = { entity_id, fields: [], structured: {} };
 
-                if (type_name === 'message' && dataBuffer.length >= 88) {
-                    try {
-                        const msgDv = new DataView(dataBuffer.buffer, dataBuffer.byteOffset, dataBuffer.byteLength);
-                        entry.timestamp = Number(msgDv.getBigInt64(48, true));
-                        entry.conversationId = Number(msgDv.getBigInt64(64, true));
-                        entry.characterId = Number(msgDv.getBigInt64(80, true));
-                    } catch (e) { }
+                if (STRUCTURED_PARSERS[type_name]) {
+                    entry.structured = parseObjectBoxEntity(dataBuffer, STRUCTURED_PARSERS[type_name]);
+                }
+
+                entry.fields = extractStringsAndJson(dataBuffer);
+
+                if (type_name === 'message') {
+                    const s = entry.structured;
+                    if (s.timestamp) entry.timestamp = s.timestamp;
+                    if (s.characterId !== undefined) entry.characterId = s.characterId;
                 }
 
                 categories[type_name].set(entity_id, entry);
@@ -156,35 +359,31 @@ export function parseTavoLMDB(arrayBuffer) {
         }
     }
 
-    // Convert maps back to arrays
     for (const k in categories) {
         categories[k] = Array.from(categories[k].values());
     }
 
-    // Group chats
     const chats = [];
     if (categories.conversation && categories.message) {
-        const msgByConv = {};
+        const msgByChar = {};
         for (const msg of categories.message) {
-            if (msg.conversationId) {
-                if (!msgByConv[msg.conversationId]) msgByConv[msg.conversationId] = [];
-                msgByConv[msg.conversationId].push(msg);
+            const charId = msg.characterId || (msg.structured && msg.structured.characterId);
+            if (charId) {
+                if (!msgByChar[charId]) msgByChar[charId] = [];
+                msgByChar[charId].push(msg);
             }
         }
         for (const conv of categories.conversation) {
-            const cid = conv.entity_id;
-            const msgs = msgByConv[cid] || [];
+            const convCharId = conv.structured && conv.structured.characterId;
+            const msgs = msgByChar[convCharId] || [];
             msgs.sort((a, b) => (a.timestamp || a.entity_id) - (b.timestamp || b.entity_id));
-            chats.push({ conversation: conv, messages: msgs });
+            chats.push({ conversation: conv, messages: msgs, characterId: convCharId });
         }
     }
 
     return { categories, chats };
 }
 
-/**
- * Base64 decoder for shared prefs decoding
- */
 export async function decodeSharedPreferences(prefsBuffer) {
     const text = new TextDecoder("utf-8").decode(prefsBuffer);
     try {
@@ -194,14 +393,8 @@ export async function decodeSharedPreferences(prefsBuffer) {
             if (typeof v === 'string') {
                 try {
                     const str = atob(v);
-                    try {
-                        decoded[k] = JSON.parse(str);
-                    } catch (e) {
-                        decoded[k] = str;
-                    }
-                } catch {
-                    decoded[k] = v;
-                }
+                    try { decoded[k] = JSON.parse(str); } catch (e) { decoded[k] = str; }
+                } catch { decoded[k] = v; }
             } else if (Array.isArray(v)) {
                 decoded[k] = v.map(item => {
                     if (typeof item === 'string') {
@@ -222,18 +415,17 @@ export async function decodeSharedPreferences(prefsBuffer) {
     }
 }
 
-/**
- * Imports a Tavo (.tbk) Backup internally inside Glaze via LMDB heuristic parsing.
- * @param {File|Blob} zipFile
- * @param {Function} [onProgress]
- */
+function tryParseJson(str) {
+    if (!str || typeof str !== 'string') return null;
+    try { return JSON.parse(str); } catch { return null; }
+}
+
 export async function importTavoBackupFromZip(zipFile, onProgress) {
     const progress = (msg) => { if (onProgress) onProgress(msg); };
     const result = { characters: 0, lorebooks: 0, presets: 0, chats: 0, errors: [] };
 
     const zip = await JSZip.loadAsync(zipFile);
 
-    // ── Clear existing DB before import ─────────────────────────────────────
     progress('clearing');
     const database = await db.open();
     await new Promise((res, rej) => {
@@ -241,7 +433,6 @@ export async function importTavoBackupFromZip(zipFile, onProgress) {
         tx.objectStore('characters').clear();
         tx.objectStore('personas').clear();
         tx.objectStore('keyvalue').clear();
-
         tx.oncomplete = res;
         tx.onerror = () => rej(tx.error);
     });
@@ -256,12 +447,9 @@ export async function importTavoBackupFromZip(zipFile, onProgress) {
     const mdbBuffer = await zip.files[mdbFile].async('arraybuffer');
     const tavoData = parseTavoLMDB(mdbBuffer);
 
-    // Helper: resolve a charaCard/... path from the ZIP and return a base64 data URL
     async function readAvatarFromZip(charaCardPath) {
         if (!charaCardPath || !charaCardPath.includes('/')) return null;
-        // Strip leading path component and look in CharacterCards/
         const filename = charaCardPath.split('/').pop();
-        // Try to find the file in the zip (case-insensitive, any folder)
         const zipKey = Object.keys(zip.files).find(k =>
             k.toLowerCase().endsWith(('CharacterCards/' + filename).toLowerCase()) ||
             k.toLowerCase().endsWith(filename.toLowerCase())
@@ -275,9 +463,7 @@ export async function importTavoBackupFromZip(zipFile, onProgress) {
                 reader.onerror = () => resolve(null);
                 reader.readAsDataURL(blob);
             });
-        } catch (e) {
-            return null;
-        }
+        } catch (e) { return null; }
     }
 
     // Process Personas
@@ -285,30 +471,42 @@ export async function importTavoBackupFromZip(zipFile, onProgress) {
     if (tavoData.categories.persona_ref && tavoData.categories.persona_ref.length > 0) {
         for (const pref of tavoData.categories.persona_ref) {
             try {
-                // Filter out empty strings
-                const strings = pref.fields.filter(f => f.type === 'text' && f.data.trim().length > 0).map(f => f.data);
-                if (strings.length < 2) continue;
+                const s = pref.structured || {};
+                const name = s.name || '';
+                const prompt = s.description || '';
+                const avatarPath = s.avatarPath || '';
 
-                // Avatar is stored as charaCard/...
-                const rawAvatar = strings.find(s => s.startsWith('charaCard/'));
-                const textOnly = strings.filter(s => s !== rawAvatar);
-
-                let prompt = "";
-                let name = "User Persona";
-                if (textOnly.length >= 2) {
-                    // Usually name is much shorter than description
-                    textOnly.sort((a, b) => b.length - a.length);
-                    prompt = textOnly[0];
-                    name = textOnly[textOnly.length - 1]; // smallest
-                } else if (textOnly.length > 0) {
-                    name = textOnly[0];
+                if (!name && !prompt) {
+                    const strings = pref.fields.filter(f => f.type === 'text' && f.data.trim().length > 0).map(f => f.data);
+                    if (strings.length < 1) continue;
+                    const rawAvatar = strings.find(st => st.startsWith('charaCard/'));
+                    const textOnly = strings.filter(st => st !== rawAvatar);
+                    if (textOnly.length >= 2) {
+                        textOnly.sort((a, b) => b.length - a.length);
+                        const persona = {
+                            id: Date.now().toString(36) + Math.random().toString(36).substr(2),
+                            prompt: textOnly[0],
+                            name: textOnly[textOnly.length - 1],
+                            avatar: rawAvatar ? await readAvatarFromZip(rawAvatar) : null
+                        };
+                        await db.put('personas', persona);
+                    } else if (textOnly.length > 0) {
+                        const persona = {
+                            id: Date.now().toString(36) + Math.random().toString(36).substr(2),
+                            prompt: '',
+                            name: textOnly[0],
+                            avatar: rawAvatar ? await readAvatarFromZip(rawAvatar) : null
+                        };
+                        await db.put('personas', persona);
+                    }
+                    continue;
                 }
 
                 const persona = {
                     id: Date.now().toString(36) + Math.random().toString(36).substr(2),
                     prompt: prompt || "",
                     name: name || "User Persona",
-                    avatar: rawAvatar ? await readAvatarFromZip(rawAvatar) : null
+                    avatar: avatarPath ? await readAvatarFromZip(avatarPath) : null
                 };
                 await db.put('personas', persona);
             } catch (err) {
@@ -323,27 +521,21 @@ export async function importTavoBackupFromZip(zipFile, onProgress) {
         const existingApiPresets = await db.get('gz_api_connection_presets') || [];
         for (const ep of tavoData.categories.endpoint) {
             try {
-                // Empty strings are often spacing, keep robust logic
-                const strings = ep.fields.filter(f => f.type === 'text' && f.data.trim().length > 0).map(f => f.data);
-                if (strings.length < 4) continue;
-
-                // Identify endpoint URL (first string that starts with http)
-                const urlIndex = strings.findIndex(s => s.startsWith('http://') || s.startsWith('https://'));
-                const baseIndex = urlIndex !== -1 ? urlIndex : 0;
-
+                const s = ep.structured || {};
+                const params = tryParseJson(s.params_json) || {};
                 const preset = {
                     id: 'tavo_' + Date.now().toString(36) + Math.random().toString(36).substr(2),
-                    endpoint: strings[baseIndex] || "",
-                    model: strings[baseIndex + 2] || "",
-                    key: strings[baseIndex + 3] || "",
-                    name: strings.length > baseIndex + 4 ? strings[baseIndex + 4] : (strings[baseIndex] || "Tavo Endpoint"),
-                    max_tokens: '8000',
-                    context: '32000',
-                    temp: '0.7',
-                    topp: '0.9',
-                    stream: true
+                    endpoint: s.url || "",
+                    model: s.model || "",
+                    key: "",
+                    name: s.name || s.url || "Tavo Endpoint",
+                    max_tokens: String(params.max_tokens || 8000),
+                    context: String(params.context_length || 32000),
+                    temp: String(params.temperature ?? 0.7),
+                    topp: String(params.top_p ?? 0.9),
+                    stream: s.stream !== undefined ? s.stream : true
                 };
-                if (!existingApiPresets.some(p => p.endpoint === preset.endpoint && p.key === preset.key)) {
+                if (!existingApiPresets.some(p => p.endpoint === preset.endpoint && p.model === preset.model)) {
                     existingApiPresets.push(preset);
                 }
             } catch (err) {
@@ -360,38 +552,40 @@ export async function importTavoBackupFromZip(zipFile, onProgress) {
         try { globalScripts = JSON.parse(localStorage.getItem('regex_scripts')) || []; } catch (e) { }
         for (const regGroup of tavoData.categories.regex) {
             try {
-                const texts = regGroup.fields.filter(f => f.type === 'text' && f.data.trim().length > 0).map(f => f.data);
-                const jsons = regGroup.fields.filter(f => f.type === 'json').map(f => f.data);
+                const s = regGroup.structured || {};
+                let rulesJson = tryParseJson(s.rules_json);
+                let groupName = s.name || '';
 
-                // Fallback: sometimes regex JSON contains complex characters that make tavoBackupReader fail
-                const unparsed = regGroup.fields.filter(f => f.type === 'text' && f.data.trim().startsWith('[') && f.data.includes('"findRegex"'));
-                for (const u of unparsed) {
-                    try { jsons.push(JSON.parse(u.data)); } catch (e) { }
+                if (!rulesJson) {
+                    const texts = regGroup.fields.filter(f => f.type === 'text' && f.data.trim().length > 0).map(f => f.data);
+                    const jsons = regGroup.fields.filter(f => f.type === 'json').map(f => f.data);
+                    const unparsed = regGroup.fields.filter(f => f.type === 'text' && f.data.trim().startsWith('[') && f.data.includes('"findRegex"'));
+                    for (const u of unparsed) { try { jsons.push(JSON.parse(u.data)); } catch (e) { } }
+                    groupName = groupName || (texts.length > 0 ? texts[texts.length - 1] : '');
+                    for (const jsonBlock of jsons) {
+                        if (Array.isArray(jsonBlock)) { rulesJson = jsonBlock; break; }
+                    }
                 }
 
-                const groupName = texts.length > 0 ? texts[texts.length - 1] : '';
-
-                for (const jsonBlock of jsons) {
-                    if (Array.isArray(jsonBlock)) {
-                        for (const rule of jsonBlock) {
-                            if (rule.identifier && rule.name) {
-                                const finalName = groupName ? `[${groupName}] ${rule.name}` : rule.name;
-                                globalScripts.push({
-                                    id: 'tavo_' + rule.identifier,
-                                    name: finalName,
-                                    regex: rule.findRegex || "",
-                                    replacement: rule.replaceString || "",
-                                    trimOut: Array.isArray(rule.trimStrings) ? rule.trimStrings.join('\n') : "",
-                                    placement: [1, 2],
-                                    disabled: rule.enabled === false,
-                                    markdownOnly: false,
-                                    runOnEdit: false,
-                                    macroRules: rule.substitution === "none" ? "0" : "1",
-                                    ephemerality: [1, 2],
-                                    minDepth: rule.minDepth || null,
-                                    maxDepth: rule.maxDepth || null
-                                });
-                            }
+                if (rulesJson && Array.isArray(rulesJson)) {
+                    for (const rule of rulesJson) {
+                        if (rule.identifier && rule.name) {
+                            const finalName = groupName ? `[${groupName}] ${rule.name}` : rule.name;
+                            globalScripts.push({
+                                id: 'tavo_' + rule.identifier,
+                                name: finalName,
+                                regex: rule.findRegex || "",
+                                replacement: rule.replaceString || "",
+                                trimOut: Array.isArray(rule.trimStrings) ? rule.trimStrings.join('\n') : "",
+                                placement: [1, 2],
+                                disabled: rule.enabled === false,
+                                markdownOnly: false,
+                                runOnEdit: false,
+                                macroRules: rule.substitution === "none" ? "0" : "1",
+                                ephemerality: [1, 2],
+                                minDepth: rule.minDepth || null,
+                                maxDepth: rule.maxDepth || null
+                            });
                         }
                     }
                 }
@@ -412,13 +606,21 @@ export async function importTavoBackupFromZip(zipFile, onProgress) {
 
         for (const lb of tavoData.categories.lorebook) {
             try {
-                // The entries JSON block is the first json field; the name is the last text field
-                const entriesField = lb.fields.find(f => f.type === 'json' && Array.isArray(f.data));
-                const nameField = lb.fields.filter(f => f.type === 'text').pop();
-                if (!entriesField) continue;
+                const s = lb.structured || {};
+                let entriesJson = tryParseJson(s.entries_json);
+                let lbName = s.name || '';
 
-                const lbName = nameField ? nameField.data : 'Tavo Lorebook';
-                const entries = entriesField.data.map(e => ({
+                if (!entriesJson) {
+                    const entriesField = lb.fields.find(f => f.type === 'json' && Array.isArray(f.data));
+                    const nameField = lb.fields.filter(f => f.type === 'text').pop();
+                    if (!entriesField) continue;
+                    entriesJson = entriesField.data;
+                    lbName = lbName || (nameField ? nameField.data : 'Tavo Lorebook');
+                }
+
+                if (!entriesJson || !Array.isArray(entriesJson)) continue;
+
+                const entries = entriesJson.map(e => ({
                     id: 'tavo_' + (e.identifier || Date.now().toString(36) + Math.random().toString(36).substr(2)),
                     keys: Array.isArray(e.keywords) ? e.keywords : [],
                     secondary_keys: Array.isArray(e.secondaryKeywords) ? e.secondaryKeywords : [],
@@ -442,7 +644,7 @@ export async function importTavoBackupFromZip(zipFile, onProgress) {
 
                 existingLorebooks.push({
                     id: 'tavo_lb_' + lb.entity_id,
-                    name: lbName,
+                    name: lbName || 'Tavo Lorebook',
                     enabled: true,
                     entries,
                 });
@@ -466,23 +668,23 @@ export async function importTavoBackupFromZip(zipFile, onProgress) {
 
         for (const preset of tavoData.categories.preset) {
             try {
-                // preset.fields usually has a JSON block of prompts and the name at the end
-                let promptsJson = null;
-                let presetName = "Tavo Preset";
-                for (let i = 0; i < preset.fields.length; i++) {
-                    const f = preset.fields[i];
-                    if (f.type === 'json' && Array.isArray(f.data) && f.data.length > 0 && f.data[0].identifier) {
-                        promptsJson = f.data;
-                    } else if (f.type === 'text' && f.data.length < 50 && !f.data.includes('{')) {
-                        presetName = f.data;
+                const s = preset.structured || {};
+                let promptsJson = tryParseJson(s.prompts_json);
+                let presetName = s.name || "Tavo Preset";
+
+                if (!promptsJson) {
+                    for (let i = 0; i < preset.fields.length; i++) {
+                        const f = preset.fields[i];
+                        if (f.type === 'json' && Array.isArray(f.data) && f.data.length > 0 && f.data[0].identifier) {
+                            promptsJson = f.data;
+                        } else if (f.type === 'text' && f.data.length < 50 && !f.data.includes('{')) {
+                            presetName = f.data;
+                        }
                     }
                 }
 
                 if (promptsJson) {
-                    const pData = {
-                        name: presetName,
-                        prompts: promptsJson
-                    };
+                    const pData = { name: presetName, prompts: promptsJson };
                     const converted = convertSTPreset(pData, presetName);
                     const id = Date.now().toString(36) + Math.random().toString(36).substr(2);
                     converted.id = id;
@@ -498,61 +700,86 @@ export async function importTavoBackupFromZip(zipFile, onProgress) {
 
     // Process Characters
     progress('characters');
-    const charNameToId = {};
+    const charEntityIdToGlazeId = {};
     if (tavoData.categories.character && tavoData.categories.character.length > 0) {
         for (const char of tavoData.categories.character) {
             try {
-                const strings = char.fields.filter(f => f.type === 'text' && f.data.trim().length > 0).map(f => f.data);
-                const jsons = char.fields.filter(f => f.type === 'json').map(f => f.data);
-
+                const s = char.structured || {};
                 let charData = { id: Date.now().toString(36) + Math.random().toString(36).substr(2) };
 
-                // If it's a V2 JSON inside
-                const v2Json = jsons.find(j => j.spec === 'chara_card_v2' || j.spec === 'chara_card_v3');
-                if (v2Json && v2Json.data) {
-                    charData = { ...charData, ...v2Json.data };
-                    // v2 cards don't embed the avatar path separately; try to find it by name
-                    const avatarStr = strings.find(s => s.startsWith('charaCard/'));
-                    if (avatarStr) charData.avatar = await readAvatarFromZip(avatarStr);
-                } else if (strings.length >= 2) {
-                    // Fallback heuristic extraction
-                    const avatarStr = strings.find(s => s.startsWith('charaCard/'));
-                    if (avatarStr) charData.avatar = await readAvatarFromZip(avatarStr);
+                const extensionsJson = tryParseJson(s.extensions_json);
+                const v2Data = extensionsJson && (extensionsJson.spec === 'chara_card_v2' || extensionsJson.spec === 'chara_card_v3')
+                    ? extensionsJson.data : null;
 
-                    const rem = strings.filter(s => s !== avatarStr);
-                    // Name is consistently the final string field in Tavo's character entity unrolling
-                    charData.name = rem.length > 0 ? rem.pop() : "Unknown";
+                if (v2Data) {
+                    charData = { ...charData, ...v2Data };
+                    if (s.avatarPath) charData.avatar = await readAvatarFromZip(s.avatarPath);
+                } else if (s.name || s.description) {
+                    charData.name = s.name || "Unknown";
+                    charData.description = s.description || "";
+                    charData.first_mes = s.first_mes || "";
+                    charData.scenario = s.scenario || "";
+                    charData.personality = s.personality || "";
+                    charData.mes_example = s.mes_example || "";
+                    charData.creator_notes = s.creator_notes || "";
+                    charData.system_prompt = s.system_prompt || "";
+                    charData.post_history_instructions = s.post_history_instructions || "";
+                    charData.creator = s.creator || "";
+                    charData.character_version = s.character_version || "";
 
-                    // The easiest and most robust way to find Description and First_mes 
-                    // from the loosely coupled strings is by length sorting
-                    const sortedByLen = [...rem].sort((a, b) => b.length - a.length);
-                    charData.description = sortedByLen.length > 0 ? sortedByLen[0] : "";
-                    charData.first_mes = sortedByLen.length > 1 ? sortedByLen[1] : "";
+                    if (s.avatarPath) {
+                        charData.avatar = await readAvatarFromZip(s.avatarPath);
+                    }
 
-                    // Bundle the rest to avoid silent data loss (short descriptions, tags, scenarios)
-                    if (sortedByLen.length > 2) {
-                        const leftover = sortedByLen.slice(2);
-
-                        // Extract probable tags (short, single-line strings)
-                        const probableTags = leftover.filter(s => s.length < 60 && !s.includes('\n') && !s.startsWith('http') && !s.startsWith('charaCard/'));
-                        if (probableTags.length > 0) {
-                            // SillyTavern and Glaze expect an array of strings for tags
-                            charData.tags = probableTags.map(t => t.trim());
-                        }
-
-                        // The rest goes to creator_notes
-                        const remaining = leftover.filter(s => !probableTags.includes(s) && !s.startsWith('http') && !s.startsWith('charaCard/'));
-                        if (remaining.length > 0) {
-                            charData.creator_notes = remaining.join("\n\n---\n");
+                    if (extensionsJson) {
+                        charData.talkativeness = extensionsJson.talkativeness || "0.5";
+                        charData.fav = extensionsJson.fav || false;
+                        charData.world = extensionsJson.world || "";
+                        if (extensionsJson.depth_prompt) {
+                            charData.depth_prompt = {
+                                prompt: extensionsJson.depth_prompt.prompt || "",
+                                depth: extensionsJson.depth_prompt.depth || 4,
+                                role: extensionsJson.depth_prompt.role || 'system'
+                            };
                         }
                     }
+
+                    const altGreetJson = tryParseJson(s.alternate_greetings);
+                    if (Array.isArray(altGreetJson)) {
+                        charData.alternate_greetings = altGreetJson;
+                    }
                 } else {
-                    continue; // cannot parse
+                    const strings = char.fields.filter(f => f.type === 'text' && f.data.trim().length > 0).map(f => f.data);
+                    const jsons = char.fields.filter(f => f.type === 'json').map(f => f.data);
+
+                    const v2 = jsons.find(j => j.spec === 'chara_card_v2' || j.spec === 'chara_card_v3');
+                    if (v2 && v2.data) {
+                        charData = { ...charData, ...v2.data };
+                        const avatarStr = strings.find(st => st.startsWith('charaCard/'));
+                        if (avatarStr) charData.avatar = await readAvatarFromZip(avatarStr);
+                    } else if (strings.length >= 2) {
+                        const avatarStr = strings.find(st => st.startsWith('charaCard/'));
+                        if (avatarStr) charData.avatar = await readAvatarFromZip(avatarStr);
+                        const rem = strings.filter(st => st !== avatarStr);
+                        charData.name = rem.length > 0 ? rem.pop() : "Unknown";
+                        const sortedByLen = [...rem].sort((a, b) => b.length - a.length);
+                        charData.description = sortedByLen.length > 0 ? sortedByLen[0] : "";
+                        charData.first_mes = sortedByLen.length > 1 ? sortedByLen[1] : "";
+                        if (sortedByLen.length > 2) {
+                            const leftover = sortedByLen.slice(2);
+                            const probableTags = leftover.filter(st => st.length < 60 && !st.includes('\n') && !st.startsWith('http'));
+                            if (probableTags.length > 0) charData.tags = probableTags.map(t => t.trim());
+                            const remaining = leftover.filter(st => !probableTags.includes(st));
+                            if (remaining.length > 0) charData.creator_notes = remaining.join("\n\n---\n");
+                        }
+                    } else {
+                        continue;
+                    }
                 }
 
                 if (!charData.name) charData.name = "Unknown";
                 await db.saveCharacter(charData);
-                charNameToId[char.entity_id] = charData.id;
+                charEntityIdToGlazeId[char.entity_id] = charData.id;
                 result.characters++;
             } catch (err) {
                 result.errors.push(`Tavo Character: ${err.message}`);
@@ -565,42 +792,33 @@ export async function importTavoBackupFromZip(zipFile, onProgress) {
     if (tavoData.chats && tavoData.chats.length > 0) {
         for (const chatBlock of tavoData.chats) {
             try {
-                const cid = chatBlock.conversation.entity_id;
-
-                const msgs = chatBlock.messages.filter(m => m.fields && m.fields.length > 0);
+                const msgs = chatBlock.messages.filter(m => m.structured && (m.structured.text || m.structured.swipe_text));
                 if (msgs.length === 0) continue;
 
-                // Find the first AI message to determine which character this chat belongs to.
-                // User messages have characterId === 0 in Tavo (not -1).
-                const firstCharMsg = msgs.find(m => m.characterId && m.characterId !== 0);
-                if (!firstCharMsg) continue;
-                const charEntityId = firstCharMsg.characterId;
+                const charEntityId = chatBlock.characterId;
+                const glazeCharId = charEntityIdToGlazeId[charEntityId];
+                if (!glazeCharId) continue;
 
-                const glazeCharId = charNameToId[charEntityId];
-                if (!glazeCharId) {
-                    continue;
-                }
-
-                // Convert messages to ST format JSONL and use existing importer
                 const lines = [];
                 const metadata = {
                     user_name: "User",
-                    character_name: "Char",
-                    create_date: new Date().toISOString(),
+                    character_name: msgs[0].structured.charName || "Char",
+                    create_date: msgs[0].timestamp ? new Date(msgs[0].timestamp).toISOString() : new Date().toISOString(),
                     chat_metadata: { exported_from: "Tavo", import_date: Date.now() }
                 };
                 lines.push(JSON.stringify(metadata));
 
                 for (const tMsg of msgs) {
-                    // Find actual text ignoring IDs, hashes, and internal image paths
-                    const txt = tMsg.fields.filter(f => f.type === 'text' && f.data.length > 5 && !f.data.startsWith('charaCard/')).map(f => f.data).join("\n");
-                    // characterId === 0 or negative means user message in Tavo
-                    const isUser = !tMsg.characterId || tMsg.characterId <= 0;
+                    const s = tMsg.structured || {};
+                    const txt = s.text || '';
+                    const isUser = s.characterId === 0;
+                    const ts = tMsg.timestamp || Date.now();
+
                     const stMsg = {
-                        name: isUser ? "User" : "Char",
+                        name: isUser ? "User" : (s.charName || "Char"),
                         is_user: isUser,
                         is_system: false,
-                        send_date: new Date(tMsg.timestamp || Date.now()).toISOString(),
+                        send_date: new Date(ts).toISOString(),
                         mes: txt,
                         extra: {}
                     };
