@@ -87,46 +87,86 @@ export function usePresetTokenPreview({
         return res;
     };
 
-    function getPresetTokens(preset) {
+    function getPresetTokens(preset, _log = false) {
         if (!preset) return 0;
-        let content = "";
+        let totalPresetTokens = 0;
+        const blockDetails = [];
         if (preset.blocks) {
             preset.blocks.forEach(b => {
-                if (b.enabled && !b.isStashed) {
-                    const blockContent = resolveBlockContent(b, { includeNonPreset: false });
-                    if (blockContent) {
-                        content += blockContent + "\n";
-                    }
+                if (!b.enabled || b.isStashed) {
+                    if (_log) blockDetails.push({ id: b.id, status: 'disabled/stashed', rawLen: 0, templateLen: 0, tokens: 0 });
+                    return;
                 }
+                const blockContent = resolveBlockContent(b, { includeNonPreset: false });
+                if (!blockContent) {
+                    if (_log) blockDetails.push({ id: b.id, status: 'no-content', rawLen: 0, templateLen: 0, tokens: 0 });
+                    return;
+                }
+
+                let literalTemplate = blockContent;
+                const sourceMacros = [
+                    /\{\{description\}\}/gi,
+                    /\{\{char_description\}\}/gi,
+                    /\{\{scenario\}\}/gi,
+                    /\{\{personality\}\}/gi,
+                    /\{\{char_personality\}\}/gi,
+                    /\{\{mesExamples\}\}/gi,
+                    /\{\{persona\}\}/gi,
+                    /\{\{summary\}\}/gi,
+                    /\{\{lorebooks\}\}/gi,
+                ];
+                for (const re of sourceMacros) {
+                    literalTemplate = literalTemplate.replace(re, '');
+                }
+
+                literalTemplate = literalTemplate
+                    .replace(/{{setvar::[\s\S]*?::[\s\S]*?}}/gi, '')
+                    .replace(/{{setglobalvar::[\s\S]*?::[\s\S]*?}}/gi, '');
+
+                const charId = activeChatChar?.value?.id || 'default';
+                const sessionId = activeChatChar?.value?.sessionId || 'current';
+                const varsKey = `gz_vars_${charId}_${sessionId}`;
+                let sessionVars = {};
+                try { sessionVars = JSON.parse(localStorage.getItem(varsKey)) || {}; } catch (e) {}
+                literalTemplate = literalTemplate.replace(/{{getvar::([\s\S]*?)}}/gi, (match, name) => {
+                    return sessionVars[name] !== undefined ? sessionVars[name] : '';
+                });
+                literalTemplate = literalTemplate.replace(/{{getglobalvar::([\s\S]*?)}}/gi, (match, name) => {
+                    try {
+                        const raw = localStorage.getItem('gz_global_vars');
+                        if (!raw) return '';
+                        const parsed = JSON.parse(raw);
+                        return parsed[name] !== undefined ? parsed[name] : '';
+                    } catch (e) { return ''; }
+                });
+
+                const charName = activeChatChar?.value ? (activeChatChar.value.macro_name || activeChatChar.value.name) : 'Character';
+                const userName = effectivePersona?.value ? effectivePersona.value.name : 'User';
+                literalTemplate = literalTemplate
+                    .replace(/{{char}}/gi, charName)
+                    .replace(/{{user}}/gi, userName);
+
+                const tokens = estimateTokens(literalTemplate);
+                if (_log) blockDetails.push({ id: b.id, status: 'counted', rawLen: blockContent.length, templateLen: literalTemplate.length, tokens });
+                totalPresetTokens += tokens;
             });
         }
-        const resolved = extendedReplaceMacros(content);
-
-        const macroReplacements = [
-            { regex: /\{\{description\}\}/gi, value: activeChatChar?.value?.description || activeChatChar?.value?.desc || '' },
-            { regex: /\{\{scenario\}\}/gi, value: activeChatChar?.value?.scenario || '' },
-            { regex: /\{\{personality\}\}/gi, value: activeChatChar?.value?.personality || '' },
-            { regex: /\{\{char_description\}\}/gi, value: activeChatChar?.value?.description || '' },
-            { regex: /\{\{char_personality\}\}/gi, value: activeChatChar?.value?.personality || '' },
-            { regex: /\{\{mesExamples\}\}/gi, value: activeChatChar?.value?.mes_example || '' },
-            { regex: /\{\{persona\}\}/gi, value: effectivePersona?.value?.prompt || '' },
-        ];
-
-        let templateOnly = resolved;
-        for (const mr of macroReplacements) {
-            templateOnly = templateOnly.replace(mr.regex, '');
+        if (_log) {
+            console.group('[getPresetTokens]', preset.name || preset.id);
+            console.log('total:', totalPresetTokens);
+            console.table(blockDetails);
+            console.groupEnd();
         }
-
-        return estimateTokens(templateOnly);
+        return totalPresetTokens;
     }
 
-    const editingPresetTokens = computed(() => getPresetTokens(currentPreset.value));
+    const editingPresetTokens = computed(() => getPresetTokens(currentPreset.value, true));
     const displayedEditingTokens = ref(0);
 
     const activePresetTokens = computed(() => {
         const id = effectivePresetId.value;
         const preset = presetState.presets[id] || presetState.presets.default_shino;
-        return getPresetTokens(preset);
+        return getPresetTokens(preset, true);
     });
     const displayedActiveTokens = ref(0);
 
