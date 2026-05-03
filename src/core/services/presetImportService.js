@@ -11,6 +11,7 @@ export function detectPresetFormat(data) {
 
 export function finalizeImportedPreset(preset) {
     if (!preset.blocks) preset.blocks = [];
+    if (!preset.regexes) preset.regexes = [];
 
     preset.blocks.forEach(b => {
         if (b.id !== 'authors_note' && b.id !== 'summary' && !b.insertion_mode) {

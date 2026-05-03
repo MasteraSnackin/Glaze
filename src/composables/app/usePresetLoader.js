@@ -28,6 +28,7 @@ export function usePresetLoader({ currentPreset }) {
             }
             if (preset.guidedGenerationPrompt === undefined) preset.guidedGenerationPrompt = '[Generate your next reply according to these instructions: {{guidance}}]';
             if (preset.guidedImpersonationPrompt === undefined) preset.guidedImpersonationPrompt = '[Instead of replying for {{char}}, impersonate {{user}} according to these instructions: {{guidance}}]';
+            if (preset.regexes === undefined) preset.regexes = [];
 
             ensureMandatoryBlocks(preset);
         }

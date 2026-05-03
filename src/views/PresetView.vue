@@ -8,6 +8,7 @@ import Editor from '@/components/editors/GenericEditor.vue';
 import { presetState, initPresetState, getEffectivePresetId, flushPresetSave } from '@/core/states/presetState.js';
 import SheetView from '@/components/ui/SheetView.vue';
 import HelpTip from '@/components/ui/HelpTip.vue';
+import Tooltip from '@/components/ui/Tooltip.vue';
 import RegexSheet from '@/components/sheets/RegexSheet.vue';
 import { logger } from '@/utils/logger.js';
 import { getEffectivePersona } from '@/core/states/personaState.js';
@@ -329,7 +330,7 @@ onBeforeUnmount(() => { unsubs.forEach(unsub => unsub()); });
 </div>
                         <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 4px;">
                             <div class="ps-card-badge" :class="{ 'ps-with-bg': !!preset.image }">
-                                <svg viewBox="0 0 24 24" class="ps-badge-icon"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
+                                <svg viewBox="0 0 24 24" class="ps-badge-icon"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c11 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
                                 {{ presetTokenCache[id] }}
                             </div>
                             <div class="ps-card-meta" :class="{ 'ps-with-bg': !!preset.image }">
