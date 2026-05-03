@@ -43,7 +43,7 @@ export async function restoreGenerationState({
     clearBackgroundUpdateTimer,
     updateSessionMessage
 }) {
-    const { getChatData, db } = persistence;
+    const { db } = persistence;
     if (typeof clearBackgroundUpdateTimer === 'function') {
         clearBackgroundUpdateTimer();
     }
@@ -68,7 +68,7 @@ export async function restoreGenerationState({
         restorePromptMetaOnMessages(currentMessages.value);
         currentMessages.value[idx].isTyping = false;
 
-        if (!isError) {
+            if (!isError) {
             const msg = currentMessages.value[idx];
             const revertedSwipe = rollbackPendingSwipe(msg, { restoreSwipeMeta: true });
 
@@ -76,16 +76,19 @@ export async function restoreGenerationState({
                 await updateSessionMessage(char, idx, msg);
             } else {
                 currentMessages.value.splice(idx, 1);
-                const data = await getChatData(char.id);
-                if (data && sessionId && data.sessions[sessionId]) {
-                    data.sessions[sessionId] = currentMessages.value;
-                    await db.saveChat(char.id, data);
-                }
+                const charId = char.id;
+                const sessionCopy = JSON.parse(JSON.stringify(currentMessages.value));
+                await db.patchChatData(charId, (data) => {
+                    if (data && sessionId && data.sessions[sessionId]) {
+                        data.sessions[sessionId] = sessionCopy;
+                    }
+                });
             }
         }
     } else {
-        const data = await getChatData(char.id);
-        if (data && data.sessions[sessionId]) {
+        const charId = char.id;
+        await db.patchChatData(charId, (data) => {
+            if (!data || !data.sessions[sessionId]) return;
             restorePromptMetaOnMessages(data.sessions[sessionId]);
             const dbIdx = data.sessions[sessionId].findIndex(m => m.id === msgId);
             if (dbIdx !== -1) {
@@ -98,10 +101,8 @@ export async function restoreGenerationState({
                         data.sessions[sessionId].splice(dbIdx, 1);
                     }
                 }
-
-                await db.saveChat(char.id, data);
             }
-        }
+        });
     }
 
     if (onAbort) onAbort(isError);

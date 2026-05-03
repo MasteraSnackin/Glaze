@@ -460,6 +460,7 @@ const {
     asyncSaveCurrentSessionState,
     applyImageAutoHide,
     onVisibilityChange,
+    onNativeBackground,
     buildCrashBufferKey,
     clearCrashBuffer
 } = useSessionPersistence({
@@ -586,12 +587,13 @@ async function loadChats() {
 }
 
 async function updateSessionMessage(char, msgIndex, newMsgData) {
-    const data = await getChatData(char.id);
-    const sessionId = char.sessionId || data.currentId;
-    if (data && data.sessions[sessionId]) {
-        data.sessions[sessionId][msgIndex] = newMsgData;
-        await db.saveChat(char.id, data);
-    }
+    const msgCopy = JSON.parse(JSON.stringify(newMsgData));
+    await db.patchChatData(char.id, (data) => {
+        const sessionId = char.sessionId || data?.currentId;
+        if (data && sessionId && data.sessions[sessionId]) {
+            data.sessions[sessionId][msgIndex] = msgCopy;
+        }
+    });
 }
 
 function handleSheetBack() {
@@ -674,6 +676,15 @@ async function openChat(char, onBack, force = false) {
     resetCutoffState();
 
     if (activeChatChar) {
+        for (const charId of listGeneratingCharIds()) {
+            const state = getGenerationState(charId);
+            if (!state) continue;
+            state.onUIUpdate = null;
+            if (state.timerId) { clearTimeout(state.timerId); state.timerId = null; }
+            if (typeof state.clearStreamFlushTimer === 'function') state.clearStreamFlushTimer();
+            if (typeof state.streamFlush === 'function') state.streamFlush();
+            if (typeof state.clearGenerationTimer === 'function') state.clearGenerationTimer();
+        }
         await asyncSaveCurrentSessionState();
     }
 
@@ -998,11 +1009,7 @@ async function openChat(char, onBack, force = false) {
                 const idx = currentMessages.value.findIndex(m => m.id === state.msgId);
                 if (idx !== -1) {
                     const m = currentMessages.value[idx];
-                    if (textDelta) {
-                        m.text += textDelta;
-                    } else {
-                        m.text = text;
-                    }
+                    m.text = text;
                     m.reasoning = reasoning;
                     m.isTyping = isTyping;
 
@@ -1294,6 +1301,12 @@ const onGenerationEnded = (e) => {
         }
         isGenerating.value = false;
         isImpersonating.value = false;
+
+        const lastTypingIdx = currentMessages.value.findLastIndex(m => m.isTyping);
+        if (lastTypingIdx !== -1 && !hasGenerationState(activeChatChar.id)) {
+            currentMessages.value[lastTypingIdx].isTyping = false;
+        }
+
         applyImageAutoHide();
         updateContextCutoff();
     }
@@ -1412,6 +1425,7 @@ onMounted(() => {
     if (Capacitor.isNativePlatform()) {
         App.addListener('appStateChange', ({ isActive }) => {
             if (!isActive && activeChatChar) {
+                onNativeBackground(activeChatChar);
                 const charId = activeChatChar.id;
                 const sessionId = activeChatChar.sessionId;
                 const messagesSnapshot = currentMessages.value;
@@ -1466,19 +1480,10 @@ watch(() => currentMessages.value.length, () => {
 onUnmounted(() => {
     setScrollLock(false);
     stopMemoryDraftProgress();
-    // Cleanup UI timers AND abort active generations for ALL generating states
-    // This prevents leaked intervals, closures referencing unmounted reactive state, and stuck isTyping flags
     for (const charId of listGeneratingCharIds()) {
         const state = getGenerationState(charId);
-        // Abort controller to stop ongoing API requests
-        if (state.controller) {
-            try {
-                state.controller.abort();
-            } catch (e) {
-                console.warn('[onUnmounted] Failed to abort controller:', e);
-            }
-        }
-        // Clear UI timer
+        if (!state) continue;
+        state.onUIUpdate = null;
         if (state.timerId) {
             clearTimeout(state.timerId);
             state.timerId = null;
@@ -1489,15 +1494,9 @@ onUnmounted(() => {
         if (typeof state.streamFlush === 'function') {
             state.streamFlush();
         }
-        // Disconnect UI updater to prevent updates to unmounted component
-        state.onUIUpdate = null;
-        // Clean localStorage flag
-        const sessionId = activeChatChar?.sessionId;
-        if (sessionId) {
-            clearPersistedGeneration(charId, sessionId);
+        if (typeof state.clearGenerationTimer === 'function') {
+            state.clearGenerationTimer();
         }
-        // Clear registry entry to prevent stale state from blocking future generations
-        clearGenerationState(charId);
     }
     if (unsubCharacterUpdated) { unsubCharacterUpdated(); unsubCharacterUpdated = null; }
     document.removeEventListener('visibilitychange', onVisibilityChange);
