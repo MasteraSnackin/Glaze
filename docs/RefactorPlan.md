@@ -97,3 +97,23 @@ All tasks require manual verification on:
 - [ ] Mobile (Android): generation + app minimize + return
 - [ ] Cloud sync: push + pull with concurrent local changes
 - [ ] Image gen: edit during generation, regenerate after abort
+
+### Task 5: Audit and migrate all `getChatData` + `saveChat` to `patchChatData`
+
+**Status:** not started  
+**Priority:** high  
+**Scope:** 58 calls to `getChatData` across the codebase
+
+`database.md` and `race-conditions.md` both mandate `patchChatData` for all read-mutate-write operations. Currently violated by:
+- `restoreGenerationState` — **fixed** in ghost generation bug commit
+- `updateSessionMessage` — **fixed** in ghost generation bug commit
+- `useSwipeNavigation` — `getChatData` + `saveChat` pattern
+- `useMessageActions` — multiple `getChatData` + `saveChat` patterns
+- `useMemoryBooks` — 12+ `getChatData` + `saveChat` patterns
+- `useGenerationCompleteHandler` — background path uses `getChatData` + `saveChat`
+- `useGenerationStreamUpdate` — background persist uses `getChatData` + `saveChat`
+
+Steps:
+1. Write ESLint rule `glaze/no-getchatdata-savechat` that flags `getChatData` followed by `saveChat` in the same function scope
+2. Migrate all call sites to `patchChatData`
+3. Verify no `getChatData` + `saveChat` patterns remain
