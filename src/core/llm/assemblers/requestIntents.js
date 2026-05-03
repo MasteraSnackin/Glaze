@@ -1,6 +1,6 @@
 import { REQUEST_KINDS } from '@/core/llm/contracts/providerContracts.js';
 
-export function createChatRequestIntent({ model, messages, temperature, topP, stream, reasoningEffort, maxTokens, stopString }) {
+export function createChatRequestIntent({ model, messages, temperature, topP, stream, reasoningEffort, maxTokens, stopString, requestReasoning }) {
     return {
         kind: REQUEST_KINDS.CHAT,
         model,
@@ -9,6 +9,7 @@ export function createChatRequestIntent({ model, messages, temperature, topP, st
         topP,
         stream,
         reasoningEffort,
+        requestReasoning: !!requestReasoning,
         maxTokens,
         stopString
     };

@@ -37,7 +37,7 @@ function buildOpenAiCompatiblePayload(intent) {
                 stream: intent.stream
             };
 
-            if (intent.reasoningEffort && intent.reasoningEffort !== 'auto') {
+            if (intent.requestReasoning && intent.reasoningEffort && intent.reasoningEffort !== 'auto') {
                 previewBody.reasoning_effort = intent.reasoningEffort;
             }
 

@@ -83,6 +83,7 @@ export async function executeFinalChatRequest({
         topP: effectiveTopP,
         stream: effectiveStream,
         reasoningEffort: effectiveReasoningEffort,
+        requestReasoning,
         maxTokens: effectiveMaxTokens,
         stopString: effectiveStopString
     });
