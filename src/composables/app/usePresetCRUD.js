@@ -19,7 +19,7 @@ export function usePresetCRUD({ currentPreset, currentPresetId, editingPresetId,
                 onConfirm: (name) => {
                     const id = Date.now().toString(36);
                     presetState.presets[id] = {
-                        id, createdAt: Date.now(), name, blocks: [], author: '', image: '',
+                        id, createdAt: Date.now(), name, blocks: [], regexes: [], author: '', image: '',
                         impersonationPrompt: '', reasoningEnabled: false, reasoningEffort: 'medium',
                         parseInlineReasoning: false, reasoningStart: R_START, reasoningEnd: R_END,
                         mergePrompts: false, mergeRole: 'system', noAssistant: false,

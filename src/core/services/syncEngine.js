@@ -442,7 +442,31 @@ async function applyCloudEntry(adapter, entry, key) {
         await db.set('gz_theme_active_preset', entity);
     } else if (entry.type === ENTITY_TYPES.LOCAL_STORAGE) {
         for (const [lsKey, lsVal] of Object.entries(entity || {})) {
-            localStorage.setItem(lsKey, lsVal);
+            if (lsKey === 'silly_cradle_presets') {
+                try {
+                    const cloudPresets = JSON.parse(lsVal);
+                    const localRaw = localStorage.getItem('silly_cradle_presets');
+                    const localPresets = localRaw ? JSON.parse(localRaw) : {};
+                    for (const [pId, cloudPreset] of Object.entries(cloudPresets)) {
+                        const localRegexes = localPresets[pId]?.regexes;
+                        const cloudRegexes = cloudPreset.regexes;
+                        if (localRegexes?.length) {
+                            if (!cloudRegexes?.length) {
+                                cloudPreset.regexes = localRegexes;
+                            } else {
+                                const cloudIds = new Set(cloudRegexes.map(r => r.id));
+                                const localOnly = localRegexes.filter(r => !cloudIds.has(r.id));
+                                if (localOnly.length) cloudPreset.regexes = [...cloudRegexes, ...localOnly];
+                            }
+                        }
+                    }
+                    localStorage.setItem(lsKey, JSON.stringify({ ...localPresets, ...cloudPresets }));
+                } catch (e) {
+                    localStorage.setItem(lsKey, lsVal);
+                }
+            } else {
+                localStorage.setItem(lsKey, lsVal);
+            }
         }
     }
     return entity;

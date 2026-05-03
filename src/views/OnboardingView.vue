@@ -322,6 +322,19 @@ function triggerPresetImport() {
                 if (data.blocks) {
                     preset = data;
                 } else {
+                    for (const [pId, importedPreset] of Object.entries(data)) {
+                        const localRegexes = presetState.presets[pId]?.regexes;
+                        const importedRegexes = importedPreset.regexes;
+                        if (localRegexes?.length) {
+                            if (!importedRegexes?.length) {
+                                importedPreset.regexes = localRegexes;
+                            } else {
+                                const importedIds = new Set(importedRegexes.map(r => r.id));
+                                const localOnly = localRegexes.filter(r => !importedIds.has(r.id));
+                                if (localOnly.length) importedPreset.regexes = [...importedRegexes, ...localOnly];
+                            }
+                        }
+                    }
                     Object.assign(presetState.presets, data);
                     savePresets();
                     next();
