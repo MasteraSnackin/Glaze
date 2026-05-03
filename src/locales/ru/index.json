@@ -329,6 +329,8 @@
     "action_export_st": "Экспорт",
     "label_export_png": "PNG (Карточка персонажа)",
     "label_export_json": "JSON (SillyTavern V2)",
+    "label_export_charx": "CharX (с галереей)",
+    "label_export_zip": "ZIP (с галереей)",
     "label_formatted": "Форматированный",
     "label_raw_json": "Сырой JSON",
     "export_success": "Экспорт завершен",

@@ -7,7 +7,7 @@ import { translations } from '@/utils/i18n.js';
 import { currentLang } from '@/core/config/APPSettings.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import { db, markSyncDeletedEntry } from '@/utils/db.js';
-import { exportCharacterAsV2Json, exportCharacterAsV2Png } from '@/utils/characterIO.js';
+import { exportCharacterAsV2Json, exportCharacterAsV2Png, exportCharacterAsCharX } from '@/utils/characterIO.js';
 import { useSessionSheet } from '@/composables/character/useSessionSheet.js';
 import { useCharacterGallery } from '@/composables/character/useCharacterGallery.js';
 import { APP_EVENTS } from '@/core/events/eventNames.js';
@@ -147,6 +147,7 @@ const menuIcon = '<svg viewBox="0 0 24 24"><path d="M12 8a2 2 0 1 0 0-4 2 2 0 0 
 const plusIcon = '<svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>';
 const exportIcon = '<svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>';
 const pngIcon = '<svg viewBox="0 0 24 24"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>';
+const archiveIcon = '<svg viewBox="0 0 24 24"><path d="M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm-6 10H6v-2h8v2zm4-4H6v-2h12v2z"/></svg>';
 const editIcon = '<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
 const deleteIcon = '<svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
 
@@ -212,6 +213,22 @@ function openExportSheet(char) {
                 icon: exportIcon,
                 onClick: () => {
                     exportCharacterAsV2Json(char);
+                    closeBottomSheet();
+                }
+            },
+            {
+                label: getTranslated('label_export_charx', 'CharX (with gallery)'),
+                icon: archiveIcon,
+                onClick: () => {
+                    exportCharacterAsCharX(char);
+                    closeBottomSheet();
+                }
+            },
+            {
+                label: getTranslated('label_export_zip', 'ZIP (with gallery)'),
+                icon: archiveIcon,
+                onClick: () => {
+                    exportCharacterAsCharX(char, true);
                     closeBottomSheet();
                 }
             }
