@@ -148,15 +148,20 @@ defineExpose({ open, close, visible: isVisible });
     height: 60px;
     z-index: 50;
     background-color: var(--ui-bg, #1e1e1e);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
+/* Root wrapper: just constrain the height */
 :deep(.window-app-header) {
+    height: 60px;
+    min-height: 60px;
+}
+
+/* Target the actual visual header element to strip mobile-app styling */
+:deep(.window-app-header .app-header) {
     margin: 0 !important;
     border-radius: 0 !important;
-    border-left: none !important;
-    border-right: none !important;
-    border-top: none !important;
-    border-bottom: none !important;
+    border: none !important;
     background-color: transparent !important;
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;

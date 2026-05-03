@@ -54,8 +54,8 @@ const minTokens = ref(29);
 const maxTokens = ref(100000);
 const selectedTagIds = ref(new Set());
 const selectedTagNames = ref(new Set());
-const selectedExcludeTagIds = ref(new Set());
-const selectedExcludeTagNames = ref(new Set());
+
+
 const tagSearch = ref('');
 
 const isChub = computed(() => activeProvider.value === 'chub');
@@ -78,8 +78,8 @@ watch(() => props.visible, (newVal, oldVal) => {
         maxTokens.value = f.maxTokens ?? 100000;
         selectedTagIds.value = new Set(f.tagIds || []);
         selectedTagNames.value = new Set(f.tagNames || []);
-        selectedExcludeTagIds.value = new Set(f.excludeTagIds || []);
-        selectedExcludeTagNames.value = new Set(f.excludeTagNames || []);
+
+
         tagSearch.value = '';
         // Refresh Chub tags when opening filters
         if (isChub.value) fetchChubTags();
@@ -89,12 +89,12 @@ watch(() => props.visible, (newVal, oldVal) => {
         const f = catalogFilters.value;
         const currentTagIds = [...selectedTagIds.value].sort();
         const currentTagNames = [...selectedTagNames.value].sort();
-        const currentExcludeTagIds = [...selectedExcludeTagIds.value].sort();
-        const currentExcludeTagNames = [...selectedExcludeTagNames.value].sort();
+
+
         const oldTagIds = [...(f.tagIds || [])].sort();
         const oldTagNames = [...(f.tagNames || [])].sort();
-        const oldExcludeTagIds = [...(f.excludeTagIds || [])].sort();
-        const oldExcludeTagNames = [...(f.excludeTagNames || [])].sort();
+
+
 
         const changed = 
             nsfw.value !== (f.nsfw !== false) ||
@@ -102,9 +102,9 @@ watch(() => props.visible, (newVal, oldVal) => {
             minTokens.value !== (f.minTokens ?? 29) ||
             maxTokens.value !== (f.maxTokens ?? 100000) ||
             JSON.stringify(currentTagIds) !== JSON.stringify(oldTagIds) ||
-            JSON.stringify(currentTagNames) !== JSON.stringify(oldTagNames) ||
-            JSON.stringify(currentExcludeTagIds) !== JSON.stringify(oldExcludeTagIds) ||
-            JSON.stringify(currentExcludeTagNames) !== JSON.stringify(oldExcludeTagNames);
+            JSON.stringify(currentTagNames) !== JSON.stringify(oldTagNames);
+
+
 
         if (changed) {
             catalogFilters.value = {
@@ -114,9 +114,9 @@ watch(() => props.visible, (newVal, oldVal) => {
                 minTokens: minTokens.value,
                 maxTokens: maxTokens.value,
                 tagIds: [...selectedTagIds.value],
-                tagNames: [...selectedTagNames.value],
-                excludeTagIds: [...selectedExcludeTagIds.value],
-                excludeTagNames: [...selectedExcludeTagNames.value]
+                tagNames: [...selectedTagNames.value]
+
+
             };
             emit('apply');
         }
@@ -127,44 +127,38 @@ function tagState(tag) {
     // Returns 'include', 'exclude', or 'none'
     if (tag.id) {
         if (selectedTagIds.value.has(tag.id)) return 'include';
-        if (selectedExcludeTagIds.value.has(tag.id)) return 'exclude';
+
         return 'none';
     } else {
         if (selectedTagNames.value.has(tag.name)) return 'include';
-        if (selectedExcludeTagNames.value.has(tag.name)) return 'exclude';
+
         return 'none';
     }
 }
 
 function cycleTag(tag) {
-    // Cycle: none → include → exclude → none
+    // Toggle: none ↔ include
     const state = tagState(tag);
     if (tag.id) {
         const incSet = new Set(selectedTagIds.value);
-        const excSet = new Set(selectedExcludeTagIds.value);
+
         if (state === 'none') {
             incSet.add(tag.id);
-        } else if (state === 'include') {
-            incSet.delete(tag.id);
-            excSet.add(tag.id);
         } else {
-            excSet.delete(tag.id);
+            incSet.delete(tag.id);
         }
         selectedTagIds.value = incSet;
-        selectedExcludeTagIds.value = excSet;
+
     } else {
         const incSet = new Set(selectedTagNames.value);
-        const excSet = new Set(selectedExcludeTagNames.value);
+
         if (state === 'none') {
             incSet.add(tag.name);
-        } else if (state === 'include') {
-            incSet.delete(tag.name);
-            excSet.add(tag.name);
         } else {
-            excSet.delete(tag.name);
+            incSet.delete(tag.name);
         }
         selectedTagNames.value = incSet;
-        selectedExcludeTagNames.value = excSet;
+
     }
 }
 
@@ -175,8 +169,8 @@ function isTagActive(tag) {
 function clearTags() {
     selectedTagIds.value = new Set();
     selectedTagNames.value = new Set();
-    selectedExcludeTagIds.value = new Set();
-    selectedExcludeTagNames.value = new Set();
+
+
 }
 
 function closeSheet() {
@@ -214,8 +208,8 @@ const selectedTags = computed(() => {
 });
 
 const totalSelectedCount = computed(() => 
-    selectedTagIds.value.size + selectedTagNames.value.size + 
-    selectedExcludeTagIds.value.size + selectedExcludeTagNames.value.size
+    selectedTagIds.value.size + selectedTagNames.value.size
+
 );
 </script>
 
@@ -279,12 +273,12 @@ const totalSelectedCount = computed(() =>
                 <!-- Selected chips preview -->
                 <TransitionGroup name="tag-list" tag="div" v-if="selectedTags.length" class="selected-tags-preview">
                     <span v-for="tag in selectedTags" :key="tag.id || tag.name" class="tag-chip" :class="{
-                        active: tag.state === 'include',
-                        excluded: tag.state === 'exclude'
+                        active: tag.state === 'include'
+
                     }" @click="cycleTag(tag)">
                         {{ tag.name }}
-                        <span class="chip-state-icon" v-if="tag.state === 'include'">✓</span>
-                        <span class="chip-state-icon" v-else-if="tag.state === 'exclude'">✕</span>
+                        <span class="chip-state-icon" v-if="tag.state === 'include'">✕</span>
+
                     </span>
                 </TransitionGroup>
 
@@ -303,14 +297,14 @@ const totalSelectedCount = computed(() =>
                         :key="tag.id || tag.name"
                         class="tag-chip"
                         :class="{
-                            active: tagState(tag) === 'include',
-                            excluded: tagState(tag) === 'exclude'
+                            active: tagState(tag) === 'include'
+
                         }"
                         @click="cycleTag(tag)"
                     >
                         {{ tag.name }}
-                        <span class="chip-state-icon" v-if="tagState(tag) === 'include'">✓</span>
-                        <span class="chip-state-icon" v-else-if="tagState(tag) === 'exclude'">✕</span>
+                        <span class="chip-state-icon" v-if="tagState(tag) === 'include'">✕</span>
+
                     </button>
                 </TransitionGroup>
             </div>
@@ -503,11 +497,7 @@ input:checked + .slider:before {
     color: #fff;
 }
 
-.tag-chip.excluded {
-    background: rgba(255, 68, 68, 0.2);
-    border-color: #ff4444;
-    color: #ff4444;
-}
+
 
 .chip-state-icon {
     font-size: 10px;

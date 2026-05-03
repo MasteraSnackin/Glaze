@@ -54,12 +54,11 @@ function loadSavedFilters() {
             nsfl: saved.nsfl !== undefined ? saved.nsfl : false,
             tagIds: Array.isArray(saved.tagIds) ? saved.tagIds : [],
             tagNames: Array.isArray(saved.tagNames) ? saved.tagNames : [],
-            excludeTagNames: Array.isArray(saved.excludeTagNames) ? saved.excludeTagNames : [],
             minTokens: saved.minTokens ?? 29,
             maxTokens: saved.maxTokens ?? 100000
         };
     } catch {
-        return { nsfw: false, nsfl: false, tagIds: [], tagNames: [], excludeTagNames: [], minTokens: 29, maxTokens: 100000 };
+        return { nsfw: false, nsfl: false, tagIds: [], tagNames: [], minTokens: 29, maxTokens: 100000 };
     }
 }
 
@@ -86,7 +85,6 @@ watch(catalogFilters, (v) => {
         nsfl: v.nsfl,
         tagIds: v.tagIds,
         tagNames: v.tagNames,
-        excludeTagNames: v.excludeTagNames,
         minTokens: v.minTokens,
         maxTokens: v.maxTokens
     }));
@@ -255,7 +253,6 @@ export function resetFilters() {
         nsfl: false,
         tagIds: [],
         tagNames: [],
-        excludeTagNames: [],
         minTokens: 29,
         maxTokens: 100000
     };

@@ -201,7 +201,7 @@ function normalizeHampterHit(hit) {
         standardTags = tagIdsToNames(hit.tagIds || []).filter(t => t.toLowerCase() !== 'limitless');
     }
 
-    const tags = [hit.isNsfw ? 'NSFW' : 'SFW', ...standardTags];
+    const tags = [(hit.isNsfw || hit.is_nsfw) ? 'NSFW' : 'SFW', ...standardTags];
 
     if (hit.custom_tags && Array.isArray(hit.custom_tags)) {
         tags.push(...hit.custom_tags.map(t => `#${t}`));
@@ -220,7 +220,7 @@ function normalizeHampterHit(hit) {
         stats: { chat: chatCount, message: msgCount },
         creator: hit.creatorUsername || hit.creator || '',
         creator_id: hit.creator_id || hit.creatorId || '',
-        nsfw: Boolean(hit.isNsfw),
+        nsfw: Boolean(hit.isNsfw || hit.is_nsfw),
         slug: hit.slug || hit.id,
         source: 'janitor'
     };
@@ -236,7 +236,7 @@ function convertHampterToGlaze(char) {
         standardTags = tagIdsToNames(char.tagIds || []).filter(t => t.toLowerCase() !== 'limitless');
     }
 
-    const tags = [char.is_nsfw ? 'NSFW' : 'SFW', ...standardTags];
+    const tags = [(char.is_nsfw || char.isNsfw) ? 'NSFW' : 'SFW', ...standardTags];
 
     if (char.custom_tags && Array.isArray(char.custom_tags)) {
         tags.push(...char.custom_tags.map(t => `#${t}`));

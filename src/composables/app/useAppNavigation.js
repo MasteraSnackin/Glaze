@@ -20,7 +20,7 @@ export function useAppNavigation() {
     const isHeaderEditorMode = ref(false);
     const isOnboarding = ref(false);
 
-    const menuViews = ['view-menu', 'view-settings', 'view-theme-settings'];
+    const menuViews = ['view-menu', 'view-settings', 'view-theme-settings', 'view-sync'];
     const isDesktopFloating = computed(() => isDesktop.value && menuViews.includes(currentView.value));
 
     const effectiveMainView = computed(() => {

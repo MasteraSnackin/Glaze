@@ -43,7 +43,7 @@ export function useAppEventSubscriptions({
     const appEventUnsubs = [];
 
     const onNavigateTo = (detail) => { currentView.value = detail; };
-    const onOpenOnboarding = () => { 
+    const onOpenOnboarding = () => {
         isOnboarding.value = true;
     };
 
@@ -94,7 +94,11 @@ export function useAppEventSubscriptions({
     };
 
     const onOpenSyncSheet = () => {
-        waitForComponent(syncSheetRef, (comp) => { comp.open(); });
+        if (isDesktop.value && currentView.value === 'view-menu') {
+            currentView.value = 'view-sync';
+        } else {
+            waitForComponent(syncSheetRef, (comp) => { comp.open(); });
+        }
     };
 
     const onOpenConflictSheet = () => {

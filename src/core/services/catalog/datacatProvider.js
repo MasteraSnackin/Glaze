@@ -489,19 +489,19 @@ function resolveAvatarUrl(url) {
 
 function normalizeListItem(c) {
     const stdTags = (c.tags || []).map(t => (typeof t === 'string' ? stripEmoji(t) : stripEmoji(t.name))).filter(Boolean);
-    const tags = [c.is_nsfw ? 'NSFW' : 'SFW', ...stdTags];
+    const tags = [(c.is_nsfw || c.isNsfw) ? 'NSFW' : 'SFW', ...stdTags];
 
     return {
         // API returns character_id (UUID) as the primary identifier
         id: c.character_id || c.characterId || c.uuid || c.id,
-        name: c.chat_name || c.chatName || c.name || 'Unknown',
+        name: c.name || c.chat_name || c.chatName || 'Unknown',
         avatarUrl: resolveAvatarUrl(pickAvatarSource(c)),
         tags: [...new Set(tags)],
         tokens: c.total_tokens || c.totalTokens || 0,
         stats: { chat: c.chat_count || 0, message: c.message_count || 0 },
         creator: c.creator_name || c.creatorName || '',
         creator_id: c.creator_id || c.creatorId || '',
-        nsfw: Boolean(c.is_nsfw),
+        nsfw: Boolean(c.is_nsfw || c.isNsfw),
         source: 'datacat'
     };
 }
@@ -511,7 +511,7 @@ function convertToGlaze(raw, meta = {}) {
         .map(t => (typeof t === 'string' ? stripEmoji(t) : stripEmoji(t?.name)))
         .filter(Boolean);
 
-    const tags = [raw.is_nsfw ? 'NSFW' : 'SFW', ...stdTags];
+    const tags = [(raw.is_nsfw || raw.isNsfw) ? 'NSFW' : 'SFW', ...stdTags];
 
     return {
         name: raw.name || raw.chatName || raw.chat_name || 'Unknown',

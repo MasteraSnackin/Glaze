@@ -169,7 +169,15 @@ const connectDropbox = async () => {
     } catch (e) {
         console.error('[SyncSheet] Dropbox connect failed:', e);
         setSyncError(e.message);
-        alert(e.message);
+        showBottomSheet({
+            title: t('title_error') || 'Error',
+            bigInfo: {
+                icon: '<svg viewBox="0 0 24 24" style="fill:currentColor;width:100%;height:100%;color:#ff4444"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>',
+                description: e.message,
+                buttonText: t('btn_ok') || 'OK',
+                onButtonClick: () => closeBottomSheet()
+            }
+        });
     } finally {
         isConnecting.value = false;
     }
@@ -187,31 +195,60 @@ const connectGdrive = async () => {
     } catch (e) {
         console.error('[SyncSheet] Google Drive connect failed:', e);
         setSyncError(e.message);
-        alert(e.message);
+        showBottomSheet({
+            title: t('title_error') || 'Error',
+            bigInfo: {
+                icon: '<svg viewBox="0 0 24 24" style="fill:currentColor;width:100%;height:100%;color:#ff4444"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>',
+                description: e.message,
+                buttonText: t('btn_ok') || 'OK',
+                onButtonClick: () => closeBottomSheet()
+            }
+        });
     } finally {
         isConnectingGdrive.value = false;
     }
 };
 
-const disconnectProvider = async () => {
-    if (!confirm(t('sync_confirm_disconnect') || 'Disconnect cloud sync? Your local data will remain intact.')) return;
-    isDisconnecting.value = true;
-    try {
-        if (syncProvider.value === PROVIDERS.DROPBOX) {
-            await dropboxAdapter.disconnect();
-        } else if (syncProvider.value === PROVIDERS.GDRIVE) {
-            await gdriveAdapter.disconnect();
-        }
-        clearProvider();
-        accountInfo.value = null;
-        localSyncStatus.value = '';
-        syncResult.value = null;
-        resetFolderStatus();
-    } catch (e) {
-        console.error('[SyncSheet] Disconnect failed:', e);
-    } finally {
-        isDisconnecting.value = false;
-    }
+const disconnectProvider = () => {
+    showBottomSheet({
+        title: t('sync_disconnect') || 'Disconnect',
+        bigInfo: {
+            icon: '<svg viewBox="0 0 24 24" style="fill:currentColor;width:100%;height:100%;color:#8e8e93"><path d="M11 15h2v2h-2zm0-8h2v6h-2zm.99-5C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z"/></svg>',
+            description: t('sync_confirm_disconnect') || 'Disconnect cloud sync? Your local data will remain intact.',
+        },
+        items: [
+            {
+                label: t('sync_disconnect') || 'Disconnect',
+                isDestructive: true,
+                centered: true,
+                onClick: async () => {
+                    closeBottomSheet();
+                    isDisconnecting.value = true;
+                    try {
+                        if (syncProvider.value === PROVIDERS.DROPBOX) {
+                            await dropboxAdapter.disconnect();
+                        } else if (syncProvider.value === PROVIDERS.GDRIVE) {
+                            await gdriveAdapter.disconnect();
+                        }
+                        clearProvider();
+                        accountInfo.value = null;
+                        localSyncStatus.value = '';
+                        syncResult.value = null;
+                        resetFolderStatus();
+                    } catch (e) {
+                        console.error('[SyncSheet] Disconnect failed:', e);
+                    } finally {
+                        isDisconnecting.value = false;
+                    }
+                }
+            },
+            {
+                label: t('btn_cancel') || 'Cancel',
+                centered: true,
+                onClick: () => closeBottomSheet()
+            }
+        ]
+    });
 };
 
 const setupEncryption = async () => {
@@ -302,30 +339,51 @@ const doPush = async () => {
     }
 };
 
-const doPull = async () => {
-    if (!confirm(t('sync_confirm_pull') || 'Pull from cloud? Local data that is older will be overwritten.')) return;
-    isSyncing.value = true;
-    syncResult.value = null;
-    try {
-        const result = await fullPull();
-        syncResult.value = { type: 'pull', ...result };
-        if (syncConflicts.value.length > 0) {
-            publishAppEvent(APP_EVENTS.nav.openConflictSheet);
-        }
-    } catch (e) {
-        console.error('[SyncSheet] Pull failed:', e);
-        showBottomSheet({
-            title: t('title_error') || 'Error',
-            bigInfo: {
-                icon: '<svg viewBox="0 0 24 24" style="fill:currentColor;width:100%;height:100%;color:#ff4444"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>',
-                description: e.message,
-                buttonText: t('btn_ok') || 'OK',
-                onButtonClick: () => closeBottomSheet()
+const doPull = () => {
+    showBottomSheet({
+        title: t('sync_pull') || 'Pull',
+        bigInfo: {
+            icon: '<svg viewBox="0 0 24 24" style="fill:currentColor;width:100%;height:100%;color:#8e8e93"><path d="M11 15h2v2h-2zm0-8h2v6h-2zm.99-5C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z"/></svg>',
+            description: t('sync_confirm_pull') || 'Pull from cloud? Local data that is older will be overwritten.',
+        },
+        items: [
+            {
+                label: t('sync_pull') || 'Pull',
+                isDestructive: true,
+                centered: true,
+                onClick: async () => {
+                    closeBottomSheet();
+                    isSyncing.value = true;
+                    syncResult.value = null;
+                    try {
+                        const result = await fullPull();
+                        syncResult.value = { type: 'pull', ...result };
+                        if (syncConflicts.value.length > 0) {
+                            publishAppEvent(APP_EVENTS.nav.openConflictSheet);
+                        }
+                    } catch (e) {
+                        console.error('[SyncSheet] Pull failed:', e);
+                        showBottomSheet({
+                            title: t('title_error') || 'Error',
+                            bigInfo: {
+                                icon: '<svg viewBox="0 0 24 24" style="fill:currentColor;width:100%;height:100%;color:#ff4444"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>',
+                                description: e.message,
+                                buttonText: t('btn_ok') || 'OK',
+                                onButtonClick: () => closeBottomSheet()
+                            }
+                        });
+                    } finally {
+                        isSyncing.value = false;
+                    }
+                }
+            },
+            {
+                label: t('btn_cancel') || 'Cancel',
+                centered: true,
+                onClick: () => closeBottomSheet()
             }
-        });
-    } finally {
-        isSyncing.value = false;
-    }
+        ]
+    });
 };
 
 const doFullSync = async () => {
@@ -342,28 +400,68 @@ const doFullSync = async () => {
 };
 
 const wipeProgress = ref('');
-const doWipe = async () => {
-    if (!confirm(t('sync_confirm_wipe') || 'Delete ALL data from cloud? This cannot be undone. Your local data will remain intact.')) return;
-    if (!confirm(t('sync_confirm_wipe_final') || 'Are you sure? Type the provider name to confirm.')) return;
-    isWiping.value = true;
-    syncResult.value = null;
-    wipeProgress.value = '';
-    try {
-        const adapter = getAdapter();
-        if (!adapter) throw new Error('No provider connected');
-        const result = await wipeCloudData(adapter, (p) => {
-            wipeProgress.value = p.message || '';
-        });
-        await resetSyncIdentityAfterWipe();
-        syncResult.value = { type: 'wipe', ...result };
-        localSyncStatus.value = 'ready';
-    } catch (e) {
-        console.error('[SyncSheet] Wipe failed:', e);
-        setSyncError(e.message);
-    } finally {
-        isWiping.value = false;
-        wipeProgress.value = '';
-    }
+const doWipe = () => {
+    showBottomSheet({
+        title: t('sync_wipe_cloud') || 'Wipe Cloud Data',
+        bigInfo: {
+            icon: '<svg viewBox="0 0 24 24" style="fill:currentColor;width:100%;height:100%;color:#ff4444"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>',
+            description: t('sync_confirm_wipe') || 'Delete ALL data from cloud? This cannot be undone. Your local data will remain intact.',
+        },
+        items: [
+            {
+                label: t('sync_wipe_cloud') || 'Wipe Cloud Data',
+                isDestructive: true,
+                centered: true,
+                onClick: () => {
+                    const expectedName = syncProvider.value;
+                    const label = expectedName === PROVIDERS.DROPBOX ? 'Dropbox' : (expectedName === PROVIDERS.GDRIVE ? 'Google Drive' : expectedName);
+                    
+                    showBottomSheet({
+                        title: t('sync_wipe_cloud') || 'Wipe Cloud Data',
+                        bigInfo: {
+                            description: t('sync_confirm_wipe_final') || 'Are you sure? Type the provider name to confirm.',
+                        },
+                        input: {
+                            placeholder: label,
+                            value: '',
+                            confirmLabel: t('btn_ok') || 'OK',
+                            onConfirm: async (val) => {
+                                if (val.toLowerCase() !== label.toLowerCase()) {
+                                    closeBottomSheet();
+                                    return;
+                                }
+                                closeBottomSheet();
+                                isWiping.value = true;
+                                syncResult.value = null;
+                                wipeProgress.value = '';
+                                try {
+                                    const adapter = getAdapter();
+                                    if (!adapter) throw new Error('No provider connected');
+                                    const result = await wipeCloudData(adapter, (p) => {
+                                        wipeProgress.value = p.message || '';
+                                    });
+                                    await resetSyncIdentityAfterWipe();
+                                    syncResult.value = { type: 'wipe', ...result };
+                                    localSyncStatus.value = 'ready';
+                                } catch (e) {
+                                    console.error('[SyncSheet] Wipe failed:', e);
+                                    setSyncError(e.message);
+                                } finally {
+                                    isWiping.value = false;
+                                    wipeProgress.value = '';
+                                }
+                            }
+                        }
+                    });
+                }
+            },
+            {
+                label: t('btn_cancel') || 'Cancel',
+                centered: true,
+                onClick: () => closeBottomSheet()
+            }
+        ]
+    });
 };
 
 const openConflictSheet = () => {
@@ -410,13 +508,13 @@ onMounted(async () => {
 </div>
                     
                     <button v-if="isDropboxAuthAvailable" class="bs-btn bs-connect-btn" @click="connectDropbox" :disabled="isConnecting || isConnectingGdrive">
-                        <svg viewBox="0 0 24 24"><path d="M7.5 2L2 6l3.75 3L2 12l5.5 4 3.75-3 3.75 3 5.5-4-4.5-3L20.5 6 15 2l-3.75 3L7.5 2zm3.75 10L7.5 15l3.75 3 3.75-3-3.75-3zM7.5 16l-1.88 1.5L3 19l5.5 4 3.75-3-4.75-4zm9-4l1.88-1.5L21 8l-5.5-4-3.75 3L16.5 8l-1.88 1.5L11 12l5.5 4 3.75-3-4.75-4z"/></svg>
+                        <svg viewBox="0 0 24 24"><path d="M6.5 2L2 5l4.5 3L11 5zM17.5 2L13 5l4.5 3L22 5zM6.5 8L2 11l4.5 3L11 11zM17.5 8L13 11l4.5 3L22 11zM12 14L7.5 17l4.5 3L16.5 17z"/></svg>
                         <span v-if="isConnecting">{{ t('sync_connecting') || 'Connecting...' }}</span>
                         <span v-else>Dropbox</span>
                     </button>
 
                     <button v-if="isGdriveAuthAvailable" class="bs-btn bs-gdrive-btn" @click="connectGdrive" :disabled="isConnecting || isConnectingGdrive" :style="isDropboxAuthAvailable ? 'margin-top:8px' : ''">
-                        <svg viewBox="0 0 24 24"><path d="M7.71 3.5L1.15 15l4.58 7.5L12.29 11 7.71 3.5zm1.14 0L19.41 3.5 12.86 15H1.72l5.13-11.5zm10.01 0L13.72 15l4.58 7.5 5.55-11.5-5-7.5z"/></svg>
+                        <svg viewBox="0 0 24 24"><path d="M7.71 3.5H16.29l6.56 11.5-4.58 7.5H5.73L1.15 15z"/></svg>
                         <span v-if="isConnectingGdrive">{{ t('sync_connecting') || 'Connecting...' }}</span>
                         <span v-else>Google Drive</span>
                     </button>
@@ -425,7 +523,7 @@ onMounted(async () => {
                         {{ t('sync_no_providers_configured') || 'Cloud sync is disabled in this build. Add OAuth keys in .env to enable Dropbox or Google Drive sign-in.' }}
                     </div>
 
-                    <div class="bs-hint">
+                    <div v-if="false" class="bs-hint">
                         {{ t('sync_hint_cloud_optional') || 'Your data can be optionally encrypted before upload. Set up encryption after connecting.' }}
                     </div>
 
@@ -438,9 +536,9 @@ onMounted(async () => {
                     </div>
                 </div>
 
-                <div class="bs-separator"></div>
+                <div v-if="false" class="bs-separator"></div>
 
-                <div class="bs-section">
+                <div v-if="false" class="bs-section">
                     <div class="bs-section-title">
 {{ t('sync_restore_key') || 'Restore from Recovery Phrase' }}
 </div>
@@ -456,8 +554,8 @@ onMounted(async () => {
                 <div class="bs-section">
                     <div class="sync-status-card">
                         <div class="sync-provider-badge">
-                            <svg v-if="syncProvider === 'dropbox'" viewBox="0 0 24 24" style="width:24px;height:24px;fill:currentColor"><path d="M7.5 2L2 6l3.75 3L2 12l5.5 4 3.75-3 3.75 3 5.5-4-4.5-3L20.5 6 15 2l-3.75 3L7.5 2zm3.75 10L7.5 15l3.75 3 3.75-3-3.75-3z"/></svg>
-                            <svg v-else-if="syncProvider === 'gdrive'" viewBox="0 0 24 24" style="width:24px;height:24px;fill:currentColor"><path d="M7.71 3.5L1.15 15l4.58 7.5L12.29 11 7.71 3.5zm1.14 0L19.41 3.5 12.86 15H1.72l5.13-11.5zm10.01 0L13.72 15l4.58 7.5 5.55-11.5-5-7.5z"/></svg>
+                            <svg v-if="syncProvider === 'dropbox'" viewBox="0 0 24 24" style="width:24px;height:24px;fill:currentColor"><path d="M6.5 2L2 5l4.5 3L11 5zM17.5 2L13 5l4.5 3L22 5zM6.5 8L2 11l4.5 3L11 11zM17.5 8L13 11l4.5 3L22 11zM12 14L7.5 17l4.5 3L16.5 17z"/></svg>
+                            <svg v-else-if="syncProvider === 'gdrive'" viewBox="0 0 24 24" style="width:24px;height:24px;fill:currentColor"><path d="M7.71 3.5H16.29l6.56 11.5-4.58 7.5H5.73L1.15 15z"/></svg>
                             <span class="sync-provider-name">{{ providerLabel }}</span>
                             <span class="sync-status-dot" :class="{ connected: localSyncStatus === 'connected' && syncStatus !== SYNC_STATUS.ERROR, error: syncStatus === SYNC_STATUS.ERROR, syncing: syncStatus === SYNC_STATUS.SYNCING }"></span>
                         </div>
@@ -572,7 +670,7 @@ onMounted(async () => {
                 </div>
 
                 <!-- Encryption setup (optional) -->
-                <div v-if="localSyncStatus !== 'connected'" class="bs-section">
+                <div v-if="false && localSyncStatus !== 'connected'" class="bs-section">
                     <div class="bs-section-title">
 {{ t('sync_encryption') || 'Encryption' }}
 </div>
@@ -603,42 +701,36 @@ onMounted(async () => {
                             <span>{{ t('sync_push') || 'Push' }}</span>
                         </button>
                         <button class="bs-btn bs-pull-btn" @click="doPull" :disabled="isSyncing || syncStatus === SYNC_STATUS.SYNCING">
-                            <svg viewBox="0 0 24 24"><path d="M11 4H5v6h2V7.41L14.59 15 16 13.59 8.41 6H11V4zm8 12h-6v2h6v-2zm-2-8H11v2h6V8z"/></svg>
+                            <svg viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
                             <span>{{ t('sync_pull') || 'Pull' }}</span>
                         </button>
                     </div>
                 </div>
 
-                <!-- Auto-sync settings -->
-                <div v-if="localSyncStatus === 'connected' || localSyncStatus === 'ready'" class="bs-section">
-                    <div class="bs-section-title">
-{{ t('sync_auto_sync') || 'Auto-Sync' }}
-</div>
-                    <div class="settings-item-checkbox" @click="autoSyncEnabled = !autoSyncEnabled" style="cursor: pointer; padding: 8px 0;">
-                        <div class="settings-text-col">
-                            <label style="cursor: pointer;">{{ t('sync_enable_auto') || 'Enable Auto-Sync' }}</label>
-                            <div class="settings-desc">
-{{ t('sync_auto_desc') || 'Automatically sync after every N messages' }}
-</div>
-                        </div>
-                        <input type="checkbox" class="vk-switch" :checked="autoSyncEnabled" style="pointer-events: none;">
-                    </div>
-                    <div v-if="autoSyncEnabled" class="sync-threshold">
-                        <label>{{ t('sync_every') || 'Every' }}</label>
-                        <input type="number" v-model.number="autoSyncThreshold" min="1" max="50" class="sync-threshold-input">
-                        <label>{{ t('sync_messages') || 'messages' }}</label>
-                    </div>
-                </div>
-
-                <div class="bs-separator"></div>
-
                 <div class="bs-section">
                     <div class="bs-section-title">
 {{ t('section_sync_settings') || 'Sync Settings' }}
 </div>
-                    <div class="settings-item-checkbox" @click="syncIncludeApiKeys = !syncIncludeApiKeys">
+                    <template v-if="localSyncStatus === 'connected' || localSyncStatus === 'ready'">
+                        <div class="settings-item-checkbox" @click="autoSyncEnabled = !autoSyncEnabled" style="cursor: pointer; padding: 8px 0;">
+                            <div class="settings-text-col">
+                                <label style="cursor: pointer;">{{ t('sync_enable_auto') || 'Enable Auto-Sync' }}</label>
+                                <div class="settings-desc">
+{{ t('sync_auto_desc') || 'Automatically sync after every N messages' }}
+</div>
+                            </div>
+                            <input type="checkbox" class="vk-switch" :checked="autoSyncEnabled" style="pointer-events: none;">
+                        </div>
+                        <div v-if="autoSyncEnabled" class="sync-threshold">
+                            <label>{{ t('sync_every') || 'Every' }}</label>
+                            <input type="number" v-model.number="autoSyncThreshold" min="1" max="50" class="sync-threshold-input">
+                            <label>{{ t('sync_messages') || 'messages' }}</label>
+                        </div>
+                    </template>
+
+                    <div class="settings-item-checkbox" @click="syncIncludeApiKeys = !syncIncludeApiKeys" style="cursor: pointer; padding: 8px 0;">
                         <div class="settings-text-col">
-                            <label>{{ t('label_sync_include_keys') || 'Include API Keys in Sync' }}</label>
+                            <label style="cursor: pointer;">{{ t('label_sync_include_keys') || 'Include API Keys in Sync' }}</label>
                             <div class="settings-desc">
 {{ t('desc_sync_include_keys') || 'Send provider API keys to cloud backup' }}
 </div>

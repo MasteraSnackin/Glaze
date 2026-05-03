@@ -176,12 +176,18 @@ function normalizeNode(node) {
     const creator = fullPath.split('/')[0] || '';
     const nsfw = Boolean(node.nsfw || node.is_nsfw);
 
+    const isTopicNsfw = (node.topics || []).some(t => String(t).toLowerCase() === 'nsfw');
+    const cleanTopics = (node.topics || []).filter(t => {
+        const lower = String(t).toLowerCase();
+        return lower !== 'nsfw' && lower !== 'sfw';
+    });
+
     return {
         id: fullPath,
         name: node.name || 'Unknown',
         avatarUrl: node.avatar_url || node.max_res_url || `${AVATAR_BASE}${fullPath}/avatar.webp`,
         description: node.tagline || '',
-        tags: [nsfw ? 'NSFW' : 'SFW', ...(node.topics || [])],
+        tags: [isTopicNsfw ? 'NSFW' : 'SFW', ...cleanTopics],
         tokens: node.nTokens || node.n_tokens || 0,
         stats: { chat: node.nDownloads || 0, message: 0 },
         creator,
@@ -198,6 +204,12 @@ function convertToGlaze(node) {
     const creator = fullPath.split('/')[0] || '';
     const nsfw = Boolean(node.nsfw || node.is_nsfw);
 
+    const isTopicNsfw = (node.topics || []).some(t => String(t).toLowerCase() === 'nsfw');
+    const cleanTopics = (node.topics || []).filter(t => {
+        const lower = String(t).toLowerCase();
+        return lower !== 'nsfw' && lower !== 'sfw';
+    });
+
     return {
         name: def.name || node.name || 'Unknown',
         description: def.personality || '',
@@ -209,7 +221,7 @@ function convertToGlaze(node) {
         system_prompt: def.system_prompt || '',
         post_history_instructions: def.post_history_instructions || '',
         alternate_greetings: def.alternate_greetings || [],
-        tags: [nsfw ? 'NSFW' : 'SFW', ...(node.topics || [])],
+        tags: [isTopicNsfw ? 'NSFW' : 'SFW', ...cleanTopics],
         creator,
         creator_id: creator,
         character_book: def.embedded_lorebook || null,

@@ -12,8 +12,8 @@ import {
     activeProvider, setActiveProvider
 } from '@/core/states/catalogState.js';
 import { createNewSession } from '@/utils/sessions.js';
-import { datacatGetCharacter, datacatExtractAndPoll } from '@/core/services/catalog/datacatProvider.js';
-import { chubGetCharacter } from '@/core/services/catalog/chubProvider.js';
+import { datacatGetCharacter, datacatExtractAndPoll, datacatTags } from '@/core/services/catalog/datacatProvider.js';
+import { chubGetCharacter, chubTags } from '@/core/services/catalog/chubProvider.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import FiltersBottomSheet from '@/components/sheets/FiltersBottomSheet.vue';
 import CharacterCardSheet from '@/components/sheets/CharacterCardSheet.vue';
@@ -293,33 +293,33 @@ const onFiltersApply = () => {
 
 const PROVIDER_SORT_OPTIONS = {
     janitor: [
-        { value: 'trending',   label: 'Trending (Week)' },
-        { value: 'trending24', label: 'Trending (24h)' },
-        { value: 'popular',    label: 'Popular All Time' },
-        { value: 'latest',     label: 'Latest' }
+        { value: 'trending',   labelKey: 'catalog_sort_janitor_trending' },
+        { value: 'trending24', labelKey: 'catalog_sort_janitor_trending24' },
+        { value: 'popular',    labelKey: 'catalog_sort_janitor_popular' },
+        { value: 'latest',     labelKey: 'catalog_sort_janitor_latest' }
     ],
     janny: [
-        { value: 'newest',      label: 'Newest' },
-        { value: 'oldest',      label: 'Oldest' },
-        { value: 'tokens_desc', label: 'Most Tokens' },
-        { value: 'tokens_asc',  label: 'Fewest Tokens' },
-        { value: 'relevant',    label: 'Relevance' }
+        { value: 'newest',      labelKey: 'catalog_sort_janny_newest' },
+        { value: 'oldest',      labelKey: 'catalog_sort_janny_oldest' },
+        { value: 'tokens_desc', labelKey: 'catalog_sort_janny_tokens_desc' },
+        { value: 'tokens_asc',  labelKey: 'catalog_sort_janny_tokens_asc' },
+        { value: 'relevant',    labelKey: 'catalog_sort_janny_relevant' }
     ],
     datacat: [
-        { value: 'recent',          label: 'Recent' },
-        { value: 'fresh',           label: 'Freshest' },
-        { value: 'score_week',      label: 'Trending (Week)' },
-        { value: 'score_24h',       label: 'Trending (24h)' },
-        { value: 'chat_count_week', label: 'Popular (Week)' },
-        { value: 'chat_count_24h',  label: 'Popular (24h)' }
+        { value: 'recent',          labelKey: 'catalog_sort_datacat_recent' },
+        { value: 'fresh',           labelKey: 'catalog_sort_datacat_fresh' },
+        { value: 'score_week',      labelKey: 'catalog_sort_datacat_score_week' },
+        { value: 'score_24h',       labelKey: 'catalog_sort_datacat_score_24h' },
+        { value: 'chat_count_week', labelKey: 'catalog_sort_datacat_chat_count_week' },
+        { value: 'chat_count_24h',  labelKey: 'catalog_sort_datacat_chat_count_24h' }
     ],
     chub: [
-        { value: 'popular',       label: 'Popular' },
-        { value: 'trending_week', label: 'Trending (Week)' },
-        { value: 'trending_24h',  label: 'Trending (24h)' },
-        { value: 'latest',        label: 'Latest' },
-        { value: 'rating',        label: 'Top Rated' },
-        { value: 'updated',       label: 'Recently Updated' }
+        { value: 'popular',       labelKey: 'catalog_sort_chub_popular' },
+        { value: 'trending_week', labelKey: 'catalog_sort_chub_trending_week' },
+        { value: 'trending_24h',  labelKey: 'catalog_sort_chub_trending_24h' },
+        { value: 'latest',        labelKey: 'catalog_sort_chub_latest' },
+        { value: 'rating',        labelKey: 'catalog_sort_chub_rating' },
+        { value: 'updated',       labelKey: 'catalog_sort_chub_updated' }
     ]
 };
 
@@ -330,25 +330,52 @@ const currentSortOptions = computed(() =>
 const currentSortLabel = () => {
     const cur = catalogFilters.value?.sort;
     const opts = PROVIDER_SORT_OPTIONS[activeProvider.value] || [];
-    return opts.find(o => o.value === cur)?.label || cur || '?';
+    const opt = opts.find(o => o.value === cur);
+    return opt ? t(opt.labelKey) : (cur || '?');
 };
 
 const activeTagItems = computed(() => {
     const res = [];
+    
+    // NSFW filter
+    if (catalogFilters.value.nsfw) {
+        res.push({ id: 'nsfw_filter', label: 'NSFW' });
+    }
+
     // Standard tags
+    const activeProv = activeProvider.value;
     (catalogFilters.value.tagIds || []).forEach(id => {
-        const label = janitorTagMap.value[id];
-        if (label) res.push({ id, label });
+        let label = id;
+        if (activeProv === 'datacat') {
+            const t = datacatTags.value.find(t => t.id === id);
+            if (t) label = t.name;
+        } else if (activeProv === 'janitor') {
+            label = janitorTagMap.value[id] || id;
+        } else if (activeProv === 'chub') {
+            const t = chubTags.value.find(t => t.id === id);
+            if (t) label = t.name;
+        }
+        res.push({ id, label });
     });
     // Custom tags
     (catalogFilters.value.tagNames || []).forEach(name => {
-        res.push({ name, label: '#' + name });
+        let label = name;
+        if (activeProv === 'chub') {
+            const t = chubTags.value.find(t => String(t.name) === String(name) || String(t.id) === String(name));
+            if (t) label = t.name;
+            else label = '#' + name;
+        } else {
+            label = '#' + name;
+        }
+        res.push({ name, label });
     });
     return res;
 });
 
 function removeTag(tag) {
-    if (tag.id) {
+    if (tag.id === 'nsfw_filter') {
+        catalogFilters.value.nsfw = false;
+    } else if (tag.id) {
         catalogFilters.value.tagIds = catalogFilters.value.tagIds.filter(tid => tid !== tag.id);
     } else {
         catalogFilters.value.tagNames = catalogFilters.value.tagNames.filter(tn => tn !== tag.name);
@@ -360,7 +387,7 @@ function openSortSelector() {
     showBottomSheet({
         title: t('sort_by'),
         items: currentSortOptions.value.map(opt => ({
-            label: opt.label,
+            label: t(opt.labelKey),
             isActive: (catalogFilters.value?.sort) === opt.value,
             onClick: () => {
                 catalogFilters.value = { ...catalogFilters.value, sort: opt.value };
@@ -463,7 +490,7 @@ onUnmounted(() => {
 
                 <div class="active-filters-container">
                     <div class="active-filters" v-if="activeTagItems.length">
-                        <div v-for="tag in activeTagItems" :key="tag.id || tag.name" class="active-tag-chip" @click="removeTag(tag)">
+                        <div v-for="tag in activeTagItems" :key="tag.id || tag.name" class="active-tag-chip" :class="{'nsfw-active-chip': tag.id === 'nsfw_filter'}" @click="removeTag(tag)">
                             {{ tag.label }}
                             <svg viewBox="0 0 24 24" class="chip-remove-icon"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
                         </div>
@@ -473,8 +500,8 @@ onUnmounted(() => {
                 <div class="sort-controls">
                     <div class="filter-icon-btn" @click="openFilters">
                         <svg viewBox="0 0 24 24"><path d="M10 18h4v-2h-4v2zM3 6v2h18V6H3zm3 7h12v-2H6v2z"/></svg>
-                        <span v-if="(catalogFilters.tagIds?.length || 0) + (catalogFilters.tagNames?.length || 0) > 0" class="filter-badge">
-                            {{ (catalogFilters.tagIds?.length || 0) + (catalogFilters.tagNames?.length || 0) }}
+                        <span v-if="(catalogFilters.tagIds?.length || 0) + (catalogFilters.tagNames?.length || 0) + (catalogFilters.nsfw ? 1 : 0) > 0" class="filter-badge">
+                            {{ (catalogFilters.tagIds?.length || 0) + (catalogFilters.tagNames?.length || 0) + (catalogFilters.nsfw ? 1 : 0) }}
                         </span>
                     </div>
 
@@ -487,7 +514,7 @@ onUnmounted(() => {
             </div>
 
             <!-- Results Count -->
-            <div v-if="catalogTotal > 0 && !catalogLoading" class="catalog-total">
+            <div v-if="catalogTotal > 0 && !catalogLoading && activeProvider !== 'janny' && activeProvider !== 'chub'" class="catalog-total">
                 {{ t('catalog_total', { count: catalogTotal }) }}
             </div>
 
@@ -743,6 +770,10 @@ onUnmounted(() => {
   align-items: center;
   gap: 4px;
   transition: transform 0.1s, opacity 0.2s;
+}
+
+.active-tag-chip.nsfw-active-chip {
+    background-color: #ff4444;
 }
 
 .active-tag-chip:active {
