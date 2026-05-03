@@ -194,6 +194,7 @@
     cursor: pointer;
     z-index: 90;
     transition: transform 0.1s;
+    pointer-events: auto;
 }
 
 .fab-add:active {
