@@ -248,10 +248,16 @@ export function useSessionPersistence({
         }
     });
 
+    function onNativeBackground(activeChatChar) {
+        if (!activeChatChar) return;
+        writeCrashBuffer(activeChatChar);
+    }
+
     return {
         asyncSaveCurrentSessionState,
         applyImageAutoHide,
         onVisibilityChange,
+        onNativeBackground,
         onPageHide,
         buildCrashBufferKey,
         clearCrashBuffer

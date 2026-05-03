@@ -460,6 +460,7 @@ const {
     asyncSaveCurrentSessionState,
     applyImageAutoHide,
     onVisibilityChange,
+    onNativeBackground,
     buildCrashBufferKey,
     clearCrashBuffer
 } = useSessionPersistence({
@@ -586,12 +587,13 @@ async function loadChats() {
 }
 
 async function updateSessionMessage(char, msgIndex, newMsgData) {
-    const data = await getChatData(char.id);
-    const sessionId = char.sessionId || data.currentId;
-    if (data && data.sessions[sessionId]) {
-        data.sessions[sessionId][msgIndex] = newMsgData;
-        await db.saveChat(char.id, data);
-    }
+    const msgCopy = JSON.parse(JSON.stringify(newMsgData));
+    await db.patchChatData(char.id, (data) => {
+        const sessionId = char.sessionId || data?.currentId;
+        if (data && sessionId && data.sessions[sessionId]) {
+            data.sessions[sessionId][msgIndex] = msgCopy;
+        }
+    });
 }
 
 function handleSheetBack() {
@@ -1412,6 +1414,7 @@ onMounted(() => {
     if (Capacitor.isNativePlatform()) {
         App.addListener('appStateChange', ({ isActive }) => {
             if (!isActive && activeChatChar) {
+                onNativeBackground(activeChatChar);
                 const charId = activeChatChar.id;
                 const sessionId = activeChatChar.sessionId;
                 const messagesSnapshot = currentMessages.value;

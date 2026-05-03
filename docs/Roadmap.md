@@ -52,6 +52,37 @@ Status: `research complete`, implementation `done`
 
 **Testing**: not tested
 
+## Ghost Generation Bug (2026-05-03)
+
+Status: `research complete`, implementation `done`
+
+**Scenario**: User sends message → app goes to background ~7 min → returns to 500+ second counter → stops/exits → chat disappears
+
+### Root Cause
+
+`restoreGenerationState` used `getChatData` + `saveChat` (not `patchChatData`). Between the async `getChatData` yield and the `saveChat`, `closeChat()` could run and set `currentMessages.value = []`. The stale reference `data.sessions[sessionId] = currentMessages.value` then wrote an empty array to DB, erasing all messages.
+
+### Bugs Fixed
+
+**BUG 1 (CRITICAL) — `restoreGenerationState` race with `closeChat`** (`useGenerationStateRestore.js:78-83`):
+- Replaced `getChatData` + `saveChat` with `patchChatData` + snapshot before await
+- Both branches (message found in `currentMessages`, message not found) now use `patchChatData`
+- Removed `getChatData` dependency entirely
+
+**BUG 2 (MODERATE) — `abortActiveChatGeneration` doesn't clear generation state** (`useGenerationAbort.js`):
+- Added `clearGenerationState(charId, state.genId)` and `publishAppEvent(generation.ended)` to abort path
+- Prevents ghost generation state from blocking future generations when SSE `onError` never fires (dead HTTP connection)
+
+**BUG 3 (MODERATE) — `updateSessionMessage` lost-update** (`ChatView.vue:588-595`):
+- Replaced `getChatData` + `saveChat` with `patchChatData` + message snapshot
+- Prevents concurrent writes from overwriting each other
+
+**BUG 4 (MINOR) — `appStateChange` missing crash buffer** (`ChatView.vue:1414`):
+- Added `onNativeBackground()` call that writes crash buffer before `patchChatData`
+- Mirrors `visibilitychange` handler behavior for native platform
+
+**Testing**: not tested
+
 ## Sync Setup Guide — For Developers
 
 ### Maintainer Goal
