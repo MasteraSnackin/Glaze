@@ -90,7 +90,11 @@ export function useAppEventSubscriptions({
     };
 
     const onOpenBackupSheet = () => {
-        waitForComponent(backupSheetRef, (comp) => { comp.open(); });
+        if (isDesktop.value && currentView.value === 'view-menu') {
+            currentView.value = 'view-backup';
+        } else {
+            waitForComponent(backupSheetRef, (comp) => { comp.open(); });
+        }
     };
 
     const onOpenSyncSheet = () => {

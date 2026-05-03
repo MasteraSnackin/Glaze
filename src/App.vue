@@ -398,6 +398,7 @@ function closeEditorWrapper() {
       <WindowView :nav="nav">
           <MenuView v-if="nav.currentView.value === 'view-menu'" class="view-gray-bg window-panel" />
           <SyncSheet v-else-if="nav.currentView.value === 'view-sync'" class="view active-view view-gray-bg window-panel" :view-mode="true" />
+          <BackupSheet v-else-if="nav.currentView.value === 'view-backup'" class="view active-view view-gray-bg window-panel" :view-mode="true" />
           <!-- glossary has its own corner popup, not shown here -->
           <ThemeSettingsView v-else-if="nav.currentView.value === 'view-theme-settings'" class="view-gray-bg window-panel" />
           <SettingsView v-else-if="nav.currentView.value === 'view-settings'" class="view-gray-bg window-panel" />

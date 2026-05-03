@@ -249,7 +249,8 @@ function updateHeader() {
         'view-lorebook': 'menu_lorebooks',
         'view-regex': 'menu_regex',
         'view-personas': 'tab_personas',
-        'view-sync': 'menu_cloud_sync'
+        'view-sync': 'menu_cloud_sync',
+        'view-backup': 'menu_backups'
     };
     
     const key = titleKeys[viewId];
@@ -264,7 +265,7 @@ function updateHeader() {
         setupMoreHeader(title);
     } else if (viewId === 'view-theme-settings') {
         setupThemeSettingsHeader(title);
-    } else if (viewId === 'view-settings' || viewId === 'view-sync') {
+    } else if (viewId === 'view-settings' || viewId === 'view-sync' || viewId === 'view-backup') {
         setupSettingsHeader(title);
     } else if (viewId === 'view-tools') {
         setupSubmenuHeader(title, 'view-menu');
