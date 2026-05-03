@@ -61,7 +61,11 @@ export function getApiRuntimeStorage() {
         autoHideImages: localStorage.getItem('gz_api_auto_hide_images') === 'true',
         autoHideImagesN: parseInt(localStorage.getItem('gz_api_auto_hide_images_n') || '1', 10),
         reasoningEffort: localStorage.getItem('gz_api_reasoning_effort') || 'medium',
-        reasoningTags: getApiReasoningTags()
+        reasoningTags: getApiReasoningTags(),
+        omitTemperature: localStorage.getItem('gz_api_omit_temperature') === 'true',
+        omitTopP: localStorage.getItem('gz_api_omit_top_p') === 'true',
+        omitReasoning: localStorage.getItem('gz_api_omit_reasoning') === 'true',
+        omitReasoningEffort: localStorage.getItem('gz_api_omit_reasoning_effort') === 'true'
     };
 }
 
@@ -122,7 +126,11 @@ export function getApiConfig() {
         contextSize: runtime.contextSize,
         autoHideImages: runtime.autoHideImages,
         autoHideImagesN: runtime.autoHideImagesN,
-        reasoningEffort: runtime.reasoningEffort
+        reasoningEffort: runtime.reasoningEffort,
+        omitTemperature: runtime.omitTemperature,
+        omitTopP: runtime.omitTopP,
+        omitReasoning: runtime.omitReasoning,
+        omitReasoningEffort: runtime.omitReasoningEffort
     };
 }
 

@@ -254,6 +254,7 @@ async function collectSingletonEntries() {
         'gz_api_temp', 'gz_api_topp', 'gz_api_stream',
         'gz_api_auto_hide_images', 'gz_api_auto_hide_images_n',
         'gz_api_request_reasoning', 'gz_api_reasoning_start', 'gz_api_reasoning_end', 'gz_api_reasoning_effort',
+        'gz_api_omit_temperature', 'gz_api_omit_top_p', 'gz_api_omit_reasoning', 'gz_api_omit_reasoning_effort',
         'gz_api_connect_timeout', 'gz_api_stream_timeout',
         // Embeddings (non-sensitive)
         'gz_embedding_use_same', 'gz_embedding_target', 'gz_embedding_scan_depth',

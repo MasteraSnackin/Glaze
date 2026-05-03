@@ -19,7 +19,11 @@ export function useApiSettings() {
         autoHideImages: false,
         autoHideImagesN: 1,
         reasoningEnabled: false,
-        reasoningEffort: 'medium'
+        reasoningEffort: 'medium',
+        omitTemperature: false,
+        omitTopP: false,
+        omitReasoning: false,
+        omitReasoningEffort: false
     });
 
     const showApiKey = ref(false);
@@ -78,6 +82,10 @@ export function useApiSettings() {
         apiSettings.autoHideImagesN = runtime.autoHideImagesN;
         apiSettings.reasoningEnabled = runtime.requestReasoning;
         apiSettings.reasoningEffort = runtime.reasoningEffort;
+        apiSettings.omitTemperature = runtime.omitTemperature;
+        apiSettings.omitTopP = runtime.omitTopP;
+        apiSettings.omitReasoning = runtime.omitReasoning;
+        apiSettings.omitReasoningEffort = runtime.omitReasoningEffort;
     }
 
     function saveApiSetting(key, value) {
@@ -96,7 +104,11 @@ export function useApiSettings() {
                 'gz_api_auto_hide_images': 'auto_hide_images',
                 'gz_api_auto_hide_images_n': 'auto_hide_images_n',
                 'gz_api_request_reasoning': 'reasoning_enabled',
-                'gz_api_reasoning_effort': 'reasoning_effort'
+                'gz_api_reasoning_effort': 'reasoning_effort',
+                'gz_api_omit_temperature': 'omit_temperature',
+                'gz_api_omit_top_p': 'omit_top_p',
+                'gz_api_omit_reasoning': 'omit_reasoning',
+                'gz_api_omit_reasoning_effort': 'omit_reasoning_effort'
             };
             if (map[key]) {
                 activeApiPreset.value[map[key]] = value;

@@ -277,6 +277,48 @@ onBeforeUnmount(() => {
                         </div>
                     </div>
                 </div>
+
+                <div class="menu-group">
+                    <div class="section-header">
+{{ t('section_omit_params') || 'Omit Parameters' }}
+</div>
+                    <div class="settings-item-checkbox">
+                        <div class="settings-text-col">
+                            <label>{{ t('label_omit_temperature') || 'Omit Temperature' }}</label>
+                            <div class="settings-desc">
+{{ t('desc_omit_temperature') || "Don't send temperature to API" }}
+</div>
+                        </div>
+                        <input type="checkbox" v-model="apiSettings.omitTemperature" @change="onApiInput('gz_api_omit_temperature', $event.target.checked)" class="vk-switch">
+                    </div>
+                    <div class="settings-item-checkbox">
+                        <div class="settings-text-col">
+                            <label>{{ t('label_omit_top_p') || 'Omit Top P' }}</label>
+                            <div class="settings-desc">
+{{ t('desc_omit_top_p') || "Don't send top_p to API" }}
+</div>
+                        </div>
+                        <input type="checkbox" v-model="apiSettings.omitTopP" @change="onApiInput('gz_api_omit_top_p', $event.target.checked)" class="vk-switch">
+                    </div>
+                    <div class="settings-item-checkbox">
+                        <div class="settings-text-col">
+                            <label>{{ t('label_omit_reasoning') || 'Omit Reasoning' }}</label>
+                            <div class="settings-desc">
+{{ t('desc_omit_reasoning') || "Don't send reasoning params to API" }}
+</div>
+                        </div>
+                        <input type="checkbox" v-model="apiSettings.omitReasoning" @change="onApiInput('gz_api_omit_reasoning', $event.target.checked)" class="vk-switch">
+                    </div>
+                    <div class="settings-item-checkbox">
+                        <div class="settings-text-col">
+                            <label>{{ t('label_omit_reasoning_effort') || 'Omit Reasoning Effort' }}</label>
+                            <div class="settings-desc">
+{{ t('desc_omit_reasoning_effort') || "Don't send reasoning_effort to API" }}
+</div>
+                        </div>
+                        <input type="checkbox" v-model="apiSettings.omitReasoningEffort" @change="onApiInput('gz_api_omit_reasoning_effort', $event.target.checked)" class="vk-switch">
+                    </div>
+                </div>
                 </template>
 
                 <!-- Embeddings Tab -->

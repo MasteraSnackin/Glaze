@@ -32,12 +32,19 @@ function buildOpenAiCompatiblePayload(intent) {
             const previewBody = {
                 model: intent.model,
                 messages: intent.messages,
-                temperature: intent.temperature,
-                top_p: intent.topP,
                 stream: intent.stream
             };
 
-            if (intent.requestReasoning && intent.reasoningEffort && intent.reasoningEffort !== 'auto') {
+            if (!intent.omitTemperature) {
+                previewBody.temperature = intent.temperature;
+            }
+
+            if (!intent.omitTopP) {
+                previewBody.top_p = intent.topP;
+            }
+
+            const shouldSendReasoning = !intent.omitReasoning && intent.requestReasoning;
+            if (shouldSendReasoning && !intent.omitReasoningEffort && intent.reasoningEffort && intent.reasoningEffort !== 'auto') {
                 previewBody.reasoning_effort = intent.reasoningEffort;
             }
 
