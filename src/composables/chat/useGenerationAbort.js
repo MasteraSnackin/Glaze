@@ -46,15 +46,6 @@ export function useGenerationAbort({
             clearPersistedGeneration(charId, sessionId);
         }
 
-        clearGenerationState(charId, state.genId);
-
-        publishAppEvent(APP_EVENTS.domain.generation.ended, {
-            charId,
-            sessionId: sessionId ?? null,
-            genId: state.genId ?? null,
-            type: type || 'chat'
-        });
-
         return true;
     }
 
