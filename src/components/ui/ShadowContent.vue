@@ -367,11 +367,8 @@ onMounted(() => {
     });
   };
 
-  watch(() => props.html, async (newHtml) => {
+  watch(() => props.html, (newHtml) => {
     if (contentDiv) {
-      activeTimers.value = [];
-      await nextTick();
-      
       contentDiv.innerHTML = newHtml;
       
       const timers = Array.from(contentDiv.querySelectorAll('.imggen-loading-timer'));
@@ -384,6 +381,8 @@ onMounted(() => {
             value: '0.0s'
           };
         });
+      } else {
+        activeTimers.value = [];
       }
       
       setTimeout(() => executeScripts(contentDiv), 0);
