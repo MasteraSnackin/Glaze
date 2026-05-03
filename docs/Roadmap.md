@@ -2031,6 +2031,132 @@ After each phase:
 - [x] Test on mobile: batch generation, delete protection, import cleanup
 - [x] PR created: #34
 
+## Bug Investigation: Inline Image Edit, Background Gen, RegexSheet DB Crash, Streaming Loss (2026-05-03)
+
+Branch: `fix/inline-image-edit-bg-gen-db-crash-streaming` (linear chain from `fix/preset-token-discrepancy`)
+Status: `research complete`, implementation `not started`
+
+### 1. Inline Image Edit During Generation
+
+**Bug**: User edits a message while an inline image is generating — in-flight `processMessageImages` overwrites the edit with stale content.
+
+**Root Cause**: No abort/cancel mechanism for `processMessageImages`. The `onUpdate` callback retains a closure over `msg` and directly mutates `msg.text` + calls `updateSessionMessage()`. When `saveEdit()` writes the edited text, the still-running `processMessageImages` overwrites it with old content + loading/result HTML.
+
+**Key Files**:
+- `src/core/services/imageGenService.js` — `processMessageImages()` (line 781), `fetchWithTimeout()` (line 54, 5-min timeout, no external abort)
+- `src/composables/chat/useGenerationCompleteHandler.js` — `onUpdate` callback (line 233-250)
+- `src/composables/chat/useMessageActions.js` — `saveEdit()` triggers second `processMessageImages` (line 419-432)
+- `src/core/utils/messageEditHelpers.js` — `normalizeImgGenHtmlForEditing`, `prepareEditText`, `restoreEditText`
+
+**Architecture Gap**: No centralized tracking of in-flight image generations. `generationStates` registry only tracks LLM text generation, not image generation. No way to check "is an image currently being generated for this message?" or cancel all image generation for a character.
+
+**Identified Race Conditions**:
+1. **Stale onUpdate overwrites edits** (HIGH) — in-flight `processMessageImages` overwrites `msg.text` saved by `saveEdit()`
+2. **Double processMessageImages** (MEDIUM) — `saveEdit` + still-running original both modify `msg.text` concurrently
+3. **handleImageRegenerate stale currentMessages** (MEDIUM) — reads `currentMessages.value[msgIndex]` snapshot that may be outdated after edit
+4. **onVisibilityChange saves imggen-loading** (MEDIUM) — loading states persisted to DB; on reload, may cause duplicate generation
+
+**Proposed Fix Direction**:
+- Add abort signal to `processMessageImages` — pass `AbortController` from generation state
+- Track in-flight image generations in a registry (similar to `generationStates`)
+- On `enterEditMode`: abort any in-flight image generation for that message
+- On `saveEdit`: cancel old generation before starting new `processMessageImages`
+- On `handleImageRegenerate`: verify message ID before writing back
+
+### 2. Background Inline Image Generation
+
+**Bug**: Inline image generation does NOT continue in background when user navigates away from ChatView.
+
+**Root Cause**: `ChatView.onUnmounted()` (line 1466-1501) aborts ALL active generations via `state.controller.abort()`. This kills the LLM streaming but does NOT cancel in-flight image generation API calls directly — however, the `processMessageImages` continuation runs as a `.then()` after streaming completes, and if streaming is aborted, the completion handler's background path (line 277-345) does handle DB writes. The problem is that `processMessageImages` is called inside `handleGenerationComplete`, which runs AFTER streaming is done — so if streaming was aborted, `handleGenerationComplete` may not be called properly for the image gen path.
+
+Additionally, `processMessageImages` uses its own `fetchWithTimeout()` with a separate `AbortController` (timeout-based only, line 54-60). There is no connection between the generation's `AbortController` and image generation's `fetchWithTimeout`.
+
+**Key Files**:
+- `src/views/ChatView.vue` — `onUnmounted()` (line 1466-1501) aborts all controllers
+- `src/core/services/imageGenService.js` — `fetchWithTimeout()` (line 54-60)
+- `src/composables/chat/useGenerationCompleteHandler.js` — background path (line 277-345)
+- `src/composables/chat/useSessionPersistence.js` — `onVisibilityChange` (line 145-181)
+
+**Proposed Fix Direction**:
+- Separate image generation lifecycle from ChatView component lifecycle
+- Image generation should continue after ChatView unmount — the API calls are already independent (own `fetchWithTimeout`)
+- The `handleGenerationComplete` background path already handles DB writes for non-visible characters
+- Need to ensure `processMessageImages` is called in the background path even after ChatView unmount
+- Consider moving image generation orchestration to a service-level module instead of component-level
+
+### 3. Database Crash After RegexSheet Operations
+
+**Bug**: App's database may crash after operations in RegexSheet.
+
+**Investigation Findings**: No direct crash-to-corruption path found, but several vectors identified:
+
+**HIGH Risk**:
+1. **`trimOut` used as raw regex without escaping** (`regexService.js:96-103`) — Each line of `trimOut` is treated as a raw regex pattern. User input like `[`, `(`, `hello (world)` causes `SyntaxError` in `new RegExp()`. Caught by try/catch but silently fails.
+2. **Cloud sync overwrites global `regex_scripts` with no merge** (`syncEngine.js:468`) — Cloud value completely replaces local global regexes. Data loss on sync.
+3. **Cloud sync regex merge is ID-based only** (`syncEngine.js:457-459`) — Modified local regexes with same ID overwritten by cloud version.
+
+**MEDIUM Risk**:
+4. **`scripts.value` loaded once, never refreshed** (`RegexSheet.vue:51-61`) — Stale data if regexes modified externally (sync, drag-drop import). User could overwrite new data.
+5. **DragDropOverlay preset import doesn't publish `regexScriptsChanged`** (`DragDropOverlay.vue:121-134`) — Imported preset regexes don't take effect until chat switch.
+6. **TavoBackupReader uses wrong field name** (`tavoBackupReader.js:389`) — `substituteRegex` instead of `macroRules`. Imported regexes lose macro settings.
+7. **DragDropOverlay `trimStrings.join('\\n')` double-escapes newline** (`DragDropOverlay.vue:106`) — Imported trimOut not split properly.
+8. **`Date.now().toString()` as ID can collide** (`RegexSheet.vue:126`) — Duplicate IDs in rapid creation.
+
+**Key Files**:
+- `src/components/sheets/RegexSheet.vue` — UI, CRUD operations, `scripts.value` loaded once (line 51-61)
+- `src/core/services/regexService.js` — `applyRegexes()` (line 52-151), `trimOut` as raw regex (line 96-103)
+- `src/core/states/presetState.js` — `savePresets()` (line 116-130), dual watcher race with RegexSheet
+- `src/core/services/syncEngine.js` — regex merge logic (line 444-470)
+- `src/utils/db.js` — IndexedDB layer (regex_scripts listed as syncable key)
+
+**Proposed Fix Direction**:
+- Escape `trimOut` tokens before using as regex patterns, or use string replacement instead
+- Add regex merge for `regex_scripts` in syncEngine (similar to preset regex merge)
+- Reload `scripts.value` when `regexScriptsChanged` event fires
+- Fix DragDropOverlay to publish event for preset regex imports too
+- Fix tavoBackupReader field name mapping
+- Use `Date.now().toString(36) + Math.random().toString(36).slice(2)` for IDs
+
+### 4. Streaming Lost When Leaving ChatView
+
+**Bug**: Streaming is lost when user navigates away from ChatView during active generation.
+
+**Root Cause**: `ChatView.onUnmounted()` (line 1466-1501) **immediately aborts every active generation** by calling `state.controller.abort()`. This kills the HTTP fetch connection. The codebase has extensive infrastructure for background generation (DB writes, notifications, unread markers), but `onUnmounted()` bypasses all of it.
+
+Additionally:
+- `onUnmounted()` does NOT set `state.userAborted = true` — so the abort is misrouted (treated as successful completion with partial content instead of user abort)
+- `clearGenerationState(charId)` runs synchronously, deleting the registry entry before the abort propagates asynchronously through the fetch/streaming chain
+- `closeChat()` runs before `onUnmounted()`, clearing `currentMessages` and `activeChatChar`
+
+**Key Files**:
+- `src/views/ChatView.vue` — `onUnmounted()` (line 1466-1501), `closeChat()` (line 1086-1110)
+- `src/core/states/generationState.js` — global generation registry
+- `src/composables/chat/useGenerationStreamUpdate.js` — background DB update path (line 27-64)
+- `src/composables/chat/useGenerationCompleteHandler.js` — background completion path (line 277-346)
+- `src/composables/chat/useGenerationAbort.js` — proper abort with `userAborted` flag (line 23-26)
+- `src/core/llm/transport/requestOutcome.js` — `handleAbortOutcome` (line 120)
+- `docs/rules/generation.md:89` — explicitly states "Character switch during generation continues background generation"
+
+**The Intended Design vs Reality**:
+- **Design** (per `docs/rules/generation.md:89`): "Character switch during generation continues background generation"
+- **Reality**: `onUnmounted()` aborts all generations, making background path unreachable for the current chat
+- The background infrastructure EXISTS: `useGenerationStreamUpdate` writes to DB periodically when `onUIUpdate` is null; `handleGenerationComplete` has a full background path with DB save + notification + unread marker
+
+**Proposed Fix Direction**:
+- On ChatView unmount / character switch: do NOT abort generation — instead disconnect UI callbacks and let generation continue in background
+- Set `state.onUIUpdate = null` to route stream updates through the background DB path
+- Keep `generationStates` entry alive so completion handler can find it
+- Only abort on explicit user action (stop button) or app background (visibilitychange)
+- Set `state.userAborted` flag properly on explicit abort only
+- Ensure `backgroundUpdateTimer` is cleaned up when generation eventually completes in background
+
+### Implementation Priority
+
+1. **Streaming lost on leave** — highest impact, design doc already specifies expected behavior
+2. **Inline image edit during generation** — data loss risk (edits overwritten)
+3. **Background inline image gen** — UX improvement, depends on fix #1
+4. **RegexSheet DB crash** — multiple medium-severity issues, no single catastrophic bug found
+
 ## Sync Setup Guide — For Developers
 
 ### Maintainer Goal
