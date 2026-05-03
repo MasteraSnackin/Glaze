@@ -360,6 +360,19 @@ defineExpose({ open });
                         </div>
                     </template>
 
+                    <!-- rout.my: only API key, endpoint is hardcoded -->
+                    <template v-else-if="showRoutmyOptions">
+                        <div class="settings-item">
+                            <label>{{ t('imggen_api_key') || 'rout.my API Key' }}</label>
+                            <input
+                                type="password"
+                                v-model="settings.routmyApiKey"
+                                placeholder="sk-..."
+                                autocomplete="off"
+                            >
+                        </div>
+                    </template>
+
                     <!-- Other providers: Use LLM API toggle + endpoint/key fields -->
                     <template v-else>
                         <div class="settings-item-checkbox">
@@ -384,7 +397,7 @@ defineExpose({ open });
                                 >
                             </div>
 
-                            <div v-if="!showRoutmyOptions" class="settings-item">
+                            <div class="settings-item">
                                 <label>{{ t('imggen_api_key') || 'API Key' }}</label>
                                 <input
                                     type="password"
@@ -395,17 +408,6 @@ defineExpose({ open });
                                 >
                             </div>
                         </template>
-
-                        <!-- rout.my API Key -->
-                        <div v-if="showRoutmyOptions" class="settings-item">
-                            <label>{{ t('imggen_api_key') || 'rout.my API Key' }}</label>
-                            <input
-                                type="password"
-                                v-model="settings.routmyApiKey"
-                                placeholder="sk-..."
-                                autocomplete="off"
-                            >
-                        </div>
                     </template>
 
                     <!-- Naistera hint -->

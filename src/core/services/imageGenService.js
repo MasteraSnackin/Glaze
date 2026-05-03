@@ -62,7 +62,7 @@ function fetchWithTimeout(url, options = {}, timeoutMs = 300000) {
 }
 
 export function getImageGenSettings() {
-    return {
+    const s = {
         enabled: localStorage.getItem(SETTINGS_KEY.enabled) === 'true',
         apiType: localStorage.getItem(SETTINGS_KEY.apiType) || 'openai',
         endpoint: (localStorage.getItem(SETTINGS_KEY.endpoint) || '').trim(),
