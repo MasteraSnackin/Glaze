@@ -203,9 +203,9 @@ export function useMessageActions(deps) {
                                 abortActiveChatGeneration(activeChatChar.id);
                             }
 } else {
-                             currentMessages.value.splice(index, 1);
-                             persistCurrentSessionMessages(activeChatChar);
-                         }
+                            msg.isTyping = false;
+                            persistCurrentSessionMessages(activeChatChar);
+                          }
                         closeBottomSheet();
                     }
                 }]

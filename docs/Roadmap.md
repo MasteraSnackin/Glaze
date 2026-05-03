@@ -83,6 +83,42 @@ Status: `research complete`, implementation `done`
 
 **Testing**: not tested
 
+## Streaming + Chat Switch Bugs (2026-05-03)
+
+Status: `research complete`, implementation `done`
+
+**Bug A**: During streaming, half the message "disappears" visually, reappears when generation finishes.
+
+**Bug B**: After switching chats during generation and returning, UI shows generation done but half the message is missing. Tapping message shows "Stop generation" instead of "Edit".
+
+### Root Cause
+
+When switching chats within ChatView (not unmounting), `state.onUIUpdate` was NOT set to `null`. The streaming `onUpdate` path checked `state?.onUIUpdate` → truthy → took the "visible path" → called `onUIUpdate` → but message wasn't in `currentMessages` (different chat) → updates silently dropped. The background DB-save path was never entered, so DB retained stale partial text.
+
+On return, `openChat` reconnected `onUIUpdate` with delta mode (`m.text += textDelta`) on a stale base text → garbled display. Generation completion overwrites with full correct text → "reappears".
+
+For Bug B: race between `handleGenerationComplete` clearing `generationState` (sync) and `openChat` loading from DB (async). `isTyping = true` persists without generation state → "Stop generation" button → **clicking it deleted the message entirely**.
+
+### Fixes
+
+**1. Disconnect `onUIUpdate` on chat switch** (`ChatView.vue` `openChat`):
+- Before `asyncSaveCurrentSessionState`, iterate all generating chars, set `state.onUIUpdate = null`, flush timers
+- Forces streaming `onUpdate` into the background path → DB saves work correctly
+
+**2. Reconnected `onUIUpdate` uses full text always** (`ChatView.vue` line 999):
+- Changed `if (textDelta) m.text += textDelta` to always `m.text = text`
+- Prevents delta-on-stale-base garbling
+
+**3. `onGenerationEnded` cleans phantom `isTyping`** (`ChatView.vue` line 1284):
+- Added `findLastIndex(m => m.isTyping)` + `m.isTyping = false` when no generation state exists
+- Prevents "Stop generation" button on completed-but-stale messages
+
+**4. `openMessageActions` safe phantom typing handling** (`useMessageActions.js` line 205):
+- Changed `currentMessages.value.splice(index, 1)` (DELETE) to `msg.isTyping = false` (PRESERVE)
+- Prevents catastrophic data loss when user clicks "Stop generation" on a phantom typing message
+
+**Testing**: not tested
+
 ## Sync Setup Guide — For Developers
 
 ### Maintainer Goal
