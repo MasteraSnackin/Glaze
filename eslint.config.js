@@ -1,5 +1,12 @@
 import js from '@eslint/js';
 import pluginVue from 'eslint-plugin-vue';
+import noAbortInUnmount from './eslint-rules/no-abort-in-unmount.js';
+
+const localRulesPlugin = {
+    rules: {
+        'no-abort-in-unmount': noAbortInUnmount
+    }
+};
 
 export default [
     {
@@ -17,6 +24,9 @@ export default [
     js.configs.recommended,
     ...pluginVue.configs['flat/recommended'],
     {
+        plugins: {
+            'glaze': localRulesPlugin
+        },
         files: ['**/*.{js,mjs,cjs}', '**/*.vue'],
         languageOptions: {
             ecmaVersion: 2022,
@@ -143,7 +153,8 @@ export default [
             'vue/first-attribute-linebreak': 'off',
             'vue/first-attribute-line': 'off',
             'vue/attributes-order': 'off',
-            'no-empty': 'off'
+            'no-empty': 'off',
+            'glaze/no-abort-in-unmount': 'error'
         }
     }
 ];

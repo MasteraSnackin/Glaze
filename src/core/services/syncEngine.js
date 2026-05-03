@@ -464,6 +464,23 @@ async function applyCloudEntry(adapter, entry, key) {
                 } catch (e) {
                     localStorage.setItem(lsKey, lsVal);
                 }
+            } else if (lsKey === 'regex_scripts') {
+                try {
+                    const cloudScripts = JSON.parse(lsVal);
+                    const localRaw = localStorage.getItem('regex_scripts');
+                    const localScripts = localRaw ? JSON.parse(localRaw) : [];
+                    if (!Array.isArray(cloudScripts)) {
+                        localStorage.setItem(lsKey, lsVal);
+                    } else if (!localScripts.length) {
+                        localStorage.setItem(lsKey, lsVal);
+                    } else {
+                        const cloudIds = new Set(cloudScripts.map(r => r.id));
+                        const localOnly = localScripts.filter(r => !cloudIds.has(r.id));
+                        localStorage.setItem(lsKey, JSON.stringify([...cloudScripts, ...localOnly]));
+                    }
+                } catch (e) {
+                    localStorage.setItem(lsKey, lsVal);
+                }
             } else {
                 localStorage.setItem(lsKey, lsVal);
             }
@@ -708,9 +725,9 @@ async function pullManifestV2(adapter, key, onProgress, onConflict) {
                                 if (existingIdx >= 0) {
                                     imgEntry.name = char.images[existingIdx].name || '';
                                     char.images[existingIdx] = imgEntry;
-                                } else {
-                                    char.images.push(imgEntry);
-                                }
+            } else {
+                localStorage.setItem(lsKey, lsVal);
+            }
                                 await db.put('characters', char);
                             }
                         }

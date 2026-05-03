@@ -60,6 +60,18 @@ const loadScripts = () => {
 };
 loadScripts();
 
+let unsubRegexChanged = null;
+onMounted(() => {
+    unsubRegexChanged = subscribeAppEvent(APP_EVENTS.domain.lorebook.regexScriptsChanged, () => {
+        if (!activeScript.value || isPresetScript.value) {
+            loadScripts();
+        }
+    });
+});
+onBeforeUnmount(() => {
+    if (unsubRegexChanged) { unsubRegexChanged(); unsubRegexChanged = null; }
+});
+
 const saveScripts = () => {
     if (activeScript.value && isPresetScript.value) {
         savePresets();
@@ -123,7 +135,7 @@ function handleBackNavigation(event) {
 
 function createNewScript(toPreset = false) {
     const newScript = {
-        id: Date.now().toString(),
+        id: Date.now().toString(36) + Math.random().toString(36).slice(2),
         name: t('action_create_new') || 'New Script',
         regex: '',
         replacement: '',

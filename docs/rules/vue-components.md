@@ -53,3 +53,36 @@ src/views/          — Page-level components (composable wiring)
 ## ChatView.vue exception
 
 ChatView.vue (~1390 script lines) is a known exception to the 400-line rule. Further extraction would cause prop-drilling due to 30+ shared dependencies. `openChat()` (~400 lines) remains due to high dependency count. This is acknowledged tech debt.
+
+## Async operation lifecycle
+
+**RULE: Components MUST NOT abort long-running async operations in `onUnmounted`/`onBeforeUnmount`.**
+
+This is enforced by the `glaze/no-abort-in-unmount` ESLint rule. Violations cause a build error.
+
+### What `onUnmounted` MAY do
+- Unsubscribe from event listeners (`unsubscribeAppEvent`)
+- Null out UI callback references (`state.onUIUpdate = null`)
+- Clear render-only timers (debounce, scroll, animation)
+- Set flags (`isMounted = false`)
+
+### What `onUnmounted` MUST NOT do
+- Call `.abort()` on any `AbortController`
+- Call `clearGenerationState()` or equivalent registry cleanup
+- Kill HTTP fetch connections
+- Delete state that async completion handlers need
+
+### The principle: unsubscribe ≠ abort
+When a component unmounts, it **disconnects from results**, not **cancels the operation**. The operation continues in the background, writing to DB through service-layer paths. When the user returns, data is loaded from DB.
+
+### Ownership model
+- **Service layer** (`*State.js`, `*Service.js`) owns the operation lifecycle: start, progress, completion, cleanup
+- **Component layer** owns the UI subscription: render, scroll, local state updates
+- Component subscribes via `onUIUpdate` callback; unsubscribes by setting `onUIUpdate = null`
+- Only explicit user action (stop button) triggers `.abort()` via service-layer abort function
+
+### Mobile background note
+On iOS/Android, JS is suspended 1-5 seconds after the app goes to background. This cannot be fixed architecturally. The strategy is:
+1. `visibilitychange` handler saves intermediate state to DB before suspension
+2. On app return, state is restored from DB and operations are checked for completion
+3. In-progress operations that were suspended may need restart — this is handled by the service layer, not the component

@@ -103,7 +103,7 @@ const onDrop = async (e) => {
                             name: item.scriptName || item.name || 'Imported Regex',
                             regex: item.findRegex || item.regex || '',
                             replacement: item.replaceString || item.replacement || '',
-                            trimOut: Array.isArray(item.trimStrings) ? item.trimStrings.join('\\n') : (item.trimOut || ''),
+                            trimOut: Array.isArray(item.trimStrings) ? item.trimStrings.join('\n') : (item.trimOut || ''),
                             placement: Array.isArray(item.placement) ? item.placement : (typeof item.placement === 'number' ? [item.placement] : [2]),
                             disabled: item.disabled ?? false,
                             runOnEdit: item.runOnEdit ?? false,

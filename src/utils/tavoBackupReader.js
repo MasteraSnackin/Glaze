@@ -386,7 +386,7 @@ export async function importTavoBackupFromZip(zipFile, onProgress) {
                                     disabled: rule.enabled === false,
                                     markdownOnly: false,
                                     runOnEdit: false,
-                                    substituteRegex: rule.substitution === "none" ? 0 : 1,
+                                    macroRules: rule.substitution === "none" ? "0" : "1",
                                     ephemerality: [1, 2],
                                     minDepth: rule.minDepth || null,
                                     maxDepth: rule.maxDepth || null
