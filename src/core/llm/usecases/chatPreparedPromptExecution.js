@@ -31,7 +31,11 @@ export async function executePreparedChatPrompt({
         model,
         stream,
         temp,
-        topP
+        topP,
+        omitTemperature,
+        omitTopP,
+        omitReasoning,
+        omitReasoningEffort
     } = apiConfig;
 
     if (!apiUrl || !model) {
@@ -94,7 +98,11 @@ export async function executePreparedChatPrompt({
             controller,
             requestReasoning,
             tagStart,
-            tagEnd
+            tagEnd,
+            omitTemperature,
+            omitTopP,
+            omitReasoning,
+            omitReasoningEffort
         }
     };
 }
