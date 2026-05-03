@@ -328,6 +328,8 @@
     "action_export_st": "Export",
     "label_export_png": "PNG (Character Card)",
     "label_export_json": "JSON (SillyTavern V2)",
+    "label_export_charx": "CharX (with gallery)",
+    "label_export_zip": "ZIP (with gallery)",
     "title_error": "Error",
     "msg_vector_generation_failed": "The embedding model did not respond during generation, so vector lorebook retrieval could not complete.",
     "msg_import_char_failed": "Failed to import character",
