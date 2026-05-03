@@ -13,6 +13,7 @@ import { initRipple } from '@/core/services/interactionEffects.js';
 import { checkAndRequestNotifications, consumePendingNotificationData } from '@/core/services/notificationService.js';
 import { generateMissingThumbnails } from '@/utils/characterIO.js';
 import { migrateScToGz } from '@/utils/db.js';
+import { seedDefaultCharacters } from '@/utils/seedDefaultCharacters.js';
 import { isKeyboardOpen, onKeyboardShow, onKeyboardHide } from '@/core/services/keyboardHandler.js';
 import { updateLanguage } from '@/utils/i18n.js';
 import { db } from '@/utils/db.js';
@@ -58,7 +59,7 @@ export function useAppInit({
                 publishAppEvent(APP_EVENTS.domain.sync.dataRefreshed, {});
                 return;
             }
-        } catch {}
+        } catch { }
 
         if (syncProvider.value) {
             try {
@@ -73,6 +74,7 @@ export function useAppInit({
 
     onMounted(async () => {
         await migrateScToGz();
+        await seedDefaultCharacters();
 
         isOnboarding.value = localStorage.getItem('glaze_onboarding_completed') !== 'true';
 
@@ -105,7 +107,7 @@ export function useAppInit({
         initViewportFix();
         initBackButton();
 
-        initHeaderDropdown(categories, activeCategories, () => {});
+        initHeaderDropdown(categories, activeCategories, () => { });
 
         const pendingData = consumePendingNotificationData();
         if (pendingData) {
