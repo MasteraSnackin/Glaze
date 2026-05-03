@@ -190,11 +190,6 @@ jobs:
           name: SillyCradle-Signed-APK
           path: ./release-files
 
-      - name: Download IPA
-        uses: actions/download-artifact@v4
-        with:
-          name: SillyCradle-Unsigned-IPA
-          path: ./release-files
 
       - name: Download Windows Artifacts
         uses: actions/download-artifact@v4
@@ -215,7 +210,6 @@ jobs:
       - name: Rename artifacts
         run: |
           for f in release-files/*.apk; do mv "$f" "release-files/Glaze-${{ steps.ver.outputs.version }}.apk"; done
-          mv release-files/App.ipa "release-files/Glaze-${{ steps.ver.outputs.version }}.ipa"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
