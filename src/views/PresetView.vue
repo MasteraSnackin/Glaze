@@ -251,24 +251,6 @@ defineExpose({ open, close, openAuthorsNoteSheet, openSummarySheet, openPreset }
 
 const regexSheetRef = ref(null);
 const presetRegexCount = computed(() => currentPreset.value?.regexes?.length || 0);
-const hasInflatingRegex = computed(() => {
-    const regexes = currentPreset.value?.regexes;
-    if (!regexes) return false;
-    return regexes.some(r => {
-        if (r.disabled) return false;
-        const rep = r.replacement || '';
-        return /[\u2000-\u200A\u202F\u205F\u3000\u00A0]/.test(rep);
-    });
-});
-
-function presetHasInflatingRegex(id) {
-    const regexes = presetState.presets[id]?.regexes;
-    if (!regexes) return false;
-    return regexes.some(r => {
-        if (r.disabled) return false;
-        return /[\u2000-\u200A\u202F\u205F\u3000\u00A0]/.test(r.replacement || '');
-    });
-}
 
 function openRegexSheetFromPreset() {
     if (openedFromRegex.value) close();
@@ -350,9 +332,6 @@ onBeforeUnmount(() => { unsubs.forEach(unsub => unsub()); });
                             <div class="ps-card-badge" :class="{ 'ps-with-bg': !!preset.image }">
                                 <svg viewBox="0 0 24 24" class="ps-badge-icon"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c11 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
                                 {{ presetTokenCache[id] }}
-                                <Tooltip v-if="presetHasInflatingRegex(id)" text="This preset has regexes that inflate token count (rare Unicode spaces). Displayed count may be inaccurate." placement="top">
-                                    <span class="inflate-warning-card">&#x26A0;&#xFE0F;</span>
-                                </Tooltip>
                             </div>
                             <div class="ps-card-meta" :class="{ 'ps-with-bg': !!preset.image }">
                                 <span v-if="preset.author">by {{ preset.author }}</span>
@@ -433,9 +412,6 @@ by {{ currentPreset.author }}
                             <div class="active-tokens">
                                 <svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
                                 <span>{{ props.contextBreakdown?.preset || displayedEditingTokens }}</span>
-                                <Tooltip v-if="hasInflatingRegex" text="This preset has regexes that inflate token count (rare Unicode spaces). Displayed count may be inaccurate." placement="bottom">
-                                    <span class="inflate-warning">&#x26A0;&#xFE0F;</span>
-                                </Tooltip>
                             </div>
                         </div>
                     </div>
@@ -1343,17 +1319,6 @@ Add Block
     width: 14px;
     height: 14px;
     fill: currentColor;
-    opacity: 0.7;
-}
-
-.inflate-warning {
-    font-size: 14px;
-    opacity: 0.8;
-}
-
-.inflate-warning-card {
-    font-size: 12px;
-    margin-left: 2px;
     opacity: 0.7;
 }
 
