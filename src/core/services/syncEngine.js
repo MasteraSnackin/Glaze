@@ -60,6 +60,12 @@ async function dataUrlToBinary(dataUrl) {
     return await res.arrayBuffer();
 }
 
+async function computeImageHash(dataUrl) {
+    const binary = await dataUrlToBinary(dataUrl);
+    const digest = await crypto.subtle.digest('SHA-256', binary);
+    return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
 function guessImageExt(dataUrl) {
     const match = dataUrl.match(/^data:image\/([\w+]+)/);
     if (!match) return 'png';
@@ -302,7 +308,7 @@ async function buildLocalManifestV2() {
             for (const img of images) {
                 if (!img?.id || !img?.src) continue;
                 const imgExt = guessImageExt(img.src);
-                const imgHash = await computeSyncHash({ id: img.id, src: img.src });
+                const imgHash = await computeImageHash(img.src);
                 const galleryKey = entryKey(ENTITY_TYPES.GALLERY, `${char.id}:${img.id}`);
                 const prevImgEntry = previousEntries[galleryKey];
                 manifest.entries[galleryKey] = {
