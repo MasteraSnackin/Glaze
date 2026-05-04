@@ -18,7 +18,17 @@ export function getConflictName(type, localEntity, cloudEntity, id) {
     if (type === 'chat') {
         return getChatName(localEntity, cloudEntity, id);
     }
-    return id;
+    if (type === 'gallery') {
+        return `Gallery: ${id}`;
+    }
+    const typeLabels = {
+        lorebooks: 'Lorebooks',
+        api_presets: 'API Presets',
+        theme_presets: 'Theme Presets',
+        theme_state: 'Theme State',
+        local_storage: 'Local Storage'
+    };
+    return typeLabels[type] || id;
 }
 
 function getChatName(localChat, cloudChat, charId) {

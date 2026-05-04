@@ -34,6 +34,11 @@ const typeLabel = (type) => {
     if (type === 'persona') return t('sync_type_persona') || 'Persona';
     if (type === 'chat') return t('sync_type_chat') || 'Chat';
     if (type === 'gallery') return t('sync_type_gallery') || 'Gallery';
+    if (type === 'lorebooks') return t('sync_type_lorebooks') || 'Lorebooks';
+    if (type === 'api_presets') return t('sync_type_api_presets') || 'API Presets';
+    if (type === 'theme_presets') return t('sync_type_theme_presets') || 'Theme Presets';
+    if (type === 'theme_state') return t('sync_type_theme_state') || 'Theme State';
+    if (type === 'local_storage') return t('sync_type_local_storage') || 'Local Storage';
     return type;
 };
 
@@ -69,6 +74,19 @@ const entityFields = (entity, type) => {
     } else if (type === 'gallery') {
         fields.push({ key: 'imgId', label: 'Image ID', value: entity.imgId || '—' });
         fields.push({ key: 'hash', label: 'Hash', value: truncate(entity.hash || '—', 16) });
+    } else if (type === 'local_storage' && typeof entity === 'object') {
+        for (const [k, v] of Object.entries(entity)) {
+            const display = v?.length > 80 ? v.substring(0, 80) + '...' : String(v ?? '');
+            fields.push({ key: k, label: k, value: display });
+        }
+    } else if (typeof entity === 'object') {
+        for (const [k, v] of Object.entries(entity)) {
+            if (typeof v === 'object' && v !== null) {
+                fields.push({ key: k, label: k, value: truncate(JSON.stringify(v), 120) });
+            } else if (v !== null && v !== undefined) {
+                fields.push({ key: k, label: k, value: truncate(String(v), 120) });
+            }
+        }
     }
     fields.push({ key: 'updatedAt', label: t('sync_modified') || 'Modified', value: formatTimestamp(entity.updatedAt) });
     return fields;
