@@ -168,22 +168,37 @@
     max-width: 64px !important;
 }
 
+/* Top nav: Characters + New Chat stacked */
+.desktop-top-nav {
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
 /* Characters button */
 .desktop-chars-btn {
     flex-shrink: 0;
     display: flex;
     align-items: center;
     gap: 10px;
-    height: var(--header-height, 56px);
+    height: 40px;
     box-sizing: border-box;
     padding: 0 16px;
     cursor: pointer;
     color: var(--text-color, #ffffff);
     font-size: 14px;
     font-weight: 700;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+    border-bottom: none;
     transition: color 0.2s, background-color 0.2s;
     user-select: none;
+    overflow: hidden;
+}
+
+.desktop-new-chat-btn {
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
+    color: var(--vk-blue);
+    font-weight: 500;
 }
 
 .desktop-chars-btn:hover {
