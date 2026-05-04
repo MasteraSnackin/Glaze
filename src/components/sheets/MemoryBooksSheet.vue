@@ -385,11 +385,34 @@ defineExpose({ open, close });
         <div class="memory-session-overview-meta">
 {{ generationSettingsSummary }}
 </div>
-        <div class="memory-quick-model-row" @click="openQuickModelSelector">
+        <div v-if="memoryProviderSettings.useSame" class="memory-quick-model-row" @click="openQuickModelSelector">
           <span class="memory-quick-model-label">{{ t('label_model') }}</span>
           <span class="memory-quick-model-value">{{ currentMemoryModelLabel }}</span>
           <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
         </div>
+        <div class="memory-settings-item-checkbox" style="margin-top: 8px;">
+            <div class="memory-settings-text-col">
+                <label>{{ t('label_use_llm_api') || 'Use LLM API' }}</label>
+                <div class="memory-settings-desc">
+{{ t('desc_use_llm_api_memory') || 'Use the same endpoint as LLM for memory book generation' }}
+</div>
+            </div>
+            <input type="checkbox" :checked="memoryProviderSettings.useSame" @change="onMemoryProviderInput('useSame', $event.target.checked)" class="vk-switch">
+        </div>
+        <template v-if="!memoryProviderSettings.useSame">
+            <div class="memory-settings-item">
+                <label>{{ t('label_memory_endpoint') || 'Memory Gen Endpoint' }}</label>
+                <input type="text" :value="memoryProviderSettings.endpoint" @input="onMemoryProviderInput('endpoint', $event.target.value)" placeholder="http://127.0.0.1:5000/v1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="width: 100%; border: 1px solid var(--border-color); background: var(--bg-item); padding: 12px; border-radius: 12px; color: var(--text-primary); font-size: 15px;">
+            </div>
+            <div class="memory-settings-item">
+                <label>{{ t('label_memory_model') || 'Model' }}</label>
+                <input type="text" :value="memoryProviderSettings.model" @input="onMemoryProviderInput('model', $event.target.value)" placeholder="gpt-4o-mini" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="width: 100%; border: 1px solid var(--border-color); background: var(--bg-item); padding: 12px; border-radius: 12px; color: var(--text-primary); font-size: 15px;">
+            </div>
+            <div class="memory-settings-item">
+                <label>{{ t('label_memory_key') || 'API Key' }}</label>
+                <input type="password" :value="memoryProviderSettings.key" @input="onMemoryProviderInput('apiKey', $event.target.value)" placeholder="sk-..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="width: 100%; border: 1px solid var(--border-color); background: var(--bg-item); padding: 12px; border-radius: 12px; color: var(--text-primary); font-size: 15px;">
+            </div>
+        </template>
       </div>
 
       <div class="memory-settings-item">
@@ -443,37 +466,8 @@ defineExpose({ open, close });
         <button type="button" class="memory-btn memory-btn-primary" @click="close">
           {{ t('btn_close') }}
         </button>
-      </div>
+       </div>
 
-      <!-- Provider Settings -->
-      <div class="memory-sheet-section" style="margin-bottom: 8px;">
-        <div class="memory-sheet-section-head">
-          <label>{{ t('memory_books_provider_config') }}</label>
-        </div>
-        <div class="memory-settings-item-checkbox">
-            <div class="memory-settings-text-col">
-                <label>{{ t('label_use_llm_api') || 'Use LLM API' }}</label>
-                <div class="memory-settings-desc">
-{{ t('desc_use_llm_api_memory') || 'Use the same endpoint as LLM for memory book generation' }}
-</div>
-            </div>
-            <input type="checkbox" :checked="memoryProviderSettings.useSame" @change="onMemoryProviderInput('useSame', $event.target.checked)" class="vk-switch">
-        </div>
-        <template v-if="!memoryProviderSettings.useSame">
-            <div class="memory-settings-item">
-                <label>{{ t('label_memory_endpoint') || 'Memory Gen Endpoint' }}</label>
-                <input type="text" :value="memoryProviderSettings.endpoint" @input="onMemoryProviderInput('endpoint', $event.target.value)" placeholder="http://127.0.0.1:5000/v1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="width: 100%; border: 1px solid var(--border-color); background: var(--bg-item); padding: 12px; border-radius: 12px; color: var(--text-primary); font-size: 15px;">
-            </div>
-            <div class="memory-settings-item">
-                <label>{{ t('label_memory_model') || 'Model' }}</label>
-                <input type="text" :value="memoryProviderSettings.model" @input="onMemoryProviderInput('model', $event.target.value)" placeholder="gpt-4o-mini" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="width: 100%; border: 1px solid var(--border-color); background: var(--bg-item); padding: 12px; border-radius: 12px; color: var(--text-primary); font-size: 15px;">
-            </div>
-            <div class="memory-settings-item">
-                <label>{{ t('label_memory_key') || 'API Key' }}</label>
-                <input type="password" :value="memoryProviderSettings.key" @input="onMemoryProviderInput('apiKey', $event.target.value)" placeholder="sk-..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="width: 100%; border: 1px solid var(--border-color); background: var(--bg-item); padding: 12px; border-radius: 12px; color: var(--text-primary); font-size: 15px;">
-            </div>
-        </template>
-      </div>
 
       <!-- Batch Actions (Scan & Generate) -->
       <div v-if="draftsNeedingGeneration.length > 0 || uncoveredSegments.count > 0" class="memory-batch-actions">
@@ -572,6 +566,7 @@ defineExpose({ open, close });
               </div>
               <div class="memory-draft-actions" @click.stop>
                 <span v-if="isDraftGenerating(draft.id)" class="memory-status-badge" style="background:rgba(255,215,0,0.1);color:#ffd700;">{{ t('memory_books_badge_generating') }}</span>
+                <span v-else-if="draft.status === 'needs_regeneration'" class="memory-status-badge" style="background:rgba(255,80,80,0.15);color:#ff6b6b;">{{ t('memory_books_badge_needs_regen') }}</span>
                 <span v-else-if="!draft.content && draft.status === 'pending_generation'" class="memory-status-badge" style="background:rgba(255,215,0,0.1);color:#ffd700;">{{ t('memory_books_badge_needs_gen') }}</span>
                 <span v-else class="memory-status-badge draft">{{ t('memory_books_badge_draft') }}</span>
                 <span v-if="vectorEnabled" class="memory-status-badge vector">vec</span>
@@ -583,6 +578,15 @@ defineExpose({ open, close });
                   @touchend.stop.prevent="handleCancelDraft(draft.id)"
                 >
                   {{ t('memory_books_btn_stop') }}
+                </button>
+                <button
+                  v-else-if="draft.status === 'needs_regeneration'"
+                  type="button"
+                  class="memory-entry-generate"
+                  @click.stop.prevent="handleGenerateDraft(draft.id)"
+                  @touchend.stop.prevent="handleGenerateDraft(draft.id)"
+                >
+                  {{ t('memory_books_btn_regenerate') }}
                 </button>
                 <button
                   v-else-if="!draft.content && draft.status === 'pending_generation'"
@@ -618,6 +622,7 @@ defineExpose({ open, close });
                 {{ draft.content.slice(0, 180) }}
               </template>
               <span v-else-if="isDraftGenerating(draft.id)" style="color:#ffd700;">{{ t('memory_books_generating_elapsed') }} {{ formatElapsedSeconds(getDraftProgress(draft.id)?.elapsedMs || 0) }}</span>
+              <span v-else-if="draft.error && draft.status === 'needs_regeneration'" style="color:#ff6b6b;">{{ draft.error }}</span>
               <span v-else style="color:var(--text-gray);">{{ t('memory_books_no_content') }}</span>
             </div>
           </div>
