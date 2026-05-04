@@ -1,13 +1,20 @@
 import { nextTick } from 'vue';
 import * as memoryBooksService from '@/core/services/memoryBooksService.js';
-import { getMemoryPromptOptions, getMemoryPromptLabelByKey, getNormalizedMemoryGenerationState } from '@/core/services/memoryPromptPresets.js';
+import { getMemoryPromptOptions, getMemoryPromptLabelByKey } from '@/core/services/memoryPromptPresets.js';
 import { showBottomSheet, closeBottomSheet } from '@/core/states/bottomSheetState.js';
 import { showToast } from '@/core/states/toastState.js';
+import { mountSheetComponent } from '@/core/utils/mountSheetComponent.js';
+import MemoryPromptPreviewSheet from '@/components/sheets/MemoryPromptPreviewSheet.vue';
+import MemoryEntryEditorSheet from '@/components/sheets/MemoryEntryEditorSheet.vue';
+import MemoryTextPreviewSheet from '@/components/sheets/MemoryTextPreviewSheet.vue';
+import MemoryPromptEditorSheet from '@/components/sheets/MemoryPromptEditorSheet.vue';
+import MemoryCoverageSheet from '@/components/sheets/MemoryCoverageSheet.vue';
+import MemoryPromptManagerSheet from '@/components/sheets/MemoryPromptManagerSheet.vue';
+import MemoryGenerationSettingsSheet from '@/components/sheets/MemoryGenerationSettingsSheet.vue';
 import { formatError } from '@/utils/errors.js';
 import { db } from '@/utils/db.js';
 import { getChatData } from '@/utils/sessions.js';
-import { addDeletedStats } from '@/core/services/statsService.js';
-import { getApiConfig } from '@/core/config/APISettings.js';
+import { saveMemorySettings, getMemorySettings } from '@/core/services/memorySchema.js';
 
 const {
     createEmptyMemoryCoverage,
@@ -58,94 +65,54 @@ export function useMemorySheetUI({
         const entry = memoryBook.entries.find(item => item.id === entryId);
         if (!entry) return;
 
-        const content = document.createElement('div');
-        content.className = 'context-sheet';
-        content.innerHTML = `
-            <div class="settings-item">
-                <label>Title</label>
-                <input id="memory-entry-title" type="text" value="${(entry.title || '').replace(/"/g, '&quot;')}" placeholder="Memory title">
-            </div>
-            <div class="settings-item">
-                <label>Content</label>
-                <textarea id="memory-entry-content" rows="8" placeholder="Memory text">${(entry.content || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>
-            </div>
-            <div class="settings-item">
-                <label>Keys</label>
-                <input id="memory-entry-keys" type="text" value="${(Array.isArray(entry.keys) ? entry.keys.join(', ') : '').replace(/"/g, '&quot;')}" placeholder="key one, key two">
-                <div class="context-sheet-note">Only this field is used for keyword retrieval.</div>
-            </div>
-            <div class="context-sheet-actions">
-                <button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-entry-cancel">Cancel</button>
-                <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="memory-entry-save">Save</button>
-            </div>
-        `;
-
-        content.querySelector('#memory-entry-cancel')?.addEventListener('click', () => {
-            closeBottomSheet();
-            setTimeout(() => openMemoryTextPreview(entry, 'Memory Entry'), 50);
-        });
-
-        content.querySelector('#memory-entry-save')?.addEventListener('click', async () => {
-            const nextTitle = content.querySelector('#memory-entry-title')?.value?.trim() || 'Untitled memory';
-            const nextContent = content.querySelector('#memory-entry-content')?.value?.trim() || '';
-            const nextKeys = parseMemoryKeyInput(content.querySelector('#memory-entry-keys')?.value);
-
-            if (!nextContent) {
-                showToast('Memory content is required');
-                return;
-            }
-
+        async function handleSave({ title: nextTitle, content: nextContent, keys: nextKeys }) {
             const retrievalChanged = JSON.stringify(entry.keys || []) !== JSON.stringify(nextKeys)
                 || String(entry.content || '') !== nextContent;
 
+            if (getMemoryVectorSearchEnabled(memoryBook) && retrievalChanged) {
+                entry.content = nextContent;
+                entry.keys = nextKeys;
+                await reindexMemoryEntry(entry, activeChatChar.id, sessionId);
+            }
+            await db.patchChatData(activeChatChar.id, (chatData) => {
+                const sid = activeChatChar.sessionId || chatData.currentId;
+                const mb = ensureSessionMemoryBook(chatData, sid);
+                const e = mb.entries.find(item => item.id === entryId);
+                if (!e) return;
+                e.title = nextTitle;
+                e.content = nextContent;
+                e.keys = nextKeys;
+                e.updatedAt = Date.now();
+                normalizeMemoryEntryShape(e);
+                mb.updatedAt = Date.now();
+                reconcileSessionMemoryState(chatData, sid, currentMessages.value);
+                chatData.sessions[sid] = currentMessages.value;
+            });
             entry.title = nextTitle;
             entry.content = nextContent;
             entry.keys = nextKeys;
             entry.updatedAt = Date.now();
-            normalizeMemoryEntryShape(entry);
-            memoryBook.updatedAt = Date.now();
-            reconcileSessionMemoryState(chatData, sessionId, currentMessages.value);
-            chatData.sessions[sessionId] = currentMessages.value;
+            closeBottomSheet();
+            setTimeout(() => openMemoryTextPreview(entry, 'Memory Entry'), 50);
+        }
 
-            try {
-                if (getMemoryVectorSearchEnabled(memoryBook) && retrievalChanged) {
-                    await reindexMemoryEntry(entry, activeChatChar.id, sessionId);
-                }
-                await db.saveChat(activeChatChar.id, chatData);
-                closeBottomSheet();
-                setTimeout(() => openMemoryTextPreview(entry, 'Memory Entry'), 50);
-            } catch (error) {
-                console.error('Failed to save memory entry:', error);
-                showToast(`Memory save failed: ${formatError(error)}`);
-            }
+        const { el } = mountSheetComponent(MemoryEntryEditorSheet, {
+            entry: { title: entry.title, content: entry.content, keys: entry.keys },
+            onSave: handleSave,
+            onPreview: () => openMemoryTextPreview(entry, 'Memory Entry')
         });
-
-        showBottomSheet({ title: 'Edit Memory Entry', content, isSolid: true });
+        showBottomSheet({ title: 'Edit Memory Entry', content: el, isSolid: true });
     }
 
     function openMemoryPromptPreview(item, options = {}) {
         if (!item) return;
         const { onClose } = options;
-        const hasOnClose = typeof onClose === 'function';
-        const content = document.createElement('div');
-        content.className = 'context-sheet';
-        content.innerHTML = `
-            <div class="settings-item">
-                <label>Rule</label>
-                <div class="context-sheet-note">${(item.label || 'Prompt').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
-            </div>
-            <div class="memory-entry-fulltext">${(item.prompt || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
-            <div class="context-sheet-actions">
-                <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="memory-prompt-preview-close">${hasOnClose ? 'Back' : 'Close'}</button>
-            </div>
-        `;
-        content.querySelector('#memory-prompt-preview-close')?.addEventListener('click', () => {
-            closeBottomSheet();
-            if (hasOnClose) {
-                setTimeout(() => onClose(), 50);
-            }
+        const { el } = mountSheetComponent(MemoryPromptPreviewSheet, {
+            label: item.label || 'Prompt',
+            prompt: item.prompt || '',
+            onClose: onClose || null
         });
-        showBottomSheet({ title: 'Generation Rule', content, isSolid: true });
+        showBottomSheet({ title: 'Generation Rule', content: el, isSolid: true });
     }
 
     async function createMemoryFromSelection() {
@@ -188,12 +155,14 @@ export function useMemorySheetUI({
             createdAt: Date.now(),
             updatedAt: Date.now()
         });
-        memoryBook.entries.push(createdEntry);
-
-        memoryBook.updatedAt = Date.now();
-        reconcileSessionMemoryState(chatData, sessionId, currentMessages.value);
-        chatData.sessions[sessionId] = currentMessages.value;
-        await db.saveChat(activeChatChar.id, chatData);
+        await db.patchChatData(activeChatChar.id, (chatData) => {
+            const sid = activeChatChar.sessionId || chatData.currentId;
+            const mb = ensureSessionMemoryBook(chatData, sid);
+            mb.entries.push(createdEntry);
+            mb.updatedAt = Date.now();
+            reconcileSessionMemoryState(chatData, sid, currentMessages.value);
+            chatData.sessions[sid] = currentMessages.value;
+        });
         await indexMemoryEntryIfNeeded(createdEntry, activeChatChar.id, sessionId);
         clearSelection();
     }
@@ -210,36 +179,8 @@ export function useMemorySheetUI({
 
     function openMemoryTextPreview(entry, kind = 'Memory') {
         if (!entry) return;
-        const keys = Array.isArray(entry.keys) && entry.keys.length
-            ? entry.keys.map(key => `<span class="memory-chip">${String(key).replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span>`).join('')
-            : '<span class="context-sheet-note">No keys yet</span>';
-        const isApprovedEntry = kind === 'Memory Entry';
-        const content = document.createElement('div');
-        content.className = 'context-sheet';
-        content.innerHTML = `
-            <div class="settings-item">
-                <label>${kind}</label>
-                <div class="context-sheet-note">${(entry.title || kind).replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
-            </div>
-            <div class="settings-item">
-                <label>Retrieval</label>
-                <div class="context-sheet-note">Vector search: ${entry.vectorSearch ? 'enabled' : 'disabled'}</div>
-                <div class="memory-chip-list">${keys}</div>
-            </div>
-            <div class="memory-entry-fulltext">${(entry.content || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
-            <div class="context-sheet-actions">
-                <button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-preview-regenerate">Regenerate</button>
-                ${isApprovedEntry ? `<button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-preview-edit">Edit</button>` : ''}
-                ${isApprovedEntry ? `<button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-preview-reindex">Reindex</button>` : ''}
-                ${isApprovedEntry ? `<button type="button" class="context-sheet-btn context-sheet-btn-secondary memory-preview-delete" id="memory-preview-delete">Delete</button>` : ''}
-                <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="memory-preview-close">${isApprovedEntry ? 'Close' : 'Back'}</button>
-            </div>
-        `;
-        content.querySelector('#memory-preview-edit')?.addEventListener('click', () => {
-            closeBottomSheet();
-            setTimeout(() => openMemoryEntryEditor(entry.id), 50);
-        });
-        content.querySelector('#memory-preview-reindex')?.addEventListener('click', async () => {
+
+        async function handleReindex() {
             const activeChatChar = getActiveChatChar();
             if (!activeChatChar) return;
             const chatData = await getChatData(activeChatChar.id);
@@ -249,41 +190,44 @@ export function useMemorySheetUI({
                 showToast('Enable Memory Books vector search first');
                 return;
             }
-            const reindexButton = content.querySelector('#memory-preview-reindex');
             try {
-                reindexButton.disabled = true;
-                reindexButton.textContent = 'Reindexing...';
                 showToast('Reindexing memory entry...', 1500);
                 entry.vectorSearch = true;
                 await reindexMemoryEntry(entry, activeChatChar.id, sessionId);
-                entry.updatedAt = Date.now();
-                memoryBook.updatedAt = Date.now();
-                await db.saveChat(activeChatChar.id, chatData);
+                await db.patchChatData(activeChatChar.id, (chatData) => {
+                    const sid = activeChatChar.sessionId || chatData.currentId;
+                    const mb = ensureSessionMemoryBook(chatData, sid);
+                    const e = mb.entries.find(item => item.id === entry.id);
+                    if (e) {
+                        e.vectorSearch = true;
+                        e.updatedAt = Date.now();
+                    }
+                    mb.updatedAt = Date.now();
+                });
                 showToast('Memory entry reindexed');
             } catch (error) {
                 console.error('Failed to reindex memory entry:', error);
                 showToast(`Reindex failed: ${formatError(error)}`);
-            } finally {
-                reindexButton.disabled = false;
-                reindexButton.textContent = 'Reindex';
             }
-        });
-        content.querySelector('#memory-preview-delete')?.addEventListener('click', async () => {
+        }
+
+        async function handleDelete() {
             const activeChatChar = getActiveChatChar();
             if (!activeChatChar) return;
-            const chatData = await getChatData(activeChatChar.id);
-            const sessionId = activeChatChar.sessionId || chatData.currentId;
-            const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
             await deleteMemoryEntryIndexIfPresent(entry.id);
-            memoryBook.entries = memoryBook.entries.filter(item => item.id !== entry.id);
-            memoryBook.updatedAt = Date.now();
-            reconcileSessionMemoryState(chatData, sessionId, currentMessages.value);
-            chatData.sessions[sessionId] = currentMessages.value;
-            await db.saveChat(activeChatChar.id, chatData);
+            await db.patchChatData(activeChatChar.id, (chatData) => {
+                const sid = activeChatChar.sessionId || chatData.currentId;
+                const mb = ensureSessionMemoryBook(chatData, sid);
+                mb.entries = mb.entries.filter(item => item.id !== entry.id);
+                mb.updatedAt = Date.now();
+                reconcileSessionMemoryState(chatData, sid, currentMessages.value);
+                chatData.sessions[sid] = currentMessages.value;
+            });
             closeBottomSheet();
             setTimeout(() => openMemoryBooksSheet(), 50);
-        });
-        content.querySelector('#memory-preview-regenerate')?.addEventListener('click', async () => {
+        }
+
+        async function handleRegenerate() {
             const activeChatChar = getActiveChatChar();
             if (!activeChatChar || !entry.messageIds || !entry.messageIds.length) {
                 showToast('Cannot regenerate: no message range');
@@ -306,12 +250,19 @@ export function useMemorySheetUI({
                 console.error('Failed to regenerate draft:', error);
                 showToast(`Regeneration failed: ${formatError(error)}`);
             }
+        }
+
+        const { el } = mountSheetComponent(MemoryTextPreviewSheet, {
+            entry,
+            kind,
+            vectorEnabled: entry.vectorSearch || false,
+            onEdit: () => { closeBottomSheet(); setTimeout(() => openMemoryEntryEditor(entry.id), 50); },
+            onReindex: handleReindex,
+            onDelete: handleDelete,
+            onRegenerate: handleRegenerate,
+            onClose: () => openMemoryBooksSheet()
         });
-        content.querySelector('#memory-preview-close')?.addEventListener('click', () => {
-            closeBottomSheet();
-            setTimeout(() => openMemoryBooksSheet(), 50);
-        });
-        showBottomSheet({ title: kind, content, isSolid: true });
+        showBottomSheet({ title: kind, content: el, isSolid: true });
     }
 
     async function openMessageMemoryCoverage(message) {
@@ -339,78 +290,51 @@ export function useMemorySheetUI({
             return;
         }
 
-        const content = document.createElement('div');
-        content.className = 'context-sheet';
-        content.innerHTML = `
-            <div class="settings-item">
-                <label>Message Memory Coverage</label>
-                <div class="context-sheet-note">This message is linked to ${matchedEntries.length} memory ${matchedEntries.length === 1 ? 'entry' : 'entries'}.</div>
-                ${coverage.needsRebuild ? '<div class="context-sheet-note" style="color: var(--warning-color, #ffb84d);">Coverage needs rebuild.</div>' : ''}
-                ${coverage.stale ? '<div class="context-sheet-note" style="color: var(--danger-color, #ff6b6b);">Coverage is marked stale.</div>' : ''}
-            </div>
-            <div class="memory-entry-list">
-                ${matchedEntries.map(entry => `
-                    <button type="button" class="memory-entry-card" data-coverage-entry-id="${entry.id}">
-                        <div class="memory-entry-title-row">
-                            <strong>${String(entry.title || 'Memory Entry').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</strong>
-                            <span class="context-sheet-note">${String(entry.status || 'active').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</span>
-                        </div>
-                        <div class="context-sheet-note">${normalizeEntryMessageIds(entry).length} linked message${normalizeEntryMessageIds(entry).length === 1 ? '' : 's'}</div>
-                    </button>
-                `).join('')}
-            </div>
-            <div class="context-sheet-actions">
-                <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="memory-coverage-close">Close</button>
-            </div>
-        `;
+        function handleEntryClick(entry) {
+            closeBottomSheet();
+            setTimeout(() => openMemoryTextPreview(entry, 'Memory Entry'), 50);
+        }
 
-        content.querySelectorAll('[data-coverage-entry-id]').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const entryId = btn.getAttribute('data-coverage-entry-id');
-                const entry = matchedEntries.find(item => item.id === entryId);
-                if (!entry) return;
-                closeBottomSheet();
-                setTimeout(() => openMemoryTextPreview(entry, 'Memory Entry'), 50);
-            });
+        const { el } = mountSheetComponent(MemoryCoverageSheet, {
+            matchedEntries: matchedEntries.map(e => ({
+                id: e.id,
+                title: e.title,
+                status: e.status,
+                messageIds: normalizeEntryMessageIds(e)
+            })),
+            coverage,
+            onEntryClick: handleEntryClick
         });
-        content.querySelector('#memory-coverage-close')?.addEventListener('click', () => closeBottomSheet());
-        showBottomSheet({ title: 'Message Memory Coverage', content, isSolid: true });
+        showBottomSheet({ title: 'Message Memory Coverage', content: el, isSolid: true });
     }
 
     async function removeMemoryFromSelection() {
         const activeChatChar = getActiveChatChar();
         if (!activeChatChar || selectedMessages.value.size === 0) return;
 
-        const chatData = await getChatData(activeChatChar.id);
-        const sessionId = activeChatChar.sessionId || chatData.currentId;
-        const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
         const selectedIds = new Set(currentMessages.value.filter(msg => msg && selectedMessages.value.has(msg.id)).map(msg => msg.id));
         if (!selectedIds.size) return;
 
-        const removedEntryIds = memoryBook.entries
-            .filter(entry => normalizeEntryMessageIds(entry).some(id => selectedIds.has(id)))
-            .map(entry => entry.id);
-
-        if (!removedEntryIds.length) {
-            clearSelection();
-            return;
-        }
-
-        memoryBook.entries = memoryBook.entries.filter(entry => !removedEntryIds.includes(entry.id));
-        memoryBook.updatedAt = Date.now();
-
-        for (const msg of currentMessages.value) {
-            if (!msg?.memoryCoverage) msg.memoryCoverage = createEmptyMemoryCoverage();
-            const wasCovered = Array.isArray(msg.memoryCoverage.entryIds) && msg.memoryCoverage.entryIds.some(id => removedEntryIds.includes(id));
-            msg.memoryCoverage.entryIds = (msg.memoryCoverage.entryIds || []).filter(id => !removedEntryIds.includes(id));
-            if (wasCovered) {
-                msg.memoryCoverage.needsRebuild = true;
-                msg.memoryCoverage.stale = false;
+        await db.patchChatData(activeChatChar.id, (chatData) => {
+            const sid = activeChatChar.sessionId || chatData.currentId;
+            const mb = ensureSessionMemoryBook(chatData, sid);
+            const removedEntryIds = mb.entries
+                .filter(entry => normalizeEntryMessageIds(entry).some(id => selectedIds.has(id)))
+                .map(entry => entry.id);
+            if (!removedEntryIds.length) return;
+            mb.entries = mb.entries.filter(entry => !removedEntryIds.includes(entry.id));
+            mb.updatedAt = Date.now();
+            for (const msg of currentMessages.value) {
+                if (!msg?.memoryCoverage) msg.memoryCoverage = createEmptyMemoryCoverage();
+                const wasCovered = Array.isArray(msg.memoryCoverage.entryIds) && msg.memoryCoverage.entryIds.some(id => removedEntryIds.includes(id));
+                msg.memoryCoverage.entryIds = (msg.memoryCoverage.entryIds || []).filter(id => !removedEntryIds.includes(id));
+                if (wasCovered) {
+                    msg.memoryCoverage.needsRebuild = true;
+                    msg.memoryCoverage.stale = false;
+                }
             }
-        }
-
-        chatData.sessions[sessionId] = currentMessages.value;
-        await db.saveChat(activeChatChar.id, chatData);
+            chatData.sessions[sid] = currentMessages.value;
+        });
         clearSelection();
     }
 
@@ -418,330 +342,178 @@ export function useMemorySheetUI({
         const activeChatChar = getActiveChatChar();
         if (!activeChatChar) return;
 
-        const chatData = await getChatData(activeChatChar.id);
-        const sessionId = activeChatChar.sessionId || chatData.currentId;
-        const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
-        if (!memoryBook.settings) memoryBook.settings = {};
-        const currentApiConfig = getApiConfig();
-        const settings = memoryBook.settings;
-        const state = getNormalizedMemoryGenerationState(settings, initialState || {});
+        const settings = getMemorySettings();
 
-        const renderSheet = () => {
-            const content = document.createElement('div');
-            content.className = 'context-sheet';
-            content.innerHTML = `
-                <div class="settings-item">
-                    <label>Generation Rules</label>
-                    <div class="clickable-selector" id="memory-prompt-selector">
-                        <span>${getMemoryPromptLabelByKey(settings, state.promptPreset)}</span>
-                        <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
-                    </div>
-                    <button type="button" class="memory-inline-link" id="memory-prompt-preview-btn">Preview Rule</button>
-                </div>
-                <div class="settings-item">
-                    <label>Temperature Override</label>
-                    <input id="memory-temperature-input" type="number" min="0" max="2" step="0.05" value="${state.temperature ?? ''}" placeholder="Use current API temperature">
-                </div>
-                <div class="settings-item">
-                    <label>Output Token Limit</label>
-                    <input id="memory-max-tokens-input" type="number" min="200" max="32000" step="100" value="${state.maxTokens ?? ''}" placeholder="Auto (recommended 2000-4000 for large batches)">
-                    <div class="context-sheet-note">Optional max completion tokens for memory draft generation. Leave blank to use the provider default with a safety floor.</div>
-                </div>
-                <div class="settings-item-checkbox">
-                    <div class="settings-text-col">
-                        <label>Auto-Create Drafts</label>
-                        <div class="settings-desc">Automatically create Memory Book drafts after enough stable messages accumulate.</div>
-                    </div>
-                    <input id="memory-auto-create-toggle" type="checkbox" class="vk-switch" ${state.autoCreateEnabled ? 'checked' : ''}>
-                </div>
-                <div class="settings-item-checkbox">
-                    <div class="settings-text-col">
-                        <label>Auto-Generate Draft Text</label>
-                        <div class="settings-desc">When enabled, newly auto-created draft placeholders immediately generate text. When disabled, auto mode only marks segments and leaves text generation manual.</div>
-                    </div>
-                    <input id="memory-auto-generate-toggle" type="checkbox" class="vk-switch" ${state.autoGenerateEnabled ? 'checked' : ''}>
-                </div>
-                <div class="settings-item">
-                    <label>Create Memory Every N Messages</label>
-                    <input id="memory-auto-interval-input" type="number" min="1" max="200" step="1" value="${state.autoCreateInterval}" placeholder="15">
-                    <div class="context-sheet-note">User-facing interval for future automatic memory creation and import bootstrap segmentation.</div>
-                </div>
-                <div class="settings-item">
-                    <label>Max Generate Batch</label>
-                    <input id="memory-batch-size-input" type="number" min="1" max="50" step="1" value="${state.batchSize}" placeholder="3">
-                    <div class="context-sheet-note">Limits how many pending drafts the batch generate button starts at once.</div>
-                </div>
-                <div class="settings-item-checkbox">
-                    <div class="settings-text-col">
-                        <label>Work With Delay</label>
-                        <div class="settings-desc">Wait for extra turns before auto-creating a memory draft, so the last user message and latest assistant reply can still be edited or regenerated safely.</div>
-                    </div>
-                    <input id="memory-delayed-automation-toggle" type="checkbox" class="vk-switch" ${state.useDelayedAutomation ? 'checked' : ''}>
-                </div>
-                <div class="settings-item">
-                    <label>Memory Entries In Prompt</label>
-                    <input id="memory-max-injected-input" type="number" min="1" max="20" step="1" value="${state.maxInjectedEntries}" placeholder="7">
-                    <div class="context-sheet-note">How many retrieved memory entries can be injected into the prompt at once.</div>
-                </div>
-                <div class="settings-item">
-                    <label>Injection Target</label>
-                    <div class="clickable-selector" id="memory-injection-target-selector">
-                        <span>${state.injectionTarget === 'summary_macro' ? '{{summary}} macro' : 'Chat summary block'}</span>
-                        <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
-                    </div>
-                    <div class="context-sheet-note">Choose whether retrieved memory context follows the dedicated summary block path or the {{summary}} macro location.</div>
-                </div>
-                <div class="context-sheet-actions">
-                    <button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-settings-cancel">Cancel</button>
-                    <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="memory-settings-save">Save</button>
-                </div>
-            `;
-
-            content.querySelector('#memory-prompt-selector')?.addEventListener('click', () => {
-                closeBottomSheet();
-                const promptItems = getMemoryPromptOptions(settings).map(item => ({
-                    label: item.label,
-                    onClick: () => {
-                        state.promptPreset = item.key;
-                        closeBottomSheet();
-                        setTimeout(() => showBottomSheet({ title: 'Memory Generation', content: renderSheet(), isSolid: true }), 50);
-                    }
-                }));
-                promptItems.push({
-                    label: `Preview: ${getMemoryPromptLabelByKey(settings, state.promptPreset)}`,
-                    onClick: () => {
-                        const selected = getMemoryPromptOptions(settings).find(item => item.key === state.promptPreset);
-                        closeBottomSheet();
-                        setTimeout(() => openMemoryPromptPreview(selected, {
-                            onClose: () => openMemoryGenerationSettings({ ...state })
-                        }), 50);
-                    }
-                });
-                promptItems.push({
-                    label: 'Manage custom prompts',
-                    onClick: () => {
-                        closeBottomSheet();
-                        setTimeout(() => openMemoryPromptManager(), 50);
-                    }
-                });
-                showBottomSheet({ title: 'Generation Rules', items: promptItems });
+        function handleSelectPrompt(state) {
+            closeBottomSheet();
+            const promptItems = getMemoryPromptOptions(settings).map(item => ({
+                label: item.label,
+                onClick: () => {
+                    state.promptPreset = item.key;
+                    closeBottomSheet();
+                }
+            }));
+            promptItems.push({
+                label: `Preview: ${getMemoryPromptLabelByKey(settings, state.promptPreset)}`,
+                onClick: () => {
+                    const selected = getMemoryPromptOptions(settings).find(item => item.key === state.promptPreset);
+                    closeBottomSheet();
+                    setTimeout(() => openMemoryPromptPreview(selected, {
+                        onClose: () => openMemoryGenerationSettings({ ...state })
+                    }), 50);
+                }
             });
-
-            content.querySelector('#memory-prompt-preview-btn')?.addEventListener('click', () => {
-                const options = getMemoryPromptOptions(settings);
-                const selected = options.find(item => item.key === state.promptPreset) || options[0];
-                closeBottomSheet();
-                setTimeout(() => openMemoryPromptPreview(selected, {
-                    onClose: () => openMemoryGenerationSettings({ ...state })
-                }), 50);
+            promptItems.push({
+                label: 'Manage custom prompts',
+                onClick: () => {
+                    closeBottomSheet();
+                    setTimeout(() => openMemoryPromptManager(), 50);
+                }
             });
+            showBottomSheet({ title: 'Generation Rules', items: promptItems });
+        }
 
-            content.querySelector('#memory-injection-target-selector')?.addEventListener('click', () => {
-                closeBottomSheet();
-                showBottomSheet({
-                    title: 'Memory Injection Target',
-                    items: [
-                        {
-                            label: 'Chat summary block',
-                            onClick: () => {
-                                state.injectionTarget = 'summary_block';
-                                closeBottomSheet();
-                                setTimeout(() => showBottomSheet({ title: 'Memory Generation', content: renderSheet(), isSolid: true }), 50);
-                            }
-                        },
-                        {
-                            label: '{{summary}} macro',
-                            onClick: () => {
-                                state.injectionTarget = 'summary_macro';
-                                closeBottomSheet();
-                                setTimeout(() => showBottomSheet({ title: 'Memory Generation', content: renderSheet(), isSolid: true }), 50);
-                            }
-                        }
-                    ]
-                });
-            });
+        function handlePreviewPrompt(state) {
+            const options = getMemoryPromptOptions(settings);
+            const selected = options.find(item => item.key === state.promptPreset) || options[0];
+            closeBottomSheet();
+            setTimeout(() => openMemoryPromptPreview(selected, {
+                onClose: () => openMemoryGenerationSettings({ ...state })
+            }), 50);
+        }
 
-            content.querySelector('#memory-settings-cancel')?.addEventListener('click', () => {
-                closeBottomSheet();
-                setTimeout(() => openMemoryBooksSheet(), 50);
-            });
-            content.querySelector('#memory-settings-save')?.addEventListener('click', async () => {
-                settings.generationSource = state.source;
-                settings.generationUseCurrentModelOverride = false;
-                settings.generationModel = state.model || '';
-                settings.generationEndpoint = state.source === 'custom'
-                    ? (content.querySelector('#memory-endpoint-input')?.value?.trim() || '')
-                    : '';
-                settings.generationApiKey = state.source === 'custom'
-                    ? (content.querySelector('#memory-apikey-input')?.value || '')
-                    : '';
-                const tempValue = content.querySelector('#memory-temperature-input')?.value?.trim();
-                settings.generationTemperature = tempValue === '' ? null : Number(tempValue);
-                const maxTokensValue = content.querySelector('#memory-max-tokens-input')?.value?.trim();
-                settings.generationMaxTokens = maxTokensValue === ''
+        function handleManagePrompts() {
+            closeBottomSheet();
+            setTimeout(() => openMemoryPromptManager(), 50);
+        }
+
+        async function handleSave(state) {
+            await db.patchChatData(activeChatChar.id, (chatData) => {
+                const sid = activeChatChar.sessionId || chatData.currentId;
+                const mb = ensureSessionMemoryBook(chatData, sid);
+                if (!mb.settings) mb.settings = {};
+                const s = mb.settings;
+                s.generationSource = state.source;
+                s.generationUseCurrentModelOverride = false;
+                s.generationModel = state.model || '';
+                s.generationTemperature = state.temperature === '' || state.temperature == null ? null : Number(state.temperature);
+                s.generationMaxTokens = state.maxTokens === '' || state.maxTokens == null
                     ? null
-                    : Math.max(200, Math.min(32000, Number.isFinite(Number(maxTokensValue)) ? Math.round(Number(maxTokensValue)) : 2000));
-                settings.autoCreateEnabled = !!content.querySelector('#memory-auto-create-toggle')?.checked;
-                settings.autoGenerateEnabled = !!content.querySelector('#memory-auto-generate-toggle')?.checked;
-                const autoIntervalRaw = content.querySelector('#memory-auto-interval-input')?.value?.trim();
-                const autoIntervalValue = autoIntervalRaw !== '' ? Number(autoIntervalRaw) : 15;
-                settings.autoCreateInterval = Number.isFinite(autoIntervalValue) && autoIntervalValue > 0 ? Math.max(1, Math.min(200, Math.round(autoIntervalValue))) : 15;
-                const batchSizeRaw = content.querySelector('#memory-batch-size-input')?.value?.trim();
-                const batchSizeValue = batchSizeRaw !== '' ? Number(batchSizeRaw) : 3;
-                settings.batchSize = Number.isFinite(batchSizeValue) && batchSizeValue > 0 ? Math.max(1, Math.min(50, Math.round(batchSizeValue))) : 3;
-                settings.useDelayedAutomation = !!content.querySelector('#memory-delayed-automation-toggle')?.checked;
-                const maxInjectedRaw = content.querySelector('#memory-max-injected-input')?.value?.trim();
-                const maxInjectedValue = maxInjectedRaw !== '' ? Number(maxInjectedRaw) : 7;
-                settings.maxInjectedEntries = Number.isFinite(maxInjectedValue) && maxInjectedValue > 0 ? Math.max(1, Math.min(20, Math.round(maxInjectedValue))) : 7;
-                settings.injectionTarget = state.injectionTarget === 'summary_macro' ? 'summary_macro' : 'summary_block';
-                settings.promptPreset = state.promptPreset || 'detailed_beats';
-                memoryBook.updatedAt = Date.now();
-                await db.saveChat(activeChatChar.id, chatData);
-                closeBottomSheet();
-                setTimeout(() => openMemoryBooksSheet(), 50);
+                    : Math.max(200, Math.min(32000, Number.isFinite(Number(state.maxTokens)) ? Math.round(Number(state.maxTokens)) : 2000));
+                s.autoCreateEnabled = !!state.autoCreateEnabled;
+                s.autoGenerateEnabled = !!state.autoGenerateEnabled;
+                s.autoCreateInterval = Number.isFinite(state.autoCreateInterval) && state.autoCreateInterval > 0 ? Math.max(1, Math.min(200, Math.round(state.autoCreateInterval))) : 15;
+                s.batchSize = Number.isFinite(state.batchSize) && state.batchSize > 0 ? Math.max(1, Math.min(50, Math.round(state.batchSize))) : 3;
+                s.useDelayedAutomation = !!state.useDelayedAutomation;
+                s.maxInjectedEntries = Number.isFinite(state.maxInjectedEntries) && state.maxInjectedEntries > 0 ? Math.max(1, Math.min(20, Math.round(state.maxInjectedEntries))) : 7;
+                s.injectionTarget = state.injectionTarget === 'summary_macro' ? 'summary_macro' : 'summary_block';
+                s.promptPreset = state.promptPreset || 'detailed_beats';
+                mb.updatedAt = Date.now();
+                saveMemorySettings(s);
             });
+            closeBottomSheet();
+            setTimeout(() => openMemoryBooksSheet(), 50);
+        }
 
-            return content;
-        };
+        function handleCancel() {
+            closeBottomSheet();
+            setTimeout(() => openMemoryBooksSheet(), 50);
+        }
 
-        showBottomSheet({
-            title: 'Memory Generation',
-            content: renderSheet(),
-            isSolid: true
+        const { el } = mountSheetComponent(MemoryGenerationSettingsSheet, {
+            settings,
+            initialState: initialState || {},
+            onSelectPrompt: handleSelectPrompt,
+            onPreviewPrompt: handlePreviewPrompt,
+            onManagePrompts: handleManagePrompts,
+            onSave: handleSave,
+            onCancel: handleCancel
         });
+        showBottomSheet({ title: 'Memory Generation', content: el, isSolid: true });
     }
 
     async function openMemoryPromptManager() {
         const activeChatChar = getActiveChatChar();
         if (!activeChatChar) return;
-        const chatData = await getChatData(activeChatChar.id);
-        const sessionId = activeChatChar.sessionId || chatData.currentId;
-        const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
-        const settings = memoryBook.settings || {};
+        const settings = getMemorySettings();
         if (!Array.isArray(settings.customPrompts)) settings.customPrompts = [];
 
-        const content = document.createElement('div');
-        content.className = 'context-sheet';
-        const promptCards = settings.customPrompts.length
-            ? settings.customPrompts.map(item => `
-                <div class="memory-entry-card" data-prompt-id="${item.id}">
-                    <div class="memory-entry-head">
-                        <div>
-                            <div class="memory-entry-title">${(item.name || 'Custom prompt').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</div>
-                            <div class="memory-entry-meta">custom prompt</div>
-                        </div>
-                        <div class="memory-draft-actions">
-                            <button type="button" class="memory-entry-approve" data-prompt-edit="${item.id}">Edit</button>
-                            <button type="button" class="memory-entry-delete" data-prompt-delete="${item.id}">Delete</button>
-                        </div>
-                    </div>
-                    <div class="memory-entry-preview">${(item.prompt || '').replace(/</g, '&lt;').replace(/>/g, '&gt;').slice(0, 180)}</div>
-                </div>
-            `).join('')
-            : '<div class="context-sheet-note">No custom prompts yet.</div>';
+        async function handleDelete(item) {
+            await db.patchChatData(activeChatChar.id, (chatData) => {
+                const sid = activeChatChar.sessionId || chatData.currentId;
+                const mb = ensureSessionMemoryBook(chatData, sid);
+                if (!mb.settings) mb.settings = {};
+                if (!Array.isArray(mb.settings.customPrompts)) mb.settings.customPrompts = [];
+                mb.settings.customPrompts = mb.settings.customPrompts.filter(p => p.id !== item.id);
+                if (mb.settings.promptPreset === item.id) mb.settings.promptPreset = 'detailed_beats';
+                mb.updatedAt = Date.now();
+                saveMemorySettings(mb.settings);
+            });
+            closeBottomSheet();
+            setTimeout(() => openMemoryPromptManager(), 50);
+        }
 
-        content.innerHTML = `
-            <div class="context-sheet-actions" style="margin-top: 0; margin-bottom: 12px;">
-                <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="memory-prompt-add">Add Prompt</button>
-                <button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-prompt-close">Close</button>
-            </div>
-            <div class="memory-entry-list">${promptCards}</div>
-        `;
+        function handleEdit(item) {
+            closeBottomSheet();
+            setTimeout(() => openMemoryPromptEditor(item), 50);
+        }
 
-        content.querySelector('#memory-prompt-add')?.addEventListener('click', () => {
+        function handlePreview(item) {
+            closeBottomSheet();
+            setTimeout(() => openMemoryPromptPreview(
+                { label: item.name || 'Custom prompt', prompt: item.prompt || '' },
+                { onClose: openMemoryPromptManager }
+            ), 50);
+        }
+
+        function handleAdd() {
             closeBottomSheet();
             setTimeout(() => openMemoryPromptEditor(), 50);
-        });
-        content.querySelector('#memory-prompt-close')?.addEventListener('click', () => closeBottomSheet());
-        content.querySelectorAll('[data-prompt-id]').forEach(card => {
-            card.addEventListener('click', (event) => {
-                if (event.target.closest('button')) return;
-                const promptId = card.getAttribute('data-prompt-id');
-                const prompt = settings.customPrompts.find(item => item.id === promptId);
-                if (!prompt) return;
-                closeBottomSheet();
-                setTimeout(() => openMemoryPromptPreview(
-                    { label: prompt.name || 'Custom prompt', prompt: prompt.prompt || '' },
-                    { onClose: openMemoryPromptManager }
-                ), 50);
-            });
-        });
-        content.querySelectorAll('[data-prompt-delete]').forEach(btn => {
-            btn.addEventListener('click', async () => {
-                const promptId = btn.getAttribute('data-prompt-delete');
-                settings.customPrompts = settings.customPrompts.filter(item => item.id !== promptId);
-                if (settings.promptPreset === promptId) settings.promptPreset = 'detailed_beats';
-                memoryBook.updatedAt = Date.now();
-                await db.saveChat(activeChatChar.id, chatData);
-                closeBottomSheet();
-                setTimeout(() => openMemoryPromptManager(), 50);
-            });
-        });
-        content.querySelectorAll('[data-prompt-edit]').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const promptId = btn.getAttribute('data-prompt-edit');
-                const prompt = settings.customPrompts.find(item => item.id === promptId);
-                if (!prompt) return;
-                closeBottomSheet();
-                setTimeout(() => openMemoryPromptEditor(prompt), 50);
-            });
-        });
+        }
 
-        showBottomSheet({ title: 'Generation Rules', content, isSolid: true });
+        const { el } = mountSheetComponent(MemoryPromptManagerSheet, {
+            customPrompts: settings.customPrompts.map(p => ({ id: p.id, name: p.name, prompt: p.prompt })),
+            onAdd: handleAdd,
+            onEdit: handleEdit,
+            onDelete: handleDelete,
+            onPreview: handlePreview
+        });
+        showBottomSheet({ title: 'Generation Rules', content: el, isSolid: true });
     }
 
     async function openMemoryPromptEditor(existing = null) {
         const activeChatChar = getActiveChatChar();
         if (!activeChatChar) return;
-        const chatData = await getChatData(activeChatChar.id);
-        const sessionId = activeChatChar.sessionId || chatData.currentId;
-        const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
-        const settings = memoryBook.settings || {};
-        if (!Array.isArray(settings.customPrompts)) settings.customPrompts = [];
 
-        const content = document.createElement('div');
-        content.className = 'context-sheet';
-        content.innerHTML = `
-            <div class="settings-item">
-                <label>Name</label>
-                <input id="memory-prompt-name" type="text" value="${(existing?.name || '').replace(/"/g, '&quot;')}" placeholder="Prompt name">
-            </div>
-            <div class="settings-item">
-                <label>Prompt</label>
-                <textarea id="memory-prompt-text" rows="10" placeholder="Use {{history}}, {{user}}, {{char}}">${(existing?.prompt || '').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</textarea>
-            </div>
-            <div class="context-sheet-actions">
-                <button type="button" class="context-sheet-btn context-sheet-btn-secondary" id="memory-prompt-cancel">Cancel</button>
-                <button type="button" class="context-sheet-btn context-sheet-btn-primary" id="memory-prompt-save">Save</button>
-            </div>
-        `;
-
-        content.querySelector('#memory-prompt-cancel')?.addEventListener('click', () => closeBottomSheet());
-        content.querySelector('#memory-prompt-save')?.addEventListener('click', async () => {
-            const name = content.querySelector('#memory-prompt-name')?.value?.trim() || 'Custom prompt';
-            const prompt = content.querySelector('#memory-prompt-text')?.value?.trim() || '';
-            if (!prompt) {
-                showToast('Prompt text is required');
-                return;
-            }
-            if (existing) {
-                const target = settings.customPrompts.find(item => item.id === existing.id);
-                if (target) {
-                    target.name = name;
-                    target.prompt = prompt;
+        async function handleSave({ name, prompt }) {
+            await db.patchChatData(activeChatChar.id, (chatData) => {
+                const sid = activeChatChar.sessionId || chatData.currentId;
+                const mb = ensureSessionMemoryBook(chatData, sid);
+                if (!mb.settings) mb.settings = {};
+                if (!Array.isArray(mb.settings.customPrompts)) mb.settings.customPrompts = [];
+                if (existing) {
+                    const target = mb.settings.customPrompts.find(item => item.id === existing.id);
+                    if (target) {
+                        target.name = name;
+                        target.prompt = prompt;
+                    }
+                } else {
+                    const created = { id: genMemoryPromptId(), name, prompt };
+                    mb.settings.customPrompts.push(created);
+                    mb.settings.promptPreset = created.id;
                 }
-            } else {
-                const created = { id: genMemoryPromptId(), name, prompt };
-                settings.customPrompts.push(created);
-                settings.promptPreset = created.id;
-            }
-            memoryBook.updatedAt = Date.now();
-            await db.saveChat(activeChatChar.id, chatData);
+                mb.updatedAt = Date.now();
+                saveMemorySettings(mb.settings);
+            });
             closeBottomSheet();
             setTimeout(() => openMemoryPromptManager(), 50);
-        });
+        }
 
-        showBottomSheet({ title: existing ? 'Edit Prompt' : 'Add Prompt', content, isSolid: true });
+        const { el } = mountSheetComponent(MemoryPromptEditorSheet, {
+            existing: existing ? { id: existing.id, name: existing.name, prompt: existing.prompt } : null,
+            onSave: handleSave
+        });
+        showBottomSheet({ title: existing ? 'Edit Prompt' : 'Add Prompt', content: el, isSolid: true });
     }
 
     async function openMemoryBooksSheet() {
