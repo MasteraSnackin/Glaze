@@ -143,8 +143,8 @@ export async function importSTBackupFromZip(zipFile, onProgress) {
                 continue;
             }
             const text = await zip.files[path].async('string');
-            const blob = new Blob([text], { type: 'text/plain' });
-            await importSillyTavernChat(blob, characterId, null, { chatDataCache });
+            const chatFile = new File([text], "st_import.jsonl", { type: 'text/plain' });
+            await importSillyTavernChat(chatFile, characterId, null, { chatDataCache });
             result.chats++;
         } catch (err) {
             result.errors.push(`Chat ${path}: ${err.message}`);

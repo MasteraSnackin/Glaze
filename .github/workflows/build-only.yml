@@ -1,11 +1,7 @@
-name: Build Artifacts Only
+﻿name: Build Artifacts Only
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-      - dev
 
 jobs:
 

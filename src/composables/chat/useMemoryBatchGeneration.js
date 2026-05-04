@@ -136,7 +136,7 @@ export function useMemoryBatchGeneration({
         const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
 
         const draftsNeedingGeneration = (Array.isArray(memoryBook.pendingDrafts) ? memoryBook.pendingDrafts : [])
-            .filter(d => !d.content && d.status === 'pending_generation' && !memoryDraftState.value?.activeDrafts?.[d.id]);
+            .filter(d => !d.content && (d.status === 'pending_generation' || d.status === 'needs_regeneration') && !memoryDraftState.value?.activeDrafts?.[d.id]);
         const maxBatchSize = Math.max(1, Math.min(50, Number(memoryBook.settings?.batchSize) || 3));
 
         if (!draftsNeedingGeneration.length) {

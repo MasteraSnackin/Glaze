@@ -204,6 +204,13 @@ export function useMemoryAutomation({
                 const memoryBook = ensureSessionMemoryBook(chatData, sessionId);
                 const automation = ensureMemoryAutomationState(memoryBook);
                 automation.isGeneratingDraft = true;
+                if (existingDraftId && Array.isArray(memoryBook.pendingDrafts)) {
+                    const draft = memoryBook.pendingDrafts.find(d => d.id === existingDraftId);
+                    if (draft) {
+                        draft.error = null;
+                        draft.status = 'pending_generation';
+                    }
+                }
                 memoryBook.updatedAt = Date.now();
             });
 
@@ -284,16 +291,25 @@ export function useMemoryAutomation({
             return true;
         } catch (error) {
             stopMemoryDraftProgress(progressDraftId);
+            const errorText = formatError(error);
+            const isAbort = error?.name === 'AbortError';
             await db.patchChatData(getActiveChatChar().id, (latestChatData) => {
                 const latestSessionId = getActiveChatChar().sessionId || latestChatData.currentId;
                 const latestMemoryBook = ensureSessionMemoryBook(latestChatData, latestSessionId);
                 const latestAutomation = ensureMemoryAutomationState(latestMemoryBook);
                 latestAutomation.isGeneratingDraft = Object.keys(memoryDraftState.value.activeDrafts || {}).length > 0;
+                if (!isAbort && existingDraftId && Array.isArray(latestMemoryBook.pendingDrafts)) {
+                    const failedDraft = latestMemoryBook.pendingDrafts.find(d => d.id === existingDraftId);
+                    if (failedDraft) {
+                        failedDraft.error = errorText;
+                        failedDraft.status = 'needs_regeneration';
+                    }
+                }
                 latestMemoryBook.updatedAt = Date.now();
             });
             await loadCurrentMemoryBook(getActiveChatChar());
             console.error('Failed to generate memory draft:', error);
-            showToast(`Memory draft failed: ${formatError(error)}`, 5000);
+            if (!isAbort) showToast(`Memory draft failed: ${errorText}`, 5000);
             return false;
         }
     }
