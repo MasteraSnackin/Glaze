@@ -305,8 +305,12 @@ export const db = {
             const tx = database.transaction(storeName, 'readwrite');
             const store = tx.objectStore(storeName);
             const req = store.put(toPlain(value));
-            req.onsuccess = () => {
+            tx.oncomplete = () => {
                 resolve();
+                database.close();
+            };
+            tx.onerror = () => {
+                reject(tx.error);
                 database.close();
             };
             req.onerror = () => {
