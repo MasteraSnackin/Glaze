@@ -522,14 +522,14 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
         // If items added to bottom (chat scenario), auto-expand end
         if (newLen > oldLen) {
             renderEnd.value = newLen;
-            // If we were at the bottom, keep us at the bottom
-            // (ChatView handles scroll, we just ensure it's rendered)
-            const wasAtBottom = containerRef.value && (containerRef.value.scrollHeight - containerRef.value.scrollTop - containerRef.value.clientHeight < 100);
-            if (wasAtBottom) {
-                // Use slight delay to allow dom updates
-                setTimeout(() => {
-                    scrollToBottom('auto');
-                }, 50);
+            // Only auto-scroll to bottom in chat mode (opt-in via options.autoScrollToBottom)
+            if (options.autoScrollToBottom !== false) {
+                const wasAtBottom = containerRef.value && (containerRef.value.scrollHeight - containerRef.value.scrollTop - containerRef.value.clientHeight < 100);
+                if (wasAtBottom) {
+                    setTimeout(() => {
+                        scrollToBottom('auto');
+                    }, 50);
+                }
             }
         }
         updateSpacers();

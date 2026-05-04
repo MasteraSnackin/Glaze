@@ -192,7 +192,8 @@ const activeScrollItems = computed(() => {
 
 const scrollContainer = ref(null);
 const { visibleItems, paddingTop, paddingBottom, refresh: refreshScroll } = useVirtualScroll(activeScrollItems, scrollContainer, {
-    estimateHeight: 72
+    estimateHeight: 72,
+    autoScrollToBottom: false
 });
 
 watch([() => props.collapsed, dialogGrouping], () => {

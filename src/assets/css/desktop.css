@@ -212,7 +212,7 @@
 .desktop-dialogs-wrapper {
     flex: 1;
     min-height: 0;
-    overflow-y: auto;
+    overflow: hidden;
     display: flex;
     flex-direction: column;
 }
@@ -220,6 +220,7 @@
 .desktop-dialogs-wrapper>* {
     flex: 1;
     min-height: 0;
+    overflow-y: auto;
 }
 
 .desktop-sidebar-left .view {
@@ -232,11 +233,11 @@
 }
 
 /* Collapsed: hide scrollbar so it doesn't steal width from the 64px layout */
-.desktop-sidebar-left.sidebar-collapsed .desktop-dialogs-wrapper {
+.desktop-sidebar-left.sidebar-collapsed .desktop-dialogs-wrapper > * {
     scrollbar-width: none;
 }
 
-.desktop-sidebar-left.sidebar-collapsed .desktop-dialogs-wrapper::-webkit-scrollbar {
+.desktop-sidebar-left.sidebar-collapsed .desktop-dialogs-wrapper > *::-webkit-scrollbar {
     display: none;
 }
 
