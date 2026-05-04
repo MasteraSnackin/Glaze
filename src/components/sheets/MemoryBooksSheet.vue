@@ -385,11 +385,34 @@ defineExpose({ open, close });
         <div class="memory-session-overview-meta">
 {{ generationSettingsSummary }}
 </div>
-        <div class="memory-quick-model-row" @click="openQuickModelSelector">
+        <div v-if="memoryProviderSettings.useSame" class="memory-quick-model-row" @click="openQuickModelSelector">
           <span class="memory-quick-model-label">{{ t('label_model') }}</span>
           <span class="memory-quick-model-value">{{ currentMemoryModelLabel }}</span>
           <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
         </div>
+        <div class="memory-settings-item-checkbox" style="margin-top: 8px;">
+            <div class="memory-settings-text-col">
+                <label>{{ t('label_use_llm_api') || 'Use LLM API' }}</label>
+                <div class="memory-settings-desc">
+{{ t('desc_use_llm_api_memory') || 'Use the same endpoint as LLM for memory book generation' }}
+</div>
+            </div>
+            <input type="checkbox" :checked="memoryProviderSettings.useSame" @change="onMemoryProviderInput('useSame', $event.target.checked)" class="vk-switch">
+        </div>
+        <template v-if="!memoryProviderSettings.useSame">
+            <div class="memory-settings-item">
+                <label>{{ t('label_memory_endpoint') || 'Memory Gen Endpoint' }}</label>
+                <input type="text" :value="memoryProviderSettings.endpoint" @input="onMemoryProviderInput('endpoint', $event.target.value)" placeholder="http://127.0.0.1:5000/v1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="width: 100%; border: 1px solid var(--border-color); background: var(--bg-item); padding: 12px; border-radius: 12px; color: var(--text-primary); font-size: 15px;">
+            </div>
+            <div class="memory-settings-item">
+                <label>{{ t('label_memory_model') || 'Model' }}</label>
+                <input type="text" :value="memoryProviderSettings.model" @input="onMemoryProviderInput('model', $event.target.value)" placeholder="gpt-4o-mini" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="width: 100%; border: 1px solid var(--border-color); background: var(--bg-item); padding: 12px; border-radius: 12px; color: var(--text-primary); font-size: 15px;">
+            </div>
+            <div class="memory-settings-item">
+                <label>{{ t('label_memory_key') || 'API Key' }}</label>
+                <input type="password" :value="memoryProviderSettings.key" @input="onMemoryProviderInput('apiKey', $event.target.value)" placeholder="sk-..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="width: 100%; border: 1px solid var(--border-color); background: var(--bg-item); padding: 12px; border-radius: 12px; color: var(--text-primary); font-size: 15px;">
+            </div>
+        </template>
       </div>
 
       <div class="memory-settings-item">
@@ -443,37 +466,8 @@ defineExpose({ open, close });
         <button type="button" class="memory-btn memory-btn-primary" @click="close">
           {{ t('btn_close') }}
         </button>
-      </div>
+       </div>
 
-      <!-- Provider Settings -->
-      <div class="memory-sheet-section" style="margin-bottom: 8px;">
-        <div class="memory-sheet-section-head">
-          <label>{{ t('memory_books_provider_config') }}</label>
-        </div>
-        <div class="memory-settings-item-checkbox">
-            <div class="memory-settings-text-col">
-                <label>{{ t('label_use_llm_api') || 'Use LLM API' }}</label>
-                <div class="memory-settings-desc">
-{{ t('desc_use_llm_api_memory') || 'Use the same endpoint as LLM for memory book generation' }}
-</div>
-            </div>
-            <input type="checkbox" :checked="memoryProviderSettings.useSame" @change="onMemoryProviderInput('useSame', $event.target.checked)" class="vk-switch">
-        </div>
-        <template v-if="!memoryProviderSettings.useSame">
-            <div class="memory-settings-item">
-                <label>{{ t('label_memory_endpoint') || 'Memory Gen Endpoint' }}</label>
-                <input type="text" :value="memoryProviderSettings.endpoint" @input="onMemoryProviderInput('endpoint', $event.target.value)" placeholder="http://127.0.0.1:5000/v1" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="width: 100%; border: 1px solid var(--border-color); background: var(--bg-item); padding: 12px; border-radius: 12px; color: var(--text-primary); font-size: 15px;">
-            </div>
-            <div class="memory-settings-item">
-                <label>{{ t('label_memory_model') || 'Model' }}</label>
-                <input type="text" :value="memoryProviderSettings.model" @input="onMemoryProviderInput('model', $event.target.value)" placeholder="gpt-4o-mini" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="width: 100%; border: 1px solid var(--border-color); background: var(--bg-item); padding: 12px; border-radius: 12px; color: var(--text-primary); font-size: 15px;">
-            </div>
-            <div class="memory-settings-item">
-                <label>{{ t('label_memory_key') || 'API Key' }}</label>
-                <input type="password" :value="memoryProviderSettings.key" @input="onMemoryProviderInput('apiKey', $event.target.value)" placeholder="sk-..." autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="width: 100%; border: 1px solid var(--border-color); background: var(--bg-item); padding: 12px; border-radius: 12px; color: var(--text-primary); font-size: 15px;">
-            </div>
-        </template>
-      </div>
 
       <!-- Batch Actions (Scan & Generate) -->
       <div v-if="draftsNeedingGeneration.length > 0 || uncoveredSegments.count > 0" class="memory-batch-actions">
