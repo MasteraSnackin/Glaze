@@ -93,7 +93,12 @@ const getRawJson = () => {
     if (!previewData.value) return '';
     const clean = JSON.parse(JSON.stringify(previewData.value));
     if (clean.messages) {
-        clean.messages = clean.messages.map(({ blockName, chatId, sources, _allSources, blockId, isDepth, depth, isHistory, image, ...rest }) => rest);
+        clean.messages = clean.messages.map(({ blockName, chatId, sources, _allSources, blockId, isDepth, depth, isHistory, ...rest }) => {
+            if (rest.image && typeof rest.image === 'string' && rest.image.length > 100) {
+                rest.image = rest.image.slice(0, 80) + '...{BASE64_STRING}';
+            }
+            return rest;
+        });
     }
     return JSON.stringify(clean, null, 2);
 };
