@@ -322,7 +322,8 @@ async function pullManifestV2(adapter, key, onProgress, onConflict) {
                     name: getConflictName(cloudEntry.type, localEntity, cloudEntity, cloudEntry.id),
                     local: localEntity,
                     cloud: cloudEntity,
-                    cloudModified: cloudEntry.updatedAt
+                    cloudModified: cloudEntry.updatedAt,
+                    localModified: localEntry.updatedAt
                 };
                 conflicts.push(conflict);
                 if (onConflict) onConflict(conflict);

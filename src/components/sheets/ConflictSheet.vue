@@ -79,6 +79,25 @@ const entityFields = (entity, type) => {
             const display = v?.length > 80 ? v.substring(0, 80) + '...' : String(v ?? '');
             fields.push({ key: k, label: k, value: display });
         }
+    } else if (type === 'lorebooks' && Array.isArray(entity)) {
+        fields.push({ key: 'count', label: t('sync_item_count') || 'Count', value: String(entity.length) });
+        for (const lb of entity.slice(0, 5)) {
+            fields.push({ key: lb.id, label: lb.name || lb.id, value: `${(lb.entries?.length || 0)} entries` });
+        }
+    } else if ((type === 'api_presets' || type === 'theme_presets') && typeof entity === 'object') {
+        const entries = Array.isArray(entity) ? entity : Object.values(entity);
+        fields.push({ key: 'count', label: t('sync_item_count') || 'Count', value: String(entries.length) });
+        for (const p of entries.slice(0, 5)) {
+            fields.push({ key: p.id, label: p.name || p.id, value: '' });
+        }
+    } else if (type === 'theme_state' && typeof entity === 'object') {
+        for (const [k, v] of Object.entries(entity)) {
+            if (typeof v === 'object' && v !== null) {
+                fields.push({ key: k, label: k, value: truncate(JSON.stringify(v), 120) });
+            } else if (v !== null && v !== undefined) {
+                fields.push({ key: k, label: k, value: truncate(String(v), 120) });
+            }
+        }
     } else if (typeof entity === 'object') {
         for (const [k, v] of Object.entries(entity)) {
             if (typeof v === 'object' && v !== null) {
@@ -228,6 +247,10 @@ defineExpose({ open, close });
                             <div class="cs-item-type">
 {{ typeLabel(conflict.type) }}
 </div>
+                            <div class="cs-item-time" v-if="conflict.localModified || conflict.cloudModified">
+                                <span class="cs-time-local" v-if="conflict.localModified">{{ t('sync_version_local') || 'Local' }}: {{ formatTimestamp(conflict.localModified) }}</span>
+                                <span class="cs-time-cloud" v-if="conflict.cloudModified">{{ t('sync_version_cloud') || 'Cloud' }}: {{ formatTimestamp(conflict.cloudModified) }}</span>
+                            </div>
                         </div>
                         <svg class="cs-chevron" viewBox="0 0 24 24" :class="{ rotated: expandedConflictId === conflict.id }"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
                     </div>
@@ -450,6 +473,21 @@ defineExpose({ open, close });
     font-size: 12px;
     color: var(--text-gray, #8e8e93);
     text-transform: capitalize;
+}
+
+.cs-item-time {
+    display: flex;
+    gap: 10px;
+    font-size: 10px;
+    margin-top: 2px;
+}
+
+.cs-time-local {
+    color: #FF9500;
+}
+
+.cs-time-cloud {
+    color: var(--vk-blue);
 }
 
 .cs-chevron {
