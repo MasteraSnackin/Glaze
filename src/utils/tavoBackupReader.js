@@ -3,9 +3,11 @@
  * Uses FlatBuffer format for structured field extraction.
  */
 import JSZip from 'jszip';
-import { db } from '@/utils/db.js';
+import { db, flushDbWriteQueue } from '@/utils/db.js';
 import { importSillyTavernChat } from '@/core/services/chatImporter.js';
 import { convertSTPreset } from '@/core/services/presetImportService.js';
+import { initLorebookState, flushLorebookSave } from '@/core/states/lorebookState.js';
+import { initPresetState, flushPresetSave } from '@/core/states/presetState.js';
 
 const TYPE_NAMES = {
     0x0000: "_meta",
@@ -833,6 +835,27 @@ export async function importTavoBackupFromZip(zipFile, onProgress) {
             }
         }
     }
+
+    progress('finalizing');
+    await flushDbWriteQueue();
+
+    flushPresetSave();
+    await initPresetState(true);
+
+    flushLorebookSave();
+    await initLorebookState(true);
+
+    const keysToRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('gz_chat_recovery_')) {
+            keysToRemove.push(key);
+        }
+    }
+    keysToRemove.forEach(key => localStorage.removeItem(key));
+
+    localStorage.setItem('gz_skip_sync_pull', Date.now().toString());
+    localStorage.setItem('gz_backup_restored', Date.now().toString());
 
     return result;
 }
