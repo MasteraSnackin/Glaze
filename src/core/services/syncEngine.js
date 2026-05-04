@@ -181,8 +181,10 @@ async function pushManifestV2(adapter, key, onProgress) {
                         const binary = await dataUrlToBinary(img.src);
                         await adapter.uploadBinary(localEntry.path, binary);
                     } else {
-                        localManifest.entries[keyName] = { ...localEntry, deleted: true, updatedAt: Date.now() };
-                        await deleteCloudFileIfExists(adapter, localEntry);
+                        console.warn(`[sync] Gallery image ${localEntry.imgId} for char ${localEntry.charId} has no src, skipping push`);
+                        skipped++;
+                        if (onProgress) onProgress(phase, i + 1, allEntries.length);
+                        return;
                     }
                 }
 
@@ -320,7 +322,8 @@ async function pullManifestV2(adapter, key, onProgress, onConflict) {
                     name: getConflictName(cloudEntry.type, localEntity, cloudEntity, cloudEntry.id),
                     local: localEntity,
                     cloud: cloudEntity,
-                    cloudModified: cloudEntry.updatedAt
+                    cloudModified: cloudEntry.updatedAt,
+                    localModified: localEntry.updatedAt
                 };
                 conflicts.push(conflict);
                 if (onConflict) onConflict(conflict);
