@@ -25,7 +25,7 @@ export async function computeBinaryHash(arrayBuffer) {
 }
 
 async function getLocalCharacterWithImages(id) {
-    return (await db.get('characters', id)) || null;
+    return (await db.getFromStore('characters', id)) || null;
 }
 
 async function arrayBufferToDataUrl(arrayBuffer) {

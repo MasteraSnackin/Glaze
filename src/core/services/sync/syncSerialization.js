@@ -23,18 +23,18 @@ export async function decryptEntity(encrypted, key) {
 }
 
 export async function getLocalCharacter(id) {
-    const char = await db.get('characters', id);
+    const char = await db.getFromStore('characters', id);
     if (!char) return null;
     const { images: _images, ...rest } = char;
     return rest;
 }
 
 export async function getLocalCharacterWithImages(id) {
-    return (await db.get('characters', id)) || null;
+    return (await db.getFromStore('characters', id)) || null;
 }
 
 export async function getLocalPersona(id) {
-    return (await db.get('personas', id)) || null;
+    return (await db.getFromStore('personas', id)) || null;
 }
 
 export async function getLocalChat(charId) {
@@ -83,7 +83,7 @@ export async function applyCloudEntry(adapter, entry, key) {
         throw new Error(`Cloud file not found: ${entry.path}`);
     }
     if (entry.type === 'character') {
-        const existing = await db.get('characters', entry.id);
+        const existing = await db.getFromStore('characters', entry.id);
         if (existing?.images) {
             entity.images = existing.images;
         } else if (!entity.images) {

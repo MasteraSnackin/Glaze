@@ -283,6 +283,22 @@ export const db = {
         });
     },
     // Generic methods for other stores (like characters)
+    getFromStore: async (storeName, key) => {
+        const database = await db.open();
+        return new Promise((resolve, reject) => {
+            const tx = database.transaction(storeName, 'readonly');
+            const store = tx.objectStore(storeName);
+            const req = store.get(key);
+            req.onsuccess = () => {
+                resolve(req.result);
+                database.close();
+            };
+            req.onerror = () => {
+                reject(req.error);
+                database.close();
+            };
+        });
+    },
     getAll: async (storeName) => {
         const database = await db.open();
         return new Promise((resolve, reject) => {

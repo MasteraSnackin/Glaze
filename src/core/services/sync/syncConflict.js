@@ -51,7 +51,7 @@ export async function resolveConflict(conflict, choice, { ENTITY_TYPES, getLocal
         return null;
     }
     if (conflict.type === ENTITY_TYPES.CHARACTER) {
-        const existing = await db.get('characters', conflict.id);
+        const existing = await db.getFromStore('characters', conflict.id);
         if (existing?.images && !entity.images) {
             entity.images = existing.images;
         }
