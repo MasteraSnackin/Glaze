@@ -196,7 +196,7 @@ const { visibleItems, paddingTop, paddingBottom, refresh: refreshScroll } = useV
 });
 
 watch([() => props.collapsed, dialogGrouping], () => {
-    refreshScroll();
+    refreshScroll({ startAtBottom: false });
 });
 
 const onOpenChat = (chat) => {

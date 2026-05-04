@@ -548,11 +548,17 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
     });
 
     // Public method to force refresh (e.g. after chat switch)
-    const refresh = () => {
+    // startAtBottom=true keeps chat behaviour; pass false for top-anchored lists
+    const refresh = ({ startAtBottom = true } = {}) => {
         itemHeights.clear();
         visibleIndices.clear();
-        renderStart.value = Math.max(0, (itemsRef.value?.length || 0) - 20); // Start at bottom for chat
-        renderEnd.value = itemsRef.value?.length || 0;
+        if (startAtBottom) {
+            renderStart.value = Math.max(0, (itemsRef.value?.length || 0) - 20);
+            renderEnd.value = itemsRef.value?.length || 0;
+        } else {
+            renderStart.value = 0;
+            renderEnd.value = Math.min(20, itemsRef.value?.length || 0);
+        }
         updateSpacers();
         nextTick(() => {
             initObservers();
