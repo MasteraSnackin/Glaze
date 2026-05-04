@@ -75,8 +75,23 @@ export async function applyGalleryEntriesForChar(adapter, entries, charId, local
 
         try {
             if (cloudEntry.deleted) {
-                char.images = char.images.filter(im => im.id !== cloudEntry.imgId);
-                applied++;
+                const localImg = char.images.find(im => im.id === cloudEntry.imgId);
+                if (localImg?.src && localEntry && !localEntry.deleted) {
+                    galleryConflicts.push({
+                        type: ENTITY_TYPES.GALLERY,
+                        id: cloudEntry.id,
+                        name: `Gallery: ${cloudEntry.imgId}`,
+                        charId,
+                        imgId: cloudEntry.imgId,
+                        local: { imgId: localEntry.imgId, hash: localEntry.hash, updatedAt: localEntry.updatedAt },
+                        cloud: { imgId: cloudEntry.imgId, hash: null, updatedAt: cloudEntry.updatedAt, deleted: true },
+                        cloudModified: cloudEntry.updatedAt
+                    });
+                    if (onConflict) onConflict(galleryConflicts[galleryConflicts.length - 1]);
+                } else {
+                    char.images = char.images.filter(im => im.id !== cloudEntry.imgId);
+                    applied++;
+                }
                 continue;
             }
 

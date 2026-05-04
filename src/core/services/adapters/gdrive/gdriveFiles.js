@@ -196,29 +196,33 @@ export async function uploadBinary(path, arrayBuffer) {
     }
 
     const metadata = { name: fileName, parents: [parentId] };
-    const boundary = 'glaze_boundary_' + generateRandomString(16);
-    const metaPart = `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n`;
-    const binaryBlob = new Blob([arrayBuffer]);
-    const multipartBody = new Blob([
-        new TextEncoder().encode(metaPart),
-        new TextEncoder().encode(`--${boundary}\r\nContent-Type: application/octet-stream\r\n\r\n`),
-        binaryBlob,
-        new TextEncoder().encode(`\r\n--${boundary}--`)
-    ]);
-
-    const response = await safeUploadFetch(
-        `${UPLOAD_BASE}/files?uploadType=multipart&fields=id&supportsAllDrives=true`,
+    const initResponse = await safeUploadFetch(
+        `${UPLOAD_BASE}/files?uploadType=resumable&supportsAllDrives=true&fields=id`,
         {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${accessToken}`,
-                'Content-Type': `multipart/related; boundary=${boundary}`
+                'Content-Type': 'application/json; charset=UTF-8',
+                'X-Upload-Content-Type': 'application/octet-stream',
+                'X-Upload-Content-Length': String(arrayBuffer.byteLength)
             },
-            body: multipartBody
+            body: JSON.stringify(metadata)
         }
     );
-    if (!response.ok) throw new Error(`Binary upload failed ${response.status}`);
-    const result = await response.json();
+    if (!initResponse.ok) throw new Error(`Binary upload init failed ${initResponse.status}`);
+    const uploadUrl = initResponse.headers.get('Location');
+    if (!uploadUrl) throw new Error('Binary upload init returned no Location header');
+
+    const uploadResponse = await safeUploadFetch(uploadUrl, {
+        method: 'PUT',
+        headers: {
+            'Content-Type': 'application/octet-stream',
+            'Content-Length': String(arrayBuffer.byteLength)
+        },
+        body: arrayBuffer
+    });
+    if (!uploadResponse.ok) throw new Error(`Binary upload failed ${uploadResponse.status}`);
+    const result = await uploadResponse.json();
     if (result?.id) cacheFileId(path, result.id);
     return result;
 }
