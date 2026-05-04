@@ -151,39 +151,33 @@ function parseObjectBoxEntity(dataBuf, fieldDefs) {
 
 const CHARACTER_FIELDS = [
     { index: 1, name: 'name', type: 'string' },
-    { index: 3, name: 'creatorNotesMultilingual', type: 'string' },
+    { index: 3, name: 'description', type: 'string' },
     { index: 4, name: 'scenario', type: 'string' },
     { index: 5, name: 'first_mes', type: 'string' },
-    { index: 6, name: 'alternate_greetings', type: 'string' },
+    { index: 6, name: 'mes_example', type: 'string' },
     { index: 13, name: 'avatarPath', type: 'string' },
-    { index: 14, name: 'description', type: 'string' },
-    { index: 15, name: 'creator_notes', type: 'string' },
-    { index: 16, name: 'fav', type: 'bool' },
-    { index: 21, name: 'mes_example', type: 'string' },
-    { index: 22, name: 'personality', type: 'string' },
-    { index: 23, name: 'system_prompt', type: 'string' },
-    { index: 24, name: 'post_history_instructions', type: 'string' },
-    { index: 25, name: 'creator', type: 'string' },
-    { index: 26, name: 'character_version', type: 'string' },
-    { index: 27, name: 'extensions_json', type: 'string' },
+    { index: 14, name: 'personality', type: 'string' },
+    { index: 15, name: 'system_prompt', type: 'string' },
+    { index: 25, name: 'alternate_greetings', type: 'string' },
+    { index: 27, name: 'source', type: 'string' },
+    { index: 20, name: 'updatedAt', type: 'int64' },
+    { index: 31, name: 'creationDate', type: 'int64' },
+    { index: 32, name: 'modificationDate', type: 'int64' },
+    { index: 34, name: 'sortIndex', type: 'int64' },
 ];
 
 const MESSAGE_FIELDS = [
     { index: 1, name: 'characterId', type: 'int64' },
     { index: 2, name: 'text', type: 'string' },
-    { index: 4, name: 'swipe_text', type: 'string' },
+    { index: 3, name: 'conversationId', type: 'int64' },
     { index: 5, name: 'charName', type: 'string' },
     { index: 6, name: 'avatarPath', type: 'string' },
     { index: 7, name: 'timestamp', type: 'int64' },
-    { index: 8, name: 'isHidden', type: 'bool' },
-    { index: 10, name: 'extras_json', type: 'string' },
 ];
 
 const CONVERSATION_FIELDS = [
     { index: 2, name: 'createdAt', type: 'int64' },
     { index: 3, name: 'updatedAt', type: 'int64' },
-    { index: 17, name: 'presetId', type: 'int64' },
-    { index: 18, name: 'characterId', type: 'int64' },
 ];
 
 const ENDPOINT_FIELDS = [
@@ -191,12 +185,12 @@ const ENDPOINT_FIELDS = [
     { index: 3, name: 'model', type: 'string' },
     { index: 4, name: 'protocol', type: 'string' },
     { index: 5, name: 'url', type: 'string' },
-    { index: 6, name: 'stream', type: 'bool' },
     { index: 13, name: 'params_json', type: 'string' },
 ];
 
 const PRESET_FIELDS = [
     { index: 1, name: 'name', type: 'string' },
+    { index: 2, name: 'updatedAt', type: 'int64' },
     { index: 4, name: 'format_json', type: 'string' },
     { index: 5, name: 'prompts_json', type: 'string' },
 ];
@@ -204,12 +198,11 @@ const PRESET_FIELDS = [
 const PERSONA_FIELDS = [
     { index: 1, name: 'avatarPath', type: 'string' },
     { index: 3, name: 'name', type: 'string' },
-    { index: 4, name: 'description', type: 'string' },
 ];
 
 const LOREBOOK_FIELDS = [
     { index: 1, name: 'name', type: 'string' },
-    { index: 4, name: 'entries_json', type: 'string' },
+    { index: 3, name: 'updatedAt', type: 'int64' },
 ];
 
 const REGEX_FIELDS = [
@@ -219,12 +212,14 @@ const REGEX_FIELDS = [
 
 const LTM_SETTINGS_FIELDS = [
     { index: 1, name: 'summaryPrompt', type: 'string' },
-    { index: 2, name: 'memoryPrompt', type: 'string' },
+    { index: 2, name: 'injectionPrompt', type: 'string' },
+    { index: 3, name: 'injectionDepth', type: 'int64' },
     { index: 4, name: 'maxTokens', type: 'int64' },
     { index: 11, name: 'role', type: 'string' },
 ];
 
 const LTM_FIELDS = [
+    { index: 1, name: 'conversationId', type: 'int64' },
     { index: 4, name: 'updatedAt', type: 'int64' },
 ];
 
@@ -333,10 +328,7 @@ export function parseTavoLMDB(arrayBuffer) {
                     const pgno = dv.getUint32(dataOffset, true);
                     const ovfOffset = pgno * pageSize;
                     if (ovfOffset + 16 + mn_dsize <= bufLen) {
-                        const ovfFlags = dv.getUint16(ovfOffset + 10, true);
-                        if ((ovfFlags & 0x04) === 0x04) {
-                            dataBuffer = buffer.subarray(ovfOffset + 16, ovfOffset + 16 + mn_dsize);
-                        }
+                        dataBuffer = buffer.subarray(ovfOffset + 16, ovfOffset + 16 + mn_dsize);
                     }
                 }
             }
@@ -354,6 +346,7 @@ export function parseTavoLMDB(arrayBuffer) {
                     const s = entry.structured;
                     if (s.timestamp) entry.timestamp = s.timestamp;
                     if (s.characterId !== undefined) entry.characterId = s.characterId;
+                    if (s.conversationId !== undefined) entry.conversationId = s.conversationId;
                 }
 
                 categories[type_name].set(entity_id, entry);
@@ -366,20 +359,44 @@ export function parseTavoLMDB(arrayBuffer) {
     }
 
     const chats = [];
-    if (categories.conversation && categories.message) {
-        const msgByChar = {};
+    if (categories.message && categories.message.length > 0) {
+        const msgByConv = {};
+        const orphansByChar = {};
         for (const msg of categories.message) {
-            const charId = msg.characterId || (msg.structured && msg.structured.characterId);
-            if (charId) {
-                if (!msgByChar[charId]) msgByChar[charId] = [];
-                msgByChar[charId].push(msg);
+            const convId = msg.conversationId ?? (msg.structured && msg.structured.conversationId);
+            const charId = msg.characterId ?? (msg.structured && msg.structured.characterId);
+            if (convId && convId !== 0) {
+                if (!msgByConv[convId]) msgByConv[convId] = [];
+                msgByConv[convId].push(msg);
+            } else if (charId && charId !== 0) {
+                if (!orphansByChar[charId]) orphansByChar[charId] = [];
+                orphansByChar[charId].push(msg);
             }
         }
-        for (const conv of categories.conversation) {
-            const convCharId = conv.structured && conv.structured.characterId;
-            const msgs = msgByChar[convCharId] || [];
+        for (const [convId, msgs] of Object.entries(msgByConv)) {
             msgs.sort((a, b) => (a.timestamp || a.entity_id) - (b.timestamp || b.entity_id));
-            chats.push({ conversation: conv, messages: msgs, characterId: convCharId });
+            const firstCharMsg = msgs.find(m => {
+                const cid = m.characterId || (m.structured && m.structured.characterId);
+                return cid && cid !== 0;
+            });
+            let charId = firstCharMsg ? (firstCharMsg.characterId || firstCharMsg.structured?.characterId) : null;
+            if (!charId && categories.conversation) {
+                const conv = categories.conversation.find(c => c.entity_id === Number(convId));
+                if (conv && conv.structured?.characters) {
+                    const parsed = conv.structured.characters.map(Number).filter(n => !isNaN(n) && n !== 0);
+                    if (parsed.length > 0) charId = parsed[0];
+                }
+            }
+            if (charId && orphansByChar[charId]) {
+                msgs.push(...orphansByChar[charId]);
+                delete orphansByChar[charId];
+            }
+            msgs.sort((a, b) => (a.timestamp || a.entity_id) - (b.timestamp || b.entity_id));
+            chats.push({ conversation: null, messages: msgs, characterId: charId });
+        }
+        for (const [charId, msgs] of Object.entries(orphansByChar)) {
+            msgs.sort((a, b) => (a.timestamp || a.entity_id) - (b.timestamp || b.entity_id));
+            chats.push({ conversation: null, messages: msgs, characterId: Number(charId) });
         }
     }
 
@@ -709,47 +726,26 @@ export async function importTavoBackupFromZip(zipFile, onProgress) {
                 const s = char.structured || {};
                 let charData = { id: Date.now().toString(36) + Math.random().toString(36).substr(2) };
 
-                const extensionsJson = tryParseJson(s.extensions_json);
-                const v2Data = extensionsJson && (extensionsJson.spec === 'chara_card_v2' || extensionsJson.spec === 'chara_card_v3')
-                    ? extensionsJson.data : null;
+                const jsons = char.fields.filter(f => f.type === 'json').map(f => f.data);
+                const extensionsBlock = jsons.find(j => j && (j.spec === 'chara_card_v2' || j.spec === 'chara_card_v3'));
+                const v2Data = extensionsBlock ? extensionsBlock.data : null;
 
                 if (v2Data) {
                     charData = { ...charData, ...v2Data };
                     if (s.avatarPath) charData.avatar = await readAvatarFromZip(s.avatarPath);
-                } else if (s.name || s.description) {
-                    charData.name = s.name || "Unknown";
-                    charData.description = s.description || "";
-                    charData.first_mes = s.first_mes || "";
-                    charData.scenario = s.scenario || "";
-                    charData.personality = s.personality || "";
-                    charData.mes_example = s.mes_example || "";
-                    charData.creator_notes = s.creator_notes || "";
-                    charData.system_prompt = s.system_prompt || "";
-                    charData.post_history_instructions = s.post_history_instructions || "";
-                    charData.creator = s.creator || "";
-                    charData.character_version = s.character_version || "";
-
-                    if (s.avatarPath) {
-                        charData.avatar = await readAvatarFromZip(s.avatarPath);
-                    }
-
-                    if (extensionsJson) {
-                        charData.talkativeness = extensionsJson.talkativeness || "0.5";
-                        charData.fav = extensionsJson.fav || false;
-                        charData.world = extensionsJson.world || "";
-                        if (extensionsJson.depth_prompt) {
-                            charData.depth_prompt = {
-                                prompt: extensionsJson.depth_prompt.prompt || "",
-                                depth: extensionsJson.depth_prompt.depth || 4,
-                                role: extensionsJson.depth_prompt.role || 'system'
-                            };
-                        }
-                    }
-
+                } else if (s.name) {
+                    charData.name = s.name;
+                    if (s.description) charData.description = s.description;
+                    if (s.first_mes) charData.first_mes = s.first_mes;
+                    if (s.scenario) charData.scenario = s.scenario;
+                    if (s.personality) charData.personality = s.personality;
+                    if (s.mes_example) charData.mes_example = s.mes_example;
+                    if (s.system_prompt) charData.system_prompt = s.system_prompt;
+                    if (s.avatarPath) charData.avatar = await readAvatarFromZip(s.avatarPath);
                     const altGreetJson = tryParseJson(s.alternate_greetings);
-                    if (Array.isArray(altGreetJson)) {
-                        charData.alternate_greetings = altGreetJson;
-                    }
+                    if (Array.isArray(altGreetJson)) charData.alternate_greetings = altGreetJson;
+                    const srcJson = tryParseJson(s.source);
+                    if (srcJson && srcJson.fav) charData.fav = true;
                 } else {
                     const strings = char.fields.filter(f => f.type === 'text' && f.data.trim().length > 0).map(f => f.data);
                     const jsons = char.fields.filter(f => f.type === 'json').map(f => f.data);
@@ -794,7 +790,7 @@ export async function importTavoBackupFromZip(zipFile, onProgress) {
     if (tavoData.chats && tavoData.chats.length > 0) {
         for (const chatBlock of tavoData.chats) {
             try {
-                const msgs = chatBlock.messages.filter(m => m.structured && (m.structured.text || m.structured.swipe_text));
+                const msgs = chatBlock.messages.filter(m => m.structured && m.structured.text);
                 if (msgs.length === 0) continue;
 
                 const charEntityId = chatBlock.characterId;
@@ -827,8 +823,8 @@ export async function importTavoBackupFromZip(zipFile, onProgress) {
                     lines.push(JSON.stringify(stMsg));
                 }
 
-                const blob = new Blob([lines.join("\n")], { type: 'text/plain' });
-                await importSillyTavernChat(blob, glazeCharId, null);
+                const chatFile = new File([lines.join("\n")], "tavo_import.jsonl", { type: 'text/plain' });
+                await importSillyTavernChat(chatFile, glazeCharId, null);
                 result.chats++;
             } catch (err) {
                 result.errors.push(`Tavo Chat: ${err.message}`);
@@ -839,11 +835,11 @@ export async function importTavoBackupFromZip(zipFile, onProgress) {
     progress('finalizing');
     await flushDbWriteQueue();
 
-    flushPresetSave();
     await initPresetState(true);
+    flushPresetSave();
 
-    flushLorebookSave();
     await initLorebookState(true);
+    flushLorebookSave();
 
     const keysToRemove = [];
     for (let i = 0; i < localStorage.length; i++) {

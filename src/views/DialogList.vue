@@ -8,7 +8,7 @@ import { translations, pluralize } from '@/utils/i18n.js';
 import { currentLang, dialogGrouping } from '@/core/config/APPSettings.js';
 import { attachLongPress } from '@/core/services/ui.js';
 import { attachHoverGlow } from '@/core/services/interactionEffects.js';
-import { getChatData, createNewSession, deleteSession } from '@/utils/sessions.js';
+import { createNewSession, deleteSession } from '@/utils/sessions.js';
 import { importSillyTavernChat, exportSillyTavernChat, exportGlazeChat, pickChatFile } from '@/core/services/chatImporter.js';
 import { allPersonas, loadPersonas } from '@/core/states/personaState.js';
 import { APP_EVENTS } from '@/core/events/eventNames.js';
@@ -192,11 +192,12 @@ const activeScrollItems = computed(() => {
 
 const scrollContainer = ref(null);
 const { visibleItems, paddingTop, paddingBottom, refresh: refreshScroll } = useVirtualScroll(activeScrollItems, scrollContainer, {
-    estimateHeight: 72
+    estimateHeight: 72,
+    autoScrollToBottom: false
 });
 
 watch([() => props.collapsed, dialogGrouping], () => {
-    refreshScroll();
+    refreshScroll({ startAtBottom: false });
 });
 
 const onOpenChat = (chat) => {
@@ -309,9 +310,13 @@ const openActions = (chat, mode = 'flat') => {
                                 }
                                 if (sessionCount <= 1) {
                                     if (charData) {
-                                        if (Array.isArray(charData)) charData = { currentId: 1, sessions: {} };
-                                        else if (charData.sessions) delete charData.sessions[chat.sessionId];
-                                        await db.saveChat(chat.id, charData);
+                                        if (Array.isArray(charData)) {
+                                            await db.saveChat(chat.id, { currentId: 1, sessions: {} });
+                                        } else if (charData.sessions) {
+                                            await db.patchChatData(chat.id, (d) => {
+                                                delete d.sessions[chat.sessionId];
+                                            });
+                                        }
                                     }
                                 } else {
                                     await deleteSession(chat.id, chat.sessionId);
@@ -420,7 +425,8 @@ const openNewChatPicker = () => {
         onClick: async () => {
             closeBottomSheet();
             const sessionId = await createNewSession(char.id);
-            emit('open-chat', { charId: char.id, sessionId });
+            loadData();
+            emit('open-chat', { ...char, sessionId });
         }
     }));
 

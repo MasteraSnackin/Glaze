@@ -846,16 +846,39 @@ function buildPromptMessagesWorker(args) {
 self.onmessage = async function (e) {
     const { id, type, payload } = e.data;
 
-    if (type === 'calculateContext' || type === 'generateChatResponse') {
-        try {
-            if (tokenizerReady) await tokenizerReady;
+    if (type === 'ping') {
+        self.postMessage({ id, success: true, data: { pong: true, ts: Date.now(), isIOS, ua: (typeof navigator !== 'undefined' ? navigator.userAgent : 'N/A') } });
+        return;
+    }
 
+    if (type === 'calculateContext' || type === 'generateChatResponse') {
+        const diag = {
+            receivedAt: Date.now(),
+            sentAt: payload?._sentAt || null,
+            tokenizerReadyAt: null,
+            buildStart: null,
+            buildEnd: null,
+            calcStart: null,
+            calcEnd: null,
+            isIOS,
+            workerUa: typeof navigator !== 'undefined' ? navigator.userAgent : 'N/A'
+        };
+        try {
+            if (tokenizerReady) {
+                await tokenizerReady;
+                diag.tokenizerReadyAt = Date.now();
+            }
+
+            diag.buildStart = Date.now();
             const { messages, loreEntries, notifyObj } = buildPromptMessagesWorker(payload);
+            diag.buildEnd = Date.now();
 
             const { apiConfig } = payload;
             const maxTokens = apiConfig.maxTokens || 8000;
             const contextSize = apiConfig.contextSize || 32000;
             const safeContext = Math.max(1000, contextSize - maxTokens);
+
+            diag.calcStart = Date.now();
 
             const staticMessages = messages.filter(m => !m.isHistory);
             const historyMessages = messages.filter(m => m.isHistory);
@@ -903,8 +926,8 @@ self.onmessage = async function (e) {
                 historyMessagesHiddenByContext: 0
             };
 
-            // Lorebook and vectorLore are inside reserve, not in fixedBase
             breakdown.fixedBase = breakdown.character + breakdown.preset + breakdown.persona + breakdown.summary + breakdown.authorsNote;
+            // Lorebook and vectorLore are inside reserve, not in fixedBase
             breakdown.fixedTotal = breakdown.fixedBase + breakdown.lorebookReserve + breakdown.memoryReserve;
 
             const availableForHistory = safeContext - breakdown.fixedTotal;
@@ -952,6 +975,8 @@ self.onmessage = async function (e) {
             breakdown.totalUsed = breakdown.fixedBase + breakdown.lorebookReserve + breakdown.memoryReserve + breakdown.history;
             breakdown.remaining = Math.max(0, contextSize - breakdown.totalUsed);
 
+            diag.calcEnd = Date.now();
+
             self.postMessage({
                 id,
                 success: true,
@@ -963,11 +988,12 @@ self.onmessage = async function (e) {
                     staticTokens,
                     contextBreakdown: breakdown,
                     needsVarsSave: notifyObj.varsChanged,
-                    sessionVars: payload.sessionVars
+                    sessionVars: payload.sessionVars,
+                    _diagnostic: diag
                 }
             });
         } catch (error) {
-            self.postMessage({ id, success: false, error: error.message });
+            self.postMessage({ id, success: false, error: error.message, _diagnostic: diag });
         }
     }
 };

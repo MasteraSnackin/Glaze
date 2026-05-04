@@ -1,16 +1,21 @@
 /**
  * HTTP abstraction for catalog requests.
- * On native (Android/iOS): uses CapacitorHttp to bypass WebView CORS — arbitrary headers allowed.
- * On web (dev): wraps URL with corsproxy.io to bypass CORS.
+ * - Native (Android/iOS): CapacitorHttp — bypasses CORS, arbitrary headers allowed.
+ * - Electron: direct fetch — webSecurity:false disables CORS, no proxy needed.
+ * - Web dev: Vite server proxy at /dc-proxy → datacat.run (handles decompression in Node.js).
  */
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
 
-const CORS_PROXY = 'https://corsproxy.io/?url=';
 const TIMEOUT = 20000;
 
-function proxyUrl(url, useProxy = true) {
-    if (Capacitor.isNativePlatform() || !useProxy) return url;
-    return CORS_PROXY + encodeURIComponent(url);
+function isElectron() {
+    return typeof navigator !== 'undefined' && navigator.userAgent.includes('Electron');
+}
+
+function resolveUrl(url, useProxy = true) {
+    if (Capacitor.isNativePlatform() || !useProxy || isElectron()) return url;
+    // Web dev: route through Vite proxy which handles CORS and decompression in Node.js
+    return url.replace('https://datacat.run', '/dc-proxy');
 }
 
 /**
@@ -24,23 +29,23 @@ export async function catalogGet(url, headers = {}, useProxy = true) {
         const response = await CapacitorHttp.get({
             url,
             headers,
-            responseType: 'json',
+            responseType: 'text',
             connectTimeout: TIMEOUT,
             readTimeout: TIMEOUT
         });
         if (response.status >= 400) {
             throw Object.assign(new Error(`HTTP ${response.status}`), { status: response.status, data: response.data });
         }
-        return response.data;
+        return parseJson(response.data, url);
     }
 
-    // Web fallback
-    const res = await fetch(proxyUrl(url, useProxy), { headers });
+    const res = await fetch(resolveUrl(url, useProxy), { headers });
     if (!res.ok) {
         const text = await res.text().catch(() => '');
         throw Object.assign(new Error(`HTTP ${res.status}`), { status: res.status, data: text });
     }
-    return res.json();
+    const text = await res.text();
+    return parseJson(text, url);
 }
 
 /**
@@ -61,7 +66,7 @@ export async function catalogGetText(url, headers = {}, useProxy = true) {
         return response.data;
     }
 
-    const res = await fetch(proxyUrl(url, useProxy), { headers });
+    const res = await fetch(resolveUrl(url, useProxy), { headers });
     if (!res.ok) throw Object.assign(new Error(`HTTP ${res.status}`), { status: res.status });
     return res.text();
 }
@@ -81,18 +86,17 @@ export async function catalogPost(url, body, headers = {}, useProxy = true) {
             url,
             headers: allHeaders,
             data: body,
-            responseType: 'json',
+            responseType: 'text',
             connectTimeout: TIMEOUT,
             readTimeout: TIMEOUT
         });
         if (response.status >= 400) {
             throw Object.assign(new Error(`HTTP ${response.status}`), { status: response.status, data: response.data });
         }
-        return response.data;
+        return parseJson(response.data, url);
     }
 
-    // Web
-    const res = await fetch(proxyUrl(url, useProxy), {
+    const res = await fetch(resolveUrl(url, useProxy), {
         method: 'POST',
         headers: allHeaders,
         body: JSON.stringify(body)
@@ -101,5 +105,16 @@ export async function catalogPost(url, body, headers = {}, useProxy = true) {
         const text = await res.text().catch(() => '');
         throw Object.assign(new Error(`HTTP ${res.status}`), { status: res.status, data: text });
     }
-    return res.json();
+    const text = await res.text();
+    return parseJson(text, url);
+}
+
+function parseJson(text, url) {
+    if (typeof text === 'object' && text !== null) return text;
+    try {
+        return JSON.parse(text);
+    } catch (e) {
+        const preview = typeof text === 'string' ? text.slice(0, 120) : String(text);
+        throw new Error(`Server returned invalid JSON from ${new URL(url).pathname}: ${preview}`);
+    }
 }
