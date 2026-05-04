@@ -572,6 +572,7 @@ defineExpose({ open, close });
               </div>
               <div class="memory-draft-actions" @click.stop>
                 <span v-if="isDraftGenerating(draft.id)" class="memory-status-badge" style="background:rgba(255,215,0,0.1);color:#ffd700;">{{ t('memory_books_badge_generating') }}</span>
+                <span v-else-if="draft.status === 'needs_regeneration'" class="memory-status-badge" style="background:rgba(255,80,80,0.15);color:#ff6b6b;">{{ t('memory_books_badge_needs_regen') }}</span>
                 <span v-else-if="!draft.content && draft.status === 'pending_generation'" class="memory-status-badge" style="background:rgba(255,215,0,0.1);color:#ffd700;">{{ t('memory_books_badge_needs_gen') }}</span>
                 <span v-else class="memory-status-badge draft">{{ t('memory_books_badge_draft') }}</span>
                 <span v-if="vectorEnabled" class="memory-status-badge vector">vec</span>
@@ -583,6 +584,15 @@ defineExpose({ open, close });
                   @touchend.stop.prevent="handleCancelDraft(draft.id)"
                 >
                   {{ t('memory_books_btn_stop') }}
+                </button>
+                <button
+                  v-else-if="draft.status === 'needs_regeneration'"
+                  type="button"
+                  class="memory-entry-generate"
+                  @click.stop.prevent="handleGenerateDraft(draft.id)"
+                  @touchend.stop.prevent="handleGenerateDraft(draft.id)"
+                >
+                  {{ t('memory_books_btn_regenerate') }}
                 </button>
                 <button
                   v-else-if="!draft.content && draft.status === 'pending_generation'"
@@ -618,6 +628,7 @@ defineExpose({ open, close });
                 {{ draft.content.slice(0, 180) }}
               </template>
               <span v-else-if="isDraftGenerating(draft.id)" style="color:#ffd700;">{{ t('memory_books_generating_elapsed') }} {{ formatElapsedSeconds(getDraftProgress(draft.id)?.elapsedMs || 0) }}</span>
+              <span v-else-if="draft.error && draft.status === 'needs_regeneration'" style="color:#ff6b6b;">{{ draft.error }}</span>
               <span v-else style="color:var(--text-gray);">{{ t('memory_books_no_content') }}</span>
             </div>
           </div>
