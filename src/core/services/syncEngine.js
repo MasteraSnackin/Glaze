@@ -409,6 +409,9 @@ export async function wipeCloudData(adapter, onProgress) {
     if (adapter.invalidateGlazeFolderCache) {
         adapter.invalidateGlazeFolderCache();
     }
+    if (adapter.invalidateFolderCache) {
+        adapter.invalidateFolderCache();
+    }
     if (onProgress) onProgress({ phase: 'deleting', message: 'Deleting cloud data...' });
     try {
         const result = await adapter.deleteFolder(CLOUD_BASE);

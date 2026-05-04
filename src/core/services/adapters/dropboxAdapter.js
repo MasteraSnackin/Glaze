@@ -156,6 +156,10 @@ async function contentDownload(path, accessToken) {
 
 const _ensuredFolders = new Set();
 
+export function invalidateFolderCache() {
+    _ensuredFolders.clear();
+}
+
 export async function ensureFolder(path) {
     const strippedPath = stripAppFolderPrefix(path);
     const parts = strippedPath.split('/').filter(Boolean);
