@@ -79,6 +79,9 @@ export async function applyCloudEntry(adapter, entry, key) {
     }
 
     const entity = await readCloudEntityByEntry(adapter, entry, key);
+    if (!entity) {
+        throw new Error(`Cloud file not found: ${entry.path}`);
+    }
     if (entry.type === 'character') {
         const existing = await db.get('characters', entry.id);
         if (existing?.images) {

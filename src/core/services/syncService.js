@@ -6,6 +6,7 @@ import * as gdriveAdapter from '@/core/services/adapters/gdriveAdapter.js';
 import { pushEntities, pullEntities, detectEncryptionState, isEncryptionEnabled } from '@/core/services/syncEngine.js';
 import { flushLorebookSave } from '@/core/states/lorebookState.js';
 import { getSyncKey, hasSyncKey } from '@/core/services/crypto/keyManager.js';
+import { db } from '@/utils/db.js';
 import { ref } from 'vue';
 
 const isDbReady = ref(false);
@@ -20,6 +21,12 @@ function getAdapter() {
 export async function fullPush() {
     if (!isDbReady.value) return;
     if (syncStatus.value === SYNC_STATUS.SYNCING) return;
+
+    const chars = await db.getAll('characters');
+    if (!chars?.length) {
+        setSyncError('Cannot push: local database appears empty. If data was lost after wake, pull from cloud first.');
+        return;
+    }
 
     syncStatus.value = SYNC_STATUS.SYNCING;
     clearConflicts();
