@@ -150,82 +150,80 @@ function parseObjectBoxEntity(dataBuf, fieldDefs) {
 }
 
 const CHARACTER_FIELDS = [
-    { index: 1, name: 'name', type: 'string' },
-    { index: 3, name: 'creatorNotesMultilingual', type: 'string' },
-    { index: 4, name: 'scenario', type: 'string' },
-    { index: 5, name: 'first_mes', type: 'string' },
-    { index: 6, name: 'alternate_greetings', type: 'string' },
-    { index: 13, name: 'avatarPath', type: 'string' },
-    { index: 14, name: 'description', type: 'string' },
-    { index: 15, name: 'creator_notes', type: 'string' },
-    { index: 16, name: 'fav', type: 'bool' },
-    { index: 21, name: 'mes_example', type: 'string' },
-    { index: 22, name: 'personality', type: 'string' },
-    { index: 23, name: 'system_prompt', type: 'string' },
-    { index: 24, name: 'post_history_instructions', type: 'string' },
-    { index: 25, name: 'creator', type: 'string' },
-    { index: 26, name: 'character_version', type: 'string' },
-    { index: 27, name: 'extensions_json', type: 'string' },
+    { index: 4, name: 'creatorNotesMultilingual', type: 'string' },
+    { index: 7, name: 'alternate_greetings', type: 'string' },
+    { index: 11, name: 'character_version', type: 'string' },
+    { index: 12, name: 'creator', type: 'string' },
+    { index: 13, name: 'tags', type: 'string_vector' },
+    { index: 16, name: 'system_prompt', type: 'string' },
+    { index: 18, name: 'fav', type: 'bool' },
+    { index: 19, name: 'creator_notes', type: 'string' },
+    { index: 20, name: 'description', type: 'string' },
+    { index: 21, name: 'avatarPath', type: 'string' },
+    { index: 22, name: 'mes_example', type: 'string' },
+    { index: 23, name: 'first_mes', type: 'string' },
+    { index: 24, name: 'scenario', type: 'string' },
+    { index: 25, name: 'personality', type: 'string' },
+    { index: 26, name: 'name', type: 'string' },
 ];
 
 const MESSAGE_FIELDS = [
-    { index: 1, name: 'characterId', type: 'int64' },
-    { index: 2, name: 'text', type: 'string' },
-    { index: 4, name: 'swipe_text', type: 'string' },
-    { index: 5, name: 'charName', type: 'string' },
-    { index: 6, name: 'avatarPath', type: 'string' },
-    { index: 7, name: 'timestamp', type: 'int64' },
-    { index: 8, name: 'isHidden', type: 'bool' },
-    { index: 10, name: 'extras_json', type: 'string' },
+    { index: 3, name: 'timestamp', type: 'int64' },
+    { index: 4, name: 'avatarPath', type: 'string' },
+    { index: 6, name: 'charName', type: 'string' },
+    { index: 8, name: 'conversationId', type: 'int64' },
+    { index: 10, name: 'text', type: 'string' },
+    { index: 11, name: 'characterId', type: 'int64' },
 ];
 
 const CONVERSATION_FIELDS = [
-    { index: 2, name: 'createdAt', type: 'int64' },
-    { index: 3, name: 'updatedAt', type: 'int64' },
-    { index: 17, name: 'presetId', type: 'int64' },
-    { index: 18, name: 'characterId', type: 'int64' },
+    { index: 3, name: 'characters', type: 'string_vector' },
+    { index: 12, name: 'personaId', type: 'int64' },
+    { index: 17, name: 'title', type: 'string' },
+    { index: 18, name: 'updatedAt', type: 'int64' },
+    { index: 19, name: 'createdAt', type: 'int64' },
 ];
 
 const ENDPOINT_FIELDS = [
-    { index: 1, name: 'name', type: 'string' },
-    { index: 3, name: 'model', type: 'string' },
-    { index: 4, name: 'protocol', type: 'string' },
-    { index: 5, name: 'url', type: 'string' },
-    { index: 6, name: 'stream', type: 'bool' },
-    { index: 13, name: 'params_json', type: 'string' },
+    { index: 3, name: 'params_json', type: 'string' },
+    { index: 5, name: 'stream', type: 'bool' },
+    { index: 6, name: 'url', type: 'string' },
+    { index: 8, name: 'model', type: 'string' },
+    { index: 10, name: 'name', type: 'string' },
 ];
 
 const PRESET_FIELDS = [
-    { index: 1, name: 'name', type: 'string' },
-    { index: 4, name: 'format_json', type: 'string' },
-    { index: 5, name: 'prompts_json', type: 'string' },
+    { index: 3, name: 'format_json', type: 'string' },
+    { index: 4, name: 'prompts_json', type: 'string' },
+    { index: 7, name: 'name', type: 'string' },
 ];
 
 const PERSONA_FIELDS = [
-    { index: 1, name: 'avatarPath', type: 'string' },
-    { index: 3, name: 'name', type: 'string' },
-    { index: 4, name: 'description', type: 'string' },
+    { index: 5, name: 'description', type: 'string' },
+    { index: 6, name: 'name', type: 'string' },
+    { index: 8, name: 'avatarPath', type: 'string' },
 ];
 
 const LOREBOOK_FIELDS = [
-    { index: 1, name: 'name', type: 'string' },
-    { index: 4, name: 'entries_json', type: 'string' },
+    { index: 3, name: 'entries_json', type: 'string' },
+    { index: 5, name: 'name', type: 'string' },
 ];
 
 const REGEX_FIELDS = [
-    { index: 1, name: 'name', type: 'string' },
-    { index: 4, name: 'rules_json', type: 'string' },
+    { index: 3, name: 'rules_json', type: 'string' },
+    { index: 6, name: 'name', type: 'string' },
 ];
 
 const LTM_SETTINGS_FIELDS = [
-    { index: 1, name: 'summaryPrompt', type: 'string' },
-    { index: 2, name: 'memoryPrompt', type: 'string' },
-    { index: 4, name: 'maxTokens', type: 'int64' },
-    { index: 11, name: 'role', type: 'string' },
+    { index: 1, name: 'role', type: 'string' },
+    { index: 2, name: 'injectionDepth', type: 'int64' },
+    { index: 8, name: 'injectionPrompt', type: 'string' },
+    { index: 9, name: 'summaryPrompt', type: 'string' },
+    { index: 6, name: 'maxTokens', type: 'int64' },
 ];
 
 const LTM_FIELDS = [
-    { index: 4, name: 'updatedAt', type: 'int64' },
+    { index: 1, name: 'updatedAt', type: 'int64' },
 ];
 
 function extractStringsAndJson(uint8Array) {
@@ -354,6 +352,7 @@ export function parseTavoLMDB(arrayBuffer) {
                     const s = entry.structured;
                     if (s.timestamp) entry.timestamp = s.timestamp;
                     if (s.characterId !== undefined) entry.characterId = s.characterId;
+                    if (s.conversationId !== undefined) entry.conversationId = s.conversationId;
                 }
 
                 categories[type_name].set(entity_id, entry);
@@ -367,19 +366,32 @@ export function parseTavoLMDB(arrayBuffer) {
 
     const chats = [];
     if (categories.conversation && categories.message) {
-        const msgByChar = {};
+        const msgByConv = {};
         for (const msg of categories.message) {
-            const charId = msg.characterId || (msg.structured && msg.structured.characterId);
-            if (charId) {
-                if (!msgByChar[charId]) msgByChar[charId] = [];
-                msgByChar[charId].push(msg);
+            const convId = msg.conversationId || (msg.structured && msg.structured.conversationId);
+            if (convId) {
+                if (!msgByConv[convId]) msgByConv[convId] = [];
+                msgByConv[convId].push(msg);
             }
         }
         for (const conv of categories.conversation) {
-            const convCharId = conv.structured && conv.structured.characterId;
-            const msgs = msgByChar[convCharId] || [];
+            const convId = conv.entity_id;
+            const msgs = msgByConv[convId] || [];
+            if (msgs.length === 0) continue;
             msgs.sort((a, b) => (a.timestamp || a.entity_id) - (b.timestamp || b.entity_id));
-            chats.push({ conversation: conv, messages: msgs, characterId: convCharId });
+            const firstCharMsg = msgs.find(m => {
+                const cid = m.characterId || (m.structured && m.structured.characterId);
+                return cid && cid !== 0;
+            });
+            let charId = firstCharMsg ? (firstCharMsg.characterId || firstCharMsg.structured?.characterId) : null;
+            if (!charId) {
+                const convChars = conv.structured?.characters;
+                if (Array.isArray(convChars) && convChars.length > 0) {
+                    const parsed = convChars.map(Number).filter(n => !isNaN(n) && n !== 0);
+                    if (parsed.length > 0) charId = parsed[0];
+                }
+            }
+            chats.push({ conversation: conv, messages: msgs, characterId: charId });
         }
     }
 
@@ -709,9 +721,9 @@ export async function importTavoBackupFromZip(zipFile, onProgress) {
                 const s = char.structured || {};
                 let charData = { id: Date.now().toString(36) + Math.random().toString(36).substr(2) };
 
-                const extensionsJson = tryParseJson(s.extensions_json);
-                const v2Data = extensionsJson && (extensionsJson.spec === 'chara_card_v2' || extensionsJson.spec === 'chara_card_v3')
-                    ? extensionsJson.data : null;
+                const jsons = char.fields.filter(f => f.type === 'json').map(f => f.data);
+                const extensionsBlock = jsons.find(j => j && (j.spec === 'chara_card_v2' || j.spec === 'chara_card_v3'));
+                const v2Data = extensionsBlock ? extensionsBlock.data : null;
 
                 if (v2Data) {
                     charData = { ...charData, ...v2Data };
@@ -725,7 +737,6 @@ export async function importTavoBackupFromZip(zipFile, onProgress) {
                     charData.mes_example = s.mes_example || "";
                     charData.creator_notes = s.creator_notes || "";
                     charData.system_prompt = s.system_prompt || "";
-                    charData.post_history_instructions = s.post_history_instructions || "";
                     charData.creator = s.creator || "";
                     charData.character_version = s.character_version || "";
 
@@ -733,18 +744,7 @@ export async function importTavoBackupFromZip(zipFile, onProgress) {
                         charData.avatar = await readAvatarFromZip(s.avatarPath);
                     }
 
-                    if (extensionsJson) {
-                        charData.talkativeness = extensionsJson.talkativeness || "0.5";
-                        charData.fav = extensionsJson.fav || false;
-                        charData.world = extensionsJson.world || "";
-                        if (extensionsJson.depth_prompt) {
-                            charData.depth_prompt = {
-                                prompt: extensionsJson.depth_prompt.prompt || "",
-                                depth: extensionsJson.depth_prompt.depth || 4,
-                                role: extensionsJson.depth_prompt.role || 'system'
-                            };
-                        }
-                    }
+                    if (s.fav) charData.fav = true;
 
                     const altGreetJson = tryParseJson(s.alternate_greetings);
                     if (Array.isArray(altGreetJson)) {
@@ -794,7 +794,7 @@ export async function importTavoBackupFromZip(zipFile, onProgress) {
     if (tavoData.chats && tavoData.chats.length > 0) {
         for (const chatBlock of tavoData.chats) {
             try {
-                const msgs = chatBlock.messages.filter(m => m.structured && (m.structured.text || m.structured.swipe_text));
+                const msgs = chatBlock.messages.filter(m => m.structured && m.structured.text);
                 if (msgs.length === 0) continue;
 
                 const charEntityId = chatBlock.characterId;
