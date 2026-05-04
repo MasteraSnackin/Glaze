@@ -26,15 +26,42 @@ function getWorker() {
     return globalThis._genWorker;
 }
 
+function buildDiagnosticInfo(sentAt, payloadSize) {
+    const isIOS = typeof navigator !== 'undefined' && /iPad|iPhone|iPod/.test(navigator.userAgent || '');
+    const parts = [
+        '--- Prompt Worker Timeout Diagnostic ---',
+        `Time: ${new Date().toISOString()}`,
+        `Message sent at: ${sentAt ? new Date(sentAt).toISOString() : 'N/A'}`,
+        `Elapsed: ${sentAt ? Date.now() - sentAt : 'N/A'}ms`,
+        `Payload size: ${(payloadSize / 1024).toFixed(1)}KB`,
+        `Worker exists: ${!!globalThis._genWorker}`,
+        `Queue size: ${globalThis._workerQueue?.size || 0}`,
+        `Main thread UA: ${typeof navigator !== 'undefined' ? navigator.userAgent : 'N/A'}`,
+        `Main thread platform: ${typeof navigator !== 'undefined' ? navigator.platform : 'N/A'}`,
+        `Main thread isIOS: ${isIOS}`,
+        `Device memory: ${navigator?.deviceMemory || 'N/A'}GB`,
+        `Hardware concurrency: ${navigator?.hardwareConcurrency || 'N/A'}`,
+        '--- End Diagnostic ---'
+    ];
+    return parts.join('\n');
+}
+
 export function processPromptAsync(payload) {
     const worker = getWorker();
     const WORKER_TIMEOUT = 30000;
+    const sentAt = Date.now();
+    payload._sentAt = sentAt;
+    const payloadSize = JSON.stringify(payload).length;
+
     return new Promise((resolve, reject) => {
         const id = ++globalThis._msgIdCounter;
 
         const timer = setTimeout(() => {
             globalThis._workerQueue.delete(id);
-            reject(new Error('Prompt building timed out (worker did not respond within 30s)'));
+            const diagInfo = buildDiagnosticInfo(sentAt, payloadSize);
+            const err = new Error('Prompt building timed out (worker did not respond within 30s)\n\n' + diagInfo);
+            err._diagnostic = diagInfo;
+            reject(err);
         }, WORKER_TIMEOUT);
 
         globalThis._workerQueue.set(id, {
