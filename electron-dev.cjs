@@ -19,7 +19,8 @@ function createWindow() {
   });
 
   mainWindow.setMenuBarVisibility(false);
-  mainWindow.loadFile(path.join(__dirname, 'dist', 'index.html'));
+  mainWindow.loadURL('http://localhost:5173');
+  mainWindow.webContents.openDevTools();
 
   mainWindow.webContents.on('before-input-event', (event, input) => {
     if (input.key === 'F12') mainWindow.webContents.toggleDevTools();
