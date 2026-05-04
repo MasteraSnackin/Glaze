@@ -132,8 +132,10 @@ export function useMemoryAutomation({
             : null;
         const summary = chatData?.summaries?.[sessionId] || null;
         const playerName = selected.find(msg => msg?.role === 'user')?.persona?.name || activePersona.value?.name || 'User';
+        const activeChar = getActiveChatChar();
+        const charName = activeChar?.macro_name || activeChar?.name || 'Character';
         const history = selected
-            .map(msg => `${msg.role === 'user' ? (msg.persona?.name || playerName) : (getActiveChatChar()?.name || 'Character')}: ${msg.text || ''}`.trim())
+            .map(msg => `${msg.role === 'user' ? (msg.persona?.name || playerName) : charName}: ${msg.text || ''}`.trim())
             .filter(Boolean)
             .join('\n');
 
@@ -159,7 +161,7 @@ export function useMemoryAutomation({
             };
         const prompt = resolveMemoryPrompt(settings)
             .replaceAll('{{user}}', playerName)
-            .replaceAll('{{char}}', getActiveChatChar()?.name || 'Character');
+            .replaceAll('{{char}}', charName);
         const finalPrompt = [
             prompt,
             continuity ? `Previous approved memory context:\n${continuity}` : '',
@@ -221,7 +223,7 @@ export function useMemoryAutomation({
                 controller: memoryDraftAbortController,
                 apiConfigOverride
             });
-            const parsedDraft = parseMemoryDraftResponse(draftText || '', [playerName, getActiveChatChar()?.name || 'Character']);
+            const parsedDraft = parseMemoryDraftResponse(draftText || '', [playerName, charName]);
 
             let wasExistingDraft = false;
             await db.patchChatDataBatch(getActiveChatChar().id, [
