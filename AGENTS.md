@@ -46,24 +46,26 @@ git rebase upstream/dev
 
 ### Hotfixes
 
-Hotfixes branch from **`main`** (not dev), then merge into both `main` and `dev`.
+Anything **urgent** branches from **`main`** (not dev), then merges into both `main` and `dev`.
+
+If it can wait — it's a feature branch from `dev`. If it can't — it's a hotfix from `main`.
 
 ```
-upstream/main ─► fix/critical-crash ─┬─► PR to main ─► merged
-                                      └─► cherry-pick / merge to dev
+upstream/main ─► fix/urgent-thing ─┬─► PR to main ─► merged
+                                    └─► cherry-pick / merge to dev
 ```
 
 ```bash
-git checkout -b fix/critical-crash upstream/main
+git checkout -b fix/urgent-thing upstream/main
 # ... fix the bug ...
-git push -u origin fix/critical-crash
+git push -u origin fix/urgent-thing
 # PR to main
 gh pr create --repo hydall/Glaze --base main ...
 # After merge, backport to dev
 git fetch upstream
-git checkout -b fix/critical-crash-backport upstream/dev
+git checkout -b fix/urgent-thing-backport upstream/dev
 git cherry-pick <commit-hash>
-git push -u origin fix/critical-crash-backport
+git push -u origin fix/urgent-thing-backport
 gh pr create --repo hydall/Glaze --base dev ...
 ```
 
