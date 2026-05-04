@@ -1,7 +1,6 @@
 <script setup>
 import { reactive, computed } from 'vue';
-import { closeBottomSheet, showBottomSheet } from '@/core/states/bottomSheetState.js';
-import { getMemoryPromptOptions, getMemoryPromptLabelByKey } from '@/core/services/memoryPromptPresets.js';
+import { getMemoryPromptLabelByKey } from '@/core/services/memoryPromptPresets.js';
 
 const props = defineProps({
     settings: { type: Object, required: true },
@@ -29,9 +28,6 @@ const state = reactive({
 });
 
 const promptLabel = computed(() => getMemoryPromptLabelByKey(props.settings, state.promptPreset));
-const injectionTargetLabel = computed(() =>
-    state.injectionTarget === 'summary_macro' ? '{{summary}} macro' : 'Chat summary block'
-);
 
 function handlePromptSelector() {
     props.onSelectPrompt(state);
@@ -39,29 +35,6 @@ function handlePromptSelector() {
 
 function handlePromptPreview() {
     props.onPreviewPrompt(state);
-}
-
-function handleInjectionTargetSelector() {
-    closeBottomSheet();
-    showBottomSheet({
-        title: 'Memory Injection Target',
-        items: [
-            {
-                label: 'Chat summary block',
-                onClick: () => {
-                    state.injectionTarget = 'summary_block';
-                    closeBottomSheet();
-                }
-            },
-            {
-                label: '{{summary}} macro',
-                onClick: () => {
-                    state.injectionTarget = 'summary_macro';
-                    closeBottomSheet();
-                }
-            }
-        ]
-    });
 }
 
 async function handleSave() {
@@ -128,13 +101,15 @@ function handleCancel() {
             <input v-model.number="state.maxInjectedEntries" type="number" min="1" max="20" step="1" placeholder="7">
             <div class="context-sheet-note">How many retrieved memory entries can be injected into the prompt at once.</div>
         </div>
-        <div class="settings-item">
-            <label>Injection Target</label>
-            <div class="clickable-selector" @click="handleInjectionTargetSelector">
-                <span>{{ injectionTargetLabel }}</span>
-                <svg viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></svg>
+        <div class="settings-item-checkbox">
+            <div class="settings-text-col">
+                <label>Injection Target</label>
+                <div class="settings-desc">Choose whether retrieved memory context follows the dedicated summary block path or the {{summary}} macro location.</div>
             </div>
-            <div class="context-sheet-note">Choose whether retrieved memory context follows the dedicated summary block path or the {{summary}} macro location.</div>
+            <div class="injection-target-toggle" @click="state.injectionTarget = state.injectionTarget === 'summary_block' ? 'summary_macro' : 'summary_block'">
+                <span class="toggle-option" :class="{ active: state.injectionTarget === 'summary_block' }">worldinfo</span>
+                <span class="toggle-option" :class="{ active: state.injectionTarget === 'summary_macro' }">&#123;&#123;summary&#125;&#125;</span>
+            </div>
         </div>
         <div class="context-sheet-actions">
             <button type="button" class="context-sheet-btn context-sheet-btn-secondary" @click="handleCancel">Cancel</button>
@@ -142,3 +117,29 @@ function handleCancel() {
         </div>
     </div>
 </template>
+
+<style scoped>
+.injection-target-toggle {
+    display: flex;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    overflow: hidden;
+    cursor: pointer;
+    flex-shrink: 0;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.injection-target-toggle .toggle-option {
+    padding: 6px 14px;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.5);
+    transition: all 0.2s ease;
+    user-select: none;
+    white-space: nowrap;
+}
+
+.injection-target-toggle .toggle-option.active {
+    background: rgba(255, 255, 255, 0.15);
+    color: #fff;
+}
+</style>
