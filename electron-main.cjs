@@ -13,7 +13,8 @@ function createWindow() {
     icon: path.join(__dirname, 'assets', 'logo.png'),
     webPreferences: {
       nodeIntegration: true,
-      contextIsolation: false
+      contextIsolation: false,
+      webSecurity: false
     }
   });
 

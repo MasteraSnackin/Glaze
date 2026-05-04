@@ -14,6 +14,21 @@ const appVersion = (() => {
 export default defineConfig({
   plugins: [vue()],
   base: './', // Это ГЛАВНОЕ: заставляет пути быть относительными
+  server: {
+    proxy: {
+      '/dc-proxy': {
+        target: 'https://datacat.run',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/dc-proxy/, ''),
+        configure: (proxy) => {
+          proxy.on('proxyReq', (proxyReq) => {
+            proxyReq.setHeader('Origin', 'https://datacat.run');
+            proxyReq.setHeader('Referer', 'https://datacat.run/');
+          });
+        }
+      }
+    }
+  },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url))
