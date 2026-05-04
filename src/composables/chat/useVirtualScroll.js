@@ -281,7 +281,8 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
         cache.pruneStale();
 
         if (newLen > oldLen) {
-            const wasAtBottom = containerRef.value && (containerRef.value.scrollHeight - containerRef.value.scrollTop - containerRef.value.clientHeight < 100);
+            const wasAtBottom = options.autoScrollToBottom !== false && containerRef.value &&
+                (containerRef.value.scrollHeight - containerRef.value.scrollTop - containerRef.value.clientHeight < 100);
             if (wasAtBottom) {
                 renderEnd.value = newLen;
                 const viewportHeight = containerRef.value?.clientHeight || 800;
@@ -298,15 +299,21 @@ export function useVirtualScroll(itemsRef, containerRef, options = {}) {
 
     watch(visibleItems, () => { nextTick(observeItems); });
 
-    const refresh = () => {
+    // startAtBottom=true keeps chat behaviour; pass false for top-anchored lists (e.g. DialogList)
+    const refresh = ({ startAtBottom = true } = {}) => {
         cache.clear();
         visibleIndices.clear();
         realVisibleIndices.clear();
         const count = itemsRef.value?.length || 0;
         const viewportHeight = containerRef.value?.clientHeight || 800;
         const estimatedItemsInView = Math.max(20, Math.ceil(viewportHeight / estimateHeight) + getBuffer());
-        renderStart.value = Math.max(0, count - estimatedItemsInView);
-        renderEnd.value = count;
+        if (startAtBottom) {
+            renderStart.value = Math.max(0, count - estimatedItemsInView);
+            renderEnd.value = count;
+        } else {
+            renderStart.value = 0;
+            renderEnd.value = Math.min(estimatedItemsInView, count);
+        }
         updateSpacers();
         nextTick(() => {
             if (!mounted) return;

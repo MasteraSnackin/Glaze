@@ -7,7 +7,7 @@ import { useSidebarResizer } from '@/composables/ui/useSidebarResizer.js';
 import { attachHoverGlow } from '@/core/services/interactionEffects.js';
 import { APP_EVENTS } from '@/core/events/eventNames.js';
 import { publishAppEvent } from '@/core/events/eventHub.js';
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 
 const props = defineProps({
     currentView: String,
@@ -24,6 +24,8 @@ function handleGlossaryToggle() {
 
 const t = (key) => translations[currentLang.value]?.[key] || key;
 
+const dialogListRef = ref(null);
+
 const { width: leftSidebarWidth, collapsed, startResize: startLeftResize } = useSidebarResizer('gz_left_sidebar_width', 280, 'left', 200, 600);
 
 const vHoverGlow = {
@@ -35,6 +37,7 @@ const vHoverGlow = {
 // Tooltip items for collapsed mode
 const leftSidebarItems = computed(() => [
     { id: 'characters', label: t('tab_characters'), icon: 'M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z' },
+    { id: 'new-chat', label: t('btn_new_chat') || 'New Chat', icon: 'M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z' },
     { id: 'glossary', label: t('menu_glossary'), icon: 'M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z' },
     { id: 'more', label: t('tab_more'), icon: 'M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z' }
 ]);
@@ -46,21 +49,35 @@ const leftSidebarItems = computed(() => [
 
       <ToolStripTooltip :items="leftSidebarItems" placement="right">
           <template #default="{ onItemEnter, onItemLeave }">
-              <div 
-                  class="desktop-chars-btn" 
-                  :class="{ active: currentView === 'view-characters' }" 
-                  data-tooltip-id="characters"
-                  v-hover-glow 
-                  @click="emit('update:currentView', 'view-characters')"
-                  @mouseenter="(e) => collapsed ? onItemEnter('characters', e) : null"
-                  @mouseleave="collapsed ? onItemLeave() : null"
-              >
-                  <svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
-                  <span v-if="!collapsed">{{ t('tab_characters') }}</span>
+              <div class="desktop-top-nav">
+                  <div
+                      class="desktop-chars-btn"
+                      :class="{ active: currentView === 'view-characters' }"
+                      data-tooltip-id="characters"
+                      v-hover-glow
+                      @click="emit('update:currentView', 'view-characters')"
+                      @mouseenter="(e) => collapsed ? onItemEnter('characters', e) : null"
+                      @mouseleave="collapsed ? onItemLeave() : null"
+                  >
+                      <svg viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+                      <span v-if="!collapsed">{{ t('tab_characters') }}</span>
+                  </div>
+                  <div
+                      class="desktop-chars-btn desktop-new-chat-btn"
+                      data-tooltip-id="new-chat"
+                      v-hover-glow
+                      @click="dialogListRef?.openNewChatPicker()"
+                      @mouseenter="(e) => collapsed ? onItemEnter('new-chat', e) : null"
+                      @mouseleave="collapsed ? onItemLeave() : null"
+                  >
+                      <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                      <span v-if="!collapsed">{{ t('btn_new_chat') || 'New Chat' }}</span>
+                  </div>
               </div>
 
               <div class="desktop-dialogs-wrapper">
                   <DialogList
+                      ref="dialogListRef"
                       :active-category="activeCategories['view-dialogs']"
                       :collapsed="collapsed"
                       @open-chat="emit('openChat', $event)"

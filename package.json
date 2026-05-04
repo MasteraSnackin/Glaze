@@ -14,7 +14,8 @@
     "test:ui": "vitest --ui",
     "lint": "eslint src",
     "lint:fix": "eslint src --fix",
-    "sync-version": "node scripts/sync-version.js"
+    "sync-version": "node scripts/sync-version.js",
+    "electron:dev": "npx electron electron-dev.cjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
