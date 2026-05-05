@@ -117,11 +117,14 @@ const getCustomColorStyle = (colorValue) => {
 
 const handleResetBackground = async () => {
     await setBackgroundImage(null);
-    
-    const index = presets.value.findIndex(p => p.id === themeState.activePresetId);
-    if (index !== -1) {
-        presets.value[index].bgImage = null;
-    }
+};
+
+const openBackgroundImagePicker = () => {
+    const i = document.createElement('input');
+    i.type = 'file';
+    i.accept = 'image/*';
+    i.onchange = (e) => onBackgroundImageSelected(e);
+    i.click();
 };
 
 const handleResetFont = async () => {
@@ -425,7 +428,7 @@ const chatPreviewStyle = computed(() => ({
                     <div class="section-header">
 {{ t('theme_background_image') }}
 </div>
-                    <div class="menu-item" @click="() => { const i = document.createElement('input'); i.type = 'file'; i.accept = 'image/*'; i.onchange = (e) => onBackgroundImageSelected(e); i.click(); }">
+                    <div class="menu-item" @click="openBackgroundImagePicker">
                         <svg class="menu-icon" viewBox="0 0 24 24"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
                         <div class="menu-text">
 {{ t('theme_select_image') }}
