@@ -499,9 +499,6 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
   /// Cached so it can be re-asserted on app resume — see
   /// [didChangeAppLifecycleState].
   double _lastMessageListBottom = 0;
-  /// Keyboard inset last pushed to the WebView, replayed alongside
-  /// [_lastMessageListBottom] on resume so the resync doesn't zero it.
-  double _lastKeyboardInset = 0;
 
   /// Measured height of the floating [MemoryActivityCard] (0 when hidden) so
   /// the message list reserves room at the *top* for it — otherwise the card
@@ -942,7 +939,6 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
       unawaited(
         _webViewStateKey.currentState?.applyBottomInset(
               _lastMessageListBottom,
-              keyboardPx: _lastKeyboardInset,
             ) ??
             Future<void>.value(),
       );
@@ -1137,17 +1133,21 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                       widget.drawerCtrl.lastKeyboardHeight,
                     )
                   : 0.0);
-        // The keyboard is deliberately kept OUT of the padding below and pushed
-        // to the WebView as a separate value instead. The WebView's own viewport
-        // already accounts for the keyboard, so adding it to the container
-        // padding as well counted it twice and let the chat scroll a full
-        // keyboard-height above the input bar. The drawer is different — it is a
-        // Flutter overlay painted on top of the WebView, which never shrinks the
-        // viewport, so its height must be reserved as real padding.
-        // The keyboard value still travels to JS (keyboardInset) because the
-        // scroll compensation there needs it to follow the keyboard; only the
-        // padding term drops it. Both are pushed on the same Flutter-driven
-        // frame, so keyboard and drawer stay in lockstep.
+        // This is the keyboard-INDEPENDENT bottom inset. The soft keyboard is
+        // deliberately NOT added here: how much of the WebView the keyboard
+        // actually covers depends on the platform (Android adjustResize shrinks
+        // the container so the keyboard is already excluded; iOS WKWebView leaves
+        // it full-screen and the keyboard overlays), and Flutter can't tell which
+        // happened. Folding a keyboard height in here therefore double-counted it
+        // on shrinking platforms (the "scroll way past the input" gap). Instead
+        // the WebView measures the real keyboard overlap from window.visualViewport
+        // and adds it to this base itself (see _reconcileBottomPadding /
+        // _keyboardOverlapPx in chat_bridge_controller.js).
+        //   • Drawer — a Flutter overlay drawn ON TOP of the WebView; it never
+        //     resizes the viewport, so its full height must be reserved here.
+        //   • Keyboard — only decides whether the home-indicator safe area is
+        //     still visible (it isn't once either panel covers the bottom); the
+        //     actual keyboard padding is added JS-side.
         final safeAreaPanelInset = math.max(
           drawerTargetInset,
           keyboardTargetInset,
@@ -1171,7 +1171,6 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
             (safeBottom * (1 - targetFactor)) +
             (isEditingMessage ? editFooterScrollRoom : 0.0);
         _lastMessageListBottom = webViewBottomInset;
-        _lastKeyboardInset = keyboardTargetInset;
         final showScrollBtn =
             _showScrollToBottom &&
             !widget.search.showSearch &&
@@ -1214,7 +1213,6 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                     isPostGenRunning: widget.state.isPostGenRunning,
                     regenTargetId: widget.state.regenTargetId,
                     bottomInset: webViewBottomInset,
-                    keyboardInset: keyboardTargetInset,
                     topInset: effectiveTopInset,
                     blurRegions: (batterySaver || preset.elementBlur <= 0)
                         ? const <ChatOverlayBlurRegion>[]

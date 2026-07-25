@@ -24,6 +24,11 @@ export class Bridge {
     // setGenerating): the header is frozen for the whole streaming window and
     // must never be left stuck hidden afterwards.
     this._headerHidden = false;
+    // Last scroll offset the header tracker decided on, and the deadline until
+    // which it only re-baselines instead of deciding. Both are instance fields
+    // so showHeader() can reset them — see showHeader() for why that matters.
+    this._headerLastTop = 0;
+    this._headerRebaselineUntil = 0;
     this._genTimer = new GenTimer(renderer);
     this._imgGenTimer = new ImgGenTimer();
     this._updateBatcher = new MessageUpdateBatcher();
@@ -46,7 +51,21 @@ export class Bridge {
       () => this.isGenerating,
       () => this.disableSwipeRegeneration,
     );
+    // Whether the scroll view is currently parked at the bottom. Kept live by
+    // the scroll listener so the keyboard (visual-viewport) handler knows
+    // whether to re-pin to the newest message.
+    this._atBottom = true;
+    // Flutter-provided bottom padding WITHOUT the soft keyboard (input bar +
+    // drawer + safe area). The keyboard's own contribution is measured from
+    // window.visualViewport and added on top in _reconcileBottomPadding().
+    this._baseBottomPadding = 0;
+    // Re-pin glide state (see _glideScrollTo). The very first padding
+    // application lands instantly so the chat doesn't slide into place on open.
+    this._bottomPaddingApplied = false;
+    this._repinAnimating = false;
+    this._repinRaf = 0;
     this._setupScrollListener();
+    this._setupVisualViewportListener();
     this._setupInteractionListener();
     this._setupGlazeRequestRelay();
     this._setupImageClickForward();
@@ -204,20 +223,50 @@ export class Bridge {
   }
 
   /* ---------- Scroll / load-more ---------- */
+
+  // Re-shows the header and re-baselines the hide-on-scroll tracker. Flutter
+  // calls this whenever a chat is opened or a session is switched.
+  //
+  // The WebView — and therefore this controller — is kept alive across chats
+  // (see chat_webview_keep_alive.dart), so both `_headerHidden` and the scroll
+  // baseline carry over from the chat that was open before. That broke a chat
+  // open two ways: the load's jump to the bottom of the new chat read as one
+  // large downward scroll and hid the header the instant the chat appeared,
+  // and a stale `_headerHidden === true` left JS disagreeing with Flutter's
+  // fresh state — since this tracker only emits on transitions, the desync
+  // then persisted and the header stopped responding to scrolling at all.
+  //
+  // Emitted unconditionally so Flutter's state is realigned even when JS
+  // already believed the header was visible.
+  showHeader() {
+    this._headerHidden = false;
+    this._headerLastTop = this.virtualList?.container?.scrollTop || 0;
+    // The messages land and the list jumps to the bottom over the frames right
+    // after this call; those scrolls are programmatic, not user intent. Matches
+    // the window setMessages() already uses to suppress load-more.
+    this._headerRebaselineUntil = Date.now() + 1000;
+    this._sendToFlutter('onHeaderScroll', [false]);
+  }
+
   _setupScrollListener() {
     let loadMoreCooldown = false;
     let lastLoadTop = 0;
     let lastShowScrollToBottom = null;
     // Header hide-on-scroll (ported from Glaze/src/core/services/ui.js initHeaderScroll).
-    // `_headerHidden` is an instance field (see constructor) so setGenerating()
-    // can re-show the header when a generation ends.
-    let headerLastTop = 0;
+    // `_headerHidden` / `_headerLastTop` are instance fields (see constructor)
+    // so setGenerating() can re-show the header when a generation ends and
+    // showHeader() can re-baseline the tracker when a chat opens.
     let ticking = false;
     const container = this.virtualList.container;
 
     const emitScrollToBottomVisibility = () => {
       const distanceFromBottom =
         container.scrollHeight - container.scrollTop - container.clientHeight;
+      // Track parked-at-bottom for the viewport-resize re-pin (keyboard toggle).
+      // Frozen while our own re-pin glide runs: its intermediate positions are
+      // "not at bottom", and letting them through would make the next resize in
+      // the burst think the user had scrolled away and skip the re-pin.
+      if (!this._repinAnimating) this._atBottom = distanceFromBottom < 5;
       // Mirror Vue ChatView.onScroll(): button appears past 100px from bottom.
       const show = distanceFromBottom > 100;
       if (lastShowScrollToBottom === show) return;
@@ -228,32 +277,39 @@ export class Bridge {
     const updateHeader = () => {
       ticking = false;
       const st = container.scrollTop;
+      // Right after showHeader() the list is still being filled and scrolled to
+      // the bottom programmatically. Follow the offset without deciding, so the
+      // jump is never mistaken for the user scrolling down.
+      if (Date.now() < this._headerRebaselineUntil) {
+        this._headerLastTop = st <= 0 ? 0 : st;
+        return;
+      }
       // Streaming auto-follow must not hide the header, but an explicit upward
       // scroll should still restore an already-hidden header.
       if (this.isGenerating) {
-        if (st < headerLastTop - 3 && this._headerHidden) {
+        if (st < this._headerLastTop - 3 && this._headerHidden) {
           this._headerHidden = false;
           this._sendToFlutter('onHeaderScroll', [false]);
         }
-        headerLastTop = st <= 0 ? 0 : st;
+        this._headerLastTop = st <= 0 ? 0 : st;
         return;
       }
       if (st < 0 || st + container.clientHeight > container.scrollHeight) {
-        headerLastTop = st <= 0 ? 0 : st;
+        this._headerLastTop = st <= 0 ? 0 : st;
         return;
       }
-      if (st > headerLastTop + 3 && st > 50) {
+      if (st > this._headerLastTop + 3 && st > 50) {
         if (!this._headerHidden) {
           this._headerHidden = true;
           this._sendToFlutter('onHeaderScroll', [true]);
         }
-      } else if (st < headerLastTop - 3) {
+      } else if (st < this._headerLastTop - 3) {
         if (this._headerHidden) {
           this._headerHidden = false;
           this._sendToFlutter('onHeaderScroll', [false]);
         }
       }
-      headerLastTop = st <= 0 ? 0 : st;
+      this._headerLastTop = st <= 0 ? 0 : st;
     };
 
     container.addEventListener('scroll', () => {
@@ -277,6 +333,41 @@ export class Bridge {
     }, { passive: true });
 
     requestAnimationFrame(emitScrollToBottomVisibility);
+  }
+
+  /* ---------- Visual viewport (soft keyboard) ---------- */
+  // The soft keyboard changes how much of the chat container is actually
+  // visible, but HOW depends on the platform / embedding and Flutter can't tell
+  // which happened:
+  //   • Android adjustResize shrinks the WebView's layout viewport, so `100vh`
+  //     (the container) shrinks and the keyboard is already excluded.
+  //   • iOS WKWebView (and Android configs where the hybrid WebView isn't
+  //     resized) leave `100vh` full and the keyboard OVERLAYS the container;
+  //     only the visual viewport shrinks.
+  // Adding a Flutter-side keyboard inset works for the first case but
+  // double-counts it, and omitting it works for the first case but hides the
+  // newest message behind the keyboard in the second. So Flutter sends only the
+  // keyboard-independent base padding (setBottomPadding) and the keyboard's real
+  // overlap on the container is measured here and added on top — correct in both
+  // cases. window.visualViewport is the single source of truth for the keyboard.
+  _setupVisualViewportListener() {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const onChange = () => this._reconcileBottomPadding();
+    vv.addEventListener('resize', onChange);
+    vv.addEventListener('scroll', onChange);
+  }
+
+  // How many px of the bottom of #chat-container are hidden under the soft
+  // keyboard. 0 when the layout viewport already shrank to exclude it (Android
+  // adjustResize), keyboard-height when the keyboard merely overlays (iOS).
+  _keyboardOverlapPx() {
+    const vv = window.visualViewport;
+    if (!vv) return 0;
+    const container = document.getElementById('chat-container') || document.body;
+    const rect = container.getBoundingClientRect();
+    const visualBottom = vv.offsetTop + vv.height;
+    return Math.max(0, rect.bottom - visualBottom);
   }
 
   /* ---------- Interaction dispatch ---------- */
@@ -721,59 +812,116 @@ export class Bridge {
     toggleClass('hide-char-name', theme['show-char-name'] === '0');
   }
 
-  // [px] is the bottom inset that must become real container padding (input bar
-  // + drawer + safe area). [keyboardPx] is the soft keyboard, which occludes the
-  // bottom of the view WITHOUT being padding: the WebView's own viewport already
-  // accounts for it, so adding it to paddingBottom as well double-counted it and
-  // let the chat scroll a full keyboard-height above the input bar. It still has
-  // to drive the scroll compensation below — otherwise the list wouldn't follow
-  // the keyboard at all — so it is tracked separately here and only the *total*
-  // occlusion feeds the scroll delta. That keeps the scroll motion (and its
-  // Flutter-driven timing) identical to before, matching the drawer exactly.
-  setBottomPadding(px, keyboardPx = 0) {
-    const container = document.getElementById('chat-container') || document.body;
-    const prevPadding = parseFloat(container.style.paddingBottom) || 0;
-    const prevKeyboard = this._keyboardInset || 0;
-    const paddingChanged = Math.abs(px - prevPadding) >= 0.1;
-    // Total occlusion delta — the value the old single-argument version used.
-    const paddingDiff = (px + keyboardPx) - (prevPadding + prevKeyboard);
-    if (!paddingChanged && Math.abs(paddingDiff) < 0.1) return;
-    this._keyboardInset = keyboardPx;
+  // Flutter pushes the keyboard-INDEPENDENT bottom inset (input bar + drawer +
+  // safe area). The live keyboard overlap is folded in by _reconcileBottomPadding
+  // so the two sources never double-count. See _setupVisualViewportListener.
+  setBottomPadding(px) {
+    this._baseBottomPadding = px;
+    this._reconcileBottomPadding();
+  }
 
-    // Ported from Vue ChatView.updateContentPadding(). The chat container is a
-    // FIXED full-screen viewport (`resizeToAvoidBottomInset: false`, the keyboard
-    // overlays it) so its clientHeight never changes — Vue's `containerHeightDiff`
-    // term is 0 here and the scroll adjustment collapses to the padding delta.
-    // We shift scrollTop by that delta so the content the user is reading stays
-    // anchored to the rising/falling input bar when the keyboard / magic drawer /
-    // input height changes — and so more-recent messages slide up into view above
-    // the keyboard. This must happen whether or not the chat is parked at the
-    // bottom; the at-bottom branch is just the numerically-clean equivalent of
-    // `+= paddingDiff` that avoids float drift at the very end of the list.
-    const wasAtBottom =
-      container.scrollHeight - container.scrollTop - container.clientHeight < 5;
+  // Apply `base + keyboard overlap` as the container's paddingBottom and keep the
+  // scroll offset anchored. Called both when Flutter changes the base padding and
+  // when the visual viewport changes (keyboard open/close). Two things can move
+  // the newest message relative to the visible area, so both are handled:
+  //   1. padding changes (keyboard overlays an un-resized container / drawer /
+  //      input-bar height) — shift scrollTop by the padding delta, or re-pin.
+  //   2. the container itself resizing (Android adjustResize shrinks 100vh) with
+  //      no padding change — re-pin when parked at the bottom.
+  _reconcileBottomPadding() {
+    const container = document.getElementById('chat-container') || document.body;
+    const target = (this._baseBottomPadding || 0) + this._keyboardOverlapPx();
+    const prevPadding = parseFloat(container.style.paddingBottom) || 0;
+    const paddingDiff = target - prevPadding;
+    const paddingChanged = Math.abs(paddingDiff) >= 0.1;
+    // Sampled continuously by the scroll listener, so it reflects the state
+    // BEFORE a viewport resize (which may fire a scroll that flips the live
+    // metric mid-animation).
+    const wasAtBottom = this._atBottom;
+
+    if (!paddingChanged && !wasAtBottom) return;
 
     // Lock the virtual-scroll window logic while we programmatically re-pin so
-    // the inset-follow does not fight onContainerScroll / the pin tracker.
+    // the inset-follow does not fight onContainerScroll / the pin tracker. The
+    // matching unlock is owned by _glideScrollTo's finish() — a fixed timeout
+    // here would release the lock mid-glide.
     const vl = this.virtualList;
-    if (vl) {
-      vl.isProgrammaticScrolling = true;
-      clearTimeout(this._bottomPadUnlockTimer);
-      this._bottomPadUnlockTimer = setTimeout(() => {
-        vl.isProgrammaticScrolling = false;
-      }, 120);
-    }
+    if (vl) vl.isProgrammaticScrolling = true;
+    clearTimeout(this._bottomPadUnlockTimer);
 
-    if (paddingChanged) container.style.paddingBottom = px + 'px';
+    // The padding itself is applied in ONE step, never tweened: it drives a full
+    // relayout of the message list, so animating it would relayout every frame
+    // (the jank the Flutter side already avoids by pushing only end values).
+    // The visible smoothness comes from gliding scrollTop instead — that is a
+    // compositor-level scroll, and the padding it reveals sits under the
+    // keyboard / input bar where it cannot be seen mid-transition.
+    if (paddingChanged) container.style.paddingBottom = target + 'px';
 
     // Reading scrollHeight forces a synchronous layout flush so the new padding
-    // is reflected before we adjust the offset.
-    if (wasAtBottom) {
-      container.scrollTop = container.scrollHeight - container.clientHeight;
-    } else {
-      container.scrollTop += paddingDiff;
+    // (and any viewport resize) is reflected before we compute the offset.
+    const targetScrollTop = wasAtBottom
+      ? container.scrollHeight - container.clientHeight
+      : container.scrollTop + paddingDiff;
+
+    // First application (chat just opened) must land instantly — gliding there
+    // would show the list visibly sliding into place on open.
+    if (!this._bottomPaddingApplied) {
+      this._bottomPaddingApplied = true;
+      container.scrollTop = targetScrollTop;
+      this._bottomPadUnlockTimer = setTimeout(() => {
+        if (vl) vl.isProgrammaticScrolling = false;
+      }, 60);
+      this._emitScrollToBottomVisibilitySoon(container);
+      return;
     }
 
+    this._glideScrollTo(container, targetScrollTop);
+  }
+
+  // Ease scrollTop to [target] over one keyboard-animation-length beat instead of
+  // snapping. Retargetable: a new call mid-flight re-aims from the current
+  // position, so a burst of visualViewport resizes (the keyboard animating up)
+  // reads as one continuous follow rather than a staircase of jumps.
+  _glideScrollTo(container, target) {
+    cancelAnimationFrame(this._repinRaf);
+    const start = container.scrollTop;
+    const delta = target - start;
+    const vl = this.virtualList;
+    const finish = () => {
+      this._repinAnimating = false;
+      clearTimeout(this._bottomPadUnlockTimer);
+      this._bottomPadUnlockTimer = setTimeout(() => {
+        if (vl) vl.isProgrammaticScrolling = false;
+      }, 60);
+      this._emitScrollToBottomVisibilitySoon(container);
+    };
+
+    if (Math.abs(delta) < 1) {
+      container.scrollTop = target;
+      finish();
+      return;
+    }
+
+    // Matches the Flutter input bar's easeOutCubic / keyboard beat so the chat
+    // and the input pill travel together.
+    const duration = 200;
+    const t0 = performance.now();
+    this._repinAnimating = true;
+    if (vl) vl.isProgrammaticScrolling = true;
+    const step = (now) => {
+      const p = Math.min(1, (now - t0) / duration);
+      const eased = 1 - Math.pow(1 - p, 3);
+      container.scrollTop = start + delta * eased;
+      if (p < 1) {
+        this._repinRaf = requestAnimationFrame(step);
+      } else {
+        finish();
+      }
+    };
+    this._repinRaf = requestAnimationFrame(step);
+  }
+
+  _emitScrollToBottomVisibilitySoon(container) {
     requestAnimationFrame(() => {
       const distanceFromBottom =
         container.scrollHeight - container.scrollTop - container.clientHeight;

@@ -46,7 +46,6 @@ class ChatWebViewInitInput {
     required this.memoryEntries,
     required this.memoryDrafts,
     required this.bottomInset,
-    this.keyboardInset = 0,
     required this.topInset,
     this.blurRegions = const [],
     required this.searchQuery,
@@ -86,7 +85,6 @@ class ChatWebViewInitInput {
   final List<dynamic> memoryEntries;
   final List<dynamic> memoryDrafts;
   final double bottomInset;
-  final double keyboardInset;
   final double topInset;
   final List<ChatOverlayBlurRegion> blurRegions;
   final String? searchQuery;
@@ -188,10 +186,7 @@ class ChatWebViewInitializer {
           .toList(),
     );
     if (input.bottomInset > 0) {
-      await bridge.setBottomPadding(
-        input.bottomInset,
-        keyboardPx: input.keyboardInset,
-      );
+      await bridge.setBottomPadding(input.bottomInset);
     }
     if (input.topInset > 0) {
       await bridge.setTopPadding(input.topInset);

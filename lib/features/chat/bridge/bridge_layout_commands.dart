@@ -17,15 +17,9 @@ class LayoutBridgeCommands {
     );
   }
 
-  /// [px] becomes the WebView's real bottom padding (input bar + drawer + safe
-  /// area). [keyboardPx] is the soft keyboard: it is NOT added to the padding
-  /// (the WebView viewport already accounts for it — adding it here too let the
-  /// chat scroll a keyboard-height above the input bar), but the JS side still
-  /// uses it to compensate the scroll offset so the list follows the keyboard.
-  Future<void> setBottomPadding(double px, {double keyboardPx = 0}) {
+  Future<void> setBottomPadding(double px) {
     return _host.evalJs(
-      'window.bridge?.setBottomPadding('
-      '${px.toStringAsFixed(1)}, ${keyboardPx.toStringAsFixed(1)})',
+      'window.bridge?.setBottomPadding(${px.toStringAsFixed(1)})',
     );
   }
 
