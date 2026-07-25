@@ -59,11 +59,6 @@ export class Bridge {
     // drawer + safe area). The keyboard's own contribution is measured from
     // window.visualViewport and added on top in _reconcileBottomPadding().
     this._baseBottomPadding = 0;
-    // Re-pin glide state (see _glideScrollTo). The very first padding
-    // application lands instantly so the chat doesn't slide into place on open.
-    this._bottomPaddingApplied = false;
-    this._repinAnimating = false;
-    this._repinRaf = 0;
     this._setupScrollListener();
     this._setupVisualViewportListener();
     this._setupInteractionListener();
@@ -263,10 +258,7 @@ export class Bridge {
       const distanceFromBottom =
         container.scrollHeight - container.scrollTop - container.clientHeight;
       // Track parked-at-bottom for the viewport-resize re-pin (keyboard toggle).
-      // Frozen while our own re-pin glide runs: its intermediate positions are
-      // "not at bottom", and letting them through would make the next resize in
-      // the burst think the user had scrolled away and skip the re-pin.
-      if (!this._repinAnimating) this._atBottom = distanceFromBottom < 5;
+      this._atBottom = distanceFromBottom < 5;
       // Mirror Vue ChatView.onScroll(): button appears past 100px from bottom.
       const show = distanceFromBottom > 100;
       if (lastShowScrollToBottom === show) return;
@@ -842,86 +834,26 @@ export class Bridge {
     if (!paddingChanged && !wasAtBottom) return;
 
     // Lock the virtual-scroll window logic while we programmatically re-pin so
-    // the inset-follow does not fight onContainerScroll / the pin tracker. The
-    // matching unlock is owned by _glideScrollTo's finish() — a fixed timeout
-    // here would release the lock mid-glide.
+    // the inset-follow does not fight onContainerScroll / the pin tracker.
     const vl = this.virtualList;
-    if (vl) vl.isProgrammaticScrolling = true;
-    clearTimeout(this._bottomPadUnlockTimer);
+    if (vl) {
+      vl.isProgrammaticScrolling = true;
+      clearTimeout(this._bottomPadUnlockTimer);
+      this._bottomPadUnlockTimer = setTimeout(() => {
+        vl.isProgrammaticScrolling = false;
+      }, 120);
+    }
 
-    // The padding itself is applied in ONE step, never tweened: it drives a full
-    // relayout of the message list, so animating it would relayout every frame
-    // (the jank the Flutter side already avoids by pushing only end values).
-    // The visible smoothness comes from gliding scrollTop instead — that is a
-    // compositor-level scroll, and the padding it reveals sits under the
-    // keyboard / input bar where it cannot be seen mid-transition.
     if (paddingChanged) container.style.paddingBottom = target + 'px';
 
     // Reading scrollHeight forces a synchronous layout flush so the new padding
-    // (and any viewport resize) is reflected before we compute the offset.
-    const targetScrollTop = wasAtBottom
-      ? container.scrollHeight - container.clientHeight
-      : container.scrollTop + paddingDiff;
-
-    // First application (chat just opened) must land instantly — gliding there
-    // would show the list visibly sliding into place on open.
-    if (!this._bottomPaddingApplied) {
-      this._bottomPaddingApplied = true;
-      container.scrollTop = targetScrollTop;
-      this._bottomPadUnlockTimer = setTimeout(() => {
-        if (vl) vl.isProgrammaticScrolling = false;
-      }, 60);
-      this._emitScrollToBottomVisibilitySoon(container);
-      return;
+    // (and any viewport resize) is reflected before we adjust the offset.
+    if (wasAtBottom) {
+      container.scrollTop = container.scrollHeight - container.clientHeight;
+    } else {
+      container.scrollTop += paddingDiff;
     }
 
-    this._glideScrollTo(container, targetScrollTop);
-  }
-
-  // Ease scrollTop to [target] over one keyboard-animation-length beat instead of
-  // snapping. Retargetable: a new call mid-flight re-aims from the current
-  // position, so a burst of visualViewport resizes (the keyboard animating up)
-  // reads as one continuous follow rather than a staircase of jumps.
-  _glideScrollTo(container, target) {
-    cancelAnimationFrame(this._repinRaf);
-    const start = container.scrollTop;
-    const delta = target - start;
-    const vl = this.virtualList;
-    const finish = () => {
-      this._repinAnimating = false;
-      clearTimeout(this._bottomPadUnlockTimer);
-      this._bottomPadUnlockTimer = setTimeout(() => {
-        if (vl) vl.isProgrammaticScrolling = false;
-      }, 60);
-      this._emitScrollToBottomVisibilitySoon(container);
-    };
-
-    if (Math.abs(delta) < 1) {
-      container.scrollTop = target;
-      finish();
-      return;
-    }
-
-    // Matches the Flutter input bar's easeOutCubic / keyboard beat so the chat
-    // and the input pill travel together.
-    const duration = 200;
-    const t0 = performance.now();
-    this._repinAnimating = true;
-    if (vl) vl.isProgrammaticScrolling = true;
-    const step = (now) => {
-      const p = Math.min(1, (now - t0) / duration);
-      const eased = 1 - Math.pow(1 - p, 3);
-      container.scrollTop = start + delta * eased;
-      if (p < 1) {
-        this._repinRaf = requestAnimationFrame(step);
-      } else {
-        finish();
-      }
-    };
-    this._repinRaf = requestAnimationFrame(step);
-  }
-
-  _emitScrollToBottomVisibilitySoon(container) {
     requestAnimationFrame(() => {
       const distanceFromBottom =
         container.scrollHeight - container.scrollTop - container.clientHeight;
