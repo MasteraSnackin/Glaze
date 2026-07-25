@@ -389,7 +389,10 @@ class _SessionTileState extends ConsumerState<_SessionTile>
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  // `ConsumerState` exposes `ref` as a field, so `build` keeps `State`'s
+  // single-argument signature — the two-argument form belongs to
+  // `ConsumerWidget` and does not override `State.build` here.
+  Widget build(BuildContext context) {
     final generating = ref.watch(
       generatingSessionsProvider.select((s) => s.contains(info.sessionId)),
     );
