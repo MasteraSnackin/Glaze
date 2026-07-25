@@ -54,6 +54,10 @@ class ChatWebViewWidget extends ConsumerStatefulWidget {
   final bool isGeneratingImage;
   final bool isPostGenRunning;
   final double bottomInset;
+
+  /// Soft-keyboard inset. Never becomes WebView padding (the viewport already
+  /// accounts for it) — pushed so the JS side can compensate the scroll.
+  final double keyboardInset;
   final double topInset;
 
   /// Rects of the Flutter glass overlays (header, input pill, buttons) in
@@ -132,6 +136,7 @@ class ChatWebViewWidget extends ConsumerStatefulWidget {
     this.isGeneratingImage = false,
     this.isPostGenRunning = false,
     this.bottomInset = 0,
+    this.keyboardInset = 0,
     this.topInset = 0,
     this.blurRegions = const [],
     this.searchQuery,
@@ -380,6 +385,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
           memoryEntries: widget.memoryEntries,
           memoryDrafts: widget.memoryDrafts,
           bottomInset: widget.bottomInset,
+          keyboardInset: widget.keyboardInset,
           topInset: widget.topInset,
           blurRegions: widget.blurRegions,
           searchQuery: widget.searchQuery,
@@ -697,6 +703,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       bgNoiseOpacity: w.bgNoiseOpacity,
       bgNoiseIntensity: w.bgNoiseIntensity,
       bottomInset: w.bottomInset,
+      keyboardInset: w.keyboardInset,
       topInset: w.topInset,
       blurRegions: w.blurRegions,
       searchQuery: w.searchQuery,
@@ -947,10 +954,10 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
   /// backgrounded, so an inset change pushed during the background transition
   /// can be dropped. The JS side no-ops when the padding already matches, so
   /// this is cheap to call defensively.
-  Future<void> applyBottomInset(double px) {
+  Future<void> applyBottomInset(double px, {double keyboardPx = 0}) {
     final b = _bridge;
     if (b == null || !_ready) return Future.value();
-    return b.setBottomPadding(px);
+    return b.setBottomPadding(px, keyboardPx: keyboardPx);
   }
 
   Future<void> scrollToMessage(String id, {bool highlight = false}) {

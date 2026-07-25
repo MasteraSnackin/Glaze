@@ -640,7 +640,8 @@ class ChatBridgeController {
   // Layout
   Future<void> setSearch({required String query, int activeIndex = -1}) =>
       layout.setSearch(query: query, activeIndex: activeIndex);
-  Future<void> setBottomPadding(double px) => layout.setBottomPadding(px);
+  Future<void> setBottomPadding(double px, {double keyboardPx = 0}) =>
+      layout.setBottomPadding(px, keyboardPx: keyboardPx);
   Future<void> setTopPadding(double px) => layout.setTopPadding(px);
   Future<void> setOverlayBlurRegions(List<ChatOverlayBlurRegion> regions) =>
       layout.setOverlayBlurRegions(regions);
