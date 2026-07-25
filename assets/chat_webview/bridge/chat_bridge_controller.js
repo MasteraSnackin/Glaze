@@ -59,6 +59,13 @@ export class Bridge {
     // embedder already removed by shrinking the WebView's own viewport.
     this._bottomInsetPx = 0;
     this._viewportFullH = 0;
+    // Re-pin glide state (see _glideScrollTo). `_atBottom` is the live
+    // parked-at-bottom flag kept by the scroll listener; the very first inset
+    // application lands instantly so the chat doesn't slide into place on open.
+    this._atBottom = true;
+    this._repinAnimating = false;
+    this._repinRaf = 0;
+    this._bottomInsetApplied = false;
     this._setupScrollListener();
     this._setupViewportShrinkListener();
     this._setupInteractionListener();
@@ -257,6 +264,11 @@ export class Bridge {
     const emitScrollToBottomVisibility = () => {
       const distanceFromBottom =
         container.scrollHeight - container.scrollTop - container.clientHeight;
+      // Live parked-at-bottom flag for the inset reconciler. Frozen while our
+      // own re-pin glide runs: its intermediate offsets all read as "not at
+      // bottom", and letting those through would make a mid-glide correction
+      // (the keyboard settle push) re-aim at the wrong offset.
+      if (!this._repinAnimating) this._atBottom = distanceFromBottom < 5;
       // Mirror Vue ChatView.onScroll(): button appears past 100px from bottom.
       const show = distanceFromBottom > 100;
       if (lastShowScrollToBottom === show) return;
@@ -845,30 +857,92 @@ export class Bridge {
     // keyboard. This must happen whether or not the chat is parked at the
     // bottom; the at-bottom branch is just the numerically-clean equivalent of
     // `+= insetDiff` that avoids float drift at the very end of the list.
-    const wasAtBottom =
-      container.scrollHeight - container.scrollTop - container.clientHeight < 5;
+    //
+    // The tracked flag wins over the live metric because the live one is
+    // unreliable here: mid-glide offsets and a viewport that just shrank both
+    // read as "scrolled away" while the user is in fact parked at the newest
+    // message. The live metric is still consulted so a list that grew without
+    // emitting a scroll event (streamed append) keeps following.
+    const liveDistance =
+      container.scrollHeight - container.scrollTop - container.clientHeight;
+    const wasAtBottom = this._atBottom || liveDistance < 5;
 
     // Lock the virtual-scroll window logic while we programmatically re-pin so
-    // the inset-follow does not fight onContainerScroll / the pin tracker.
+    // the inset-follow does not fight onContainerScroll / the pin tracker. The
+    // matching unlock is owned by _finishRepin — a fixed timeout here would
+    // release it mid-glide.
     const vl = this.virtualList;
-    if (vl) {
-      vl.isProgrammaticScrolling = true;
-      clearTimeout(this._bottomPadUnlockTimer);
-      this._bottomPadUnlockTimer = setTimeout(() => {
-        vl.isProgrammaticScrolling = false;
-      }, 120);
-    }
+    if (vl) vl.isProgrammaticScrolling = true;
+    clearTimeout(this._bottomPadUnlockTimer);
 
+    // The padding itself is applied in ONE step, never tweened: it relayouts the
+    // whole message list, so animating it would relayout every frame — the jank
+    // the Flutter side already avoids by pushing only end values. The visible
+    // smoothness comes from gliding scrollTop instead, which is a compositor
+    // scroll, and the padding it reveals sits under the keyboard / input bar
+    // where it cannot be seen mid-transition.
     if (paddingChanged) container.style.paddingBottom = target + 'px';
 
     // Reading scrollHeight forces a synchronous layout flush so the new padding
-    // is reflected before we adjust the offset.
-    if (wasAtBottom) {
-      container.scrollTop = container.scrollHeight - container.clientHeight;
-    } else if (insetDiff !== 0) {
-      container.scrollTop += insetDiff;
+    // is reflected before we compute the offset.
+    const targetScrollTop = wasAtBottom
+      ? container.scrollHeight - container.clientHeight
+      : container.scrollTop + insetDiff;
+
+    // The first application (chat just opened) must land instantly — gliding
+    // there would show the list visibly sliding into place on open.
+    if (!this._bottomInsetApplied) {
+      this._bottomInsetApplied = true;
+      cancelAnimationFrame(this._repinRaf);
+      this._repinAnimating = false;
+      container.scrollTop = targetScrollTop;
+      this._finishRepin(container);
+      return;
     }
 
+    this._glideScrollTo(container, targetScrollTop);
+  }
+
+  // Eases scrollTop to [target] over one keyboard beat instead of snapping it,
+  // so the list travels with the rising input bar rather than teleporting when
+  // Flutter pushes the settled inset. Retargetable: a call mid-flight re-aims
+  // from the current offset, so the keyboard's rise and its settle correction
+  // read as one continuous follow instead of a staircase of jumps.
+  _glideScrollTo(container, target) {
+    cancelAnimationFrame(this._repinRaf);
+    const start = container.scrollTop;
+    const delta = target - start;
+    if (Math.abs(delta) < 1) {
+      container.scrollTop = target;
+      this._repinAnimating = false;
+      this._finishRepin(container);
+      return;
+    }
+
+    // Matches the Flutter input bar's easeOutCubic beat so the chat and the
+    // input pill travel together.
+    const duration = 240;
+    const t0 = performance.now();
+    this._repinAnimating = true;
+    const step = (now) => {
+      const p = Math.min(1, (now - t0) / duration);
+      container.scrollTop = start + delta * (1 - Math.pow(1 - p, 3));
+      if (p < 1) {
+        this._repinRaf = requestAnimationFrame(step);
+        return;
+      }
+      this._repinAnimating = false;
+      this._finishRepin(container);
+    };
+    this._repinRaf = requestAnimationFrame(step);
+  }
+
+  _finishRepin(container) {
+    const vl = this.virtualList;
+    clearTimeout(this._bottomPadUnlockTimer);
+    this._bottomPadUnlockTimer = setTimeout(() => {
+      if (vl) vl.isProgrammaticScrolling = false;
+    }, 60);
     requestAnimationFrame(() => {
       const distanceFromBottom =
         container.scrollHeight - container.scrollTop - container.clientHeight;
