@@ -17,9 +17,16 @@ class LayoutBridgeCommands {
     );
   }
 
-  Future<void> setBottomPadding(double px) {
+  /// [px] is the bottom inset measured from the bottom edge of the WebView box
+  /// (input bar + keyboard/drawer + leftover safe area). [viewportHeight] is
+  /// that box's height, which lets the page detect how much of the inset its
+  /// own viewport already absorbed when the soft keyboard shrank it — the page
+  /// turns only the remainder into padding. Pass 0 to make the whole inset
+  /// padding (the pre-measurement behaviour).
+  Future<void> setBottomPadding(double px, {double viewportHeight = 0}) {
     return _host.evalJs(
-      'window.bridge?.setBottomPadding(${px.toStringAsFixed(1)})',
+      'window.bridge?.setBottomPadding('
+      '${px.toStringAsFixed(1)}, ${viewportHeight.toStringAsFixed(1)})',
     );
   }
 

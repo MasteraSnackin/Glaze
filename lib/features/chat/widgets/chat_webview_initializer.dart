@@ -46,6 +46,7 @@ class ChatWebViewInitInput {
     required this.memoryEntries,
     required this.memoryDrafts,
     required this.bottomInset,
+    this.viewportHeight = 0,
     required this.topInset,
     this.blurRegions = const [],
     required this.searchQuery,
@@ -85,6 +86,10 @@ class ChatWebViewInitInput {
   final List<dynamic> memoryEntries;
   final List<dynamic> memoryDrafts;
   final double bottomInset;
+
+  /// Height of the WebView box, so the page can tell how much of
+  /// [bottomInset] its own viewport already absorbed.
+  final double viewportHeight;
   final double topInset;
   final List<ChatOverlayBlurRegion> blurRegions;
   final String? searchQuery;
@@ -186,7 +191,10 @@ class ChatWebViewInitializer {
           .toList(),
     );
     if (input.bottomInset > 0) {
-      await bridge.setBottomPadding(input.bottomInset);
+      await bridge.setBottomPadding(
+        input.bottomInset,
+        viewportHeight: input.viewportHeight,
+      );
     }
     if (input.topInset > 0) {
       await bridge.setTopPadding(input.topInset);

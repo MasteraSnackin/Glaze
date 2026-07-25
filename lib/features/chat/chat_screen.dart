@@ -506,6 +506,17 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
   double _memoryCardHeight = 0.0;
   final GlobalKey _memoryCardKey = GlobalKey();
 
+  /// Measured height of the box the chat WebView is laid out in. Pushed to the
+  /// page alongside the bottom inset: whether the soft keyboard shrinks the
+  /// WebView's own viewport or merely overlays it is decided by the embedder
+  /// (Android window resize mode, iOS WKWebView, desktop) and Flutter cannot
+  /// tell which happened, so the page compares this against its live viewport
+  /// height and turns only the *unabsorbed* part of the inset into padding.
+  /// Measuring the real box (rather than assuming the screen height) keeps that
+  /// comparison honest on desktop, where the chat is not full-screen.
+  double _webViewBoxHeight = 0.0;
+  final GlobalKey _webViewBoxKey = GlobalKey();
+
   final _selectionCtrl = ChatMessageSelectionController();
   bool _showScrollToBottom = false;
   bool _showMemoryActivity = false;
@@ -605,6 +616,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
     var changed = false;
     var nextInputBarHeight = _inputBarHeight;
     var nextMemoryCardHeight = _memoryCardHeight;
+    var nextWebViewBoxHeight = _webViewBoxHeight;
 
     final inputCtx = _inputBarKey.currentContext;
     if (inputCtx != null) {
@@ -623,10 +635,20 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
       changed = true;
     }
 
+    // Only ever grows/shrinks with the window itself (rotation, desktop resize)
+    // — the keyboard cannot move it, since the scaffold runs with
+    // `resizeToAvoidBottomInset: false`.
+    final boxHeight = _webViewBoxKey.currentContext?.size?.height ?? 0.0;
+    if (boxHeight > 0 && boxHeight != _webViewBoxHeight) {
+      nextWebViewBoxHeight = boxHeight;
+      changed = true;
+    }
+
     if (changed) {
       setState(() {
         _inputBarHeight = nextInputBarHeight;
         _memoryCardHeight = nextMemoryCardHeight;
+        _webViewBoxHeight = nextWebViewBoxHeight;
       });
     }
   }
@@ -939,6 +961,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
       unawaited(
         _webViewStateKey.currentState?.applyBottomInset(
               _lastMessageListBottom,
+              viewportHeight: _webViewBoxHeight,
             ) ??
             Future<void>.value(),
       );
@@ -1173,344 +1196,371 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
 
         return Stack(
           children: [
+            // The box height feeds the WebView's inset split (see
+            // [_webViewBoxHeight]); re-measure whenever it changes (rotation,
+            // desktop window resize). The keyboard never triggers this — the
+            // scaffold keeps the body full-size while it is up.
             Positioned.fill(
-              child: NotificationListener<UserScrollNotification>(
-                onNotification: (notification) {
-                  // Do NOT drive the header from Flutter scroll notifications.
-                  // The chat list is an InAppWebView platform view whose internal
-                  // scroll never bubbles here — the only notifications this can
-                  // catch are from stray Flutter scrollables inside the subtree
-                  // (panels, overlays, dropdowns). Forwarding those flipped
-                  // `_isHeaderHidden` out of band while JS still believed the
-                  // opposite, and since JS only emits header events on
-                  // transitions (edge-triggered) it never corrected the desync,
-                  // leaving the header frozen. JS `onHeaderScroll` is the single
-                  // source of truth (see ScrollCallbacks.onHeaderScroll below).
-                  return false;
+              child: NotificationListener<SizeChangedLayoutNotification>(
+                onNotification: (n) {
+                  WidgetsBinding.instance.addPostFrameCallback(
+                    (_) => _checkHeight(),
+                  );
+                  return true;
                 },
-                child: RepaintBoundary(
-                  child: ChatWebViewWidget(
-                    key: _webViewStateKey,
-                    messages: widget.state.visibleMessages,
-                    charId: widget.charId,
-                    isGenerating: widget.state.isGenerating,
-                    isGeneratingImage: widget.state.isGeneratingImage,
-                    isPostGenRunning: widget.state.isPostGenRunning,
-                    regenTargetId: widget.state.regenTargetId,
-                    bottomInset: webViewBottomInset,
-                    topInset: effectiveTopInset,
-                    blurRegions: (batterySaver || preset.elementBlur <= 0)
-                        ? const <ChatOverlayBlurRegion>[]
-                        : _blurRegions,
-                    charName: character?.name,
-                    charColor: character?.color,
-                    personaName: effectivePersona?.name,
-                    greetingTotal: greetingTotal,
-                    chatLayout: preset.chatLayout,
-                    themeSyncKey: _chatWebViewThemeSyncKey(
-                      preset,
-                      preset.chatLayout,
-                    ),
-                    elementOpacity: preset.elementOpacity,
-                    elementBlur: preset.elementBlur,
-                    uiFontWeight: preset.uiFontWeight,
-                    userMessageFontWeight: preset.userMessageFontWeight,
-                    charMessageFontWeight: preset.charMessageFontWeight,
-                    userBubbleRadius: preset.userBubbleRadius,
-                    charBubbleRadius: preset.charBubbleRadius,
-                    userBubbleGradient: preset.userBubbleGradientParsed,
-                    charBubbleGradient: preset.charBubbleGradientParsed,
-                    textBgOpacity: preset.textBgOpacity,
-                    showUserAvatar: preset.showUserAvatar,
-                    showCharAvatar: preset.showCharAvatar,
-                    showUserName: preset.showUserName,
-                    showCharName: preset.showCharName,
-                    charAvatarPath: character?.avatarPath,
-                    personaAvatarPath: effectivePersona?.avatarPath,
-                    bgImagePath: bgPath,
-                    bgBlur: bgBlur,
-                    bgOpacity: bgOpacity,
-                    bgNoiseOpacity: preset.bgNoiseOpacity,
-                    bgNoiseIntensity: preset.bgNoiseIntensity,
-                    bgDim: preset.bgDim,
-                    chatBgMode: preset.chatBgMode,
-                    chatBgColor: preset.chatBgColorParsed,
-                    chatFontName: fontStyle.fontFamily,
-                    chatFontDataUrl: fontDataUrl,
-                    chatFontSize: fontStyle.fontSize,
-                    chatLetterSpacing: fontStyle.letterSpacing,
-                    memoryEntries: memBook.value?.entries ?? [],
-                    memoryDrafts: memBook.value?.pendingDrafts ?? [],
-                    sessionId: widget.state.session?.id,
-                    visibleStartIndex: widget.state.visibleStartIndex,
-                    batterySaver: appSettings?.batterySaver ?? false,
-                    hideMessageId:
-                        preset.hideMessageId ??
-                        (appSettings?.hideMessageId ?? false),
-                    hideGenerationTime:
-                        preset.hideGenerationTime ??
-                        (appSettings?.hideGenerationTime ?? false),
-                    hideTokenCount:
-                        preset.hideTokenCount ??
-                        (appSettings?.hideTokenCount ?? false),
-                    disableSwipeRegeneration:
-                        appSettings?.disableSwipeRegeneration ?? false,
-                    studioEnabled:
-                        ref
-                            .watch(
-                              sessionStudioEnabledProvider(
-                                widget.state.session?.id ?? '',
-                              ),
-                            )
-                            .value ??
-                        false,
-                    messageActions: MessageActionsCallbacks(
-                      onMessageContext:
-                          (index, messageId, isUser, isSystem, content) {
-                            showMessageContextMenu(
-                              context: context,
-                              ref: ref,
-                              charId: widget.charId,
-                              content: content,
-                              messageIndex: index,
-                              messageId: messageId,
-                              isUser: isUser,
-                              isTyping:
-                                  widget.state.isGenerating &&
-                                  index == widget.state.messages.length - 1,
-                              isError: false,
-                              isLast: index == widget.state.messages.length - 1,
-                              isGenerating: widget.state.isGenerating,
-                              isHidden: widget.state.messages[index].isHidden,
-                              canDeleteSwipe:
-                                  !isUser &&
-                                  widget.state.messages[index].swipes.length >
-                                      1,
-                              canDeleteAgentSwipe:
-                                  !isUser &&
-                                  widget
-                                          .state
-                                          .messages[index]
-                                          .agentSwipes
-                                          .length >
-                                      1,
+                child: SizeChangedLayoutNotifier(
+                  key: _webViewBoxKey,
+                  child: NotificationListener<UserScrollNotification>(
+                    onNotification: (notification) {
+                      // Do NOT drive the header from Flutter scroll notifications.
+                      // The chat list is an InAppWebView platform view whose internal
+                      // scroll never bubbles here — the only notifications this can
+                      // catch are from stray Flutter scrollables inside the subtree
+                      // (panels, overlays, dropdowns). Forwarding those flipped
+                      // `_isHeaderHidden` out of band while JS still believed the
+                      // opposite, and since JS only emits header events on
+                      // transitions (edge-triggered) it never corrected the desync,
+                      // leaving the header frozen. JS `onHeaderScroll` is the single
+                      // source of truth (see ScrollCallbacks.onHeaderScroll below).
+                      return false;
+                    },
+                    child: RepaintBoundary(
+                      child: ChatWebViewWidget(
+                        key: _webViewStateKey,
+                        messages: widget.state.visibleMessages,
+                        charId: widget.charId,
+                        isGenerating: widget.state.isGenerating,
+                        isGeneratingImage: widget.state.isGeneratingImage,
+                        isPostGenRunning: widget.state.isPostGenRunning,
+                        regenTargetId: widget.state.regenTargetId,
+                        bottomInset: webViewBottomInset,
+                        viewportHeight: _webViewBoxHeight,
+                        topInset: effectiveTopInset,
+                        blurRegions: (batterySaver || preset.elementBlur <= 0)
+                            ? const <ChatOverlayBlurRegion>[]
+                            : _blurRegions,
+                        charName: character?.name,
+                        charColor: character?.color,
+                        personaName: effectivePersona?.name,
+                        greetingTotal: greetingTotal,
+                        chatLayout: preset.chatLayout,
+                        themeSyncKey: _chatWebViewThemeSyncKey(
+                          preset,
+                          preset.chatLayout,
+                        ),
+                        elementOpacity: preset.elementOpacity,
+                        elementBlur: preset.elementBlur,
+                        uiFontWeight: preset.uiFontWeight,
+                        userMessageFontWeight: preset.userMessageFontWeight,
+                        charMessageFontWeight: preset.charMessageFontWeight,
+                        userBubbleRadius: preset.userBubbleRadius,
+                        charBubbleRadius: preset.charBubbleRadius,
+                        userBubbleGradient: preset.userBubbleGradientParsed,
+                        charBubbleGradient: preset.charBubbleGradientParsed,
+                        textBgOpacity: preset.textBgOpacity,
+                        showUserAvatar: preset.showUserAvatar,
+                        showCharAvatar: preset.showCharAvatar,
+                        showUserName: preset.showUserName,
+                        showCharName: preset.showCharName,
+                        charAvatarPath: character?.avatarPath,
+                        personaAvatarPath: effectivePersona?.avatarPath,
+                        bgImagePath: bgPath,
+                        bgBlur: bgBlur,
+                        bgOpacity: bgOpacity,
+                        bgNoiseOpacity: preset.bgNoiseOpacity,
+                        bgNoiseIntensity: preset.bgNoiseIntensity,
+                        bgDim: preset.bgDim,
+                        chatBgMode: preset.chatBgMode,
+                        chatBgColor: preset.chatBgColorParsed,
+                        chatFontName: fontStyle.fontFamily,
+                        chatFontDataUrl: fontDataUrl,
+                        chatFontSize: fontStyle.fontSize,
+                        chatLetterSpacing: fontStyle.letterSpacing,
+                        memoryEntries: memBook.value?.entries ?? [],
+                        memoryDrafts: memBook.value?.pendingDrafts ?? [],
+                        sessionId: widget.state.session?.id,
+                        visibleStartIndex: widget.state.visibleStartIndex,
+                        batterySaver: appSettings?.batterySaver ?? false,
+                        hideMessageId:
+                            preset.hideMessageId ??
+                            (appSettings?.hideMessageId ?? false),
+                        hideGenerationTime:
+                            preset.hideGenerationTime ??
+                            (appSettings?.hideGenerationTime ?? false),
+                        hideTokenCount:
+                            preset.hideTokenCount ??
+                            (appSettings?.hideTokenCount ?? false),
+                        disableSwipeRegeneration:
+                            appSettings?.disableSwipeRegeneration ?? false,
+                        studioEnabled:
+                            ref
+                                .watch(
+                                  sessionStudioEnabledProvider(
+                                    widget.state.session?.id ?? '',
+                                  ),
+                                )
+                                .value ??
+                            false,
+                        messageActions: MessageActionsCallbacks(
+                          onMessageContext:
+                              (index, messageId, isUser, isSystem, content) {
+                                showMessageContextMenu(
+                                  context: context,
+                                  ref: ref,
+                                  charId: widget.charId,
+                                  content: content,
+                                  messageIndex: index,
+                                  messageId: messageId,
+                                  isUser: isUser,
+                                  isTyping:
+                                      widget.state.isGenerating &&
+                                      index == widget.state.messages.length - 1,
+                                  isError: false,
+                                  isLast:
+                                      index ==
+                                      widget.state.messages.length - 1,
+                                  isGenerating: widget.state.isGenerating,
+                                  isHidden:
+                                      widget.state.messages[index].isHidden,
+                                  canDeleteSwipe:
+                                      !isUser &&
+                                      widget
+                                              .state
+                                              .messages[index]
+                                              .swipes
+                                              .length >
+                                          1,
+                                  canDeleteAgentSwipe:
+                                      !isUser &&
+                                      widget
+                                              .state
+                                              .messages[index]
+                                              .agentSwipes
+                                              .length >
+                                          1,
+                                );
+                              },
+                          onSwipe: (id, direction) {
+                            final idx = widget.state.messages.indexWhere(
+                              (m) => m.id == id,
+                            );
+                            if (idx < 0) return;
+                            final dir = direction == 'right' ? 1 : -1;
+                            ref
+                                .read(chatProvider(widget.charId).notifier)
+                                .changeSwipe(idx, dir, fromSwipe: true);
+                          },
+                          onAgentSwipe: (id, direction) {
+                            final idx = widget.state.messages.indexWhere(
+                              (m) => m.id == id,
+                            );
+                            if (idx < 0) return;
+                            final dir = direction == 'right' ? 1 : -1;
+                            ref
+                                .read(chatProvider(widget.charId).notifier)
+                                .changeAgentSwipe(idx, dir, fromSwipe: true);
+                          },
+                          onChangeGreeting: (id, dir) {
+                            final idx = widget.state.messages.indexWhere(
+                              (m) => m.id == id,
+                            );
+                            if (idx < 0) return;
+                            ref
+                                .read(chatProvider(widget.charId).notifier)
+                                .setGreeting(idx, dir);
+                          },
+                          onRegenerate: (id, mode) {
+                            ref
+                                .read(chatProvider(widget.charId).notifier)
+                                .regenerateLastAssistant();
+                          },
+                          onRerunCleaner: (id) {
+                            ref
+                                .read(chatProvider(widget.charId).notifier)
+                                .rerunCleaner(id);
+                          },
+                          onToggleHidden: (id) {
+                            final idx = widget.state.messages.indexWhere(
+                              (m) => m.id == id,
+                            );
+                            if (idx >= 0) {
+                              ref
+                                  .read(chatProvider(widget.charId).notifier)
+                                  .toggleMessageHidden(idx);
+                            }
+                          },
+                          onMemoryClick: (id) {
+                            final idx = widget.state.messages.indexWhere(
+                              (m) => m.id == id,
+                            );
+                            if (idx < 0) return;
+                            final msg = widget.state.messages[idx];
+                            if (msg.triggeredMemories.isNotEmpty) {
+                              _showTriggeredItemsSheet(
+                                context,
+                                memories: msg.triggeredMemories,
+                              );
+                            }
+                          },
+                          onGuidedSwipe: (id, guidanceText) {
+                            final idx = widget.state.messages.indexWhere(
+                              (m) => m.id == id,
+                            );
+                            if (idx < 0) return;
+                            final msg = widget.state.messages[idx];
+                            final isLastAssistant =
+                                msg.role == 'assistant' &&
+                                idx == widget.state.messages.length - 1;
+                            if (isLastAssistant) {
+                              ref
+                                  .read(chatProvider(widget.charId).notifier)
+                                  .regenerateLastAssistant(
+                                    guidanceText: guidanceText,
+                                  );
+                            }
+                          },
+                          onInjectClick: (id) {
+                            final idx = widget.state.messages.indexWhere(
+                              (m) => m.id == id,
+                            );
+                            if (idx < 0) return;
+                            final msg = widget.state.messages[idx];
+                            _showTriggeredItemsSheet(
+                              context,
+                              lorebooks: msg.triggeredLorebooks,
+                              memories: msg.triggeredMemories,
+                              regexes:
+                                  _webViewStateKey.currentState
+                                      ?.triggeredRegexesFor(id) ??
+                                  const [],
                             );
                           },
-                      onSwipe: (id, direction) {
-                        final idx = widget.state.messages.indexWhere(
-                          (m) => m.id == id,
-                        );
-                        if (idx < 0) return;
-                        final dir = direction == 'right' ? 1 : -1;
-                        ref
-                            .read(chatProvider(widget.charId).notifier)
-                            .changeSwipe(idx, dir, fromSwipe: true);
-                      },
-                      onAgentSwipe: (id, direction) {
-                        final idx = widget.state.messages.indexWhere(
-                          (m) => m.id == id,
-                        );
-                        if (idx < 0) return;
-                        final dir = direction == 'right' ? 1 : -1;
-                        ref
-                            .read(chatProvider(widget.charId).notifier)
-                            .changeAgentSwipe(idx, dir, fromSwipe: true);
-                      },
-                      onChangeGreeting: (id, dir) {
-                        final idx = widget.state.messages.indexWhere(
-                          (m) => m.id == id,
-                        );
-                        if (idx < 0) return;
-                        ref
-                            .read(chatProvider(widget.charId).notifier)
-                            .setGreeting(idx, dir);
-                      },
-                      onRegenerate: (id, mode) {
-                        ref
-                            .read(chatProvider(widget.charId).notifier)
-                            .regenerateLastAssistant();
-                      },
-                      onRerunCleaner: (id) {
-                        ref
-                            .read(chatProvider(widget.charId).notifier)
-                            .rerunCleaner(id);
-                      },
-                      onToggleHidden: (id) {
-                        final idx = widget.state.messages.indexWhere(
-                          (m) => m.id == id,
-                        );
-                        if (idx >= 0) {
-                          ref
-                              .read(chatProvider(widget.charId).notifier)
-                              .toggleMessageHidden(idx);
-                        }
-                      },
-                      onMemoryClick: (id) {
-                        final idx = widget.state.messages.indexWhere(
-                          (m) => m.id == id,
-                        );
-                        if (idx < 0) return;
-                        final msg = widget.state.messages[idx];
-                        if (msg.triggeredMemories.isNotEmpty) {
-                          _showTriggeredItemsSheet(
-                            context,
-                            memories: msg.triggeredMemories,
-                          );
-                        }
-                      },
-                      onGuidedSwipe: (id, guidanceText) {
-                        final idx = widget.state.messages.indexWhere(
-                          (m) => m.id == id,
-                        );
-                        if (idx < 0) return;
-                        final msg = widget.state.messages[idx];
-                        final isLastAssistant =
-                            msg.role == 'assistant' &&
-                            idx == widget.state.messages.length - 1;
-                        if (isLastAssistant) {
-                          ref
-                              .read(chatProvider(widget.charId).notifier)
-                              .regenerateLastAssistant(
-                                guidanceText: guidanceText,
-                              );
-                        }
-                      },
-                      onInjectClick: (id) {
-                        final idx = widget.state.messages.indexWhere(
-                          (m) => m.id == id,
-                        );
-                        if (idx < 0) return;
-                        final msg = widget.state.messages[idx];
-                        _showTriggeredItemsSheet(
-                          context,
-                          lorebooks: msg.triggeredLorebooks,
-                          memories: msg.triggeredMemories,
-                          regexes:
-                              _webViewStateKey.currentState
-                                  ?.triggeredRegexesFor(id) ??
-                              const [],
-                        );
-                      },
+                        ),
+                        editActions: EditActionsCallbacks(
+                          onEditSave: (id, text) async {
+                            final idx = widget.state.messages.indexWhere(
+                              (m) => m.id == id,
+                            );
+                            if (idx >= 0 && text.isNotEmpty) {
+                              await ref
+                                  .read(chatProvider(widget.charId).notifier)
+                                  .editMessage(
+                                    idx,
+                                    text,
+                                    tagStart: '<think>',
+                                    tagEnd: '</think>',
+                                  );
+                            }
+                            if (!mounted ||
+                                ref.read(
+                                      editingMessageIdProvider(widget.charId),
+                                    ) !=
+                                    id) {
+                              return;
+                            }
+                            ref
+                                    .read(
+                                      editingMessageIdProvider(
+                                        widget.charId,
+                                      ).notifier,
+                                    )
+                                    .state =
+                                null;
+                          },
+                          onEditCancel: (id) {
+                            ref
+                                    .read(
+                                      editingMessageIdProvider(
+                                        widget.charId,
+                                      ).notifier,
+                                    )
+                                    .state =
+                                null;
+                          },
+                          onEditFocusChange: (id, focused) {
+                            if (!focused) return;
+                            final activeEditingId = ref.read(
+                              editingMessageIdProvider(widget.charId),
+                            );
+                            if (activeEditingId == id &&
+                                widget.drawerCtrl.inputFocus.hasFocus) {
+                              widget.drawerCtrl.inputFocus.unfocus();
+                            }
+                          },
+                        ),
+                        imageGenActions: ImageGenCallbacks(
+                          onImgRetry: (instruction, messageId) {
+                            ref
+                                .read(chatProvider(widget.charId).notifier)
+                                .retryImageGenerationForMessage(messageId);
+                          },
+                          onImgFind: (instruction, messageId) {
+                            ref
+                                .read(chatProvider(widget.charId).notifier)
+                                .findImageOnDisk(messageId, instruction);
+                          },
+                          onImgRegen: (instruction, messageId) {
+                            ref
+                                .read(chatProvider(widget.charId).notifier)
+                                .retryImageGenerationForMessage(messageId);
+                          },
+                          onImgCancel: () {
+                            ref
+                                .read(chatProvider(widget.charId).notifier)
+                                .cancelImageGeneration();
+                          },
+                          onImgDownload: _downloadImage,
+                          onImgOptions: _showImageOptionsSheet,
+                        ),
+                        scrollActions: ScrollCallbacks(
+                          onHeaderScroll: (hidden) {
+                            if (widget.onScrollDirection == null) return;
+                            widget.onScrollDirection!(
+                              hidden
+                                  ? ScrollDirection.reverse
+                                  : ScrollDirection.forward,
+                            );
+                          },
+                          onScrollToBottomVisibility: (visible) {
+                            if (!mounted || _showScrollToBottom == visible) {
+                              return;
+                            }
+                            setState(() => _showScrollToBottom = visible);
+                          },
+                        ),
+                        miscActions: MiscCallbacks(
+                          onStop: () {
+                            final notifier = ref.read(
+                              chatProvider(widget.charId).notifier,
+                            );
+                            if (widget.state.isGeneratingImage &&
+                                !widget.state.isGenerating) {
+                              notifier.cancelImageGeneration();
+                            } else {
+                              notifier.abortGeneration();
+                            }
+                          },
+                          onSelectionAction: (action, text) {
+                            if (action == 'copy') {
+                              Clipboard.setData(ClipboardData(text: text));
+                            }
+                          },
+                          onSelectionChange: (ids) {
+                            if (mounted) {
+                              setState(() {
+                                _selectionCtrl.updateSelection(ids);
+                              });
+                            }
+                          },
+                          onImageClick: (imageUrl) {
+                            _showImageViewer(context, imageUrl);
+                          },
+                        ),
+                        isSelectionMode: _selectionCtrl.isSelectionMode,
+                        searchQuery: widget.search.searchQuery,
+                        searchCurrentIndex: widget.search.searchCurrentIndex,
+                      ),
                     ),
-                    editActions: EditActionsCallbacks(
-                      onEditSave: (id, text) async {
-                        final idx = widget.state.messages.indexWhere(
-                          (m) => m.id == id,
-                        );
-                        if (idx >= 0 && text.isNotEmpty) {
-                          await ref
-                              .read(chatProvider(widget.charId).notifier)
-                              .editMessage(
-                                idx,
-                                text,
-                                tagStart: '<think>',
-                                tagEnd: '</think>',
-                              );
-                        }
-                        if (!mounted ||
-                            ref.read(editingMessageIdProvider(widget.charId)) !=
-                                id) {
-                          return;
-                        }
-                        ref
-                                .read(
-                                  editingMessageIdProvider(
-                                    widget.charId,
-                                  ).notifier,
-                                )
-                                .state =
-                            null;
-                      },
-                      onEditCancel: (id) {
-                        ref
-                                .read(
-                                  editingMessageIdProvider(
-                                    widget.charId,
-                                  ).notifier,
-                                )
-                                .state =
-                            null;
-                      },
-                      onEditFocusChange: (id, focused) {
-                        if (!focused) return;
-                        final activeEditingId = ref.read(
-                          editingMessageIdProvider(widget.charId),
-                        );
-                        if (activeEditingId == id &&
-                            widget.drawerCtrl.inputFocus.hasFocus) {
-                          widget.drawerCtrl.inputFocus.unfocus();
-                        }
-                      },
-                    ),
-                    imageGenActions: ImageGenCallbacks(
-                      onImgRetry: (instruction, messageId) {
-                        ref
-                            .read(chatProvider(widget.charId).notifier)
-                            .retryImageGenerationForMessage(messageId);
-                      },
-                      onImgFind: (instruction, messageId) {
-                        ref
-                            .read(chatProvider(widget.charId).notifier)
-                            .findImageOnDisk(messageId, instruction);
-                      },
-                      onImgRegen: (instruction, messageId) {
-                        ref
-                            .read(chatProvider(widget.charId).notifier)
-                            .retryImageGenerationForMessage(messageId);
-                      },
-                      onImgCancel: () {
-                        ref
-                            .read(chatProvider(widget.charId).notifier)
-                            .cancelImageGeneration();
-                      },
-                      onImgDownload: _downloadImage,
-                      onImgOptions: _showImageOptionsSheet,
-                    ),
-                    scrollActions: ScrollCallbacks(
-                      onHeaderScroll: (hidden) {
-                        if (widget.onScrollDirection == null) return;
-                        widget.onScrollDirection!(
-                          hidden
-                              ? ScrollDirection.reverse
-                              : ScrollDirection.forward,
-                        );
-                      },
-                      onScrollToBottomVisibility: (visible) {
-                        if (!mounted || _showScrollToBottom == visible) return;
-                        setState(() => _showScrollToBottom = visible);
-                      },
-                    ),
-                    miscActions: MiscCallbacks(
-                      onStop: () {
-                        final notifier = ref.read(
-                          chatProvider(widget.charId).notifier,
-                        );
-                        if (widget.state.isGeneratingImage &&
-                            !widget.state.isGenerating) {
-                          notifier.cancelImageGeneration();
-                        } else {
-                          notifier.abortGeneration();
-                        }
-                      },
-                      onSelectionAction: (action, text) {
-                        if (action == 'copy') {
-                          Clipboard.setData(ClipboardData(text: text));
-                        }
-                      },
-                      onSelectionChange: (ids) {
-                        if (mounted) {
-                          setState(() {
-                            _selectionCtrl.updateSelection(ids);
-                          });
-                        }
-                      },
-                      onImageClick: (imageUrl) {
-                        _showImageViewer(context, imageUrl);
-                      },
-                    ),
-                    isSelectionMode: _selectionCtrl.isSelectionMode,
-                    searchQuery: widget.search.searchQuery,
-                    searchCurrentIndex: widget.search.searchCurrentIndex,
                   ),
                 ),
               ),

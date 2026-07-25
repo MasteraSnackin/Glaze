@@ -640,6 +640,58 @@ void main() {
     });
   });
 
+  // ─── bottom inset split (soft keyboard) ───────────────────────────────────
+  group('bottom inset vs. viewport shrink (chat_bridge_controller.js)', () {
+    test('padding is the inset minus the measured viewport shrink', () {
+      expect(
+        bridgeControllerJs,
+        contains('this._bottomInsetPx - this._viewportShrinkPx()'),
+        reason:
+            'Whether the soft keyboard shrinks the WebView viewport or overlays '
+            'it is embedder-specific. Turning the whole Flutter inset into '
+            'padding without subtracting the measured shrink double-counts the '
+            'keyboard and lets the chat scroll a keyboard-height above the '
+            'input bar.',
+      );
+    });
+
+    test('the shrink is measured against the Flutter-reported box height', () {
+      expect(
+        bridgeControllerJs,
+        contains('full - this.virtualList.container.clientHeight'),
+        reason:
+            'The shrink must be measured, not assumed — that is what keeps the '
+            'same code correct on embedders that resize the WebView and on '
+            'those that do not.',
+      );
+    });
+
+    test('a viewport resize re-runs the reconciliation', () {
+      expect(
+        bridgeControllerJs,
+        contains('_setupViewportShrinkListener()'),
+        reason:
+            'The keyboard can resize the WebView without any Flutter push, so '
+            'the padding split has to be recomputed on viewport changes too.',
+      );
+      expect(
+        bridgeControllerJs,
+        contains('new ResizeObserver(onViewportChange)'),
+      );
+    });
+
+    test('scroll compensation is driven by the inset, not the padding', () {
+      expect(
+        bridgeControllerJs,
+        contains('container.scrollTop += insetDiff'),
+        reason:
+            'The content must follow the input bar by the full inset delta '
+            'regardless of how the inset was split between padding and shrink, '
+            'or the list stops tracking the keyboard.',
+      );
+    });
+  });
+
   // ─── edit textarea CSS (styles.css) ───────────────────────────────────────
   group('edit textarea CSS (styles.css)', () {
     test('overscroll-behavior:contain prevents scroll bleed to parent', () {

@@ -294,8 +294,15 @@ class ChatWebViewSyncDispatcher {
     required ChatWebViewWidgetFields old,
     required ChatWebViewWidgetFields current,
   }) {
-    if (current.bottomInset != old.bottomInset) {
-      bridge.setBottomPadding(current.bottomInset);
+    // The viewport height is part of the same push: the page subtracts the
+    // viewport shrink it measures against it, so a stale height would mis-split
+    // the inset (see LayoutBridgeCommands.setBottomPadding).
+    if (current.bottomInset != old.bottomInset ||
+        current.viewportHeight != old.viewportHeight) {
+      bridge.setBottomPadding(
+        current.bottomInset,
+        viewportHeight: current.viewportHeight,
+      );
     }
     if (current.topInset != old.topInset) {
       bridge.setTopPadding(current.topInset);
@@ -444,6 +451,7 @@ class ChatWebViewWidgetFields {
     required this.bgNoiseOpacity,
     required this.bgNoiseIntensity,
     required this.bottomInset,
+    this.viewportHeight = 0,
     required this.topInset,
     this.blurRegions = const [],
     required this.searchQuery,
@@ -497,6 +505,11 @@ class ChatWebViewWidgetFields {
   final double bgNoiseOpacity;
   final double bgNoiseIntensity;
   final double bottomInset;
+
+  /// Height of the WebView box. Pushed with [bottomInset] so the page can
+  /// subtract the part of the inset its own viewport already absorbed when the
+  /// soft keyboard shrank it.
+  final double viewportHeight;
   final double topInset;
 
   /// Rects of Flutter glass overlays (header, input pill, buttons) mirrored
