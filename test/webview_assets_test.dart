@@ -680,6 +680,31 @@ void main() {
       );
     });
 
+    test('padding reductions are deferred, growth is immediate', () {
+      expect(
+        bridgeControllerJs,
+        contains('_scheduleShrink(container)'),
+        reason:
+            'Shortening the scroll range under a list parked at the bottom '
+            'makes the engine clamp scrollTop itself — an instant jump the '
+            'glide cannot smooth. Reductions must wait for the viewport and '
+            "Flutter's inset to agree; growth is always safe.",
+      );
+    });
+
+    test('the resting offset is derived from the full box height', () {
+      expect(
+        bridgeControllerJs,
+        contains('contentHeight + this._bottomInsetPx - full'),
+        reason:
+            'At rest the padding is `inset - shrink` and the viewport is '
+            '`full - shrink`, so the shrink cancels: the resting offset is the '
+            'same number whether the keyboard already resized the viewport or '
+            'not. That is what lets the glide aim at the final position from '
+            'the first frame instead of chasing a moving target.',
+      );
+    });
+
     test('scroll compensation is driven by the inset, not the padding', () {
       expect(
         bridgeControllerJs,
