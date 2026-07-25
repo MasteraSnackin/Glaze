@@ -51,7 +51,16 @@ export class Bridge {
       () => this.isGenerating,
       () => this.disableSwipeRegeneration,
     );
+    // Bottom-inset reconciliation state — see setBottomPadding().
+    // `_bottomInsetPx` is the inset Flutter measured from the bottom edge of the
+    // full-size WebView box (input bar + keyboard/drawer + safe area);
+    // `_viewportFullH` is that box's height in Flutter logical px. Comparing the
+    // latter against the live container height reveals how much of the inset the
+    // embedder already removed by shrinking the WebView's own viewport.
+    this._bottomInsetPx = 0;
+    this._viewportFullH = 0;
     this._setupScrollListener();
+    this._setupViewportShrinkListener();
     this._setupInteractionListener();
     this._setupGlazeRequestRelay();
     this._setupImageClickForward();
@@ -314,6 +323,44 @@ export class Bridge {
     }, { passive: true });
 
     requestAnimationFrame(emitScrollToBottomVisibility);
+  }
+
+  /* ---------- Viewport shrink (soft keyboard) ---------- */
+  // Whether the soft keyboard shrinks the WebView's own viewport or merely
+  // overlays it is decided by the embedder (Android window resize mode +
+  // edge-to-edge, iOS WKWebView, desktop), and Flutter cannot tell which
+  // happened — every earlier attempt to hard-code one answer broke the other
+  // case. So the container measures it: `#chat-container` is `height: 100vh`,
+  // and any shrink of the visible viewport shows up in its clientHeight.
+  // Reconcile whenever that can change; the padding is then derived from the
+  // difference, never assumed. See setBottomPadding() / _viewportShrinkPx().
+  _setupViewportShrinkListener() {
+    const container = this.virtualList.container;
+    const onViewportChange = () => this._reconcileBottomInset();
+    if (typeof ResizeObserver === 'function') {
+      this._viewportObserver = new ResizeObserver(onViewportChange);
+      // Border-box, so our own paddingBottom writes (which shrink the content
+      // box) don't re-enter this handler on every inset change.
+      this._viewportObserver.observe(container, { box: 'border-box' });
+    }
+    window.addEventListener('resize', onViewportChange);
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', onViewportChange);
+    }
+  }
+
+  // How many px of Flutter's bottom inset the WebView viewport already ate by
+  // shrinking. 0 when the viewport stays full-screen and the keyboard simply
+  // overlays it (then the whole inset must become real padding).
+  _viewportShrinkPx() {
+    const full = this._viewportFullH || 0;
+    if (full <= 0) return 0;
+    const shrink = full - this.virtualList.container.clientHeight;
+    // CSS px and Flutter logical px agree (initial-scale=1), but rounding on
+    // either side can leave a pixel or two of slack — ignore that as noise so a
+    // non-shrinking embedder never loses real padding to it.
+    if (shrink < 8) return 0;
+    return Math.min(shrink, this._bottomInsetPx);
   }
 
   /* ---------- Interaction dispatch ---------- */
@@ -758,22 +805,46 @@ export class Bridge {
     toggleClass('hide-char-name', theme['show-char-name'] === '0');
   }
 
-  setBottomPadding(px) {
-    const container = document.getElementById('chat-container') || document.body;
-    const prevPadding = parseFloat(container.style.paddingBottom) || 0;
-    const paddingDiff = px - prevPadding;
-    if (Math.abs(paddingDiff) < 0.1) return;
+  // [px] is the bottom inset Flutter measured from the bottom edge of the
+  // full-size WebView box: input bar + keyboard/drawer + leftover safe area.
+  // [viewportHeight] is that box's height (Flutter logical px), which lets the
+  // page tell how much of the inset its own viewport already absorbed — see
+  // _setupViewportShrinkListener. Pass 0/undefined and the whole inset becomes
+  // padding, i.e. the behaviour of the single-argument version.
+  //
+  // The keyboard moves the content by exactly [px]'s delta either way; only how
+  // much of it has to be *padding* differs, so the scroll compensation below is
+  // driven by the inset and stays independent of the split.
+  setBottomPadding(px, viewportHeight) {
+    const next = Number(px) || 0;
+    const insetDiff = next - this._bottomInsetPx;
+    this._bottomInsetPx = next;
+    if (viewportHeight != null) this._viewportFullH = Number(viewportHeight) || 0;
+    this._reconcileBottomInset(insetDiff);
+  }
 
-    // Ported from Vue ChatView.updateContentPadding(). The chat container is a
-    // FIXED full-screen viewport (`resizeToAvoidBottomInset: false`, the keyboard
-    // overlays it) so its clientHeight never changes — Vue's `containerHeightDiff`
-    // term is 0 here and the scroll adjustment collapses to the padding delta.
-    // We shift scrollTop by that delta so the content the user is reading stays
-    // anchored to the rising/falling input bar when the keyboard / magic drawer /
-    // input height changes — and so more-recent messages slide up into view above
-    // the keyboard. This must happen whether or not the chat is parked at the
+  // Applies `inset - viewport shrink` as the container's real padding and keeps
+  // the reading position anchored.
+  //
+  // [insetDiff] is how much Flutter's inset just moved (0 when a viewport resize
+  // triggered this instead). Only the inset drives the scroll: a pure shrink
+  // needs no scroll adjustment, because dropping the same number of px from the
+  // padding leaves scrollHeight - clientHeight — and therefore the offset that
+  // parks the newest message on the input bar — exactly where it was.
+  _reconcileBottomInset(insetDiff = 0) {
+    const container = document.getElementById('chat-container') || document.body;
+    const target = Math.max(0, this._bottomInsetPx - this._viewportShrinkPx());
+    const prevPadding = parseFloat(container.style.paddingBottom) || 0;
+    const paddingChanged = Math.abs(target - prevPadding) >= 0.1;
+    if (!paddingChanged && Math.abs(insetDiff) < 0.1) return;
+
+    // Ported from Vue ChatView.updateContentPadding(). We shift scrollTop by the
+    // inset delta so the content the user is reading stays anchored to the
+    // rising/falling input bar when the keyboard / magic drawer / input height
+    // changes — and so more-recent messages slide up into view above the
+    // keyboard. This must happen whether or not the chat is parked at the
     // bottom; the at-bottom branch is just the numerically-clean equivalent of
-    // `+= paddingDiff` that avoids float drift at the very end of the list.
+    // `+= insetDiff` that avoids float drift at the very end of the list.
     const wasAtBottom =
       container.scrollHeight - container.scrollTop - container.clientHeight < 5;
 
@@ -788,14 +859,14 @@ export class Bridge {
       }, 120);
     }
 
-    container.style.paddingBottom = px + 'px';
+    if (paddingChanged) container.style.paddingBottom = target + 'px';
 
     // Reading scrollHeight forces a synchronous layout flush so the new padding
     // is reflected before we adjust the offset.
     if (wasAtBottom) {
       container.scrollTop = container.scrollHeight - container.clientHeight;
-    } else {
-      container.scrollTop += paddingDiff;
+    } else if (insetDiff !== 0) {
+      container.scrollTop += insetDiff;
     }
 
     requestAnimationFrame(() => {
