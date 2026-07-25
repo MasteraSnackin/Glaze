@@ -845,7 +845,7 @@ export class Bridge {
   // parks the newest message on the input bar — exactly where it was.
   _reconcileBottomInset(insetDiff = 0) {
     const container = document.getElementById('chat-container') || document.body;
-    const target = Math.max(0, this._bottomInsetPx - this._viewportShrinkPx());
+    const target = this._targetBottomPadding();
     const prevPadding = parseFloat(container.style.paddingBottom) || 0;
     const paddingChanged = Math.abs(target - prevPadding) >= 0.1;
     if (!paddingChanged && Math.abs(insetDiff) < 0.1) return;
@@ -875,18 +875,11 @@ export class Bridge {
     if (vl) vl.isProgrammaticScrolling = true;
     clearTimeout(this._bottomPadUnlockTimer);
 
-    // The padding itself is applied in ONE step, never tweened: it relayouts the
-    // whole message list, so animating it would relayout every frame — the jank
-    // the Flutter side already avoids by pushing only end values. The visible
-    // smoothness comes from gliding scrollTop instead, which is a compositor
-    // scroll, and the padding it reveals sits under the keyboard / input bar
-    // where it cannot be seen mid-transition.
-    if (paddingChanged) container.style.paddingBottom = target + 'px';
-
-    // Reading scrollHeight forces a synchronous layout flush so the new padding
-    // is reflected before we compute the offset.
+    // Content height is padding-independent, so it survives the padding moves
+    // below and can be measured once, here.
+    const contentHeight = container.scrollHeight - prevPadding;
     const targetScrollTop = wasAtBottom
-      ? container.scrollHeight - container.clientHeight
+      ? this._restingScrollTop(container, contentHeight)
       : container.scrollTop + insetDiff;
 
     // The first application (chat just opened) must land instantly — gliding
@@ -895,12 +888,77 @@ export class Bridge {
       this._bottomInsetApplied = true;
       cancelAnimationFrame(this._repinRaf);
       this._repinAnimating = false;
+      container.style.paddingBottom = target + 'px';
       container.scrollTop = targetScrollTop;
       this._finishRepin(container);
       return;
     }
 
+    // Grow the padding now; defer any reduction (see _scheduleShrink). Growing
+    // early is always free — a longer scroll range can never clamp.
+    //
+    // The padding is applied in ONE step either way, never tweened: it relayouts
+    // the whole message list, so animating it would relayout every frame — the
+    // jank the Flutter side already avoids by pushing only end values. The
+    // visible smoothness comes from gliding scrollTop, a compositor scroll, and
+    // the padding it reveals sits under the keyboard / input bar where it cannot
+    // be seen mid-transition.
+    if (target > prevPadding) {
+      container.style.paddingBottom = target + 'px';
+    } else if (paddingChanged) {
+      this._scheduleShrink(container);
+    }
+
     this._glideScrollTo(container, targetScrollTop);
+  }
+
+  // A padding REDUCTION waits until both sides of the transition have stopped
+  // moving. Shortening the scroll range under a list parked at the bottom makes
+  // the engine clamp scrollTop *itself*, instantly — the un-animatable jump the
+  // glide exists to avoid — and mid-transition the two sides disagree about how
+  // much padding is right: Flutter predicts the end inset the moment the
+  // keyboard starts falling, while the viewport is still shrunk. Applying the
+  // reduction from that inconsistent pair left no slack for the viewport growing
+  // back, which is what made closing the keyboard at the end of a chat jump.
+  //
+  // Once everything is settled the reduction is clamp-free by construction: at
+  // the resting offset the shortened range ends exactly where the list already
+  // is (see _restingScrollTop).
+  _scheduleShrink(container) {
+    clearTimeout(this._paddingShrinkTimer);
+    this._paddingShrinkTimer = setTimeout(() => {
+      // Still gliding — the transition has not settled, try again after it.
+      if (this._repinAnimating) {
+        this._scheduleShrink(container);
+        return;
+      }
+      const target = this._targetBottomPadding();
+      const applied = parseFloat(container.style.paddingBottom) || 0;
+      if (target >= applied - 0.1) return;
+      container.style.paddingBottom = target + 'px';
+    }, 260);
+  }
+
+  // Padding = the part of Flutter's inset the WebView viewport did not already
+  // absorb by shrinking. See _setupViewportShrinkListener.
+  _targetBottomPadding() {
+    return Math.max(0, this._bottomInsetPx - this._viewportShrinkPx());
+  }
+
+  // The offset that parks the newest message on the input bar, once everything
+  // has settled. Derived from the FULL box height instead of the live viewport
+  // on purpose: at rest the padding is `inset - shrink` and the viewport is
+  // `full - shrink`, so the shrink cancels out and the resting offset is just
+  //     contentHeight + inset - full
+  // — the same number whether the keyboard has already resized the viewport,
+  // hasn't yet, or never will. That is what lets the glide aim at the final
+  // position from the first frame of a transition instead of chasing a target
+  // that moves again when the resize lands.
+  _restingScrollTop(container, contentHeight) {
+    const full = this._viewportFullH || 0;
+    // No box height yet — fall back to whatever the current layout reports.
+    if (full <= 0) return container.scrollHeight - container.clientHeight;
+    return Math.max(0, contentHeight + this._bottomInsetPx - full);
   }
 
   // Eases scrollTop to [target] over one keyboard beat instead of snapping it,
@@ -938,6 +996,15 @@ export class Bridge {
   }
 
   _finishRepin(container) {
+    // The list has landed; let any held-back reduction settle behind it.
+    const target = this._targetBottomPadding();
+    const applied = parseFloat(container.style.paddingBottom) || 0;
+    if (target > applied) {
+      container.style.paddingBottom = target + 'px';
+    } else if (target < applied - 0.1) {
+      this._scheduleShrink(container);
+    }
+
     const vl = this.virtualList;
     clearTimeout(this._bottomPadUnlockTimer);
     this._bottomPadUnlockTimer = setTimeout(() => {
