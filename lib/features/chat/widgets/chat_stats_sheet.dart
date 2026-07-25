@@ -6,10 +6,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/state/character_provider.dart';
 import '../../../core/utils/platform_paths.dart';
-import '../../../core/state/chat_session_ops_provider.dart';
+import '../../../core/state/db_provider.dart';
 import '../../../core/services/model_usage_service.dart';
 import '../../../core/state/shared_prefs_provider.dart';
 import '../../../core/models/character.dart';
+import '../../../core/models/chat_message.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/utils/time_formatter.dart';
 import '../../../shared/widgets/rolling_number.dart';
@@ -71,8 +72,11 @@ class ChatStatsSheet extends ConsumerStatefulWidget {
 class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
   String _currentTab = 'chat';
   String? _selectedCharId;
+  String? _selectedSessionId;
   List<Character> _allCharacters = [];
+  List<ChatSession> _allSessions = [];
   bool _showCharDropdown = false;
+  bool _showChatDropdown = false;
   bool _loading = true;
 
   _StatsData _chatStats = const _StatsData();
@@ -102,11 +106,41 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
 
   Future<void> _initData() async {
     _allCharacters = ref.read(charactersProvider).value ?? [];
-    await _loadTopModels();
+    // Read sessions straight from the DB rather than the cached provider: the
+    // cache is not invalidated on message edits/deletions (counts would lag),
+    // and a plain repo future reliably completes so the initial compute — and
+    // thus the General tab — never gets stuck behind an unresolved provider.
+    _allSessions = await ref.read(chatRepoProvider).getAllSessions();
+    if (!mounted) return;
+
+    // Order by most-recent interaction (message timestamps, branch/creation and
+    // updatedAt all considered — same signal that sorts the session list) so the
+    // pickers default to, and list, the last chat/character the user engaged
+    // with rather than whatever the DB happened to return first.
+    _allSessions.sort((a, b) => b.lastActivityMs.compareTo(a.lastActivityMs));
+
+    // Global entry point (opened from Tools with no character/chat context):
+    // seed defaults from the last-interacted chat so every tab shows data
+    // immediately instead of waiting for the user to pick a character/chat.
+    if (_selectedCharId == null || _selectedCharId!.isEmpty) {
+      _selectedCharId = _allSessions.isNotEmpty
+          ? _allSessions.first.characterId
+          : (_allCharacters.isNotEmpty ? _allCharacters.first.id : null);
+    }
+    String? currentSessionId;
+    if (widget.initialCharId.isNotEmpty) {
+      currentSessionId =
+          ref.read(chatProvider(widget.initialCharId)).value?.session?.id;
+    }
+    _selectedSessionId = currentSessionId ??
+        (_allSessions.isNotEmpty ? _allSessions.first.id : null);
+
     await _calculateStats();
     if (mounted) {
       setState(() => _loading = false);
     }
+    // Best-effort: never let a slow/failed model-usage read block the stats.
+    await _loadTopModels();
   }
 
   Future<void> _loadTopModels() async {
@@ -121,6 +155,14 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
     if (!mounted) return;
     final prefs = await ref.read(sharedPreferencesProvider.future);
 
+    // Time is tracked per character (`chat_time_<charId>`), the finest
+    // granularity available. The Chat tab shows the time for the character
+    // that owns the selected chat.
+    final chatCharId = _allSessions
+        .where((s) => s.id == _selectedSessionId)
+        .firstOrNull
+        ?.characterId;
+
     int chatTime = 0;
     int charTime = 0;
     int generalTime = 0;
@@ -130,13 +172,12 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
         final t = prefs.getInt(key) ?? 0;
         generalTime += t;
         final cid = key.replaceFirst('chat_time_', '');
-        if (cid == _selectedCharId) {
-          charTime += t;
-          chatTime += t; 
-        }
+        if (cid == _selectedCharId) charTime += t;
+        if (cid == chatCharId) chatTime += t;
       }
     }
 
+    if (!mounted) return;
     setState(() {
       _generalStats = _generalStats.copyWith(timeSpent: generalTime);
       _charStats = _charStats.copyWith(timeSpent: charTime);
@@ -145,10 +186,7 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
   }
 
   Future<void> _calculateStats() async {
-    final allSessions = ref.read(chatSessionOpsProvider).value ?? [];
-    final currentSession =
-        ref.read(chatProvider(widget.initialCharId)).value?.session;
-    final currentSessionId = currentSession?.id;
+    final selectedSessionId = _selectedSessionId;
 
     int chatMsg = 0, chatTok = 0, chatChar = 0, chatRegen = 0, chatDel = 0;
     int charMsg = 0, charTok = 0, charChar = 0, charRegen = 0, charDel = 0;
@@ -156,15 +194,22 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
 
     int? chatFirstMsg, charFirstMsg, genFirstMsg;
 
-    for (final session in allSessions) {
+    for (final session in _allSessions) {
       final isCurrentChar = session.characterId == _selectedCharId;
-      final isCurrentChat = isCurrentChar && session.id == currentSessionId;
+      final isCurrentChat = session.id == selectedSessionId;
+
+      // Deleted messages are removed from the session, so they can't be counted
+      // from the live message list. Read the persisted per-session counter that
+      // `ChatMessageService.deleteMessages` maintains instead.
+      final sessionDeleted = session.deletedMessageCount;
+      genDel += sessionDeleted;
+      if (isCurrentChar) charDel += sessionDeleted;
+      if (isCurrentChat) chatDel += sessionDeleted;
 
       for (final msg in session.messages) {
         final int tokens = (msg.tokens?.toInt()) ?? (msg.content.length ~/ 4);
         final int chars = msg.content.length.toInt();
         final int regens = msg.swipes.length > 1 ? (msg.swipes.length - 1).toInt() : 0;
-        final isDeleted = msg.isHidden;
         final ts = msg.timestamp;
 
         // General
@@ -172,7 +217,6 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
         genTok += tokens;
         genChar += chars;
         genRegen += regens;
-        if (isDeleted) genDel++;
         if (ts != null && (genFirstMsg == null || ts < genFirstMsg)) {
           genFirstMsg = ts;
         }
@@ -183,7 +227,6 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
           charTok += tokens;
           charChar += chars;
           charRegen += regens;
-          if (isDeleted) charDel++;
           if (ts != null && (charFirstMsg == null || ts < charFirstMsg)) {
             charFirstMsg = ts;
           }
@@ -195,7 +238,6 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
           chatTok += tokens;
           chatChar += chars;
           chatRegen += regens;
-          if (isDeleted) chatDel++;
           if (ts != null && (chatFirstMsg == null || ts < chatFirstMsg)) {
             chatFirstMsg = ts;
           }
@@ -551,6 +593,212 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
     );
   }
 
+  /// Human label for a chat/session in the chat picker: "<character> · <chat>".
+  String _sessionLabel(ChatSession s) {
+    final char = _allCharacters.where((c) => c.id == s.characterId).firstOrNull;
+    final charName = char?.name ?? s.characterId;
+    final name = s.sessionVars['sessionName']?.trim();
+    final chatName = (name != null && name.isNotEmpty)
+        ? name
+        : 'Chat #${s.sessionIndex + 1}';
+    return '$charName · $chatName';
+  }
+
+  Widget _buildChatPicker() {
+    final selected = _allSessions
+        .where((s) => s.id == _selectedSessionId)
+        .firstOrNull;
+    final selectedChar = selected == null
+        ? null
+        : _allCharacters
+              .where((c) => c.id == selected.characterId)
+              .firstOrNull;
+    final label = selected == null ? '—' : _sessionLabel(selected);
+    final charColor = selectedChar?.color ?? '#66ccff';
+    final parsedColor = Color(int.parse(charColor.replaceFirst('#', '0xFF')));
+    final selectedAvatar = selectedChar?.avatarPath;
+    final selectedName = selectedChar?.name ?? '?';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        GestureDetector(
+          onTap: () => setState(() => _showChatDropdown = !_showChatDropdown),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.05),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: parsedColor,
+                    shape: BoxShape.circle,
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: selectedAvatar != null
+                      ? Image.file(
+                          File(resolveGlazeFilePath(selectedAvatar)!),
+                          fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) =>
+                              _buildInitials(selectedName),
+                        )
+                      : const Icon(
+                          Icons.chat_bubble,
+                          color: Colors.white,
+                          size: 18,
+                        ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: context.cs.onSurface,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                Icon(
+                  _showChatDropdown
+                      ? Icons.keyboard_arrow_up
+                      : Icons.keyboard_arrow_down,
+                  color: context.cs.onSurfaceVariant,
+                ),
+              ],
+            ),
+          ),
+        ),
+        AnimatedCrossFade(
+          firstChild: const SizedBox(height: 0, width: double.infinity),
+          secondChild: Container(
+            margin: const EdgeInsets.only(top: 8),
+            constraints: const BoxConstraints(maxHeight: 240),
+            decoration: BoxDecoration(
+              color: const Color(0xFF282828).withValues(alpha: 0.9),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(14),
+              child: _allSessions.isEmpty
+                  ? Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 14,
+                      ),
+                      child: Text(
+                        'No chats yet',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: context.cs.onSurfaceVariant,
+                        ),
+                      ),
+                    )
+                  : ListView.separated(
+                      shrinkWrap: true,
+                      padding: EdgeInsets.zero,
+                      itemCount: _allSessions.length,
+                      separatorBuilder: (context, index) => Container(
+                        height: 0.5,
+                        color: Colors.white.withValues(alpha: 0.06),
+                      ),
+                      itemBuilder: (context, index) {
+                        final session = _allSessions[index];
+                        final active = session.id == _selectedSessionId;
+                        final char = _allCharacters
+                            .where((c) => c.id == session.characterId)
+                            .firstOrNull;
+                        final avatarPath = char?.avatarPath;
+                        final charName = char?.name ?? '?';
+                        final cColor = Color(
+                          int.parse(
+                            (char?.color ?? '#66ccff').replaceFirst(
+                              '#',
+                              '0xFF',
+                            ),
+                          ),
+                        );
+                        return InkWell(
+                          onTap: () {
+                            setState(() {
+                              _selectedSessionId = session.id;
+                              _showChatDropdown = false;
+                            });
+                            unawaited(_calculateStats());
+                          },
+                          child: Container(
+                            color: active
+                                ? context.cs.primary.withValues(alpha: 0.08)
+                                : Colors.transparent,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 10,
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 32,
+                                  height: 32,
+                                  decoration: BoxDecoration(
+                                    color: cColor,
+                                    shape: BoxShape.circle,
+                                  ),
+                                  clipBehavior: Clip.antiAlias,
+                                  child: avatarPath != null
+                                      ? Image.file(
+                                          File(
+                                            resolveGlazeFilePath(avatarPath)!,
+                                          ),
+                                          fit: BoxFit.cover,
+                                          errorBuilder:
+                                              (context, error, stackTrace) =>
+                                                  _buildInitials(charName),
+                                        )
+                                      : _buildInitials(charName),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    _sessionLabel(session),
+                                    style: TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w500,
+                                      color: context.cs.onSurface,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                if (active)
+                                  Icon(
+                                    Icons.check,
+                                    color: context.cs.primary,
+                                    size: 20,
+                                  ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ),
+          crossFadeState: _showChatDropdown
+              ? CrossFadeState.showSecond
+              : CrossFadeState.showFirst,
+          duration: const Duration(milliseconds: 200),
+        ),
+      ],
+    );
+  }
+
   Widget _buildCharPicker() {
     final selectedChar = _allCharacters
         .where((c) => c.id == _selectedCharId)
@@ -637,16 +885,12 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
                   final cColor = Color(
                       int.parse((char.color ?? '#66ccff').replaceFirst('#', '0xFF')));
                   return InkWell(
-                    onTap: () async {
+                    onTap: () {
                       setState(() {
                         _selectedCharId = char.id;
                         _showCharDropdown = false;
-                        _loading = true;
                       });
-                      await _calculateStats();
-                      if (mounted) {
-                        setState(() => _loading = false);
-                      }
+                      unawaited(_calculateStats());
                     },
                     child: Container(
                       color: active
@@ -763,6 +1007,10 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
             MediaQuery.of(context).padding.bottom + 24,
           ),
           children: [
+            if (_currentTab == 'chat') ...[
+              _buildChatPicker(),
+              const SizedBox(height: 12),
+            ],
             if (_currentTab == 'char') ...[
               _buildCharPicker(),
               const SizedBox(height: 12),
