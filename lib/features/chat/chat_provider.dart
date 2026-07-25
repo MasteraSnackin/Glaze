@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 
@@ -348,6 +349,28 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     final acceptedAssistant = current.messages.reversed
         .where((message) => message.role == 'assistant')
         .firstOrNull;
+
+    // Show the user bubble and the typing indicator on the same frame as the
+    // tap. Persisting the session re-encodes the whole message list on the UI
+    // isolate and the ledger commit adds more round trips, so publishing the
+    // state only after those writes made both appear a beat late on long
+    // chats. The writes below just reconcile this optimistic session with the
+    // persisted one.
+    final optimisticSession = current.session!.copyWith(
+      messages: [...current.messages, userMsg],
+      draft: '',
+      updatedAt: currentTimestampSeconds(),
+    );
+    state = AsyncData(
+      current.copyWith(
+        session: optimisticSession,
+        isGenerating: true,
+        generationStartTime: DateTime.now(),
+      ),
+    );
+    await _yieldToFrame();
+    if (!ref.mounted) return;
+
     final updatedSession = await ref
         .read(chatRepoProvider)
         .appendUserMessageAndClearDraft(
@@ -355,7 +378,12 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
           message: userMsg,
           updatedAt: currentTimestampSeconds(),
         );
-    if (updatedSession == null) return;
+    if (!ref.mounted) return;
+    if (updatedSession == null) {
+      // The session row is gone — roll the optimistic append back.
+      state = AsyncData(current);
+      return;
+    }
     // Commit the exact visible green/blue swipe, never whichever Ledger call
     // happened to finish most recently.
     final snapshotRepo = ref.read(trackerSnapshotRepoProvider);
@@ -386,13 +414,15 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     if (!ref.mounted) return;
     ChatSessionService.updateCache(updatedSession);
     _invalidateHistory();
-    state = AsyncData(
-      current.copyWith(
-        session: updatedSession,
-        isGenerating: true,
-        generationStartTime: DateTime.now(),
-      ),
-    );
+    final afterWrite = state.value;
+    // Stop was pressed (or the session changed) while the writes were in
+    // flight — the user message is persisted, but this generation is off.
+    if (afterWrite == null ||
+        !afterWrite.isGenerating ||
+        afterWrite.session?.id != updatedSession.id) {
+      return;
+    }
+    state = AsyncData(afterWrite.copyWith(session: updatedSession));
 
     // Dispatch `afterUser` extension blocks. This is fire-and-forget — the
     // generation pipeline starts immediately, the post-gen service runs
@@ -433,6 +463,28 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         );
       }
     }
+  }
+
+  /// Waits for the pending frame to be built before returning, so an
+  /// optimistic state update is actually pushed to the WebView bridge before
+  /// the caller starts heavy synchronous work (session JSON encode/decode) on
+  /// the UI isolate. Without this the update is scheduled but the frame that
+  /// carries it can be starved until the write finishes — exactly the delay
+  /// the optimistic update exists to remove. The timeout keeps the send path
+  /// alive if no frame is produced (e.g. the app is backgrounded).
+  Future<void> _yieldToFrame() async {
+    Future<void>? endOfFrame;
+    try {
+      endOfFrame = SchedulerBinding.instance.endOfFrame;
+    } catch (e) {
+      // No binding (headless / unit tests) — there is no frame to wait on.
+      debugPrint('[ChatNotifier] frame yield skipped: $e');
+    }
+    if (endOfFrame == null) return;
+    await endOfFrame.timeout(
+      const Duration(milliseconds: 200),
+      onTimeout: () {},
+    );
   }
 
   Future<void> _dispatchAfterUserBlocks(ChatSession session) async {
