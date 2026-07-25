@@ -294,15 +294,8 @@ class ChatWebViewSyncDispatcher {
     required ChatWebViewWidgetFields old,
     required ChatWebViewWidgetFields current,
   }) {
-    // The keyboard inset never changes the padding itself, but it must still be
-    // pushed: it drives the JS-side scroll compensation that makes the list
-    // follow the keyboard (see LayoutBridgeCommands.setBottomPadding).
-    if (current.bottomInset != old.bottomInset ||
-        current.keyboardInset != old.keyboardInset) {
-      bridge.setBottomPadding(
-        current.bottomInset,
-        keyboardPx: current.keyboardInset,
-      );
+    if (current.bottomInset != old.bottomInset) {
+      bridge.setBottomPadding(current.bottomInset);
     }
     if (current.topInset != old.topInset) {
       bridge.setTopPadding(current.topInset);
@@ -451,7 +444,6 @@ class ChatWebViewWidgetFields {
     required this.bgNoiseOpacity,
     required this.bgNoiseIntensity,
     required this.bottomInset,
-    this.keyboardInset = 0,
     required this.topInset,
     this.blurRegions = const [],
     required this.searchQuery,
@@ -505,10 +497,6 @@ class ChatWebViewWidgetFields {
   final double bgNoiseOpacity;
   final double bgNoiseIntensity;
   final double bottomInset;
-
-  /// Soft-keyboard inset. Not part of the WebView padding (the viewport already
-  /// accounts for it); pushed only so the JS side can compensate the scroll.
-  final double keyboardInset;
   final double topInset;
 
   /// Rects of Flutter glass overlays (header, input pill, buttons) mirrored

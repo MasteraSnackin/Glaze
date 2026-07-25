@@ -499,9 +499,6 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
   /// Cached so it can be re-asserted on app resume — see
   /// [didChangeAppLifecycleState].
   double _lastMessageListBottom = 0;
-  /// Keyboard inset last pushed to the WebView, replayed alongside
-  /// [_lastMessageListBottom] on resume so the resync doesn't zero it.
-  double _lastKeyboardInset = 0;
 
   /// Measured height of the floating [MemoryActivityCard] (0 when hidden) so
   /// the message list reserves room at the *top* for it — otherwise the card
@@ -942,7 +939,6 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
       unawaited(
         _webViewStateKey.currentState?.applyBottomInset(
               _lastMessageListBottom,
-              keyboardPx: _lastKeyboardInset,
             ) ??
             Future<void>.value(),
       );
@@ -1137,27 +1133,16 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                       widget.drawerCtrl.lastKeyboardHeight,
                     )
                   : 0.0);
-        // The keyboard is deliberately kept OUT of the padding below and pushed
-        // to the WebView as a separate value instead. The WebView's own viewport
-        // already accounts for the keyboard, so adding it to the container
-        // padding as well counted it twice and let the chat scroll a full
-        // keyboard-height above the input bar. The drawer is different — it is a
-        // Flutter overlay painted on top of the WebView, which never shrinks the
-        // viewport, so its height must be reserved as real padding.
-        // The keyboard value still travels to JS (keyboardInset) because the
-        // scroll compensation there needs it to follow the keyboard; only the
-        // padding term drops it. Both are pushed on the same Flutter-driven
-        // frame, so keyboard and drawer stay in lockstep.
-        final safeAreaPanelInset = math.max(
+        final targetPanelHeight = math.max(
           drawerTargetInset,
           keyboardTargetInset,
         );
         final targetFactor = math.min(
           1.0,
-          safeAreaPanelInset / math.max(1.0, safeBottom),
+          targetPanelHeight / math.max(1.0, safeBottom),
         );
         // While inline-editing a message, reserve extra scroll room at the
-        // bottom. The normal inset only matches the input bar (+ drawer), so a
+        // bottom. The normal inset only matches the input bar + keyboard, so a
         // message edited at the very end of the chat can scroll its body up to
         // that boundary but no further — and in bubble mode the Save/Cancel
         // footer wraps onto its own row *below* the bubble, landing behind the
@@ -1167,11 +1152,10 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
         const editFooterScrollRoom = 96.0;
         final webViewBottomInset =
             _inputBarHeight +
-            drawerTargetInset +
+            targetPanelHeight +
             (safeBottom * (1 - targetFactor)) +
             (isEditingMessage ? editFooterScrollRoom : 0.0);
         _lastMessageListBottom = webViewBottomInset;
-        _lastKeyboardInset = keyboardTargetInset;
         final showScrollBtn =
             _showScrollToBottom &&
             !widget.search.showSearch &&
@@ -1214,7 +1198,6 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                     isPostGenRunning: widget.state.isPostGenRunning,
                     regenTargetId: widget.state.regenTargetId,
                     bottomInset: webViewBottomInset,
-                    keyboardInset: keyboardTargetInset,
                     topInset: effectiveTopInset,
                     blurRegions: (batterySaver || preset.elementBlur <= 0)
                         ? const <ChatOverlayBlurRegion>[]

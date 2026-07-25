@@ -24,6 +24,11 @@ export class Bridge {
     // setGenerating): the header is frozen for the whole streaming window and
     // must never be left stuck hidden afterwards.
     this._headerHidden = false;
+    // Last scroll offset the header tracker decided on, and the deadline until
+    // which it only re-baselines instead of deciding. Both are instance fields
+    // so showHeader() can reset them — see showHeader() for why that matters.
+    this._headerLastTop = 0;
+    this._headerRebaselineUntil = 0;
     this._genTimer = new GenTimer(renderer);
     this._imgGenTimer = new ImgGenTimer();
     this._updateBatcher = new MessageUpdateBatcher();
@@ -204,14 +209,39 @@ export class Bridge {
   }
 
   /* ---------- Scroll / load-more ---------- */
+
+  // Re-shows the header and re-baselines the hide-on-scroll tracker. Flutter
+  // calls this whenever a chat is opened or a session is switched.
+  //
+  // The WebView — and therefore this controller — is kept alive across chats
+  // (see chat_webview_keep_alive.dart), so both `_headerHidden` and the scroll
+  // baseline carry over from the chat that was open before. That broke a chat
+  // open two ways: the load's jump to the bottom of the new chat read as one
+  // large downward scroll and hid the header the instant the chat appeared,
+  // and a stale `_headerHidden === true` left JS disagreeing with Flutter's
+  // fresh state — since this tracker only emits on transitions, the desync
+  // then persisted and the header stopped responding to scrolling at all.
+  //
+  // Emitted unconditionally so Flutter's state is realigned even when JS
+  // already believed the header was visible.
+  showHeader() {
+    this._headerHidden = false;
+    this._headerLastTop = this.virtualList?.container?.scrollTop || 0;
+    // The messages land and the list jumps to the bottom over the frames right
+    // after this call; those scrolls are programmatic, not user intent. Matches
+    // the window setMessages() already uses to suppress load-more.
+    this._headerRebaselineUntil = Date.now() + 1000;
+    this._sendToFlutter('onHeaderScroll', [false]);
+  }
+
   _setupScrollListener() {
     let loadMoreCooldown = false;
     let lastLoadTop = 0;
     let lastShowScrollToBottom = null;
     // Header hide-on-scroll (ported from Glaze/src/core/services/ui.js initHeaderScroll).
-    // `_headerHidden` is an instance field (see constructor) so setGenerating()
-    // can re-show the header when a generation ends.
-    let headerLastTop = 0;
+    // `_headerHidden` / `_headerLastTop` are instance fields (see constructor)
+    // so setGenerating() can re-show the header when a generation ends and
+    // showHeader() can re-baseline the tracker when a chat opens.
     let ticking = false;
     const container = this.virtualList.container;
 
@@ -228,32 +258,39 @@ export class Bridge {
     const updateHeader = () => {
       ticking = false;
       const st = container.scrollTop;
+      // Right after showHeader() the list is still being filled and scrolled to
+      // the bottom programmatically. Follow the offset without deciding, so the
+      // jump is never mistaken for the user scrolling down.
+      if (Date.now() < this._headerRebaselineUntil) {
+        this._headerLastTop = st <= 0 ? 0 : st;
+        return;
+      }
       // Streaming auto-follow must not hide the header, but an explicit upward
       // scroll should still restore an already-hidden header.
       if (this.isGenerating) {
-        if (st < headerLastTop - 3 && this._headerHidden) {
+        if (st < this._headerLastTop - 3 && this._headerHidden) {
           this._headerHidden = false;
           this._sendToFlutter('onHeaderScroll', [false]);
         }
-        headerLastTop = st <= 0 ? 0 : st;
+        this._headerLastTop = st <= 0 ? 0 : st;
         return;
       }
       if (st < 0 || st + container.clientHeight > container.scrollHeight) {
-        headerLastTop = st <= 0 ? 0 : st;
+        this._headerLastTop = st <= 0 ? 0 : st;
         return;
       }
-      if (st > headerLastTop + 3 && st > 50) {
+      if (st > this._headerLastTop + 3 && st > 50) {
         if (!this._headerHidden) {
           this._headerHidden = true;
           this._sendToFlutter('onHeaderScroll', [true]);
         }
-      } else if (st < headerLastTop - 3) {
+      } else if (st < this._headerLastTop - 3) {
         if (this._headerHidden) {
           this._headerHidden = false;
           this._sendToFlutter('onHeaderScroll', [false]);
         }
       }
-      headerLastTop = st <= 0 ? 0 : st;
+      this._headerLastTop = st <= 0 ? 0 : st;
     };
 
     container.addEventListener('scroll', () => {
@@ -721,24 +758,11 @@ export class Bridge {
     toggleClass('hide-char-name', theme['show-char-name'] === '0');
   }
 
-  // [px] is the bottom inset that must become real container padding (input bar
-  // + drawer + safe area). [keyboardPx] is the soft keyboard, which occludes the
-  // bottom of the view WITHOUT being padding: the WebView's own viewport already
-  // accounts for it, so adding it to paddingBottom as well double-counted it and
-  // let the chat scroll a full keyboard-height above the input bar. It still has
-  // to drive the scroll compensation below — otherwise the list wouldn't follow
-  // the keyboard at all — so it is tracked separately here and only the *total*
-  // occlusion feeds the scroll delta. That keeps the scroll motion (and its
-  // Flutter-driven timing) identical to before, matching the drawer exactly.
-  setBottomPadding(px, keyboardPx = 0) {
+  setBottomPadding(px) {
     const container = document.getElementById('chat-container') || document.body;
     const prevPadding = parseFloat(container.style.paddingBottom) || 0;
-    const prevKeyboard = this._keyboardInset || 0;
-    const paddingChanged = Math.abs(px - prevPadding) >= 0.1;
-    // Total occlusion delta — the value the old single-argument version used.
-    const paddingDiff = (px + keyboardPx) - (prevPadding + prevKeyboard);
-    if (!paddingChanged && Math.abs(paddingDiff) < 0.1) return;
-    this._keyboardInset = keyboardPx;
+    const paddingDiff = px - prevPadding;
+    if (Math.abs(paddingDiff) < 0.1) return;
 
     // Ported from Vue ChatView.updateContentPadding(). The chat container is a
     // FIXED full-screen viewport (`resizeToAvoidBottomInset: false`, the keyboard
@@ -764,7 +788,7 @@ export class Bridge {
       }, 120);
     }
 
-    if (paddingChanged) container.style.paddingBottom = px + 'px';
+    container.style.paddingBottom = px + 'px';
 
     // Reading scrollHeight forces a synchronous layout flush so the new padding
     // is reflected before we adjust the offset.
