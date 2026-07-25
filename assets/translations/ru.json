@@ -235,6 +235,7 @@
   "top_p": "Top P",
   "sheet_title_chat_actions": "Чат",
   "sheet_title_magic_drawer": "Быстрый доступ",
+  "sheet_title_quick_replies": "Быстрые ответы",
   "action_new_session": "Новая сессия",
   "action_rename": "Переименовать",
   "action_delete_session": "Удалить сессию",

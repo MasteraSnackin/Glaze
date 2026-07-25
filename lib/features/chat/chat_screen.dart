@@ -533,9 +533,26 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
   bool _keyboardRising = false;
   Timer? _keyboardSettleTimer;
 
+  /// Drives the bottom-panel subtree. The drawer animation alone is not
+  /// enough: switching between Quick Access and Quick Replies while the
+  /// drawer is already open leaves the animation parked at 1.0 and only
+  /// flips [ChatDrawerController.activePanel], so without listening to the
+  /// controller itself the tapped panel never rebuilds into view.
+  late Listenable _drawerListenable;
+
+  void _bindDrawerListenable() {
+    _drawerListenable = Listenable.merge([
+      widget.drawerCtrl.drawerAnim,
+      widget.drawerCtrl,
+    ]);
+  }
+
   @override
   void didUpdateWidget(covariant _ChatBody oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.drawerCtrl != widget.drawerCtrl) {
+      _bindDrawerListenable();
+    }
     if (oldWidget.keyboardHeight != widget.keyboardHeight) {
       _keyboardRising = widget.keyboardHeight > oldWidget.keyboardHeight;
       _keyboardSettled = false;
@@ -551,6 +568,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _bindDrawerListenable();
     // Re-measure when the input bar swaps tracked elements (e.g. entering
     // search/selection mode) without this widget rebuilding.
     _blurRegistry.addListener(_scheduleBlurMeasure);
@@ -1066,7 +1084,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
               character.alternateGreetings.where((g) => g.isNotEmpty).length);
 
     return AnimatedBuilder(
-      animation: widget.drawerCtrl.drawerAnim,
+      animation: _drawerListenable,
       builder: (context, _) {
         final progress = widget.drawerCtrl.drawerAnim.value;
         final bool drawerActive =

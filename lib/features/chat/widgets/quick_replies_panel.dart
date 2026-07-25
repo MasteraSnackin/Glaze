@@ -352,7 +352,7 @@ class QuickRepliesHeader extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           Text(
-            'sheet_title_magic_drawer'.tr(),
+            'sheet_title_quick_replies'.tr(),
             style: TextStyle(
               fontSize: 17,
               fontWeight: FontWeight.w700,
