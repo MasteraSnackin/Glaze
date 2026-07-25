@@ -1194,6 +1194,17 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
         // animation, input growth), so re-measure their rects post-frame.
         _scheduleBlurMeasure();
 
+        // The box height feeds the WebView's inset split (see
+        // [_webViewBoxHeight]). It is normally captured by the post-frame
+        // measure in initState, but if that frame lands before this subtree is
+        // laid out the height stays 0 — and SizeChangedLayoutNotifier only
+        // fires on *changes*, never on a first layout, so nothing would ever
+        // re-measure it and the split would stay silently disabled. Keep
+        // asking until it lands.
+        if (_webViewBoxHeight == 0) {
+          WidgetsBinding.instance.addPostFrameCallback((_) => _checkHeight());
+        }
+
         return Stack(
           children: [
             // The box height feeds the WebView's inset split (see
