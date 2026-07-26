@@ -104,7 +104,7 @@ class TrackerSnapshotRepo {
         await (db.select(db.trackerSnapshots)
               ..where((t) => t.sessionId.equals(sessionId))
               ..where((t) => t.committed.equals(1))
-              ..orderBy([(t) => OrderingTerm.desc(t.createdAt)])
+              ..orderBy(_latestFirst)
               ..limit(1))
             .get();
     return rows.isEmpty ? null : _rowToModel(rows.first);
@@ -122,7 +122,7 @@ class TrackerSnapshotRepo {
               ..where((t) => t.sessionId.equals(sessionId))
               ..where((t) => t.committed.equals(1))
               ..where((t) => t.messageId.equals(excludeMessageId).not())
-              ..orderBy([(t) => OrderingTerm.desc(t.createdAt)])
+              ..orderBy(_latestFirst)
               ..limit(1))
             .get();
     return rows.isEmpty ? null : _rowToModel(rows.first);
@@ -135,7 +135,7 @@ class TrackerSnapshotRepo {
     final rows =
         await (db.select(db.trackerSnapshots)
               ..where((t) => t.sessionId.equals(sessionId))
-              ..orderBy([(t) => OrderingTerm.desc(t.createdAt)])
+              ..orderBy(_latestFirst)
               ..limit(1))
             .get();
     return rows.isEmpty ? null : _rowToModel(rows.first);
@@ -145,7 +145,7 @@ class TrackerSnapshotRepo {
   Future<List<TrackerSnapshot>> getBySessionId(String sessionId) {
     return (db.select(db.trackerSnapshots)
           ..where((t) => t.sessionId.equals(sessionId))
-          ..orderBy([(t) => OrderingTerm.desc(t.createdAt)]))
+          ..orderBy(_latestFirst))
         .get()
         .then((rows) => rows.map(_rowToModel).toList());
   }
@@ -328,7 +328,7 @@ class TrackerSnapshotRepo {
             agentSwipeId: Value(row.agentSwipeId),
             trackersJson: Value(row.trackersJson),
             committed: Value(row.committed),
-            createdAt: Value(currentTimestampSeconds()),
+            createdAt: Value(row.createdAt),
           ),
           mode: InsertMode.insertOrReplace,
         );
@@ -357,4 +357,11 @@ class TrackerSnapshotRepo {
       createdAt: row.createdAt,
     );
   }
+
+  List<OrderingTerm Function($TrackerSnapshotsTable)> get _latestFirst => [
+    (t) => OrderingTerm.desc(t.createdAt),
+    (t) => OrderingTerm.desc(t.messageId),
+    (t) => OrderingTerm.desc(t.swipeId),
+    (t) => OrderingTerm.desc(t.agentSwipeId),
+  ];
 }

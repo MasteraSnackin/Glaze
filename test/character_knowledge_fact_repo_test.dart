@@ -57,6 +57,27 @@ void main() {
     expect((await repo.getActiveForSession('session-1')).single.id, 'fact-1');
   });
 
+  test('activating an anchor retracts rejected sibling swipe facts', () async {
+    await repo.insertTentative(fact(id: 'rejected', swipeId: 0));
+    await repo.insertTentative(fact(id: 'accepted', swipeId: 1));
+
+    await repo.activateAnchor(
+      sessionId: 'session-1',
+      messageId: 'message-1',
+      swipeId: 1,
+      agentSwipeId: 0,
+    );
+
+    expect(
+      (await repo.getById('rejected'))!.lifecycle,
+      CharacterKnowledgeFactLifecycle.retracted,
+    );
+    expect(
+      (await repo.getById('accepted'))!.lifecycle,
+      CharacterKnowledgeFactLifecycle.active,
+    );
+  });
+
   test(
     'replaying an anchor replaces its tentative export instead of duplicating',
     () async {
@@ -449,6 +470,39 @@ void main() {
         (await repo.getActiveForSession('branch-1')).map((item) => item.id),
         ['kept@branch-1'],
       );
+    },
+  );
+
+  test(
+    'branch copies reconciliation cleanup journal for a full range',
+    () async {
+      await repo.insertTentative(fact(id: 'kept'));
+      await repo.activateAnchor(
+        sessionId: 'session-1',
+        messageId: 'message-1',
+        swipeId: 0,
+        agentSwipeId: 0,
+      );
+      await repo.applyReconciliationCleanup(
+        sessionId: 'session-1',
+        ops: const [KnowledgeCleanupOp.retract('kept')],
+        allowedFactIds: const {'kept'},
+        endpointMessageId: 'message-2',
+        messageIds: const ['message-1', 'message-2'],
+      );
+
+      await repo.copyForSessionBranch(
+        fromSessionId: 'session-1',
+        toSessionId: 'branch-1',
+        messageIds: const {'message-1', 'message-2'},
+      );
+
+      final journals = await (db.select(
+        db.ledgerReconciliationCleanupJournals,
+      )..where((row) => row.sessionId.equals('branch-1'))).get();
+      expect(journals, hasLength(1));
+      expect(journals.single.endpointMessageId, 'message-2');
+      expect(journals.single.beforeImagesJson, contains('kept@branch-1'));
     },
   );
 }

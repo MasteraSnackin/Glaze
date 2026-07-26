@@ -75,6 +75,21 @@ class CharacterKnowledgeFactRepo {
     required int agentSwipeId,
   }) async {
     await db.transaction(() async {
+      await (db.update(db.characterKnowledgeFactRows)
+            ..where((row) => row.chatSessionId.equals(sessionId))
+            ..where((row) => row.sourceMessageId.equals(messageId))
+            ..where((row) => row.lifecycle.equals('tentative'))
+            ..where(
+              (row) =>
+                  row.sourceSwipeId.equals(swipeId).not() |
+                  row.sourceAgentSwipeId.equals(agentSwipeId).not(),
+            ))
+          .write(
+            CharacterKnowledgeFactRowsCompanion(
+              lifecycle: const Value('retracted'),
+              updatedAt: Value(currentTimestampSeconds()),
+            ),
+          );
       final incoming = await getBySourceAnchor(
         sessionId: sessionId,
         messageId: messageId,
