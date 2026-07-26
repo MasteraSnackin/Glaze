@@ -70,7 +70,7 @@ Glaze Flutter is built with Flutter, Riverpod, Drift, SQLite, Dio, GoRouter, and
 ### Setup
 
 ```bash
-git clone https://github.com/hydall/GlazeFlutter.git
+git clone https://github.com/hydall/Glaze.git
 cd GlazeFlutter
 flutter pub get
 ```

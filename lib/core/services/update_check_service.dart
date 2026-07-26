@@ -66,7 +66,7 @@ class UpdateCheckResult {
 /// (60 req/h per IP — ample for an occasional check). No token is sent.
 class UpdateCheckService {
   static const _owner = 'hydall';
-  static const _repo = 'GlazeFlutter';
+  static const _repo = 'Glaze';
   static const _workflowFile = 'build-branch.yml';
   static const _branch = 'master';
 

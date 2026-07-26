@@ -306,7 +306,7 @@ class _MenuScreenState extends ConsumerState<MenuScreen> with ShellHeaderMixin {
                             headSha: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
                             createdAt: DateTime.now().toUtc(),
                             runUrl:
-                                'https://github.com/hydall/GlazeFlutter/actions',
+                                'https://github.com/hydall/Glaze/actions',
                             runNumber: 123,
                             commits: const [
                               'folders ux/ui',

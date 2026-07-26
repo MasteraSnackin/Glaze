@@ -1,5 +1,5 @@
 // Tests that guard WebView JS/CSS assets against regressions introduced by
-// upstream UI rewrites (e.g. hydall/GlazeFlutter PRs).
+// upstream UI rewrites (e.g. hydall/Glaze PRs).
 //
 // These are intentionally static-analysis tests — they read the source files
 // as strings and assert that critical CSS rules / JS patterns are present.

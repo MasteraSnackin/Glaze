@@ -157,7 +157,7 @@ class _CommunitySection extends StatelessWidget {
           label: 'btn_github'.tr(),
           subtitle: 'about_source_code'.tr(),
           brandColor: context.cs.onSurface,
-          onTap: () => onLink('https://github.com/hydall/GlazeFlutter'),
+          onTap: () => onLink('https://github.com/hydall/Glaze'),
         ),
         if (lang == 'en')
           _LinkTile(

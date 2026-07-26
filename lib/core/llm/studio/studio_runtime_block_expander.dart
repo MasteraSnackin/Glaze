@@ -8,7 +8,7 @@ import 'studio_brief_macro_renderer.dart';
 /// Chat-time Studio block expansion + block filtering + role normalization.
 /// Extracted from `StudioMessageBuilder` (plan Phase 5b).
 ///
-/// This is distinct from the build-time [StudioBlockExpander] which handles
+/// This is distinct from build-time block expansion, which handles
 /// `{{setvar}}`/`{{getvar}}`/`{{trim}}` at preset-routing time. This class
 /// expands `{{char}}`, `{{user}}`, `{{studio_*_brief}}` and all other
 /// chat-time macros inside block content at generation time.
