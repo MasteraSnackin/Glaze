@@ -48,7 +48,9 @@ Only run one-shot, non-interactive commands:
 
 (Fall back to the full `& "Z:\GlazeProject\flutter\bin\flutter.bat"` path if `flutter` is not on PATH.)
 
-If you need to verify runtime behavior or hot-reload changes, ask the user to run `flutter run -d <platform>` (or `flutter run -d chrome`) in a separate terminal and report back. The agent cannot drive or observe a live Flutter session.
+If you need to verify runtime behavior or hot-reload changes, ask the user to run `flutter run -d <platform>` in a separate terminal and report back. The agent cannot drive or observe a live Flutter session.
+
+Web is **not** a target platform — `lib/` imports `dart:io` without conditional stubs, and Drift/`sqlite3_flutter_libs`, `photo_manager` and the WebView bridge have no web support. Target Windows, Android, iOS, macOS or Linux.
 
 **Hot restart after JS asset changes:**
 When files in `assets/chat_webview/` are modified, the user must **hot restart** (press `R`). Hot reload (`r`) doesn't rebuild the asset bundle.

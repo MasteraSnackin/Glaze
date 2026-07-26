@@ -136,9 +136,9 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
     return SheetView(
       titleWidget: Row(
         children: [
-          const Text(
-            'Image Generation',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+          Text(
+            'section_image_gen'.tr(),
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
           ),
           const HelpTip(term: 'image-gen'),
           const Spacer(),
@@ -212,8 +212,7 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
                 children: [
                   rows.ImageGenCheckboxRow(
                     label: 'Send previous images as context',
-                    description:
-                        'Include recently generated images as visual reference for new generations',
+                    description: 'imggen_image_context_desc'.tr(),
                     value: s.imageContextEnabled,
                     onChanged: (v) =>
                         _update(s.copyWith(imageContextEnabled: v)),
@@ -480,8 +479,8 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
         title: 'Reference Images',
         children: [
           rows.ImageGenCheckboxRow(
-            label: 'Send character avatar',
-            description: 'Use character\'s avatar as visual reference',
+            label: 'imggen_send_char_avatar'.tr(),
+            description: 'imggen_send_char_avatar_desc'.tr(),
             value: sendCharAvatar,
             onChanged: (v) {
               if (isRoutmy) {
@@ -494,8 +493,8 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
             },
           ),
           rows.ImageGenCheckboxRow(
-            label: 'Send persona avatar',
-            description: 'Use active persona\'s avatar as visual reference',
+            label: 'imggen_send_user_avatar'.tr(),
+            description: 'imggen_send_user_avatar_desc'.tr(),
             value: sendUserAvatar,
             onChanged: (v) {
               if (isRoutmy) {
@@ -604,7 +603,7 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
                   ),
                   child: Center(
                     child: Text(
-                      '+ Add reference',
+                      '+ ${'imggen_add_ref'.tr()}',
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w500,

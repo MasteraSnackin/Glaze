@@ -50,7 +50,9 @@ class GenericEditor extends StatefulWidget {
   final List<GenericEditorSection> config;
   final bool showAvatar;
   final String avatarField;
-  final String avatarHint;
+  /// Defaults to the localized `hint_change_avatar` when not supplied — it
+  /// cannot be a constructor default because `.tr()` is not a constant.
+  final String? avatarHint;
   final String avatarPlaceholder;
   final Future<void> Function()? onAvatarTap;
   final void Function(Map<String, dynamic> values) onChanged;
@@ -69,7 +71,7 @@ class GenericEditor extends StatefulWidget {
     required this.config,
     this.showAvatar = false,
     this.avatarField = 'avatarPath',
-    this.avatarHint = 'Tap to change avatar',
+    this.avatarHint,
     this.avatarPlaceholder = '?',
     this.onAvatarTap,
     required this.onChanged,
@@ -625,7 +627,7 @@ class _GenericEditorState extends State<GenericEditor> {
                 ),
                 alignment: Alignment.center,
                 child: Text(
-                  widget.avatarHint,
+                  widget.avatarHint ?? 'hint_change_avatar'.tr(),
                   style: const TextStyle(
                     color: Color(0xE6FFFFFF),
                     fontSize: 14,

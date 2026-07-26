@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:ui';
 
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart'
@@ -220,7 +221,7 @@ class GenerationNotificationService {
     _isGenerating = true;
     await _acquireForeground(
       notificationTitle: charName,
-      notificationText: 'Generating response...',
+      notificationText: 'notification_generating'.tr(),
     );
   }
 

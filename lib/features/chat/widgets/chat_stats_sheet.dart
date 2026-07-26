@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -1049,7 +1050,7 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
                   _buildStatItem(
                     icon: Icons.history,
                     color: const Color(0xFFFF9800),
-                    label: 'First Message',
+                    label: 'stats_first_msg'.tr(),
                     value: _loading ? '...' : stats.firstMessage,
                     isDate: true,
                   ),

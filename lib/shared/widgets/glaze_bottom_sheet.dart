@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -949,7 +950,7 @@ class _CardRowState extends State<_CardRow> {
                 top: 10,
                 left: 12,
                 child: Text(
-                  'FEATURED PRESET',
+                  'label_featured_preset'.tr(),
                   style: TextStyle(
                     fontSize: 9,
                     fontWeight: FontWeight.w700,

@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -229,7 +230,7 @@ class SyncController {
           invalidateDataProviders();
           statusNotifier.state = service.status;
           conflictsNotifier.state = service.conflicts;
-          return 'Full sync completed';
+          return 'sync_full_done'.tr();
       }
     } catch (e) {
       lastErrorNotifier.state = e.toString();

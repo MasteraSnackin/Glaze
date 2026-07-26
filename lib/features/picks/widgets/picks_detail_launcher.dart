@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:easy_localization/easy_localization.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -224,7 +225,9 @@ class _DownloadingView extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           Text(
-            progress > 0 ? '${(progress * 100).round()}%' : 'Connecting...',
+            progress > 0
+                ? '${(progress * 100).round()}%'
+                : 'onboarding_status_connecting'.tr(),
             style: TextStyle(fontSize: 13, color: context.cs.onSurfaceVariant),
           ),
         ],

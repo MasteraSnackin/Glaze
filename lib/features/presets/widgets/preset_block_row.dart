@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/llm/tokenizer.dart';
@@ -175,7 +176,7 @@ Widget _systemBadge(BuildContext context) {
 
 Widget _appendBadge(BuildContext context) {
   return Tooltip(
-    message: 'Appended to last user message',
+    message: 'block_append_to_last_user'.tr(),
     child: Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(

@@ -275,20 +275,11 @@ class _NormalView extends StatelessWidget {
                 primary: true,
               ),
               const SizedBox(height: 4),
-              const _Hint(
+              _Hint(
                 lines: [
-                  _HintLine(
-                    bold: 'Tavo (.tbk): ',
-                    text: 'characters, presets, chats',
-                  ),
-                  _HintLine(
-                    bold: 'SillyTavern (.zip): ',
-                    text: 'characters, lorebooks, presets, chats, personas',
-                  ),
-                  _HintLine(
-                    bold: 'Glaze (.glz): ',
-                    text: 'full application state',
-                  ),
+                  _HintLine.markup('backup_hint_import_tavo'.tr()),
+                  _HintLine.markup('backup_hint_import_st'.tr()),
+                  _HintLine.markup('backup_hint_import_glaze'.tr()),
                 ],
               ),
             ],
@@ -417,6 +408,15 @@ class _HintLine {
   final String? bold;
   final String text;
   const _HintLine({this.bold, required this.text});
+
+  /// Splits a localized hint that marks its lead-in with `<b>…</b>`, e.g.
+  /// `<b>Tavo (.tbk):</b> characters, presets, chats`, into the bold run and
+  /// the remainder. Falls back to an unstyled line when the markup is absent.
+  factory _HintLine.markup(String source) {
+    final m = RegExp(r'^<b>(.*?)</b>\s*(.*)$', dotAll: true).firstMatch(source);
+    if (m == null) return _HintLine(text: source);
+    return _HintLine(bold: '${m.group(1)!} ', text: m.group(2)!);
+  }
 }
 
 class _Hint extends StatelessWidget {

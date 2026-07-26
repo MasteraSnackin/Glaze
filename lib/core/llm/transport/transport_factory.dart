@@ -1,4 +1,3 @@
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../models/api_config.dart';
 import 'anthropic_chat_transport.dart';
@@ -37,7 +36,3 @@ ChatTransport pickChatTransport(String protocol) {
 
 ChatTransport pickChatTransportFor(ApiConfig config) =>
     pickChatTransport(config.protocol);
-
-/// Riverpod handle for consumers that prefer DI over the bare function.
-final chatTransportFactoryProvider =
-    Provider<ChatTransport Function(String)>((_) => pickChatTransport);

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:easy_localization/easy_localization.dart';
 import 'package:archive/archive.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -80,11 +81,11 @@ class TavoBackupImporter {
   }) async {
     final result = TavoImportResult();
 
-    onProgress?.call('Clearing existing data...');
+    onProgress?.call('backup_progress_clearing'.tr());
     await _clearAllTables();
     _cancel.check();
 
-    onProgress?.call('Reading database...');
+    onProgress?.call('backup_progress_reading'.tr());
     final mdbFile = zip.files.firstWhere(
       (f) => f.isFile && f.name.toLowerCase().endsWith('data.mdb'),
       orElse: () => throw const FormatException(
@@ -96,35 +97,35 @@ class TavoBackupImporter {
 
     final charEntityIdToGlazeId = <int, String>{};
 
-    onProgress?.call('Importing personas...');
+    onProgress?.call('backup_progress_personas'.tr());
     await _importPersonas(tavoData, zip, result);
     _cancel.check();
 
-    onProgress?.call('Importing API endpoints...');
+    onProgress?.call('backup_progress_apis'.tr());
     await _importApiEndpoints(tavoData, result);
     _cancel.check();
 
-    onProgress?.call('Importing regex scripts...');
+    onProgress?.call('backup_progress_regex'.tr());
     await _importRegexes(tavoData, result);
     _cancel.check();
 
-    onProgress?.call('Importing lorebooks...');
+    onProgress?.call('backup_progress_lorebooks'.tr());
     await _importLorebooks(tavoData, result);
     _cancel.check();
 
-    onProgress?.call('Importing presets...');
+    onProgress?.call('backup_progress_presets'.tr());
     await _importPresets(tavoData, result);
     _cancel.check();
 
-    onProgress?.call('Importing characters...');
+    onProgress?.call('backup_progress_characters'.tr());
     await _importCharacters(tavoData, zip, charEntityIdToGlazeId, result);
     _cancel.check();
 
-    onProgress?.call('Importing chats...');
+    onProgress?.call('backup_progress_chats'.tr());
     await _importChats(tavoData, charEntityIdToGlazeId, result);
     _cancel.check();
 
-    onProgress?.call('Finalizing...');
+    onProgress?.call('backup_progress_finalizing'.tr());
     return result;
   }
 

@@ -249,7 +249,7 @@ class CatalogGrid extends ConsumerWidget {
                 padding: const EdgeInsets.only(top: 80),
                 child: Center(
                   child: Text(
-                    state.error != null ? '' : 'No characters found',
+                    state.error != null ? '' : 'catalog_empty'.tr(),
                     style: TextStyle(
                       color: context.cs.onSurfaceVariant,
                       fontSize: 14,
