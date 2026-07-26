@@ -14,16 +14,24 @@ plugins {
 // with no hint about the real cause.
 val ciKeystoreBase64: String? =
     System.getenv("KEYSTORE_BASE64")?.filterNot { it.isWhitespace() }?.ifEmpty { null }
-val ciStorePassword: String = System.getenv("KEYSTORE_PASSWORD") ?: "android"
-val ciKeyAlias: String = System.getenv("KEY_ALIAS") ?: "debug-key"
+
+// Store password, key alias and key password come from secrets too, so they are
+// subject to the same empty-string-instead-of-null trap.
+fun requireCiEnv(name: String): String =
+    System.getenv(name)?.takeIf { it.isNotBlank() } ?: throw GradleException(
+        "KEYSTORE_BASE64 is set but $name is empty — CI signing needs the store password, " +
+            "key alias and key password (secrets ANDROID_STORE_PASSWORD, ANDROID_KEY_ALIAS, " +
+            "ANDROID_KEY_PASSWORD).",
+    )
 
 fun decodeCiKeystore(base64: String): ByteArray {
     val bytes = try {
         Base64.getMimeDecoder().decode(base64)
     } catch (e: IllegalArgumentException) {
         throw GradleException(
-            "KEYSTORE_BASE64 is not valid base64 (${e.message}). Re-create the secret with:\n" +
-                "  [Convert]::ToBase64String([IO.File]::ReadAllBytes(\"debug-key.keystore\")) | Set-Clipboard",
+            "KEYSTORE_BASE64 is not valid base64 (${e.message}). Re-create the ANDROID_KEYSTORE_BASE64 " +
+                "secret from the raw keystore bytes:\n" +
+                "  [Convert]::ToBase64String([IO.File]::ReadAllBytes(\"<keystore>\")) | Set-Clipboard",
         )
     }
     if (bytes.isEmpty()) {
@@ -77,13 +85,15 @@ android {
         create("ci") {
             val base64 = ciKeystoreBase64
             if (base64 != null) {
-                val ksFile = rootProject.file("debug-key.keystore")
+                val ksPassword = requireCiEnv("KEYSTORE_PASSWORD")
+                val ksAlias = requireCiEnv("KEY_ALIAS")
+                val ksFile = rootProject.file("ci-signing.keystore")
                 ksFile.writeBytes(decodeCiKeystore(base64))
+                verifyCiKeystore(ksFile, ksPassword, ksAlias)
                 storeFile = ksFile
-                storePassword = ciStorePassword
-                keyAlias = ciKeyAlias
-                keyPassword = System.getenv("KEY_PASSWORD") ?: "android"
-                verifyCiKeystore(ksFile, ciStorePassword, ciKeyAlias)
+                storePassword = ksPassword
+                keyAlias = ksAlias
+                keyPassword = requireCiEnv("KEY_PASSWORD")
             }
         }
     }
