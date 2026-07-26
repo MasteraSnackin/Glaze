@@ -9,7 +9,7 @@
 
 Glaze is a local, novice-friendly AI roleplay chat client. It works with any OpenAI-compatible (Chat Completion) LLM provider, and keeps your data on your own device.
 
-This repository holds the native Flutter rewrite of Glaze. It keeps the approachability and SillyTavern compatibility of the original JS/Vue client, and moves the core experience onto a native cross-platform stack: local SQLite storage, real desktop support, and a sandboxed extension runtime.
+The app is now native Flutter, and it replaces the original JS/Vue (Capacitor) client — that version is abandoned legacy and no longer maintained. All development continues here, on a native cross-platform stack: local SQLite storage, real desktop support, and a sandboxed extension runtime, while keeping the approachability and SillyTavern compatibility of the original.
 
 > [!WARNING]
 > Glaze is still under heavy development. The app is not yet stable and may contain bugs.
@@ -54,6 +54,12 @@ Download the latest release from the [Releases](../../releases) page.
 - **iOS** — Sideload the IPA using [AltStore](https://altstore.io/) or a similar tool. App Store distribution is not yet available.
 - **Windows** — Download the Windows build and run it directly on your PC.
 - **macOS / Linux** — Buildable from source, but not published as prebuilt releases yet; packaging and signing are still to be set up.
+
+### 🔄 Migrating from the old Vue client
+
+The JS/Vue version is legacy and receives no further updates. Your data comes across in one step: export a `.glz` backup from the old app, then in Glaze open **Menu → Backups** and import it. A `.glz` restores the full application state — characters, chats, presets, lorebooks, personas and API configuration.
+
+Backups from **SillyTavern** (`.zip`) and **Tavo** (`.tbk`) can be imported the same way.
 
 ## 🛠️ Development
 
