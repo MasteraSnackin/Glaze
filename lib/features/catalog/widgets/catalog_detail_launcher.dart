@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/models/character.dart';
+import '../../../core/utils/error_format.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_error_dialog.dart';
 import '../../character_list/character_detail_screen.dart';
@@ -76,7 +77,7 @@ class _CatalogDetailLauncherState
       }
       if (mounted) setState(() => _downloaded = result);
     } catch (e) {
-      if (mounted) setState(() => _error = e.toString());
+      if (mounted) setState(() => _error = formatError(e));
     }
   }
 
