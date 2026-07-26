@@ -1092,6 +1092,8 @@
   "tokenizer_history_limit_warning": "История близка к лимиту",
   "tokenizer_hide_confirm_desc": "Скрыть верхние {} видимых сообщений из промпта? Они останутся видны в чате (затемнённые), но будут исключены из генерации.",
   "image_gen_generating": "Генерация изображения...",
+  "image_viewer_load_failed": "Не удалось загрузить изображение",
+  "image_viewer_unsupported_src": "Это изображение нельзя открыть",
   "label_generation_params": "Параметры",
   "filter_all": "Все",
   "filter_lorebook": "Лорбук",

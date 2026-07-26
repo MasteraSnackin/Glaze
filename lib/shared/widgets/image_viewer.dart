@@ -1,5 +1,6 @@
 import 'dart:ui';
 
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
@@ -141,6 +142,25 @@ class _ImageViewerState extends State<ImageViewer> with SingleTickerProviderStat
                 child: Image(
                   image: widget.imageProvider,
                   fit: BoxFit.contain,
+                  // Without these the viewer just sits on the dimmed barrier
+                  // with nothing in it, which is indistinguishable from a
+                  // broken build. Show progress while it decodes and a real
+                  // message when the image can't be loaded at all.
+                  loadingBuilder: (context, child, progress) {
+                    if (progress == null) return child;
+                    return const Center(
+                      child: SizedBox(
+                        width: 32,
+                        height: 32,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white70,
+                        ),
+                      ),
+                    );
+                  },
+                  errorBuilder: (context, error, stackTrace) =>
+                      const _ImageViewerError(),
                 ),
               ),
             ),
@@ -206,6 +226,28 @@ class _ImageViewerState extends State<ImageViewer> with SingleTickerProviderStat
                 ),
               ),
             ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ImageViewerError extends StatelessWidget {
+  const _ImageViewerError();
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.broken_image_outlined,
+              color: Colors.white54, size: 48),
+          const SizedBox(height: 12),
+          Text(
+            'image_viewer_load_failed'.tr(),
+            style: const TextStyle(color: Colors.white70, fontSize: 14),
+          ),
         ],
       ),
     );

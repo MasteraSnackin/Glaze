@@ -15,6 +15,7 @@ import 'package:path/path.dart' as p;
 // ignore: depend_on_referenced_packages
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+import '../../core/utils/image_src.dart';
 import '../../core/utils/platform_paths.dart';
 import 'editing_message_provider.dart';
 
@@ -665,34 +666,14 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
   }
 
   void _showImageViewer(BuildContext context, String imageUrl) {
-    final ImageProvider provider;
-    if (imageUrl.startsWith('data:')) {
-      final commaIdx = imageUrl.indexOf(',');
-      if (commaIdx == -1) return;
-      provider = MemoryImage(base64Decode(imageUrl.substring(commaIdx + 1)));
-    } else if (imageUrl.startsWith('http://') ||
-        imageUrl.startsWith('https://')) {
-      provider = NetworkImage(imageUrl);
-    } else {
-      final path = _imageSrcToFilePath(imageUrl);
-      provider = FileImage(File(path));
+    final provider = imageProviderForSrc(imageUrl);
+    if (provider == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('image_viewer_unsupported_src'.tr())),
+      );
+      return;
     }
     ImageViewer.show(context, imageProvider: provider);
-  }
-
-  String _imageSrcToFilePath(String src) {
-    if (src.startsWith('file://')) {
-      try {
-        return Uri.parse(src).toFilePath(windows: Platform.isWindows);
-      } catch (_) {
-        final withoutScheme = src.replaceFirst('file://', '');
-        if (Platform.isWindows) return withoutScheme.replaceFirst('/', '');
-        return withoutScheme.startsWith('/')
-            ? withoutScheme
-            : '/$withoutScheme';
-      }
-    }
-    return src;
   }
 
   /// Saves/shares a generated image. The native share sheet on iOS/Android
@@ -702,13 +683,18 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
     try {
       Uint8List bytes;
       String ext = 'png';
+      // A loopback `__glaze_file__` URL is a local file wearing an http coat —
+      // read it off disk instead of round-tripping through the WebView server.
+      final loopbackPath = glazeFilePathFromLoopbackUrl(src);
+      final localSrc = loopbackPath ?? src;
       if (src.startsWith('data:')) {
         final commaIdx = src.indexOf(',');
         if (commaIdx == -1) return;
         bytes = base64Decode(src.substring(commaIdx + 1));
         final header = src.substring(0, commaIdx).toLowerCase();
         if (header.contains('jpeg') || header.contains('jpg')) ext = 'jpg';
-      } else if (src.startsWith('http://') || src.startsWith('https://')) {
+      } else if (loopbackPath == null &&
+          (src.startsWith('http://') || src.startsWith('https://'))) {
         final resp = await Dio().get<List<int>>(
           src,
           options: Options(responseType: ResponseType.bytes),
@@ -719,7 +705,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
           ext = 'jpg';
         }
       } else {
-        final path = _imageSrcToFilePath(src);
+        final path = imageSrcToFilePath(localSrc);
         final resolved = resolveGlazeFilePath(path) ?? path;
         final file = File(resolved);
         if (!await file.exists()) return;
