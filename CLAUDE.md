@@ -1,6 +1,6 @@
-# GlazeFlutter
+# Glaze
 
-Native LLM frontend for AI roleplay. Flutter rewrite of [Glaze](https://github.com/hydall/Glaze).
+Native LLM frontend for AI roleplay. Native Flutter rewrite of the original JS/Vue Glaze client.
 **Stack:** Flutter 3.44 + Riverpod 2 + Drift (SQLite) + GoRouter. **Language:** Dart only. **License:** AGPL-3.0.
 
 Architecture: `docs/ARCHITECTURE.md`. Workflow (git, PRs, Trello): `docs/WORKFLOW.md`.

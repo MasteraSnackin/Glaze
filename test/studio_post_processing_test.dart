@@ -59,7 +59,7 @@ ApiConfig _stubApiConfig({String model = 'test-model'}) {
 void main() {
   group('StudioAgent.normalizeAgentPhaseForType', () {
     test('is a no-op for unknown agent types — returns configured phase', () {
-      // GlazeFlutter has no built-in typed agents, so the user's configured
+      // Glaze has no built-in typed agents, so the user's configured
       // phase is always respected. This is the documented stub seam: future
       // built-in types (prose-guardian / continuity) would be forced to
       // post_processing here.

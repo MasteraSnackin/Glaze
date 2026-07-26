@@ -199,7 +199,7 @@ abstract class StudioAgent with _$StudioAgent {
       _$StudioAgentFromJson(json);
 
   /// Forces certain agent types to a specific phase regardless of user
-  /// config. Currently a no-op stub: GlazeFlutter agents are arbitrary
+  /// config. Currently a no-op stub: Glaze agents are arbitrary
   /// user-defined (no built-in typed controllers like Marinara's
   /// `prose-guardian` / `continuity`), so the user's configured
   /// [configuredPhase] is always respected.

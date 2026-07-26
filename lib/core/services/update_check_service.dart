@@ -87,7 +87,7 @@ class UpdateCheckService {
                 'Accept': 'application/vnd.github+json',
                 'X-GitHub-Api-Version': '2022-11-28',
                 // GitHub rejects requests without a User-Agent.
-                'User-Agent': 'GlazeFlutter-UpdateCheck',
+                'User-Agent': 'Glaze-UpdateCheck',
               },
               // We branch on status codes ourselves; never throw on 4xx/5xx.
               validateStatus: (_) => true,

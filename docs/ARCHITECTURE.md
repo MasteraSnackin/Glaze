@@ -1,4 +1,4 @@
-# Architecture — Glaze Flutter
+# Architecture — Glaze
 
 Related docs:
 - Generation invariants (formal, with code refs): `docs/INVARIANTS.md`

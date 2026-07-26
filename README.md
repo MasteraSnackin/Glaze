@@ -2,17 +2,17 @@
   <img src="assets/logos/glaze.svg" width="256" alt="Glaze Logo">
 </p>
 
-# Glaze Flutter
+# Glaze
 
 [![Discord](https://img.shields.io/discord/1355184294868484196?color=5865F2&logo=discord&logoColor=white)](https://discord.gg/jnGhd7p6Ht)
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-FFDD00?style=flat&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/hydall)
 
-Glaze Flutter is a native rewrite of [Glaze](https://github.com/hydall/Glaze): a local, novice-friendly AI roleplay chat client that works with any OpenAI-compatible Chat Completions provider.
+Glaze is a local, novice-friendly AI roleplay chat client that works with any OpenAI-compatible Chat Completions provider.
 
-This repository contains the Flutter version of the app. The goal is to keep the approachability and SillyTavern compatibility of the original JS/Vue client while moving the core experience to a native cross-platform stack with local SQLite storage, stronger desktop support, and a cleaner extension runtime.
+This repository contains the native Flutter version of the app. The goal is to keep the approachability and SillyTavern compatibility of the original JS/Vue client while moving the core experience to a native cross-platform stack with local SQLite storage, stronger desktop support, and a cleaner extension runtime.
 
 > [!WARNING]
-> Glaze Flutter is still under heavy development. The app is not yet stable and may contain bugs.
+> Glaze is still under heavy development. The app is not yet stable and may contain bugs.
 >
 > This is the in-progress Flutter rewrite, not the original Vue/Capacitor app.
 
@@ -38,7 +38,7 @@ This repository contains the Flutter version of the app. The goal is to keep the
 
 ## Extensions
 
-Glaze Flutter includes a sandboxed extension system for post-generation automation and interactive UI blocks.
+Glaze includes a sandboxed extension system for post-generation automation and interactive UI blocks.
 
 - **Post-generation blocks** - Run `infoblock`, `imageGen`, `jsRunner`, and `interactive` blocks after assistant messages, after user messages, or on periodic timers.
 - **Interactive panels** - Render extension-owned HTML panels under assistant messages without giving scripts same-origin access to the app.
@@ -59,7 +59,7 @@ Download the latest build from the [Releases](../../releases) page when availabl
 
 ## Development
 
-Glaze Flutter is built with Flutter, Riverpod, Drift, SQLite, Dio, GoRouter, and a WebView-based chat/extension renderer.
+Glaze is built with Flutter, Riverpod, Drift, SQLite, Dio, GoRouter, and a WebView-based chat/extension renderer.
 
 ### Prerequisites
 
@@ -71,7 +71,7 @@ Glaze Flutter is built with Flutter, Riverpod, Drift, SQLite, Dio, GoRouter, and
 
 ```bash
 git clone https://github.com/hydall/Glaze.git
-cd GlazeFlutter
+cd Glaze
 flutter pub get
 ```
 
