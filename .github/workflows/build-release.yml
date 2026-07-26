@@ -159,6 +159,41 @@ jobs:
       - name: Generate code
         run: dart run build_runner build --delete-conflicting-outputs
 
+      - name: Verify signing keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: android
+          KEY_ALIAS: debug-key
+        run: |
+          set -euo pipefail
+          if [ -z "$(printf '%s' "${KEYSTORE_BASE64:-}" | tr -d '[:space:]')" ]; then
+            echo "::error::Secret DEBUG_KEYSTORE_BASE64 is empty or not set in this repository — the APK cannot be signed."
+            echo "Add it in Settings -> Secrets and variables -> Actions. Value = base64 of the raw keystore file:"
+            echo '  [Convert]::ToBase64String([IO.File]::ReadAllBytes("debug-key.keystore")) | Set-Clipboard   # PowerShell'
+            echo '  base64 -w0 debug-key.keystore                                                              # bash'
+            echo "If the keystore was lost together with the old repository, generate a new one (this changes the"
+            echo "APK signature, so existing installs have to be reinstalled):"
+            echo '  keytool -genkeypair -v -keystore debug-key.keystore -storetype PKCS12 -alias debug-key \'
+            echo '    -storepass android -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Glaze"'
+            exit 1
+          fi
+          if ! printf '%s' "$KEYSTORE_BASE64" | tr -d '[:space:]' | base64 -d > android/debug-key.keystore; then
+            echo "::error::DEBUG_KEYSTORE_BASE64 is not valid base64 — re-create the secret from the raw keystore bytes."
+            exit 1
+          fi
+          echo "Decoded keystore: $(stat -c%s android/debug-key.keystore) bytes," \
+               "header $(od -An -tx1 -N4 android/debug-key.keystore | tr -d ' ')," \
+               "sha256 $(sha256sum android/debug-key.keystore | cut -c1-16)..."
+          if ! keytool -list -keystore android/debug-key.keystore -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" > keytool.log 2>&1; then
+            echo "::error::Keystore decoded from DEBUG_KEYSTORE_BASE64 is unreadable or has no \"$KEY_ALIAS\" alias."
+            echo "A 0-byte or text-mangled keystore shows up later as 'Tag number over 30 is not supported'."
+            cat keytool.log
+            rm -f keytool.log
+            exit 1
+          fi
+          rm -f keytool.log
+          echo "Keystore OK - alias \"$KEY_ALIAS\" is readable."
+
       - name: Build APK (arm64 only)
         env:
           KEYSTORE_BASE64: ${{ secrets.DEBUG_KEYSTORE_BASE64 }}
