@@ -7,67 +7,65 @@
 [![Discord](https://img.shields.io/discord/1355184294868484196?color=5865F2&logo=discord&logoColor=white)](https://discord.gg/jnGhd7p6Ht)
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-FFDD00?style=flat&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/hydall)
 
-Glaze is a local, novice-friendly AI roleplay chat client that works with any OpenAI-compatible Chat Completions provider.
+Glaze is a local, novice-friendly AI roleplay chat client. It works with any OpenAI-compatible (Chat Completion) LLM provider, and keeps your data on your own device.
 
-This repository contains the native Flutter version of the app. The goal is to keep the approachability and SillyTavern compatibility of the original JS/Vue client while moving the core experience to a native cross-platform stack with local SQLite storage, stronger desktop support, and a cleaner extension runtime.
+This repository holds the native Flutter rewrite of Glaze. It keeps the approachability and SillyTavern compatibility of the original JS/Vue client, and moves the core experience onto a native cross-platform stack: local SQLite storage, real desktop support, and a sandboxed extension runtime.
 
 > [!WARNING]
 > Glaze is still under heavy development. The app is not yet stable and may contain bugs.
->
-> This is the in-progress Flutter rewrite, not the original Vue/Capacitor app.
 
-## Key Features
+## ✨ Key Features
 
-- **Native AI roleplay chat** - Chat with characters using OpenAI-compatible LLM APIs, manage multiple chats and sessions, and keep data locally on your device.
-- **Character cards** - Import and export SillyTavern V2 character cards, including JSON and PNG card formats.
-- **Prompt presets** - Create and edit generation presets, configure model parameters, and reuse prompt structures across chats.
-- **Lorebooks and memory** - Attach lorebooks, memory books, author's notes, personas, and contextual data to improve long-running roleplay sessions.
-- **Reasoning-aware rendering** - Reasoning/thinking output can be parsed into separate blocks so it is readable in the UI without being blindly fed back into the model.
-- **Image generation** - Generate images from the app and connect image output to roleplay flows and extension blocks.
-- **Cloud sync** - Dropbox and Google Drive sync support for moving local data between devices.
-- **Theming** - Material 3 UI with custom theme presets, color controls, Google Fonts, and desktop/mobile layouts.
-- **Local-first storage** - Drift/SQLite persistence for characters, sessions, presets, API configuration, personas, lorebooks, and extension data.
+- **User-Friendly Installation and Interface** — You don't need an IT degree to use the app. Just install it and start chatting.
+- **Actually Working User Statistics** — Gain insights into how many messages you've sent, how many tokens you've burned, and how many hours you've spent chatting.
+- **Native Reasoning Model Support** — No complex regex needed. Native reasoning is properly parsed and injected into a separate block that is not sent back to the model. If your preset has its own reasoning tags, Glaze can parse those too.
+- **Customizable Theming** — Change colors, fonts, and background images, then export your theme as a JSON file to share with others. Material 3 throughout, with separate desktop and mobile layouts.
+- **Background Generation** — Glaze can generate responses in the background and notify you once they are ready.
+- **Lorebooks and Memory** — Attach lorebooks, memory books, author's notes, and personas to keep long-running roleplay coherent.
+- **Image Generation** — Generate images from inside the app and wire image output into roleplay flows and extension blocks.
+- **Cloud Sync** — Optional Dropbox and Google Drive sync for moving your local data between devices.
+- **Local-First Storage** — Characters, sessions, presets, API configuration, personas, lorebooks, and extension data all live in a local SQLite database.
 
-## SillyTavern Compatibility
+## 🤝 Basic SillyTavern Compatibility
 
-- **Character Card V2** - Import/export support for SillyTavern V2 JSON and PNG cards.
-- **Presets** - JSON preset compatibility is a core target, with built-in editors for prompt and generation settings.
-- **Lorebooks / World Info** - Lorebook support is built into the chat context pipeline.
-- **Macros** - Macro expansion is handled by the prompt builder and macro engine, including character/user substitutions and contextual variables.
-- **Regex and formatting rules** - The renderer and prompt pipeline include support for custom formatting behavior used by roleplay presets.
+- **Presets** — All JSON presets from SillyTavern are compatible with Glaze. Several popular presets come preinstalled.
+- **Advanced Macro System** — Basic macro support is available (full SillyTavern compatibility is in progress). Variables (setvars/getvars), random choices, dice rolls, and character/user data substitution are fully supported.
+- **Character Card Compatibility** — Import and export character cards in SillyTavern V2 format (JSON and PNG).
+- **Lorebooks (World Info)** — Full support for lorebooks to enhance your roleplay experience.
+- **Regex Support** — Full support for regex scripts, including those built into your favorite presets.
 
-## Extensions
+## 🧩 Extensions
 
 Glaze includes a sandboxed extension system for post-generation automation and interactive UI blocks.
 
-- **Post-generation blocks** - Run `infoblock`, `imageGen`, `jsRunner`, and `interactive` blocks after assistant messages, after user messages, or on periodic timers.
-- **Interactive panels** - Render extension-owned HTML panels under assistant messages without giving scripts same-origin access to the app.
-- **JS extension SDK** - Sandboxed scripts can use `window.glaze.*` APIs for variables, text generation, prompt injection, audio, command execution, toasts, and more.
-- **Capability permissions** - Every bridge method is gated by explicit per-preset capabilities. The default is deny.
-- **Scoped variables** - Extensions can use `chat`, `character`, `global`, and `message` variable scopes through dedicated storage APIs.
+- **Post-generation blocks** — Run `infoblock`, `imageGen`, `jsRunner`, and `interactive` blocks after assistant messages, after user messages, or on periodic timers.
+- **Interactive panels** — Render extension-owned HTML panels under assistant messages without giving scripts same-origin access to the app.
+- **JS extension SDK** — Sandboxed scripts can use `window.glaze.*` APIs for variables, text generation, prompt injection, audio, command execution, toasts, and more.
+- **Capability permissions** — Every bridge method is gated by explicit per-preset capabilities. The default is deny.
+- **Scoped variables** — Extensions can use `chat`, `character`, `global`, and `message` variable scopes through dedicated storage APIs.
 
 See `docs/ARCHITECTURE.md` section 9 and `docs/INVARIANTS.md` for the bridge architecture and security invariants.
 
-## Installation
+## 📥 Installation
 
-Download the latest build from the [Releases](../../releases) page when available.
+Download the latest release from the [Releases](../../releases) page.
 
-- **Windows** - Download the Windows build or installer and run it directly.
-- **Android** - Install the APK directly on your device.
-- **iOS** - Sideload the IPA using [AltStore](https://altstore.io/) or a similar tool. App Store distribution is not yet available.
-- **macOS/Linux** - Not published as Flutter builds yet; platform support depends on Flutter build availability, packaging, and signing setup.
+- **Android** — Install the APK directly on your device.
+- **iOS** — Sideload the IPA using [AltStore](https://altstore.io/) or a similar tool. App Store distribution is not yet available.
+- **Windows** — Download the Windows build and run it directly on your PC.
+- **macOS / Linux** — Buildable from source, but not published as prebuilt releases yet; packaging and signing are still to be set up.
 
-## Development
+## 🛠️ Development
 
-Glaze is built with Flutter, Riverpod, Drift, SQLite, Dio, GoRouter, and a WebView-based chat/extension renderer.
+Built with Flutter, Riverpod, Drift/SQLite, Dio, and GoRouter, with a WebView-based chat and extension renderer.
 
-### Prerequisites
+### 📋 Prerequisites
 
-- [Flutter](https://docs.flutter.dev/get-started/install) 3.44+ or newer compatible with Dart 3.12+
-- A desktop/mobile toolchain for the platform you want to build
+- [Flutter](https://docs.flutter.dev/get-started/install) 3.44+ (or newer, compatible with Dart 3.12+)
+- A toolchain for the platform you want to build — [Android Studio](https://developer.android.com/studio) for Android, Xcode for iOS/macOS, Visual Studio with the C++ desktop workload for Windows
 - Git
 
-### Setup
+### 🏗️ Setup
 
 ```bash
 git clone https://github.com/hydall/Glaze.git
@@ -75,68 +73,75 @@ cd Glaze
 flutter pub get
 ```
 
-### Common Commands
+A `.env` file in the project root is **required to build** — it is declared as an asset in `pubspec.yaml`, so the build fails if it is missing:
 
 ```bash
-flutter analyze
-flutter test
-flutter build windows
+cp .env.example .env
 ```
 
-After editing generated Drift, Freezed, or JSON-serializable models, regenerate code:
+It holds the OAuth credentials for cloud sync. Leaving the values empty is fine — the app builds and runs, and only Dropbox / Google Drive sync stays unavailable.
+
+### 🚀 Dev Run
+
+```bash
+flutter run -d windows   # or: -d android, -d chrome, ...
+```
+
+### 🏭 Builds
+
+```bash
+flutter build apk        # Android
+flutter build windows    # Windows
+flutter build ios        # iOS
+```
+
+### ⚙️ Code Generation
+
+Drift, Freezed, and JSON-serializable models are generated. After editing any of them:
 
 ```bash
 dart run build_runner build
 ```
 
-See `docs/BUILD_NOTES.md` for Windows build notes and dependency override context.
+### 🧪 Tests and Analysis
 
-## Project Layout
+```bash
+flutter analyze
+flutter test
+```
+
+## 📚 Project Layout
 
 ```text
 lib/
-  app.dart                          # GlazeApp: router and boot-time initialization
-  main.dart                         # Entry point
-  core/                             # Models, services, providers, LLM pipeline, navigation
+  main.dart                 # Entry point
+  app.dart                  # GlazeApp: router and boot-time initialization
+  core/                     # Models, services, providers, LLM pipeline, navigation
   features/
-    chat/                           # Chat UI, WebView bridge, generation flow
-    extensions/                     # Post-generation blocks and JS bridge SDK
-    settings/                       # API, app, and theme settings
-    lorebooks/                      # Lorebook UI and management
-    presets/                        # Prompt preset editor
-    character_list/                 # Character CRUD and editor
-    image_gen/                      # Image generation UI and services
-    cloud_sync/                     # Dropbox / Google Drive sync
-  shared/                           # Shell, theme, shared widgets
-assets/chat_webview/                # WebView HTML/JS/CSS renderer and bridge assets
-assets/translations/                # Localization files
-docs/                               # Architecture, invariants, rules, workflow, build notes
-test/                               # Unit, characterization, extension, and asset-guard tests
+    chat/                   # Chat UI, WebView bridge, generation flow
+    extensions/             # Post-generation blocks and JS bridge SDK
+    character_list/         # Character CRUD and editor
+    lorebooks/              # Lorebook UI and management
+    presets/                # Prompt preset editor
+    image_gen/              # Image generation UI and services
+    cloud_sync/             # Dropbox / Google Drive sync
+    settings/               # API, app, and theme settings
+  shared/                   # Shell, theme, shared widgets
+assets/chat_webview/        # WebView HTML/JS/CSS renderer and bridge assets
+assets/translations/        # Localization files
+docs/                       # Architecture, invariants, rules, workflow, build notes
+test/                       # Unit, characterization, extension, and asset-guard tests
 ```
 
-## Architecture Notes
+Primary technical references: `docs/ARCHITECTURE.md`, `docs/INVARIANTS.md`, `docs/rules/`, `docs/WORKFLOW.md`, and `docs/BUILD_NOTES.md` for Windows build and dependency-override context.
 
-- **State management** - Riverpod providers and notifiers.
-- **Persistence** - Drift over SQLite, accessed through repositories.
-- **Generation** - HTTP/SSE-based LLM transport through Dio; WebSocket transport is not used for LLM streaming.
-- **Navigation** - GoRouter route definitions for desktop and mobile layouts.
-- **Rendering** - Chat messages are rendered through WebView assets with a Flutter bridge for state, actions, and extension panels.
-- **Security model** - Extension scripts run in sandboxed contexts and must pass capability checks before calling bridge APIs.
-
-Primary technical references:
-
-- `docs/ARCHITECTURE.md`
-- `docs/INVARIANTS.md`
-- `docs/rules/`
-- `docs/WORKFLOW.md`
-
-## Studio References
+## 🙏 Studio References
 
 Glaze Studio was informed by prior work from:
 
 - [Marinara Engine](https://github.com/Pasta-Devs/Marinara-Engine)
 - [Lumiverse](https://github.com/prolix-oc/Lumiverse)
 
-## License
+## 📜 License
 
 This project is licensed under the [GNU Affero General Public License v3.0](LICENSE).
