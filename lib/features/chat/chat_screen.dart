@@ -34,6 +34,7 @@ import '../../shared/theme/theme_provider.dart';
 import '../../shared/widgets/glaze_scaffold.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
+import '../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/image_viewer.dart';
 import '../character_list/character_detail_screen.dart';
 import '../personas/persona_list_screen.dart';
@@ -668,8 +669,10 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
   void _showImageViewer(BuildContext context, String imageUrl) {
     final provider = imageProviderForSrc(imageUrl);
     if (provider == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('image_viewer_unsupported_src'.tr())),
+      GlazeToast.show(
+        context,
+        'image_viewer_unsupported_src'.tr(),
+        isError: true,
       );
       return;
     }
