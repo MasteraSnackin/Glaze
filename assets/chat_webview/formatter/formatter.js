@@ -130,7 +130,7 @@ export class Formatter {
 
     // 5b. Janitor images: ![alt](url) → <span class="janitor-img-wrapper"> with options button
     html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (match, alt, url) => {
-      const safeUrl = this._escapeHtml(url);
+      const safeUrl = this._escapeHtml(this._normalizeMdUrl(url));
       return `<span class="janitor-img-wrapper"><img src="${safeUrl}" alt="${this._escapeHtml(alt)}" class="janitor-img" loading="lazy" data-action="image-click" data-src="${safeUrl}"><button class="janitor-options-btn" type="button" data-action="img-options" data-src="${safeUrl}" title="Options">${OPTIONS_SVG}</button></span>`;
     });
 
@@ -400,6 +400,23 @@ export class Formatter {
     }
     const normalized = path.replace(/\\/g, '/');
     return normalized.startsWith('/') ? `file://${normalized}` : `file:///${normalized}`;
+  }
+
+  // Normalizes the destination of a markdown image/link.
+  //
+  // The raw capture is everything between the parens, which for CommonMark can
+  // carry padding, an <…> wrapper and a title: `![a]( <u> "cap" )`. A browser
+  // trims and re-encodes most of that when it loads the <img>, so the picture
+  // still appears in the message — but the same raw string handed to Flutter
+  // (via data-src) is not a valid URL there, and the full-screen viewer opens
+  // onto nothing. Normalize once, so both sides see the same URL.
+  _normalizeMdUrl(url) {
+    let out = String(url == null ? '' : url).trim();
+    // Trailing title: `url "caption"` / `url 'caption'` / `url (caption)`.
+    const titled = out.match(/^(\S+)\s+(?:"[^"]*"|'[^']*'|\([^)]*\))$/);
+    if (titled) out = titled[1];
+    if (out.startsWith('<') && out.endsWith('>')) out = out.slice(1, -1).trim();
+    return out;
   }
 
   _escapeHtml(value) {

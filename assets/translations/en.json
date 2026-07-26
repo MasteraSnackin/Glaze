@@ -1118,6 +1118,8 @@
   "tokenizer_history_limit_warning": "History is near its limit",
   "tokenizer_hide_confirm_desc": "Hide the top {} visible message(s) from prompt? They will still be visible in chat (dimmed) but excluded from generation.",
   "image_gen_generating": "Generating image...",
+  "image_viewer_load_failed": "Couldn't load the image",
+  "image_viewer_unsupported_src": "This image can't be opened",
   "label_generation_params": "Parameters",
   "filter_all": "All",
   "filter_lorebook": "Lorebook",
