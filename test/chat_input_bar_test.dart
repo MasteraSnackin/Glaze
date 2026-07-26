@@ -18,8 +18,10 @@ void main() {
       bool virtualKeyboardSend = false,
       bool enterToSend = true,
       bool isEditingMessage = false,
+      bool isGeneratingImage = false,
       String initialDraft = '',
       void Function(String? guidance)? onImpersonate,
+      VoidCallback? onStop,
     }) {
       sentMessages = [];
       return ProviderScope(
@@ -28,12 +30,14 @@ void main() {
             body: ChatInputBar(
               onSend: (text) => sentMessages.add(text),
               isGenerating: false,
+              isGeneratingImage: isGeneratingImage,
               focusNode: focusNode,
               virtualKeyboardSend: virtualKeyboardSend,
               enterToSend: enterToSend,
               isEditingMessage: isEditingMessage,
               initialDraft: initialDraft,
               onImpersonate: onImpersonate,
+              onStop: onStop,
             ),
           ),
         ),
@@ -115,6 +119,24 @@ void main() {
       await tester.tap(find.byIcon(Icons.send_rounded));
 
       expect(sentMessages, isEmpty);
+    });
+
+    testWidgets('image generation stop button remains tappable', (
+      tester,
+    ) async {
+      var stopCalls = 0;
+      await tester.pumpWidget(
+        buildChatInputBar(isGeneratingImage: true, onStop: () => stopCalls++),
+      );
+
+      final stopButton = find.ancestor(
+        of: find.byIcon(Icons.stop_rounded),
+        matching: find.byType(InkWell),
+      );
+      expect(stopButton, findsOneWidget);
+
+      await tester.tap(stopButton);
+      expect(stopCalls, 1);
     });
   });
 

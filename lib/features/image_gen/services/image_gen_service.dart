@@ -137,6 +137,12 @@ class ImageGenService {
     final status = e.response?.statusCode;
     final msg = responseMessage?.trim().isNotEmpty == true
         ? [if (status != null) 'HTTP $status', responseMessage!].join(': ')
+        : status != null
+        ? [
+            'HTTP $status',
+            if (e.response?.statusMessage?.trim().isNotEmpty == true)
+              e.response!.statusMessage!.trim(),
+          ].join(': ')
         : e.message ?? e.toString();
     return _formatErrorString(msg);
   }
