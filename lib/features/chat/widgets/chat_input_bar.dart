@@ -13,7 +13,8 @@ import '../../../shared/theme/theme_preset.dart';
 import '../../../shared/theme/theme_provider.dart';
 import '../../../shared/widgets/fullscreen_editor.dart';
 import '../../../shared/widgets/glass_surface.dart';
-import '../chat_provider.dart' show ImpersonationState, impersonationStateProvider;
+import '../chat_provider.dart'
+    show ImpersonationState, impersonationStateProvider;
 import 'chat_blur_region_tracker.dart';
 
 Border _uiBorder(BuildContext context, ThemePreset preset) {
@@ -916,7 +917,8 @@ class _SendBtnState extends State<_SendBtn>
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    return InkWell(
+      customBorder: const CircleBorder(),
       onTap: widget.onTap,
       onTapDown: widget.batterySaver ? null : (_) => _press.forward(),
       onTapUp: widget.batterySaver ? null : (_) => _press.reverse(),

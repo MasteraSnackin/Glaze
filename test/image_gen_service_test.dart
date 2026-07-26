@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/features/image_gen/services/image_gen_service.dart';
 import 'package:glaze_flutter/features/image_gen/services/image_tag_markup.dart';
@@ -187,6 +188,39 @@ void main() {
       final decoded = jsonDecode(errorJson) as Map<String, dynamic>;
       expect(decoded['error'], 'API timeout');
     });
+  });
+
+  group('HTTP errors', () {
+    test(
+      'reports status instead of Dio internals for an empty response',
+      () async {
+        final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        addTearDown(() => server.close(force: true));
+        server.listen((request) async {
+          await request.drain<void>();
+          request.response.statusCode = HttpStatus.notFound;
+          await request.response.close();
+        });
+
+        String? reportedError;
+        await service.processMessageImages(
+          text: '[IMG:GEN:{"prompt":"test"}]',
+          settings: ImageGenSettings(
+            enabled: true,
+            useSameEndpoint: false,
+            customEndpoint: 'http://${server.address.address}:${server.port}',
+            customApiKey: 'test-key',
+          ),
+          llmEndpoint: '',
+          llmApiKey: '',
+          llmModel: '',
+          onError: (error) => reportedError = error,
+        );
+
+        expect(reportedError, startsWith('HTTP 404'));
+        expect(reportedError, isNot(contains('RequestOptions.validateStatus')));
+      },
+    );
   });
 
   group('resetErrorTags', () {
