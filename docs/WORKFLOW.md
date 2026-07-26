@@ -4,25 +4,39 @@ Git, branching, PR, and task-tracking conventions. Loaded on demand — `CLAUDE.
 
 ## Branching
 
-Each feature = a branch off `master`, pushed to `origin`, then a PR into upstream `hydall/Glaze:master`.
+The repository has three long-lived release branches, one per build channel:
 
-- **No direct commits to `master`** — always use a feature branch.
-- **Stack while catching up** — if a feature depends on another not-yet-merged branch, branch off that branch instead of `master`.
+| Branch    | Channel   | Role                                    |
+|-----------|-----------|-----------------------------------------|
+| `nightly` | `nightly` | integration — where features land        |
+| `staging` | `staging` | release candidates / QA                  |
+| `stable`  | `stable`  | public releases (default branch)         |
+
+Work flows upward, `nightly → staging → stable`, by ordinary merges. The channel
+is derived from the branch name at build time, so a commit picks up the right
+build settings automatically as it is promoted — see `docs/RELEASE_CHANNELS.md`.
+
+Each feature = a branch off `nightly`, pushed to `origin`, then a PR into
+upstream `hydall/Glaze:nightly`.
+
+- **No direct commits to `nightly`, `staging` or `stable`** — always use a feature branch.
+- **Never PR straight into `staging` or `stable`** — features enter through `nightly` and are promoted.
+- **Stack while catching up** — if a feature depends on another not-yet-merged branch, branch off that branch instead of `nightly`.
 - **Run `dart run build_runner build`** after changing any freezed/drift model.
 
 ```bash
-git checkout master && git pull
+git checkout nightly && git pull
 git checkout -b feat/xxx
 # ... work ...
 git push -u origin feat/xxx
 ```
 
-Open the PR against `hydall/Glaze:master`, not a fork's `master`. Use the **GitHub MCP tools** (`mcp__plugin_github_github__create_pull_request`) or the GitHub web UI. Do **not** use the `gh` CLI — GitHub operations go through GitHub MCP (project + global convention).
+Open the PR against `hydall/Glaze:nightly`, not a fork's branch. Use the **GitHub MCP tools** (`mcp__plugin_github_github__create_pull_request`) or the GitHub web UI. Do **not** use the `gh` CLI — GitHub operations go through GitHub MCP (project + global convention).
 
 ## Before starting work
 
 1. `git branch --show-current` — confirm the branch.
-2. `git checkout master && git pull` — sync.
+2. `git checkout nightly && git pull` — sync.
 3. `git checkout -b feat/xxx` — create the feature branch.
 4. `flutter analyze` — lint + typecheck.
 5. `flutter test` — run the test suite (one-shot, non-watch mode).
@@ -31,7 +45,17 @@ Open the PR against `hydall/Glaze:master`, not a fork's `master`. Use the **GitH
 
 - Delete local branch: `git branch -D feat/xxx`
 - Delete remote branch: `git push origin --delete feat/xxx`
-- Sync master: `git checkout master && git pull`
+- Sync nightly: `git checkout nightly && git pull`
+
+## Promoting a release
+
+```bash
+# nightly → staging (cut a release candidate)
+git checkout staging && git pull && git merge --no-ff nightly && git push
+
+# staging → stable (ship it)
+git checkout stable && git pull && git merge --no-ff staging && git push
+```
 
 ## Trello board
 

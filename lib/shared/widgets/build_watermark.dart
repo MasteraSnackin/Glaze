@@ -7,9 +7,10 @@ import '../../core/state/dev_mode_provider.dart';
 /// Persistent build watermark pinned to the bottom-right of the screen.
 ///
 /// Shows the build branch (when injected) above the build date, both aligned
-/// to the right edge. Visible by default; can be hidden from the Dev settings
-/// via [hideBuildWatermarkProvider]. Must be placed as a direct child of a
-/// [Stack].
+/// to the right edge. Visible by default on the `staging` and `nightly`
+/// channels and hidden on `stable`; either way it follows
+/// [hideBuildWatermarkProvider], which is toggleable from the Dev settings.
+/// Must be placed as a direct child of a [Stack].
 class BuildWatermark extends ConsumerWidget {
   const BuildWatermark({super.key});
 

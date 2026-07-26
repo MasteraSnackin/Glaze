@@ -18,9 +18,9 @@ class UpdateDialogResult {
   });
 }
 
-/// "New build available" bottom sheet. Lists the commit subjects since the
-/// installed build (the same set the Telegram release bot posts) and offers to
-/// open the GitHub Actions run page where the artifacts live.
+/// "Update available" bottom sheet. Lists what changed — release notes on
+/// `stable`, commit subjects since the installed build elsewhere — and offers
+/// to open the page where the artifacts live: the release, or the Actions run.
 ///
 /// Returns the [UpdateDialogResult], or `null` when dismissed via the backdrop
 /// or drag handle.
@@ -28,9 +28,12 @@ Future<UpdateDialogResult?> showUpdateDialog(
   BuildContext context,
   UpdateInfo info,
 ) {
+  final isRelease = info.source == UpdateSource.release;
   return GlazeBottomSheet.show<UpdateDialogResult>(
     context,
-    title: 'update_available_title'.tr(),
+    title: isRelease
+        ? 'update_release_available_title'.tr()
+        : 'update_available_title'.tr(),
     child: _UpdateSheetBody(info: info),
   );
 }
@@ -50,7 +53,7 @@ class _UpdateSheetBodyState extends State<_UpdateSheetBody> {
   UpdateInfo get info => widget.info;
 
   Future<void> _openActions() async {
-    final uri = Uri.parse(info.runUrl);
+    final uri = Uri.parse(info.url);
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     }
@@ -73,8 +76,8 @@ class _UpdateSheetBodyState extends State<_UpdateSheetBody> {
   @override
   Widget build(BuildContext context) {
     final cs = context.cs;
-    final meta = info.runNumber > 0
-        ? '#${info.runNumber} · ${_formatDate(info.createdAt)}'
+    final meta = info.label.isNotEmpty
+        ? '${info.label} · ${_formatDate(info.createdAt)}'
         : _formatDate(info.createdAt);
 
     return Padding(
@@ -91,7 +94,7 @@ class _UpdateSheetBodyState extends State<_UpdateSheetBody> {
             ),
           ),
           const SizedBox(height: 16),
-          if (info.commits.isNotEmpty) ...[
+          if (info.notes.isNotEmpty) ...[
             Text(
               'update_changes_header'.tr(),
               style: TextStyle(
@@ -111,13 +114,13 @@ class _UpdateSheetBodyState extends State<_UpdateSheetBody> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  for (final commit in info.commits) _CommitLine(text: commit),
-                  if (info.extraCommits > 0)
+                  for (final note in info.notes) _CommitLine(text: note),
+                  if (info.extraNotes > 0)
                     Padding(
                       padding: const EdgeInsets.only(top: 2, left: 13),
                       child: Text(
                         'update_more_commits'.tr(
-                          namedArgs: {'count': '${info.extraCommits}'},
+                          namedArgs: {'count': '${info.extraNotes}'},
                         ),
                         style: TextStyle(
                           fontSize: 13,
@@ -155,7 +158,11 @@ class _UpdateSheetBodyState extends State<_UpdateSheetBody> {
                     _close(openedActions: true);
                   },
                   icon: const Icon(Icons.open_in_new_rounded, size: 18),
-                  label: Text('update_open_actions'.tr()),
+                  label: Text(
+                    info.source == UpdateSource.release
+                        ? 'update_open_release'.tr()
+                        : 'update_open_actions'.tr(),
+                  ),
                 ),
               ),
             ],

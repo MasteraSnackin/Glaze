@@ -8,16 +8,17 @@ import '../navigation/router.dart' show rootNavigatorKey;
 import 'onboarding_service.dart' show isOnboardingComplete;
 import 'update_check_service.dart';
 
-/// SHA of the build the user chose to stop being reminded about (the "don't
-/// remind me about this update" toggle). While the latest CI build matches
-/// this, the startup check stays silent. Cleared automatically once the user
-/// is on the latest build, so future updates remind again.
+/// Identity of the update the user chose to stop being reminded about (the
+/// "don't remind me about this update" toggle) — a run SHA on the pre-release
+/// channels, a release tag on `stable`. While the latest update matches this,
+/// the startup check stays silent. Cleared automatically once the user is on
+/// the latest build, so future updates remind again.
 const _dismissedShaKey = 'update_dismissed_sha';
 
-/// Silent auto-check on startup. Shows the dialog only when a newer `master`
-/// build exists and the user hasn't muted that exact build. Any failure
-/// (offline, rate-limited, dev build) is swallowed — never blocks or
-/// interrupts launch. Skipped while onboarding is still pending.
+/// Silent auto-check on startup. Shows the dialog only when something newer
+/// exists on this build's channel and the user hasn't muted that exact update.
+/// Any failure (offline, rate-limited, dev build) is swallowed — never blocks
+/// or interrupts launch. Skipped while onboarding is still pending.
 Future<void> checkAndShowUpdateOnStartup({UpdateCheckService? service}) async {
   if (!await isOnboardingComplete()) return;
 
@@ -34,7 +35,7 @@ Future<void> checkAndShowUpdateOnStartup({UpdateCheckService? service}) async {
   final info = result.info;
   if (info == null) return;
 
-  if (prefs.getString(_dismissedShaKey) == info.headSha) return;
+  if (prefs.getString(_dismissedShaKey) == info.dismissId) return;
 
   // Show on the root navigator: the startup hook fires above MaterialApp,
   // so its own context has no Navigator/Overlay (same reason onboarding uses
@@ -74,6 +75,6 @@ Future<void> _present(BuildContext context, UpdateInfo info) async {
   final result = await showUpdateDialog(context, info);
   if (result?.dontRemind == true) {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_dismissedShaKey, info.headSha);
+    await prefs.setString(_dismissedShaKey, info.dismissId);
   }
 }

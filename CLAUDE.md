@@ -1,6 +1,7 @@
 # Glaze
 
-Native LLM frontend for AI roleplay. Native Flutter rewrite that replaces the original JS/Vue Glaze client (abandoned legacy, no longer maintained).
+Native LLM frontend for AI roleplay. Flutter rewrite of the original Vue + Capacitor
+app, which is archived on the `legacy-vue` branch.
 **Stack:** Flutter 3.44 + Riverpod 2 + Drift (SQLite) + GoRouter. **Language:** Dart only. **License:** AGPL-3.0.
 
 Architecture: `docs/ARCHITECTURE.md`. Workflow (git, PRs, Trello): `docs/WORKFLOW.md`.
@@ -165,11 +166,13 @@ When editing files matching a pattern below, READ the corresponding rule file FI
 | Class/file organization, decomposition | `docs/CODE_STYLE.md` |
 | JS extension bridge (`glaze.*`), panel iframe, headless engine, capability permissions, periodic/afterUser triggers, `executeCommand`, audio, connection profiles | `docs/ARCHITECTURE.md` § 9 + `docs/INVARIANTS.md` (INV-EG1–8, INV-JS1–6) |
 | Variable storage (`chat` / `character` / `global` / `message` scopes) | `docs/rules/database.md` (atomic repo methods) |
+| Build channels, dev-mode / watermark defaults, `--dart-define` wiring | `docs/RELEASE_CHANNELS.md` |
 
 ## Workflow
 
-- Branch (`feat/xxx`) off `master`, push to `origin`, open a PR — see `docs/WORKFLOW.md` for branching, Trello, and cleanup checklists.
-- Open PRs only against upstream repository `hydall/Glaze` (base: `hydall/Glaze:master`), not against fork repos.
+- Branch (`feat/xxx`) off `nightly`, push to `origin`, open a PR — see `docs/WORKFLOW.md` for branching, Trello, and cleanup checklists.
+- Open PRs only against upstream repository `hydall/Glaze` (base: `hydall/Glaze:nightly`), not against fork repos.
+- Release branches are `nightly` → `staging` → `stable`, one per build channel; features enter at `nightly` and are promoted by merge. Channel semantics: `docs/RELEASE_CHANNELS.md`.
 - Run `dart run build_runner build` after changing any freezed/drift model.
 - Single responsibility: split a class before it grows past ~200-250 lines (thin orchestrators, fat specialists, constructor injection). Details: `docs/CODE_STYLE.md`.
 
@@ -181,7 +184,7 @@ When editing files matching a pattern below, READ the corresponding rule file FI
 - Store API keys in plain text in Drift
 - Mutate state directly — use immutable patterns with freezed
 - Forget `ref.watch` select for streaming UI (causes full rebuild per chunk)
-- Commit directly to `master` — always use a feature branch
+- Commit directly to `nightly`, `staging` or `stable` — always use a feature branch
 - Use the `gh` CLI — GitHub operations go through GitHub MCP tools
 - Bypass `_requireCapability` in the JS bridge — every `glaze.*` method must enforce the matching capability (default-deny)
 - Run user JS in a same-origin iframe — panel/sandbox scripts go in `sandbox="allow-scripts"` (no `allow-same-origin`)

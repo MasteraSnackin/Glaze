@@ -303,19 +303,41 @@ class _MenuScreenState extends ConsumerState<MenuScreen> with ShellHeaderMixin {
                         onTap: () => showUpdateDialog(
                           context,
                           UpdateInfo(
-                            headSha: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+                            source: UpdateSource.ciBuild,
+                            dismissId:
+                                'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+                            label: '#123',
                             createdAt: DateTime.now().toUtc(),
-                            runUrl:
-                                'https://github.com/hydall/Glaze/actions',
-                            runNumber: 123,
-                            commits: const [
+                            url: 'https://github.com/hydall/Glaze/actions',
+                            notes: const [
                               'folders ux/ui',
                               'fix random character button',
                               'Fix extblock image generation races',
                               'tools screen expansion, chat list fix',
                               'Update Lucy pick card',
                             ],
-                            totalCommits: 13,
+                            totalNotes: 13,
+                          ),
+                        ),
+                      ),
+                      MenuItem(
+                        icon: Icons.new_releases_outlined,
+                        label: 'menu_test_update_dialog_release'.tr(),
+                        onTap: () => showUpdateDialog(
+                          context,
+                          UpdateInfo(
+                            source: UpdateSource.release,
+                            dismissId: 'v0.8.0',
+                            label: 'v0.8.0',
+                            createdAt: DateTime.now().toUtc(),
+                            url:
+                                'https://github.com/hydall/Glaze/releases/latest',
+                            notes: const [
+                              'Memory book rework',
+                              'Cloud sync conflict resolution',
+                              'Studio agent presets',
+                            ],
+                            totalNotes: 3,
                           ),
                         ),
                       ),

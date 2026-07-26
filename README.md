@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logos/glaze.svg" width="256" alt="Glaze Logo">
+  <img src="assets/logos/glaze.png" width="256" alt="Glaze Logo">
 </p>
 
 # Glaze
