@@ -501,7 +501,7 @@ class _LorebookCard extends ConsumerWidget {
               ),
               const SizedBox(width: 8),
               IconButton(
-                icon: Icon(Icons.hub_outlined, size: 20, color: scopeColor),
+                icon: Icon(Icons.link, size: 18, color: scopeColor),
                 tooltip: 'header_connections'.tr(),
                 onPressed: onConnections,
               ),
