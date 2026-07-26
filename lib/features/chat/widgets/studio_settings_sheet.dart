@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:easy_localization/easy_localization.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -610,7 +611,7 @@ class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
     if ((await ref.read(activeStudioPresetProvider.future)) == preset.id) {
       await ref.read(activeStudioPresetProvider.notifier).set('default');
     }
-    if (mounted) GlazeToast.show(context, 'Preset deleted.');
+    if (mounted) GlazeToast.show(context, 'theme_preset_deleted'.tr());
   }
 
   Widget _buildPostTrackerContextSetting(PipelineSettings pipeline) {

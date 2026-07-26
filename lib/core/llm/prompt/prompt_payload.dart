@@ -102,7 +102,7 @@ class PromptPayload {
   /// Marinara's `chatSummaryFingerprint` (djb2 on compiled summary). We
   /// hash the MemoryBook injection content (MemoryBook is our summary
   /// equivalent). Empty when no memory content was injected.
-  /// Rationale: GlazeFlutter has no separate Chat Summary system — MemoryBook
+  /// Rationale: Glaze has no separate Chat Summary system — MemoryBook
   /// IS our summary (chronologically ordered entries with messageIds linkage).
   /// The fingerprint detects "memory changed since last turn" for prompt-cache
   /// invalidation (Marinara chatSummaryFingerprint / djb2 analog).

@@ -283,7 +283,7 @@ PromptResult _buildFromInputs(PromptInputs inputs) {
   // turn" and invalidate prompt cache (Anthropic/DeepSeek). The fingerprint
   // is stored on the produced ChatMessage so the NEXT turn can compare.
   // Marinara uses djb2 on the compiled chat summary; we hash the memory
-  // injection content (MemoryBook is our summary equivalent — GlazeFlutter
+  // injection content (MemoryBook is our summary equivalent — Glaze
   // has no separate Chat Summary system, so MemoryBook IS the summary, and
   // its djb2 fingerprint detects "memory changed since last turn" for
   // prompt-cache invalidation).

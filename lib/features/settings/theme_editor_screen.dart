@@ -342,7 +342,7 @@ class _GeneralTab extends StatelessWidget {
               onChanged: (v) => onUpdate((p) => p.copyWith(uiFontSize: v)),
             ),
             _SliderRow(
-              label: 'Letter Spacing',
+              label: 'theme_letter_spacing'.tr(),
               value: preset.uiLetterSpacing,
               min: -1,
               max: 3,

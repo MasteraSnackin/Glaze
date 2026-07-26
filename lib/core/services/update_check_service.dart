@@ -66,7 +66,7 @@ class UpdateCheckResult {
 /// (60 req/h per IP — ample for an occasional check). No token is sent.
 class UpdateCheckService {
   static const _owner = 'hydall';
-  static const _repo = 'GlazeFlutter';
+  static const _repo = 'Glaze';
   static const _workflowFile = 'build-branch.yml';
   static const _branch = 'master';
 
@@ -87,7 +87,7 @@ class UpdateCheckService {
                 'Accept': 'application/vnd.github+json',
                 'X-GitHub-Api-Version': '2022-11-28',
                 // GitHub rejects requests without a User-Agent.
-                'User-Agent': 'GlazeFlutter-UpdateCheck',
+                'User-Agent': 'Glaze-UpdateCheck',
               },
               // We branch on status codes ourselves; never throw on 4xx/5xx.
               validateStatus: (_) => true,

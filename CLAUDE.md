@@ -1,6 +1,6 @@
-# GlazeFlutter
+# Glaze
 
-Native LLM frontend for AI roleplay. Flutter rewrite of [Glaze](https://github.com/hydall/Glaze).
+Native LLM frontend for AI roleplay. Native Flutter rewrite that replaces the original JS/Vue Glaze client (abandoned legacy, no longer maintained).
 **Stack:** Flutter 3.44 + Riverpod 2 + Drift (SQLite) + GoRouter. **Language:** Dart only. **License:** AGPL-3.0.
 
 Architecture: `docs/ARCHITECTURE.md`. Workflow (git, PRs, Trello): `docs/WORKFLOW.md`.
@@ -48,7 +48,9 @@ Only run one-shot, non-interactive commands:
 
 (Fall back to the full `& "Z:\GlazeProject\flutter\bin\flutter.bat"` path if `flutter` is not on PATH.)
 
-If you need to verify runtime behavior or hot-reload changes, ask the user to run `flutter run -d <platform>` (or `flutter run -d chrome`) in a separate terminal and report back. The agent cannot drive or observe a live Flutter session.
+If you need to verify runtime behavior or hot-reload changes, ask the user to run `flutter run -d <platform>` in a separate terminal and report back. The agent cannot drive or observe a live Flutter session.
+
+Web is **not** a target platform — `lib/` imports `dart:io` without conditional stubs, and Drift/`sqlite3_flutter_libs`, `photo_manager` and the WebView bridge have no web support. Target Windows, Android, iOS, macOS or Linux.
 
 **Hot restart after JS asset changes:**
 When files in `assets/chat_webview/` are modified, the user must **hot restart** (press `R`). Hot reload (`r`) doesn't rebuild the asset bundle.
@@ -167,7 +169,7 @@ When editing files matching a pattern below, READ the corresponding rule file FI
 ## Workflow
 
 - Branch (`feat/xxx`) off `master`, push to `origin`, open a PR — see `docs/WORKFLOW.md` for branching, Trello, and cleanup checklists.
-- Open PRs only against upstream repository `hydall/GlazeFlutter` (base: `hydall/GlazeFlutter:master`), not against fork repos.
+- Open PRs only against upstream repository `hydall/Glaze` (base: `hydall/Glaze:master`), not against fork repos.
 - Run `dart run build_runner build` after changing any freezed/drift model.
 - Single responsibility: split a class before it grows past ~200-250 lines (thin orchestrators, fat specialists, constructor injection). Details: `docs/CODE_STYLE.md`.
 

@@ -1,4 +1,4 @@
-# Generation Invariants — Glaze Flutter
+# Generation Invariants — Glaze
 
 Formal runtime behavior that must not change during any refactor.
 Every structural PR must preserve these invariants or explicitly document a deviation.

@@ -4,7 +4,7 @@
       "id": "hydall",
       "name": "Hydall",
       "description": "Hydall's curated picks",
-      "imageUrl": "https://raw.githubusercontent.com/danvitv/GlazeFlutter/master/picks/hydall/ipuxiv.jpg",
+      "imageUrl": "https://raw.githubusercontent.com/hydall/Glaze/master/picks/hydall/ipuxiv.jpg",
       "subfolders": [],
       "characters": [
         {
@@ -30,7 +30,7 @@
       "id": "danvi",
       "name": "Danvi",
       "description": "Danvi's curated picks",
-      "imageUrl": "https://raw.githubusercontent.com/danvitv/GlazeFlutter/master/picks/danvi/fox.jpg",
+      "imageUrl": "https://raw.githubusercontent.com/hydall/Glaze/master/picks/danvi/fox.jpg",
       "subfolders": [
         {
           "id": "crafted",

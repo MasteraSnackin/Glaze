@@ -238,7 +238,7 @@ class TrackerBatcher {
     ResolvedAgentConfig resolved,
   ) {
     final sum = agents.fold<int>(0, (acc, a) => acc + a.maxTokens);
-    // GlazeFlutter has no separate `maxOutputTokens` field on the model;
+    // Glaze has no separate `maxOutputTokens` field on the model;
     // `ApiConfig.maxTokens` is the single output cap. Use it as the ceiling.
     // 0 or negative = uncapped (very large); treat as no cap.
     final cap = resolved.contextSize > 0 ? resolved.contextSize : 1 << 30;

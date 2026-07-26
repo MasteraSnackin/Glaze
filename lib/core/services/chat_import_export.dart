@@ -30,7 +30,7 @@ Future<ChatExportResult> exportChatAsJsonl({
     'character_name': character.name,
     'create_date': _formatSTDate(DateTime.now()),
     'chat_metadata': {
-      'exported_from': 'GlazeFlutter',
+      'exported_from': 'Glaze',
       'import_date': DateTime.now().millisecondsSinceEpoch,
     },
   };

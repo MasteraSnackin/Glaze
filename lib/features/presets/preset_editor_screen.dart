@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -485,8 +486,8 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
               const _SectionLabel('Reasoning', helpTerm: 'preset-reasoning'),
               const SizedBox(height: 8),
               _SettingsToggle(
-                label: 'Parse Inline Reasoning',
-                description: 'Extract reasoning tags from model output',
+                label: 'label_parse_inline_reasoning'.tr(),
+                description: 'desc_parse_inline_reasoning'.tr(),
                 value: _parseInlineReasoning,
                 helpTerm: 'preset-reasoning-inline',
                 onChanged: (v) {
@@ -520,8 +521,8 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
               const _SectionLabel('Post-processing'),
               const SizedBox(height: 8),
               _SettingsToggle(
-                label: 'Merge Prompts',
-                description: 'Combine adjacent blocks into one message',
+                label: 'label_merge_prompts'.tr(),
+                description: 'desc_merge_prompts'.tr(),
                 value: _mergePrompts,
                 helpTerm: 'preset-merge',
                 onChanged: (v) {
@@ -596,12 +597,12 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
     final hasMemoryBlock = _blocks.any((b) => b.id == 'memory');
     GlazeBottomSheet.show<void>(
       context,
-      title: 'Add Block',
+      title: 'add_block'.tr(),
       items: [
         if (!hasMemoryBlock)
           BottomSheetItem(
             icon: Icons.psychology_alt_outlined,
-            label: 'Memory Book',
+            label: 'label_memory_book'.tr(),
             onTap: () {
               Navigator.of(context, rootNavigator: true).pop();
               _addMemoryBlock();
@@ -609,7 +610,7 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
           ),
         BottomSheetItem(
           icon: Icons.add,
-          label: 'Custom Block',
+          label: 'label_custom_block'.tr(),
           onTap: () {
             Navigator.of(context, rootNavigator: true).pop();
             _addCustomBlock();
@@ -617,7 +618,7 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
         ),
         BottomSheetItem(
           icon: Icons.content_copy_outlined,
-          label: 'Copy from Preset',
+          label: 'action_copy_from_preset'.tr(),
           onTap: () {
             Navigator.of(context, rootNavigator: true).pop();
             _openCopyBlockPresetPicker();
@@ -633,7 +634,7 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
     if (presets.isEmpty) return;
     GlazeBottomSheet.show<void>(
       context,
-      title: 'Select Preset',
+      title: 'action_select_preset'.tr(),
       cardItems: [
         for (final preset in presets)
           BottomSheetCardItem(
@@ -661,7 +662,7 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
         title: preset.name,
         items: [
           BottomSheetItem(
-            label: 'No blocks available',
+            label: 'label_no_blocks'.tr(),
             centered: true,
             onTap: () => Navigator.of(context, rootNavigator: true).pop(),
           ),
@@ -671,7 +672,7 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
     }
     GlazeBottomSheet.show<void>(
       context,
-      title: '${preset.name} — Blocks',
+      title: 'preset_blocks_title'.tr(args: [preset.name]),
       items: [
         for (final block in blocks)
           BottomSheetItem(
@@ -759,7 +760,7 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
   void _showRenameDialog() {
     GlazeBottomSheet.show<void>(
       context,
-      title: 'Rename Preset',
+      title: 'action_rename_preset'.tr(),
       input: BottomSheetInput(
         placeholder: 'Preset name',
         value: _nameCtrl.text,
@@ -776,7 +777,7 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
   void _showAuthorDialog() {
     GlazeBottomSheet.show<void>(
       context,
-      title: 'Set Author',
+      title: 'action_set_author'.tr(),
       input: BottomSheetInput(
         placeholder: 'Author (optional)',
         value: _author,
@@ -819,11 +820,11 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
   void _showOptionsMenu() {
     GlazeBottomSheet.show<void>(
       context,
-      title: 'Options',
+      title: 'preset_options'.tr(),
       items: [
         BottomSheetItem(
           icon: Icons.drive_file_rename_outline,
-          label: 'Rename',
+          label: 'action_rename'.tr(),
           onTap: () {
             Navigator.of(context, rootNavigator: true).pop();
             _showRenameDialog();
@@ -831,7 +832,7 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
         ),
         BottomSheetItem(
           icon: Icons.person_outline,
-          label: 'Set Author',
+          label: 'action_set_author'.tr(),
           onTap: () {
             Navigator.of(context, rootNavigator: true).pop();
             _showAuthorDialog();
@@ -839,7 +840,7 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
         ),
         BottomSheetItem(
           icon: Icons.copy_outlined,
-          label: 'Clone',
+          label: 'action_clone_block'.tr(),
           onTap: () async {
             Navigator.of(context, rootNavigator: true).pop();
             // Clone the live editor state (including unsaved edits) rather than
@@ -853,7 +854,7 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
         ),
         BottomSheetItem(
           icon: Icons.upload_file_outlined,
-          label: 'Export',
+          label: 'action_export_st'.tr(),
           onTap: () {
             Navigator.of(context, rootNavigator: true).pop();
             exportPreset(context, _currentSnapshot());
@@ -863,7 +864,7 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
           BottomSheetItem(
             icon: Icons.delete_outlined,
             iconColor: const Color(0xFFFF4444),
-            label: 'Delete',
+            label: 'action_delete_msg'.tr(),
             isDestructive: true,
             onTap: () async {
               Navigator.of(context, rootNavigator: true).pop();
@@ -1196,10 +1197,10 @@ class _BlockEditorInline extends StatelessWidget {
       GenericEditorSection(
         title: null,
         fields: [
-          const GenericEditorField(key: 'name', label: 'Block Name', type: 'text'),
+          const GenericEditorField(key: 'name', label: 'placeholder_block_name'.tr(), type: 'text'),
           const GenericEditorField(
             key: 'role',
-            label: 'Role',
+            label: 'label_role'.tr(),
             type: 'select',
             options: [
               {'label': 'System', 'value': 'system'},
@@ -1209,7 +1210,7 @@ class _BlockEditorInline extends StatelessWidget {
           ),
           const GenericEditorField(
             key: 'insertionMode',
-            label: 'Insertion',
+            label: 'label_insertion'.tr(),
             type: 'select',
             options: [
               {'label': 'Relative', 'value': 'relative'},
@@ -1218,14 +1219,14 @@ class _BlockEditorInline extends StatelessWidget {
           ),
           GenericEditorField(
             key: 'depth',
-            label: 'Depth',
+            label: 'label_depth'.tr(),
             type: 'select',
             options: List.generate(20, (i) => {'label': '${i + 1}', 'value': i + 1}),
             showIf: (item) => item['insertionMode'] == 'depth',
           ),
           const GenericEditorField(
             key: 'appendToLastMessage',
-            label: 'Append to last user message',
+            label: 'label_append_last_user'.tr(),
             type: 'select',
             options: [
               {'label': 'No', 'value': false},
@@ -1234,7 +1235,7 @@ class _BlockEditorInline extends StatelessWidget {
           ),
           const GenericEditorField(
             key: 'content',
-            label: 'Content',
+            label: 'section_content'.tr(),
             type: 'textarea',
             rows: 5,
             expandable: true,
@@ -1322,7 +1323,7 @@ class _AuthorsNoteBlockEditor extends ConsumerWidget {
         fields: [
           const GenericEditorField(
             key: 'role',
-            label: 'Role',
+            label: 'label_role'.tr(),
             type: 'select',
             options: [
               {'label': 'System', 'value': 'system'},
@@ -1332,7 +1333,7 @@ class _AuthorsNoteBlockEditor extends ConsumerWidget {
           ),
           const GenericEditorField(
             key: 'insertionMode',
-            label: 'Insertion',
+            label: 'label_insertion'.tr(),
             type: 'select',
             options: [
               {'label': 'Relative', 'value': 'relative'},
@@ -1341,7 +1342,7 @@ class _AuthorsNoteBlockEditor extends ConsumerWidget {
           ),
           GenericEditorField(
             key: 'depth',
-            label: 'Depth',
+            label: 'label_depth'.tr(),
             type: 'select',
             options: List.generate(20, (i) => {'label': '${i + 1}', 'value': i + 1}),
             showIf: (item) => item['insertionMode'] == 'depth',
@@ -1411,7 +1412,7 @@ class _SummaryBlockEditor extends ConsumerWidget {
         fields: [
           const GenericEditorField(
             key: 'role',
-            label: 'Role',
+            label: 'label_role'.tr(),
             type: 'select',
             options: [
               {'label': 'System', 'value': 'system'},
@@ -1421,7 +1422,7 @@ class _SummaryBlockEditor extends ConsumerWidget {
           ),
           const GenericEditorField(
             key: 'insertionMode',
-            label: 'Insertion',
+            label: 'label_insertion'.tr(),
             type: 'select',
             options: [
               {'label': 'Relative', 'value': 'relative'},
@@ -1430,14 +1431,14 @@ class _SummaryBlockEditor extends ConsumerWidget {
           ),
           GenericEditorField(
             key: 'depth',
-            label: 'Depth',
+            label: 'label_depth'.tr(),
             type: 'select',
             options: List.generate(20, (i) => {'label': '${i + 1}', 'value': i + 1}),
             showIf: (item) => item['insertionMode'] == 'depth',
           ),
           const GenericEditorField(
             key: 'prefix',
-            label: 'Prefix',
+            label: 'label_prefix'.tr(),
             type: 'text',
             placeholder: 'Summary: ',
           ),
@@ -1457,7 +1458,7 @@ class _SummaryBlockEditor extends ConsumerWidget {
             context,
             charId: charId,
             content: content,
-            hint: 'Summary content is tied to a chat. Open a chat to edit it.',
+            hint: 'hint_summary_needs_chat'.tr(),
             onEdit: () => showSummarySheet(context, charId!),
           ),
           GenericEditor(

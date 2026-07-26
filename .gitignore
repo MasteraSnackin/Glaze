@@ -183,9 +183,15 @@ analyze_errors.txt
 test_failures.txt
 analyze_full.txt
 test_full.txt
+analyze_output.txt
 fix_apply.txt
 fix_dry.txt
 pubget.txt
+*_test_output.txt
+*_test_summary.txt
+
+# Agent session artifacts (plans / scratch scripts, per-machine)
+.hermes/
 
 # Browser-Claude chat output (patches / PR drafts, not committed as-is)
 docs/chatoutput/

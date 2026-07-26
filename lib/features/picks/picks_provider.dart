@@ -6,7 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'picks_models.dart';
 
 const kPicksBaseUrl =
-    'https://raw.githubusercontent.com/danvitv/GlazeFlutter/master/picks';
+    'https://raw.githubusercontent.com/hydall/Glaze/master/picks';
 
 final _dio = Dio(BaseOptions(
   connectTimeout: const Duration(seconds: 15),
