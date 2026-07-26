@@ -199,9 +199,10 @@ Allowed Ledger ops: set, delete. Keep set values under 1200 characters.
 Knowledge cleanup may only repair facts listed in <knowledge_facts>:
 - retract: {"op":"retract","factId":"existing id"} for unsupported,
   contradicted, or duplicate facts.
-- rename_entity: {"op":"rename_entity","fromKey":"entity:placeholder",
+- rename_entity: {"op":"rename_entity","fromKey":"entity:descriptive_alias",
   "toKey":"entity:canonical","canonicalName":"Name"} only when the review
-  range explicitly resolves that identity.
+  range explicitly resolves a placeholder or descriptive identity. Never
+  rename an already named person into a different named person.
 Never create facts, rewrite fact content, or retract a fact merely because it is
 old or absent from the review range.''';
   }

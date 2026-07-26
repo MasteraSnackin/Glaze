@@ -21,6 +21,7 @@ import 'package:glaze_flutter/core/models/character_knowledge_fact.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
 import 'package:glaze_flutter/core/models/knowledge_cleanup.dart';
 import 'package:glaze_flutter/core/models/tracker.dart';
+import 'package:glaze_flutter/core/models/tracker_snapshot.dart';
 import 'package:glaze_flutter/core/state/db_provider.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -630,6 +631,40 @@ void main() {
       expect(ops, isEmpty);
     });
 
+    test('knowledge cleanup accepts a resolved descriptive alias', () {
+      const offered = CharacterKnowledgeFact(
+        id: 'fact-1',
+        chatSessionId: 's',
+        knowerKey: 'entity:helga',
+        subjectKey: 'entity:woman_in_yellow_jacket',
+        factClass: CharacterKnowledgeFactClass.knowledge,
+        predicate: 'location',
+        object: 'Afterlife',
+        epistemicState: CharacterKnowledgeEpistemicState.observed,
+        sourceMessageId: 'a1',
+        sourceSwipeId: 0,
+        sourceAgentSwipeId: 0,
+      );
+      const output = '''
+<glaze_knowledge_cleanup>
+{"ops":[
+  {"op":"rename_entity","fromKey":"entity:woman_in_yellow_jacket","toKey":"entity:lucy","canonicalName":"Lucy"}
+]}
+</glaze_knowledge_cleanup>
+''';
+
+      final ops = const KnowledgeCleanupParser().parse(
+        output: output,
+        offeredFacts: const [offered],
+        reviewText: 'The woman in the yellow jacket is identified as Lucy.',
+      );
+
+      expect(ops, hasLength(1));
+      expect(ops.single.type, KnowledgeCleanupOpType.renameEntity);
+      expect(ops.single.fromKey, 'entity:woman_in_yellow_jacket');
+      expect(ops.single.toKey, 'entity:lucy');
+    });
+
     test('prompt offers relevant inferred and placeholder facts', () {
       final messages = [
         ..._conversation(6),
@@ -1107,6 +1142,46 @@ Ledger text.
         expect(live!.value, 'wary');
       },
     );
+
+    test('branch preserves snapshot chronology', () async {
+      const source = 'source';
+      const branch = 'branch';
+      await snapshotRepo.upsert(
+        TrackerSnapshot(
+          sessionId: source,
+          messageId: 'msg_old',
+          swipeId: 0,
+          agentSwipeId: 0,
+          trackers: _makeTrackers(source, {'scene.state': 'old'}),
+          committed: true,
+          createdAt: 100,
+        ),
+      );
+      await snapshotRepo.upsert(
+        TrackerSnapshot(
+          sessionId: source,
+          messageId: 'msg_new',
+          swipeId: 0,
+          agentSwipeId: 0,
+          trackers: _makeTrackers(source, {'scene.state': 'new'}),
+          committed: true,
+          createdAt: 200,
+        ),
+      );
+
+      await snapshotRepo.copyForSessionBranch(
+        fromSessionId: source,
+        toSessionId: branch,
+        messageIds: const {'msg_old', 'msg_new'},
+      );
+
+      final copied = await snapshotRepo.getBySessionId(branch);
+      expect(copied.map((snapshot) => snapshot.createdAt), [200, 100]);
+      expect(
+        (await snapshotRepo.getLatestCommitted(branch))!.messageId,
+        'msg_new',
+      );
+    });
   });
 
   // ── Ledger prompt tracker authority ─────────────────────────────────────

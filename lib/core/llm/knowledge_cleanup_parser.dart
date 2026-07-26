@@ -38,7 +38,7 @@ class KnowledgeCleanupParser {
       final name = rawOp['canonicalName']?.toString().trim() ?? '';
       final validKey = RegExp(r'^entity:[a-z0-9_:-]+$');
       if (!entityKeys.contains(from) ||
-          !_isPlaceholderKey(from) ||
+          !_isResolvableAliasKey(from) ||
           !validKey.hasMatch(to) ||
           from == to ||
           name.isEmpty ||
@@ -75,8 +75,8 @@ class KnowledgeCleanupParser {
     return decoded['ops'] as List;
   }
 
-  bool _isPlaceholderKey(String key) => RegExp(
-    r'(unknown|unidentified|stranger|неизвест|незнаком)',
+  bool _isResolvableAliasKey(String key) => RegExp(
+    r'(unknown|unidentified|stranger|woman|man|girl|boy|person|figure|netrunner|merc|неизвест|незнаком|женщин|мужчин|девуш|парень|человек|фигура|нетраннер|наёмник|наемник)',
     caseSensitive: false,
   ).hasMatch(key);
 }
