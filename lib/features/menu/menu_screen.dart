@@ -113,6 +113,7 @@ class _MenuScreenState extends ConsumerState<MenuScreen> with ShellHeaderMixin {
             children: [
                 MenuGroup(
                   header: 'section_settings'.tr(),
+                  headerIcon: Icons.settings_rounded,
                   items: [
                     MenuItem(
                       icon: Icons.settings_outlined,
@@ -130,6 +131,7 @@ class _MenuScreenState extends ConsumerState<MenuScreen> with ShellHeaderMixin {
                 ),
                 MenuGroup(
                   header: 'section_data'.tr(),
+                  headerIcon: Icons.storage_rounded,
                   items: [
                     MenuItem(
                       icon: Icons.backup_outlined,
@@ -169,6 +171,7 @@ class _MenuScreenState extends ConsumerState<MenuScreen> with ShellHeaderMixin {
                 if (ref.watch(devModeProvider))
                   MenuGroup(
                     header: 'menu_dev_header'.tr(),
+                    headerIcon: Icons.developer_mode_rounded,
                     items: [
                       MenuSwitchItem(
                         label: 'menu_hide_build_date_watermark'.tr(),
@@ -320,6 +323,7 @@ class _MenuScreenState extends ConsumerState<MenuScreen> with ShellHeaderMixin {
                   ),
                 MenuGroup(
                   header: 'section_info'.tr(),
+                  headerIcon: Icons.info_rounded,
                   items: [
                     MenuItem(
                       icon: Icons.info_outline_rounded,
