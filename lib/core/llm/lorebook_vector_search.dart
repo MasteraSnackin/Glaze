@@ -45,11 +45,27 @@ class LorebookVectorSearch {
     final charId = character?.id;
     final activeLorebooks = lorebooks.where((lb) {
       if (lb.enabled) return true;
-      if (charId != null && activations?.character[charId]?.contains(lb.id) == true) return true;
-      if (chatId != null && activations?.chat[chatId]?.contains(lb.id) == true) return true;
-      if (charId != null && lb.activationScope == 'character' && lb.activationTargetId == charId) return true;
-      if (chatId != null && lb.activationScope == 'chat' && lb.activationTargetId == chatId) return true;
-      if (charWorld != null && charWorld.isNotEmpty && lb.name == charWorld) return true;
+      if (charId != null &&
+          activations?.character[charId]?.contains(lb.id) == true) {
+        return true;
+      }
+      if (chatId != null &&
+          activations?.chat[chatId]?.contains(lb.id) == true) {
+        return true;
+      }
+      if (charId != null &&
+          lb.activationScope == 'character' &&
+          lb.activationTargetId == charId) {
+        return true;
+      }
+      if (chatId != null &&
+          lb.activationScope == 'chat' &&
+          lb.activationTargetId == chatId) {
+        return true;
+      }
+      if (charWorld != null && charWorld.isNotEmpty && lb.name == charWorld) {
+        return true;
+      }
       return false;
     }).toList();
 
@@ -60,6 +76,7 @@ class LorebookVectorSearch {
 
     var effectiveThreshold = settings.vectorThreshold;
     var effectiveTopK = overrideTopK ?? settings.vectorTopK;
+    int? configuredScanDepth;
     for (final lb in activeLorebooks) {
       final lbSettings = lb.settings;
       if (lbSettings != null) {
@@ -69,8 +86,13 @@ class LorebookVectorSearch {
         if (lbSettings.vectorTopK > effectiveTopK) {
           effectiveTopK = lbSettings.vectorTopK;
         }
+        if (configuredScanDepth == null ||
+            lbSettings.vectorScanDepth > configuredScanDepth) {
+          configuredScanDepth = lbSettings.vectorScanDepth;
+        }
       }
     }
+    final effectiveScanDepth = configuredScanDepth ?? 5;
 
     final vectorEntries = <(LorebookEntry, String)>[];
     // NEW (patch #4 follow-up — Marinara analog): semantic fallback pool
@@ -114,22 +136,29 @@ class LorebookVectorSearch {
       if (row == null || row.vectorsBlob == null) continue;
 
       final text = _getEmbeddingText(entry, lorebooks, lbId);
-      final fingerprint = LorebookEmbeddingService.buildEmbeddingFingerprint(entry, text);
+      final fingerprint = LorebookEmbeddingService.buildEmbeddingFingerprint(
+        entry,
+        text,
+      );
       final currentHash = computeHash(fingerprint);
       if (row.textHash != currentHash) continue;
 
       final vectors = _repo.decodeVectors(row);
       if (vectors == null || vectors.isEmpty) continue;
 
-      candidates.add(VectorCandidate(
-        id: entry.id,
-        vectors: vectors.map((v) => VectorChunk(text: '', vector: v)).toList(),
-        metadata: {
-          'lorebookId': lbId,
-          'entry': entry,
-          'hints': _repo.decodeHints(row) ?? [],
-        },
-      ));
+      candidates.add(
+        VectorCandidate(
+          id: entry.id,
+          vectors: vectors
+              .map((v) => VectorChunk(text: '', vector: v))
+              .toList(),
+          metadata: {
+            'lorebookId': lbId,
+            'entry': entry,
+            'hints': _repo.decodeHints(row) ?? [],
+          },
+        ),
+      );
     }
 
     // Separate candidate pool for fallback (keyless) entries.
@@ -140,28 +169,50 @@ class LorebookVectorSearch {
       if (row == null || row.vectorsBlob == null) continue;
 
       final text = _getEmbeddingText(entry, lorebooks, lbId);
-      final fingerprint = LorebookEmbeddingService.buildEmbeddingFingerprint(entry, text);
+      final fingerprint = LorebookEmbeddingService.buildEmbeddingFingerprint(
+        entry,
+        text,
+      );
       final currentHash = computeHash(fingerprint);
       if (row.textHash != currentHash) continue;
 
       final vectors = _repo.decodeVectors(row);
       if (vectors == null || vectors.isEmpty) continue;
 
-      fallbackCandidates.add(VectorCandidate(
-        id: entry.id,
-        vectors: vectors.map((v) => VectorChunk(text: '', vector: v)).toList(),
-        metadata: {
-          'lorebookId': lbId,
-          'entry': entry,
-          'hints': _repo.decodeHints(row) ?? [],
-        },
-      ));
+      fallbackCandidates.add(
+        VectorCandidate(
+          id: entry.id,
+          vectors: vectors
+              .map((v) => VectorChunk(text: '', vector: v))
+              .toList(),
+          metadata: {
+            'lorebookId': lbId,
+            'entry': entry,
+            'hints': _repo.decodeHints(row) ?? [],
+          },
+        ),
+      );
     }
 
     if (candidates.isEmpty && fallbackCandidates.isEmpty) return [];
 
-    final focusedQuery = _buildFocusedQuery(history, currentText, config.maxChunkTokens);
-    final fallbackQuery = _buildFallbackQuery(history, currentText, config.maxChunkTokens);
+    final recentHistory = effectiveScanDepth <= 0
+        ? const <ChatMessageForSearch>[]
+        : history
+              .skip(
+                (history.length - effectiveScanDepth).clamp(0, history.length),
+              )
+              .toList();
+    final focusedQuery = _buildFocusedQuery(
+      recentHistory,
+      currentText,
+      config.maxChunkTokens,
+    );
+    final fallbackQuery = _buildFallbackQuery(
+      recentHistory,
+      currentText,
+      config.maxChunkTokens,
+    );
 
     final allResults = <String, double>{};
     final allLorebookIds = <String, String>{};
@@ -191,12 +242,14 @@ class LorebookVectorSearch {
       final results = findTopKMulti(vecChunks, pool, pool.length, 0);
       for (final r in results) {
         final entry = r.metadata['entry'] as LorebookEntry;
+        final lorebookId = r.metadata['lorebookId'] as String;
+        final resultId = '${lorebookId}_${entry.id}';
         final hints = r.metadata['hints'] as List<String>;
         final boosted = _applyHybridBoost(r.score, entry, hints, query);
-        if (allResults[entry.id] == null || boosted > allResults[entry.id]!) {
-          allResults[entry.id] = boosted;
+        if (allResults[resultId] == null || boosted > allResults[resultId]!) {
+          allResults[resultId] = boosted;
         }
-        allLorebookIds[entry.id] = r.metadata['lorebookId'] as String;
+        allLorebookIds[resultId] = lorebookId;
       }
     }
 
@@ -223,26 +276,25 @@ class LorebookVectorSearch {
     final fallbackResults = <String, double>{};
     final fallbackLorebookIds = <String, String>{};
     if (focusedChunks != null && fallbackCandidates.isNotEmpty) {
-      mainFutures.add(
-        () async {
-          final vecChunks = await focusedChunks;
-          final results = findTopKMulti(
-            vecChunks,
-            fallbackCandidates,
-            fallbackCandidates.length,
-            0,
-          );
-          for (final r in results) {
-            final entry = r.metadata['entry'] as LorebookEntry;
-            final score = r.score;
-            if (score >= fallbackThreshold) {
-              fallbackResults[entry.id] = score;
-              fallbackLorebookIds[entry.id] =
-                  r.metadata['lorebookId'] as String;
-            }
+      mainFutures.add(() async {
+        final vecChunks = await focusedChunks;
+        final results = findTopKMulti(
+          vecChunks,
+          fallbackCandidates,
+          fallbackCandidates.length,
+          0,
+        );
+        for (final r in results) {
+          final entry = r.metadata['entry'] as LorebookEntry;
+          final lorebookId = r.metadata['lorebookId'] as String;
+          final resultId = '${lorebookId}_${entry.id}';
+          final score = r.score;
+          if (score >= fallbackThreshold) {
+            fallbackResults[resultId] = score;
+            fallbackLorebookIds[resultId] = lorebookId;
           }
-        }(),
-      );
+        }
+      }());
     }
     await Future.wait(mainFutures);
 
@@ -255,11 +307,13 @@ class LorebookVectorSearch {
     final mainResults = sorted
         .where((e) => e.value >= threshold)
         .take(topK)
-        .map((e) => VectorSearchResult(
-              entryId: e.key,
-              score: e.value,
-              lorebookId: allLorebookIds[e.key] ?? '',
-            ))
+        .map(
+          (e) => VectorSearchResult(
+            entryId: e.key.substring((allLorebookIds[e.key]?.length ?? -1) + 1),
+            score: e.value,
+            lorebookId: allLorebookIds[e.key] ?? '',
+          ),
+        )
         .toList();
 
     // Merge fallback results into the final list. Take top fallbackTopK
@@ -267,28 +321,46 @@ class LorebookVectorSearch {
     // keyless entry that also has vectorSearch=true is not double-counted.
     final fallbackSorted = fallbackResults.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
-    final mainIds = mainResults.map((r) => r.entryId).toSet();
+    final mainIds = mainResults
+        .map((r) => '${r.lorebookId}_${r.entryId}')
+        .toSet();
     final fallbackFinal = fallbackSorted
         .where((e) => !mainIds.contains(e.key))
         .take(fallbackTopK)
-        .map((e) => VectorSearchResult(
-              entryId: e.key,
-              score: e.value,
-              lorebookId: fallbackLorebookIds[e.key] ?? '',
-            ))
+        .map(
+          (e) => VectorSearchResult(
+            entryId: e.key.substring(
+              (fallbackLorebookIds[e.key]?.length ?? -1) + 1,
+            ),
+            score: e.value,
+            lorebookId: fallbackLorebookIds[e.key] ?? '',
+          ),
+        )
         .toList();
 
     return [...mainResults, ...fallbackFinal];
   }
 
-  String _buildFocusedQuery(List<ChatMessageForSearch> history, String currentText, int maxChunkTokens) {
-    final userMessages = history.where((m) => m.role == 'user').toList().reversed;
+  String _buildFocusedQuery(
+    List<ChatMessageForSearch> history,
+    String currentText,
+    int maxChunkTokens,
+  ) {
+    final userMessages = history
+        .where((m) => m.role == 'user')
+        .toList()
+        .reversed;
     final maxChars = (maxChunkTokens * 2).clamp(0, 1024) * 4;
     final buffer = StringBuffer();
 
     buffer.write(currentText);
 
+    var skippedCurrent = false;
     for (final msg in userMessages) {
+      if (!skippedCurrent && msg.content == currentText) {
+        skippedCurrent = true;
+        continue;
+      }
       final toAdd = '\n${msg.content}';
       if (buffer.length + toAdd.length > maxChars.clamp(0, 6000)) break;
       buffer.write(toAdd);
@@ -297,13 +369,22 @@ class LorebookVectorSearch {
     return _sanitizeQuery(buffer.toString());
   }
 
-  String _buildFallbackQuery(List<ChatMessageForSearch> history, String currentText, int maxChunkTokens) {
+  String _buildFallbackQuery(
+    List<ChatMessageForSearch> history,
+    String currentText,
+    int maxChunkTokens,
+  ) {
     final maxChars = (maxChunkTokens * 3).clamp(0, 1536) * 4;
     final buffer = StringBuffer();
 
     buffer.write(currentText);
 
+    var skippedCurrent = false;
     for (final msg in history.reversed) {
+      if (!skippedCurrent && msg.content == currentText) {
+        skippedCurrent = true;
+        continue;
+      }
       final toAdd = '\n${msg.content}';
       if (buffer.length + toAdd.length > maxChars.clamp(0, 10000)) break;
       buffer.write(toAdd);
@@ -320,11 +401,18 @@ class LorebookVectorSearch {
     return clean.trim();
   }
 
-  double _applyHybridBoost(double rawScore, LorebookEntry entry, List<String> hints, String queryText) {
+  double _applyHybridBoost(
+    double rawScore,
+    LorebookEntry entry,
+    List<String> hints,
+    String queryText,
+  ) {
     double boost = 0;
     final queryLower = queryText.toLowerCase();
 
-    final nameInQuery = entry.comment.isNotEmpty && queryLower.contains(entry.comment.toLowerCase());
+    final nameInQuery =
+        entry.comment.isNotEmpty &&
+        queryLower.contains(entry.comment.toLowerCase());
     if (nameInQuery) {
       boost += 0.18;
     }
@@ -353,10 +441,17 @@ class LorebookVectorSearch {
   }
 
   List<String> _tokenize(String text) {
-    return text.split(RegExp(r'[\s,.;:!?]+')).where((t) => t.length > 2).toList();
+    return text
+        .split(RegExp(r'[\s,.;:!?]+'))
+        .where((t) => t.length > 2)
+        .toList();
   }
 
-  String _getEmbeddingText(LorebookEntry entry, List<Lorebook> lorebooks, String lbId) {
+  String _getEmbeddingText(
+    LorebookEntry entry,
+    List<Lorebook> lorebooks,
+    String lbId,
+  ) {
     final lb = lorebooks.where((l) => l.id == lbId).firstOrNull;
     final target = lb?.settings?.embeddingTarget ?? 'content';
     if (target == 'keys') {
@@ -371,11 +466,11 @@ class LorebookVectorSearch {
     if (filter == null) return false;
     if (filter.names.isEmpty) return false;
     final charName = character.name.toLowerCase();
-    final isInCategory = filter.names.any((n) => charName.contains(n.toLowerCase()));
+    final isInCategory = filter.names.any(
+      (n) => charName.contains(n.toLowerCase()),
+    );
     if (filter.isExclude && isInCategory) return true;
     if (!filter.isExclude && !isInCategory) return true;
     return false;
   }
 }
-
-

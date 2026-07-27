@@ -467,6 +467,7 @@ class PromptPayloadBuilder {
         history.lastOrNull?.content ?? '',
         character.world,
         character,
+        chatId: session.id,
       );
     }
 

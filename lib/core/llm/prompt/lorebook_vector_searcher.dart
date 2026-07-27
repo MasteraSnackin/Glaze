@@ -2,7 +2,8 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../shared/widgets/glaze_toast.dart' show GlazeToast, ToastPosition;
+import '../../../shared/widgets/glaze_toast.dart'
+    show GlazeToast, ToastPosition;
 import '../../state/db_provider.dart';
 import '../../state/lorebook_provider.dart';
 import '../embedding_types.dart';
@@ -70,14 +71,21 @@ class LorebookVectorSearcher {
       // Key by "lorebookId_entryId" to avoid collisions between lorebooks
       // whose entries share the same numeric id.
       final entryMap = <String, LorebookEntry>{};
+      final lorebookNames = <String, String>{};
       for (final lb in lorebooks) {
+        lorebookNames[lb.id] = lb.name;
         for (final entry in lb.entries) {
           entryMap['${lb.id}_${entry.id}'] = entry;
         }
       }
       return results
           .where((r) => entryMap.containsKey('${r.lorebookId}_${r.entryId}'))
-          .map((r) => entryMap['${r.lorebookId}_${r.entryId}']!.copyWith())
+          .map(
+            (r) => entryMap['${r.lorebookId}_${r.entryId}']!.copyWith(
+              lorebookId: r.lorebookId,
+              lorebookName: lorebookNames[r.lorebookId] ?? '',
+            ),
+          )
           .toList();
     } catch (e, st) {
       if (cancelToken?.isCancelled == true ||

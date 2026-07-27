@@ -115,15 +115,29 @@ PromptResult buildPrompt(PromptPayload payload) {
         applyPerBookLimits: false,
       );
 
+  final vectorEntries = payload.vectorEntries.map((entry) {
+    if (entry.lorebookId.isNotEmpty) return entry;
+    final matches = payload.lorebooks.where(
+      (book) => book.entries.any(
+        (candidate) =>
+            candidate.id == entry.id && candidate.content == entry.content,
+      ),
+    );
+    final book = matches.length == 1 ? matches.single : null;
+    return book == null
+        ? entry
+        : entry.copyWith(lorebookId: book.id, lorebookName: book.name);
+  }).toList();
+
   final mergedEntries = mergeKeywordVector(
     keywordEntries: loreEntries,
-    vectorEntries: payload.vectorEntries,
+    vectorEntries: vectorEntries,
     settings: payload.lorebookSettings,
   );
 
   final keywordIdToEntry = <String, ScannedEntry>{};
   for (final e in loreEntries) {
-    keywordIdToEntry[e.id] = e;
+    keywordIdToEntry['${e.lorebookId}_${e.id}'] = e;
   }
   final coverageKeywordIdToEntry = <String, CoverageEntry>{};
   if (payload.lorebookSettings.searchType != 'vector') {
@@ -144,17 +158,32 @@ PromptResult buildPrompt(PromptPayload payload) {
           (e.activated &&
               e.matchedKeys.isNotEmpty &&
               !e.matchedKeys.contains('[vector]'));
-      if (isKeywordLike) coverageKeywordIdToEntry[e.id] = e;
+      if (isKeywordLike) {
+        coverageKeywordIdToEntry['${e.lorebookId}_${e.id}'] = e;
+      }
     }
   }
   final vectorIdToEntry = <String, LorebookEntry>{};
-  for (final e in payload.vectorEntries) {
-    vectorIdToEntry[e.id] = e;
+  for (final e in vectorEntries) {
+    vectorIdToEntry['${e.lorebookId}_${e.id}'] = e;
   }
+
+  final vectorLoreContent = mergedEntries
+      .where((entry) {
+        final key = '${entry.lorebookId}_${entry.id}';
+        return vectorIdToEntry.containsKey(key) &&
+            !keywordIdToEntry.containsKey(key);
+      })
+      .map((entry) => entry.content)
+      .join('\n\n');
+  final vectorLoreTokens = vectorLoreContent.isEmpty
+      ? 0
+      : estimateTokens(vectorLoreContent);
 
   final triggeredLorebooks = <TriggeredEntry>[];
   for (final merged in mergedEntries) {
-    final kw = keywordIdToEntry[merged.id];
+    final mergedKey = '${merged.lorebookId}_${merged.id}';
+    final kw = keywordIdToEntry[mergedKey];
     if (kw != null) {
       triggeredLorebooks.add(
         TriggeredEntry(
@@ -167,7 +196,7 @@ PromptResult buildPrompt(PromptPayload payload) {
       );
       continue;
     }
-    final coverageKw = coverageKeywordIdToEntry[merged.id];
+    final coverageKw = coverageKeywordIdToEntry[mergedKey];
     if (coverageKw != null) {
       triggeredLorebooks.add(
         TriggeredEntry(
@@ -182,12 +211,14 @@ PromptResult buildPrompt(PromptPayload payload) {
       );
       continue;
     }
-    final vec = vectorIdToEntry[merged.id];
+    final vec = vectorIdToEntry[mergedKey];
     if (vec != null) {
       triggeredLorebooks.add(
         TriggeredEntry(
           id: vec.id,
           name: vec.comment.isNotEmpty ? vec.comment : vec.id,
+          lorebookName: vec.lorebookName,
+          lorebookId: vec.lorebookId,
           source: 'vector',
         ),
       );
@@ -399,6 +430,7 @@ PromptResult buildPrompt(PromptPayload payload) {
     triggeredLorebooks: triggeredLorebooks,
     triggeredMemories: payload.triggeredMemories,
     macroTokens: macroTokens,
+    vectorLoreTokens: vectorLoreTokens,
   );
 }
 
@@ -418,6 +450,7 @@ PromptResult _assembleMessages({
   List<TriggeredEntry> triggeredLorebooks = const [],
   List<TriggeredEntry> triggeredMemories = const [],
   Map<String, int> macroTokens = const {},
+  int vectorLoreTokens = 0,
 }) {
   final messages = <PromptMessage>[];
   final attributionBlocks = <StaticBlock>[];
@@ -674,21 +707,6 @@ PromptResult _assembleMessages({
   }
 
   final lorebookReserve = calculateLorebookReserve(payload);
-
-  // Count vector-only tokens so the tokenizer can show "Vector Lorebook" as
-  // its own row. Without this, vector entries silently inflate the
-  // "Lorebook Reserve" row (which is computed as reserve minus keyword+macro
-  // usage) and the user can never see how much vector lore was actually
-  // injected. We approximate the actual payload bytes by joining the
-  // content of every vector entry — the merge with keyword dedups at most
-  // maxInjectedEntries, and the user-visible goal is "see vector lore in
-  // flight", not an exact budget.
-  final vectorContent = payload.vectorEntries
-      .map((e) => e.content)
-      .join('\n\n');
-  final vectorLoreTokens = vectorContent.isEmpty
-      ? 0
-      : estimateTokens(vectorContent);
 
   final calculator = ContextCalculator(
     contextSize: payload.apiConfig.contextSize,
