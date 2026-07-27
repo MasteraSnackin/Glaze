@@ -118,11 +118,31 @@ jobs:
           ref: ${{ github.ref_name }}
 
       - name: Create .env from secrets
+        env:
+          BUILD_CHANNEL: ${{ needs.metadata.outputs.build_channel }}
+          DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
+          DROPBOX_APP_KEY_STAGING: ${{ secrets.DROPBOX_APP_KEY_STAGING }}
+          DROPBOX_APP_KEY_NIGHTLY: ${{ secrets.DROPBOX_APP_KEY_NIGHTLY }}
+          DROPBOX_REDIRECT_NATIVE: ${{ secrets.DROPBOX_REDIRECT_NATIVE }}
+          GDRIVE_CLIENT_ID: ${{ secrets.GDRIVE_CLIENT_ID }}
         run: |
-          echo "DROPBOX_APP_KEY=${{ secrets.DROPBOX_APP_KEY }}" >> .env
-          echo "DROPBOX_REDIRECT_NATIVE=${{ secrets.DROPBOX_REDIRECT_NATIVE }}" >> .env
-          echo "GDRIVE_CLIENT_ID=${{ secrets.GDRIVE_CLIENT_ID }}" >> .env
-          echo "GDRIVE_REDIRECT_NATIVE=com.hydall.glaze://oauth/gdrive" >> .env
+          set -euo pipefail
+          # A channel can be given its own Dropbox app, which gets it its own
+          # App folder in the user's Dropbox. While the channel secret is unset
+          # the build falls back to the shared key, and the channels are kept
+          # apart by a sub-folder inside that one App folder instead — see
+          # _channelSubfolder in dropbox_adapter.dart. Both layouts work.
+          case "$BUILD_CHANNEL" in
+            stable)  CHANNEL_DROPBOX_KEY="" ;;
+            staging) CHANNEL_DROPBOX_KEY="$DROPBOX_APP_KEY_STAGING" ;;
+            *)       CHANNEL_DROPBOX_KEY="$DROPBOX_APP_KEY_NIGHTLY" ;;
+          esac
+          {
+            echo "DROPBOX_APP_KEY=${CHANNEL_DROPBOX_KEY:-$DROPBOX_APP_KEY}"
+            echo "DROPBOX_REDIRECT_NATIVE=$DROPBOX_REDIRECT_NATIVE"
+            echo "GDRIVE_CLIENT_ID=$GDRIVE_CLIENT_ID"
+            echo "GDRIVE_REDIRECT_NATIVE=com.hydall.glaze://oauth/gdrive"
+          } >> .env
 
       - name: Set up Java 21
         uses: actions/setup-java@v4
@@ -210,6 +230,10 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_STORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          # Read by android/app/build.gradle.kts to derive the applicationId
+          # suffix and the launcher label, so the three channels co-install.
+          # Signing is unaffected — all channels use the same keystore above.
+          BUILD_CHANNEL: ${{ needs.metadata.outputs.build_channel }}
         run: >
           flutter build apk --release --no-pub --target-platform android-arm64
           "--dart-define=APP_VERSION=${{ needs.metadata.outputs.version }}"
@@ -238,11 +262,31 @@ jobs:
 
       - name: Create .env from secrets
         shell: bash
+        env:
+          BUILD_CHANNEL: ${{ needs.metadata.outputs.build_channel }}
+          DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
+          DROPBOX_APP_KEY_STAGING: ${{ secrets.DROPBOX_APP_KEY_STAGING }}
+          DROPBOX_APP_KEY_NIGHTLY: ${{ secrets.DROPBOX_APP_KEY_NIGHTLY }}
+          DROPBOX_REDIRECT_NATIVE: ${{ secrets.DROPBOX_REDIRECT_NATIVE }}
+          GDRIVE_CLIENT_ID: ${{ secrets.GDRIVE_CLIENT_ID }}
         run: |
-          echo "DROPBOX_APP_KEY=${{ secrets.DROPBOX_APP_KEY }}" >> .env
-          echo "DROPBOX_REDIRECT_NATIVE=${{ secrets.DROPBOX_REDIRECT_NATIVE }}" >> .env
-          echo "GDRIVE_CLIENT_ID=${{ secrets.GDRIVE_CLIENT_ID }}" >> .env
-          echo "GDRIVE_REDIRECT_NATIVE=com.hydall.glaze://oauth/gdrive" >> .env
+          set -euo pipefail
+          # A channel can be given its own Dropbox app, which gets it its own
+          # App folder in the user's Dropbox. While the channel secret is unset
+          # the build falls back to the shared key, and the channels are kept
+          # apart by a sub-folder inside that one App folder instead — see
+          # _channelSubfolder in dropbox_adapter.dart. Both layouts work.
+          case "$BUILD_CHANNEL" in
+            stable)  CHANNEL_DROPBOX_KEY="" ;;
+            staging) CHANNEL_DROPBOX_KEY="$DROPBOX_APP_KEY_STAGING" ;;
+            *)       CHANNEL_DROPBOX_KEY="$DROPBOX_APP_KEY_NIGHTLY" ;;
+          esac
+          {
+            echo "DROPBOX_APP_KEY=${CHANNEL_DROPBOX_KEY:-$DROPBOX_APP_KEY}"
+            echo "DROPBOX_REDIRECT_NATIVE=$DROPBOX_REDIRECT_NATIVE"
+            echo "GDRIVE_CLIENT_ID=$GDRIVE_CLIENT_ID"
+            echo "GDRIVE_REDIRECT_NATIVE=com.hydall.glaze://oauth/gdrive"
+          } >> .env
 
       - name: Install Flutter
         uses: subosito/flutter-action@v2
@@ -294,11 +338,31 @@ jobs:
           ref: ${{ github.ref_name }}
 
       - name: Create .env from secrets
+        env:
+          BUILD_CHANNEL: ${{ needs.metadata.outputs.build_channel }}
+          DROPBOX_APP_KEY: ${{ secrets.DROPBOX_APP_KEY }}
+          DROPBOX_APP_KEY_STAGING: ${{ secrets.DROPBOX_APP_KEY_STAGING }}
+          DROPBOX_APP_KEY_NIGHTLY: ${{ secrets.DROPBOX_APP_KEY_NIGHTLY }}
+          DROPBOX_REDIRECT_NATIVE: ${{ secrets.DROPBOX_REDIRECT_NATIVE }}
+          GDRIVE_CLIENT_ID: ${{ secrets.GDRIVE_CLIENT_ID }}
         run: |
-          echo "DROPBOX_APP_KEY=${{ secrets.DROPBOX_APP_KEY }}" >> .env
-          echo "DROPBOX_REDIRECT_NATIVE=${{ secrets.DROPBOX_REDIRECT_NATIVE }}" >> .env
-          echo "GDRIVE_CLIENT_ID=${{ secrets.GDRIVE_CLIENT_ID }}" >> .env
-          echo "GDRIVE_REDIRECT_NATIVE=com.hydall.glaze://oauth/gdrive" >> .env
+          set -euo pipefail
+          # A channel can be given its own Dropbox app, which gets it its own
+          # App folder in the user's Dropbox. While the channel secret is unset
+          # the build falls back to the shared key, and the channels are kept
+          # apart by a sub-folder inside that one App folder instead — see
+          # _channelSubfolder in dropbox_adapter.dart. Both layouts work.
+          case "$BUILD_CHANNEL" in
+            stable)  CHANNEL_DROPBOX_KEY="" ;;
+            staging) CHANNEL_DROPBOX_KEY="$DROPBOX_APP_KEY_STAGING" ;;
+            *)       CHANNEL_DROPBOX_KEY="$DROPBOX_APP_KEY_NIGHTLY" ;;
+          esac
+          {
+            echo "DROPBOX_APP_KEY=${CHANNEL_DROPBOX_KEY:-$DROPBOX_APP_KEY}"
+            echo "DROPBOX_REDIRECT_NATIVE=$DROPBOX_REDIRECT_NATIVE"
+            echo "GDRIVE_CLIENT_ID=$GDRIVE_CLIENT_ID"
+            echo "GDRIVE_REDIRECT_NATIVE=com.hydall.glaze://oauth/gdrive"
+          } >> .env
 
       - name: Install Flutter
         uses: subosito/flutter-action@v2
@@ -328,6 +392,23 @@ jobs:
 
       - name: Install CocoaPods
         run: cd ios && pod install && cd ..
+
+      - name: Configure iOS channel identity
+        # Overwrites the checked-in defaults in ios/Flutter/Channel.xcconfig so
+        # the bundle identifier and the home-screen name match the channel being
+        # built and the three IPAs can live on one device.
+        env:
+          BUILD_CHANNEL: ${{ needs.metadata.outputs.build_channel }}
+        run: |
+          set -euo pipefail
+          case "$BUILD_CHANNEL" in
+            stable)  SUFFIX="";         NAME="Glaze" ;;
+            staging) SUFFIX=".staging"; NAME="Glaze Staging" ;;
+            *)       SUFFIX=".nightly"; NAME="Glaze Nightly" ;;
+          esac
+          printf 'BUNDLE_ID_SUFFIX = %s\nAPP_DISPLAY_NAME = %s\n' \
+            "$SUFFIX" "$NAME" > ios/Flutter/Channel.xcconfig
+          cat ios/Flutter/Channel.xcconfig
 
       - name: Build iOS (release, no signing)
         run: |
