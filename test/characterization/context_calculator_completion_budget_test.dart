@@ -62,5 +62,65 @@ void main() {
         expect(breakdown.trimmedHistory, isEmpty);
       },
     );
+
+    test('reasoning tokens reduce the retained history window', () {
+      final messages = [
+        userTurn('m1', 'older message'),
+        const PromptMessage(
+          role: 'assistant',
+          content: 'recent reply',
+          reasoningContent: 'one two three four five six seven eight nine ten',
+          isHistory: true,
+          sourceMessageId: 'm2',
+        ),
+      ];
+      final contentOnly = ContextCalculator(
+        contextSize: 20,
+        maxTokens: 5,
+      ).calculate(staticBlocks: const [], historyMessages: messages);
+      final withReasoning = ContextCalculator(
+        contextSize: 20,
+        maxTokens: 5,
+        reasoningHistoryCount: 1,
+      ).calculate(staticBlocks: const [], historyMessages: messages);
+
+      expect(contentOnly.trimmedHistory, hasLength(2));
+      expect(withReasoning.trimmedHistory, hasLength(1));
+      expect(withReasoning.trimmedHistory.single.sourceMessageId, 'm2');
+      expect(
+        withReasoning.historyTokens,
+        greaterThan(contentOnly.historyTokens),
+      );
+    });
+
+    test('minus one budgets every retained reasoning block', () {
+      const messages = [
+        PromptMessage(
+          role: 'assistant',
+          content: 'older reply',
+          reasoningContent: 'older private reasoning',
+          isHistory: true,
+        ),
+        PromptMessage(
+          role: 'assistant',
+          content: 'newer reply',
+          reasoningContent: 'newer private reasoning',
+          isHistory: true,
+        ),
+      ];
+      final one = ContextCalculator(
+        contextSize: 100,
+        maxTokens: 10,
+        reasoningHistoryCount: 1,
+      ).calculate(staticBlocks: const [], historyMessages: messages);
+      final all = ContextCalculator(
+        contextSize: 100,
+        maxTokens: 10,
+        reasoningHistoryCount: -1,
+      ).calculate(staticBlocks: const [], historyMessages: messages);
+
+      expect(all.historyTokens, greaterThan(one.historyTokens));
+      expect(all.totalTokens, all.historyTokens);
+    });
   });
 }

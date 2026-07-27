@@ -2,7 +2,6 @@ import 'context_calculator.dart';
 import 'history_assembler.dart';
 import 'macro_engine.dart';
 import 'prompt_builder.dart';
-import 'tokenizer.dart';
 
 PromptResult buildFallbackPrompt(PromptPayload payload) {
   final macroCtx = MacroContext(
@@ -20,31 +19,44 @@ PromptResult buildFallbackPrompt(PromptPayload payload) {
     macroName: payload.character.macroName,
   );
 
-  final messages = <PromptMessage>[];
-  messages.add(const PromptMessage(role: 'system', content: 'You are a helpful assistant.'));
+  const systemMessage = PromptMessage(
+    role: 'system',
+    content: 'You are a helpful assistant.',
+  );
+  final history = <PromptMessage>[];
 
   for (final msg in payload.history) {
     final macroResult = replaceMacros(msg.content, macroCtx);
-    messages.add(
+    history.add(
       PromptMessage(
         role: msg.role,
         content: macroResult.text,
+        reasoningContent: msg.reasoning,
+        isHistory: true,
+        sourceMessageId: msg.id,
         imagePath: msg.imageHidden ? null : msg.imagePath,
       ),
     );
   }
 
+  final calculator = ContextCalculator(
+    contextSize: payload.apiConfig.contextSize,
+    maxTokens: payload.apiConfig.maxTokens,
+    reasoningHistoryCount: payload.apiConfig.reasoningHistoryCount,
+  );
+  final breakdown = calculator.calculate(
+    staticBlocks: const [
+      StaticBlock(
+        id: 'fallback_system',
+        content: 'You are a helpful assistant.',
+      ),
+    ],
+    historyMessages: history,
+  );
+
   return PromptResult(
-    messages: messages,
-    breakdown: TokenBreakdown(
-      sourceTokens: {'preset': 6},
-      staticTotal: 6,
-      historyBudget: payload.apiConfig.contextSize - payload.apiConfig.maxTokens - 6,
-      historyTokens: messages.fold(0, (sum, m) => sum + estimateTokens(m.content)),
-      totalTokens: messages.fold(0, (sum, m) => sum + estimateTokens(m.content)),
-      cutoffIndex: 0,
-      trimmedHistory: messages.skip(1).toList(),
-    ),
+    messages: [systemMessage, ...breakdown.trimmedHistory],
+    breakdown: breakdown,
     sessionVars: payload.sessionVars,
     globalVars: payload.globalVars,
   );

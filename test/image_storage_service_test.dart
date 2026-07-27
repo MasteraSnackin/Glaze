@@ -286,6 +286,55 @@ void main() {
       },
     );
 
+    test(
+      'prefers current channel copy over an existing sibling file',
+      () async {
+        final parent = await Directory.systemTemp.createTemp('glaze_channels_');
+        addTearDown(() => parent.delete(recursive: true));
+        final nightly = Directory(p.join(parent.path, 'Glaze-nightly'));
+        final stable = Directory(p.join(parent.path, 'Glaze'));
+        await nightly.create(recursive: true);
+        await stable.create(recursive: true);
+        final current = File(p.join(nightly.path, 'avatars', 'shared.png'));
+        final sibling = File(p.join(stable.path, 'avatars', 'shared.png'));
+        await current.parent.create(recursive: true);
+        await sibling.parent.create(recursive: true);
+        await current.writeAsBytes([1]);
+        await sibling.writeAsBytes([2]);
+
+        final channelService = ImageStorageService(nightly.path);
+
+        expect(
+          p.equals(channelService.absolutePath(sibling.path)!, current.path),
+          isTrue,
+        );
+      },
+    );
+
+    test('recognizes staging and nightly sibling roots', () async {
+      final parent = await Directory.systemTemp.createTemp('glaze_channels_');
+      addTearDown(() => parent.delete(recursive: true));
+      final stable = Directory(p.join(parent.path, 'Glaze'));
+      final target = File(p.join(stable.path, 'gallery', 'char', 'image.png'));
+      await target.parent.create(recursive: true);
+      await target.writeAsBytes([1]);
+      final stableService = ImageStorageService(stable.path);
+
+      for (final root in ['Glaze-staging', 'Glaze-nightly']) {
+        final sibling = p.join(
+          parent.path,
+          root,
+          'gallery',
+          'char',
+          'image.png',
+        );
+        expect(
+          p.equals(stableService.absolutePath(sibling)!, target.path),
+          isTrue,
+        );
+      }
+    });
+
     test('empty and null are passed through', () {
       expect(service.absolutePath(''), equals(''));
       expect(service.absolutePath(null), isNull);

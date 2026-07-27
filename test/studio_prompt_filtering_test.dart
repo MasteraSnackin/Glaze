@@ -181,7 +181,7 @@ void main() {
         ),
         priorBriefs: const [],
         isFinalResponse: true,
-        includeLastReasoning: true,
+        reasoningHistoryCount: 2,
       );
 
       final first = messages.firstWhere((m) => m['content'] == 'first');
@@ -190,15 +190,15 @@ void main() {
       final third = messages.firstWhere((m) => m['content'] == 'third');
       expect(first, isNot(contains('reasoning_content')));
       expect(next, isNot(contains('reasoning_content')));
-      expect(second, isNot(contains('reasoning_content')));
+      expect(second['reasoning_content'], 'second reasoning');
       expect(third['reasoning_content'], 'third reasoning');
       expect(
         messages.where((m) => m.containsKey('reasoning_content')),
-        hasLength(1),
+        hasLength(2),
       );
     });
 
-    test('final run does not fall back to stale assistant reasoning', () {
+    test('final run counts non-empty reasoning blocks', () {
       final messages = builder.buildAgentMessages(
         agent: const StudioAgent(id: 'final', name: 'Main Responder'),
         promptResult: _result([
@@ -229,12 +229,71 @@ void main() {
         ),
         priorBriefs: const [],
         isFinalResponse: true,
-        includeLastReasoning: true,
+        reasoningHistoryCount: 1,
       );
 
       expect(
         messages.where((m) => m.containsKey('reasoning_content')),
-        isEmpty,
+        hasLength(1),
+      );
+      expect(
+        messages.firstWhere(
+          (m) => m['content'] == 'older',
+        )['reasoning_content'],
+        'stale reasoning',
+      );
+    });
+
+    test('final run includes all reasoning blocks for minus one', () {
+      final messages = builder.buildAgentMessages(
+        agent: const StudioAgent(id: 'final', name: 'Main Responder'),
+        promptResult: _result([
+          const PromptMessage(
+            role: 'assistant',
+            content: 'older',
+            reasoningContent: 'older reasoning',
+            isHistory: true,
+          ),
+          const PromptMessage(role: 'user', content: 'next', isHistory: true),
+          const PromptMessage(
+            role: 'assistant',
+            content: 'latest',
+            reasoningContent: 'latest reasoning',
+            isHistory: true,
+          ),
+        ]),
+        promptPayload: promptPayload,
+        config: config,
+        studioPreset: const StudioPreset(
+          id: 'history',
+          blocks: [
+            StudioPresetBlock(
+              id: 'history',
+              kind: 'chat_history',
+              section: 'final',
+            ),
+          ],
+        ),
+        priorBriefs: const [],
+        isFinalResponse: true,
+        reasoningHistoryCount: -1,
+      );
+
+      expect(
+        messages.where((m) => m.containsKey('reasoning_content')),
+        hasLength(2),
+      );
+      expect(
+        messages.firstWhere(
+          (m) => m['content'] == 'older',
+        )['reasoning_content'],
+        'older reasoning',
+      );
+      expect(
+        messages.firstWhere(
+          (m) => m['content'] == 'latest',
+        )['reasoning_content'],
+        'latest reasoning',
       );
     });
 

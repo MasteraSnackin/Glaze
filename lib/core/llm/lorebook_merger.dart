@@ -18,8 +18,9 @@ List<LorebookEntry> mergeKeywordVector({
   // only triggered keywords are counted against `maxEntries`. When constants
   // already exceed `maxEntries`, no triggered-keyword slots remain — clamp to
   // 0 so `.take()` never receives a negative count (RangeError).
-  final triggeredKeywordSlots =
-      maxEntries - constantKeywords.length < 0 ? 0 : maxEntries - constantKeywords.length;
+  final triggeredKeywordSlots = maxEntries - constantKeywords.length < 0
+      ? 0
+      : maxEntries - constantKeywords.length;
   final usedKeyword = triggeredKeywords.take(triggeredKeywordSlots).toList();
 
   if (vectorEntries.isEmpty) {
@@ -39,11 +40,11 @@ List<LorebookEntry> mergeKeywordVector({
 
   // Dedupe vector entries against keyword entries already selected.
   final keywordIds = {
-    ...constantKeywords.map((e) => e.id),
-    ...usedKeyword.map((e) => e.id),
+    ...constantKeywords.map(_scannedKey),
+    ...usedKeyword.map(_scannedKey),
   };
   final dedupedVector = vectorEntries
-      .where((e) => !keywordIds.contains(e.id))
+      .where((e) => !keywordIds.contains(_entryKey(e)))
       .toList();
 
   final usedVector = dedupedVector.take(usableVectorSlots).toList();
@@ -60,4 +61,10 @@ LorebookEntry _fromScanned(ScannedEntry e) => LorebookEntry(
   comment: e.comment,
   content: e.content,
   position: e.position,
+  lorebookId: e.lorebookId,
+  lorebookName: e.lorebookName,
 );
+
+String _scannedKey(ScannedEntry entry) => '${entry.lorebookId}_${entry.id}';
+
+String _entryKey(LorebookEntry entry) => '${entry.lorebookId}_${entry.id}';

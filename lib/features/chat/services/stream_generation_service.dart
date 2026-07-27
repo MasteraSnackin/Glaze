@@ -172,7 +172,7 @@ class StreamGenerationService {
 
       final apiMessages = buildApiMessages(
         promptResult.messages,
-        includeLastReasoning: apiConfig.includeLastReasoning,
+        reasoningHistoryCount: apiConfig.reasoningHistoryCount,
       );
       final previousApiMessages = _lastRequestsBySession[session.id];
       _rememberRequest(session.id, apiMessages);

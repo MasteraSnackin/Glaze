@@ -50,6 +50,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   final _maxTokensCtrl = TextEditingController();
   final _contextSizeCtrl = TextEditingController();
   final _firstChunkTimeoutCtrl = TextEditingController();
+  final _reasoningHistoryCountCtrl = TextEditingController();
   final _embEndpointCtrl = TextEditingController();
   final _embApiKeyCtrl = TextEditingController();
   final _embModelCtrl = TextEditingController();
@@ -64,7 +65,6 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   bool _stream = true;
   bool _requestReasoning = false;
   bool _showNativeReasoning = true;
-  bool _includeLastReasoning = false;
   String _reasoningEffort = 'medium';
   bool _omitTemperature = false;
   bool _omitTopP = false;
@@ -104,6 +104,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     _maxTokensCtrl,
     _contextSizeCtrl,
     _firstChunkTimeoutCtrl,
+    _reasoningHistoryCountCtrl,
     _embEndpointCtrl,
     _embApiKeyCtrl,
     _embModelCtrl,
@@ -203,6 +204,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     _contextSizeCtrl.text = config.contextSize.toString();
     _firstChunkTimeoutCtrl.text = (config.firstChunkTimeoutMs ~/ 1000)
         .toString();
+    _reasoningHistoryCountCtrl.text = config.reasoningHistoryCount.toString();
     _embEndpointCtrl.text = config.embeddingEndpoint;
     _embApiKeyCtrl.text = config.embeddingApiKey;
     _embModelCtrl.text = config.embeddingModel;
@@ -217,7 +219,6 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       _stream = config.stream;
       _requestReasoning = config.requestReasoning && !config.omitReasoning;
       _showNativeReasoning = config.showNativeReasoning;
-      _includeLastReasoning = config.includeLastReasoning;
       _reasoningEffort = config.reasoningEffort;
       _omitTemperature = config.omitTemperature;
       _omitTopP = config.omitTopP;
@@ -245,6 +246,8 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   Future<void> _save() async {
     final config = _ref.read(activeApiConfigProvider);
     if (config == null) return;
+    final reasoningHistoryCount =
+        int.tryParse(_reasoningHistoryCountCtrl.text) ?? 0;
     await _ref
         .read(apiListProvider.notifier)
         .put(
@@ -266,7 +269,9 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
             stream: _stream,
             requestReasoning: _requestReasoning,
             showNativeReasoning: _showNativeReasoning,
-            includeLastReasoning: _includeLastReasoning,
+            reasoningHistoryCount: reasoningHistoryCount < -1
+                ? 0
+                : reasoningHistoryCount,
             reasoningEffort: _reasoningEffort,
             omitTemperature: _omitTemperature,
             omitTopP: _omitTopP,
@@ -423,10 +428,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     return GlazeTabBar(
       tabs: [
         GlazeTabItem(label: 'LLM', icon: Icons.chat_bubble_outline_rounded),
-        GlazeTabItem(
-          label: 'tab_embeddings'.tr(),
-          icon: Icons.layers_outlined,
-        ),
+        GlazeTabItem(label: 'tab_embeddings'.tr(), icon: Icons.layers_outlined),
       ],
       activeIndex: _tab,
       onChanged: (i) => setState(() => _tab = i),
@@ -762,14 +764,13 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
                   onTap: _openReasoningEffortSelector,
                 ),
               if (_supportsReasoning)
-                MenuSwitchItem(
+                MenuFieldItem(
                   label: 'label_include_last_reasoning'.tr(),
-                  description: 'desc_include_last_reasoning'.tr(),
-                  value: _includeLastReasoning,
-                  onChanged: (value) {
-                    setState(() => _includeLastReasoning = value);
-                    _scheduleSave();
-                  },
+                  controller: _reasoningHistoryCountCtrl,
+                  placeholder: '0',
+                  keyboardType: const TextInputType.numberWithOptions(
+                    signed: true,
+                  ),
                 ),
               if (_supportsPromptCache)
                 MenuSelectorItem(

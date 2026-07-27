@@ -5,7 +5,7 @@ void main() {
   test('reasoning settings are backward-compatible', () {
     final config = ApiConfig.fromJson(const {'id': 'api'});
 
-    expect(config.includeLastReasoning, isFalse);
+    expect(config.reasoningHistoryCount, 0);
     expect(config.showNativeReasoning, isTrue);
     expect(config.omitTopK, isFalse);
     expect(config.omitFrequencyPenalty, isFalse);
@@ -24,5 +24,15 @@ void main() {
 
     expect(visible.showNativeReasoning, isTrue);
     expect(hidden.showNativeReasoning, isFalse);
+  });
+
+  test('migrates legacy include-last-reasoning JSON to count one', () {
+    final config = ApiConfig.fromJson(const {
+      'id': 'legacy',
+      'includeLastReasoning': true,
+    });
+
+    expect(config.reasoningHistoryCount, 1);
+    expect(config.toJson(), isNot(contains('includeLastReasoning')));
   });
 }

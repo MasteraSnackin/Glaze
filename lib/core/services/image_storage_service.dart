@@ -246,32 +246,27 @@ class ImageStorageService implements SyncImageStore {
     if (!File(relativePath).isAbsolute) {
       return p.join(baseDir, relativePath);
     }
-    // The path is absolute. On iOS the app sandbox container UUID changes on
-    // every reinstall/OS update, so an absolute path persisted by an older
-    // build (e.g. .../Application/<OLD_UUID>/Documents/Glaze/avatars/x.png)
-    // no longer exists under the current container. The files themselves are
-    // preserved under the *new* container, so rebase any absolute path that
-    // lives under a "Glaze" data root onto the current [baseDir].
+    // Rebase stale iOS containers and sibling desktop build channels.
     final rebased = _rebaseOntoBaseDir(relativePath);
     return rebased ?? relativePath;
   }
 
-  /// If [absPath] points inside a Glaze data directory from a stale sandbox
-  /// container, return the equivalent path under the current [baseDir].
-  /// Returns null when the path can't be rebased (not under a Glaze root) or
-  /// already resolves correctly.
+  /// Resolves [absPath] against the current Glaze data directory when the
+  /// equivalent file exists, otherwise retains an existing source path.
   String? _rebaseOntoBaseDir(String absPath) {
-    if (File(absPath).existsSync()) return absPath; // already valid
-
     final normalized = absPath.replaceAll('\\', '/');
-    // Find the last "/Glaze/" segment — everything after it is the stable
-    // sub-path (avatars/<id>.png, gallery/..., etc.).
-    const marker = '/Glaze/';
-    final idx = normalized.lastIndexOf(marker);
-    if (idx < 0) return null;
-    final suffix = normalized.substring(idx + marker.length);
-    if (suffix.isEmpty) return null;
-    return p.join(baseDir, suffix);
+    final match = RegExp(
+      r'/(?:Glaze|Glaze-staging|Glaze-nightly)/',
+      caseSensitive: false,
+    ).allMatches(normalized).lastOrNull;
+    if (match != null) {
+      final suffix = normalized.substring(match.end);
+      if (suffix.isNotEmpty) {
+        final rebased = p.join(baseDir, suffix);
+        if (File(rebased).existsSync()) return rebased;
+      }
+    }
+    return File(absPath).existsSync() ? absPath : null;
   }
 
   Uint8List? _resizeImage(Uint8List imageBytes, int maxDimension) =>
