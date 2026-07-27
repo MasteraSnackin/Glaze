@@ -7,6 +7,8 @@
 [![Discord](https://img.shields.io/discord/1355184294868484196?color=5865F2&logo=discord&logoColor=white)](https://discord.gg/jnGhd7p6Ht)
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-FFDD00?style=flat&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/hydall)
 
+[Русский](README.ru.md)
+
 Glaze is a local, novice-friendly AI roleplay chat client. It works with any OpenAI-compatible (Chat Completion) LLM provider, and keeps your data on your own device.
 
 The app is now native Flutter, and it replaces the original JS/Vue (Capacitor) client — that version is abandoned legacy and no longer maintained. All development continues here, on a native cross-platform stack: local SQLite storage, real desktop support, and a sandboxed extension runtime, while keeping the approachability and SillyTavern compatibility of the original.
