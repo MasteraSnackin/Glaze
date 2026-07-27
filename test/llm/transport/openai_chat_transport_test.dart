@@ -17,15 +17,16 @@ ChatTransportRequest _req({
   bool omitTopK = false,
   bool omitFrequencyPenalty = false,
   bool omitPresencePenalty = false,
+  List<Map<String, dynamic>> messages = const [
+    {'role': 'user', 'content': 'hi'},
+  ],
   List<ExtraRequestParameter> extraRequestParameters = const [],
 }) {
   return ChatTransportRequest(
     endpoint: endpoint,
     apiKey: 'sk-test',
     model: 'gpt-test',
-    messages: const [
-      {'role': 'user', 'content': 'hi'},
-    ],
+    messages: messages,
     maxTokens: 100,
     temperature: 0.7,
     topP: 0.9,
@@ -127,6 +128,26 @@ void main() {
     expect(omitted, isNot(contains('top_k')));
     expect(omitted, isNot(contains('frequency_penalty')));
     expect(omitted, isNot(contains('presence_penalty')));
+  });
+
+  test('preserves reasoning content in historical assistant messages', () {
+    final body = OpenAiChatTransport.buildBody(
+      _req(
+        messages: const [
+          {'role': 'user', 'content': 'first'},
+          {
+            'role': 'assistant',
+            'reasoning_content': 'private plan',
+            'content': 'answer',
+          },
+          {'role': 'user', 'content': 'follow-up'},
+        ],
+      ),
+    );
+
+    final messages = (body['messages'] as List).cast<Map<String, dynamic>>();
+    expect(messages[1]['reasoning_content'], 'private plan');
+    expect(messages[1]['content'], 'answer');
   });
 
   group('extra request parameters', () {

@@ -35,7 +35,7 @@ class StudioHistoryLimiter {
     List<PromptMessage> history,
     StudioConfig config, {
     int pipelineOverride = 0,
-    bool includeLastReasoning = false,
+    int reasoningHistoryCount = 0,
   }) {
     final msgLimit = pipelineOverride > 0
         ? pipelineOverride
@@ -46,19 +46,18 @@ class StudioHistoryLimiter {
     // Walk backwards from the end, stop at msgLimit or tokenBudget.
     final selected = <PromptMessage>[];
     var totalTokens = 0;
-    var nearestAssistantSeen = false;
+    final includeAllReasoning = reasoningHistoryCount == -1;
+    var remainingReasoning = reasoningHistoryCount;
     for (var i = history.length - 1; i >= 0; i--) {
       final m = history[i];
       final cleaned = stripFontTags(m.content);
       var tokens = estimateTokens(cleaned);
       final reasoning = m.reasoningContent?.trim();
-      if (includeLastReasoning &&
-          !nearestAssistantSeen &&
-          m.role == 'assistant') {
-        nearestAssistantSeen = true;
-        if (reasoning?.isNotEmpty == true) {
-          tokens += estimateTokens(reasoning!);
-        }
+      if ((includeAllReasoning || remainingReasoning > 0) &&
+          m.role == 'assistant' &&
+          reasoning?.isNotEmpty == true) {
+        tokens += estimateTokens(reasoning!);
+        if (!includeAllReasoning) remainingReasoning--;
       }
       // Always keep at least the last message.
       if (selected.isNotEmpty &&

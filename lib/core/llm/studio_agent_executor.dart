@@ -270,8 +270,8 @@ class StudioAgentExecutor {
       isFinalResponse: true,
       finalContextOverride:
           _readPipelineSettings().studioAgent.studioFinalContextSize,
-      includeLastReasoning:
-          _readPipelineSettings().studioAgent.studioFinalIncludeLastReasoning,
+      reasoningHistoryCount:
+          _readPipelineSettings().studioAgent.studioFinalReasoningHistoryCount,
     );
     final runner = _runner;
     final result = await runner.runAgent(

@@ -140,22 +140,28 @@ class PromptMessage {
 
 List<Map<String, dynamic>> buildApiMessages(
   List<PromptMessage> messages, {
-  bool includeLastReasoning = false,
+  int reasoningHistoryCount = 0,
 }) {
   final included = messages
       .where((message) => message.content.trim().isNotEmpty || message.hasImage)
       .toList();
   final result = included.map((message) => message.toApiMap()).toList();
-  if (!includeLastReasoning) return result;
+  if (reasoningHistoryCount == 0 || reasoningHistoryCount < -1) return result;
 
-  for (var i = included.length - 1; i >= 0; i--) {
+  final includeAll = reasoningHistoryCount == -1;
+  var remaining = reasoningHistoryCount;
+  for (
+    var i = included.length - 1;
+    i >= 0 && (includeAll || remaining > 0);
+    i--
+  ) {
     final message = included[i];
     if (message.role != 'assistant') continue;
     final reasoning = message.reasoningContent?.trim();
     if (reasoning?.isNotEmpty == true) {
       result[i]['reasoning_content'] = reasoning;
+      if (!includeAll) remaining--;
     }
-    break;
   }
   return result;
 }

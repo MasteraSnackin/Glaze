@@ -24,7 +24,7 @@ class StudioSlotSettings {
   final bool omitTopP;
   final bool omitReasoning;
   final bool omitReasoningEffort;
-  final bool includeLastReasoning;
+  final int reasoningHistoryCount;
   final int maxTokens;
   final int timeoutMs;
   final List<ExtraRequestParameter> extraRequestParameters;
@@ -41,7 +41,7 @@ class StudioSlotSettings {
     required this.omitTopP,
     required this.omitReasoning,
     required this.omitReasoningEffort,
-    this.includeLastReasoning = false,
+    this.reasoningHistoryCount = 0,
     required this.maxTokens,
     required this.timeoutMs,
     required this.extraRequestParameters,
@@ -63,7 +63,7 @@ class StudioSlotSettings {
             studioFinalOmitTopP: omitTopP,
             studioFinalOmitReasoning: omitReasoning,
             studioFinalOmitReasoningEffort: omitReasoningEffort,
-            studioFinalIncludeLastReasoning: includeLastReasoning,
+            studioFinalReasoningHistoryCount: reasoningHistoryCount,
             studioFinalMaxTokens: maxTokens,
             studioFinalTimeoutMs: timeoutMs,
             studioFinalExtraRequestParameters: extraRequestParameters,
@@ -138,7 +138,7 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
   late bool _omitTopP;
   late bool _omitReasoning;
   late bool _omitReasoningEffort;
-  late bool _includeLastReasoning;
+  late TextEditingController _reasoningHistoryCountCtrl;
   late TextEditingController _maxTokensCtrl;
   late TextEditingController _timeoutCtrl;
   late List<ExtraRequestParameter> _extraRequestParameters;
@@ -160,7 +160,9 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
         _omitTopP = p.studioAgent.studioFinalOmitTopP;
         _omitReasoning = p.studioAgent.studioFinalOmitReasoning;
         _omitReasoningEffort = p.studioAgent.studioFinalOmitReasoningEffort;
-        _includeLastReasoning = p.studioAgent.studioFinalIncludeLastReasoning;
+        _reasoningHistoryCountCtrl = TextEditingController(
+          text: '${p.studioAgent.studioFinalReasoningHistoryCount}',
+        );
         _maxTokensCtrl = TextEditingController(
           text: p.studioAgent.studioFinalMaxTokens > 0
               ? '${p.studioAgent.studioFinalMaxTokens}'
@@ -185,7 +187,7 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
         _omitTopP = p.studioAgent.studioTrackerOmitTopP;
         _omitReasoning = p.studioAgent.studioTrackerOmitReasoning;
         _omitReasoningEffort = p.studioAgent.studioTrackerOmitReasoningEffort;
-        _includeLastReasoning = false;
+        _reasoningHistoryCountCtrl = TextEditingController(text: '0');
         _maxTokensCtrl = TextEditingController(
           text: p.studioAgent.studioTrackerMaxTokens > 0
               ? '${p.studioAgent.studioTrackerMaxTokens}'
@@ -210,7 +212,7 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
         _omitTopP = p.cleaner.postCleanerOmitTopP;
         _omitReasoning = p.cleaner.postCleanerOmitReasoning;
         _omitReasoningEffort = p.cleaner.postCleanerOmitReasoningEffort;
-        _includeLastReasoning = false;
+        _reasoningHistoryCountCtrl = TextEditingController(text: '0');
         _maxTokensCtrl = TextEditingController(
           text: p.cleaner.postCleanerMaxTokens > 0
               ? '${p.cleaner.postCleanerMaxTokens}'
@@ -229,6 +231,7 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
   void dispose() {
     _maxTokensCtrl.dispose();
     _timeoutCtrl.dispose();
+    _reasoningHistoryCountCtrl.dispose();
     super.dispose();
   }
 
@@ -325,6 +328,8 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
 
   void _save() {
     final maxTokens = int.tryParse(_maxTokensCtrl.text.trim()) ?? 0;
+    final reasoningHistoryCount =
+        int.tryParse(_reasoningHistoryCountCtrl.text.trim()) ?? 0;
     final seconds = int.tryParse(_timeoutCtrl.text.trim()) ?? 0;
     final timeoutMs = seconds > 0 ? seconds * 1000 : 0;
     Navigator.of(context).pop(
@@ -340,7 +345,9 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
         omitTopP: _omitTopP,
         omitReasoning: _omitReasoning,
         omitReasoningEffort: _omitReasoningEffort,
-        includeLastReasoning: _includeLastReasoning,
+        reasoningHistoryCount: reasoningHistoryCount < -1
+            ? 0
+            : reasoningHistoryCount,
         maxTokens: maxTokens,
         timeoutMs: timeoutMs,
         extraRequestParameters: _extraRequestParameters,
@@ -365,123 +372,118 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
         children: [
           const SizedBox(height: 8),
           MenuGroup(
-                compact: true,
-                header: 'Параметры генерации',
-                items: [
-                  MenuRangeItem(
-                    label: 'Temperature',
-                    value: _temperature,
-                    min: 0,
-                    max: 2,
-                    divisions: 200,
-                    editableValue: true,
-                    included: !_omitTemperature,
-                    onIncludedChanged: (v) =>
-                        setState(() => _omitTemperature = !v),
-                    onChanged: (v) => setState(() => _temperature = v),
-                  ),
-                  MenuRangeItem(
-                    label: 'Top P',
-                    value: _topP,
-                    min: 0,
-                    max: 1,
-                    divisions: 100,
-                    editableValue: true,
-                    included: !_omitTopP,
-                    onIncludedChanged: (v) => setState(() => _omitTopP = !v),
-                    onChanged: (v) => setState(() => _topP = v),
-                  ),
-                  MenuRangeItem(
-                    label: 'Top K',
-                    value: _topK.toDouble(),
-                    min: 0,
-                    max: 200,
-                    divisions: 200,
-                    editableValue: true,
-                    decimalPlaces: 0,
-                    onChanged: (v) => setState(() => _topK = v.round()),
-                  ),
-                  MenuRangeItem(
-                    label: 'Частотный штраф',
-                    value: _frequencyPenalty,
-                    min: -2,
-                    max: 2,
-                    divisions: 80,
-                    editableValue: true,
-                    onChanged: (v) => setState(() => _frequencyPenalty = v),
-                  ),
-                  MenuRangeItem(
-                    label: 'Штраф присутствия',
-                    value: _presencePenalty,
-                    min: -2,
-                    max: 2,
-                    divisions: 80,
-                    editableValue: true,
-                    onChanged: (v) => setState(() => _presencePenalty = v),
-                  ),
-                  MenuFieldItem(
-                    label: _maxTokensLabel,
-                    controller: _maxTokensCtrl,
-                    placeholder: _maxTokensHint,
-                    keyboardType: TextInputType.number,
-                  ),
-                  MenuFieldItem(
-                    label: _timeoutLabel,
-                    controller: _timeoutCtrl,
-                    placeholder: _timeoutHint,
-                    keyboardType: TextInputType.number,
-                  ),
-                ],
+            compact: true,
+            header: 'Параметры генерации',
+            items: [
+              MenuRangeItem(
+                label: 'Temperature',
+                value: _temperature,
+                min: 0,
+                max: 2,
+                divisions: 200,
+                editableValue: true,
+                included: !_omitTemperature,
+                onIncludedChanged: (v) => setState(() => _omitTemperature = !v),
+                onChanged: (v) => setState(() => _temperature = v),
               ),
-              ExtraRequestParametersEditor(
-                parameters: _extraRequestParameters,
-                title: 'extra_request_parameters'.tr(),
-                description: 'extra_request_parameters_studio_desc'.tr(),
-                keyLabel: 'extra_request_parameter_key'.tr(),
-                valueLabel: 'extra_request_parameter_value'.tr(),
-                addLabel: 'extra_request_parameter_add'.tr(),
-                onChanged: (parameters) {
-                  _extraRequestParameters = parameters;
-                },
+              MenuRangeItem(
+                label: 'Top P',
+                value: _topP,
+                min: 0,
+                max: 1,
+                divisions: 100,
+                editableValue: true,
+                included: !_omitTopP,
+                onIncludedChanged: (v) => setState(() => _omitTopP = !v),
+                onChanged: (v) => setState(() => _topP = v),
               ),
-              const SizedBox(height: 8),
-              MenuGroup(
-                compact: true,
-                header: 'Мышление',
-                items: [
-                  MenuSwitchItem(
-                    label: 'Запросить нативное мышление',
-                    description: 'Показывает блок нативного мышления модели',
-                    included: !_omitReasoning,
-                    onIncludedChanged: (v) =>
-                        setState(() => _omitReasoning = !v),
-                    value: _requestReasoning,
-                    onChanged: (v) => setState(() => _requestReasoning = v),
-                  ),
-                  MenuSelectorItem(
-                    label: 'Уровень мышления',
-                    currentValue: _reasoningEffortLabel(_reasoningEffort),
-                    included: !_omitReasoningEffort,
-                    onIncludedChanged: (v) =>
-                        setState(() => _omitReasoningEffort = !v),
-                    onTap: _openReasoningEffortSelector,
-                  ),
-                  if (widget.slot == StudioSlot.finalGenerator)
-                    MenuSwitchItem(
-                      label: 'Передавать последний reasoning блок',
-                      description:
-                          'Добавлять последний reasoning_content из истории',
-                      value: _includeLastReasoning,
-                      onChanged: (v) =>
-                          setState(() => _includeLastReasoning = v),
-                    ),
-                ],
+              MenuRangeItem(
+                label: 'Top K',
+                value: _topK.toDouble(),
+                min: 0,
+                max: 200,
+                divisions: 200,
+                editableValue: true,
+                decimalPlaces: 0,
+                onChanged: (v) => setState(() => _topK = v.round()),
               ),
-          const SizedBox(height: 16),
-          FilledButton(
-            onPressed: _save,
-            child: const Text('Save'),
+              MenuRangeItem(
+                label: 'Частотный штраф',
+                value: _frequencyPenalty,
+                min: -2,
+                max: 2,
+                divisions: 80,
+                editableValue: true,
+                onChanged: (v) => setState(() => _frequencyPenalty = v),
+              ),
+              MenuRangeItem(
+                label: 'Штраф присутствия',
+                value: _presencePenalty,
+                min: -2,
+                max: 2,
+                divisions: 80,
+                editableValue: true,
+                onChanged: (v) => setState(() => _presencePenalty = v),
+              ),
+              MenuFieldItem(
+                label: _maxTokensLabel,
+                controller: _maxTokensCtrl,
+                placeholder: _maxTokensHint,
+                keyboardType: TextInputType.number,
+              ),
+              MenuFieldItem(
+                label: _timeoutLabel,
+                controller: _timeoutCtrl,
+                placeholder: _timeoutHint,
+                keyboardType: TextInputType.number,
+              ),
+            ],
           ),
+          ExtraRequestParametersEditor(
+            parameters: _extraRequestParameters,
+            title: 'extra_request_parameters'.tr(),
+            description: 'extra_request_parameters_studio_desc'.tr(),
+            keyLabel: 'extra_request_parameter_key'.tr(),
+            valueLabel: 'extra_request_parameter_value'.tr(),
+            addLabel: 'extra_request_parameter_add'.tr(),
+            onChanged: (parameters) {
+              _extraRequestParameters = parameters;
+            },
+          ),
+          const SizedBox(height: 8),
+          MenuGroup(
+            compact: true,
+            header: 'Мышление',
+            items: [
+              MenuSwitchItem(
+                label: 'Запросить нативное мышление',
+                description: 'Показывает блок нативного мышления модели',
+                included: !_omitReasoning,
+                onIncludedChanged: (v) => setState(() => _omitReasoning = !v),
+                value: _requestReasoning,
+                onChanged: (v) => setState(() => _requestReasoning = v),
+              ),
+              MenuSelectorItem(
+                label: 'Уровень мышления',
+                currentValue: _reasoningEffortLabel(_reasoningEffort),
+                included: !_omitReasoningEffort,
+                onIncludedChanged: (v) =>
+                    setState(() => _omitReasoningEffort = !v),
+                onTap: _openReasoningEffortSelector,
+              ),
+              if (widget.slot == StudioSlot.finalGenerator)
+                MenuFieldItem(
+                  label: 'Reasoning-блоки (-1 = все, 0 = не передавать)',
+                  controller: _reasoningHistoryCountCtrl,
+                  placeholder: '0',
+                  keyboardType: const TextInputType.numberWithOptions(
+                    signed: true,
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          FilledButton(onPressed: _save, child: const Text('Save')),
         ],
       ),
     );

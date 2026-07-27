@@ -27,7 +27,7 @@ abstract class ApiConfig with _$ApiConfig {
     @Default('medium') String reasoningEffort,
     @Default(false) bool requestReasoning,
     @Default(true) bool showNativeReasoning,
-    @Default(false) bool includeLastReasoning,
+    @Default(0) int reasoningHistoryCount,
     String? reasoningTagStart,
     String? reasoningTagEnd,
     @Default(false) bool omitTemperature,
@@ -51,9 +51,14 @@ abstract class ApiConfig with _$ApiConfig {
     List<ExtraRequestParameter> extraRequestParameters,
   }) = _ApiConfig;
 
-  factory ApiConfig.fromJson(Map<String, dynamic> json) => _$ApiConfigFromJson({
-    ...json,
-    if (!json.containsKey('showNativeReasoning'))
-      'showNativeReasoning': json['omitReasoning'] != true,
-  });
+  factory ApiConfig.fromJson(Map<String, dynamic> json) =>
+      _$ApiConfigFromJson(_normalizeApiConfigJson(json));
 }
+
+Map<String, dynamic> _normalizeApiConfigJson(Map<String, dynamic> json) =>
+    Map<String, dynamic>.from(json)
+      ..putIfAbsent('showNativeReasoning', () => json['omitReasoning'] != true)
+      ..putIfAbsent(
+        'reasoningHistoryCount',
+        () => json['includeLastReasoning'] == true ? 1 : 0,
+      );
