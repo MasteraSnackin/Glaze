@@ -711,6 +711,7 @@ PromptResult _assembleMessages({
   final calculator = ContextCalculator(
     contextSize: payload.apiConfig.contextSize,
     maxTokens: payload.apiConfig.maxTokens,
+    reasoningHistoryCount: payload.apiConfig.reasoningHistoryCount,
   );
   var historyOnly = messages.where((m) => m.isHistory).toList();
 
