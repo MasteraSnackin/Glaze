@@ -43,22 +43,24 @@ String? resolveGlazeFilePath(String? path) {
   if (!p.isAbsolute(path)) {
     return p.join(base, path);
   }
-  // Absolute: if it already exists, keep it. Otherwise try to rebase onto the
-  // current base by the last data-root marker.
-  if (File(path).existsSync()) return path;
-
+  // Absolute: first prefer the matching file in this build channel's data
+  // root. A copied/imported database can still contain paths from another
+  // installed channel, whose source files may also continue to exist.
   final normalized = path.replaceAll('\\', '/');
-  // This channel's folder first, then the bare "Glaze" root, so a path written
-  // by a stable build — or by any build from before the channels got their own
-  // desktop data folders — still rebases. The set collapses to one entry on
-  // stable and on mobile, where both names are the same.
-  for (final marker in {'/$glazeDataFolderName/', '/Glaze/'}) {
-    final idx = normalized.lastIndexOf(marker);
-    if (idx < 0) continue;
-    final suffix = normalized.substring(idx + marker.length);
-    if (suffix.isEmpty) continue;
-    return p.join(base, suffix);
+  // Desktop channels use sibling roots. Match all of them so a copied DB can
+  // move in either direction: stable <-> staging <-> nightly.
+  final match = RegExp(
+    r'/(?:Glaze|Glaze-staging|Glaze-nightly)/',
+    caseSensitive: false,
+  ).allMatches(normalized).lastOrNull;
+  if (match != null) {
+    final suffix = normalized.substring(match.end);
+    if (suffix.isNotEmpty) {
+      final rebased = p.join(base, suffix);
+      if (File(rebased).existsSync()) return rebased;
+    }
   }
+  if (File(path).existsSync()) return path;
   return path;
 }
 
@@ -86,12 +88,17 @@ String _desktopDataDir() {
     final appData = Platform.environment['APPDATA']!;
     return p.join(appData, glazeDataFolderName);
   } else if (Platform.isLinux) {
-    final xdg = Platform.environment['XDG_DATA_HOME'] ??
+    final xdg =
+        Platform.environment['XDG_DATA_HOME'] ??
         p.join(Platform.environment['HOME']!, '.local', 'share');
     return p.join(xdg, glazeDataFolderName);
   } else if (Platform.isMacOS) {
-    return p.join(Platform.environment['HOME']!, 'Library',
-        'Application Support', glazeDataFolderName);
+    return p.join(
+      Platform.environment['HOME']!,
+      'Library',
+      'Application Support',
+      glazeDataFolderName,
+    );
   }
   throw UnsupportedError('Platform not supported yet');
 }

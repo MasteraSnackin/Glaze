@@ -98,10 +98,10 @@ String? chatWebViewResolveLocalFileUrl(String? source) {
 
   final path = _sourceToFilePath(source);
   if (path == null) return source;
-  // iOS reinstalls/OS updates change the sandbox container UUID, so a path
-  // persisted by an older build points at a directory that no longer exists.
-  // Rebase it onto the current Glaze data root before serving.
-  final healed = Platform.isIOS ? (resolveGlazeFilePath(path) ?? path) : path;
+  // A restored database may contain an absolute path from an older iOS
+  // sandbox or another desktop build channel. Rebase it onto this build's
+  // data root before applying the local-file security boundary.
+  final healed = resolveGlazeFilePath(path) ?? path;
   final filePath = chatWebViewUsesAndroidAssetLoader()
       ? healed
       : File(healed).absolute.path;
@@ -365,9 +365,7 @@ Directory _glazeDataDirectory() {
     if (appData != null && appData.isNotEmpty) {
       // Must track the same per-channel folder as getAppDataDir(), or the
       // file-serving root would point at another channel's install.
-      return Directory(
-        '$appData${Platform.pathSeparator}$glazeDataFolderName',
-      );
+      return Directory('$appData${Platform.pathSeparator}$glazeDataFolderName');
     }
   }
   return Directory.current;

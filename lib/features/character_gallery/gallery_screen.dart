@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'package:easy_localization/easy_localization.dart';
 
 import '../../core/models/gallery_entry.dart';
+import '../../core/utils/platform_paths.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/glaze_scaffold.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
@@ -39,15 +40,18 @@ class GalleryScreen extends ConsumerWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.photo_library_outlined,
-                      size: 64,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant),
+                  Icon(
+                    Icons.photo_library_outlined,
+                    size: 64,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
                   const SizedBox(height: 16),
-                  Text('no_results'.tr(),
-                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                            color:
-                                Theme.of(context).colorScheme.onSurfaceVariant,
-                          )),
+                  Text(
+                    'no_results'.tr(),
+                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
                   const SizedBox(height: 24),
                   FilledButton.icon(
                     onPressed: () => _addImage(context, ref),
@@ -74,8 +78,7 @@ class GalleryScreen extends ConsumerWidget {
                     return _GalleryTile(
                       entry: entry,
                       charId: charId,
-                      onTap: () =>
-                          _openViewer(context, ref, entries, index),
+                      onTap: () => _openViewer(context, ref, entries, index),
                     );
                   },
                 ),
@@ -118,22 +121,32 @@ class GalleryScreen extends ConsumerWidget {
       ref.invalidate(galleryProvider(charId));
     } catch (e) {
       if (context.mounted) {
-        GlazeErrorDialog.show(context, e, prefix: '${'settings_err_failed'.tr()} ');
+        GlazeErrorDialog.show(
+          context,
+          e,
+          prefix: '${'settings_err_failed'.tr()} ',
+        );
       }
     }
   }
 
-  void _openViewer(BuildContext context, WidgetRef ref,
-      List<GalleryEntry> entries, int initialIndex) {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => _GalleryViewer(
-          charId: charId,
-          entries: entries,
-          initialIndex: initialIndex,
-        ),
-      ),
-    ).then((_) => ref.invalidate(galleryProvider(charId)));
+  void _openViewer(
+    BuildContext context,
+    WidgetRef ref,
+    List<GalleryEntry> entries,
+    int initialIndex,
+  ) {
+    Navigator.of(context)
+        .push(
+          MaterialPageRoute<void>(
+            builder: (_) => _GalleryViewer(
+              charId: charId,
+              entries: entries,
+              initialIndex: initialIndex,
+            ),
+          ),
+        )
+        .then((_) => ref.invalidate(galleryProvider(charId)));
   }
 }
 
@@ -159,12 +172,14 @@ class _GalleryTile extends ConsumerWidget {
           fit: StackFit.expand,
           children: [
             Image.file(
-              File(entry.imagePath),
+              File(resolveGlazeFilePath(entry.imagePath) ?? entry.imagePath),
               fit: BoxFit.cover,
               errorBuilder: (_, _, _) => Container(
                 color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                child: Icon(Icons.broken_image,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant),
+                child: Icon(
+                  Icons.broken_image,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
             ),
             if (entry.label != null && entry.label!.isNotEmpty)
@@ -173,8 +188,10 @@ class _GalleryTile extends ConsumerWidget {
                 left: 0,
                 right: 0,
                 child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 4,
+                    vertical: 2,
+                  ),
                   color: Colors.black54,
                   child: Text(
                     entry.label!,
@@ -201,15 +218,18 @@ class _GalleryTile extends ConsumerWidget {
           onTap: () async {
             Navigator.of(context, rootNavigator: true).pop();
             try {
-              final service =
-                  await ref.read(galleryServiceProvider.future);
+              final service = await ref.read(galleryServiceProvider.future);
               await service.setAsAvatar(entry.characterId, entry.id);
               if (context.mounted) {
                 GlazeToast.show(context, 'import_success'.tr());
               }
             } catch (e) {
               if (context.mounted) {
-                GlazeErrorDialog.show(context, e, prefix: '${'settings_err_failed'.tr()} ');
+                GlazeErrorDialog.show(
+                  context,
+                  e,
+                  prefix: '${'settings_err_failed'.tr()} ',
+                );
               }
             }
           },
@@ -222,13 +242,16 @@ class _GalleryTile extends ConsumerWidget {
           onTap: () async {
             Navigator.of(context, rootNavigator: true).pop();
             try {
-              final service =
-                  await ref.read(galleryServiceProvider.future);
+              final service = await ref.read(galleryServiceProvider.future);
               await service.deleteImage(entry.characterId, entry.id);
               ref.invalidate(galleryProvider(charId));
             } catch (e) {
               if (context.mounted) {
-                GlazeErrorDialog.show(context, e, prefix: '${'settings_err_failed'.tr()} ');
+                GlazeErrorDialog.show(
+                  context,
+                  e,
+                  prefix: '${'settings_err_failed'.tr()} ',
+                );
               }
             }
           },
@@ -289,15 +312,18 @@ class _GalleryViewerState extends ConsumerState<_GalleryViewer> {
             tooltip: 'avatar'.tr(),
             onPressed: () async {
               try {
-                final service =
-                    await ref.read(galleryServiceProvider.future);
+                final service = await ref.read(galleryServiceProvider.future);
                 await service.setAsAvatar(entry.characterId, entry.id);
                 if (context.mounted) {
                   GlazeToast.show(context, 'import_success'.tr());
                 }
               } catch (e) {
                 if (context.mounted) {
-                  GlazeErrorDialog.show(context, e, prefix: '${'settings_err_failed'.tr()} ');
+                  GlazeErrorDialog.show(
+                    context,
+                    e,
+                    prefix: '${'settings_err_failed'.tr()} ',
+                  );
                 }
               }
             },
@@ -305,7 +331,7 @@ class _GalleryViewerState extends ConsumerState<_GalleryViewer> {
           IconButton(
             icon: const Icon(Icons.delete),
             tooltip: 'action_delete_msg'.tr(),
-              onPressed: () {
+            onPressed: () {
               GlazeBottomSheet.show<void>(
                 context,
                 title: '${'action_delete_msg'.tr()}?',
@@ -321,14 +347,19 @@ class _GalleryViewerState extends ConsumerState<_GalleryViewer> {
                     onTap: () async {
                       Navigator.of(context, rootNavigator: true).pop();
                       try {
-                        final service =
-                            await ref.read(galleryServiceProvider.future);
+                        final service = await ref.read(
+                          galleryServiceProvider.future,
+                        );
                         await service.deleteImage(entry.characterId, entry.id);
                         ref.invalidate(galleryProvider(widget.charId));
                         if (context.mounted) Navigator.pop(context);
                       } catch (e) {
                         if (context.mounted) {
-                          GlazeErrorDialog.show(context, e, prefix: '${'settings_err_failed'.tr()} ');
+                          GlazeErrorDialog.show(
+                            context,
+                            e,
+                            prefix: '${'settings_err_failed'.tr()} ',
+                          );
                         }
                       }
                     },
@@ -336,7 +367,8 @@ class _GalleryViewerState extends ConsumerState<_GalleryViewer> {
                   BottomSheetItem(
                     label: 'btn_cancel'.tr(),
                     centered: true,
-                    onTap: () => Navigator.of(context, rootNavigator: true).pop(),
+                    onTap: () =>
+                        Navigator.of(context, rootNavigator: true).pop(),
                   ),
                 ],
               );
@@ -355,15 +387,21 @@ class _GalleryViewerState extends ConsumerState<_GalleryViewer> {
             maxScale: 4.0,
             child: Center(
               child: Image.file(
-                File(e.imagePath),
+                File(resolveGlazeFilePath(e.imagePath) ?? e.imagePath),
                 fit: BoxFit.contain,
                 errorBuilder: (_, _, _) => Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.broken_image, color: Colors.white54, size: 64),
+                    const Icon(
+                      Icons.broken_image,
+                      color: Colors.white54,
+                      size: 64,
+                    ),
                     const SizedBox(height: 8),
-                    Text('no_results'.tr(),
-                        style: const TextStyle(color: Colors.white54)),
+                    Text(
+                      'no_results'.tr(),
+                      style: const TextStyle(color: Colors.white54),
+                    ),
                   ],
                 ),
               ),
