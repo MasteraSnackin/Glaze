@@ -144,6 +144,7 @@ class ChatMessageSync {
       final agentSwipeTotalChanged =
           o.agentSwipes.length != n.agentSwipes.length;
       final hiddenChanged = o.isHidden != n.isHidden;
+      final imageHiddenChanged = o.imageHidden != n.imageHidden;
       final typingChanged = o.isTyping != n.isTyping;
       final errorChanged = o.isError != n.isError;
       final guidanceChanged = o.guidanceText != n.guidanceText;
@@ -164,6 +165,7 @@ class ChatMessageSync {
           contentChanged ||
           swipeChanged ||
           hiddenChanged ||
+          imageHiddenChanged ||
           swipeTotalChanged ||
           agentSwipeChanged ||
           agentSwipeTotalChanged ||
