@@ -32,6 +32,9 @@ abstract class LorebookEntry with _$LorebookEntry {
     @Default(true) bool useKeywordSearch,
     @Default(false) bool delayUntilRecursion,
     @Default(false) bool useGroupScoring,
+    @Default('') String lorebookId,
+    @Default('') String lorebookName,
+
     /// When true, this entry is excluded from the embedding pipeline —
     /// `LorebookEmbeddingService` skips it (deletes any existing embedding
     /// row), and the semantic-fallback path in `LorebookVectorSearch`
@@ -95,6 +98,7 @@ abstract class LorebookGlobalSettings with _$LorebookGlobalSettings {
     @Default(50) int keywordVectorSplit,
     @Default(0.45) double vectorThreshold,
     @Default(10) int vectorTopK,
+
     /// Semantic fallback for keyless entries (Marinara analog). Entries
     /// with no `keys` and no `secondaryKeys` cannot activate via keyword
     /// scan; this fallback activates them via cosine similarity against

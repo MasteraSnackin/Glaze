@@ -140,7 +140,9 @@ List<ScannedEntry> scanLorebooks({
 
   for (final c in candidateEntries) {
     if (c.entry.constant) {
-      if (!allRelevantEntries.any((e) => e.id == c.entry.id)) {
+      if (!allRelevantEntries.any(
+        (e) => e.id == c.entry.id && e.lorebookId == c.lorebookId,
+      )) {
         allRelevantEntries.add(_toScanned(c));
       }
     }
@@ -161,7 +163,11 @@ List<ScannedEntry> scanLorebooks({
 
     for (final c in candidateEntries) {
       final entry = c.entry;
-      if (allRelevantEntries.any((e) => e.id == entry.id)) continue;
+      if (allRelevantEntries.any(
+        (e) => e.id == entry.id && e.lorebookId == c.lorebookId,
+      )) {
+        continue;
+      }
       if (entry.constant) continue;
 
       final primaryKeys = entry.keys;

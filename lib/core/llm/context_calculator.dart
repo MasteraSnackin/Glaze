@@ -8,19 +8,19 @@ class StaticBlock {
 
   Map<String, dynamic> toJson() => {'id': id, 'content': content};
 
-  factory StaticBlock.fromJson(Map<String, dynamic> json) => StaticBlock(
-    id: json['id'] as String,
-    content: json['content'] as String,
-  );
+  factory StaticBlock.fromJson(Map<String, dynamic> json) =>
+      StaticBlock(id: json['id'] as String, content: json['content'] as String);
 }
 
 class ContextCalculator {
   final int contextSize;
   final int maxTokens;
+  final int reasoningHistoryCount;
 
   ContextCalculator({
     required this.contextSize,
     required this.maxTokens,
+    this.reasoningHistoryCount = 0,
   });
 
   /// Context window available for the *prompt*, i.e. everything we send.
@@ -55,36 +55,37 @@ class ContextCalculator {
       staticTotal += tokens;
     }
 
-    final actualLorebook = (sourceTokens['lorebook'] ?? 0) + (macroTokens['lorebooks'] ?? 0);
+    final actualLorebook =
+        (sourceTokens['lorebook'] ?? 0) + (macroTokens['lorebooks'] ?? 0);
     final effectiveReserve = lorebookReserveTokens > actualLorebook
         ? lorebookReserveTokens - actualLorebook
         : 0;
 
-    final historyBudget = safeContext - staticTotal - effectiveReserve - memoryTokens;
+    final historyBudget =
+        safeContext - staticTotal - effectiveReserve - memoryTokens;
 
     final (trimmedHistory, cutoffIndex) = _trimHistory(
       historyMessages,
       historyBudget > 0 ? historyBudget : 0,
     );
 
-    final historyTokens = trimmedHistory.fold<int>(
-      0,
-      (sum, m) => sum + estimateTokens(m.content),
-    );
+    final historyTokens = _historyTokens(trimmedHistory);
     sourceTokens['history'] = historyTokens;
 
     if (vectorLoreTokens > 0) {
       sourceTokens['vectorLore'] = vectorLoreTokens;
     }
 
-    final fixedTotal = staticTotal + effectiveReserve + memoryTokens + vectorLoreTokens;
+    final fixedTotal =
+        staticTotal + effectiveReserve + memoryTokens + vectorLoreTokens;
     final remaining = safeContext - fixedTotal - historyTokens;
 
     // sentTokens = tokens actually sent in the request (no unspent reserve).
     // fixedTotal includes effectiveReserve which shrinks the history budget but
     // is never literally in the payload; exclude it so HeroCard matches
     // the provider's prompt_tokens as closely as possible.
-    final sentTokens = staticTotal + memoryTokens + vectorLoreTokens + historyTokens;
+    final sentTokens =
+        staticTotal + memoryTokens + vectorLoreTokens + historyTokens;
 
     return TokenBreakdown(
       sourceTokens: sourceTokens,
@@ -133,16 +134,44 @@ class ContextCalculator {
 
     final kept = <PromptMessage>[];
     var used = 0;
+    final includeAllReasoning = reasoningHistoryCount == -1;
+    var remainingReasoning = reasoningHistoryCount;
 
     for (int i = messages.length - 1; i >= 0; i--) {
-      final tokens = estimateTokens(messages[i].content);
+      final message = messages[i];
+      var tokens = estimateTokens(message.content);
+      final reasoning = message.reasoningContent?.trim();
+      final includesReasoning =
+          (includeAllReasoning || remainingReasoning > 0) &&
+          message.role == 'assistant' &&
+          reasoning?.isNotEmpty == true;
+      if (includesReasoning) tokens += estimateTokens(reasoning!);
       if (used + tokens > budget) break;
       used += tokens;
-      kept.insert(0, messages[i]);
+      kept.insert(0, message);
+      if (includesReasoning && !includeAllReasoning) remainingReasoning--;
     }
 
     final cutoff = messages.length - kept.length;
     return (kept, cutoff);
+  }
+
+  int _historyTokens(List<PromptMessage> messages) {
+    var tokens = 0;
+    final includeAllReasoning = reasoningHistoryCount == -1;
+    var remainingReasoning = reasoningHistoryCount;
+    for (var i = messages.length - 1; i >= 0; i--) {
+      final message = messages[i];
+      tokens += estimateTokens(message.content);
+      final reasoning = message.reasoningContent?.trim();
+      if ((includeAllReasoning || remainingReasoning > 0) &&
+          message.role == 'assistant' &&
+          reasoning?.isNotEmpty == true) {
+        tokens += estimateTokens(reasoning!);
+        if (!includeAllReasoning) remainingReasoning--;
+      }
+    }
+    return tokens;
   }
 }
 
@@ -204,7 +233,9 @@ class TokenBreakdown {
     historyTokens: json['historyTokens'] as int,
     totalTokens: json['totalTokens'] as int,
     cutoffIndex: json['cutoffIndex'] as int,
-    trimmedHistory: (json['trimmedHistory'] as List).map((m) => PromptMessage.fromJson(m as Map<String, dynamic>)).toList(),
+    trimmedHistory: (json['trimmedHistory'] as List)
+        .map((m) => PromptMessage.fromJson(m as Map<String, dynamic>))
+        .toList(),
     lorebookReserveTokens: json['lorebookReserveTokens'] as int? ?? 0,
     memoryTokens: json['memoryTokens'] as int? ?? 0,
     vectorLoreTokens: json['vectorLoreTokens'] as int? ?? 0,
@@ -215,7 +246,10 @@ class TokenBreakdown {
         .toSet(),
   );
 
-  int get lorebookTotal => (sourceTokens['lorebook'] ?? 0) + (macroTokens['lorebooks'] ?? 0) + vectorLoreTokens;
+  int get lorebookTotal =>
+      (sourceTokens['lorebook'] ?? 0) +
+      (macroTokens['lorebooks'] ?? 0) +
+      vectorLoreTokens;
 
   double get historyFillPercent => historyBudget > 0
       ? (historyTokens / historyBudget * 100).clamp(0, 100)

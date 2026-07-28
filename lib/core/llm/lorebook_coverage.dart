@@ -58,22 +58,35 @@ CoverageResult computeLorebookCoverage({
   required LorebookGlobalSettings globalSettings,
   required LorebookActivations activations,
   List<LorebookEntry> vectorEntries = const [],
-  // Maps entry.id → lorebookId for correct lorebook lookup without id collisions.
+  // Maps a namespaced entry id to its lorebook for legacy callers whose vector
+  // entries do not carry provenance yet.
   Map<String, String> vectorEntryLorebookIds = const {},
 }) {
-  Lorebook? lbForEntry(String entryId) {
-    final lbId = vectorEntryLorebookIds[entryId];
+  Lorebook? lbForEntry(LorebookEntry entry) {
+    final lbId = entry.lorebookId.isNotEmpty
+        ? entry.lorebookId
+        : vectorEntryLorebookIds.entries
+              .where((item) => item.key.endsWith('_${entry.id}'))
+              .map((item) => item.value)
+              .firstOrNull;
     if (lbId != null) return lorebooks.where((l) => l.id == lbId).firstOrNull;
-    return lorebooks.where((l) => l.entries.any((en) => en.id == entryId)).firstOrNull;
+    return lorebooks
+        .where((l) => l.entries.any((en) => en.id == entry.id))
+        .firstOrNull;
   }
 
   // In vector-only mode, show only vector results (keyword scan is skipped).
   if (globalSettings.searchType == 'vector') {
     if (vectorEntries.isEmpty) {
-      return const CoverageResult(entries: [], totalCandidates: 0, activatedCount: 0, cutOffCount: 0);
+      return const CoverageResult(
+        entries: [],
+        totalCandidates: 0,
+        activatedCount: 0,
+        cutOffCount: 0,
+      );
     }
     final entries = vectorEntries.map((e) {
-      final lb = lbForEntry(e.id);
+      final lb = lbForEntry(e);
       return CoverageEntry(
         id: e.id,
         comment: e.comment,
@@ -99,13 +112,23 @@ CoverageResult computeLorebookCoverage({
 
   final activeLorebooks = lorebooks.where((lb) {
     if (lb.enabled) return true;
-    if (charId != null && activations.character[charId]?.contains(lb.id) == true) return true;
-    if (chatId != null && activations.chat[chatId]?.contains(lb.id) == true) return true;
+    if (charId != null &&
+        activations.character[charId]?.contains(lb.id) == true) {
+      return true;
+    }
+    if (chatId != null && activations.chat[chatId]?.contains(lb.id) == true) {
+      return true;
+    }
     return false;
   }).toList();
 
   if (activeLorebooks.isEmpty) {
-    return const CoverageResult(entries: [], totalCandidates: 0, activatedCount: 0, cutOffCount: 0);
+    return const CoverageResult(
+      entries: [],
+      totalCandidates: 0,
+      activatedCount: 0,
+      cutOffCount: 0,
+    );
   }
 
   final maxInjectedEntries = globalSettings.maxInjectedEntries.clamp(1, 100);
@@ -114,7 +137,8 @@ CoverageResult computeLorebookCoverage({
   for (final lb in activeLorebooks) {
     final lbSettings = lb.settings;
     final lbScanDepth = lbSettings?.scanDepth ?? globalSettings.scanDepth;
-    final lbCaseSensitive = lbSettings?.caseSensitive ?? globalSettings.caseSensitive;
+    final lbCaseSensitive =
+        lbSettings?.caseSensitive ?? globalSettings.caseSensitive;
     final lbMatchWholeWords = lbSettings?.matchWholeWords;
 
     for (final entry in lb.entries) {
@@ -125,7 +149,9 @@ CoverageResult computeLorebookCoverage({
         final filter = entry.characterFilter!;
         if (filter.names.isNotEmpty) {
           final charName = char.name.toLowerCase();
-          final isInCategory = filter.names.any((n) => charName.contains(n.toLowerCase()));
+          final isInCategory = filter.names.any(
+            (n) => charName.contains(n.toLowerCase()),
+          );
           if (filter.isExclude && isInCategory) continue;
           if (!filter.isExclude && !isInCategory) continue;
         }
@@ -134,12 +160,14 @@ CoverageResult computeLorebookCoverage({
       final effectiveCaseSensitive = entry.caseSensitive ?? lbCaseSensitive;
       final effectiveWholeWords = resolveWholeWords(
         entry.matchWholeWords,
-        lbMatchWholeWords != null ? (lbMatchWholeWords == 'true') : globalSettings.matchWholeWords,
+        lbMatchWholeWords != null
+            ? (lbMatchWholeWords == 'true')
+            : globalSettings.matchWholeWords,
         globalSettings.keySearchMode,
       );
       final effectiveScanDepth = entry.scanDepth ?? lbScanDepth;
 
-      candidates[entry.id] = _Candidate(
+      candidates['${lb.id}_${entry.id}'] = _Candidate(
         entry: entry,
         lorebookName: lb.name,
         lorebookId: lb.id,
@@ -175,7 +203,7 @@ CoverageResult computeLorebookCoverage({
     final matchedPrimary = <String>[];
     for (final key in entry.keys) {
       if (key.isEmpty) continue;
-        if (glazeCheckMatch(key, scanText, caseSensitive, wholeWords)) {
+      if (glazeCheckMatch(key, scanText, caseSensitive, wholeWords)) {
         matchedPrimary.add(key);
       }
     }
@@ -187,7 +215,8 @@ CoverageResult computeLorebookCoverage({
             ? scanMessages[i].content
             : scanMessages[i].content.toLowerCase();
         for (final key in entry.keys) {
-          if (key.isNotEmpty && glazeCheckMatch(key, msgText, caseSensitive, wholeWords)) {
+          if (key.isNotEmpty &&
+              glazeCheckMatch(key, msgText, caseSensitive, wholeWords)) {
             matchIdx = history.indexOf(scanMessages[i]);
             break;
           }
@@ -200,7 +229,7 @@ CoverageResult computeLorebookCoverage({
     if (matchedPrimary.isNotEmpty && entry.secondaryKeys.isNotEmpty) {
       for (final key in entry.secondaryKeys) {
         if (key.isEmpty) continue;
-      if (glazeCheckMatch(key, scanText, caseSensitive, wholeWords)) {
+        if (glazeCheckMatch(key, scanText, caseSensitive, wholeWords)) {
           matchedSecondary.add(key);
         }
       }
@@ -217,13 +246,20 @@ CoverageResult computeLorebookCoverage({
     if (logic != 4 && entry.secondaryKeys.isNotEmpty) {
       final anyMatch = matchedSecondary.isNotEmpty;
       final allMatch = entry.secondaryKeys.every(
-          (k) => k.isEmpty || glazeCheckMatch(k, scanText, caseSensitive, wholeWords));
+        (k) =>
+            k.isEmpty ||
+            glazeCheckMatch(k, scanText, caseSensitive, wholeWords),
+      );
 
       switch (logic) {
-        case 0: secondaryPass = anyMatch;
-        case 1: secondaryPass = allMatch;
-        case 2: secondaryPass = !anyMatch;
-        case 3: secondaryPass = !allMatch;
+        case 0:
+          secondaryPass = anyMatch;
+        case 1:
+          secondaryPass = allMatch;
+        case 2:
+          secondaryPass = !anyMatch;
+        case 3:
+          secondaryPass = !allMatch;
       }
     }
 
@@ -234,24 +270,24 @@ CoverageResult computeLorebookCoverage({
 
   // Separate constant entries from keyword-triggered ones.
   // Constants are always injected and never count toward the slot cap.
-  final constantActivated = candidates.values
-      .where((c) => c.activated && c.entry.constant)
-      .toList()
-    ..sort((a, b) => a.entry.order.compareTo(b.entry.order));
+  final constantActivated =
+      candidates.values.where((c) => c.activated && c.entry.constant).toList()
+        ..sort((a, b) => a.entry.order.compareTo(b.entry.order));
 
-  final keywordActivatedList = candidates.values
-      .where((c) => c.activated && !c.entry.constant)
-      .toList()
-    ..sort((a, b) => a.entry.order.compareTo(b.entry.order));
+  final keywordActivatedList =
+      candidates.values.where((c) => c.activated && !c.entry.constant).toList()
+        ..sort((a, b) => a.entry.order.compareTo(b.entry.order));
 
   final notActivatedList = candidates.values.where((c) => !c.activated).toList()
     ..sort((a, b) => a.entry.order.compareTo(b.entry.order));
 
   // Dedupe vector entries against all keyword-activated IDs (constants excluded —
   // they can't be vector-matched anyway since constant=true disables vectorSearch).
-  final keywordActivatedIds = keywordActivatedList.map((c) => c.entry.id).toSet();
+  final keywordActivatedIds = keywordActivatedList
+      .map((c) => '${c.lorebookId}_${c.entry.id}')
+      .toSet();
   final dedupedVectorEntries = vectorEntries
-      .where((e) => !keywordActivatedIds.contains(e.id))
+      .where((e) => !keywordActivatedIds.contains('${e.lorebookId}_${e.id}'))
       .toList();
 
   final hasVector = dedupedVectorEntries.isNotEmpty;
@@ -265,7 +301,8 @@ CoverageResult computeLorebookCoverage({
   // negative count (RangeError).
   final maxVector = globalSettings.vectorTopK;
 
-  final triggeredKeywordSlots = maxInjectedEntries - constantActivated.length < 0
+  final triggeredKeywordSlots =
+      maxInjectedEntries - constantActivated.length < 0
       ? 0
       : maxInjectedEntries - constantActivated.length;
   final usedKeyword = keywordActivatedList.take(triggeredKeywordSlots).toList();
@@ -292,16 +329,19 @@ CoverageResult computeLorebookCoverage({
       ? dedupedVectorEntries.length - usableVectorSlots
       : 0;
   final vectorInBudget = usedVector;
-  final vectorOverBudget = dedupedVectorEntries.skip(usableVectorSlots).toList();
+  final vectorOverBudget = dedupedVectorEntries
+      .skip(usableVectorSlots)
+      .toList();
 
   final totalCutOff = keywordCutOffCount + vectorCutOffCount;
   // Constants are always active; keyword/vector cut-offs still count as "activated"
   // for the summary bar (they were triggered, just not injected).
-  final totalActivated = constantActivated.length + usedKeyword.length + vectorInBudget.length;
+  final totalActivated =
+      constantActivated.length + usedKeyword.length + vectorInBudget.length;
 
   // Build vector CoverageEntries for in-budget and over-budget.
   CoverageEntry vectorToCoverage(LorebookEntry e, bool cutOff) {
-    final lb = lbForEntry(e.id);
+    final lb = lbForEntry(e);
     return CoverageEntry(
       id: e.id,
       comment: e.comment,

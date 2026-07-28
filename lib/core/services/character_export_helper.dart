@@ -52,7 +52,9 @@ Future<String> exportCharacterToFile({
     final galleryEntries = character.gallery;
     final galleryBytesList = <Uint8List>[];
     for (final entry in galleryEntries) {
-      final file = File(entry.imagePath);
+      final file = File(
+        resolveGlazeFilePath(entry.imagePath) ?? entry.imagePath,
+      );
       galleryBytesList.add(
         await file.exists() ? await file.readAsBytes() : Uint8List(0),
       );
@@ -61,8 +63,7 @@ Future<String> exportCharacterToFile({
     for (int i = 0; i < galleryEntries.length; i++) {
       if (galleryBytesList[i].isNotEmpty) validGallery.add(i);
     }
-    final filteredEntries =
-        validGallery.map((i) => galleryEntries[i]).toList();
+    final filteredEntries = validGallery.map((i) => galleryEntries[i]).toList();
     final filteredBytes = validGallery.map((i) => galleryBytesList[i]).toList();
 
     final result = await exportCharacterAsZip(
@@ -97,11 +98,16 @@ Future<String> exportCharacterToFile({
 
 /// Merges all character-scoped lorebooks for [characterId] into a single V2
 /// `character_book` payload, or null when there are none.
-Map<String, dynamic>? _buildCharacterBookData(WidgetRef ref, String characterId) {
+Map<String, dynamic>? _buildCharacterBookData(
+  WidgetRef ref,
+  String characterId,
+) {
   final lorebooks = ref.read(lorebooksProvider).value ?? [];
-  final charLorebooks = lorebooks.where((lb) =>
-      lb.activationScope == 'character' &&
-      lb.activationTargetId == characterId);
+  final charLorebooks = lorebooks.where(
+    (lb) =>
+        lb.activationScope == 'character' &&
+        lb.activationTargetId == characterId,
+  );
   if (charLorebooks.isEmpty) return null;
 
   final merged = <String, dynamic>{
@@ -110,8 +116,9 @@ Map<String, dynamic>? _buildCharacterBookData(WidgetRef ref, String characterId)
   };
   for (final lb in charLorebooks) {
     final bookJson = lorebookToCharacterBookJson(lb);
-    (merged['entries'] as List<dynamic>)
-        .addAll(bookJson['entries'] as Iterable<dynamic>);
+    (merged['entries'] as List<dynamic>).addAll(
+      bookJson['entries'] as Iterable<dynamic>,
+    );
     if (lb != charLorebooks.first) {
       merged['name'] = '${merged['name']}, ${lb.name}';
     }

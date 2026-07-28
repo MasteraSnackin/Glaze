@@ -71,16 +71,10 @@ class ImpersonationService {
     }
 
     final preset = _ref.read(
-      effectivePresetForChatProvider((
-        charId: _charId,
-        sessionId: session.id,
-      )),
+      effectivePresetForChatProvider((charId: _charId, sessionId: session.id)),
     );
     final persona = _ref.read(
-      effectivePersonaForChatProvider((
-        charId: _charId,
-        sessionId: session.id,
-      )),
+      effectivePersonaForChatProvider((charId: _charId, sessionId: session.id)),
     );
     final character = await _ref.read(characterRepoProvider).getById(_charId);
     if (_isAborted()) return ImpersonationOutcome.aborted;
@@ -150,7 +144,7 @@ class ImpersonationService {
 
     final apiMessages = buildApiMessages(
       promptResult.messages,
-      includeLastReasoning: apiConfig.includeLastReasoning,
+      reasoningHistoryCount: apiConfig.reasoningHistoryCount,
     );
 
     final accumulator = StreamAccumulator(
@@ -232,8 +226,7 @@ class ImpersonationService {
       onError: (error) {
         idleGuard.dispose();
         final isCancelled =
-            (error is DioException &&
-                error.type == DioExceptionType.cancel) ||
+            (error is DioException && error.type == DioExceptionType.cancel) ||
             cancelToken.isCancelled ||
             _isAborted();
         if (isCancelled && !idleTimedOut) {

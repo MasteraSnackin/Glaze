@@ -146,6 +146,12 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       },
     );
     _search = ChatSearchDelegate();
+    // The delegate holds the query, the match list and the active match index.
+    // Nothing else rebuilds on those: without this listener, `searchNext` /
+    // `searchPrev` only mutated the delegate and the new active index never
+    // reached the WebView, so the prev/next buttons looked dead and closing
+    // search left the highlight behind until some unrelated rebuild.
+    _search.addListener(_onSearchChanged);
     if (widget.forceNewSession || widget.initialSessionIndex != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _applySessionPreference();
@@ -153,9 +159,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     }
   }
 
+  void _onSearchChanged() {
+    if (!mounted) return;
+    setState(() {});
+  }
+
   @override
   void dispose() {
     _drawerCtrl.dispose();
+    _search.removeListener(_onSearchChanged);
     _search.dispose();
     super.dispose();
   }
@@ -758,8 +770,12 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
   /// Options sheet for a generated/janitor image (Imagen UI, ported from
   /// Glaze useMessageImageGen.js): Expand → fullscreen, Save → share/save,
   /// Regenerate → re-run image generation for the owning message. The
-  /// Regenerate entry is hidden when there is no owning message (e.g. inline
-  /// janitor `![](url)` images, which carry no messageId).
+  /// Regenerate entry is hidden when the owning message can't be resolved in
+  /// the current list (no messageId, or the message is already gone).
+  ///
+  /// Uses [GlazeBottomSheet] so the sheet matches every other action sheet in
+  /// the app (glass surface, handle bar, haptics) instead of a bare Material
+  /// `showModalBottomSheet`.
   void _showImageOptionsSheet(
     String src,
     String instruction,
@@ -770,57 +786,37 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
         ? -1
         : messages.indexWhere((m) => m.id == messageId);
 
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: context.cs.surfaceContainerHigh,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (sheetCtx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 8),
-            Container(
-              width: 32,
-              height: 4,
-              decoration: BoxDecoration(
-                color: context.cs.outlineVariant.withValues(alpha: 0.4),
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const SizedBox(height: 8),
-            ListTile(
-              leading: const Icon(Icons.fullscreen),
-              title: Text('imggen_expand_image'.tr()),
-              onTap: () {
-                Navigator.pop(sheetCtx);
-                _showImageViewer(context, src);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.save_alt),
-              title: Text('action_save_image'.tr()),
-              onTap: () {
-                Navigator.pop(sheetCtx);
-                _downloadImage(src);
-              },
-            ),
-            if (idx >= 0)
-              ListTile(
-                leading: const Icon(Icons.refresh),
-                title: Text('action_regenerate'.tr()),
-                onTap: () {
-                  Navigator.pop(sheetCtx);
-                  ref
-                      .read(chatProvider(widget.charId).notifier)
-                      .retryImageGenerationForMessage(messageId);
-                },
-              ),
-            const SizedBox(height: 8),
-          ],
+    GlazeBottomSheet.show<void>(
+      context,
+      items: [
+        BottomSheetItem(
+          icon: Icons.fullscreen,
+          label: 'imggen_expand_image'.tr(),
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            _showImageViewer(context, src);
+          },
         ),
-      ),
+        BottomSheetItem(
+          icon: Icons.save_alt,
+          label: 'action_save_image'.tr(),
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            _downloadImage(src);
+          },
+        ),
+        if (idx >= 0)
+          BottomSheetItem(
+            icon: Icons.refresh,
+            label: 'action_regenerate'.tr(),
+            onTap: () {
+              Navigator.of(context, rootNavigator: true).pop();
+              ref
+                  .read(chatProvider(widget.charId).notifier)
+                  .retryImageGenerationForMessage(messageId);
+            },
+          ),
+      ],
     );
   }
 
@@ -1389,6 +1385,16 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                               ref
                                   .read(chatProvider(widget.charId).notifier)
                                   .toggleMessageHidden(idx);
+                            }
+                          },
+                          onToggleImageHidden: (id) {
+                            final idx = widget.state.messages.indexWhere(
+                              (m) => m.id == id,
+                            );
+                            if (idx >= 0) {
+                              ref
+                                  .read(chatProvider(widget.charId).notifier)
+                                  .toggleImageHidden(idx);
                             }
                           },
                           onMemoryClick: (id) {

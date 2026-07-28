@@ -230,6 +230,7 @@ class ChatWebViewSurface extends ConsumerWidget {
                 bridge.onGuidedSwipe = callbacks.onGuidedSwipe;
                 bridge.onMemoryClick = callbacks.onMemoryClick;
                 bridge.onToggleHidden = callbacks.onToggleHidden;
+                bridge.onToggleImageHidden = callbacks.onToggleImageHidden;
                 bridge.onInjectClick = callbacks.onInjectClick;
                 bridge.onImgRetry = callbacks.onImgRetry;
                 bridge.onImgFind = callbacks.onImgFind;
@@ -269,6 +270,9 @@ class ChatWebViewSurface extends ConsumerWidget {
                 // The init path is also wired through onWebViewCreated. When
                 // load stop wins the race, run init here.
                 await onInitWebView();
+              },
+              shouldOverrideUrlLoading: (controller, request) async {
+                return NavigationActionPolicy.CANCEL;
               },
             ),
           ),

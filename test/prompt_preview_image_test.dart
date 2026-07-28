@@ -109,13 +109,13 @@ void main() {
         content: 'second',
         reasoningContent: '  latest reasoning  ',
       ),
-    ], includeLastReasoning: true);
+    ], reasoningHistoryCount: 1);
 
     expect(messages[0], isNot(contains('reasoning_content')));
     expect(messages[2]['reasoning_content'], 'latest reasoning');
   });
 
-  test('preview request does not fall back to stale reasoning', () {
+  test('preview request counts non-empty reasoning blocks', () {
     final messages = buildPreviewApiMessages(const [
       PromptMessage(
         role: 'assistant',
@@ -123,8 +123,65 @@ void main() {
         reasoningContent: 'old reasoning',
       ),
       PromptMessage(role: 'assistant', content: 'second'),
-    ], includeLastReasoning: true);
+    ], reasoningHistoryCount: 1);
 
-    expect(messages, everyElement(isNot(contains('reasoning_content'))));
+    expect(messages[0]['reasoning_content'], 'old reasoning');
+    expect(messages[1], isNot(contains('reasoning_content')));
+  });
+
+  test('preview request includes the requested number of reasoning blocks', () {
+    final messages = buildPreviewApiMessages(const [
+      PromptMessage(
+        role: 'assistant',
+        content: 'first',
+        reasoningContent: 'first reasoning',
+      ),
+      PromptMessage(
+        role: 'assistant',
+        content: 'second',
+        reasoningContent: 'second reasoning',
+      ),
+      PromptMessage(
+        role: 'assistant',
+        content: 'third',
+        reasoningContent: 'third reasoning',
+      ),
+    ], reasoningHistoryCount: 2);
+
+    expect(messages[0], isNot(contains('reasoning_content')));
+    expect(messages[1]['reasoning_content'], 'second reasoning');
+    expect(messages[2]['reasoning_content'], 'third reasoning');
+  });
+
+  test('minus one includes every reasoning block', () {
+    final messages = buildPreviewApiMessages(const [
+      PromptMessage(
+        role: 'assistant',
+        content: 'first',
+        reasoningContent: 'first reasoning',
+      ),
+      PromptMessage(role: 'user', content: 'next'),
+      PromptMessage(
+        role: 'assistant',
+        content: 'second',
+        reasoningContent: 'second reasoning',
+      ),
+    ], reasoningHistoryCount: -1);
+
+    expect(messages[0]['reasoning_content'], 'first reasoning');
+    expect(messages[1], isNot(contains('reasoning_content')));
+    expect(messages[2]['reasoning_content'], 'second reasoning');
+  });
+
+  test('zero reasoning history count omits every reasoning block', () {
+    final messages = buildPreviewApiMessages(const [
+      PromptMessage(
+        role: 'assistant',
+        content: 'reply',
+        reasoningContent: 'hidden reasoning',
+      ),
+    ]);
+
+    expect(messages.single, isNot(contains('reasoning_content')));
   });
 }

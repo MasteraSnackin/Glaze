@@ -33,10 +33,16 @@ const String _kThumbMigrationKey = 'gz_thumb_v6_migrated';
 /// SharedPreferences flag guarding the one-time background thumbnail backfill.
 const String _kThumbBackfillKey = 'gz_thumb_v6_backfilled';
 
+const String _kThumbMigrationMarker = '.thumbnails-v6-migrated';
+const String _kThumbRefreshMarker = '.thumbnails-v6-refresh-required';
+
 /// Runs in a background isolate and scales without upscaling or changing the
 /// aspect ratio. Both axes are bounded to keep extreme images mobile-safe.
-Uint8List? resizeAvatarBytes(Uint8List imageBytes, int maxShortSide,
-    [int maxLongSide = kThumbnailLongSide]) {
+Uint8List? resizeAvatarBytes(
+  Uint8List imageBytes,
+  int maxShortSide, [
+  int maxLongSide = kThumbnailLongSide,
+]) {
   try {
     final image = img.decodeImage(imageBytes);
     if (image == null) return null;
@@ -52,7 +58,9 @@ Uint8List? resizeAvatarBytes(Uint8List imageBytes, int maxShortSide,
             height: (image.height * scale).round().clamp(1, maxLongSide),
           )
         : image;
-    return Uint8List.fromList(img.encodeJpg(scaled, quality: _kThumbnailQuality));
+    return Uint8List.fromList(
+      img.encodeJpg(scaled, quality: _kThumbnailQuality),
+    );
   } catch (_) {
     return null;
   }
@@ -66,23 +74,28 @@ class ImageStorageService implements SyncImageStore {
   static Future<ImageStorageService> create() async {
     final baseDir = await getAppDataDir();
     final service = ImageStorageService(baseDir);
-    await service._migrateOldThumbnails();
+    await service.migrateOldThumbnails();
     return service;
   }
 
-  Future<void> _migrateOldThumbnails([SharedPreferences? prefsArg]) async {
+  Future<void> migrateOldThumbnails([SharedPreferences? prefsArg]) async {
     final prefs = prefsArg ?? await SharedPreferences.getInstance();
-    if (prefs.getBool(_kThumbMigrationKey) == true) return;
+    final marker = File(p.join(baseDir, _kThumbMigrationMarker));
+    if (await marker.exists()) return;
 
-    final thumbDir = Directory(p.join(baseDir, 'thumbnails'));
-    if (await thumbDir.exists()) {
-      await thumbDir.delete(recursive: true);
+    // The Windows ProductName determines the preferences directory. A renamed
+    // executable must not replay a destructive thumbnail migration against the
+    // stable Glaze data directory just because its preference flag moved.
+    if (prefs.getBool(_kThumbMigrationKey) != true) {
+      await File(
+        p.join(baseDir, _kThumbRefreshMarker),
+      ).writeAsString('pending', flush: true);
     }
     await prefs.setBool(_kThumbMigrationKey, true);
-    // The wipe leaves existing characters without thumbnails until they are
-    // re-saved; clear the backfill flag so the next [backfillMissingThumbnails]
-    // pass regenerates them at the new resolution.
+    // Also repairs files removed by an interrupted legacy migration. Existing
+    // thumbnails are skipped unless a real schema refresh is pending.
     await prefs.setBool(_kThumbBackfillKey, false);
+    await marker.writeAsString('done', flush: true);
   }
 
   /// One-time background pass that regenerates thumbnails for any [avatarPaths]
@@ -93,7 +106,9 @@ class ImageStorageService implements SyncImageStore {
   /// Returns the number of thumbnails (re)generated.
   Future<int> backfillMissingThumbnails(Iterable<String?> avatarPaths) async {
     final prefs = await SharedPreferences.getInstance();
-    if (prefs.getBool(_kThumbBackfillKey) == true) return 0;
+    final refreshMarker = File(p.join(baseDir, _kThumbRefreshMarker));
+    final refreshExisting = await refreshMarker.exists();
+    if (!refreshExisting && prefs.getBool(_kThumbBackfillKey) == true) return 0;
 
     final dir = Directory(p.join(baseDir, 'thumbnails'));
     if (!await dir.exists()) await dir.create(recursive: true);
@@ -102,7 +117,7 @@ class ImageStorageService implements SyncImageStore {
     var complete = true;
     for (final avatarPath in avatarPaths) {
       if (avatarPath == null || avatarPath.isEmpty) continue;
-      if (thumbnailPath(avatarPath) != null) continue; // already has one
+      if (!refreshExisting && thumbnailPath(avatarPath) != null) continue;
 
       final resolvedPath = absolutePath(avatarPath) ?? avatarPath;
       final avatarFile = File(resolvedPath);
@@ -128,7 +143,10 @@ class ImageStorageService implements SyncImageStore {
       }
     }
 
-    if (complete) await prefs.setBool(_kThumbBackfillKey, true);
+    if (complete) {
+      await prefs.setBool(_kThumbBackfillKey, true);
+      if (await refreshMarker.exists()) await refreshMarker.delete();
+    }
     return made;
   }
 
@@ -145,14 +163,18 @@ class ImageStorageService implements SyncImageStore {
   }
 
   Future<String?> saveAvatarFromDataUrl(
-      String characterId, String dataUrl) async {
+    String characterId,
+    String dataUrl,
+  ) async {
     final bytes = dataUrlToBytes(dataUrl);
     if (bytes == null) return null;
     return saveAvatar(characterId, bytes);
   }
 
   Future<String?> saveThumbnail(
-      String characterId, Uint8List imageBytes) async {
+    String characterId,
+    Uint8List imageBytes,
+  ) async {
     final dir = Directory(p.join(baseDir, 'thumbnails'));
     if (!await dir.exists()) {
       await dir.create(recursive: true);
@@ -224,32 +246,27 @@ class ImageStorageService implements SyncImageStore {
     if (!File(relativePath).isAbsolute) {
       return p.join(baseDir, relativePath);
     }
-    // The path is absolute. On iOS the app sandbox container UUID changes on
-    // every reinstall/OS update, so an absolute path persisted by an older
-    // build (e.g. .../Application/<OLD_UUID>/Documents/Glaze/avatars/x.png)
-    // no longer exists under the current container. The files themselves are
-    // preserved under the *new* container, so rebase any absolute path that
-    // lives under a "Glaze" data root onto the current [baseDir].
+    // Rebase stale iOS containers and sibling desktop build channels.
     final rebased = _rebaseOntoBaseDir(relativePath);
     return rebased ?? relativePath;
   }
 
-  /// If [absPath] points inside a Glaze data directory from a stale sandbox
-  /// container, return the equivalent path under the current [baseDir].
-  /// Returns null when the path can't be rebased (not under a Glaze root) or
-  /// already resolves correctly.
+  /// Resolves [absPath] against the current Glaze data directory when the
+  /// equivalent file exists, otherwise retains an existing source path.
   String? _rebaseOntoBaseDir(String absPath) {
-    if (File(absPath).existsSync()) return absPath; // already valid
-
     final normalized = absPath.replaceAll('\\', '/');
-    // Find the last "/Glaze/" segment — everything after it is the stable
-    // sub-path (avatars/<id>.png, gallery/..., etc.).
-    const marker = '/Glaze/';
-    final idx = normalized.lastIndexOf(marker);
-    if (idx < 0) return null;
-    final suffix = normalized.substring(idx + marker.length);
-    if (suffix.isEmpty) return null;
-    return p.join(baseDir, suffix);
+    final match = RegExp(
+      r'/(?:Glaze|Glaze-staging|Glaze-nightly)/',
+      caseSensitive: false,
+    ).allMatches(normalized).lastOrNull;
+    if (match != null) {
+      final suffix = normalized.substring(match.end);
+      if (suffix.isNotEmpty) {
+        final rebased = p.join(baseDir, suffix);
+        if (File(rebased).existsSync()) return rebased;
+      }
+    }
+    return File(absPath).existsSync() ? absPath : null;
   }
 
   Uint8List? _resizeImage(Uint8List imageBytes, int maxDimension) =>
@@ -268,7 +285,9 @@ class ImageStorageService implements SyncImageStore {
     bool stripped = false;
     while (offset < pngBytes.length - 4) {
       final length = data.getUint32(offset, Endian.big);
-      final type = String.fromCharCodes(pngBytes.sublist(offset + 4, offset + 8));
+      final type = String.fromCharCodes(
+        pngBytes.sublist(offset + 4, offset + 8),
+      );
       if (type == 'tEXt' || type == 'zTXt' || type == 'iTXt') {
         stripped = true;
         offset += 12 + length;

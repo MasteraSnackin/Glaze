@@ -49,7 +49,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 77;
+  int get schemaVersion => 79;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -1388,6 +1388,30 @@ class AppDatabase extends _$AppDatabase {
       }
       if (from < 77) {
         await m.createTable(ledgerReconciliationCleanupJournals);
+      }
+      if (from < 78) {
+        final prefs = await SharedPreferences.getInstance();
+        if (!prefs.containsKey('gz_disabled_third_party_providers')) {
+          await prefs.setStringList(
+            'gz_disabled_third_party_providers',
+            <String>[],
+          );
+        }
+      }
+      if (from < 79) {
+        final columns = await customSelect(
+          "PRAGMA table_info('api_configs')",
+        ).get();
+        final names = columns
+            .map((column) => column.read<String>('name'))
+            .toSet();
+        if (!names.contains('reasoning_history_count')) {
+          await m.addColumn(apiConfigs, apiConfigs.reasoningHistoryCount);
+          await customStatement(
+            'UPDATE api_configs SET reasoning_history_count = '
+            'CASE WHEN include_last_reasoning = 1 THEN 1 ELSE 0 END',
+          );
+        }
       }
     },
   );

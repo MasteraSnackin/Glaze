@@ -4,6 +4,8 @@ import 'package:path/path.dart' as p;
 // ignore: depend_on_referenced_packages
 import 'package:path_provider/path_provider.dart';
 
+import '../constants/build_channel.dart';
+
 /// Cached Glaze data root, populated on the first [getAppDataDir] call (which
 /// happens at startup via ImageStorageService.create / AppDatabase open).
 /// Used by [resolveGlazeFilePath] so widgets can rebase stale absolute paths
@@ -41,17 +43,25 @@ String? resolveGlazeFilePath(String? path) {
   if (!p.isAbsolute(path)) {
     return p.join(base, path);
   }
-  // Absolute: if it already exists, keep it. Otherwise try to rebase onto the
-  // current base by the last "/Glaze/" marker.
-  if (File(path).existsSync()) return path;
-
+  // Absolute: first prefer the matching file in this build channel's data
+  // root. A copied/imported database can still contain paths from another
+  // installed channel, whose source files may also continue to exist.
   final normalized = path.replaceAll('\\', '/');
-  const marker = '/Glaze/';
-  final idx = normalized.lastIndexOf(marker);
-  if (idx < 0) return path;
-  final suffix = normalized.substring(idx + marker.length);
-  if (suffix.isEmpty) return path;
-  return p.join(base, suffix);
+  // Desktop channels use sibling roots. Match all of them so a copied DB can
+  // move in either direction: stable <-> staging <-> nightly.
+  final match = RegExp(
+    r'/(?:Glaze|Glaze-staging|Glaze-nightly)/',
+    caseSensitive: false,
+  ).allMatches(normalized).lastOrNull;
+  if (match != null) {
+    final suffix = normalized.substring(match.end);
+    if (suffix.isNotEmpty) {
+      final rebased = p.join(base, suffix);
+      if (File(rebased).existsSync()) return rebased;
+    }
+  }
+  if (File(path).existsSync()) return path;
+  return path;
 }
 
 /// Returns the on-disk path to the 512px thumbnail JPG for a stored avatar
@@ -76,14 +86,19 @@ String? resolveGlazeThumbnailPath(String? avatarPath) {
 String _desktopDataDir() {
   if (Platform.isWindows) {
     final appData = Platform.environment['APPDATA']!;
-    return p.join(appData, 'Glaze');
+    return p.join(appData, glazeDataFolderName);
   } else if (Platform.isLinux) {
-    final xdg = Platform.environment['XDG_DATA_HOME'] ??
+    final xdg =
+        Platform.environment['XDG_DATA_HOME'] ??
         p.join(Platform.environment['HOME']!, '.local', 'share');
-    return p.join(xdg, 'Glaze');
+    return p.join(xdg, glazeDataFolderName);
   } else if (Platform.isMacOS) {
-    return p.join(Platform.environment['HOME']!, 'Library',
-        'Application Support', 'Glaze');
+    return p.join(
+      Platform.environment['HOME']!,
+      'Library',
+      'Application Support',
+      glazeDataFolderName,
+    );
   }
   throw UnsupportedError('Platform not supported yet');
 }

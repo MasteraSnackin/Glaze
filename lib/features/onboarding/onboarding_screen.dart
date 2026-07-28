@@ -9,6 +9,8 @@ import '../../shared/theme/theme_provider.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../core/services/onboarding_service.dart';
 import '../backup/backup_screen.dart';
+import '../../core/state/active_selection_provider.dart';
+import '../settings/api_list_provider.dart';
 import '../settings/api_settings_screen.dart';
 import '../settings/widgets/chat_layout_picker.dart';
 import '../personas/persona_list_screen.dart';
@@ -131,8 +133,18 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     if (_isLastSlide) return 'onboarding_btn_start'.tr();
     switch (_slides[_currentSlide].type) {
       case OnboardingSlideType.dataImport:
-      case OnboardingSlideType.api:
+        return 'onboarding_btn_skip'.tr();
       case OnboardingSlideType.persona:
+        final personaId = ref.watch(activePersonaIdProvider);
+        if (personaId != null) {
+          return 'onboarding_btn_next'.tr();
+        }
+        return 'onboarding_btn_skip'.tr();
+      case OnboardingSlideType.api:
+        final apiConfig = ref.watch(activeApiConfigProvider);
+        if (apiConfig != null && apiConfig.apiKey.isNotEmpty) {
+          return 'onboarding_btn_next'.tr();
+        }
         return 'onboarding_btn_skip'.tr();
       case OnboardingSlideType.layout:
         return 'onboarding_btn_next'.tr();
@@ -519,10 +531,10 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
     );
   }
 
-  void _setChatLayout(String layout) {
+  Future<void> _setChatLayout(String layout) async {
     final preset = ref.read(themeProvider).activePreset;
     if (preset.chatLayout == layout) return;
-    ref.read(themeProvider.notifier).updatePreset(
+    await ref.read(themeProvider.notifier).updatePreset(
           preset.copyWith(chatLayout: layout),
         );
   }

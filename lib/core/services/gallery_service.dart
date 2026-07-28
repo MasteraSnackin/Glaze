@@ -23,12 +23,12 @@ class GalleryService {
     String imagePath, {
     String? label,
   }) async {
-    final sourceFile = File(imagePath);
+    final sourceFile = File(_imageStorage.absolutePath(imagePath) ?? imagePath);
     if (!await sourceFile.exists()) {
       throw Exception('Image file not found: $imagePath');
     }
 
-    final ext = p.extension(imagePath).replaceFirst('.', '') ;
+    final ext = p.extension(imagePath).replaceFirst('.', '');
     final id = 'gal_${DateTime.now().millisecondsSinceEpoch}';
     final destPath = await _imageStorage.saveBytes(
       await sourceFile.readAsBytes(),
@@ -47,9 +47,7 @@ class GalleryService {
 
     final c = await _characterRepo.getById(charId);
     if (c != null) {
-      await _characterRepo.put(c.copyWith(
-        gallery: [...c.gallery, entry],
-      ));
+      await _characterRepo.put(c.copyWith(gallery: [...c.gallery, entry]));
     }
 
     return entry;
@@ -79,9 +77,7 @@ class GalleryService {
 
     final c = await _characterRepo.getById(charId);
     if (c != null) {
-      await _characterRepo.put(c.copyWith(
-        gallery: [...c.gallery, entry],
-      ));
+      await _characterRepo.put(c.copyWith(gallery: [...c.gallery, entry]));
     }
 
     return entry;
@@ -93,15 +89,17 @@ class GalleryService {
 
     final entry = c.gallery.where((e) => e.id == entryId).firstOrNull;
     if (entry != null) {
-      final file = File(entry.imagePath);
+      final file = File(
+        _imageStorage.absolutePath(entry.imagePath) ?? entry.imagePath,
+      );
       if (await file.exists()) {
         await file.delete();
       }
     }
 
-    await _characterRepo.put(c.copyWith(
-      gallery: c.gallery.where((e) => e.id != entryId).toList(),
-    ));
+    await _characterRepo.put(
+      c.copyWith(gallery: c.gallery.where((e) => e.id != entryId).toList()),
+    );
   }
 
   Future<void> setAsAvatar(String charId, String entryId) async {
@@ -111,7 +109,9 @@ class GalleryService {
     final entry = c.gallery.where((e) => e.id == entryId).firstOrNull;
     if (entry == null) return;
 
-    final sourceFile = File(entry.imagePath);
+    final sourceFile = File(
+      _imageStorage.absolutePath(entry.imagePath) ?? entry.imagePath,
+    );
     if (!await sourceFile.exists()) return;
 
     final bytes = await sourceFile.readAsBytes();
