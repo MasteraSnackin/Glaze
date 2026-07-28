@@ -97,7 +97,31 @@ class _HeroCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 4),
-                  const _VersionBadge(),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const _VersionBadge(),
+                      if (isBetaVersion) const SizedBox(width: 8),
+                      if (isBetaVersion)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.orange.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(5),
+                            border: Border.all(color: Colors.orange.withValues(alpha: 0.35)),
+                          ),
+                          child: const Text(
+                            'BETA',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.orange,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
                   if (buildDate.isNotEmpty || buildBranch.isNotEmpty) ...[
                     const SizedBox(height: 6),
                     if (buildDate.isNotEmpty)
@@ -308,17 +332,78 @@ class _AuthorsSection extends StatelessWidget {
           name: 'hydall',
           role: 'about_role_hydall'.tr(),
           initial: 'H',
-          accentColor: Color(0xFF7996CE),
+          accentColor: const Color(0xFF7996CE),
           imageAsset: 'assets/hydall.jpg',
         ),
         _AuthorTile(
           name: 'danvitv',
           role: 'about_role_danvitv'.tr(),
           initial: 'D',
-          accentColor: Color(0xFF79CE96),
+          accentColor: const Color(0xFF79CE96),
           imageAsset: 'assets/danvitv.png',
         ),
+        _TestersTile(
+          onTap: () => context.push('/menu/about/hall-of-fame'),
+        ),
       ],
+    );
+  }
+}
+
+class _TestersTile extends StatelessWidget {
+  final VoidCallback onTap;
+
+  const _TestersTile({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = context.cs;
+    const accentColor = Color(0xFFFFD700);
+
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+        child: Row(
+          children: [
+            Container(
+              width: 38,
+              height: 38,
+              decoration: BoxDecoration(
+                color: accentColor.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: accentColor.withValues(alpha: 0.35),
+                ),
+              ),
+              alignment: Alignment.center,
+              child: const Icon(
+                Icons.groups_rounded,
+                size: 22,
+                color: accentColor,
+              ),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Text(
+                '...and our helpful testers',
+                style: TextStyle(
+                  color: cs.onSurface,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            ),
+            Icon(
+              Icons.arrow_forward_ios_rounded,
+              size: 14,
+              color: cs.onSurfaceVariant.withValues(alpha: 0.35),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

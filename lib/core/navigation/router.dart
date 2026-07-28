@@ -16,6 +16,7 @@ import '../../features/lorebooks/lorebook_list_screen.dart';
 import '../../features/lorebooks/lorebook_global_settings_screen.dart';
 import '../../features/lorebooks/embedding_settings_screen.dart';
 import '../../features/menu/about_screen.dart';
+import '../../features/menu/hall_of_fame_screen.dart';
 import '../../features/menu/menu_screen.dart';
 import '../../features/personas/persona_list_screen.dart';
 import '../../features/presets/preset_list_screen.dart';
@@ -32,6 +33,19 @@ import '../../shared/shell/shell_screen.dart';
 import '../../shared/shell/desktop/desktop_shell.dart';
 
 final rootNavigatorKey = GlobalKey<NavigatorState>();
+
+CustomTransitionPage<void> _noTransitionPage({
+  required GoRouterState state,
+  required Widget child,
+}) {
+  return CustomTransitionPage<void>(
+    key: state.pageKey,
+    transitionDuration: Duration.zero,
+    reverseTransitionDuration: Duration.zero,
+    child: child,
+    transitionsBuilder: (_, _, _, child) => child,
+  );
+}
 
 CustomTransitionPage<void> _overlayPage({
   required GoRouterState state,
@@ -253,6 +267,15 @@ GoRouter buildRouter(
                   path: 'about',
                   pageBuilder: (_, state) =>
                       _fadePage(state: state, child: const AboutScreen()),
+                  routes: [
+                    GoRoute(
+                      path: 'hall-of-fame',
+                      pageBuilder: (_, state) => _noTransitionPage(
+                        state: state,
+                        child: const HallOfFameScreen(),
+                      ),
+                    ),
+                  ],
                 ),
                 GoRoute(
                   path: 'glossary',

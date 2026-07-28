@@ -41,7 +41,7 @@ class StudioMessageBuilder {
     required bool isFinalResponse,
     String mainResponse = '',
     int finalContextOverride = 0,
-    bool includeLastReasoning = false,
+    int reasoningHistoryCount = 0,
   }) {
     final context = _bucketizer.bucketize(
       promptResult,
@@ -137,14 +137,17 @@ class StudioMessageBuilder {
                   context.history,
                   config,
                   pipelineOverride: finalContextOverride,
-                  includeLastReasoning: includeLastReasoning,
+                  reasoningHistoryCount: reasoningHistoryCount,
                 )
               : StudioHistoryLimiter.limitTrackerHistory(
                   context.history,
                   agent.contextSize,
                 );
-          if (isFinalResponse && includeLastReasoning) {
-            messages.addAll(_historyWithLastReasoning(history));
+          if (isFinalResponse &&
+              (reasoningHistoryCount == -1 || reasoningHistoryCount > 0)) {
+            messages.addAll(
+              _historyWithReasoning(history, reasoningHistoryCount),
+            );
           } else {
             messages.addAll(history.map((m) => m.toApiMap()));
           }
@@ -196,20 +199,27 @@ class StudioMessageBuilder {
     return messages;
   }
 
-  List<Map<String, dynamic>> _historyWithLastReasoning(
+  List<Map<String, dynamic>> _historyWithReasoning(
     List<PromptMessage> history,
+    int reasoningHistoryCount,
   ) {
     final messages = history
         .map<Map<String, dynamic>>((message) => message.toApiMap())
         .toList();
-    for (var i = history.length - 1; i >= 0; i--) {
+    final includeAll = reasoningHistoryCount == -1;
+    var remaining = reasoningHistoryCount;
+    for (
+      var i = history.length - 1;
+      i >= 0 && (includeAll || remaining > 0);
+      i--
+    ) {
       final message = history[i];
       if (message.role != 'assistant') continue;
       final reasoning = message.reasoningContent?.trim();
       if (reasoning?.isNotEmpty == true) {
         messages[i]['reasoning_content'] = reasoning;
+        if (!includeAll) remaining--;
       }
-      break;
     }
     return messages;
   }

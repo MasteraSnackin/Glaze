@@ -51,10 +51,9 @@ abstract class StudioAgentSettings with _$StudioAgentSettings {
     @Default(false) bool studioFinalOmitTopP,
     @Default(true) bool studioFinalOmitReasoning,
     @Default(true) bool studioFinalOmitReasoningEffort,
-    // Include only the most recent non-empty assistant reasoning block in the
-    // final generator's chat history. Required by models with preserved
-    // thinking; disabled by default for broad provider compatibility.
-    @Default(false) bool studioFinalIncludeLastReasoning,
+    // Include reasoning_content from the N most recent assistant messages in
+    // final-generator history. -1 includes all retained history; 0 disables it.
+    @Default(0) int studioFinalReasoningHistoryCount,
     // When true, the final generator's request forces requestReasoning=false
     // and omitReasoning=true regardless of the ApiConfig. Targeted at Gemini
     // Flash thinking models that spend most of the token budget on a
@@ -107,5 +106,13 @@ abstract class StudioAgentSettings with _$StudioAgentSettings {
   }) = _StudioAgentSettings;
 
   factory StudioAgentSettings.fromJson(Map<String, dynamic> json) =>
-      _$StudioAgentSettingsFromJson(json);
+      _$StudioAgentSettingsFromJson(_normalizeStudioAgentSettingsJson(json));
 }
+
+Map<String, dynamic> _normalizeStudioAgentSettingsJson(
+  Map<String, dynamic> json,
+) => Map<String, dynamic>.from(json)
+  ..putIfAbsent(
+    'studioFinalReasoningHistoryCount',
+    () => json['studioFinalIncludeLastReasoning'] == true ? 1 : 0,
+  );

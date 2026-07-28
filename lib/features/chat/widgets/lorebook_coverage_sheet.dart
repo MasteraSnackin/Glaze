@@ -13,7 +13,6 @@ import '../../../shared/widgets/glaze_filter_chip_bar.dart';
 import '../../../shared/widgets/sheet_view.dart';
 import '../chat_provider.dart';
 
-
 class CoveragePanel extends ConsumerStatefulWidget {
   final String charId;
 
@@ -21,11 +20,7 @@ class CoveragePanel extends ConsumerStatefulWidget {
   /// inside the Prompt Inspector's tabbed shell.
   final bool embedded;
 
-  const CoveragePanel({
-    super.key,
-    required this.charId,
-    this.embedded = false,
-  });
+  const CoveragePanel({super.key, required this.charId, this.embedded = false});
 
   @override
   ConsumerState<CoveragePanel> createState() => _CoveragePanelState();
@@ -75,10 +70,16 @@ class _CoveragePanelState extends ConsumerState<CoveragePanel> {
         try {
           final searchService = ref.read(lorebookVectorSearchProvider);
           final searchHistory = session.messages
-              .map((m) => ChatMessageForSearch(role: m.role, content: m.content))
+              .map(
+                (m) => ChatMessageForSearch(role: m.role, content: m.content),
+              )
               .toList();
           final results = await searchService.search(
-            searchHistory, lastUserMsg, lorebooks, settings, embeddingConfig,
+            searchHistory,
+            lastUserMsg,
+            lorebooks,
+            settings,
+            embeddingConfig,
             charWorld: character?.world,
             character: character,
             activations: activations,
@@ -92,10 +93,19 @@ class _CoveragePanelState extends ConsumerState<CoveragePanel> {
             }
           }
           vectorEntries = results
-              .where((r) => entryMap.containsKey('${r.lorebookId}_${r.entryId}'))
+              .where(
+                (r) => entryMap.containsKey('${r.lorebookId}_${r.entryId}'),
+              )
               .map((r) {
-                entryToLbId[r.entryId] = r.lorebookId;
-                return entryMap['${r.lorebookId}_${r.entryId}']!;
+                final key = '${r.lorebookId}_${r.entryId}';
+                entryToLbId[key] = r.lorebookId;
+                final lorebook = lorebooks
+                    .where((book) => book.id == r.lorebookId)
+                    .firstOrNull;
+                return entryMap[key]!.copyWith(
+                  lorebookId: r.lorebookId,
+                  lorebookName: lorebook?.name ?? '',
+                );
               })
               .toList();
           _vectorEntryLorebookIds = entryToLbId;
@@ -105,19 +115,22 @@ class _CoveragePanelState extends ConsumerState<CoveragePanel> {
       }
     }
 
-
     // Run on the event loop to avoid blocking the current frame.
-    final result = await Future(() => computeLorebookCoverage(
-      history: session.messages,
-      char: character,
-      textToScan: lastUserMsg,
-      chatId: session.id,
-      lorebooks: lorebooks,
-      globalSettings: settings,
-      activations: activations,
-      vectorEntries: vectorEntries,
-      vectorEntryLorebookIds: Map<String, String>.from(_vectorEntryLorebookIds),
-    ));
+    final result = await Future(
+      () => computeLorebookCoverage(
+        history: session.messages,
+        char: character,
+        textToScan: lastUserMsg,
+        chatId: session.id,
+        lorebooks: lorebooks,
+        globalSettings: settings,
+        activations: activations,
+        vectorEntries: vectorEntries,
+        vectorEntryLorebookIds: Map<String, String>.from(
+          _vectorEntryLorebookIds,
+        ),
+      ),
+    );
 
     if (mounted) {
       setState(() {
@@ -130,35 +143,32 @@ class _CoveragePanelState extends ConsumerState<CoveragePanel> {
   @override
   Widget build(BuildContext context) {
     final body = _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _result == null
-          ? Center(
-              child: Text(
-                'No data',
-                style: TextStyle(color: context.cs.onSurfaceVariant),
+        ? const Center(child: CircularProgressIndicator())
+        : _result == null
+        ? Center(
+            child: Text(
+              'No data',
+              style: TextStyle(color: context.cs.onSurfaceVariant),
+            ),
+          )
+        : Column(
+            children: [
+              Builder(
+                builder: (context) =>
+                    SizedBox(height: MediaQuery.paddingOf(context).top),
               ),
-            )
-          : Column(
-              children: [
-                Builder(
-                  builder: (context) =>
-                      SizedBox(height: MediaQuery.paddingOf(context).top),
-                ),
-                _SummaryBar(result: _result!),
-                GlazeFilterChipBar<_FilterMode>(
-                  current: _filter,
-                  options: _FilterMode.values.toList(),
-                  labelBuilder: _labelForFilter,
-                  onSelected: (f) => setState(() => _filter = f),
-                ),
-                Expanded(
-                  child: _EntryList(
-                    entries: _filteredEntries,
-                    result: _result!,
-                  ),
-                ),
-              ],
-            );
+              _SummaryBar(result: _result!),
+              GlazeFilterChipBar<_FilterMode>(
+                current: _filter,
+                options: _FilterMode.values.toList(),
+                labelBuilder: _labelForFilter,
+                onSelected: (f) => setState(() => _filter = f),
+              ),
+              Expanded(
+                child: _EntryList(entries: _filteredEntries, result: _result!),
+              ),
+            ],
+          );
 
     if (widget.embedded) {
       // The Prompt Inspector injects the floating-header height as the body's

@@ -921,4 +921,66 @@ void main() {
     expect(result.triggeredLorebooks.single.lorebookId, 'lb1');
     expect(result.triggeredLorebooks.single.source, 'keyword');
   });
+
+  test('vector lore is injected with lorebook provenance', () {
+    const vectorEntry = LorebookEntry(
+      id: 'vector',
+      comment: 'Vector Entry',
+      content: 'Vector payload marker.',
+      position: 'lorebooksMacro',
+      vectorSearch: true,
+      useKeywordSearch: false,
+      lorebookId: 'lb1',
+      lorebookName: 'Vector Book',
+    );
+    final result = buildPrompt(
+      PromptPayload(
+        character: Character(id: 'c1', name: 'Alice'),
+        preset: const Preset(
+          id: 'p1',
+          name: 'Prompt',
+          blocks: [
+            PresetBlock(
+              id: 'lore_slot',
+              name: 'Lore Slot',
+              role: 'system',
+              content: '{{lorebooks}}',
+            ),
+            PresetBlock(
+              id: 'chat_history',
+              name: 'History',
+              role: 'system',
+              content: '',
+            ),
+          ],
+        ),
+        history: const [
+          ChatMessage(id: 'u1', role: 'user', content: 'Current scene.'),
+        ],
+        apiConfig: const ApiConfig(
+          id: 'api',
+          name: 'API',
+          contextSize: 10000,
+          maxTokens: 100,
+        ),
+        lorebooks: const [
+          Lorebook(id: 'lb1', name: 'Vector Book', entries: [vectorEntry]),
+        ],
+        lorebookSettings: const LorebookGlobalSettings(
+          searchType: 'vector',
+          injectionPosition: 'lorebooksMacro',
+        ),
+        vectorEntries: const [vectorEntry],
+      ),
+    );
+
+    expect(
+      result.messages.any((m) => m.content.contains('Vector payload marker.')),
+      isTrue,
+    );
+    expect(result.triggeredLorebooks, hasLength(1));
+    expect(result.triggeredLorebooks.single.lorebookId, 'lb1');
+    expect(result.triggeredLorebooks.single.lorebookName, 'Vector Book');
+    expect(result.triggeredLorebooks.single.source, 'vector');
+  });
 }
