@@ -88,6 +88,23 @@ URLRequest? chatWebViewInitialUrlRequest() {
   return null;
 }
 
+NavigationActionPolicy chatWebViewNavigationPolicy(WebUri? url) {
+  if (url == null) return NavigationActionPolicy.CANCEL;
+
+  final initialUrl = chatWebViewInitialUrlRequest()?.url;
+  if (initialUrl != null && url == initialUrl) {
+    return NavigationActionPolicy.ALLOW;
+  }
+
+  if (initialUrl == null &&
+      url.scheme == 'file' &&
+      url.path.endsWith('/assets/chat_webview/index.html')) {
+    return NavigationActionPolicy.ALLOW;
+  }
+
+  return NavigationActionPolicy.CANCEL;
+}
+
 String? chatWebViewResolveLocalFileUrl(String? source) {
   if (source == null || source.isEmpty) return source;
   if (source.startsWith('data:') ||

@@ -272,7 +272,7 @@ class ChatWebViewSurface extends ConsumerWidget {
                 await onInitWebView();
               },
               shouldOverrideUrlLoading: (controller, request) async {
-                return NavigationActionPolicy.CANCEL;
+                return chatWebViewNavigationPolicy(request.request.url);
               },
             ),
           ),
