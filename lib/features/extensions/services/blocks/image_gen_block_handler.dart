@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/db/repositories/info_blocks_repository.dart';
 import '../../models/block_run_status.dart';
 import '../../models/info_block.dart';
-import '../../models/extension_context_policy.dart';
 import '../info_block_service.dart';
 import 'block_context.dart';
 import 'block_handler.dart';
@@ -60,8 +59,7 @@ class ImageGenBlockHandler implements BlockHandler {
       persona: context.persona?.name,
       personaPrompt: context.persona?.prompt,
       previousOutput: context.previousOutput,
-      contextPolicy:
-          context.preset?.contextPolicy ?? const ExtensionContextPolicy(),
+      contextPolicy: blockConfig.contextPolicy,
       mainModelContextSnapshot: context.mainModelContextSnapshot,
       personaModel: context.persona,
       swipeId: context.swipeId,

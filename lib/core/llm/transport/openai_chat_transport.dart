@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
+import '../../utils/error_format.dart';
 import 'chat_transport.dart';
 import 'chat_transport_request.dart';
 import 'extra_request_parameters.dart';
@@ -109,7 +110,7 @@ class OpenAiChatTransport implements ChatTransport {
           await Future<void>.delayed(const Duration(seconds: 1));
           continue;
         }
-        onError?.call(e);
+        onError?.call(await decodeStreamingError(e));
         return;
       } catch (e) {
         onError?.call(e);

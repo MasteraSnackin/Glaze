@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../../shared/widgets/sheet_view.dart';
 import '../../models/block_config.dart';
+import '../../models/extension_context_policy.dart';
+import '../../widgets/extension_context_policy_editor.dart';
 import 'widgets/api_config_selector.dart';
 import 'widgets/block_trigger_picker.dart';
 import 'widgets/block_type_picker.dart';
@@ -41,6 +43,7 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
   late bool _streamToPanel;
   late bool _useStaticHtml;
   late bool _manualOnly;
+  late ExtensionContextPolicy _contextPolicy;
   bool _fetchingModels = false;
 
   @override
@@ -73,6 +76,7 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
     _previousBlocksCount = b.previousBlocksCount;
     _streamToPanel = b.streamToPanel;
     _manualOnly = b.manualOnly;
+    _contextPolicy = b.contextPolicy;
     _useStaticHtml =
         b.type == BlockType.interactive && b.script.trim().isNotEmpty;
   }
@@ -106,6 +110,7 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
       contextMessageCount: usesLlm ? _contextMessageCount : 0,
       previousBlocksCount: usesLlm ? _previousBlocksCount : 0,
       contextSystemPrompt: usesLlm ? _contextSystemPromptController.text : '',
+      contextPolicy: _contextPolicy,
       streamToPanel: usesLlm ? _streamToPanel : false,
       manualOnly: _manualOnly,
       script: isInteractive
@@ -198,121 +203,129 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
       body: Material(
         type: MaterialType.transparency,
         child: ListView(
-            children: [
+          children: [
+            const SizedBox(height: 8),
+            TextField(
+              controller: _nameController,
+              decoration: InputDecoration(
+                labelText: 'block_edit_name_label'.tr(),
+              ),
+            ),
+            const SizedBox(height: 16),
+            BlockTypePicker(selected: _type, onChanged: _onTypeChanged),
+            const SizedBox(height: 16),
+            BlockTriggerPicker(
+              selected: _trigger,
+              onChanged: (v) => setState(() => _trigger = v),
+            ),
+            const SizedBox(height: 4),
+            SwitchListTile(
+              title: Text('block_manual_only_title'.tr()),
+              subtitle: Text('block_manual_only_sub'.tr()),
+              value: _manualOnly,
+              onChanged: (v) => setState(() => _manualOnly = v),
+              contentPadding: EdgeInsets.zero,
+            ),
+            if (_type == BlockType.infoblock ||
+                _type == BlockType.imageGen ||
+                _type == BlockType.jsRunner) ...[
               const SizedBox(height: 8),
-              TextField(
-                controller: _nameController,
-                decoration: InputDecoration(
-                  labelText: 'block_edit_name_label'.tr(),
-                ),
+              _DependsOnPreviousSwitch(
+                type: _type,
+                value: _dependsOnPrevious,
+                onChanged: (v) => setState(() => _dependsOnPrevious = v),
               ),
-              const SizedBox(height: 16),
-              BlockTypePicker(selected: _type, onChanged: _onTypeChanged),
-              const SizedBox(height: 16),
-              BlockTriggerPicker(
-                selected: _trigger,
-                onChanged: (v) => setState(() => _trigger = v),
-              ),
-              const SizedBox(height: 4),
-              SwitchListTile(
-                title: Text('block_manual_only_title'.tr()),
-                subtitle: Text('block_manual_only_sub'.tr()),
-                value: _manualOnly,
-                onChanged: (v) => setState(() => _manualOnly = v),
-                contentPadding: EdgeInsets.zero,
-              ),
-              if (_type == BlockType.infoblock ||
-                  _type == BlockType.imageGen ||
-                  _type == BlockType.jsRunner) ...[
-                const SizedBox(height: 8),
-                _DependsOnPreviousSwitch(
-                  type: _type,
-                  value: _dependsOnPrevious,
-                  onChanged: (v) => setState(() => _dependsOnPrevious = v),
-                ),
-              ],
-              if (_type == BlockType.infoblock) ...[
-                const SizedBox(height: 16),
-                _InfoblockInjectFields(
-                  inject: _inject,
-                  injectPrefixController: _injectPrefixController,
-                  onInjectChanged: (v) {
-                    _onInjectChanged(v);
-                  },
-                  onLastNChanged: (v) => _injectLastN = v,
-                  initialLastN: _injectLastN,
-                ),
-              ],
-              if (_usesStandardLlmFields) ...[
-                const SizedBox(height: 16),
-                _PromptFields(type: _type, controller: _promptController),
-              ],
-              if (_type == BlockType.infoblock) ...[
-                const SizedBox(height: 8),
-                _TemplateField(controller: _templateController),
-              ],
-              if (_usesStandardLlmFields) ...[
-                const SizedBox(height: 16),
-                _LlmOptionsFields(
-                  type: _type,
-                  apiConfigController: _apiConfigController,
-                  modelController: _modelController,
-                  contextSystemPromptController: _contextSystemPromptController,
-                  contextMessageCount: _contextMessageCount,
-                  previousBlocksCount: _previousBlocksCount,
-                  streamToPanel: _streamToPanel,
-                  fetchingModels: _fetchingModels,
-                  onContextMessageCountChanged: (v) => _contextMessageCount = v,
-                  onPreviousBlocksCountChanged: (v) => _previousBlocksCount = v,
-                  onStreamToPanelChanged: (v) =>
-                      setState(() => _streamToPanel = v),
-                  onApiChanged: (id) {
-                    setState(() {
-                      _apiConfigController.text = id ?? '';
-                      _modelController.clear();
-                    });
-                  },
-                  onFetchStart: () => setState(() => _fetchingModels = true),
-                  onFetchEnd: () => setState(() => _fetchingModels = false),
-                ),
-              ],
-              if (_type == BlockType.imageGen) const _ImageGenHelpText(),
-              if (_type == BlockType.jsRunner) const _JsRunnerHelpText(),
-              if (_type == BlockType.interactive) ...[
-                const SizedBox(height: 16),
-                _InteractiveFields(
-                  useStaticHtml: _useStaticHtml,
-                  staticHtmlController: _staticHtmlController,
-                  promptController: _promptController,
-                  minHeightController: _minHeightController,
-                  dependsOnPrevious: _dependsOnPrevious,
-                  contextMessageCount: _contextMessageCount,
-                  contextSystemPromptController: _contextSystemPromptController,
-                  apiConfigController: _apiConfigController,
-                  modelController: _modelController,
-                  fetchingModels: _fetchingModels,
-                  streamToPanel: _streamToPanel,
-                  onUseStaticHtmlChanged: (v) =>
-                      setState(() => _useStaticHtml = v),
-                  onMinHeightChanged: (_) {},
-                  onDependsOnPreviousChanged: (v) =>
-                      setState(() => _dependsOnPrevious = v),
-                  onContextMessageCountChanged: (v) => _contextMessageCount = v,
-                  onApiChanged: (id) {
-                    setState(() {
-                      _apiConfigController.text = id ?? '';
-                      _modelController.clear();
-                    });
-                  },
-                  onFetchStart: () => setState(() => _fetchingModels = true),
-                  onFetchEnd: () => setState(() => _fetchingModels = false),
-                  onStreamToPanelChanged: (v) =>
-                      setState(() => _streamToPanel = v),
-                ),
-              ],
-              const SizedBox(height: 16),
-              FilledButton(onPressed: _save, child: Text('btn_save'.tr())),
             ],
+            if (_type == BlockType.infoblock) ...[
+              const SizedBox(height: 16),
+              _InfoblockInjectFields(
+                inject: _inject,
+                injectPrefixController: _injectPrefixController,
+                onInjectChanged: (v) {
+                  _onInjectChanged(v);
+                },
+                onLastNChanged: (v) => _injectLastN = v,
+                initialLastN: _injectLastN,
+              ),
+            ],
+            if (_usesStandardLlmFields) ...[
+              const SizedBox(height: 16),
+              _PromptFields(type: _type, controller: _promptController),
+            ],
+            if (_type == BlockType.infoblock) ...[
+              const SizedBox(height: 8),
+              _TemplateField(controller: _templateController),
+            ],
+            if (_usesLlm) ...[
+              const SizedBox(height: 16),
+              SectionLabel('Контекст блока'),
+              ExtensionContextPolicyEditor(
+                policy: _contextPolicy,
+                onChanged: (policy) => setState(() => _contextPolicy = policy),
+              ),
+            ],
+            if (_usesStandardLlmFields) ...[
+              const SizedBox(height: 16),
+              _LlmOptionsFields(
+                type: _type,
+                apiConfigController: _apiConfigController,
+                modelController: _modelController,
+                contextSystemPromptController: _contextSystemPromptController,
+                contextMessageCount: _contextMessageCount,
+                previousBlocksCount: _previousBlocksCount,
+                streamToPanel: _streamToPanel,
+                fetchingModels: _fetchingModels,
+                onContextMessageCountChanged: (v) => _contextMessageCount = v,
+                onPreviousBlocksCountChanged: (v) => _previousBlocksCount = v,
+                onStreamToPanelChanged: (v) =>
+                    setState(() => _streamToPanel = v),
+                onApiChanged: (id) {
+                  setState(() {
+                    _apiConfigController.text = id ?? '';
+                    _modelController.clear();
+                  });
+                },
+                onFetchStart: () => setState(() => _fetchingModels = true),
+                onFetchEnd: () => setState(() => _fetchingModels = false),
+              ),
+            ],
+            if (_type == BlockType.imageGen) const _ImageGenHelpText(),
+            if (_type == BlockType.jsRunner) const _JsRunnerHelpText(),
+            if (_type == BlockType.interactive) ...[
+              const SizedBox(height: 16),
+              _InteractiveFields(
+                useStaticHtml: _useStaticHtml,
+                staticHtmlController: _staticHtmlController,
+                promptController: _promptController,
+                minHeightController: _minHeightController,
+                dependsOnPrevious: _dependsOnPrevious,
+                contextMessageCount: _contextMessageCount,
+                contextSystemPromptController: _contextSystemPromptController,
+                apiConfigController: _apiConfigController,
+                modelController: _modelController,
+                fetchingModels: _fetchingModels,
+                streamToPanel: _streamToPanel,
+                onUseStaticHtmlChanged: (v) =>
+                    setState(() => _useStaticHtml = v),
+                onMinHeightChanged: (_) {},
+                onDependsOnPreviousChanged: (v) =>
+                    setState(() => _dependsOnPrevious = v),
+                onContextMessageCountChanged: (v) => _contextMessageCount = v,
+                onApiChanged: (id) {
+                  setState(() {
+                    _apiConfigController.text = id ?? '';
+                    _modelController.clear();
+                  });
+                },
+                onFetchStart: () => setState(() => _fetchingModels = true),
+                onFetchEnd: () => setState(() => _fetchingModels = false),
+                onStreamToPanelChanged: (v) =>
+                    setState(() => _streamToPanel = v),
+              ),
+            ],
+            const SizedBox(height: 16),
+            FilledButton(onPressed: _save, child: Text('btn_save'.tr())),
+          ],
         ),
       ),
     );
@@ -322,6 +335,10 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
       _type == BlockType.infoblock ||
       _type == BlockType.imageGen ||
       _type == BlockType.jsRunner;
+
+  bool get _usesLlm =>
+      _usesStandardLlmFields ||
+      (_type == BlockType.interactive && !_useStaticHtml);
 }
 
 class _DependsOnPreviousSwitch extends StatelessWidget {

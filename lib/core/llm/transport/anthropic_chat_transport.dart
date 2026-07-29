@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
+import '../../utils/error_format.dart';
 import '../converters/claude_messages.dart';
 import '../converters/cache_breakpoint_marker.dart';
 import '../converters/thinking_budget.dart';
@@ -131,7 +132,7 @@ class AnthropicChatTransport implements ChatTransport {
           await Future<void>.delayed(const Duration(seconds: 1));
           continue;
         }
-        onError?.call(e);
+        onError?.call(await decodeStreamingError(e));
         return;
       } catch (e) {
         onError?.call(e);

@@ -499,11 +499,6 @@ ExtensionPreset makeExtPreset(String id, {String name = 'Preset'}) =>
 ExtensionPreset makeExtPresetWithBlock(String id) => ExtensionPreset(
   id: id,
   name: 'Rich Preset',
-  contextPolicy: const ExtensionContextPolicy(
-    useMainModelContext: true,
-    includeLorebooks: true,
-    messageCount: -1,
-  ),
   blocks: [
     BlockConfig(
       id: 'block1',
@@ -511,6 +506,11 @@ ExtensionPreset makeExtPresetWithBlock(String id) => ExtensionPreset(
       type: BlockType.infoblock,
       trigger: BlockTrigger.afterUser,
       prompt: 'Describe the scene',
+      contextMessageCount: -1,
+      contextPolicy: const ExtensionContextPolicy(
+        useMainModelContext: true,
+        includeLorebooks: true,
+      ),
     ),
   ],
 );
@@ -632,10 +632,14 @@ void main() {
       deviceB.extensionPresets.data['ep1']!.blocks.first.prompt,
       equals('Describe the scene'),
     );
-    final contextPolicy = deviceB.extensionPresets.data['ep1']!.contextPolicy;
+    final contextPolicy =
+        deviceB.extensionPresets.data['ep1']!.blocks.first.contextPolicy;
     expect(contextPolicy.useMainModelContext, isTrue);
     expect(contextPolicy.includeLorebooks, isTrue);
-    expect(contextPolicy.messageCount, -1);
+    expect(
+      deviceB.extensionPresets.data['ep1']!.blocks.first.contextMessageCount,
+      -1,
+    );
   });
 
   // ── Test 3: ExtensionPreset deletion tracking ─────────────────────────

@@ -36,7 +36,7 @@ void main() {
       previousOutput: null,
     );
     final request = const ExtensionContextAssembler().assemble(
-      policy: preset.contextPolicy,
+      policy: block.contextPolicy,
       blockConfig: block,
       chatMessages: history,
       anchorMessageId: 'a1',

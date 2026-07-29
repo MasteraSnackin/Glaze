@@ -3,7 +3,6 @@ import 'package:flutter/foundation.dart';
 import '../../../../core/db/repositories/info_blocks_repository.dart';
 import '../../models/block_run_status.dart';
 import '../../models/info_block.dart';
-import '../../models/extension_context_policy.dart';
 import '../info_block_service.dart';
 import '../js_script_extractor.dart';
 import 'block_context.dart';
@@ -79,8 +78,7 @@ class JsRunnerBlockHandler implements BlockHandler {
       character: context.character,
       persona: context.persona?.name,
       previousOutput: context.previousOutput,
-      contextPolicy:
-          context.preset?.contextPolicy ?? const ExtensionContextPolicy(),
+      contextPolicy: blockConfig.contextPolicy,
       mainModelContextSnapshot: context.mainModelContextSnapshot,
       personaModel: context.persona,
       swipeId: context.swipeId,

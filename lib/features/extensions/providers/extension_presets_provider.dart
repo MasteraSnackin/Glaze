@@ -5,7 +5,6 @@ import '../../../core/db/repositories/extension_presets_repository.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../core/utils/sync_deletion_tracker.dart';
 import '../models/extension_preset.dart';
-import '../models/extension_context_policy.dart';
 
 final extensionPresetsProvider =
     StateNotifierProvider<ExtensionPresetsNotifier, List<ExtensionPreset>>(
@@ -46,17 +45,6 @@ class ExtensionPresetsNotifier extends StateNotifier<List<ExtensionPreset>> {
         if (p.id == preset.id) preset else p,
     ];
     await _enqueuePersist(preset);
-  }
-
-  Future<void> updateContextPolicy(
-    String presetId,
-    ExtensionContextPolicy Function(ExtensionContextPolicy current) update,
-  ) async {
-    final current = state.where((preset) => preset.id == presetId).firstOrNull;
-    if (current == null) return;
-    await this.update(
-      current.copyWith(contextPolicy: update(current.contextPolicy)),
-    );
   }
 
   Future<void> _enqueuePersist(ExtensionPreset preset) {

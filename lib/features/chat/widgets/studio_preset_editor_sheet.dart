@@ -297,7 +297,7 @@ class _StudioPresetEditorSheetState
   }
 
   Future<void> _toggleBlock(StudioPresetBlock block, bool enabled) async {
-    if (_preset == null) return;
+    if (_preset == null || (block.locked && !enabled)) return;
     final blocks = updateStudioPresetBlockRespectingGroups(
       _preset!.blocks,
       block.copyWith(enabled: enabled),
