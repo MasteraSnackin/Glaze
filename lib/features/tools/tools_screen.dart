@@ -9,7 +9,6 @@ import 'package:go_router/go_router.dart';
 import '../../core/services/featured_presets.dart';
 import '../../core/state/active_selection_provider.dart';
 import '../../core/state/active_studio_preset_provider.dart';
-import '../../core/state/studio_feature_provider.dart';
 import '../../core/utils/platform_paths.dart';
 import '../../core/state/db_provider.dart';
 import '../../shared/shell/nav_height_provider.dart';
@@ -149,7 +148,8 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
     final bottomPad = ref.watch(navHeightProvider) + 20;
     final personaInfo = ref.watch(_activePersonaInfoProvider);
     final resolvedAvatar = ref.watch(_resolvedPersonaAvatarPathProvider).value;
-    final presetName = ref.watch(_activePresetNameProvider).value ?? 'label_default'.tr();
+    final presetName =
+        ref.watch(_activePresetNameProvider).value ?? 'label_default'.tr();
     final presetImage = ref.watch(_activePresetImageProvider);
     final studioEnabled = ref.watch(studioFeatureEnabledProvider);
     final topPad = MediaQuery.of(context).padding.top + 66.0;
@@ -236,7 +236,8 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
                           isScrollControlled: true,
                           useRootNavigator: true,
                           backgroundColor: Colors.transparent,
-                          builder: (_) => const ChatStatsSheet(initialCharId: ''),
+                          builder: (_) =>
+                              const ChatStatsSheet(initialCharId: ''),
                         ),
                       ),
                     ),
@@ -483,8 +484,10 @@ class _GridTile extends StatelessWidget {
     required this.subtitle,
     required this.onTap,
     this.showStatusDot = false,
-  }) : assert(iconPath != null || icon != null,
-            'Provide either an SVG iconPath or an IconData icon');
+  }) : assert(
+         iconPath != null || icon != null,
+         'Provide either an SVG iconPath or an IconData icon',
+       );
 
   @override
   Widget build(BuildContext context) {
@@ -532,10 +535,7 @@ class _GridTile extends StatelessWidget {
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         color: context.cs.onSurfaceVariant,
-                        border: Border.all(
-                          color: context.cs.surface,
-                          width: 2,
-                        ),
+                        border: Border.all(color: context.cs.surface, width: 2),
                       ),
                     ),
                   ),

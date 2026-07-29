@@ -5,10 +5,7 @@ import '../theme/app_colors.dart';
 import 'glass_surface.dart';
 import 'help_tip.dart';
 
-enum MenuGroupHeaderVariant {
-  standard,
-  accentCaps,
-}
+enum MenuGroupHeaderVariant { standard, accentCaps }
 
 // ── Group container ────────────────────────────────────────────────────────────
 
@@ -53,8 +50,7 @@ class MenuGroup extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (header != null)
-              _buildHeader(context),
+            if (header != null) _buildHeader(context),
             ...items,
             const SizedBox(height: 6),
           ],
@@ -101,7 +97,7 @@ class MenuGroup extends StatelessWidget {
                   ],
                 ),
               ),
-              if (headerTrailing != null) headerTrailing!,
+              ?headerTrailing,
             ],
           ),
           if (description != null) ...[
@@ -205,28 +201,39 @@ class _MenuItemState extends State<MenuItem> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(widget.label,
-                      style: TextStyle(
-                          color: context.cs.onSurfaceVariant,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w400)),
+                  Text(
+                    widget.label,
+                    style: TextStyle(
+                      color: context.cs.onSurfaceVariant,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w400,
+                    ),
+                  ),
                   if (widget.subtitle != null &&
                       widget.subtitle!.isNotEmpty) ...[
                     const SizedBox(height: 2),
-                    Text(widget.subtitle!,
-                        style: TextStyle(
-                            color: context.cs.onSurfaceVariant
-                                .withValues(alpha: 0.45),
-                            fontSize: 12,
-                            fontWeight: FontWeight.w400)),
+                    Text(
+                      widget.subtitle!,
+                      style: TextStyle(
+                        color: context.cs.onSurfaceVariant.withValues(
+                          alpha: 0.45,
+                        ),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w400,
+                      ),
+                    ),
                   ],
                 ],
               ),
             ),
             if (widget.value != null)
-              Text(widget.value!,
-                  style: TextStyle(
-                      color: context.cs.onSurfaceVariant, fontSize: 14)),
+              Text(
+                widget.value!,
+                style: TextStyle(
+                  color: context.cs.onSurfaceVariant,
+                  fontSize: 14,
+                ),
+              ),
             if (widget.trailing != null) widget.trailing!,
             if (widget.value != null || widget.trailing != null)
               const SizedBox(width: 4),
@@ -379,16 +386,23 @@ class MenuFieldItem extends StatelessWidget {
         children: [
           Row(
             children: [
-              Text(label,
-                  style: TextStyle(
-                      color: context.cs.onSurfaceVariant, fontSize: 13)),
+              Text(
+                label,
+                style: TextStyle(
+                  color: context.cs.onSurfaceVariant,
+                  fontSize: 13,
+                ),
+              ),
               if (helpTerm != null) HelpTip(term: helpTerm!, size: 14),
               const Spacer(),
               if (onExpand != null)
                 GestureDetector(
                   onTap: onExpand,
-                  child: Icon(Icons.open_in_full,
-                      size: 16, color: context.cs.primary),
+                  child: Icon(
+                    Icons.open_in_full,
+                    size: 16,
+                    color: context.cs.primary,
+                  ),
                 ),
             ],
           ),
@@ -756,13 +770,16 @@ class _MenuScriptItemState extends State<MenuScriptItem> {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  if (widget.subtitle != null && widget.subtitle!.isNotEmpty) ...[
+                  if (widget.subtitle != null &&
+                      widget.subtitle!.isNotEmpty) ...[
                     const SizedBox(height: 2),
                     Text(
                       widget.subtitle!,
                       style: TextStyle(
                         fontSize: 12,
-                        color: context.cs.onSurfaceVariant.withValues(alpha: 0.45),
+                        color: context.cs.onSurfaceVariant.withValues(
+                          alpha: 0.45,
+                        ),
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,

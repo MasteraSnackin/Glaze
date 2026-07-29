@@ -8,21 +8,66 @@ import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../chat_provider.dart';
 
 final kSourceMeta = <String, SourceMeta>{
-  'preset':          SourceMeta(label: 'subtab_preset'.tr(),           color: const Color(0xFF4ECDC4)),
-  'description':     SourceMeta(label: 'label_description'.tr(),      color: const Color(0xFFFF6B6B)),
-  'personality':     SourceMeta(label: 'label_personality'.tr(),      color: const Color(0xFFD4A5E5)),
-  'scenario':        SourceMeta(label: 'label_scenario'.tr(),         color: const Color(0xFFB8D4E3)),
-  'mesExamples':     SourceMeta(label: 'token_source_mes_examples'.tr(), color: const Color(0xFFC9B1FF)),
-  'depthPrompt':     SourceMeta(label: 'token_source_depth_prompt'.tr(), color: const Color(0xFFE8A0BF)),
-  'persona':         SourceMeta(label: 'tab_personas'.tr(),          color: const Color(0xFF81ECEC)),
-  'authorsNote':     SourceMeta(label: 'magic_authors_notes'.tr(),    color: const Color(0xFFFFD93D)),
-  'summary':         SourceMeta(label: 'token_source_summary'.tr(),          color: const Color(0xFF95E1D3)),
-  'memory':          SourceMeta(label: 'token_source_memory'.tr(),           color: const Color(0xFFA8E6CF)),
-  'lorebook':        SourceMeta(label: 'token_source_keyword_lorebook'.tr(), color: const Color(0xFFF4A261)),
-  'lorebooks':       SourceMeta(label: 'token_source_lorebooks_macro'.tr(),color: const Color(0xFFE8985E)),
-  'vectorLore':      SourceMeta(label: 'token_source_vector_lorebook'.tr(),  color: const Color(0xFFE76F51)),
-  'lorebookReserve': SourceMeta(label: 'token_source_lorebook_reserve'.tr(), color: const Color(0xFFA8DADC)),
-  'history':         SourceMeta(label: 'token_source_history'.tr(),          color: const Color(0xFF6C5CE7)),
+  'preset': SourceMeta(
+    label: 'subtab_preset'.tr(),
+    color: const Color(0xFF4ECDC4),
+  ),
+  'description': SourceMeta(
+    label: 'label_description'.tr(),
+    color: const Color(0xFFFF6B6B),
+  ),
+  'personality': SourceMeta(
+    label: 'label_personality'.tr(),
+    color: const Color(0xFFD4A5E5),
+  ),
+  'scenario': SourceMeta(
+    label: 'label_scenario'.tr(),
+    color: const Color(0xFFB8D4E3),
+  ),
+  'mesExamples': SourceMeta(
+    label: 'token_source_mes_examples'.tr(),
+    color: const Color(0xFFC9B1FF),
+  ),
+  'depthPrompt': SourceMeta(
+    label: 'token_source_depth_prompt'.tr(),
+    color: const Color(0xFFE8A0BF),
+  ),
+  'persona': SourceMeta(
+    label: 'tab_personas'.tr(),
+    color: const Color(0xFF81ECEC),
+  ),
+  'authorsNote': SourceMeta(
+    label: 'magic_authors_notes'.tr(),
+    color: const Color(0xFFFFD93D),
+  ),
+  'summary': SourceMeta(
+    label: 'token_source_summary'.tr(),
+    color: const Color(0xFF95E1D3),
+  ),
+  'memory': SourceMeta(
+    label: 'token_source_memory'.tr(),
+    color: const Color(0xFFA8E6CF),
+  ),
+  'lorebook': SourceMeta(
+    label: 'token_source_keyword_lorebook'.tr(),
+    color: const Color(0xFFF4A261),
+  ),
+  'lorebooks': SourceMeta(
+    label: 'token_source_lorebooks_macro'.tr(),
+    color: const Color(0xFFE8985E),
+  ),
+  'vectorLore': SourceMeta(
+    label: 'token_source_vector_lorebook'.tr(),
+    color: const Color(0xFFE76F51),
+  ),
+  'lorebookReserve': SourceMeta(
+    label: 'token_source_lorebook_reserve'.tr(),
+    color: const Color(0xFFA8DADC),
+  ),
+  'history': SourceMeta(
+    label: 'token_source_history'.tr(),
+    color: const Color(0xFF6C5CE7),
+  ),
 };
 
 class SourceMeta {
@@ -36,20 +81,29 @@ class BarRow {
   final String label;
   final int tokens;
   final Color color;
-  const BarRow({required this.key, required this.label, required this.tokens, required this.color});
+  const BarRow({
+    required this.key,
+    required this.label,
+    required this.tokens,
+    required this.color,
+  });
 }
 
 int tokensForKey(TokenBreakdown bd, String key) {
   return switch (key) {
     'lorebookReserve' => _unusedLorebookReserve(bd),
-    'vectorLore'      => bd.vectorLoreTokens,
-    'preset'          => bd.presetNetTokens,
-    _                 => (bd.sourceTokens[key] ?? 0) > 0 ? bd.sourceTokens[key]! : (bd.macroTokens[key] ?? 0),
+    'vectorLore' => bd.vectorLoreTokens,
+    'preset' => bd.presetNetTokens,
+    _ =>
+      (bd.sourceTokens[key] ?? 0) > 0
+          ? bd.sourceTokens[key]!
+          : (bd.macroTokens[key] ?? 0),
   };
 }
 
 int _unusedLorebookReserve(TokenBreakdown bd) {
-  final actual = (bd.sourceTokens['lorebook'] ?? 0) + (bd.macroTokens['lorebooks'] ?? 0);
+  final actual =
+      (bd.sourceTokens['lorebook'] ?? 0) + (bd.macroTokens['lorebooks'] ?? 0);
   // Vector lorebook entries also consume the reserve budget; without
   // subtracting them, the "Lorebook Reserve" row would inflate by
   // vectorLoreTokens and double-count what the dedicated "Vector Lorebook"
@@ -64,7 +118,9 @@ List<BarRow> buildOrderedRows(TokenBreakdown bd, List<String> keys) {
     final tokens = tokensForKey(bd, key);
     if (tokens <= 0) continue;
     final meta = kSourceMeta[key] ?? SourceMeta(label: key, color: Colors.grey);
-    rows.add(BarRow(key: key, label: meta.label, tokens: tokens, color: meta.color));
+    rows.add(
+      BarRow(key: key, label: meta.label, tokens: tokens, color: meta.color),
+    );
   }
   return rows;
 }
@@ -89,7 +145,10 @@ class HeroCard extends StatelessWidget {
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(16),
         gradient: LinearGradient(
-          colors: [context.cs.primary, Color.lerp(context.cs.primary, Colors.black, 0.2)!],
+          colors: [
+            context.cs.primary,
+            Color.lerp(context.cs.primary, Colors.black, 0.2)!,
+          ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
@@ -99,12 +158,23 @@ class HeroCard extends StatelessWidget {
         children: [
           Text(
             fmtNum(used),
-            style: const TextStyle(fontSize: 40, fontWeight: FontWeight.w700, color: Colors.white, height: 1.1, letterSpacing: -0.5),
+            style: const TextStyle(
+              fontSize: 40,
+              fontWeight: FontWeight.w700,
+              color: Colors.white,
+              height: 1.1,
+              letterSpacing: -0.5,
+            ),
           ),
           const SizedBox(height: 4),
           Text(
             'used / ${fmtNum(contextSize)}'.toUpperCase(),
-            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Colors.white70, letterSpacing: 0.5),
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+              color: Colors.white70,
+              letterSpacing: 0.5,
+            ),
           ),
           const SizedBox(height: 16),
           Container(
@@ -115,9 +185,20 @@ class HeroCard extends StatelessWidget {
             padding: const EdgeInsets.symmetric(vertical: 12),
             child: Row(
               children: [
-                Expanded(child: KpiItem(value: fmtNum(remaining), label: 'remaining')),
-                Container(width: 1, height: 28, color: Colors.white.withValues(alpha: 0.2)),
-                Expanded(child: KpiItem(value: '${historyFill.round()}%', label: 'history fill')),
+                Expanded(
+                  child: KpiItem(value: fmtNum(remaining), label: 'remaining'),
+                ),
+                Container(
+                  width: 1,
+                  height: 28,
+                  color: Colors.white.withValues(alpha: 0.2),
+                ),
+                Expanded(
+                  child: KpiItem(
+                    value: '${historyFill.round()}%',
+                    label: 'history fill',
+                  ),
+                ),
               ],
             ),
           ),
@@ -146,9 +227,24 @@ class KpiItem extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        Text(value, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Colors.white)),
+        Text(
+          value,
+          style: const TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+            color: Colors.white,
+          ),
+        ),
         const SizedBox(height: 2),
-        Text(label.toUpperCase(), style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: Colors.white.withValues(alpha: 0.65), letterSpacing: 0.3)),
+        Text(
+          label.toUpperCase(),
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w500,
+            color: Colors.white.withValues(alpha: 0.65),
+            letterSpacing: 0.3,
+          ),
+        ),
       ],
     );
   }
@@ -157,20 +253,53 @@ class KpiItem extends StatelessWidget {
 class TokenizerLayout extends StatelessWidget {
   final TokenBreakdown breakdown;
   final int contextSize;
-  const TokenizerLayout({super.key, required this.breakdown, required this.contextSize});
+  const TokenizerLayout({
+    super.key,
+    required this.breakdown,
+    required this.contextSize,
+  });
 
-  static const _mainKeys = ['description', 'personality', 'scenario', 'mesExamples', 'depthPrompt', 'preset', 'persona', 'authorsNote', 'summary', 'memory', 'history'];
-  static const _reserveKeys = ['lorebook', 'lorebooks', 'vectorLore', 'lorebookTotal', 'lorebookReserve'];
+  static const _mainKeys = [
+    'description',
+    'personality',
+    'scenario',
+    'mesExamples',
+    'depthPrompt',
+    'preset',
+    'persona',
+    'authorsNote',
+    'summary',
+    'memory',
+    'history',
+  ];
+  static const _reserveKeys = [
+    'lorebook',
+    'lorebooks',
+    'vectorLore',
+    'lorebookTotal',
+    'lorebookReserve',
+  ];
 
   @override
   Widget build(BuildContext context) {
     final mainItems = buildOrderedRows(breakdown, _mainKeys);
     final reserveItems = buildOrderedRows(breakdown, _reserveKeys);
-    
+
     final List<BarRow> combinedBreakdownItems = [...mainItems, ...reserveItems];
-    final hasKeywordLore = (breakdown.sourceTokens['lorebook'] ?? 0) > 0 || (breakdown.macroTokens['lorebooks'] ?? 0) > 0;
-    if (breakdown.lorebookTotal > 0 && hasKeywordLore && breakdown.vectorLoreTokens > 0) {
-      combinedBreakdownItems.add(BarRow(key: 'lorebookTotal', label: 'token_source_lorebook_total'.tr(), tokens: breakdown.lorebookTotal, color: Colors.transparent));
+    final hasKeywordLore =
+        (breakdown.sourceTokens['lorebook'] ?? 0) > 0 ||
+        (breakdown.macroTokens['lorebooks'] ?? 0) > 0;
+    if (breakdown.lorebookTotal > 0 &&
+        hasKeywordLore &&
+        breakdown.vectorLoreTokens > 0) {
+      combinedBreakdownItems.add(
+        BarRow(
+          key: 'lorebookTotal',
+          label: 'token_source_lorebook_total'.tr(),
+          tokens: breakdown.lorebookTotal,
+          color: Colors.transparent,
+        ),
+      );
     }
 
     final totalMain = mainItems.fold<int>(0, (s, r) => s + r.tokens);
@@ -181,13 +310,28 @@ class TokenizerLayout extends StatelessWidget {
     // Build segment data for the bar painter
     final segments = <_BarSegment>[];
     for (final item in mainItems) {
-      segments.add(_BarSegment(fraction: item.tokens.toDouble() * ctxPct, color: item.color));
+      segments.add(
+        _BarSegment(
+          fraction: item.tokens.toDouble() * ctxPct,
+          color: item.color,
+        ),
+      );
     }
     if (emptyTokens > 0) {
-      segments.add(_BarSegment(fraction: emptyTokens.toDouble() * ctxPct, color: Colors.transparent));
+      segments.add(
+        _BarSegment(
+          fraction: emptyTokens.toDouble() * ctxPct,
+          color: Colors.transparent,
+        ),
+      );
     }
     for (final item in reserveItems) {
-      segments.add(_BarSegment(fraction: item.tokens.toDouble() * ctxPct, color: item.color));
+      segments.add(
+        _BarSegment(
+          fraction: item.tokens.toDouble() * ctxPct,
+          color: item.color,
+        ),
+      );
     }
 
     return IntrinsicHeight(
@@ -211,7 +355,9 @@ class TokenizerLayout extends StatelessWidget {
           Expanded(
             child: Column(
               mainAxisSize: MainAxisSize.min,
-              children: combinedBreakdownItems.map((row) => _breakdownRow(context, row, breakdown)).toList(),
+              children: combinedBreakdownItems
+                  .map((row) => _breakdownRow(context, row, breakdown))
+                  .toList(),
             ),
           ),
         ],
@@ -232,12 +378,31 @@ class TokenizerLayout extends StatelessWidget {
           if (row.key == 'lorebookTotal')
             const SizedBox(width: 8)
           else
-            Container(width: 8, height: 8, decoration: BoxDecoration(color: row.color, shape: BoxShape.circle)),
+            Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(
+                color: row.color,
+                shape: BoxShape.circle,
+              ),
+            ),
           const SizedBox(width: 8),
-          Expanded(child: Text(row.label, style: TextStyle(fontSize: 14, color: context.cs.onSurfaceVariant))),
+          Expanded(
+            child: Text(
+              row.label,
+              style: TextStyle(
+                fontSize: 14,
+                color: context.cs.onSurfaceVariant,
+              ),
+            ),
+          ),
           Text(
             _rowTokenText(bd, row),
-            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: context.cs.onSurface),
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: context.cs.onSurface,
+            ),
           ),
         ],
       ),
@@ -267,13 +432,18 @@ class TokenizerActionButtons extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final hideCount = (visibleCount * hidePercent / 100).ceil().clamp(1, visibleCount > 1 ? visibleCount - 1 : 0);
+    final hideCount = (visibleCount * hidePercent / 100).ceil().clamp(
+      1,
+      visibleCount > 1 ? visibleCount - 1 : 0,
+    );
 
     return Row(
       children: [
         Expanded(
           child: FilledButton.icon(
-            onPressed: hideCount > 0 ? () => _confirmHide(context, ref, hideCount) : null,
+            onPressed: hideCount > 0
+                ? () => _confirmHide(context, ref, hideCount)
+                : null,
             icon: const Icon(Icons.visibility_off, size: 16),
             label: Text('${'label_hide_top_messages'.tr()} $hideCount'),
             style: FilledButton.styleFrom(
@@ -287,14 +457,19 @@ class TokenizerActionButtons extends ConsumerWidget {
           Expanded(
             child: OutlinedButton.icon(
               onPressed: () async {
-                await ref.read(chatProvider(charId).notifier).unhideAllMessages();
+                await ref
+                    .read(chatProvider(charId).notifier)
+                    .unhideAllMessages();
                 if (context.mounted) onRefresh();
               },
               icon: const Icon(Icons.visibility, size: 16),
               label: Text('${'action_unhide_msg'.tr()} all ($hiddenCount)'),
               style: OutlinedButton.styleFrom(
                 foregroundColor: context.cs.primary,
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
               ),
             ),
           ),
@@ -348,7 +523,12 @@ class CutoffWarning extends StatelessWidget {
         children: [
           const Icon(Icons.warning_amber, size: 18, color: Colors.orange),
           const SizedBox(width: 8),
-          Expanded(child: Text('count_message_cut'.plural(cutoffCount), style: const TextStyle(fontSize: 13, color: Colors.orange))),
+          Expanded(
+            child: Text(
+              'count_message_cut'.plural(cutoffCount),
+              style: const TextStyle(fontSize: 13, color: Colors.orange),
+            ),
+          ),
         ],
       ),
     );
@@ -358,7 +538,11 @@ class CutoffWarning extends StatelessWidget {
 class NearLimitWarning extends StatelessWidget {
   final int hideCount;
   final int hideTokens;
-  const NearLimitWarning({super.key, required this.hideCount, required this.hideTokens});
+  const NearLimitWarning({
+    super.key,
+    required this.hideCount,
+    required this.hideTokens,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -367,12 +551,21 @@ class NearLimitWarning extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xFFFFB84D).withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFFFB84D).withValues(alpha: 0.3)),
+        border: Border.all(
+          color: const Color(0xFFFFB84D).withValues(alpha: 0.3),
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('tokenizer_history_limit_warning'.tr(), style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFFFFB84D))),
+          Text(
+            'tokenizer_history_limit_warning'.tr(),
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFFFFB84D),
+            ),
+          ),
           const SizedBox(height: 4),
           Text(
             'Hide about $hideCount top message${hideCount == 1 ? '' : 's'} to free about $hideTokens tokens.',
@@ -383,7 +576,6 @@ class NearLimitWarning extends StatelessWidget {
     );
   }
 }
-
 
 class SettingsSlider extends StatelessWidget {
   final String label;
@@ -421,13 +613,40 @@ class SettingsSlider extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(label, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: context.cs.onSurface)),
-                Text('${value.round()}$unit', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: context.cs.primary)),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: context.cs.onSurface,
+                  ),
+                ),
+                Text(
+                  '${value.round()}$unit',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: context.cs.primary,
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 4),
-            Text(description, style: TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant)),
-            Slider(value: value, min: min, max: max, divisions: (max - min).round(), activeColor: context.cs.primary, onChanged: onChanged),
+            Text(
+              description,
+              style: TextStyle(
+                fontSize: 12,
+                color: context.cs.onSurfaceVariant,
+              ),
+            ),
+            Slider(
+              value: value,
+              min: min,
+              max: max,
+              divisions: (max - min).round(),
+              activeColor: context.cs.primary,
+              onChanged: onChanged,
+            ),
           ],
         ),
       ),
@@ -454,8 +673,11 @@ class _BarChartPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final rrect = RRect.fromRectAndRadius(Offset.zero & size, Radius.circular(borderRadius));
-    
+    final rrect = RRect.fromRectAndRadius(
+      Offset.zero & size,
+      Radius.circular(borderRadius),
+    );
+
     // Draw background
     final bgPaint = Paint()..color = backgroundColor;
     canvas.drawRRect(rrect, bgPaint);
@@ -466,7 +688,12 @@ class _BarChartPainter extends CustomPainter {
     // Draw base gradient (simulating the container's gradient from before)
     final rect = Offset.zero & size;
     final gradient = LinearGradient(
-      colors: [Colors.white.withValues(alpha: 0.05), Colors.white.withValues(alpha: 0.12), Colors.white.withValues(alpha: 0.02), Colors.transparent],
+      colors: [
+        Colors.white.withValues(alpha: 0.05),
+        Colors.white.withValues(alpha: 0.12),
+        Colors.white.withValues(alpha: 0.02),
+        Colors.transparent,
+      ],
       stops: const [0, 0.2, 0.5, 1],
     );
     final shaderPaint = Paint()..shader = gradient.createShader(rect);
@@ -479,44 +706,51 @@ class _BarChartPainter extends CustomPainter {
       if (height <= 0) continue;
 
       final segmentRect = Rect.fromLTWH(0, currentY, size.width, height);
-      
+
       if (segment.color != Colors.transparent) {
         final darken = Color.lerp(segment.color, Colors.black, 0.15)!;
         final segmentGradient = LinearGradient(colors: [segment.color, darken]);
-        final segmentPaint = Paint()..shader = segmentGradient.createShader(segmentRect);
-        
+        final segmentPaint = Paint()
+          ..shader = segmentGradient.createShader(segmentRect);
+
         canvas.drawRect(segmentRect, segmentPaint);
-        
+
         // Draw borders
-        final borderPaint = Paint()..style = PaintingStyle.stroke..strokeWidth = 1;
+        final borderPaint = Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1;
         borderPaint.color = Colors.white.withValues(alpha: 0.1);
         canvas.drawLine(segmentRect.topLeft, segmentRect.topRight, borderPaint);
-        
+
         borderPaint.color = Colors.black.withValues(alpha: 0.1);
-        canvas.drawLine(segmentRect.bottomLeft, segmentRect.bottomRight, borderPaint);
+        canvas.drawLine(
+          segmentRect.bottomLeft,
+          segmentRect.bottomRight,
+          borderPaint,
+        );
       }
 
       currentY += height;
     }
 
     canvas.restore();
-    
+
     // Draw outer box shadows (inner shadow effect)
     final path = Path()..addRRect(rrect);
-    
+
     canvas.save();
     canvas.clipRRect(rrect);
-    
+
     final innerShadowPaint1 = Paint()
       ..color = Colors.white.withValues(alpha: 0.05)
       ..maskFilter = const MaskFilter.blur(BlurStyle.inner, 2);
     canvas.drawPath(path.shift(const Offset(1, 1)), innerShadowPaint1);
-    
+
     final innerShadowPaint2 = Paint()
       ..color = Colors.black.withValues(alpha: 0.2)
       ..maskFilter = const MaskFilter.blur(BlurStyle.inner, 2);
     canvas.drawPath(path.shift(const Offset(-1, -1)), innerShadowPaint2);
-    
+
     canvas.restore();
   }
 
@@ -541,6 +775,7 @@ class TokenizerEmbeddedToolbar extends StatelessWidget {
   final VoidCallback? onRefresh;
 
   const TokenizerEmbeddedToolbar({
+    super.key,
     required this.showSettings,
     required this.onToggleSettings,
     required this.onRefresh,

@@ -130,10 +130,14 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
     }
     String? currentSessionId;
     if (widget.initialCharId.isNotEmpty) {
-      currentSessionId =
-          ref.read(chatProvider(widget.initialCharId)).value?.session?.id;
+      currentSessionId = ref
+          .read(chatProvider(widget.initialCharId))
+          .value
+          ?.session
+          ?.id;
     }
-    _selectedSessionId = currentSessionId ??
+    _selectedSessionId =
+        currentSessionId ??
         (_allSessions.isNotEmpty ? _allSessions.first.id : null);
 
     await _calculateStats();
@@ -210,7 +214,9 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
       for (final msg in session.messages) {
         final int tokens = (msg.tokens?.toInt()) ?? (msg.content.length ~/ 4);
         final int chars = msg.content.length.toInt();
-        final int regens = msg.swipes.length > 1 ? (msg.swipes.length - 1).toInt() : 0;
+        final int regens = msg.swipes.length > 1
+            ? (msg.swipes.length - 1).toInt()
+            : 0;
         final ts = msg.timestamp;
 
         // General
@@ -305,7 +311,6 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
     }
   }
 
-
   Widget _buildHero(_StatsData stats) {
     return Container(
       decoration: BoxDecoration(
@@ -376,14 +381,17 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
                   ),
                 ),
                 Container(
-                    width: 1,
-                    height: 28,
-                    color: Colors.white.withValues(alpha: 0.2)),
+                  width: 1,
+                  height: 28,
+                  color: Colors.white.withValues(alpha: 0.2),
+                ),
                 Expanded(
                   child: Column(
                     children: [
                       RollingNumber(
-                        value: _loading ? '...' : _formatNumber(stats.characters),
+                        value: _loading
+                            ? '...'
+                            : _formatNumber(stats.characters),
                         style: const TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.w600,
@@ -405,7 +413,7 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
                 ),
               ],
             ),
-          )
+          ),
         ],
       ),
     );
@@ -485,8 +493,11 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
             child: Row(
               children: [
-                Icon(Icons.leaderboard_outlined,
-                    size: 18, color: context.cs.primary),
+                Icon(
+                  Icons.leaderboard_outlined,
+                  size: 18,
+                  color: context.cs.primary,
+                ),
                 const SizedBox(width: 8),
                 Text(
                   'Top Models',
@@ -572,8 +583,9 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
                     value: fraction.clamp(0.0, 1.0),
                     minHeight: 4,
                     backgroundColor: Colors.white.withValues(alpha: 0.06),
-                    valueColor:
-                        AlwaysStoppedAnimation<Color>(context.cs.primary),
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      context.cs.primary,
+                    ),
                   ),
                 ),
               ],
@@ -594,7 +606,7 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
     );
   }
 
-  /// Human label for a chat/session in the chat picker: "<character> · <chat>".
+  /// Human label for a chat/session in the chat picker: `<character> · <chat>`.
   String _sessionLabel(ChatSession s) {
     final char = _allCharacters.where((c) => c.id == s.characterId).firstOrNull;
     final charName = char?.name ?? s.characterId;
@@ -611,9 +623,7 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
         .firstOrNull;
     final selectedChar = selected == null
         ? null
-        : _allCharacters
-              .where((c) => c.id == selected.characterId)
-              .firstOrNull;
+        : _allCharacters.where((c) => c.id == selected.characterId).firstOrNull;
     final label = selected == null ? '—' : _sessionLabel(selected);
     final charColor = selectedChar?.color ?? '#66ccff';
     final parsedColor = Color(int.parse(charColor.replaceFirst('#', '0xFF')));
@@ -832,9 +842,12 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
                   clipBehavior: Clip.antiAlias,
                   child: selectedChar?.avatarPath != null
                       ? Image.file(
-                          File(resolveGlazeFilePath(selectedChar!.avatarPath!)!),
+                          File(
+                            resolveGlazeFilePath(selectedChar!.avatarPath!)!,
+                          ),
                           fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) => _buildInitials(charName),
+                          errorBuilder: (context, error, stackTrace) =>
+                              _buildInitials(charName),
                         )
                       : _buildInitials(charName),
                 ),
@@ -884,7 +897,10 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
                   final char = _allCharacters[index];
                   final active = char.id == _selectedCharId;
                   final cColor = Color(
-                      int.parse((char.color ?? '#66ccff').replaceFirst('#', '0xFF')));
+                    int.parse(
+                      (char.color ?? '#66ccff').replaceFirst('#', '0xFF'),
+                    ),
+                  );
                   return InkWell(
                     onTap: () {
                       setState(() {
@@ -898,7 +914,9 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
                           ? context.cs.primary.withValues(alpha: 0.08)
                           : Colors.transparent,
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 10),
+                        horizontal: 14,
+                        vertical: 10,
+                      ),
                       child: Row(
                         children: [
                           Container(
@@ -911,10 +929,13 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
                             clipBehavior: Clip.antiAlias,
                             child: char.avatarPath != null
                                 ? Image.file(
-                                    File(resolveGlazeFilePath(char.avatarPath!)!),
+                                    File(
+                                      resolveGlazeFilePath(char.avatarPath!)!,
+                                    ),
                                     fit: BoxFit.cover,
-                                    errorBuilder: (context, error, stackTrace) =>
-                                        _buildInitials(char.name),
+                                    errorBuilder:
+                                        (context, error, stackTrace) =>
+                                            _buildInitials(char.name),
                                   )
                                 : _buildInitials(char.name),
                           ),
@@ -982,10 +1003,14 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
             GlazeTabItem(label: 'Character', icon: Icons.person),
             GlazeTabItem(label: 'General', icon: Icons.public),
           ],
-          activeIndex: _currentTab == 'chat' ? 0 : (_currentTab == 'char' ? 1 : 2),
+          activeIndex: _currentTab == 'chat'
+              ? 0
+              : (_currentTab == 'char' ? 1 : 2),
           onChanged: (index) {
             setState(() {
-              _currentTab = index == 0 ? 'chat' : (index == 1 ? 'char' : 'general');
+              _currentTab = index == 0
+                  ? 'chat'
+                  : (index == 1 ? 'char' : 'general');
             });
           },
         ),
@@ -995,74 +1020,82 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
           index: _currentTab == 'chat' ? 0 : (_currentTab == 'char' ? 1 : 2),
           length: 3,
           onChanged: (index) => setState(() {
-            _currentTab = index == 0 ? 'chat' : (index == 1 ? 'char' : 'general');
+            _currentTab = index == 0
+                ? 'chat'
+                : (index == 1 ? 'char' : 'general');
           }),
           child: TabSlideSwitcher(
-          index: _currentTab == 'chat' ? 0 : (_currentTab == 'char' ? 1 : 2),
-          child: ListView(
-          shrinkWrap: true,
-          padding: EdgeInsets.fromLTRB(
-            16,
-            MediaQuery.of(context).padding.top + 12,
-            16,
-            MediaQuery.of(context).padding.bottom + 24,
-          ),
-          children: [
-            if (_currentTab == 'chat') ...[
-              _buildChatPicker(),
-              const SizedBox(height: 12),
-            ],
-            if (_currentTab == 'char') ...[
-              _buildCharPicker(),
-              const SizedBox(height: 12),
-            ],
-            _buildHero(stats),
-            const SizedBox(height: 12),
-            Container(
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.05),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-                borderRadius: BorderRadius.circular(16),
+            index: _currentTab == 'chat' ? 0 : (_currentTab == 'char' ? 1 : 2),
+            child: ListView(
+              shrinkWrap: true,
+              padding: EdgeInsets.fromLTRB(
+                16,
+                MediaQuery.of(context).padding.top + 12,
+                16,
+                MediaQuery.of(context).padding.bottom + 24,
               ),
-              child: Column(
-                children: [
-                  _buildStatItem(
-                    icon: Icons.refresh,
-                    color: const Color(0xFF4CAF50),
-                    label: 'Regenerations',
-                    value: _loading ? '...' : _formatNumber(stats.regenerations),
-                  ),
-                  _buildSeparator(),
-                  _buildStatItem(
-                    icon: Icons.delete_outline,
-                    color: const Color(0xFFF44336),
-                    label: 'Deleted',
-                    value: _loading ? '...' : _formatNumber(stats.deleted),
-                  ),
-                  _buildSeparator(),
-                  _buildStatItem(
-                    icon: Icons.access_time,
-                    color: const Color(0xFF2196F3),
-                    label: _currentTab == 'general' ? 'App Time' : 'Time Spent',
-                    value: _loading ? '...' : _formatTime(stats.timeSpent),
-                  ),
-                  _buildSeparator(),
-                  _buildStatItem(
-                    icon: Icons.history,
-                    color: const Color(0xFFFF9800),
-                    label: 'stats_first_msg'.tr(),
-                    value: _loading ? '...' : stats.firstMessage,
-                    isDate: true,
-                  ),
+              children: [
+                if (_currentTab == 'chat') ...[
+                  _buildChatPicker(),
+                  const SizedBox(height: 12),
                 ],
-              ),
+                if (_currentTab == 'char') ...[
+                  _buildCharPicker(),
+                  const SizedBox(height: 12),
+                ],
+                _buildHero(stats),
+                const SizedBox(height: 12),
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.05),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.08),
+                    ),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Column(
+                    children: [
+                      _buildStatItem(
+                        icon: Icons.refresh,
+                        color: const Color(0xFF4CAF50),
+                        label: 'Regenerations',
+                        value: _loading
+                            ? '...'
+                            : _formatNumber(stats.regenerations),
+                      ),
+                      _buildSeparator(),
+                      _buildStatItem(
+                        icon: Icons.delete_outline,
+                        color: const Color(0xFFF44336),
+                        label: 'Deleted',
+                        value: _loading ? '...' : _formatNumber(stats.deleted),
+                      ),
+                      _buildSeparator(),
+                      _buildStatItem(
+                        icon: Icons.access_time,
+                        color: const Color(0xFF2196F3),
+                        label: _currentTab == 'general'
+                            ? 'App Time'
+                            : 'Time Spent',
+                        value: _loading ? '...' : _formatTime(stats.timeSpent),
+                      ),
+                      _buildSeparator(),
+                      _buildStatItem(
+                        icon: Icons.history,
+                        color: const Color(0xFFFF9800),
+                        label: 'stats_first_msg'.tr(),
+                        value: _loading ? '...' : stats.firstMessage,
+                        isDate: true,
+                      ),
+                    ],
+                  ),
+                ),
+                if (_currentTab == 'general') ...[
+                  const SizedBox(height: 12),
+                  _buildTopModels(),
+                ],
+              ],
             ),
-            if (_currentTab == 'general') ...[
-              const SizedBox(height: 12),
-              _buildTopModels(),
-            ],
-          ],
-          ),
           ),
         ),
       ),
