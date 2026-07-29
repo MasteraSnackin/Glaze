@@ -93,7 +93,7 @@ void main() {
     expect(assembly.messages.last['content'], 'block instruction');
   });
 
-  test('custom filtering honors categories and preset message count', () {
+  test('custom filtering honors categories and block message count', () {
     final snapshot = _snapshot(const [
       PromptMessage(role: 'system', content: 'card', blockId: 'char_card'),
       PromptMessage(
@@ -127,7 +127,6 @@ void main() {
         includeLorebooks: true,
         includeMemoryBooks: false,
         includeStudioState: true,
-        messageCount: 1,
       ),
       blockConfig: _block,
       chatMessages: [
@@ -184,7 +183,6 @@ void main() {
       policy: const ExtensionContextPolicy(
         includeMainPresetInstructions: true,
         includeRuntimePrompts: true,
-        messageCount: 1,
       ),
       blockConfig: _block,
       chatMessages: [_chat('u2', 'user', 'latest')],
@@ -211,7 +209,6 @@ void main() {
       final assembly = assembler.assemble(
         policy: const ExtensionContextPolicy(
           includeMainPresetInstructions: true,
-          messageCount: 1,
         ),
         blockConfig: _block,
         chatMessages: [_chat('u1', 'user', 'actual chat')],
@@ -243,9 +240,8 @@ void main() {
         includeCharacterCard: false,
         includePersona: false,
         includeRuntimePrompts: true,
-        messageCount: -1,
       ),
-      blockConfig: _block,
+      blockConfig: _block.copyWith(contextMessageCount: -1),
       chatMessages: [
         _chat('u1', 'user', 'one'),
         _chat('a1', 'assistant', 'two'),
@@ -328,7 +324,7 @@ void main() {
     expect(assembly.messages.last['content'], 'instruction');
   });
 
-  test('null preset count preserves per-block history count', () {
+  test('block history count limits reconstructed history', () {
     final assembly = assembler.assemble(
       policy: const ExtensionContextPolicy(),
       blockConfig: _block,
