@@ -18,9 +18,16 @@ const _stBlockIds = <String, String>{
 };
 
 const _mandatoryBlockIds = <String>{
-  'chat_history', 'char_card', 'char_personality', 'user_persona',
-  'example_dialogue', 'worldInfoBefore', 'worldInfoAfter', 'scenario',
-  'main', 'nsfw',
+  'chat_history',
+  'char_card',
+  'char_personality',
+  'user_persona',
+  'example_dialogue',
+  'worldInfoBefore',
+  'worldInfoAfter',
+  'scenario',
+  'main',
+  'nsfw',
 };
 
 const _blockNameToId = <String, String>{
@@ -28,31 +35,62 @@ const _blockNameToId = <String, String>{
   'Chat History': 'chat_history',
   // Character card
   'charDescription': 'char_card',
+  'Char Description': 'char_card',
   'Character Description': 'char_card',
   'Character Card': 'char_card',
   // Character personality
   'charPersonality': 'char_personality',
+  'Char Personality': 'char_personality',
   'Character Personality': 'char_personality',
   // User persona
   'personaDescription': 'user_persona',
+  'Persona Description': 'user_persona',
   'User Persona': 'user_persona',
   // Dialogue examples
   'dialogueExamples': 'example_dialogue',
+  'Chat Examples': 'example_dialogue',
   'Dialogue Examples': 'example_dialogue',
   // World info
   'World Info Before': 'worldInfoBefore',
+  'World Info (before)': 'worldInfoBefore',
   'World Info After': 'worldInfoAfter',
+  'World Info (after)': 'worldInfoAfter',
   // Scenario
   'Scenario': 'scenario',
   // Main / nsfw
   'Main Prompt': 'main',
   'nsfw': 'nsfw',
+  // Other Glaze system blocks
+  'Memory Book': 'memory',
+  'Summary': 'summary',
+  "Author's Note": 'authors_note',
+  'Guided Generation': 'guided_generation',
+};
+
+const _staticBlockIds = <String>{
+  'worldInfoBefore',
+  'worldInfoAfter',
+  'char_card',
+  'char_personality',
+  'user_persona',
+  'example_dialogue',
+  'scenario',
+  'chat_history',
+  'memory',
+  'summary',
+  'authors_note',
+  'guided_generation',
 };
 
 String _normalizeImportedBlockId(String rawId, String name) {
   if (_stBlockIds.containsKey(rawId)) return _stBlockIds[rawId]!;
   if (_blockNameToId.containsKey(name)) return _blockNameToId[name]!;
   return rawId;
+}
+
+String _normalizeImportedRole(dynamic role) {
+  final value = role is String ? role.trim() : '';
+  return value.isEmpty ? 'system' : value;
 }
 
 Preset parseSillyTavernPreset(Map<String, dynamic> json, String fileName) {
@@ -74,6 +112,7 @@ Preset parseSillyTavernPreset(Map<String, dynamic> json, String fileName) {
       final blockName = (pm['name'] as String?) ?? '';
       final normalizedId = _normalizeImportedBlockId(blockName, blockName);
       final isMandatory = _mandatoryBlockIds.contains(normalizedId);
+      final isCanonical = isMandatory || _staticBlockIds.contains(normalizedId);
       final isEnabled = pm['enabled'] as bool? ?? true;
 
       final rawMode = pm['insertion_mode'] as String?;
@@ -88,17 +127,20 @@ Preset parseSillyTavernPreset(Map<String, dynamic> json, String fileName) {
         depth = null;
       }
 
-      blocks.add(PresetBlock(
-        id: isMandatory ? normalizedId : generateId(),
-        name: blockName,
-        role: (pm['role'] as String?) ?? 'system',
-        content: isMandatory ? '' : ((pm['content'] as String?) ?? ''),
-        enabled: isEnabled,
-        insertionMode: insertionMode,
-        depth: depth,
-        isStashed: pm['isStashed'] as bool? ?? false,
-        appendToLastMessage: pm['appendToLastMessage'] as bool? ?? false,
-      ));
+      blocks.add(
+        PresetBlock(
+          id: isCanonical ? normalizedId : generateId(),
+          name: blockName,
+          role: _normalizeImportedRole(pm['role']),
+          content: isMandatory ? '' : ((pm['content'] as String?) ?? ''),
+          enabled: isEnabled,
+          isStatic: _staticBlockIds.contains(normalizedId),
+          insertionMode: insertionMode,
+          depth: depth,
+          isStashed: pm['isStashed'] as bool? ?? false,
+          appendToLastMessage: pm['appendToLastMessage'] as bool? ?? false,
+        ),
+      );
     }
   } else {
     // ── SillyTavern-native format (identifier + prompt_order) ─────────────
@@ -120,15 +162,15 @@ Preset parseSillyTavernPreset(Map<String, dynamic> json, String fileName) {
           break;
         }
       }
-      Map<String, dynamic> bestOrder = preferredOrder ?? promptOrder.fold<Map<String, dynamic>?>(
-        null,
-        (prev, current) {
-          if (current is! Map<String, dynamic>) return prev;
-          final prevLen = (prev?['order'] as List?)?.length ?? 0;
-          final currentLen = (current['order'] as List?)?.length ?? 0;
-          return currentLen > prevLen ? current : prev;
-        },
-      ) ?? {};
+      Map<String, dynamic> bestOrder =
+          preferredOrder ??
+          promptOrder.fold<Map<String, dynamic>?>(null, (prev, current) {
+            if (current is! Map<String, dynamic>) return prev;
+            final prevLen = (prev?['order'] as List?)?.length ?? 0;
+            final currentLen = (current['order'] as List?)?.length ?? 0;
+            return currentLen > prevLen ? current : prev;
+          }) ??
+          {};
       final order = bestOrder['order'] as List<dynamic>? ?? [];
       for (final item in order) {
         if (item is Map<String, dynamic>) orderList.add(item);
@@ -136,10 +178,16 @@ Preset parseSillyTavernPreset(Map<String, dynamic> json, String fileName) {
     }
 
     if (orderList.isEmpty) {
-      orderList = promptsList.map((p) {
-        final pm = p as Map<String, dynamic>;
-        return {'identifier': pm['identifier'], 'enabled': pm['enabled'] ?? true};
-      }).toList().cast<Map<String, dynamic>>();
+      orderList = promptsList
+          .map((p) {
+            final pm = p as Map<String, dynamic>;
+            return {
+              'identifier': pm['identifier'],
+              'enabled': pm['enabled'] ?? true,
+            };
+          })
+          .toList()
+          .cast<Map<String, dynamic>>();
     }
 
     final usedIdentifiers = <String>{};
@@ -155,7 +203,8 @@ Preset parseSillyTavernPreset(Map<String, dynamic> json, String fileName) {
       final blockName = (p['name'] as String?) ?? identifier;
       final normalizedId = _normalizeImportedBlockId(identifier, blockName);
       final isMandatory = _mandatoryBlockIds.contains(normalizedId);
-      final isEnabled = item['enabled'] as bool? ?? p['enabled'] as bool? ?? true;
+      final isEnabled =
+          item['enabled'] as bool? ?? p['enabled'] as bool? ?? true;
 
       String insertionMode;
       int? depth;
@@ -168,15 +217,18 @@ Preset parseSillyTavernPreset(Map<String, dynamic> json, String fileName) {
         insertionMode = 'relative';
       }
 
-      blocks.add(PresetBlock(
-        id: normalizedId,
-        name: blockName,
-        role: (p['role'] as String?) ?? 'system',
-        content: isMandatory ? '' : ((p['content'] as String?) ?? ''),
-        enabled: isEnabled,
-        insertionMode: insertionMode,
-        depth: depth,
-      ));
+      blocks.add(
+        PresetBlock(
+          id: normalizedId,
+          name: blockName,
+          role: _normalizeImportedRole(p['role']),
+          content: isMandatory ? '' : ((p['content'] as String?) ?? ''),
+          enabled: isEnabled,
+          isStatic: _staticBlockIds.contains(normalizedId),
+          insertionMode: insertionMode,
+          depth: depth,
+        ),
+      );
     }
 
     for (final p in promptsList) {
@@ -192,12 +244,14 @@ Preset parseSillyTavernPreset(Map<String, dynamic> json, String fileName) {
       final blockJson = Map<String, dynamic>.from(pm);
       blockJson['id'] = normalizedId;
       blockJson['name'] = blockName;
-      blockJson['role'] = pm['role'] ?? 'system';
+      blockJson['role'] = _normalizeImportedRole(pm['role']);
       blockJson['content'] = isMandatory ? '' : (pm['content'] ?? '');
 
       if (pm['injection_position'] == 1) {
         blockJson['insertionMode'] = 'depth';
-        blockJson['depth'] = pm['injection_depth'] is num ? (pm['injection_depth'] as num).toInt() : 4;
+        blockJson['depth'] = pm['injection_depth'] is num
+            ? (pm['injection_depth'] as num).toInt()
+            : 4;
       } else {
         blockJson['insertionMode'] = 'relative';
       }
@@ -207,7 +261,9 @@ Preset parseSillyTavernPreset(Map<String, dynamic> json, String fileName) {
   }
 
   final stRegexes = json['regexes'] as List<dynamic>?;
-  final extRegexes = (json['extensions'] as Map<String, dynamic>?)?['regex_scripts'] as List<dynamic>?;
+  final extRegexes =
+      (json['extensions'] as Map<String, dynamic>?)?['regex_scripts']
+          as List<dynamic>?;
   final regexSource = extRegexes ?? stRegexes;
   if (regexSource != null) {
     for (int i = 0; i < regexSource.length; i++) {
@@ -221,12 +277,17 @@ Preset parseSillyTavernPreset(Map<String, dynamic> json, String fileName) {
     }
   }
 
-  return finalizeImportedPreset(Preset(
-    id: generateId(),
-    name: (json['name'] as String?) ?? fileName.replaceAll('.json', ''),
-    blocks: blocks,
-    regexes: regexes,
-    reasoningEnabled: json['reasoning'] as bool? ?? json['reasoning_enabled'] as bool? ?? false,
-    createdAt: currentTimestampSeconds(),
-  ));
+  return finalizeImportedPreset(
+    Preset(
+      id: generateId(),
+      name: (json['name'] as String?) ?? fileName.replaceAll('.json', ''),
+      blocks: blocks,
+      regexes: regexes,
+      reasoningEnabled:
+          json['reasoning'] as bool? ??
+          json['reasoning_enabled'] as bool? ??
+          false,
+      createdAt: currentTimestampSeconds(),
+    ),
+  );
 }
