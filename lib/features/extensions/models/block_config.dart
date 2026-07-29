@@ -1,5 +1,7 @@
 import 'package:freezed_annotation/freezed_annotation.dart';
 
+import 'extension_context_policy.dart';
+
 part 'block_config.freezed.dart';
 part 'block_config.g.dart';
 
@@ -45,6 +47,9 @@ abstract class BlockConfig with _$BlockConfig {
     /// Additional system text prepended before chat history.
     /// Supports macros: {{char}}, {{user}}, {{description}}, {{personality}}.
     @Default('') String contextSystemPrompt,
+
+    /// Controls which parts of the main request are visible to this block.
+    @Default(ExtensionContextPolicy()) ExtensionContextPolicy contextPolicy,
 
     /// Number of this block's own previous outputs (same [name], same session,
     /// from earlier messages) to feed into the generation prompt as reference,

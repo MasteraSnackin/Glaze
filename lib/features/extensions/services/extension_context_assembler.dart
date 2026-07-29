@@ -80,7 +80,7 @@ class ExtensionContextAssembler {
         : _filterPromptSnapshot(
             filterableMessages,
             policy,
-            _effectiveMessageCount(policy, blockConfig),
+            blockConfig.contextMessageCount,
           );
 
     _appendCanonicalAssistant(
@@ -191,7 +191,7 @@ class ExtensionContextAssembler {
     final scoped = buildContextMessages(
       messages: chatMessages,
       anchorMessageId: anchorMessageId,
-      count: _effectiveMessageCount(policy, blockConfig),
+      count: blockConfig.contextMessageCount,
     );
     final history = scoped
         .map(
@@ -214,11 +214,6 @@ class ExtensionContextAssembler {
     );
     return messages;
   }
-
-  int _effectiveMessageCount(
-    ExtensionContextPolicy policy,
-    BlockConfig blockConfig,
-  ) => policy.messageCount ?? blockConfig.contextMessageCount;
 
   void _appendCanonicalAssistant(
     List<Map<String, dynamic>> messages, {

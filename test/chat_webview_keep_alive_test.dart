@@ -183,5 +183,23 @@ void main() {
         NavigationActionPolicy.CANCEL,
       );
     });
+
+    test('allows the loopback bootstrap navigation on Windows', () {
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      setChatWebViewAssetBaseUrlForTesting(WebUri('http://127.0.0.1:51234/'));
+
+      expect(
+        chatWebViewNavigationPolicy(
+          WebUri('http://127.0.0.1:51234/index.html'),
+        ),
+        NavigationActionPolicy.ALLOW,
+      );
+      expect(
+        chatWebViewNavigationPolicy(
+          WebUri('http://127.0.0.1:51234/bridge/index.js'),
+        ),
+        NavigationActionPolicy.CANCEL,
+      );
+    });
   });
 }
