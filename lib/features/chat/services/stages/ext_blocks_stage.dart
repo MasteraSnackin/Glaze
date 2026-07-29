@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 
 import '../../../../core/models/character.dart';
 import '../../../../core/models/chat_message.dart';
+import '../../../../core/llm/prompt/main_model_context_snapshot.dart';
+import '../../../../core/state/persona_resolution.dart';
 import '../../../extensions/services/extension_post_gen_service.dart';
 import '../../state/post_gen_status_provider.dart';
 import 'stage_context.dart';
@@ -24,6 +26,7 @@ class ExtBlocksStage {
     required ChatSession session,
     required Character character,
     required int agentSwipeId,
+    MainModelContextSnapshot? mainModelContextSnapshot,
   }) async {
     if (session.id.isEmpty || session.messages.isEmpty) return;
     final lastMessage = session.messages.last;
@@ -35,7 +38,12 @@ class ExtBlocksStage {
         charId: ctx.charId,
         session: session,
         character: character,
-        persona: null,
+        persona: ctx.ref.read(
+          effectivePersonaForChatProvider((
+            charId: ctx.charId,
+            sessionId: session.id,
+          )),
+        ),
         agentSwipeId: agentSwipeId,
         onStarted: () {
           if (!ctx.ref.mounted) return;
@@ -46,6 +54,7 @@ class ExtBlocksStage {
           runningStatus = status;
           ctx.ref.read(postGenStatusProvider.notifier).state = status;
         },
+        mainModelContextSnapshot: mainModelContextSnapshot,
       );
       if (didRun &&
           ctx.ref.mounted &&

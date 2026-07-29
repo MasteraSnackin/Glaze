@@ -33,14 +33,14 @@ class ChatMessageSync {
   /// a tail append (only when generation has settled).
   /// [sessionSwitching] short-circuits the diff entirely so a session
   /// switch can complete its full reset.
-  void sync({
+  Future<void> sync({
     required ChatBridgeController? bridge,
     required List<ChatMessage> oldMsgs,
     required List<ChatMessage> newMsgs,
     required int visibleStartIndex,
     required bool isGenerating,
     required bool sessionSwitching,
-  }) {
+  }) async {
     if (sessionSwitching) return;
     if (bridge == null) return;
 
@@ -49,9 +49,9 @@ class ChatMessageSync {
     final newLen = newIds.length;
 
     if (oldIds.isEmpty) {
-      bridge.setMessages(newMsgs, visibleStartIndex: visibleStartIndex);
+      await bridge.setMessages(newMsgs, visibleStartIndex: visibleStartIndex);
       if (!isGenerating) {
-        bridge.setLastMessage(
+        await bridge.setLastMessage(
           lastUserMessageId(newMsgs) ?? newMsgs.lastOrNull?.id,
         );
       }
@@ -59,7 +59,7 @@ class ChatMessageSync {
     }
 
     if (newIds.isEmpty) {
-      bridge.clearAll();
+      await bridge.clearAll();
       return;
     }
 
@@ -67,7 +67,7 @@ class ChatMessageSync {
       final oldFirstId = oldIds.first;
       final newIdx = newIds.indexOf(oldFirstId);
       if (newIdx > 0) {
-        bridge.prependMessages(
+        await bridge.prependMessages(
           newMsgs.sublist(0, newIdx),
           visibleStartIndex: visibleStartIndex,
         );
@@ -75,12 +75,12 @@ class ChatMessageSync {
       }
       if (newLen > oldIds.length) {
         final appends = newMsgs.sublist(oldIds.length, newLen);
-        bridge.appendMessages(
+        await bridge.appendMessages(
           appends,
           startIndex: visibleStartIndex + oldIds.length,
         );
         if (appends.isNotEmpty && !isGenerating) {
-          bridge.setLastMessage(
+          await bridge.setLastMessage(
             lastUserMessageId(appends) ?? newMsgs.lastOrNull?.id,
           );
         }
@@ -93,7 +93,7 @@ class ChatMessageSync {
       final oldIdx = oldIds.indexOf(newFirstId);
       if (oldIdx > 0) {
         for (int i = 0; i < oldIdx; i++) {
-          bridge.removeMessage(oldIds[i]);
+          await bridge.removeMessage(oldIds[i]);
         }
         return;
       }
@@ -101,19 +101,19 @@ class ChatMessageSync {
       final oldLastIdx = oldIds.indexOf(newLastId);
       if (oldLastIdx >= 0 && newIds.length == oldLastIdx + 1) {
         for (int i = oldIds.length - 1; i > oldLastIdx; i--) {
-          bridge.removeMessage(oldIds[i]);
+          await bridge.removeMessage(oldIds[i]);
         }
         if (!isGenerating) {
-          bridge.setLastMessage(
+          await bridge.setLastMessage(
             lastUserMessageId(newMsgs) ?? newMsgs.lastOrNull?.id,
           );
         }
         return;
       }
-      bridge.clearAll();
-      bridge.setMessages(newMsgs, visibleStartIndex: visibleStartIndex);
+      await bridge.clearAll();
+      await bridge.setMessages(newMsgs, visibleStartIndex: visibleStartIndex);
       if (!isGenerating) {
-        bridge.setLastMessage(
+        await bridge.setLastMessage(
           lastUserMessageId(newMsgs) ?? newMsgs.lastOrNull?.id,
         );
       }
@@ -125,10 +125,10 @@ class ChatMessageSync {
     for (int i = 0; i < minLen; i++) {
       if (i >= newIds.length) break;
       if (newIds[i] != oldIds[i]) {
-        bridge.clearAll();
-        bridge.setMessages(newMsgs, visibleStartIndex: visibleStartIndex);
+        await bridge.clearAll();
+        await bridge.setMessages(newMsgs, visibleStartIndex: visibleStartIndex);
         if (!isGenerating) {
-          bridge.setLastMessage(
+          await bridge.setLastMessage(
             lastUserMessageId(newMsgs) ?? newMsgs.lastOrNull?.id,
           );
         }
@@ -178,7 +178,7 @@ class ChatMessageSync {
           tokensChanged;
 
       if (needsUpdate) {
-        bridge.updateMessage(n);
+        await bridge.updateMessage(n);
         anyUpdated = true;
       }
     }
@@ -188,11 +188,25 @@ class ChatMessageSync {
     // `updateMessage`. The previous dispatcher call relied on a
     // changing isGenerating flag, which does not move on edit.
     if (anyUpdated && !isGenerating) {
-      bridge.setLastMessage(
+      await bridge.setLastMessage(
         lastUserMessageId(newMsgs) ?? newMsgs.lastOrNull?.id,
       );
     }
   }
+}
+
+/// Appends the virtual streaming message only after persisted message changes
+/// have reached the WebView. Returns false when the generation became stale at
+/// either async boundary.
+Future<bool> appendStreamingPlaceholderAfterMessageSync({
+  required Future<void> messageSync,
+  required bool Function() isCurrent,
+  required Future<void> Function() appendPlaceholder,
+}) async {
+  await messageSync;
+  if (!isCurrent()) return false;
+  await appendPlaceholder();
+  return isCurrent();
 }
 
 /// Returns the id of the last message in [msgs] **only when it is a

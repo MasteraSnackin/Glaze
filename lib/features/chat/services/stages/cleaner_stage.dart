@@ -9,6 +9,7 @@ import '../../../../core/llm/aux_llm_client.dart'
 import '../../../../core/llm/beauty_state_parser.dart';
 import '../../../../core/llm/macro_engine.dart';
 import '../../../../core/llm/prompt_builder.dart' show PromptPayload;
+import '../../../../core/llm/prompt/main_model_context_snapshot.dart';
 import '../../../../core/llm/studio_slot_resolver.dart';
 import '../../../../core/llm/tokenizer.dart';
 import '../../../../core/llm/cleaner/audit_prompt_builder.dart'
@@ -94,6 +95,7 @@ class CleanerStage {
     required List<ChatMessage> messages,
     required int genId,
     PromptPayload? promptPayload,
+    MainModelContextSnapshot? mainModelContextSnapshot,
     Character? character,
   }) async {
     if (!ctx.ref.mounted) return;
@@ -170,6 +172,7 @@ class CleanerStage {
               session: refreshed,
               character: effectiveChar,
               agentSwipeId: -1,
+              mainModelContextSnapshot: mainModelContextSnapshot,
             );
           }
         }
@@ -303,6 +306,7 @@ class CleanerStage {
         broadcastBlocks: broadcastBlocks,
         pipeline: pipeline,
         promptPayload: promptPayload,
+        mainModelContextSnapshot: mainModelContextSnapshot,
         character: effectiveChar,
         cleanerConfig: cleanerConfig,
         beautyBrief: beautyBrief,
@@ -414,6 +418,7 @@ class CleanerStage {
     required List<String> broadcastBlocks,
     required PipelineSettings pipeline,
     PromptPayload? promptPayload,
+    MainModelContextSnapshot? mainModelContextSnapshot,
     Character? character,
     required AuxApiConfig cleanerConfig,
     String beautyBrief = '',
@@ -780,6 +785,7 @@ class CleanerStage {
             session: refreshed,
             character: character,
             agentSwipeId: cleanedAgentSwipeId,
+            mainModelContextSnapshot: mainModelContextSnapshot,
           );
         }
       }
@@ -801,6 +807,7 @@ class CleanerStage {
             session: refreshed,
             character: character,
             agentSwipeId: -1,
+            mainModelContextSnapshot: mainModelContextSnapshot,
           );
         }
       }
@@ -840,6 +847,7 @@ class CleanerStage {
             agentSwipeId: _preCreatedCleanerSwipeId >= 0
                 ? _preCreatedCleanerSwipeId
                 : -1,
+            mainModelContextSnapshot: mainModelContextSnapshot,
           );
         }
       }
@@ -861,6 +869,7 @@ class CleanerStage {
             session: refreshed,
             character: character,
             agentSwipeId: -1,
+            mainModelContextSnapshot: mainModelContextSnapshot,
           );
         }
       }
@@ -880,6 +889,7 @@ class CleanerStage {
             session: refreshed,
             character: character,
             agentSwipeId: -1,
+            mainModelContextSnapshot: mainModelContextSnapshot,
           );
         }
       }

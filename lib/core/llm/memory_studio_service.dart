@@ -148,6 +148,7 @@ class MemoryStudioService {
     CancelToken? cancelToken,
     void Function(String text, String? reasoning)? onFinalResponseUpdate,
     void Function()? onFinalStart,
+    void Function(List<Map<String, dynamic>> messages)? onFinalMessagesBuilt,
   }) async {
     final token = cancelToken ?? CancelToken();
     if (token.isCancelled) {
@@ -201,6 +202,7 @@ class MemoryStudioService {
       cancelToken: token,
       apiConfigId: config.expensiveApiConfigId,
       onFinalResponseUpdate: onFinalResponseUpdate,
+      onMessagesBuilt: onFinalMessagesBuilt,
     );
     if (token.isCancelled) {
       return const StudioPipelineResult(status: 'aborted', response: '');

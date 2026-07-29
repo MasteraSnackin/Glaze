@@ -2,6 +2,7 @@ import 'package:freezed_annotation/freezed_annotation.dart';
 
 import 'block_config.dart';
 import 'connection_profiles.dart';
+import 'extension_context_policy.dart';
 import 'preset_permissions.dart';
 
 part 'extension_preset.freezed.dart';
@@ -16,8 +17,19 @@ abstract class ExtensionPreset with _$ExtensionPreset {
     @Default(0) int createdAt,
     @Default(PresetPermissions()) PresetPermissions permissions,
     @Default(ConnectionProfiles()) ConnectionProfiles connectionProfiles,
+    @Default(ExtensionContextPolicy()) ExtensionContextPolicy contextPolicy,
   }) = _ExtensionPreset;
 
   factory ExtensionPreset.fromJson(Map<String, dynamic> json) =>
-      _$ExtensionPresetFromJson(json);
+      _$ExtensionPresetFromJson(_withLegacyContextPolicy(json));
+}
+
+Map<String, dynamic> _withLegacyContextPolicy(Map<String, dynamic> json) {
+  if (json.containsKey('contextPolicy')) return json;
+  return {
+    ...json,
+    'contextPolicy': const ExtensionContextPolicy(
+      legacyPromptSemantics: true,
+    ).toJson(),
+  };
 }

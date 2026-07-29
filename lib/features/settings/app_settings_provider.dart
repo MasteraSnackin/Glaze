@@ -52,6 +52,7 @@ abstract class AppSettings with _$AppSettings {
     @Default(true) bool batterySaver,
     @Default(false) bool hideTooltips,
     @Default(false) bool disableSwipeRegeneration,
+    @Default(false) bool allowMessageScripts,
     @Default('en') String language,
     @Default(false) bool virtualKeyboardSend,
     @Default(30) double tokenizerHidePercent,
@@ -109,6 +110,11 @@ class AppSettingsNotifier extends AsyncNotifier<AppSettings> {
       disableSwipeRegeneration: _readBoolPref(
         prefs,
         'disableSwipeRegeneration',
+        defaultValue: false,
+      ),
+      allowMessageScripts: _readBoolPref(
+        prefs,
+        'allowMessageScripts',
         defaultValue: false,
       ),
       language: supportedAppLanguages.contains(savedLanguage)
@@ -172,6 +178,7 @@ class AppSettingsNotifier extends AsyncNotifier<AppSettings> {
       'disableSwipeRegeneration',
       settings.disableSwipeRegeneration,
     );
+    await prefs.setBool('allowMessageScripts', settings.allowMessageScripts);
     await prefs.setString('language', normalized.language);
     await prefs.setBool('virtualKeyboardSend', normalized.virtualKeyboardSend);
     await prefs.setDouble(

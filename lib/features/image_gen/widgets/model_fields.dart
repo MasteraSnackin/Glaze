@@ -76,6 +76,9 @@ List<Widget> buildRoutmyModelFields(
   final imageSizes = isRu
       ? RuRoutMyConstants.imageSizes
       : RoutMyConstants.imageSizes;
+  final availableImageSizes = model == 'bytedance/seedream-5.0-pro'
+      ? RoutMyConstants.seedreamImageSizes
+      : imageSizes;
 
   return [
     rows.ImageGenSelectorRow(
@@ -88,9 +91,20 @@ List<Widget> buildRoutmyModelFields(
         items: constantsModels.map((e) => e.$1).toList(),
         labelBuilder: (v) => constantsModels.firstWhere((e) => e.$1 == v).$2,
         isSelected: (v) => model == v,
-        onSelected: (v) => isRu
-            ? onUpdate(s.copyWith(ruRoutmyModel: v))
-            : onUpdate(s.copyWith(routmyModel: v)),
+        onSelected: (v) {
+          final seedreamSize =
+              v == 'bytedance/seedream-5.0-pro' &&
+                  !RoutMyConstants.seedreamImageSizes.contains(size)
+              ? '2K'
+              : size;
+          isRu
+              ? onUpdate(
+                  s.copyWith(ruRoutmyModel: v, ruRoutmyImageSize: seedreamSize),
+                )
+              : onUpdate(
+                  s.copyWith(routmyModel: v, routmyImageSize: seedreamSize),
+                );
+        },
       ),
     ),
     rows.ImageGenSelectorRow(
@@ -111,7 +125,7 @@ List<Widget> buildRoutmyModelFields(
       value: size,
       onTap: () => showOptions<String>(
         title: 'Resolution',
-        items: imageSizes,
+        items: availableImageSizes,
         labelBuilder: (v) => v,
         isSelected: (v) => size == v,
         onSelected: (v) => isRu
@@ -119,19 +133,20 @@ List<Widget> buildRoutmyModelFields(
             : onUpdate(s.copyWith(routmyImageSize: v)),
       ),
     ),
-    rows.ImageGenSelectorRow(
-      label: 'Quality',
-      value: quality == 'hd' ? 'HD' : 'Standard',
-      onTap: () => showOptions<String>(
-        title: 'Quality',
-        items: ['standard', 'hd'],
-        labelBuilder: (v) => v == 'hd' ? 'HD' : 'Standard',
-        isSelected: (v) => quality == v,
-        onSelected: (v) => isRu
-            ? onUpdate(s.copyWith(ruRoutmyQuality: v))
-            : onUpdate(s.copyWith(routmyQuality: v)),
+    if (model != 'bytedance/seedream-5.0-pro')
+      rows.ImageGenSelectorRow(
+        label: 'Quality',
+        value: quality == 'hd' ? 'HD' : 'Standard',
+        onTap: () => showOptions<String>(
+          title: 'Quality',
+          items: ['standard', 'hd'],
+          labelBuilder: (v) => v == 'hd' ? 'HD' : 'Standard',
+          isSelected: (v) => quality == v,
+          onSelected: (v) => isRu
+              ? onUpdate(s.copyWith(ruRoutmyQuality: v))
+              : onUpdate(s.copyWith(routmyQuality: v)),
+        ),
       ),
-    ),
   ];
 }
 

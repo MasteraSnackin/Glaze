@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/core/models/persona.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
+import 'package:glaze_flutter/core/llm/prompt/main_model_context_snapshot.dart';
 import 'package:glaze_flutter/features/chat/abort_handler.dart';
 import 'package:glaze_flutter/features/chat/chat_state.dart';
 import 'package:glaze_flutter/features/chat/services/stages/ext_blocks_stage.dart';
@@ -28,6 +29,7 @@ class _RecordingExtensionPostGenService extends ExtensionPostGenService {
     required Persona? persona,
     int agentSwipeId = -1,
     void Function()? onStarted,
+    MainModelContextSnapshot? mainModelContextSnapshot,
   }) async {
     processCalls++;
     if (didRun) onStarted?.call();

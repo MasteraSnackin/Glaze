@@ -6,6 +6,7 @@ import '../../../core/utils/id_generator.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../models/extension_preset.dart';
+import '../models/extension_context_policy.dart';
 import '../providers/extension_presets_provider.dart';
 import '../providers/extensions_settings_provider.dart';
 
@@ -19,72 +20,82 @@ class ExtBlocksSettingsSheet extends ConsumerWidget {
     final settings = ref.watch(extensionsSettingsProvider);
     final presets = ref.watch(extensionPresetsProvider);
     final activePreset = settings.activePresetId != null
-        ? presets
-            .where((p) => p.id == settings.activePresetId)
-            .firstOrNull
+        ? presets.where((p) => p.id == settings.activePresetId).firstOrNull
         : null;
 
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Container(
-                width: 32,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: context.cs.outlineVariant.withValues(alpha: 0.4),
-                  borderRadius: BorderRadius.circular(2),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 32,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: context.cs.outlineVariant.withValues(alpha: 0.4),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'Ext Blocks',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-                color: context.cs.onSurface,
+              const SizedBox(height: 12),
+              Text(
+                'Ext Blocks',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: context.cs.onSurface,
+                ),
               ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Выберите пресет расширений для текущего чата',
-              style: TextStyle(
-                fontSize: 13,
-                color: context.cs.onSurfaceVariant,
+              const SizedBox(height: 4),
+              Text(
+                'Выберите пресет расширений для текущего чата',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: context.cs.onSurfaceVariant,
+                ),
               ),
-            ),
-            const SizedBox(height: 16),
-            _SelectorTile(
-              icon: Icons.tune_outlined,
-              label: 'Активный пресет',
-              value: activePreset?.name ?? 'Не выбран',
-              onTap: () => _showPresetSelector(context, ref, settings, presets),
-            ),
-            const SizedBox(height: 8),
-            if (activePreset != null) ...[
-              _ActionTile(
-                icon: Icons.edit_outlined,
-                label: 'Редактировать пресет',
-                onTap: () {
-                  Navigator.pop(context);
-                  context.push('/extensions/preset-editor/${activePreset.id}');
-                },
+              const SizedBox(height: 16),
+              _SelectorTile(
+                icon: Icons.tune_outlined,
+                label: 'Активный пресет',
+                value: activePreset?.name ?? 'Не выбран',
+                onTap: () =>
+                    _showPresetSelector(context, ref, settings, presets),
               ),
               const SizedBox(height: 8),
-              _BlocksList(preset: activePreset),
+              if (activePreset != null) ...[
+                _ActionTile(
+                  icon: Icons.edit_outlined,
+                  label: 'Редактировать пресет',
+                  onTap: () {
+                    Navigator.pop(context);
+                    context.push(
+                      '/extensions/preset-editor/${activePreset.id}',
+                    );
+                  },
+                ),
+                const SizedBox(height: 8),
+                _ContextPolicyEditor(
+                  policy: activePreset.contextPolicy,
+                  onChanged: (update) => ref
+                      .read(extensionPresetsProvider.notifier)
+                      .updateContextPolicy(activePreset.id, update),
+                ),
+                const SizedBox(height: 8),
+                _BlocksList(preset: activePreset),
+              ],
+              const SizedBox(height: 8),
+              _ActionTile(
+                icon: Icons.add_circle_outline,
+                label: 'Создать пресет',
+                onTap: () => _createPreset(context, ref),
+              ),
             ],
-            const SizedBox(height: 8),
-            _ActionTile(
-              icon: Icons.add_circle_outline,
-              label: 'Создать пресет',
-              onTap: () => _createPreset(context, ref),
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -124,27 +135,229 @@ class ExtBlocksSettingsSheet extends ConsumerWidget {
               : context.cs.onSurfaceVariant,
           onTap: () {
             Navigator.pop(context);
-            ref
-                .read(extensionsSettingsProvider.notifier)
-                .selectPreset(null);
+            ref.read(extensionsSettingsProvider.notifier).selectPreset(null);
           },
         ),
-        ...presets.map((preset) => BottomSheetItem(
-              label: preset.name,
-              icon: activeId == preset.id
-                  ? Icons.radio_button_checked
-                  : Icons.radio_button_off,
-              iconColor: activeId == preset.id
-                  ? context.cs.primary
-                  : context.cs.onSurfaceVariant,
-              onTap: () {
-                Navigator.pop(context);
-                ref
-                    .read(extensionsSettingsProvider.notifier)
-                    .selectPreset(preset.id);
-              },
-            )),
+        ...presets.map(
+          (preset) => BottomSheetItem(
+            label: preset.name,
+            icon: activeId == preset.id
+                ? Icons.radio_button_checked
+                : Icons.radio_button_off,
+            iconColor: activeId == preset.id
+                ? context.cs.primary
+                : context.cs.onSurfaceVariant,
+            onTap: () {
+              Navigator.pop(context);
+              ref
+                  .read(extensionsSettingsProvider.notifier)
+                  .selectPreset(preset.id);
+            },
+          ),
+        ),
       ],
+    );
+  }
+}
+
+class _ContextPolicyEditor extends StatefulWidget {
+  const _ContextPolicyEditor({required this.policy, required this.onChanged});
+
+  final ExtensionContextPolicy policy;
+  final ValueChanged<
+    ExtensionContextPolicy Function(ExtensionContextPolicy current)
+  >
+  onChanged;
+
+  @override
+  State<_ContextPolicyEditor> createState() => _ContextPolicyEditorState();
+}
+
+class _ContextPolicyEditorState extends State<_ContextPolicyEditor> {
+  late final TextEditingController _countController;
+
+  @override
+  void initState() {
+    super.initState();
+    _countController = TextEditingController(
+      text: (widget.policy.messageCount ?? 10).toString(),
+    );
+  }
+
+  @override
+  void didUpdateWidget(covariant _ContextPolicyEditor oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final value = (widget.policy.messageCount ?? 10).toString();
+    if (_countController.text != value) _countController.text = value;
+  }
+
+  @override
+  void dispose() {
+    _countController.dispose();
+    super.dispose();
+  }
+
+  void _update(
+    ExtensionContextPolicy Function(ExtensionContextPolicy current) update,
+  ) => widget.onChanged(update);
+
+  @override
+  Widget build(BuildContext context) {
+    final policy = widget.policy;
+    return Material(
+      color: Colors.white.withValues(alpha: 0.06),
+      shape: RoundedRectangleBorder(
+        side: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          SwitchListTile(
+            title: const Text(
+              'Передавать тот же контекст, что и в основную модель',
+            ),
+            subtitle: const Text(
+              'ExtBlock может использовать другого API-провайдера. Полный '
+              'контекст увеличивает стоимость и передаёт ему карточку, память '
+              'и инструкции основного запроса.',
+            ),
+            value: policy.useMainModelContext,
+            onChanged: (value) => _update(
+              (current) => current.copyWith(
+                legacyPromptSemantics: false,
+                useMainModelContext: value,
+              ),
+            ),
+          ),
+          if (!policy.useMainModelContext)
+            ExpansionTile(
+              title: const Text('Настроить контекст'),
+              subtitle: const Text(
+                'Общий лимит сообщений имеет приоритет; старые пресеты без '
+                'лимита используют настройку каждого блока.',
+              ),
+              childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              children: [
+                _toggle('Карточка персонажа', policy.includeCharacterCard, (v) {
+                  _update(
+                    (current) => current.copyWith(
+                      legacyPromptSemantics: false,
+                      includeCharacterCard: v,
+                    ),
+                  );
+                }),
+                _toggle('Персона пользователя', policy.includePersona, (v) {
+                  _update(
+                    (current) => current.copyWith(
+                      legacyPromptSemantics: false,
+                      includePersona: v,
+                    ),
+                  );
+                }),
+                _toggle(
+                  'Инструкции основного пресета',
+                  policy.includeMainPresetInstructions,
+                  (v) => _update(
+                    (current) => current.copyWith(
+                      legacyPromptSemantics: false,
+                      includeMainPresetInstructions: v,
+                    ),
+                  ),
+                ),
+                _toggle('Lorebooks', policy.includeLorebooks, (v) {
+                  _update(
+                    (current) => current.copyWith(
+                      legacyPromptSemantics: false,
+                      includeLorebooks: v,
+                    ),
+                  );
+                }),
+                _toggle('MemoryBooks и raw recall', policy.includeMemoryBooks, (
+                  v,
+                ) {
+                  _update(
+                    (current) => current.copyWith(
+                      legacyPromptSemantics: false,
+                      includeMemoryBooks: v,
+                    ),
+                  );
+                }),
+                _toggle('Studio Ledger / state', policy.includeStudioState, (
+                  v,
+                ) {
+                  _update(
+                    (current) => current.copyWith(
+                      legacyPromptSemantics: false,
+                      includeStudioState: v,
+                    ),
+                  );
+                }),
+                _toggle('Summary', policy.includeSummary, (v) {
+                  _update(
+                    (current) => current.copyWith(
+                      legacyPromptSemantics: false,
+                      includeSummary: v,
+                    ),
+                  );
+                }),
+                _toggle('Author’s note', policy.includeAuthorsNote, (v) {
+                  _update(
+                    (current) => current.copyWith(
+                      legacyPromptSemantics: false,
+                      includeAuthorsNote: v,
+                    ),
+                  );
+                }),
+                _toggle(
+                  'Runtime prompt injections',
+                  policy.includeRuntimePrompts,
+                  (v) {
+                    _update(
+                      (current) => current.copyWith(
+                        legacyPromptSemantics: false,
+                        includeRuntimePrompts: v,
+                      ),
+                    );
+                  },
+                ),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: _countController,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    signed: true,
+                  ),
+                  decoration: const InputDecoration(
+                    labelText: 'Количество сообщений',
+                    helperText:
+                        '-1 = все до сообщения, 0 = без истории, N = последние N',
+                    border: OutlineInputBorder(),
+                  ),
+                  onChanged: (raw) {
+                    final parsed = int.tryParse(raw);
+                    if (parsed == null || parsed < -1) return;
+                    _update(
+                      (current) => current.copyWith(
+                        legacyPromptSemantics: false,
+                        messageCount: parsed,
+                      ),
+                    );
+                  },
+                ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _toggle(String title, bool value, ValueChanged<bool> onChanged) {
+    return SwitchListTile(
+      dense: true,
+      contentPadding: EdgeInsets.zero,
+      title: Text(title),
+      value: value,
+      onChanged: onChanged,
     );
   }
 }
@@ -183,10 +396,7 @@ class _SelectorTile extends StatelessWidget {
               Expanded(
                 child: Text(
                   label,
-                  style: TextStyle(
-                    fontSize: 15,
-                    color: context.cs.onSurface,
-                  ),
+                  style: TextStyle(fontSize: 15, color: context.cs.onSurface),
                 ),
               ),
               Text(
@@ -242,10 +452,7 @@ class _ActionTile extends StatelessWidget {
               Expanded(
                 child: Text(
                   label,
-                  style: TextStyle(
-                    fontSize: 15,
-                    color: context.cs.onSurface,
-                  ),
+                  style: TextStyle(fontSize: 15, color: context.cs.onSurface),
                 ),
               ),
               Icon(
