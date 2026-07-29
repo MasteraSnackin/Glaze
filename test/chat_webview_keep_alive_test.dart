@@ -148,5 +148,21 @@ void main() {
         'http://127.0.0.1:51234/index.html',
       );
     });
+
+    test('allows the loopback bootstrap navigation and blocks others', () {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      setChatWebViewAssetBaseUrlForTesting(WebUri('http://127.0.0.1:51234/'));
+
+      expect(
+        chatWebViewNavigationPolicy(
+          WebUri('http://127.0.0.1:51234/index.html'),
+        ),
+        NavigationActionPolicy.ALLOW,
+      );
+      expect(
+        chatWebViewNavigationPolicy(WebUri('https://example.com/')),
+        NavigationActionPolicy.CANCEL,
+      );
+    });
   });
 }
