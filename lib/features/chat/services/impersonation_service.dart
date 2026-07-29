@@ -38,12 +38,10 @@ class ImpersonationService {
   final bool Function() _isAborted;
 
   ImpersonationService({
-    required Ref ref,
-    required String charId,
-    required bool Function() isAborted,
-  }) : _ref = ref,
-       _charId = charId,
-       _isAborted = isAborted;
+    required this._ref,
+    required this._charId,
+    required this._isAborted,
+  });
 
   /// Resolves the effective impersonation prompt for [sessionId], or null when
   /// it is empty/unset (the caller should then prompt the user to configure it,

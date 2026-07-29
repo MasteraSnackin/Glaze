@@ -113,9 +113,8 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
   bool _savedStateApplied = false;
 
   /// [fetchOverride] replaces the real per-provider fetch; tests only.
-  CatalogNotifier(this._ref, {CatalogFetcher? fetchOverride})
-    : _fetchOverride = fetchOverride,
-      super(const CatalogState()) {
+  CatalogNotifier(this._ref, {this._fetchOverride})
+    : super(const CatalogState()) {
     _loadSavedState();
     // If the active provider gets disabled on the Third-Party providers screen,
     // fall back to an enabled one so the catalog never shows a hidden source.
@@ -242,8 +241,8 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
       activeProvider: provider,
       filters: savedFilters.copyWith(sort: savedSort),
     );
-    _saveState();
-    search(reset: true);
+    unawaited(_saveState());
+    unawaited(search(reset: true));
   }
 
   void setSort(String sort) {

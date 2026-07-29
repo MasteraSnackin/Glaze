@@ -259,6 +259,7 @@ class StudioAgentExecutor {
     required CancelToken cancelToken,
     String? apiConfigId,
     void Function(String text, String? reasoning)? onFinalResponseUpdate,
+    void Function(List<Map<String, dynamic>> messages)? onMessagesBuilt,
   }) async {
     final messages = _messageBuilder.buildAgentMessages(
       agent: agent,
@@ -273,6 +274,7 @@ class StudioAgentExecutor {
       reasoningHistoryCount:
           _readPipelineSettings().studioAgent.studioFinalReasoningHistoryCount,
     );
+    onMessagesBuilt?.call(messages);
     final runner = _runner;
     final result = await runner.runAgent(
       agent: agent,

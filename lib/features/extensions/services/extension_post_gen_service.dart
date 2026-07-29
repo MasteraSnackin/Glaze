@@ -5,6 +5,7 @@ import '../../../core/db/repositories/info_blocks_repository.dart';
 import '../../../core/models/chat_message.dart';
 import '../../../core/models/character.dart';
 import '../../../core/models/persona.dart';
+import '../../../core/llm/prompt/main_model_context_snapshot.dart';
 import '../../../core/state/db_provider.dart';
 import '../models/block_config.dart';
 import '../models/extension_preset.dart';
@@ -101,6 +102,7 @@ class ExtensionPostGenService {
     required Persona? persona,
     bool clearExisting = true,
     void Function()? onStarted,
+    MainModelContextSnapshot? mainModelContextSnapshot,
   }) async {
     final preset = _resolveActivePreset();
     if (preset == null) return false;
@@ -115,10 +117,20 @@ class ExtensionPostGenService {
     if (clearExisting) {
       await _ref
           .read(infoBlocksProvider(sessionId).notifier)
-          .deleteByMessageId(messageId, swipeId: swipeId, agentSwipeId: agentSwipeId);
+          .deleteByMessageId(
+            messageId,
+            swipeId: swipeId,
+            agentSwipeId: agentSwipeId,
+          );
     }
 
-    _refreshPanelForMessage(charId, sessionId, messageId, swipeId, agentSwipeId);
+    _refreshPanelForMessage(
+      charId,
+      sessionId,
+      messageId,
+      swipeId,
+      agentSwipeId,
+    );
 
     final cancelToken = _startBlockRun();
     try {
@@ -134,10 +146,17 @@ class ExtensionPostGenService {
         persona: persona,
         cancelToken: cancelToken,
         trigger: BlockTrigger.afterAssistant,
+        mainModelContextSnapshot: mainModelContextSnapshot,
       );
     } finally {
       _finishBlockRun(cancelToken);
-      _refreshPanelForMessage(charId, sessionId, messageId, swipeId, agentSwipeId);
+      _refreshPanelForMessage(
+        charId,
+        sessionId,
+        messageId,
+        swipeId,
+        agentSwipeId,
+      );
     }
     return true;
   }
@@ -173,6 +192,7 @@ class ExtensionPostGenService {
     required Persona? persona,
     int agentSwipeId = -1,
     void Function()? onStarted,
+    MainModelContextSnapshot? mainModelContextSnapshot,
   }) async {
     if (session.id.isEmpty || session.messages.isEmpty) return false;
 
@@ -191,6 +211,7 @@ class ExtensionPostGenService {
       character: character,
       persona: persona,
       onStarted: onStarted,
+      mainModelContextSnapshot: mainModelContextSnapshot,
     );
   }
 
@@ -287,7 +308,13 @@ class ExtensionPostGenService {
     } finally {
       _finishBlockRun(cancelToken);
     }
-    _refreshPanelForMessage(charId, sessionId, messageId, swipeId, agentSwipeId);
+    _refreshPanelForMessage(
+      charId,
+      sessionId,
+      messageId,
+      swipeId,
+      agentSwipeId,
+    );
   }
 
   /// Cancels any in-flight block generation for the current session.
@@ -396,6 +423,7 @@ class ExtensionPostGenService {
     required Persona? persona,
     required CancelToken cancelToken,
     BlockTrigger trigger = BlockTrigger.afterAssistant,
+    MainModelContextSnapshot? mainModelContextSnapshot,
   }) async {
     await _blockProcessor.run(
       preset: preset,
@@ -415,6 +443,7 @@ class ExtensionPostGenService {
           persona: persona,
           previousOutput: previousOutput,
           cancelToken: cancelToken,
+          mainModelContextSnapshot: mainModelContextSnapshot,
         );
       },
       onBlockComplete: (result) {
@@ -441,6 +470,7 @@ class ExtensionPostGenService {
     required String? previousOutput,
     required CancelToken cancelToken,
     String? reuseBlockId,
+    MainModelContextSnapshot? mainModelContextSnapshot,
   }) =>
       SingleBlockRunner(
         statusTracker: _statusTracker,
@@ -460,6 +490,7 @@ class ExtensionPostGenService {
         previousOutput: previousOutput,
         cancelToken: cancelToken,
         reuseBlockId: reuseBlockId,
+        mainModelContextSnapshot: mainModelContextSnapshot,
       );
 
   BlockHandler _handlerFor(BlockType type) {

@@ -33,6 +33,7 @@ void main() {
   late String genTimerJs;
   late String interactionDispatchJs;
   late String panelHostJs;
+  late String htmlSanitizerJs;
   late String selectionManagerJs;
   late String swipeHandlerJs;
   late String glazeSdkJs;
@@ -58,6 +59,7 @@ void main() {
     genTimerJs = _bridgeAsset('gen_timer.js');
     interactionDispatchJs = _bridgeAsset('interaction_dispatch.js');
     panelHostJs = _bridgeAsset('panel_host.js');
+    htmlSanitizerJs = _bridgeAsset('html_sanitizer.js');
     selectionManagerJs = _bridgeAsset('selection_manager.js');
     swipeHandlerJs = _bridgeAsset('swipe_gesture_handler.js');
     glazeSdkJs = _asset('glaze_sdk.js');
@@ -121,6 +123,120 @@ void main() {
         );
       },
     );
+  });
+
+  group('message script execution policy', () {
+    test('renderer defaults message scripts to disabled', () {
+      expect(rendererMessageJs, contains('this.allowMessageScripts = false'));
+      expect(rendererJs, contains('allowMessageScripts = false'));
+    });
+
+    test('disabled path removes scripts before returning', () {
+      final marker = 'export function executeInlineScripts';
+      final body = _extractBlockBody(rendererJs, rendererJs.indexOf(marker));
+      expect(body, contains('if (!allowMessageScripts)'));
+      expect(body, contains('script.remove()'));
+      expect(
+        body.indexOf('script.remove()'),
+        lessThan(body.indexOf('new Function(src)()')),
+      );
+    });
+
+    test('disabled path sanitizes active HTML before innerHTML insertion', () {
+      expect(
+        rendererJs,
+        contains(
+          "import { sanitizeMessageHtml } from '../bridge/html_sanitizer.js'",
+        ),
+      );
+      final writeBlock = _extractWriteShadowContent(rendererJs);
+      final sanitize = writeBlock.indexOf('sanitizeMessageHtml(formatted)');
+      final insertion = writeBlock.indexOf('root.innerHTML =');
+      expect(sanitize, isNonNegative);
+      expect(insertion, isNonNegative);
+      expect(writeBlock, contains('allowMessageScripts'));
+    });
+
+    test('search re-render sanitizes active HTML before insertion', () {
+      expect(
+        rendererMessageJs,
+        contains(
+          "import { sanitizeMessageHtml } from '../bridge/html_sanitizer.js'",
+        ),
+      );
+      final searchBlock = _extractBlockBody(
+        rendererMessageJs,
+        rendererMessageJs.indexOf('setSearch(query, activeIndex = -1'),
+      );
+      final sanitize = searchBlock.indexOf('sanitizeMessageHtml(highlighted)');
+      final insertion = searchBlock.indexOf('root.innerHTML =');
+      expect(sanitize, isNonNegative);
+      expect(insertion, isNonNegative);
+      expect(searchBlock, contains('this.allowMessageScripts'));
+    });
+
+    test('app bridge changes only the message renderer policy', () {
+      expect(bridgeControllerJs, contains('setAllowMessageScripts(enabled)'));
+      expect(
+        bridgeControllerJs,
+        contains('this.renderer.allowMessageScripts = enabled === true'),
+      );
+      expect(headlessHtml, contains('runSandboxedScript'));
+    });
+  });
+
+  group('ordinary ExtBlocks HTML sanitizer', () {
+    test('controller sanitizes every ExtBlock innerHTML insertion', () {
+      expect(
+        bridgeControllerJs,
+        contains("import { sanitizeExtBlockHtml } from './html_sanitizer.js'"),
+      );
+      expect(
+        RegExp(r'\.innerHTML\s*=(?!\s*sanitizeExtBlockHtml)').allMatches(
+          _extractBlockBody(
+            bridgeControllerJs,
+            bridgeControllerJs.indexOf('_fillExtBlockBody(body, block) {'),
+          ),
+        ),
+        isEmpty,
+      );
+    });
+
+    test('sanitizer blocks active content and dangerous attributes', () {
+      for (final token in [
+        "'script'",
+        "'iframe'",
+        "'object'",
+        "'embed'",
+        "'form'",
+        "'math'",
+        "'foreignobject'",
+        "'animate'",
+        "'use'",
+        "'feimage'",
+        "'meta'",
+        "'link'",
+        "'base'",
+        "'style'",
+        "name.startsWith('on')",
+        "name === 'srcdoc'",
+        "compact.startsWith('javascript:')",
+        'SAFE_IMAGE_DATA_URL',
+        'hasUnsafeCssUrl',
+        'isSafeDataUrl',
+        'EXT_BLOCK_STYLE_PROPERTIES',
+        'UNSAFE_CSS',
+      ]) {
+        expect(htmlSanitizerJs, contains(token));
+      }
+    });
+
+    test('generated image result markup remains supported', () {
+      expect(bridgeControllerJs, contains('_renderExtBlockImageHtml'));
+      expect(bridgeControllerJs, contains('data-action="image-click"'));
+      expect(bridgeControllerJs, contains('data-action="img-download"'));
+      expect(htmlSanitizerJs, contains("'style'"));
+    });
   });
 
   group('bridge ES module layout', () {

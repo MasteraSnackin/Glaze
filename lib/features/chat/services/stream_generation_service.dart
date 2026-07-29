@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/llm/history_assembler.dart';
 import '../../../core/llm/prompt_isolate.dart';
 import '../../../core/llm/prompt_payload_builder.dart';
+import '../../../core/llm/prompt/main_model_context_snapshot.dart';
 import '../../../core/llm/studio/studio_stream_interceptor.dart';
 import '../../../core/llm/stream_accumulator.dart';
 import '../../../core/llm/beauty_state_parser.dart';
@@ -190,6 +191,7 @@ class StreamGenerationService {
       final triggeredMemories = promptResult.triggeredMemories;
 
       if (studioConfig != null) {
+        List<Map<String, dynamic>>? studioFinalMessages;
         final trackerContextSize =
             pipelineSettings.studioAgent.studioTrackerContextSize;
         final trackerVisibleMessageIds =
@@ -289,6 +291,9 @@ class StreamGenerationService {
             }
             scheduleStudioStreamingUpdate();
           },
+          onFinalMessagesBuilt: (messages) {
+            studioFinalMessages = messages;
+          },
         );
         if (_isAborted() || studioResult.status == 'aborted') {
           _ref.read(studioCycleStateProvider.notifier).state =
@@ -378,7 +383,17 @@ class StreamGenerationService {
                 studioResult.stageBriefs,
               ),
             )
-            .copyWith(promptPayload: finalPayload);
+            .copyWith(
+              promptPayload: finalPayload,
+              mainModelContextSnapshot: studioFinalMessages == null
+                  ? null
+                  : MainModelContextSnapshot(
+                      providerMessages: studioFinalMessages!,
+                      promptResult: promptResult,
+                      promptPayload: finalPayload,
+                      isStudioFinalWriter: true,
+                    ),
+            );
         _recordModelUsage(apiConfig.model);
         final messageId = _lastAssistantId(finalState.session!, regenTargetId);
         _recorder.recordStudioTrackerOperation(
@@ -568,7 +583,15 @@ class StreamGenerationService {
                 regenTargetId: regenTargetId,
                 visibleStartIndex: vsi,
               )
-              .copyWith(promptPayload: payload);
+              .copyWith(
+                promptPayload: payload,
+                mainModelContextSnapshot: MainModelContextSnapshot(
+                  providerMessages: apiMessages,
+                  promptResult: promptResult,
+                  promptPayload: payload,
+                  isStudioFinalWriter: false,
+                ),
+              );
           _recordModelUsage(apiConfig.model);
           if (memoryDiagnostics is Map<String, dynamic> &&
               finalState?.session != null) {

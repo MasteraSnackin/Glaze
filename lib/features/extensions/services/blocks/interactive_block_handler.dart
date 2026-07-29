@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/db/repositories/info_blocks_repository.dart';
 import '../../models/block_run_status.dart';
 import '../../models/info_block.dart';
+import '../../models/extension_context_policy.dart';
 import '../../providers/info_blocks_provider.dart';
 import '../info_block_service.dart';
 import '../panel_host_service.dart';
@@ -65,6 +66,10 @@ class InteractiveBlockHandler implements BlockHandler {
         character: context.character,
         persona: context.persona?.name,
         previousOutput: context.previousOutput,
+        contextPolicy:
+            context.preset?.contextPolicy ?? const ExtensionContextPolicy(),
+        mainModelContextSnapshot: context.mainModelContextSnapshot,
+        personaModel: context.persona,
         swipeId: context.swipeId,
         cancelToken: context.cancelToken,
       );

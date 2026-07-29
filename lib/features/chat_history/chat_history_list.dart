@@ -71,9 +71,8 @@ class _ChatHistoryListState extends ConsumerState<ChatHistoryList> {
     final settingsAsync = ref.watch(appSettingsProvider);
 
     return sessionsAsync.when(
-      loading: () => Center(
-        child: CircularProgressIndicator(color: context.cs.primary),
-      ),
+      loading: () =>
+          Center(child: CircularProgressIndicator(color: context.cs.primary)),
       error: (e, _) => Center(child: Text('${'title_error'.tr()}: $e')),
       data: (list) {
         _precacheAvatars(list);
@@ -101,7 +100,10 @@ class _ChatHistoryListState extends ConsumerState<ChatHistoryList> {
 
         return ListView.builder(
           controller: widget.controller,
-          padding: EdgeInsets.only(top: widget.topPadding, bottom: widget.bottomPadding),
+          padding: EdgeInsets.only(
+            top: widget.topPadding,
+            bottom: widget.bottomPadding,
+          ),
           itemCount: filtered.length + 1,
           itemBuilder: (_, i) {
             if (i == 0) return _buildCountHeader(filtered.length);
@@ -120,30 +122,30 @@ class _ChatHistoryListState extends ConsumerState<ChatHistoryList> {
     return Padding(
       padding: EdgeInsets.only(top: widget.topPadding),
       child: Center(
-      child: widget.collapsed
-          ? Icon(
-              Icons.chat_bubble_outline,
-              size: 24,
-              color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
-            )
-          : Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  Icons.chat_bubble_outline,
-                  size: 48,
-                  color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  'no_dialogs'.tr(),
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: context.cs.onSurfaceVariant,
+        child: widget.collapsed
+            ? Icon(
+                Icons.chat_bubble_outline,
+                size: 24,
+                color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
+              )
+            : Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.chat_bubble_outline,
+                    size: 48,
+                    color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
                   ),
-                ),
-              ],
-            ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'no_dialogs'.tr(),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: context.cs.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
       ),
     );
   }
@@ -195,10 +197,7 @@ class _ChatHistoryListState extends ConsumerState<ChatHistoryList> {
       padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
       child: Text(
         '$count ${'count_chats'.plural(count)}',
-        style: TextStyle(
-          fontSize: 11,
-          color: context.cs.onSurfaceVariant,
-        ),
+        style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant),
       ),
     );
   }
@@ -405,8 +404,8 @@ class _SessionTileState extends ConsumerState<_SessionTile>
     final Widget tile = widget.collapsed
         ? _buildCollapsedTile(context, ref, generating, unread)
         : widget.isGrouped
-            ? _buildGroupedTile(context, ref, generating, unread)
-            : _buildFullTile(context, ref, generating, unread);
+        ? _buildGroupedTile(context, ref, generating, unread)
+        : _buildFullTile(context, ref, generating, unread);
 
     return FadeTransition(
       opacity: _fadeAnim,
@@ -517,9 +516,11 @@ class _SessionTileState extends ConsumerState<_SessionTile>
                   Text(
                     info.sessionName?.isNotEmpty == true
                         ? info.sessionName!
-                        : 'session_name'.tr(namedArgs: {
-                            'id': (info.sessionIndex + 1).toString(),
-                          }),
+                        : 'session_name'.tr(
+                            namedArgs: {
+                              'id': (info.sessionIndex + 1).toString(),
+                            },
+                          ),
                     style: TextStyle(
                       fontSize: 12,
                       color: context.cs.onSurfaceVariant,
@@ -557,9 +558,8 @@ class _SessionTileState extends ConsumerState<_SessionTile>
   ) {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: () => context.go(
-        '/chat/${info.characterId}?session=${info.sessionIndex}',
-      ),
+      onTap: () =>
+          context.go('/chat/${info.characterId}?session=${info.sessionIndex}'),
       onLongPress: () => _showSessionActions(context, ref),
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -580,9 +580,11 @@ class _SessionTileState extends ConsumerState<_SessionTile>
                         child: Text(
                           info.sessionName?.isNotEmpty == true
                               ? info.sessionName!
-                              : 'session_name'.tr(namedArgs: {
-                                  'id': (info.sessionIndex + 1).toString(),
-                                }),
+                              : 'session_name'.tr(
+                                  namedArgs: {
+                                    'id': (info.sessionIndex + 1).toString(),
+                                  },
+                                ),
                           style: TextStyle(
                             fontWeight: unread
                                 ? FontWeight.w700
@@ -628,8 +630,9 @@ class _SessionTileState extends ConsumerState<_SessionTile>
   void _showRenameDialog(BuildContext context, WidgetRef ref) {
     final currentName = info.sessionName?.isNotEmpty == true
         ? info.sessionName!
-        : 'session_name'
-            .tr(namedArgs: {'id': (info.sessionIndex + 1).toString()});
+        : 'session_name'.tr(
+            namedArgs: {'id': (info.sessionIndex + 1).toString()},
+          );
     GlazeBottomSheet.show<void>(
       context,
       title: 'Rename Session',
@@ -1043,9 +1046,8 @@ class _GeneratingPreview extends StatelessWidget {
 /// 0→5px across the first 75% of the cycle, then 5px→0.
 class _WritingPencil extends StatefulWidget {
   final Color color;
-  final double size;
 
-  const _WritingPencil({required this.color, this.size = 14});
+  const _WritingPencil({required this.color});
 
   @override
   State<_WritingPencil> createState() => _WritingPencilState();
@@ -1062,14 +1064,18 @@ class _WritingPencilState extends State<_WritingPencil>
     // 0% → 75%: slide right 0 → 5px in 1px steps, each 15% of the cycle.
     for (int i = 0; i < 5; i++)
       TweenSequenceItem(
-        tween: Tween<double>(begin: i.toDouble(), end: (i + 1).toDouble())
-            .chain(CurveTween(curve: Curves.easeInOut)),
+        tween: Tween<double>(
+          begin: i.toDouble(),
+          end: (i + 1).toDouble(),
+        ).chain(CurveTween(curve: Curves.easeInOut)),
         weight: 15,
       ),
     // 75% → 100%: snap back 5px → 0.
     TweenSequenceItem(
-      tween: Tween<double>(begin: 5, end: 0)
-          .chain(CurveTween(curve: Curves.easeInOut)),
+      tween: Tween<double>(
+        begin: 5,
+        end: 0,
+      ).chain(CurveTween(curve: Curves.easeInOut)),
       weight: 25,
     ),
   ]).animate(_controller);
@@ -1084,13 +1090,11 @@ class _WritingPencilState extends State<_WritingPencil>
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: _dx,
-      builder: (context, child) => Transform.translate(
-        offset: Offset(_dx.value, 0),
-        child: child,
-      ),
+      builder: (context, child) =>
+          Transform.translate(offset: Offset(_dx.value, 0), child: child),
       child: Icon(
         Icons.edit,
-        size: widget.size,
+        size: 14,
         color: widget.color.withValues(alpha: 0.7),
       ),
     );
@@ -1129,9 +1133,7 @@ class _StatusBadge extends StatelessWidget {
 
 String formatTimeAgo(int epochMs) {
   final now = DateTime.now();
-  final diff = now.difference(
-    DateTime.fromMillisecondsSinceEpoch(epochMs),
-  );
+  final diff = now.difference(DateTime.fromMillisecondsSinceEpoch(epochMs));
   if (diff.inMinutes < 1) return 'now';
   if (diff.inHours < 1) return '${diff.inMinutes}m';
   if (diff.inDays < 1) return '${diff.inHours}h';
