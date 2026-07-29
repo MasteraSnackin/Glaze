@@ -253,6 +253,11 @@ List<StudioPresetBlock> selectExclusiveStudioBlock(
   if (!group.exclusive) return blocks;
   final ids = group.children.map((block) => block.id).toSet();
   if (!ids.contains(selectedId)) return blocks;
+  if (group.children.any(
+    (block) => block.locked && block.enabled && block.id != selectedId,
+  )) {
+    return blocks;
+  }
   return blocks
       .map(
         (block) => ids.contains(block.id)
@@ -269,6 +274,10 @@ List<StudioPresetBlock> updateStudioPresetBlockRespectingGroups(
   List<StudioPresetBlock> blocks,
   StudioPresetBlock updated,
 ) {
+  final existing = blocks.where((block) => block.id == updated.id).firstOrNull;
+  if (existing?.locked == true && !updated.enabled) {
+    updated = updated.copyWith(enabled: true);
+  }
   var result = blocks
       .map((block) => block.id == updated.id ? updated : block)
       .toList(growable: false);

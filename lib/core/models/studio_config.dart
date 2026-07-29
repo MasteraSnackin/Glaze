@@ -86,6 +86,7 @@ abstract class StudioPresetBlock with _$StudioPresetBlock {
     @Default('system') String role,
     @Default('') String content,
     @Default(true) bool enabled,
+    @Default(false) bool locked,
     @Default(0) int order,
     @Default('pregen') String section,
   }) = _StudioPresetBlock;
