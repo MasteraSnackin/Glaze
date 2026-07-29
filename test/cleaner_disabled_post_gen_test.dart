@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/llm/aux_llm_client.dart' show AuxApiConfig;
+import 'package:glaze_flutter/core/llm/prompt/main_model_context_snapshot.dart';
 import 'package:glaze_flutter/core/llm/studio_ledger_reconciliation.dart';
 import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
@@ -29,6 +30,7 @@ class _RecordingExtBlocksStage extends ExtBlocksStage {
     required ChatSession session,
     required Character character,
     required int agentSwipeId,
+    MainModelContextSnapshot? mainModelContextSnapshot,
   }) async {
     calls++;
     this.agentSwipeId = agentSwipeId;

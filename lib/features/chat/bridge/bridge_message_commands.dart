@@ -177,7 +177,13 @@ class MessageBridgeCommands {
   void _resolveMappedFileUrls(Map<String, dynamic> map) {
     final imagePath = map['imagePath'];
     if (imagePath is String) {
-      map['imagePath'] = _host.resolveLocalFileUrl(imagePath) ?? imagePath;
+      final resolved = _host.resolveLocalFileUrl(imagePath);
+      if (resolved == null) {
+        map.remove('imagePath');
+        map.remove('imageHidden');
+      } else {
+        map['imagePath'] = resolved;
+      }
     }
   }
 

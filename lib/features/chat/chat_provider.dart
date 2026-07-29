@@ -12,6 +12,7 @@ import '../../core/services/generation_notification_service.dart';
 import '../../core/utils/id_generator.dart';
 import '../../core/utils/time_helpers.dart';
 import '../../core/state/db_provider.dart';
+import '../../core/state/persona_resolution.dart';
 import '../chat_history/chat_history_provider.dart';
 import '../memory/state/memory_active_drafts_provider.dart';
 import 'abort_handler.dart';
@@ -502,7 +503,9 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         charId: arg,
         session: session,
         character: character,
-        persona: null,
+        persona: ref.read(
+          effectivePersonaForChatProvider((charId: arg, sessionId: session.id)),
+        ),
       );
     } catch (e) {
       debugPrint('[ChatNotifier] afterUser dispatch failed: $e');

@@ -8,6 +8,7 @@ import { EditController } from './edit_controller.js';
 import { SwipeGestureHandler } from './swipe_gesture_handler.js';
 import { InteractionDispatch } from './interaction_dispatch.js';
 import { PanelHost } from './panel_host.js';
+import { sanitizeExtBlockHtml } from './html_sanitizer.js';
 import { ICON } from '../renderer/icon_library.js';
 
 export class Bridge {
@@ -1107,6 +1108,10 @@ export class Bridge {
     this._renderOverlayBlurRegions();
   }
 
+  setAllowMessageScripts(enabled) {
+    this.renderer.allowMessageScripts = enabled === true;
+  }
+
   /* ---------- Inline edit (toggle into .msg-body) ---------- */
   startEdit(messageId) {
     this._editController.startEdit(messageId, (pos) => {
@@ -1668,17 +1673,17 @@ export class Bridge {
       );
       const htmlEl = document.createElement('div');
       htmlEl.className = 'ext-block-content';
-      htmlEl.innerHTML = html;
+      htmlEl.innerHTML = sanitizeExtBlockHtml(html);
       body.appendChild(htmlEl);
     } else if (hasImgResult) {
       const imgMatch = block.content.match(imgResultRegex);
       const wrapper = document.createElement('span');
-      wrapper.innerHTML = this._renderExtBlockImageHtml(imgMatch[1]);
+      wrapper.innerHTML = sanitizeExtBlockHtml(this._renderExtBlockImageHtml(imgMatch[1]));
       body.appendChild(wrapper.firstElementChild);
     } else {
       const html = document.createElement('div');
       html.className = 'ext-block-content';
-      html.innerHTML = block.content;
+      html.innerHTML = sanitizeExtBlockHtml(block.content);
       body.appendChild(html);
     }
   }

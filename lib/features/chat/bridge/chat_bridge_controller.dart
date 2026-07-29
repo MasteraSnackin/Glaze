@@ -187,8 +187,8 @@ class ChatBridgeController {
       (match) {
         final path = match.group(1) ?? '';
         final suffix = match.group(2) ?? '';
-        final resolved = resolveLocalFileUrl(path) ?? path;
-        return '[IMG:RESULT:$resolved$suffix]';
+        final resolved = resolveLocalFileUrl(path);
+        return resolved == null ? '' : '[IMG:RESULT:$resolved$suffix]';
       },
     );
   }
@@ -204,17 +204,7 @@ class ChatBridgeController {
   }
 
   void setAvatarUrl(String? path, {required bool isChar}) {
-    String? url;
-    if (path != null && path.isNotEmpty) {
-      if (path.startsWith('data:') ||
-          path.startsWith('http://') ||
-          path.startsWith('https://') ||
-          path.startsWith('file://')) {
-        url = resolveLocalFileUrl(path) ?? path;
-      } else {
-        url = resolveLocalFileUrl(path) ?? Uri.file(path).toString();
-      }
-    }
+    final url = path == null || path.isEmpty ? null : resolveLocalFileUrl(path);
     if (isChar) {
       _charAvatarUrl = url;
     } else {

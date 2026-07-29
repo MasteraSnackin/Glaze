@@ -20,6 +20,7 @@ import 'package:glaze_flutter/features/cloud_sync/sync_repo_interfaces.dart';
 import 'package:glaze_flutter/features/extensions/models/block_config.dart';
 import 'package:glaze_flutter/features/extensions/models/block_run_status.dart';
 import 'package:glaze_flutter/features/extensions/models/extension_preset.dart';
+import 'package:glaze_flutter/features/extensions/models/extension_context_policy.dart';
 import 'package:glaze_flutter/features/extensions/models/extensions_settings.dart';
 import 'package:glaze_flutter/features/extensions/models/info_block.dart';
 import 'package:glaze_flutter/core/models/studio_config.dart';
@@ -498,6 +499,11 @@ ExtensionPreset makeExtPreset(String id, {String name = 'Preset'}) =>
 ExtensionPreset makeExtPresetWithBlock(String id) => ExtensionPreset(
   id: id,
   name: 'Rich Preset',
+  contextPolicy: const ExtensionContextPolicy(
+    useMainModelContext: true,
+    includeLorebooks: true,
+    messageCount: -1,
+  ),
   blocks: [
     BlockConfig(
       id: 'block1',
@@ -626,6 +632,10 @@ void main() {
       deviceB.extensionPresets.data['ep1']!.blocks.first.prompt,
       equals('Describe the scene'),
     );
+    final contextPolicy = deviceB.extensionPresets.data['ep1']!.contextPolicy;
+    expect(contextPolicy.useMainModelContext, isTrue);
+    expect(contextPolicy.includeLorebooks, isTrue);
+    expect(contextPolicy.messageCount, -1);
   });
 
   // ── Test 3: ExtensionPreset deletion tracking ─────────────────────────

@@ -625,12 +625,22 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       return;
     }
 
+    // A streaming append may already be crossing the platform channel. The
+    // dispatcher invalidated its epoch synchronously; wait for the call to
+    // settle before replacing the DOM so a late old-session bubble cannot land
+    // after the new session's setMessages.
+    final pendingStreamAppend = _syncState.streamingAppendPending;
+    if (pendingStreamAppend != null) {
+      try {
+        await pendingStreamAppend;
+      } catch (_) {}
+    }
+
     // Drop any interactive panels from the previous session before clearing
     // the WebView DOM. JS-side `clearAll()` also closes panels, but the
     // Dart-side registry has to be reset so the next `openPanel` call can
     // bind fresh handlers on the (potentially new) bridge.
     unawaited(PanelHostService.instance.disposeAll(charId: old.charId));
-    unawaited(bridge.evalJs('window.bridge?.clearAll();'));
     try {
       if (mounted) setState(() => _sessionSwitching = true);
       // Same reasoning as on open: the replace below jumps the list, which the
@@ -696,6 +706,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     }
     _syncState.wasGenerating = widget.isGenerating;
     _syncState.streamingSent = false;
+    _syncState.regenStreamingSent = false;
   }
 
   ChatWebViewWidgetFields _fieldsFor(ChatWebViewWidget w) {
@@ -804,21 +815,71 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       }
       return;
     }
-    if (result.runMessageSync) {
-      _syncMessages(oldWidget.messages);
-      unawaited(_syncExtBlockPanels());
-    }
-    if (result.appendPlaceholder && result.placeholder != null) {
-      unawaited(_bridge?.appendMessage(result.placeholder!));
-      _syncDispatcher.onPlaceholderAppended();
+    final bridge = _bridge;
+    final messageSync = result.runMessageSync
+        ? _syncMessages(oldWidget.messages, bridge: bridge)
+        : Future<void>.value();
+    if (result.runMessageSync) unawaited(_syncExtBlockPanels());
+    if (result.appendPlaceholder &&
+        result.placeholder != null &&
+        bridge != null) {
+      final charId = widget.charId;
+      final sessionId = widget.sessionId;
+      final placeholder = result.placeholder!;
+      late final Future<void> pending;
+      pending = () async {
+        try {
+          bool isCurrent() =>
+              mounted &&
+              identical(_bridge, bridge) &&
+              _ready &&
+              !_sessionSwitching &&
+              widget.charId == charId &&
+              widget.sessionId == sessionId &&
+              widget.isGenerating &&
+              widget.regenTargetId == null &&
+              widget.continuationTargetId == null &&
+              !_syncState.streamingSent;
+          final appended = await appendStreamingPlaceholderAfterMessageSync(
+            messageSync: messageSync,
+            isCurrent: isCurrent,
+            appendPlaceholder: () => bridge.appendMessage(placeholder),
+          );
+          if (appended) {
+            _syncDispatcher.onPlaceholderAppended();
+          } else if (mounted &&
+              identical(_bridge, bridge) &&
+              widget.charId == charId &&
+              widget.sessionId == sessionId &&
+              !widget.isGenerating) {
+            // Stop can land while appendMessage is crossing the platform
+            // channel, after the falling edge already tried to remove it.
+            await bridge.removeMessage(_kStreamingId);
+          }
+        } catch (e, st) {
+          debugPrint(
+            '[ChatWebView] streaming placeholder append failed: $e\n$st',
+          );
+        } finally {
+          if (identical(_syncState.streamingAppendPending, pending)) {
+            _syncState.streamingAppendPending = null;
+          }
+        }
+      }();
+      _syncState.streamingAppendPending = pending;
+    } else {
+      unawaited(messageSync);
     }
   }
 
   static const _messageSync = ChatMessageSync();
 
-  void _syncMessages(List<ChatMessage> oldMsgs) {
-    _messageSync.sync(
-      bridge: _bridge,
+  Future<void> _syncMessages(
+    List<ChatMessage> oldMsgs, {
+    required ChatBridgeController? bridge,
+  }) {
+    return _messageSync.sync(
+      bridge: bridge,
       oldMsgs: oldMsgs,
       newMsgs: widget.messages,
       visibleStartIndex: widget.visibleStartIndex,
@@ -873,6 +934,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       visibleStartIndex: widget.visibleStartIndex,
       onRefreshExtBlocksPanel: _refreshExtBlocksPanel,
       onSyncExtBlockPanels: _syncExtBlockPanels,
+      isCurrentBridge: (bridge) => identical(_bridge, bridge),
     ).attach();
 
     // 'inherit' reuses the global background image; 'custom' uses the chat's

@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/models/character.dart';
 import '../../../../core/models/chat_message.dart';
+import '../../../../core/llm/prompt/main_model_context_snapshot.dart';
 import '../../../../core/services/generation_notification_service.dart';
 import '../../../image_gen/services/image_tag_markup.dart';
 import '../../../../core/state/db_provider.dart';
@@ -100,6 +101,7 @@ class PostGenCoordinator {
   void _launchExtensionBlocksInBackground({
     required ChatSession session,
     required Character? character,
+    required MainModelContextSnapshot? mainModelContextSnapshot,
   }) {
     if (character == null) return;
     _runInBackground(
@@ -107,6 +109,7 @@ class PostGenCoordinator {
         session: session,
         character: character,
         agentSwipeId: -1,
+        mainModelContextSnapshot: mainModelContextSnapshot,
       ),
       'extension blocks',
     );
@@ -154,7 +157,8 @@ class PostGenCoordinator {
       final studioConfig = await ctx.ref
           .read(studioConfigRepoProvider)
           .getBySessionId(sessionId);
-      studioEnabled = studioConfig?.enabled == true &&
+      studioEnabled =
+          studioConfig?.enabled == true &&
           ctx.ref.read(studioFeatureEnabledProvider);
     } catch (e) {
       debugPrint(
@@ -170,6 +174,7 @@ class PostGenCoordinator {
       _launchExtensionBlocksInBackground(
         session: result.session!,
         character: character,
+        mainModelContextSnapshot: result.mainModelContextSnapshot,
       );
       if (!_hasForegroundImageWork(result.session!)) return;
       if (!_beginForegroundPostGen(sessionId: sessionId, genId: genId)) return;
@@ -198,6 +203,7 @@ class PostGenCoordinator {
         messages: result.session!.messages,
         genId: genId,
         promptPayload: result.promptPayload,
+        mainModelContextSnapshot: result.mainModelContextSnapshot,
         character: character,
       );
       postGenFutures.add(cleanerTask);

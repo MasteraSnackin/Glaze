@@ -1,5 +1,6 @@
 import { syncCodeBlockMetadata } from './code_highlight.js';
 import { formatMessageBody } from './macros_in_message.js';
+import { sanitizeMessageHtml } from '../bridge/html_sanitizer.js';
 
 export function writeShadowContent({
   host,
@@ -9,6 +10,7 @@ export function writeShadowContent({
   formatter,
   searchQuery,
   applySearchHighlight,
+  allowMessageScripts = false,
 }) {
   if (!host || !host.shadowRoot) return;
   const root = host.shadowRoot.querySelector('.glaze-message');
@@ -20,9 +22,13 @@ export function writeShadowContent({
     }
     let formatted = formatMessageBody(formatter, text, isUser);
     if (searchQuery) formatted = applySearchHighlight(formatted);
-    root.innerHTML = formatted;
+    // Sanitize before insertion: assigning active HTML first can fire load/error
+    // handlers before a later cleanup gets a chance to remove them.
+    root.innerHTML = allowMessageScripts
+      ? formatted
+      : sanitizeMessageHtml(formatted);
     syncCodeBlockMetadata(root);
-    executeInlineScripts(root);
+    executeInlineScripts(root, allowMessageScripts);
     fixDetailsSummaryArrows(root);
   } catch (e) {
     root.textContent = text || '';
@@ -30,8 +36,12 @@ export function writeShadowContent({
   }
 }
 
-export function executeInlineScripts(root) {
+export function executeInlineScripts(root, allowMessageScripts = false) {
   const scripts = Array.from(root.querySelectorAll('script'));
+  if (!allowMessageScripts) {
+    scripts.forEach(script => script.remove());
+    return;
+  }
   for (const oldScript of scripts) {
     // Inline scripts set via innerHTML are never executed by the browser.
     // We run them manually with shimmed globals so ST-compatible regex

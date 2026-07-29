@@ -93,6 +93,7 @@ class RoutMyConstants {
   ];
 
   static const imageSizes = ['1K', '2K', '4K'];
+  static const seedreamImageSizes = ['1K', '2K'];
 }
 
 class RuRoutMyConstants {
