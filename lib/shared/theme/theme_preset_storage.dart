@@ -8,7 +8,17 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../application/sync_theme_store.dart';
 import 'theme_preset.dart';
 
-class ThemePresetStorage implements SyncThemePresetStore {
+abstract interface class ThemePresetStore {
+  Future<List<ThemePreset>> loadAll();
+  Future<String> loadActiveId();
+  Future<void> saveAll(List<ThemePreset> presets);
+  Future<ThemePreset> importFromFile(String path);
+  Future<void> addPreset(ThemePreset preset);
+  Future<void> removePreset(String id);
+  Future<void> setActive(String id);
+}
+
+class ThemePresetStorage implements SyncThemePresetStore, ThemePresetStore {
   static const _presetsKey = 'theme_presets';
   static const _activeKey = 'theme_active_preset';
 
@@ -20,6 +30,7 @@ class ThemePresetStorage implements SyncThemePresetStore {
     return ThemePresetStorage(prefs);
   }
 
+  @override
   Future<List<ThemePreset>> loadAll() async {
     final raw = _prefs.getString(_presetsKey);
     if (raw == null) return _withBuiltins([]);
@@ -50,18 +61,24 @@ class ThemePresetStorage implements SyncThemePresetStore {
     return result;
   }
 
+  @override
   Future<String> loadActiveId() async {
     return _prefs.getString(_activeKey) ?? 'default';
   }
 
+  @override
   Future<void> saveAll(List<ThemePreset> presets) async {
-    await _prefs.setString(_presetsKey, jsonEncode(presets.map((e) => e.toJson()).toList()));
+    await _prefs.setString(
+      _presetsKey,
+      jsonEncode(presets.map((e) => e.toJson()).toList()),
+    );
   }
 
   Future<void> saveActiveId(String id) async {
     await _prefs.setString(_activeKey, id);
   }
 
+  @override
   Future<ThemePreset> importFromFile(String path) async {
     final file = File(path);
     final bytes = await file.readAsBytes();
@@ -400,6 +417,7 @@ class ThemePresetStorage implements SyncThemePresetStore {
     return 'application/octet-stream';
   }
 
+  @override
   Future<void> addPreset(ThemePreset preset) async {
     final presets = await loadAll();
     final idx = presets.indexWhere((p) => p.id == preset.id);
@@ -411,6 +429,7 @@ class ThemePresetStorage implements SyncThemePresetStore {
     await saveAll(presets);
   }
 
+  @override
   Future<void> removePreset(String id) async {
     if (id == 'default' || id == kMaterialYouPresetId) return;
     final presets = await loadAll();
@@ -418,6 +437,7 @@ class ThemePresetStorage implements SyncThemePresetStore {
     await saveAll(presets);
   }
 
+  @override
   Future<void> setActive(String id) async {
     await saveActiveId(id);
   }
