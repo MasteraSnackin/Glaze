@@ -122,6 +122,9 @@ class BottomSheetInput {
   });
 }
 
+typedef BottomSheetItemBuilder =
+    BottomSheetItem Function(BuildContext context, int index);
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 class GlazeBottomSheet {
@@ -130,6 +133,8 @@ class GlazeBottomSheet {
     String? title,
     Widget? headerAction,
     List<BottomSheetItem>? items,
+    int? itemCount,
+    BottomSheetItemBuilder? itemBuilder,
     List<BottomSheetItem>? itemsAsCards,
     List<BottomSheetSessionItem>? sessionItems,
     List<BottomSheetCardItem>? cardItems,
@@ -140,6 +145,32 @@ class GlazeBottomSheet {
     bool isDismissible = true,
     int? scrollToIndex,
   }) {
+    assert(
+      (itemCount == null) == (itemBuilder == null),
+      'itemCount and itemBuilder must be provided together.',
+    );
+    assert(
+      itemBuilder == null || items == null,
+      'items and itemBuilder cannot be used together.',
+    );
+    assert(
+      itemCount == null || itemCount >= 0,
+      'itemCount cannot be negative.',
+    );
+    assert(
+      itemBuilder == null ||
+          (itemsAsCards == null &&
+              sessionItems == null &&
+              cardItems == null &&
+              bigInfo == null &&
+              input == null &&
+              child == null),
+      'Lazy items cannot be combined with other sheet body content.',
+    );
+    assert(
+      itemBuilder == null || scrollToIndex == null,
+      'scrollToIndex is only supported for materialized items.',
+    );
     return showModalBottomSheet<T>(
       context: context,
       useRootNavigator: true,
@@ -153,6 +184,8 @@ class GlazeBottomSheet {
         title: title,
         headerAction: headerAction,
         items: items,
+        itemCount: itemCount,
+        itemBuilder: itemBuilder,
         itemsAsCards: itemsAsCards,
         sessionItems: sessionItems,
         cardItems: cardItems,
@@ -212,6 +245,8 @@ class _GlazeBottomSheetContent extends ConsumerStatefulWidget {
   final String? title;
   final Widget? headerAction;
   final List<BottomSheetItem>? items;
+  final int? itemCount;
+  final BottomSheetItemBuilder? itemBuilder;
   final List<BottomSheetItem>? itemsAsCards;
   final List<BottomSheetSessionItem>? sessionItems;
   final List<BottomSheetCardItem>? cardItems;
@@ -225,6 +260,8 @@ class _GlazeBottomSheetContent extends ConsumerStatefulWidget {
     this.title,
     this.headerAction,
     this.items,
+    this.itemCount,
+    this.itemBuilder,
     this.itemsAsCards,
     this.sessionItems,
     this.cardItems,
@@ -295,6 +332,26 @@ class _GlazeBottomSheetContentState
 
   bool get _hasHeader => widget.title != null || widget.headerAction != null;
 
+  Widget _buildLazyList(BuildContext context, EdgeInsets padding) {
+    return CustomScrollView(
+      controller: _scrollController,
+      shrinkWrap: true,
+      slivers: [
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 16).add(padding),
+          sliver: SliverList.builder(
+            itemCount: widget.itemCount,
+            itemBuilder: (context, index) => _LazyItemRow(
+              item: widget.itemBuilder!(context, index),
+              isFirst: index == 0,
+              isLast: index == widget.itemCount! - 1,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
@@ -342,49 +399,58 @@ class _GlazeBottomSheetContentState
                     behavior: ScrollConfiguration.of(
                       context,
                     ).copyWith(scrollbars: false),
-                    child: SingleChildScrollView(
-                      controller: _scrollController,
-                      padding: EdgeInsets.only(
-                        bottom: bottomInset + safeBottom + 16,
-                      ),
-                      // Isolates the sheet content in its own layer so a
-                      // scroll only shifts the layer instead of re-recording
-                      // every row each frame.
-                      child: RepaintBoundary(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const SizedBox(height: 4),
-                            if (widget.child != null) widget.child!,
-                            if (widget.bigInfo != null)
-                              _BigInfo(info: widget.bigInfo!),
-                            if (widget.items != null &&
-                                widget.items!.isNotEmpty)
-                              _ItemsList(
-                                items: widget.items!,
-                                scrollToIndex: widget.scrollToIndex,
-                                scrollTargetKey: _scrollTargetKey,
+                    child: widget.itemBuilder != null
+                        ? _buildLazyList(
+                            context,
+                            EdgeInsets.only(
+                              bottom: bottomInset + safeBottom + 16,
+                            ),
+                          )
+                        : SingleChildScrollView(
+                            controller: _scrollController,
+                            padding: EdgeInsets.only(
+                              bottom: bottomInset + safeBottom + 16,
+                            ),
+                            // Isolates the sheet content in its own layer so a
+                            // scroll only shifts the layer instead of re-recording
+                            // every row each frame.
+                            child: RepaintBoundary(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const SizedBox(height: 4),
+                                  if (widget.child != null) widget.child!,
+                                  if (widget.bigInfo != null)
+                                    _BigInfo(info: widget.bigInfo!),
+                                  if (widget.items != null &&
+                                      widget.items!.isNotEmpty)
+                                    _ItemsList(
+                                      items: widget.items!,
+                                      scrollToIndex: widget.scrollToIndex,
+                                      scrollTargetKey: _scrollTargetKey,
+                                    ),
+                                  if (widget.itemsAsCards != null &&
+                                      widget.itemsAsCards!.isNotEmpty)
+                                    _ItemsCardList(items: widget.itemsAsCards!),
+                                  if (widget.sessionItems != null &&
+                                      widget.sessionItems!.isNotEmpty)
+                                    GlazeSessionList(
+                                      items: widget.sessionItems!,
+                                    ),
+                                  if (widget.cardItems != null &&
+                                      widget.cardItems!.isNotEmpty)
+                                    _CardList(items: widget.cardItems!),
+                                  if (widget.input != null)
+                                    _InputSection(
+                                      input: widget.input!,
+                                      controller: _inputController,
+                                      focusNode: _inputFocus,
+                                    ),
+                                ],
                               ),
-                            if (widget.itemsAsCards != null &&
-                                widget.itemsAsCards!.isNotEmpty)
-                              _ItemsCardList(items: widget.itemsAsCards!),
-                            if (widget.sessionItems != null &&
-                                widget.sessionItems!.isNotEmpty)
-                              GlazeSessionList(items: widget.sessionItems!),
-                            if (widget.cardItems != null &&
-                                widget.cardItems!.isNotEmpty)
-                              _CardList(items: widget.cardItems!),
-                            if (widget.input != null)
-                              _InputSection(
-                                input: widget.input!,
-                                controller: _inputController,
-                                focusNode: _inputFocus,
-                              ),
-                          ],
-                        ),
-                      ),
-                    ),
+                            ),
+                          ),
                   ),
                 ),
               ),
@@ -577,6 +643,44 @@ class _ItemRowState extends State<_ItemRow> {
               ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _LazyItemRow extends StatelessWidget {
+  final BottomSheetItem item;
+  final bool isFirst;
+  final bool isLast;
+
+  const _LazyItemRow({
+    required this.item,
+    required this.isFirst,
+    required this.isLast,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.vertical(
+        top: isFirst ? const Radius.circular(16) : Radius.zero,
+        bottom: isLast ? const Radius.circular(16) : Radius.zero,
+      ),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.06),
+          border: Border(
+            top: BorderSide(
+              color: Colors.white.withValues(alpha: isFirst ? 0.1 : 0.06),
+            ),
+            left: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
+            right: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
+            bottom: isLast
+                ? BorderSide(color: Colors.white.withValues(alpha: 0.1))
+                : BorderSide.none,
+          ),
+        ),
+        child: _ItemRow(item: item),
       ),
     );
   }
