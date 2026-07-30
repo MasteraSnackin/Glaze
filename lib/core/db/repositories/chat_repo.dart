@@ -107,10 +107,11 @@ class ChatRepo implements SyncChatStore {
       )..where((t) => t.sessionId.equals(sessionId))).getSingleOrNull();
       if (row == null) return null;
 
-      final messages = (jsonDecode(row.messagesJson) as List<dynamic>)
-          .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>))
-          .toList()
-        ..add(message);
+      final messages =
+          (jsonDecode(row.messagesJson) as List<dynamic>)
+              .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>))
+              .toList()
+            ..add(message);
 
       await (_db.update(
         _db.chatSessions,
@@ -150,13 +151,49 @@ class ChatRepo implements SyncChatStore {
       final (messageCount, _) = _scanTopLevelObjects(row.messagesJson);
       if (messageCount != expectedMessageCount) return null;
 
+      await (_db.update(_db.chatSessions)
+            ..where((t) => t.sessionId.equals(sessionId)))
+          .write(ChatSessionsCompanion(draft: Value(draft)));
+
+      return _toModel(row.copyWith(draft: Value(draft)));
+    });
+  }
+
+  /// Atomically transforms the latest durable message list for a session.
+  ///
+  /// The callback runs inside the database transaction, so callers never have
+  /// to persist a full session snapshot captured before another mutation.
+  Future<ChatSession?> mutateMessages({
+    required String sessionId,
+    required List<ChatMessage> Function(List<ChatMessage> messages) mutate,
+    required int updatedAt,
+  }) async {
+    return _db.transaction(() async {
+      final row = await (_db.select(
+        _db.chatSessions,
+      )..where((t) => t.sessionId.equals(sessionId))).getSingleOrNull();
+      if (row == null) return null;
+
+      final messages = (jsonDecode(row.messagesJson) as List<dynamic>)
+          .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>))
+          .toList();
+      final updatedMessages = mutate(messages);
+      final messagesJson = jsonEncode(
+        updatedMessages.map((e) => e.toJson()).toList(),
+      );
+
       await (_db.update(
         _db.chatSessions,
       )..where((t) => t.sessionId.equals(sessionId))).write(
-        ChatSessionsCompanion(draft: Value(draft)),
+        ChatSessionsCompanion(
+          messagesJson: Value(messagesJson),
+          updatedAt: Value(updatedAt),
+        ),
       );
 
-      return _toModel(row.copyWith(draft: Value(draft)));
+      return _toModel(
+        row.copyWith(messagesJson: messagesJson, updatedAt: updatedAt),
+      );
     });
   }
 

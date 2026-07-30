@@ -288,7 +288,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
 
   Future<void> clearChat() => _messageOpsCtrl.clearChat();
 
-  void setSwipe(int messageIndex, int swipeId) =>
+  Future<void> setSwipe(int messageIndex, int swipeId) =>
       _swipeCtrl.setSwipe(messageIndex, swipeId);
 
   Future<void> changeSwipe(

@@ -53,14 +53,33 @@ class ChatMessageOpsController {
         current.isPostGenRunning) {
       return;
     }
-    var updated = _messageSvc.editMessage(
+    if (index < 0 || index >= current.session!.messages.length) return;
+    var edited = _messageSvc.editMessage(
       current.session!,
       index,
       newContent,
       tagStart: tagStart,
       tagEnd: tagEnd,
     );
-    updated = await _applyRunOnEditRegexes(updated, index);
+    edited = await _applyRunOnEditRegexes(edited, index);
+    final updated = await _messageSvc.commitMessageMutation(
+      current.session!,
+      index,
+      (latest, latestIndex) {
+        var result = _messageSvc.editMessage(
+          latest,
+          latestIndex,
+          newContent,
+          tagStart: tagStart,
+          tagEnd: tagEnd,
+        );
+        final regexContent = edited.messages[index].content;
+        if (result.messages[latestIndex].content != regexContent) {
+          result = _messageSvc.editMessage(result, latestIndex, regexContent);
+        }
+        return result;
+      },
+    );
     if (!_ref.mounted) return;
     _invalidateHistory();
     TokenBreakdownCache.invalidate();
@@ -102,24 +121,26 @@ class ChatMessageOpsController {
     if (content == msg.content) return session;
     final newMessages = List<ChatMessage>.from(session.messages);
     newMessages[index] = msg.copyWith(content: content);
-    final updated = session.copyWith(
+    return session.copyWith(
       messages: newMessages,
       updatedAt: currentTimestampSeconds(),
     );
-    await _ref.read(chatRepoProvider).put(updated);
-    ChatSessionService.updateCache(updated);
-    return updated;
   }
 
   Future<void> moveMessage(int fromIndex, int toIndex) async {
     if (!_ref.mounted) return;
     final current = _getState().value;
     if (current == null || current.session == null) return;
-    final updated = _messageSvc.moveMessage(
-      current.session!,
-      fromIndex,
-      toIndex,
-    );
+    if (fromIndex < 0 || fromIndex >= current.session!.messages.length) return;
+    if (toIndex < 0 || toIndex >= current.session!.messages.length) return;
+    final updated = await _messageSvc.commitMessagesMutation(current.session!, (
+      latest,
+    ) {
+      final movedId = current.session!.messages[fromIndex].id;
+      final currentIndex = latest.messages.indexWhere((m) => m.id == movedId);
+      if (currentIndex < 0) return latest;
+      return _messageSvc.moveMessage(latest, currentIndex, toIndex);
+    });
     _invalidateHistory();
     _setState(AsyncData(current.copyWith(session: updated)));
   }
@@ -181,7 +202,11 @@ class ChatMessageOpsController {
     if (!_ref.mounted) return;
     final current = _getState().value;
     if (current == null || current.session == null) return;
-    final updated = _messageSvc.toggleMessageHidden(current.session!, index);
+    final updated = await _messageSvc.commitMessageMutation(
+      current.session!,
+      index,
+      _messageSvc.toggleMessageHidden,
+    );
     _invalidateHistory();
     _setState(AsyncData(current.copyWith(session: updated)));
   }
@@ -192,7 +217,11 @@ class ChatMessageOpsController {
     if (!_ref.mounted) return;
     final current = _getState().value;
     if (current == null || current.session == null) return;
-    final updated = _messageSvc.toggleImageHidden(current.session!, index);
+    final updated = await _messageSvc.commitMessageMutation(
+      current.session!,
+      index,
+      _messageSvc.toggleImageHidden,
+    );
     if (identical(updated, current.session)) return;
     _invalidateHistory();
     _setState(AsyncData(current.copyWith(session: updated)));
@@ -202,7 +231,10 @@ class ChatMessageOpsController {
     if (!_ref.mounted) return;
     final current = _getState().value;
     if (current == null || current.session == null) return;
-    final updated = _messageSvc.unhideAllMessages(current.session!);
+    final updated = await _messageSvc.commitMessagesMutation(
+      current.session!,
+      _messageSvc.unhideAllMessages,
+    );
     _invalidateHistory();
     _setState(AsyncData(current.copyWith(session: updated)));
   }
@@ -211,7 +243,10 @@ class ChatMessageOpsController {
     if (!_ref.mounted) return;
     final current = _getState().value;
     if (current == null || current.session == null) return;
-    final updated = _messageSvc.hideTopMessages(current.session!, count);
+    final updated = await _messageSvc.commitMessagesMutation(
+      current.session!,
+      (latest) => _messageSvc.hideTopMessages(latest, count),
+    );
     _invalidateHistory();
     _setState(AsyncData(current.copyWith(session: updated)));
   }
