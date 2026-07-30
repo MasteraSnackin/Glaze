@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../features/chat/chat_session_service.dart';
 import '../../features/chat_history/chat_history_provider.dart';
 import '../../features/settings/api_list_provider.dart';
 import '../llm/agent_runner.dart';
@@ -92,6 +93,7 @@ final postCleanerServiceProvider = Provider<PostCleanerService>((ref) {
     llm: const AuxLlmClient(),
     chatRepo: ref.read(chatRepoProvider),
     snapshotRepo: ref.read(trackerSnapshotRepoProvider),
+    onSessionUpdated: ChatSessionService.updateCache,
     invalidateChatHistory: () => ref.invalidate(chatHistoryProvider),
   );
 });
