@@ -8,7 +8,7 @@ import '../../models/character.dart';
 import '../../models/gallery_entry.dart';
 import '../../llm/character_tokens.dart';
 import '../../utils/time_helpers.dart';
-import '../../../features/cloud_sync/sync_repo_interfaces.dart';
+import '../../application/sync_repo_interfaces.dart';
 
 enum CharacterSortField { name, date, lastChat }
 

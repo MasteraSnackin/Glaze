@@ -8,7 +8,7 @@ import '../tables.dart';
 import '../../models/memory_book.dart';
 import '../../state/memory_settings_provider.dart';
 import '../../utils/time_helpers.dart';
-import '../../../features/cloud_sync/sync_repo_interfaces.dart';
+import '../../application/sync_repo_interfaces.dart';
 
 part 'memory_book_repo.g.dart';
 

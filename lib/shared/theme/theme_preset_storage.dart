@@ -5,7 +5,7 @@ import 'dart:typed_data';
 import 'package:archive/archive.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../../features/cloud_sync/sync_repo_interfaces.dart';
+import '../application/sync_theme_store.dart';
 import 'theme_preset.dart';
 
 class ThemePresetStorage implements SyncThemePresetStore {

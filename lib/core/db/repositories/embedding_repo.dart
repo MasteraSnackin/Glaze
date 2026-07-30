@@ -6,7 +6,7 @@ import '../app_db.dart';
 import '../tables.dart';
 import '../../llm/vector_math.dart';
 import '../../utils/time_helpers.dart';
-import '../../../features/cloud_sync/sync_repo_interfaces.dart';
+import '../../application/sync_repo_interfaces.dart';
 
 part 'embedding_repo.g.dart';
 

@@ -6,7 +6,7 @@ import '../../models/studio_config.dart';
 import '../../llm/studio_controller_ontology.dart';
 import '../../utils/time_helpers.dart';
 import '../app_db.dart';
-import '../../../features/cloud_sync/sync_repo_interfaces.dart';
+import '../../application/sync_repo_interfaces.dart';
 
 class StudioConfigRepo implements SyncStudioConfigStore {
   final AppDatabase db;

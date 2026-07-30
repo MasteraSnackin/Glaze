@@ -5,7 +5,7 @@ import 'package:drift/drift.dart';
 
 import '../app_db.dart';
 import '../../models/chat_message.dart';
-import '../../../features/cloud_sync/sync_repo_interfaces.dart';
+import '../../application/sync_repo_interfaces.dart';
 
 class ChatRepo implements SyncChatStore {
   final AppDatabase _db;
