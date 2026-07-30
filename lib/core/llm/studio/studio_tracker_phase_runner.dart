@@ -151,11 +151,27 @@ class StudioTrackerPhaseRunner {
       final cachedBriefs = <StudioStageBrief>[];
       final fetchTrackers = <StudioAgent>[];
       final cacheProbeByAgent = <String, CacheProbe>{};
+      final trackerContextOverride =
+          _readPipelineSettings().studioAgent.studioTrackerContextSize;
       for (final agent in dueTrackers) {
+        final resolvedConfig = await _executor.resolveTrackerConfig(
+          agent: agent,
+          apiConfig: apiConfig,
+          sessionId: sessionId,
+          apiConfigId: config.cheapApiConfigId,
+        );
+        if (token.isCancelled) {
+          return const PreGenPhaseResult(status: 'aborted');
+        }
         final probe = _briefCache.probeCache(
           agent: agent,
           config: config,
-          presetId: presetId,
+          studioPreset: studioPreset,
+          sessionId: sessionId,
+          resolvedConfig: resolvedConfig,
+          trackerContextSize: trackerContextOverride,
+          maxTokensOverride: _executor.effectiveMaxTokens(agent),
+          temperatureOverride: _executor.effectiveTemperature(agent),
           promptPayload: promptPayload,
           sceneKey: sceneKey,
           turnIndex: turnIndex,
@@ -176,8 +192,6 @@ class StudioTrackerPhaseRunner {
         apiConfigId: config.cheapApiConfigId,
       );
 
-      final trackerContextOverride = _readPipelineSettings()
-          .studioAgent.studioTrackerContextSize;
       final fetchedResults = await batcher.runPhase(
         batchGroups: grouping.batchGroups,
         individualAgents: grouping.individualAgents,

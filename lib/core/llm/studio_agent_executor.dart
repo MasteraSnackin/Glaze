@@ -35,6 +35,26 @@ class StudioAgentExecutor {
     this._readPipelineSettings,
   );
 
+  Future<ResolvedAgentConfig> resolveTrackerConfig({
+    required StudioAgent agent,
+    required ApiConfig apiConfig,
+    required String sessionId,
+    String? apiConfigId,
+  }) {
+    return _runner.resolveAgentConfig(
+      agent,
+      apiConfig,
+      sessionId,
+      apiConfigId: apiConfigId,
+    );
+  }
+
+  int? effectiveMaxTokens(StudioAgent agent) =>
+      _runner.effectiveMaxTokens(agent, false);
+
+  double? effectiveTemperature(StudioAgent agent) =>
+      _runner.effectiveTemperature(agent, false);
+
   /// Delegate the actual LLM call to [AgentRunner]. This method still
   /// builds the `messages` list (prompt assembly via [StudioMessageBuilder])
   /// and adapts the result type to the internal [StudioStageBrief] pipeline.
