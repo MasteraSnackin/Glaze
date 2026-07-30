@@ -183,12 +183,11 @@ class ChatMessageEmbeddingService {
   }
 
   Future<void> _deleteStaleChunks(String sessionId, int chunkCount) async {
-    final rows = await _repo.getBySourceId(sessionId);
+    final rows = await _repo.getBySource('chat_message', sessionId);
     final currentEntryIds = {
       for (var index = 0; index < chunkCount; index++) '${sessionId}_$index',
     };
     for (final row in rows) {
-      if (row.sourceType != 'chat_message') continue;
       if (!currentEntryIds.contains(row.entryId)) {
         await _repo.deleteByEntryId(row.entryId);
       }

@@ -82,4 +82,26 @@ void main() {
 
     expect(await repo.getBySourceId('s1'), isEmpty);
   });
+
+  test('stale cleanup preserves rows from another source type', () async {
+    await seedChunk(0);
+    await repo.putEmbeddingVector(
+      entryId: 'memory-s1',
+      sourceType: 'memory_entry',
+      sourceId: 's1',
+      vectors: const [
+        [1, 0],
+      ],
+      textHash: 'memory',
+    );
+
+    await service.indexSessionMessages(
+      sessionId: 's1',
+      messages: messages(4),
+      config: const EmbeddingConfig(endpoint: 'test'),
+    );
+
+    expect(await repo.getByEntryId('s1_0'), isNull);
+    expect(await repo.getByEntryId('memory-s1'), isNotNull);
+  });
 }

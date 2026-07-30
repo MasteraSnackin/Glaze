@@ -63,6 +63,13 @@ class EmbeddingRepo extends DatabaseAccessor<AppDatabase>
     )..where((e) => e.sourceId.equals(sourceId))).get();
   }
 
+  Future<List<EmbeddingRow>> getBySource(String sourceType, String sourceId) {
+    return (select(embeddings)
+          ..where((e) => e.sourceType.equals(sourceType))
+          ..where((e) => e.sourceId.equals(sourceId)))
+        .get();
+  }
+
   Future<void> put(EmbeddingsCompanion entry) {
     return into(embeddings).insertOnConflictUpdate(entry);
   }
