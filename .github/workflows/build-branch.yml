@@ -514,11 +514,15 @@ jobs:
 
       - name: Install Linux dependencies
         # pacman-package-manager brings makepkg, which the packaging script uses
-        # for the Arch/CachyOS package; the rest is the standard Flutter Linux
+        # for the Arch/CachyOS package. libgstreamer1.0-dev and
+        # libgstreamer-plugins-base1.0-dev provide the gstreamer-1.0 /
+        # gstreamer-audio-1.0 pkg-config modules that audioplayers_linux's
+        # CMakeLists requires — without them CMake configure fails before
+        # Flutter even starts compiling. The rest is the standard Flutter Linux
         # desktop toolchain.
         run: |
           sudo apt-get update -y
-          sudo apt-get install -y clang cmake git ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev pacman-package-manager
+          sudo apt-get install -y clang cmake git ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev pacman-package-manager libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
 
       - name: Install Flutter
         uses: subosito/flutter-action@v2
