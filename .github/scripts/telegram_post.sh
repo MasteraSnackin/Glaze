@@ -113,8 +113,13 @@ for FILE in "${FILES[@]}"; do
     continue
   fi
 
-  ARGS=(-F "chat_id=$CHAT_ID" -F "reply_to_message_id=$MSG_ID" -F "document=@$FILE")
-  [ -n "$TOPIC_ID" ] && ARGS+=(-F "message_thread_id=$TOPIC_ID")
+  # --form-string for the scalar fields, because -F treats a leading "@" as
+  # "read this local file" — which silently breaks a public-group chat id given
+  # as @username. Only the document itself is meant to be a file reference.
+  ARGS=(--form-string "chat_id=$CHAT_ID"
+        --form-string "reply_to_message_id=$MSG_ID"
+        -F "document=@$FILE")
+  [ -n "$TOPIC_ID" ] && ARGS+=(--form-string "message_thread_id=$TOPIC_ID")
 
   RESPONSE=$(curl -sS -X POST "$API/sendDocument" "${ARGS[@]}")
   if [ "$(jq -r '.ok' <<<"$RESPONSE")" != "true" ]; then
