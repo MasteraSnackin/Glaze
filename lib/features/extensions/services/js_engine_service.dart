@@ -75,6 +75,9 @@ class JsEngineBridgeHost {
   final JsBridgeService bridge;
   final String? Function()? currentCharIdProvider;
 
+  static Set<String> get supportedMethods =>
+      JsBridgeMethodRegistry.methodsFor(JsBridgeHostProfile.headless);
+
   Future<Map<String, dynamic>> handle(List<dynamic> args) async {
     if (args.isEmpty) {
       return {

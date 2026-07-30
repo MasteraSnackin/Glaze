@@ -9,6 +9,8 @@
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:glaze_flutter/features/extensions/services/js_bridge_service.dart';
+
 String _asset(String name) =>
     File('assets/chat_webview/$name').readAsStringSync();
 
@@ -96,18 +98,7 @@ void main() {
     });
 
     test('SDK exposes expected window.glaze methods', () {
-      for (final method in [
-        'getVariables',
-        'setVariables',
-        'deleteVariable',
-        'executeCommand',
-        'triggerGeneration',
-        'injectPrompt',
-        'uninjectPrompt',
-        'generateText',
-        'showToast',
-        'playAudio',
-      ]) {
+      for (final method in JsBridgeMethodRegistry.methods.map((e) => e.name)) {
         expect(glazeSdkJs, contains('$method('));
       }
     });

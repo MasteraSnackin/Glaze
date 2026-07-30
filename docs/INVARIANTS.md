@@ -834,7 +834,10 @@ matching source-check (`e.source !== iframe.contentWindow` /
 
 ### INV-JS1: `glaze.*` calls are gated by per-preset capability permissions (default-deny) ✅ ENFORCED
 
-Every bridge method is wrapped in `JsBridgeService._requireCapability(capabilityId)`.
+Every public bridge method is defined in the immutable
+`JsBridgeMethodRegistry`, including its capability resolver and host
+availability. `JsBridgeService.dispatch` rejects methods absent from that
+registry and enforces the resolved capability before invoking a handler.
 The default policy is **deny** when no `PermissionCheck` is registered (test seam).
 Production wires `_bridgePermissionCheck` in `ChatWebViewWidget`, which reads
 `activePresetPermissionsProvider`. The `PresetPermissions` model has 19
@@ -852,6 +855,11 @@ toggles; only `showToast` defaults to allow.
 | `glaze.playAudio` | `play_audio` |
 | `glaze.executeCommand` | `execute_command` |
 | `glaze.showToast` (default ALLOW) | `show_toast` |
+
+The visual and headless hosts currently expose the same registry-defined
+contract. Scope-sensitive variable methods resolve their capability from
+`params.scope`; fixed-capability methods carry a fixed resolver. Handler code
+does not maintain a second capability table.
 
 ### INV-JS2: Variable writes are atomic; payload is JSON-validated and ≤ 64 KiB ✅ ENFORCED
 

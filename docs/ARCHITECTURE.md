@@ -1105,9 +1105,11 @@ independent of the chat text-generation token (INV-EG5).
 ### Capability permissions
 
 Each extension preset carries a `PresetPermissions` freezed model with
-19 capability toggles (default-deny except `showToast`). Every bridge
-method enforces its capability via `JsBridgeService._requireCapability`,
-which delegates to an injected `PermissionCheck` function — production
+19 capability toggles (default-deny except `showToast`). The immutable
+`JsBridgeMethodRegistry` is the canonical public method set and records each
+method's capability resolver plus visual/headless host availability.
+`JsBridgeService.dispatch` enforces that metadata through the injected
+`PermissionCheck` function — production
 wiring in `ChatWebViewWidget` reads `activePresetPermissionsProvider`.
 
 | Capability | Bridge method |
@@ -1208,6 +1210,7 @@ and the same `JsBridgeService.dispatch` for `glaze.*` calls.
 * `info_block_injector.dart` — inserts stored `InfoBlock` outputs into the prompt context
 * `js_bridge_service.dart` — compatibility export for `js_bridge/js_bridge_service.dart`
 * `js_bridge/js_bridge_service.dart` — pure dispatcher: `{ method, params, context }` → `{ ok, result/error }`; no Riverpod
+* `js_bridge/js_bridge_method_registry.dart` — immutable canonical method set with operation, capability resolver, and host availability metadata
 * `js_bridge/handlers/*_handler.dart` — variables, generation, prompt injection, audio, commands, toast
 * `js_bridge/capability_resolver.dart` + `permission_gate.dart` — method/scope capability mapping and default-deny enforcement
 * `js_engine_service.dart` — singleton headless engine + `JsEngineBridgeHost` (optional `currentCharIdProvider` for `triggerGeneration` in headless mode)

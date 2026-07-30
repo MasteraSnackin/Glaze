@@ -18,6 +18,7 @@ class GlazeCommand {
     required this.name,
     required this.summary,
     required this.handler,
+    this.bridgeMethod,
   });
 
   /// The slash-prefixed name (e.g. `'/trigger'`). Always starts with `/`.
@@ -25,6 +26,10 @@ class GlazeCommand {
 
   /// Short human-readable description for the editor / docs.
   final String summary;
+
+  /// Canonical bridge method used by a wired command, or null for commands
+  /// that do not delegate through `JsBridgeService.dispatch`.
+  final String? bridgeMethod;
 
   /// Async handler. `args` is whatever the caller passed — for the JS
   /// bridge it's the JS `params.args` object. The handler must NEVER
@@ -164,6 +169,7 @@ CommandRegistry buildWiredCommandRegistry(WiredCommandDeps deps) {
   registry.register(
     GlazeCommand(
       name: '/trigger',
+      bridgeMethod: 'triggerGeneration',
       summary:
           'Trigger a chat generation. Args: { mode?: "continue" | "regenerate" | "auto", reason?: string }',
       handler: (args, context) async {
@@ -184,6 +190,7 @@ CommandRegistry buildWiredCommandRegistry(WiredCommandDeps deps) {
   registry.register(
     GlazeCommand(
       name: '/getvar',
+      bridgeMethod: 'getVariables',
       summary:
           'Read a JS variable. Args: { scope: "chat"|"character"|"global"|"message", path?: string }',
       handler: (args, context) async {
@@ -204,6 +211,7 @@ CommandRegistry buildWiredCommandRegistry(WiredCommandDeps deps) {
   registry.register(
     GlazeCommand(
       name: '/setvar',
+      bridgeMethod: 'setVariables',
       summary: 'Write a JS variable. Args: { scope, path?, value? | values? }',
       handler: (args, context) async {
         final params = <String, dynamic>{'scope': args['scope'] ?? 'chat'};
@@ -223,6 +231,7 @@ CommandRegistry buildWiredCommandRegistry(WiredCommandDeps deps) {
   registry.register(
     GlazeCommand(
       name: '/inject',
+      bridgeMethod: 'injectPrompt',
       summary:
           'Inject a runtime prompt block. Args: { id, content, depth?, role? }',
       handler: (args, context) async {
@@ -254,6 +263,7 @@ CommandRegistry buildWiredCommandRegistry(WiredCommandDeps deps) {
   registry.register(
     GlazeCommand(
       name: '/toast',
+      bridgeMethod: 'showToast',
       summary:
           'Show a toast. Args: { message, severity?: "info"|"success"|"warning"|"error", action?: string }',
       handler: (args, context) async {

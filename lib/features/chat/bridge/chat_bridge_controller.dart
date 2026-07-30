@@ -35,6 +35,9 @@ import 'chat_overlay_blur_region.dart';
 /// Inbound callbacks (JS -> Dart) are exposed as nullable function
 /// properties on the host and registered via [setupHandlers].
 class ChatBridgeController {
+  static Set<String> get supportedExtensionMethods =>
+      JsBridgeMethodRegistry.methodsFor(JsBridgeHostProfile.visual);
+
   final InAppWebViewController _controller;
   final JsBridgeService _jsBridgeService;
   final Map<String, Completer<dynamic>> _pendingRequests = {};

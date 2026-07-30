@@ -103,6 +103,42 @@ void main() {
       final names = registry.list().map((c) => c.name).toSet();
       expect(names, {'/trigger', '/getvar', '/setvar', '/inject', '/toast'});
     });
+
+    test('every command dispatches its registered canonical method', () async {
+      String? dispatchedMethod;
+      final registry = buildWiredCommandRegistry(
+        WiredCommandDeps(
+          bridgeDispatch: (request) async {
+            dispatchedMethod = request['method'] as String?;
+            return {'ok': true};
+          },
+        ),
+      );
+      final argsByCommand = <String, Map<String, dynamic>>{
+        '/trigger': {'mode': 'auto'},
+        '/getvar': {'scope': 'chat'},
+        '/setvar': {'scope': 'chat', 'path': 'x', 'value': 1},
+        '/inject': {'id': 'mood', 'content': 'tense'},
+        '/toast': {'message': 'hi'},
+      };
+
+      for (final command in registry.list()) {
+        expect(command.bridgeMethod, isNotNull, reason: command.name);
+        expect(
+          JsBridgeMethodRegistry.lookup(command.bridgeMethod!),
+          isNotNull,
+          reason: '${command.name} -> ${command.bridgeMethod}',
+        );
+
+        dispatchedMethod = null;
+        await registry.run(
+          command.name,
+          argsByCommand[command.name]!,
+          context: const CommandContext(charId: 'c1'),
+        );
+        expect(dispatchedMethod, command.bridgeMethod, reason: command.name);
+      }
+    });
   });
 
   group('/getvar and /setvar route through the bridge', () {
