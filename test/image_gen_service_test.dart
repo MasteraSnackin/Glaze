@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/features/image_gen/services/image_gen_service.dart';
 import 'package:glaze_flutter/features/image_gen/services/image_tag_markup.dart';
@@ -287,6 +288,48 @@ void main() {
       );
       final prompt = style.isNotEmpty ? '$style, $cleanPrompt' : cleanPrompt;
       expect(prompt, 'cinematic manga, A group walks');
+    });
+
+    test('labels rout.my references by their transmitted order', () {
+      final prompt = imagePromptWithReferenceLabels('Danvi drives.', [
+        {'name': 'Lucy', 'image': 'first'},
+        {'name': 'Danvi', 'image': 'second'},
+        {'name': 'context', 'image': 'third'},
+      ]);
+
+      expect(prompt, contains('Reference image 1 shows "Lucy".'));
+      expect(prompt, contains('Reference image 2 shows "Danvi".'));
+      expect(prompt, isNot(contains('shows "context"')));
+      expect(prompt, endsWith('Danvi drives.'));
+    });
+  });
+
+  group('generated image format', () {
+    test('detects formats used for persisted file extensions', () {
+      expect(
+        imageExtensionForBytes(Uint8List.fromList([0xff, 0xd8, 0xff])),
+        'jpg',
+      );
+      expect(
+        imageExtensionForBytes(
+          Uint8List.fromList([
+            0x52,
+            0x49,
+            0x46,
+            0x46,
+            0,
+            0,
+            0,
+            0,
+            0x57,
+            0x45,
+            0x42,
+            0x50,
+          ]),
+        ),
+        'webp',
+      );
+      expect(imageExtensionForBytes(Uint8List.fromList([1, 2, 3])), 'png');
     });
   });
 

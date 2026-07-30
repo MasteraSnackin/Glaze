@@ -64,6 +64,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   int _topK = 0;
   bool _stream = true;
   bool _requestReasoning = false;
+  bool _useResponsesApi = false;
   bool _showNativeReasoning = true;
   String _reasoningEffort = 'medium';
   bool _omitTemperature = false;
@@ -218,6 +219,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       _presencePenalty = config.presencePenalty;
       _stream = config.stream;
       _requestReasoning = config.requestReasoning && !config.omitReasoning;
+      _useResponsesApi = config.useResponsesApi;
       _showNativeReasoning = config.showNativeReasoning;
       _reasoningEffort = config.reasoningEffort;
       _omitTemperature = config.omitTemperature;
@@ -268,6 +270,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
             presencePenalty: _presencePenalty,
             stream: _stream,
             requestReasoning: _requestReasoning,
+            useResponsesApi: _useResponsesApi,
             showNativeReasoning: _showNativeReasoning,
             reasoningHistoryCount: reasoningHistoryCount < -1
                 ? 0
@@ -736,6 +739,16 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
             header: 'label_reasoning_settings'.tr(),
             helpTerm: 'preset-reasoning',
             items: [
+              if (_protocol == LlmProtocol.openai)
+                MenuSwitchItem(
+                  label: 'label_use_responses_api'.tr(),
+                  description: 'desc_use_responses_api'.tr(),
+                  value: _useResponsesApi,
+                  onChanged: (value) {
+                    setState(() => _useResponsesApi = value);
+                    _scheduleSave();
+                  },
+                ),
               if (_supportsReasoning)
                 MenuSwitchItem(
                   label: 'label_reasoning'.tr(),
@@ -1261,6 +1274,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       apiKey: apiKey,
       model: model,
       protocol: _protocol,
+      useResponsesApi: _useResponsesApi,
     );
     if (!mounted) return;
     switch (result) {

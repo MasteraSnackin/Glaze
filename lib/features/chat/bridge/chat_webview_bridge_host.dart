@@ -182,6 +182,7 @@ class ChatWebViewBridgeHost {
           presencePenalty: apiConfig.presencePenalty,
           stream: false,
           requestReasoning: apiConfig.requestReasoning,
+          useResponsesApi: apiConfig.useResponsesApi,
           reasoningEffort: apiConfig.reasoningEffort,
           omitTemperature: apiConfig.omitTemperature,
           omitTopP: apiConfig.omitTopP,

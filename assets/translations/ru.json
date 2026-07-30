@@ -132,6 +132,8 @@
   "desc_auto_hide_images": "Скрывать отправленные изображения через указанное количество ответов от модели",
   "label_auto_hide_images_n": "Количество ответов",
   "label_reasoning_settings": "Мышление",
+  "label_use_responses_api": "Использовать Responses API",
+  "desc_use_responses_api": "Отправлять OpenAI-compatible запросы на /v1/responses вместо /v1/chat/completions. Неподдерживаемые провайдеры могут отклонить запрос.",
   "label_reasoning_effort": "Уровень мышления",
   "reasoning_effort_min": "Минимальный",
   "reasoning_effort_low": "Низкий",

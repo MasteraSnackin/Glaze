@@ -27,6 +27,7 @@ class ChatTransportRequest {
   final double presencePenalty;
   final bool stream;
   final bool requestReasoning;
+  final bool useResponsesApi;
   final String? reasoningEffort;
   final bool omitTemperature;
   final bool omitTopP;
@@ -81,6 +82,7 @@ class ChatTransportRequest {
     this.presencePenalty = 0.0,
     this.stream = true,
     this.requestReasoning = false,
+    this.useResponsesApi = false,
     this.reasoningEffort,
     this.omitTemperature = false,
     this.omitTopP = false,

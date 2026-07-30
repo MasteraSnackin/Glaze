@@ -133,6 +133,8 @@
   "desc_auto_hide_images": "Hide sent images after the specified number of model responses",
   "label_auto_hide_images_n": "Responses count",
   "label_reasoning_settings": "Reasoning",
+  "label_use_responses_api": "Use Responses API",
+  "desc_use_responses_api": "Send OpenAI-compatible requests to /v1/responses instead of /v1/chat/completions. Unsupported providers may reject it.",
   "label_reasoning_effort": "Reasoning Effort",
   "reasoning_effort_min": "Minimal",
   "reasoning_effort_low": "Low",
