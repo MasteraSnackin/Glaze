@@ -168,7 +168,7 @@ class HeroCard extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            'used / ${fmtNum(contextSize)}'.toUpperCase(),
+            'tokenizer_used_of'.tr(args: [fmtNum(contextSize)]).toUpperCase(),
             style: const TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.w500,
@@ -186,7 +186,10 @@ class HeroCard extends StatelessWidget {
             child: Row(
               children: [
                 Expanded(
-                  child: KpiItem(value: fmtNum(remaining), label: 'remaining'),
+                  child: KpiItem(
+                    value: fmtNum(remaining),
+                    label: 'label_remaining'.tr(),
+                  ),
                 ),
                 Container(
                   width: 1,
@@ -196,7 +199,7 @@ class HeroCard extends StatelessWidget {
                 Expanded(
                   child: KpiItem(
                     value: '${historyFill.round()}%',
-                    label: 'history fill',
+                    label: 'label_history_fill'.tr(),
                   ),
                 ),
               ],
@@ -463,7 +466,9 @@ class TokenizerActionButtons extends ConsumerWidget {
                 if (context.mounted) onRefresh();
               },
               icon: const Icon(Icons.visibility, size: 16),
-              label: Text('${'action_unhide_msg'.tr()} all ($hiddenCount)'),
+              label: Text(
+                'action_unhide_all_count'.tr(args: ['$hiddenCount']),
+              ),
               style: OutlinedButton.styleFrom(
                 foregroundColor: context.cs.primary,
                 padding: const EdgeInsets.symmetric(
@@ -568,7 +573,10 @@ class NearLimitWarning extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            'Hide about $hideCount top message${hideCount == 1 ? '' : 's'} to free about $hideTokens tokens.',
+            'tokenizer_near_limit_body'.plural(
+              hideCount,
+              args: ['$hideCount', '$hideTokens'],
+            ),
             style: TextStyle(fontSize: 14, color: context.cs.onSurfaceVariant),
           ),
         ],
@@ -788,7 +796,7 @@ class TokenizerEmbeddedToolbar extends StatelessWidget {
       child: Row(
         children: [
           Text(
-            showSettings ? 'Context Settings' : 'Context',
+            showSettings ? 'context_settings_title'.tr() : 'tab_context'.tr(),
             style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w600,
@@ -803,14 +811,16 @@ class TokenizerEmbeddedToolbar extends StatelessWidget {
               size: 20,
               color: showSettings ? context.cs.primary : context.cs.onSurface,
             ),
-            tooltip: showSettings ? 'Close settings' : 'Context Settings',
+            tooltip: showSettings
+                ? 'action_close_settings'.tr()
+                : 'context_settings_title'.tr(),
             onPressed: onToggleSettings,
           ),
           if (!showSettings)
             IconButton(
               visualDensity: VisualDensity.compact,
               icon: const Icon(Icons.refresh, size: 20),
-              tooltip: 'Recalculate',
+              tooltip: 'action_recalculate'.tr(),
               onPressed: onRefresh,
             ),
         ],

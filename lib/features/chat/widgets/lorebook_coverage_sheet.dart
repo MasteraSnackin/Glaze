@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -147,7 +148,7 @@ class _CoveragePanelState extends ConsumerState<CoveragePanel> {
         : _result == null
         ? Center(
             child: Text(
-              'No data',
+              'label_no_data'.tr(),
               style: TextStyle(color: context.cs.onSurfaceVariant),
             ),
           )
@@ -187,7 +188,7 @@ class _CoveragePanelState extends ConsumerState<CoveragePanel> {
                 child: Row(
                   children: [
                     Text(
-                      'Lorebook Coverage',
+                      'lorebook_coverage_title'.tr(),
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
@@ -198,7 +199,7 @@ class _CoveragePanelState extends ConsumerState<CoveragePanel> {
                     IconButton(
                       visualDensity: VisualDensity.compact,
                       icon: const Icon(Icons.refresh, size: 20),
-                      tooltip: 'Refresh',
+                      tooltip: 'action_refresh'.tr(),
                       onPressed: _loading ? null : _load,
                     ),
                   ],
@@ -212,12 +213,12 @@ class _CoveragePanelState extends ConsumerState<CoveragePanel> {
     }
 
     return SheetView(
-      title: 'Lorebook Coverage',
+      title: 'lorebook_coverage_title'.tr(),
       actions: [
         SheetViewAction(
           icon: const Icon(Icons.refresh, size: 20),
           onPressed: _load,
-          tooltip: 'Refresh',
+          tooltip: 'action_refresh'.tr(),
         ),
       ],
       body: body,
@@ -247,27 +248,27 @@ class _SummaryBar extends StatelessWidget {
       child: Row(
         children: [
           _StatChip(
-            label: 'Active',
+            label: 'label_active'.tr(),
             value: '${result.activatedCount - result.cutOffCount}',
             color: Colors.green,
           ),
           const SizedBox(width: 8),
           if (result.cutOffCount > 0) ...[
             _StatChip(
-              label: 'Cut off',
+              label: 'label_cut_off'.tr(),
               value: '${result.cutOffCount}',
               color: Colors.orange,
             ),
             const SizedBox(width: 8),
           ],
           _StatChip(
-            label: 'Inactive',
+            label: 'label_inactive'.tr(),
             value: '${result.totalCandidates - result.activatedCount}',
             color: context.cs.onSurfaceVariant,
           ),
           const SizedBox(width: 8),
           _StatChip(
-            label: 'Total',
+            label: 'label_total'.tr(),
             value: '${result.totalCandidates}',
             color: Colors.cyan,
           ),
@@ -320,10 +321,10 @@ class _StatChip extends StatelessWidget {
 enum _FilterMode { activated, cutOff, notTriggered, all }
 
 String _labelForFilter(_FilterMode m) => switch (m) {
-  _FilterMode.activated => 'Activated',
-  _FilterMode.cutOff => 'Cut Off',
-  _FilterMode.notTriggered => 'Not Triggered',
-  _FilterMode.all => 'All',
+  _FilterMode.activated => 'filter_activated'.tr(),
+  _FilterMode.cutOff => 'filter_cut_off'.tr(),
+  _FilterMode.notTriggered => 'filter_not_triggered'.tr(),
+  _FilterMode.all => 'filter_all'.tr(),
 };
 
 class _EntryList extends StatelessWidget {
@@ -337,7 +338,7 @@ class _EntryList extends StatelessWidget {
       return Padding(
         padding: const EdgeInsets.all(24),
         child: Text(
-          'No entries in this category',
+          'lorebook_no_entries_category'.tr(),
           style: TextStyle(color: context.cs.onSurfaceVariant, fontSize: 14),
         ),
       );
@@ -453,9 +454,9 @@ class _CoverageTileState extends State<_CoverageTile> {
                         color: Colors.purple.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(4),
                       ),
-                      child: const Text(
-                        'CONST',
-                        style: TextStyle(
+                      child: Text(
+                        'label_const_badge'.tr(),
+                        style: const TextStyle(
                           fontSize: 9,
                           fontWeight: FontWeight.w700,
                           color: Colors.purple,
@@ -474,9 +475,9 @@ class _CoverageTileState extends State<_CoverageTile> {
                         color: Colors.orange.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(4),
                       ),
-                      child: const Text(
-                        'BUDGET',
-                        style: TextStyle(
+                      child: Text(
+                        'label_budget_badge'.tr(),
+                        style: const TextStyle(
                           fontSize: 9,
                           fontWeight: FontWeight.w700,
                           color: Colors.orange,
@@ -551,7 +552,9 @@ class _CoverageTileState extends State<_CoverageTile> {
               if (e.matchMessageIndex != null) ...[
                 const SizedBox(height: 4),
                 Text(
-                  'Matched in message #${e.matchMessageIndex! + 1}',
+                  'lorebook_matched_in_message'.tr(
+                    args: ['${e.matchMessageIndex! + 1}'],
+                  ),
                   style: TextStyle(
                     fontSize: 11,
                     color: Colors.blue.withValues(alpha: 0.7),
@@ -595,9 +598,9 @@ class _PositionBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (label, color) = switch (position) {
-      'worldInfoBefore' => ('Before', Colors.cyan),
-      'worldInfoAfter' => ('After', Colors.teal),
-      'lorebooksMacro' => ('Macro', Colors.purple),
+      'worldInfoBefore' => ('position_before'.tr(), Colors.cyan),
+      'worldInfoAfter' => ('position_after'.tr(), Colors.teal),
+      'lorebooksMacro' => ('position_macro'.tr(), Colors.purple),
       _ => (position, context.cs.onSurfaceVariant),
     };
 
