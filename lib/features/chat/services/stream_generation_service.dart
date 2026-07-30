@@ -30,6 +30,7 @@ import '../chat_provider.dart';
 import '../chat_state.dart';
 import '../state/cached_token_breakdown.dart';
 import '../state/memory_activity_provider.dart';
+import '../state/studio_cycle_state_mapper.dart';
 import '../state/studio_cycle_state_provider.dart';
 import 'memory_agent_recorder.dart';
 import 'saved_message_writer.dart';
@@ -351,7 +352,7 @@ class StreamGenerationService {
         );
         _ref
             .read(studioCycleStateProvider.notifier)
-            .state = StudioStreamInterceptor.studioFinalState(
+            .state = StudioCycleStateMapper.studioFinalState(
           session.id,
           studioResult,
           StudioCyclePhase.done,

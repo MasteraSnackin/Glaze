@@ -1,8 +1,6 @@
 import '../../models/chat_message.dart';
 import '../prompt_builder.dart' show PromptPayload;
 import '../studio_stage_brief.dart';
-import '../../../features/chat/state/studio_cycle_state_provider.dart';
-import '../memory_studio_service.dart' show StudioPipelineResult;
 import '../../models/agent_operation_record.dart';
 import '../tokenizer.dart';
 
@@ -114,42 +112,6 @@ class StudioStreamInterceptor {
     return briefs
         .map((b) => {'id': b.agentId, 'name': b.agentName, 'content': b.brief})
         .toList(growable: false);
-  }
-
-  /// Builds the terminal `StudioCycleState` from a `StudioPipelineResult`,
-  /// aggregating the per-agent briefs into completed/failed counts.
-  static StudioCycleState studioFinalState(
-    String sessionId,
-    StudioPipelineResult result,
-    StudioCyclePhase phase,
-  ) {
-    final briefs = result.stageBriefs;
-    final ok = briefs.where((b) => b.status == 'ok').length;
-    final failed = briefs.length - ok;
-    final failedNames = briefs
-        .where((b) => b.status != 'ok')
-        .map((b) => b.agentName)
-        .toList(growable: false);
-    switch (phase) {
-      case StudioCyclePhase.done:
-        return StudioCycleState.done(
-          sessionId: sessionId,
-          totalAgents: briefs.length,
-          completedAgents: ok,
-          failedAgents: failed,
-          failedAgentNames: failedNames,
-        );
-      case StudioCyclePhase.agentErrors:
-        return StudioCycleState.agentErrors(
-          sessionId: sessionId,
-          totalAgents: briefs.length,
-          completedAgents: ok,
-          failedAgents: failed,
-          failedAgentNames: failedNames,
-        );
-      default:
-        return const StudioCycleState.idle();
-    }
   }
 
   /// Maps a Studio pipeline status string to an [AgentOperationStatus].
