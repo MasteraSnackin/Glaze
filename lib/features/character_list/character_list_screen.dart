@@ -11,13 +11,12 @@ import 'package:wechat_assets_picker/wechat_assets_picker.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/db/repositories/character_repo.dart';
-import '../../core/services/character_book_converter.dart';
 import '../../core/services/character_export_helper.dart';
 import '../../core/services/character_importer.dart';
+import '../../core/services/character_import_persistence_coordinator.dart';
 import '../../core/state/character_folder_provider.dart';
 import '../../core/state/character_provider.dart';
 import '../../core/state/db_provider.dart';
-import '../../core/state/lorebook_provider.dart';
 import '../../shared/shell/header_scroll_hider.dart';
 import '../../shared/shell/nav_height_provider.dart';
 import '../../shared/shell/nav_retap_provider.dart';
@@ -33,10 +32,10 @@ import '../../shared/widgets/glaze_toast.dart';
 import '../catalog/catalog_provider.dart';
 import '../catalog/third_party_providers_provider.dart';
 import '../catalog/widgets/widgets.dart';
-import '../character_gallery/gallery_provider.dart';
 import '../picks/widgets/picks_grid.dart';
 import '../settings/app_settings_provider.dart';
 import 'character_sort.dart';
+import 'character_import_persistence_provider.dart';
 import 'character_detail_screen.dart';
 import 'character_selection_provider.dart';
 import 'filtered_characters_provider.dart';
@@ -1243,8 +1242,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
     if (assets == null || assets.isEmpty) return;
 
     final importer = await ref.read(characterImporterProvider.future);
-    final notifier = ref.read(charactersProvider.notifier);
-    final galleryService = await ref.read(galleryServiceProvider.future);
+    final persistence = ref.read(characterImportPersistenceCoordinatorProvider);
     int imported = 0;
     String? lastError;
 
@@ -1259,32 +1257,9 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
           continue;
         }
         final r = await importer.importFromBytes(bytes, name);
-        await notifier.add(r.character);
-        if (r.characterBookData != null) {
-          final lorebook = convertCharacterBook(
-            r.characterBookData!,
-            r.character.id,
-          );
-          debugPrint(
-            '[character_import] gallery saving_lorebook id=${lorebook.id} '
-            'name=${lorebook.name} entries=${lorebook.entries.length} '
-            'character=${r.character.id}',
-          );
-          await ref.read(lorebooksProvider.notifier).put(lorebook);
-        } else {
-          debugPrint(
-            '[character_import] gallery no_lorebook character=${r.character.id}',
-          );
-        }
-        if (r.galleryImages != null) {
-          for (final img in r.galleryImages!) {
-            await galleryService.addImageBytes(
-              r.character.id,
-              img.bytes,
-              img.ext,
-              label: img.label,
-            );
-          }
+        final persisted = await persistence.persist(r);
+        if (persisted case CharacterImportPersistenceFailure()) {
+          persisted.rethrowError();
         }
         imported++;
       } catch (e) {
@@ -1326,8 +1301,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
     if (result == null || result.files.isEmpty) return;
 
     final importer = await ref.read(characterImporterProvider.future);
-    final notifier = ref.read(charactersProvider.notifier);
-    final galleryService = await ref.read(galleryServiceProvider.future);
+    final persistence = ref.read(characterImportPersistenceCoordinatorProvider);
     int imported = 0;
     String? lastError;
 
@@ -1341,32 +1315,9 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
         } else {
           continue;
         }
-        await notifier.add(r.character);
-        if (r.characterBookData != null) {
-          final lorebook = convertCharacterBook(
-            r.characterBookData!,
-            r.character.id,
-          );
-          debugPrint(
-            '[character_import] files saving_lorebook id=${lorebook.id} '
-            'name=${lorebook.name} entries=${lorebook.entries.length} '
-            'character=${r.character.id}',
-          );
-          await ref.read(lorebooksProvider.notifier).put(lorebook);
-        } else {
-          debugPrint(
-            '[character_import] files no_lorebook character=${r.character.id}',
-          );
-        }
-        if (r.galleryImages != null) {
-          for (final img in r.galleryImages!) {
-            await galleryService.addImageBytes(
-              r.character.id,
-              img.bytes,
-              img.ext,
-              label: img.label,
-            );
-          }
+        final persisted = await persistence.persist(r);
+        if (persisted case CharacterImportPersistenceFailure()) {
+          persisted.rethrowError();
         }
         imported++;
       } catch (e) {
