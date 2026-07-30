@@ -210,37 +210,65 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
       result = await FilePicker.pickFiles(
         type: Platform.isIOS ? FileType.any : FileType.custom,
         allowedExtensions: Platform.isIOS ? null : ['json'],
-        allowMultiple: false,
+        allowMultiple: true,
         withData: true,
       );
     } catch (_) {}
     if (!mounted) return;
     if (result == null || result.files.isEmpty) return;
-    final picked = result.files.first;
 
-    try {
-      String jsonString;
-      if (picked.bytes != null && picked.bytes!.isNotEmpty) {
-        jsonString = utf8.decode(picked.bytes!);
-      } else if (picked.path != null && picked.path!.isNotEmpty) {
-        jsonString = await File(picked.path!).readAsString();
-      } else {
-        if (ctx.mounted) GlazeToast.show(ctx, 'Cannot read file');
-        return;
-      }
+    final notifier = ref.read(presetListProvider.notifier);
+    final imported = <Preset>[];
+    Object? lastError;
+    var unreadable = 0;
 
-      final json = jsonDecode(jsonString) as Map<String, dynamic>;
-      final preset = parseSillyTavernPreset(json, picked.name);
-      await ref.read(presetListProvider.notifier).add(preset);
-      if (ctx.mounted) {
-        GlazeToast.show(
-          ctx,
-          'Imported "${preset.name}" (${preset.blocks.length} blocks)',
-        );
+    for (final picked in result.files) {
+      try {
+        String jsonString;
+        if (picked.bytes != null && picked.bytes!.isNotEmpty) {
+          jsonString = utf8.decode(picked.bytes!);
+        } else if (picked.path != null && picked.path!.isNotEmpty) {
+          jsonString = await File(picked.path!).readAsString();
+        } else {
+          unreadable++;
+          continue;
+        }
+
+        final json = jsonDecode(jsonString) as Map<String, dynamic>;
+        final preset = parseSillyTavernPreset(json, picked.name);
+        await notifier.add(preset);
+        imported.add(preset);
+      } catch (e) {
+        lastError = e;
       }
-    } catch (e) {
-      if (ctx.mounted) GlazeErrorDialog.show(ctx, e, prefix: 'Import failed: ');
     }
+
+    if (!ctx.mounted) return;
+
+    if (imported.isEmpty) {
+      if (lastError != null) {
+        GlazeErrorDialog.show(ctx, lastError, prefix: 'Import failed: ');
+      } else if (unreadable > 0) {
+        GlazeToast.show(ctx, 'Cannot read file');
+      }
+      return;
+    }
+
+    if (imported.length == 1 && result.files.length == 1) {
+      final preset = imported.single;
+      GlazeToast.show(
+        ctx,
+        'Imported "${preset.name}" (${preset.blocks.length} blocks)',
+      );
+      return;
+    }
+
+    final failed = result.files.length - imported.length;
+    GlazeToast.show(
+      ctx,
+      'Imported ${imported.length} presets'
+      '${failed > 0 ? ' — $failed failed' : ''}',
+    );
   }
 }
 

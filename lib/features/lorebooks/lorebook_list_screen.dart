@@ -193,39 +193,74 @@ class LorebookListScreen extends ConsumerWidget {
       type: FileType.custom,
       allowedExtensions: ['json'],
       dialogTitle: 'lorebook_import_st_dialog_title'.tr(),
+      allowMultiple: true,
       withData: true,
     );
     if (result == null || result.files.isEmpty) return;
-    final filePath = result.files.single.path;
-    if (filePath == null) return;
 
-    try {
-      final importResult = await importSTLorebookFromFile(filePath);
-      await ref
-          .read(lorebooksProvider.notifier)
-          .addLorebook(importResult.lorebook);
-      if (context.mounted) {
-        GlazeToast.show(
-          context,
-          'lorebook_imported'.tr(
-            args: [
-              importResult.lorebook.name,
-              importResult.entryCount.toString(),
-            ],
-          ),
-        );
-        await Navigator.of(context).push(
-          MaterialPageRoute<void>(
-            builder: (_) =>
-                LorebookEditorScreen(lorebookId: importResult.lorebook.id),
-          ),
-        );
-      }
-    } catch (e) {
-      if (context.mounted) {
-        GlazeErrorDialog.show(context, e, prefix: 'Import failed: ');
+    final notifier = ref.read(lorebooksProvider.notifier);
+    final imported = <STLorebookImportResult>[];
+    Object? lastError;
+
+    for (final file in result.files) {
+      try {
+        final STLorebookImportResult importResult;
+        final bytes = file.bytes;
+        final filePath = file.path;
+        if (bytes != null && bytes.isNotEmpty) {
+          importResult = importSTLorebook(
+            jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>,
+            nameOverride: file.name,
+          );
+        } else if (filePath != null && filePath.isNotEmpty) {
+          importResult = await importSTLorebookFromFile(filePath);
+        } else {
+          continue;
+        }
+        await notifier.addLorebook(importResult.lorebook);
+        imported.add(importResult);
+      } catch (e) {
+        lastError = e;
       }
     }
+
+    if (!context.mounted) return;
+
+    if (imported.isEmpty) {
+      if (lastError != null) {
+        GlazeErrorDialog.show(context, lastError, prefix: 'Import failed: ');
+      }
+      return;
+    }
+
+    // A single picked file keeps the original flow: toast + open the editor.
+    if (result.files.length == 1) {
+      final single = imported.single;
+      GlazeToast.show(
+        context,
+        'lorebook_imported'.tr(
+          args: [single.lorebook.name, single.entryCount.toString()],
+        ),
+      );
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => LorebookEditorScreen(lorebookId: single.lorebook.id),
+        ),
+      );
+      return;
+    }
+
+    final failed = result.files.length - imported.length;
+    final summary = StringBuffer(
+      '${'import_success'.tr()}: ${imported.length} '
+      '${'count_lorebooks'.plural(imported.length)}',
+    );
+    if (failed > 0) {
+      summary.write(
+        ' — ${'import_failed_count'.tr(args: [failed.toString()])}',
+      );
+    }
+    GlazeToast.show(context, summary.toString());
   }
 
   void _lorebookMenu(BuildContext context, WidgetRef ref, Lorebook lb) {
