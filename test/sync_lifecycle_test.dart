@@ -13,6 +13,7 @@ import 'package:glaze_flutter/core/models/persona.dart';
 import 'package:glaze_flutter/core/models/preset.dart';
 import 'package:glaze_flutter/core/models/studio_config.dart';
 import 'package:glaze_flutter/core/application/session_deletion_store.dart';
+import 'package:glaze_flutter/core/application/character_deletion_store.dart';
 import 'package:glaze_flutter/features/cloud_sync/sync_repo_interfaces.dart';
 import 'package:glaze_flutter/shared/theme/theme_preset.dart';
 import 'package:glaze_flutter/features/cloud_sync/cloud_adapter.dart';
@@ -92,6 +93,29 @@ class FakeSessionDeletionStore implements SessionDeletionStore {
   Future<void> deleteSession(String sessionId) async {
     deletedSessionIds.add(sessionId);
     await chats.delete(sessionId);
+  }
+}
+
+class FakeCharacterDeletionStore implements CharacterDeletionStore {
+  final FakeCharacterStore characters;
+  final List<Set<String>> deletedCharacterIds = [];
+
+  FakeCharacterDeletionStore(this.characters);
+
+  @override
+  Future<CharacterDeletionResult> deleteCharacters(
+    Set<String> characterIds,
+  ) async {
+    deletedCharacterIds.add(Set.of(characterIds));
+    for (final id in characterIds) {
+      await characters.delete(id);
+    }
+    return CharacterDeletionResult(
+      characterIds: characterIds,
+      sessionIds: const {},
+      studioConfigSessionIds: const {},
+      lorebookIds: const {},
+    );
   }
 }
 
@@ -534,6 +558,7 @@ class SyncWorld {
   late final FakeThemePresetStore uiThemes;
   late final InMemoryManifestProvider manifestProvider;
   late final FakeSessionDeletionStore sessionDeletions;
+  late final FakeCharacterDeletionStore characterDeletions;
 
   SyncWorld() {
     characters = FakeCharacterStore();
@@ -548,6 +573,7 @@ class SyncWorld {
     cloud = FakeCloudAdapter();
     uiThemes = FakeThemePresetStore();
     sessionDeletions = FakeSessionDeletionStore(chats);
+    characterDeletions = FakeCharacterDeletionStore(characters);
     manifestProvider = InMemoryManifestProvider(
       characterRepo: characters,
       chatRepo: chats,
@@ -585,6 +611,7 @@ class SyncWorld {
     null,
     null,
     sessionDeletions,
+    characterDeletions,
     (_) async {},
   );
 }
@@ -833,6 +860,39 @@ void main() {
     expect(world.chats.data['deleted-session'], isNull);
     expect(world.sessionDeletions.deletedSessionIds, ['deleted-session']);
   });
+
+  test(
+    'Pull routes a character tombstone through the character cascade',
+    () async {
+      final world = SyncWorld();
+      await world.characters.put(makeChar('deleted-character'));
+
+      final cloudManifest = SyncManifest(
+        deviceId: 'cloud-device',
+        createdAt: 1,
+        entries: {
+          'character:deleted-character': SyncManifestEntry(
+            type: 'character',
+            id: 'deleted-character',
+            path: cloudPath('character', 'deleted-character'),
+            updatedAt: 2,
+            hash: '',
+            deleted: true,
+          ),
+        },
+      );
+      world.cloud.files[cloudPath('manifest', 'manifest')] = jsonEncode(
+        cloudManifest.toJson(),
+      );
+
+      await world.engine.pullEntities(onProgress: (_) {}, onConflict: (_) {});
+
+      expect(world.characters.data['deleted-character'], isNull);
+      expect(world.characterDeletions.deletedCharacterIds, [
+        {'deleted-character'},
+      ]);
+    },
+  );
 
   test('Cloud round-trip restores the active Studio preset', () async {
     const activePreset = 'studio_loom_causal_direct_v1';

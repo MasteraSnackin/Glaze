@@ -51,6 +51,7 @@ final syncServiceProvider = FutureProvider<SyncService>((ref) async {
       ref.watch(appDbProvider),
     ),
     sessionDeletionStore: ref.watch(sessionDeletionRepoProvider),
+    characterDeletionStore: ref.watch(characterDeletionRepoProvider),
     saveLorebookActivations: saveLorebookActivations,
   );
   await service.init();

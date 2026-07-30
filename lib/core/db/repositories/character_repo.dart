@@ -9,6 +9,7 @@ import '../../models/gallery_entry.dart';
 import '../../llm/character_tokens.dart';
 import '../../utils/time_helpers.dart';
 import '../../application/sync_repo_interfaces.dart';
+import 'character_deletion_repo.dart';
 
 enum CharacterSortField { name, date, lastChat }
 
@@ -240,57 +241,7 @@ class CharacterRepo implements SyncCharacterStore {
 
   @override
   Future<void> delete(String id) async {
-    // Capture the variation group/order before deletion so we can promote a
-    // sibling to representative (variant_order 0) if needed — otherwise the
-    // whole group would vanish from the My Characters list (which only shows
-    // variant_order 0 rows).
-    final deletedRow = await (_db.select(_db.characters)
-          ..where((t) => t.charId.equals(id)))
-        .getSingleOrNull();
-
-    final sessionIds = (await (_db.select(_db.chatSessions)
-              ..where((t) => t.characterId.equals(id)))
-            .get())
-        .map((r) => r.sessionId)
-        .toList();
-    if (sessionIds.isNotEmpty) {
-      await (_db.delete(_db.memoryBookRows)
-            ..where((t) => t.sessionId.isIn(sessionIds)))
-          .go();
-      await (_db.delete(_db.trackerRows)
-            ..where((t) => t.sessionId.isIn(sessionIds)))
-          .go();
-      await (_db.delete(_db.chatSummaries)
-            ..where((t) => t.sessionId.isIn(sessionIds)))
-          .go();
-    }
-    await (_db.delete(_db.chatSessions)..where((t) => t.characterId.equals(id))).go();
-    // Drop folder memberships for this character (local folders feature).
-    await (_db.delete(_db.characterFolderMembers)
-          ..where((t) => t.charId.equals(id)))
-        .go();
-    await (_db.delete(_db.characters)..where((t) => t.charId.equals(id))).go();
-
-    if (deletedRow != null && deletedRow.variantOrder == 0) {
-      final groupId = deletedRow.variantGroupId.isEmpty
-          ? deletedRow.charId
-          : deletedRow.variantGroupId;
-      await _promoteRepresentative(groupId);
-    }
-  }
-
-  /// Ensures the variation group has a representative (variant_order 0) by
-  /// promoting its lowest-ordered remaining sibling. No-op when the group is
-  /// empty or already has a representative.
-  Future<void> _promoteRepresentative(String groupId) async {
-    final siblings = await (_db.select(_db.characters)
-          ..where((t) => t.variantGroupId.equals(groupId))
-          ..orderBy([(t) => OrderingTerm.asc(t.variantOrder)]))
-        .get();
-    if (siblings.isEmpty || siblings.any((s) => s.variantOrder == 0)) return;
-    await (_db.update(_db.characters)
-          ..where((t) => t.charId.equals(siblings.first.charId)))
-        .write(const CharactersCompanion(variantOrder: Value(0)));
+    await CharacterDeletionRepo(_db).deleteCharacters({id});
   }
 
   /// All variations in a group, ordered by variant_order (representative first).

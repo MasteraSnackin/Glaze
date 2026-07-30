@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:drift/drift.dart';
 
 import '../app_db.dart';
+import 'session_deletion_queries.dart';
 import '../../models/chat_message.dart';
 import '../../application/sync_repo_interfaces.dart';
 
@@ -720,32 +721,17 @@ class ChatRepo implements SyncChatStore {
   /// dependent data (memory books, summaries). Returns the deleted session IDs
   /// for sync-deletion tracking.
   Future<List<String>> deleteByCharacterId(String characterId) async {
-    final rows = await (_db.select(
-      _db.chatSessions,
-    )..where((t) => t.characterId.equals(characterId))).get();
-    final ids = rows.map((r) => r.sessionId).toList();
-
-    if (ids.isNotEmpty) {
-      await (_db.delete(
-        _db.memoryBookRows,
-      )..where((t) => t.sessionId.isIn(ids))).go();
-      await (_db.delete(
-        _db.trackerRows,
-      )..where((t) => t.sessionId.isIn(ids))).go();
-      await (_db.delete(
-        _db.trackerSnapshots,
-      )..where((t) => t.sessionId.isIn(ids))).go();
-      await (_db.delete(
-        _db.ledgerReconciliationCheckpoints,
-      )..where((t) => t.sessionId.isIn(ids))).go();
-      await (_db.delete(
-        _db.chatSummaries,
-      )..where((t) => t.sessionId.isIn(ids))).go();
-      await (_db.delete(
+    return _db.transaction(() async {
+      final rows = await (_db.select(
         _db.chatSessions,
-      )..where((t) => t.characterId.equals(characterId))).go();
-    }
-    return ids;
+      )..where((t) => t.characterId.equals(characterId))).get();
+      final ids = rows.map((r) => r.sessionId).toList();
+      final deletion = SessionDeletionQueries(_db);
+      for (final id in ids) {
+        await deletion.deleteSessionRows(id);
+      }
+      return ids;
+    });
   }
 
   SessionMetadata _toMetadata(ChatSessionRow c) {
