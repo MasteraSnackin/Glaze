@@ -72,13 +72,6 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   final String arg;
   bool _buildComplete = false;
 
-  void _persistSession(ChatSession session) {
-    ref.read(chatRepoProvider).put(session).catchError((Object e) {
-      debugPrint('[ChatNotifier] failed to persist session: $e');
-    });
-    ChatSessionService.updateCache(session);
-  }
-
   /// Reflects the active session's generation state into
   /// [generatingSessionsProvider]. Called on every state transition; membership
   /// updates are idempotent so streaming chunks don't churn the registry.
@@ -169,7 +162,14 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       state = s;
     },
     getState: () => state,
-    persistSession: _persistSession,
+    mutateSession: (sessionId, mutate) => ref
+        .read(chatRepoProvider)
+        .mutateSession(
+          sessionId: sessionId,
+          mutate: mutate,
+          updatedAt: currentTimestampSeconds(),
+        ),
+    loadSession: ref.read(chatRepoProvider).getById,
   );
 
   void setCancelToken(CancelToken token, {required int genId}) =>
@@ -181,7 +181,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       ImageRecoveryService.fixupSwipesWithImageResults(session);
 
   void abortImageGeneration() => _abortHandler.abortImageGeneration();
-  void abortGeneration() => _abortHandler.abortGeneration();
+  Future<void> abortGeneration() => _abortHandler.abortGeneration();
   void cancelImageGeneration() => _abortHandler.cancelImageGeneration();
   Future<void> retryImageGeneration() async =>
       _imageRecoverySvc.retryImageGeneration();
@@ -518,7 +518,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     if (ref.read(editingMessageIdProvider(arg)) != null) return;
     if (state.value?.isGenerating == true ||
         state.value?.isPostGenRunning == true) {
-      abortGeneration();
+      await abortGeneration();
     }
     final current = state.value;
     if (current == null ||

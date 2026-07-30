@@ -17,7 +17,8 @@ final _resolverProvider = Provider<RegenResolver>((ref) {
     charId: 'c1',
     setState: (next) => state = next,
     getState: () => state,
-    persistSession: (_) {},
+    mutateSession: (_, _) async => null,
+    loadSession: (_) async => null,
   );
   return RegenResolver(
     StageContext(

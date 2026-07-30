@@ -132,7 +132,8 @@ void main() {
           charId: 'c1',
           setState: (next) => state = next,
           getState: () => state,
-          persistSession: (_) {},
+          mutateSession: (_, _) async => null,
+          loadSession: (_) async => null,
         );
         final ctx = StageContext(
           ref: ref,
