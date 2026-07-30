@@ -168,31 +168,54 @@ class ChatRepo implements SyncChatStore {
     required List<ChatMessage> Function(List<ChatMessage> messages) mutate,
     required int updatedAt,
   }) async {
+    return mutateSession(
+      sessionId: sessionId,
+      updatedAt: updatedAt,
+      mutate: (session) => session.copyWith(
+        messages: mutate(List<ChatMessage>.from(session.messages)),
+      ),
+    );
+  }
+
+  /// Atomically transforms the latest durable chat session while preserving
+  /// columns the callback did not change.
+  Future<ChatSession?> mutateSession({
+    required String sessionId,
+    required ChatSession? Function(ChatSession session) mutate,
+    required int updatedAt,
+  }) async {
     return _db.transaction(() async {
       final row = await (_db.select(
         _db.chatSessions,
       )..where((t) => t.sessionId.equals(sessionId))).getSingleOrNull();
       if (row == null) return null;
 
-      final messages = (jsonDecode(row.messagesJson) as List<dynamic>)
-          .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>))
-          .toList();
-      final updatedMessages = mutate(messages);
+      final current = _toModel(row);
+      final updated = mutate(current);
+      if (updated == null) return null;
       final messagesJson = jsonEncode(
-        updatedMessages.map((e) => e.toJson()).toList(),
+        updated.messages.map((e) => e.toJson()).toList(),
       );
+      final sessionVarsJson = updated.sessionVars.isNotEmpty
+          ? jsonEncode(updated.sessionVars)
+          : null;
 
       await (_db.update(
         _db.chatSessions,
       )..where((t) => t.sessionId.equals(sessionId))).write(
         ChatSessionsCompanion(
           messagesJson: Value(messagesJson),
+          sessionVarsJson: Value(sessionVarsJson),
           updatedAt: Value(updatedAt),
         ),
       );
 
       return _toModel(
-        row.copyWith(messagesJson: messagesJson, updatedAt: updatedAt),
+        row.copyWith(
+          messagesJson: messagesJson,
+          sessionVarsJson: Value(sessionVarsJson),
+          updatedAt: updatedAt,
+        ),
       );
     });
   }
@@ -222,6 +245,21 @@ class ChatRepo implements SyncChatStore {
       );
       return updated;
     });
+  }
+
+  static Map<String, String> applySessionVarDelta(
+    Map<String, String> latest,
+    Map<String, String> before,
+    Map<String, String> after,
+  ) {
+    final merged = Map<String, String>.from(latest);
+    for (final key in before.keys) {
+      if (!after.containsKey(key)) merged.remove(key);
+    }
+    for (final entry in after.entries) {
+      if (before[entry.key] != entry.value) merged[entry.key] = entry.value;
+    }
+    return merged;
   }
 
   @override

@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/models/chat_message.dart';
+import '../../../core/db/repositories/chat_repo.dart';
 import '../../../core/services/generation_notification_service.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../core/utils/time_helpers.dart';
@@ -109,7 +111,7 @@ class GenerationPipeline {
       }
 
       final service = ctx.ref.read(chatGenerationServiceProvider);
-      final result = await service.generate(
+      var result = await service.generate(
         session: session,
         saveSession: saveSession,
         charId: ctx.charId,
@@ -142,11 +144,20 @@ class GenerationPipeline {
         return null;
       }
 
-      await ctx.ref.read(chatRepoProvider).put(result.session!);
+      final durableSession = await _commitGenerationResult(
+        baseSession: saveSession ?? session,
+        generatedSession: result.session!,
+        regenTargetId: regenTargetId,
+      );
+      if (durableSession == null) {
+        await notifService.onGenerationAborted();
+        return null;
+      }
+      result = result.copyWith(session: durableSession);
       if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) {
         return null;
       }
-      ChatSessionService.updateCache(result.session!);
+      ChatSessionService.updateCache(durableSession);
       ctx.ref.invalidate(chatHistoryProvider);
 
       final generationErrored =
@@ -287,6 +298,76 @@ class GenerationPipeline {
       await _handlePipelineError(e, genId, notifService);
       return null;
     }
+  }
+
+  Future<ChatSession?> _commitGenerationResult({
+    required ChatSession baseSession,
+    required ChatSession generatedSession,
+    required String? regenTargetId,
+  }) {
+    return ctx.ref
+        .read(chatRepoProvider)
+        .mutateSession(
+          sessionId: generatedSession.id,
+          updatedAt: generatedSession.updatedAt,
+          mutate: (latest) {
+            final messages = List<ChatMessage>.from(latest.messages);
+            if (regenTargetId != null) {
+              final baseIndex = baseSession.messages.indexWhere(
+                (message) => message.id == regenTargetId,
+              );
+              final generatedIndex = generatedSession.messages.indexWhere(
+                (message) => message.id == regenTargetId,
+              );
+              final latestIndex = messages.indexWhere(
+                (message) => message.id == regenTargetId,
+              );
+              if (baseIndex < 0 || generatedIndex < 0 || latestIndex < 0) {
+                return null;
+              }
+              final base = baseSession.messages[baseIndex];
+              final current = messages[latestIndex];
+              if (!_sameGenerationAnchor(base, current)) return null;
+              messages[latestIndex] = generatedSession.messages[generatedIndex]
+                  .copyWith(
+                    isHidden: current.isHidden,
+                    imageHidden: current.imageHidden,
+                  );
+            } else {
+              if (generatedSession.messages.length !=
+                  baseSession.messages.length + 1) {
+                return null;
+              }
+              final expectedTail = baseSession.messages.lastOrNull?.id;
+              final currentTail = messages.lastOrNull?.id;
+              if (expectedTail != currentTail) return null;
+              messages.add(generatedSession.messages.last);
+            }
+
+            return latest.copyWith(
+              messages: messages,
+              sessionVars: ChatRepo.applySessionVarDelta(
+                latest.sessionVars,
+                baseSession.sessionVars,
+                generatedSession.sessionVars,
+              ),
+            );
+          },
+        );
+  }
+
+  static bool _sameGenerationAnchor(ChatMessage expected, ChatMessage current) {
+    return expected.content == current.content &&
+        expected.swipeId == current.swipeId &&
+        expected.agentSwipeId == current.agentSwipeId &&
+        jsonEncode(expected.swipes) == jsonEncode(current.swipes) &&
+        jsonEncode(expected.swipesMeta) == jsonEncode(current.swipesMeta) &&
+        jsonEncode(
+              expected.agentSwipes.map((swipe) => swipe.toJson()).toList(),
+            ) ==
+            jsonEncode(
+              current.agentSwipes.map((swipe) => swipe.toJson()).toList(),
+            );
   }
 
   /// Re-run the POST-cleaner against an existing assistant message.

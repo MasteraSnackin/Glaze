@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/legacy.dart';
 
 import '../../core/llm/tokenizer.dart';
 import '../../core/models/chat_message.dart';
+import '../../core/db/repositories/chat_repo.dart';
 import '../../core/services/generation_notification_service.dart';
 import '../../core/utils/id_generator.dart';
 import '../../core/utils/time_helpers.dart';
@@ -765,16 +766,41 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       if (!ref.mounted || !_abortHandler.isCurrentGen(genId)) return;
 
       var completedResult = result;
-      final updatedMessages = mergeContinuationMessages(
-        result.messages,
-        lastMsg,
-      );
-      if (updatedMessages != null) {
-        final finalSession = result.session!.copyWith(
-          messages: updatedMessages,
-          updatedAt: currentTimestampSeconds(),
-        );
-        await ref.read(chatRepoProvider).put(finalSession);
+      final generated = result.messages.lastOrNull;
+      if (generated?.role == 'assistant' && result.session != null) {
+        final finalSession = await ref
+            .read(chatRepoProvider)
+            .mutateSession(
+              sessionId: current.session!.id,
+              updatedAt: currentTimestampSeconds(),
+              mutate: (latest) {
+                final latestIndex = latest.messages.indexWhere(
+                  (message) => message.id == lastMsg.id,
+                );
+                if (latestIndex < 0 ||
+                    latestIndex != latest.messages.length - 1 ||
+                    latest.messages[latestIndex].content != lastMsg.content ||
+                    latest.messages[latestIndex].swipeId != lastMsg.swipeId ||
+                    latest.messages[latestIndex].agentSwipeId !=
+                        lastMsg.agentSwipeId) {
+                  return null;
+                }
+                final messages = List<ChatMessage>.from(latest.messages);
+                messages[latestIndex] = mergeContinuationMessage(
+                  messages[latestIndex],
+                  generated!,
+                );
+                return latest.copyWith(
+                  messages: messages,
+                  sessionVars: ChatRepo.applySessionVarDelta(
+                    latest.sessionVars,
+                    current.session!.sessionVars,
+                    result.session!.sessionVars,
+                  ),
+                );
+              },
+            );
+        if (finalSession == null) return;
         if (!ref.mounted || !_abortHandler.isCurrentGen(genId)) return;
         ChatSessionService.updateCache(finalSession);
         _invalidateHistory();

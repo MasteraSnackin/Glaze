@@ -73,4 +73,18 @@ void main() {
     expect(durable?.messages.first.isHidden, isTrue);
     expect(durable?.messages.last.content, 'tail');
   });
+
+  test('session var delta preserves concurrent keys', () {
+    final merged = ChatRepo.applySessionVarDelta(
+      {'unchanged': 'latest', 'concurrent': 'keep', 'removed': 'old'},
+      {'unchanged': 'old', 'removed': 'old'},
+      {'unchanged': 'generated', 'added': 'new'},
+    );
+
+    expect(merged, {
+      'unchanged': 'generated',
+      'concurrent': 'keep',
+      'added': 'new',
+    });
+  });
 }
