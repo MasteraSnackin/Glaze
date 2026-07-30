@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:glaze_flutter/features/extensions/services/js_bridge/handlers/generation_handler.dart';
 import 'package:glaze_flutter/features/extensions/services/js_bridge/js_bridge_context.dart';
+import 'package:glaze_flutter/features/extensions/services/js_bridge/js_bridge_service.dart';
 
 void main() {
   group('GenerationHandler', () {
@@ -61,15 +62,26 @@ void main() {
       },
     );
 
-    test('default-denies when permission check is missing', () {
-      final handler = GenerationHandler();
-      final bridge = JsBridgeContext(
-        params: {'prompt': 'Hello'},
-        context: const {},
+    test('canonical dispatch default-denies without a permission check', () async {
+      final bridge = JsBridgeService(
         generateText: (_, _, _) async => 'must not run',
       );
 
-      expect(() => handler.generateText(bridge), throwsA(isA<StateError>()));
+      final response = await bridge.dispatch({
+        'method': 'generateText',
+        'params': {'prompt': 'Hello'},
+      });
+
+      expect(response['ok'], isFalse);
+      expect(response['error'], isA<Map<String, dynamic>>());
+      expect(
+        (response['error'] as Map<String, dynamic>)['code'],
+        'bridge_error',
+      );
+      expect(
+        (response['error'] as Map<String, dynamic>)['message'],
+        contains('Permission denied: generate_text'),
+      );
     });
   });
 }
