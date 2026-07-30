@@ -38,10 +38,10 @@ export 'studio/studio_tracker_phase_runner.dart' show PreGenPhaseResult;
 /// compact briefs; the last enabled agent produces the actual RP response.
 class MemoryStudioService {
   final Ref _ref;
+  final AgentRunner _runner;
+  final TrackerBatcher _batcher;
   final StudioPromptText _promptText = const StudioPromptText();
   final StudioContextBucketizer _bucketizer = const StudioContextBucketizer();
-  late final AgentRunner _runner = _ref.read(agentRunnerProvider);
-  late final TrackerBatcher _batcher = _ref.read(trackerBatcherProvider);
   late final StudioBriefParser _briefParser = StudioBriefParser(_log);
   late final StudioBriefDeduper _briefDeduper = StudioBriefDeduper(
     _briefParser,
@@ -80,7 +80,7 @@ class MemoryStudioService {
     log: _log,
   );
 
-  MemoryStudioService(this._ref);
+  MemoryStudioService(this._ref, this._runner, this._batcher);
 
   Future<StudioTurnConfigSnapshot> resolveTurnConfig(String sessionId) =>
       StudioTurnConfigSnapshot.resolve(_ref, sessionId);

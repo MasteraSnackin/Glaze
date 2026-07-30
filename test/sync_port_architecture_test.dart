@@ -3,6 +3,17 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('AgentRunner does not import feature providers', () {
+    final file = File('lib/core/llm/agent_runner.dart');
+    final featureImport = RegExp(r'''import\s+['"][^'"]*features/''');
+
+    expect(
+      file.readAsStringSync(),
+      isNot(matches(featureImport)),
+      reason: '${file.path} must receive values and callbacks by constructor',
+    );
+  });
+
   test('core repositories do not import cloud sync features', () {
     final files = <File>[
       ...Directory('lib/core/db/repositories')

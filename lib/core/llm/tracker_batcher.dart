@@ -1,5 +1,3 @@
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-
 import '../models/api_config.dart';
 import '../models/studio_config.dart';
 import 'agent_runner.dart';
@@ -457,8 +455,3 @@ class _PhaseJob {
   const _PhaseJob({required this.isBatch, this.batch, this.agent})
     : assert(isBatch ? batch != null : agent != null);
 }
-
-/// Riverpod provider for [TrackerBatcher]. Wraps [agentRunnerProvider].
-final trackerBatcherProvider = Provider<TrackerBatcher>((ref) {
-  return TrackerBatcher(ref.read(agentRunnerProvider));
-});

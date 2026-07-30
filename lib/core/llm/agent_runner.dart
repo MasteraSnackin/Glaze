@@ -2,14 +2,11 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:easy_localization/easy_localization.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../features/settings/api_list_provider.dart';
 import '../models/api_config.dart';
 import '../models/extra_request_parameter.dart';
 import '../models/pipeline_settings.dart';
 import '../models/studio_config.dart';
-import '../state/db_provider.dart';
 import '../utils/error_format.dart';
 import 'agent_stream_runner.dart';
 import 'studio/agent_config_resolver.dart';
@@ -512,25 +509,3 @@ class ResolvedAgentConfig {
     );
   }
 }
-
-/// Riverpod provider for [AgentRunner]. Single shared instance — it is
-/// stateless beyond the injected callbacks.
-final agentRunnerProvider = Provider<AgentRunner>((ref) {
-  return AgentRunner(
-    configResolver: AgentConfigResolver(
-      loadApiConfigs: () async {
-        await ref.read(apiListProvider.future);
-        return ref.read(apiListProvider).value ?? const <ApiConfig>[];
-      },
-      readActiveApiConfig: () => ref.read(activeApiConfigProvider),
-      readPipelineSettings: () => ref.read(pipelineSettingsProvider),
-      readRunApiConfigId: (sessionId) async {
-        final config = await ref
-            .read(studioConfigRepoProvider)
-            .getBySessionId(sessionId);
-        return config?.runApiConfigId ?? '';
-      },
-    ),
-    readPipelineSettings: () => ref.read(pipelineSettingsProvider),
-  );
-});
