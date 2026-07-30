@@ -32,7 +32,13 @@ class StudioFeatureEnabledNotifier extends StateNotifier<bool> {
   static const _storageKey = 'feature_studio_enabled';
 
   Future<void> _load() async {
-    final prefs = await SharedPreferences.getInstance();
+    final SharedPreferences prefs;
+    try {
+      prefs = await SharedPreferences.getInstance();
+    } catch (_) {
+      // Keep the feature default-deny when preferences are unavailable.
+      return;
+    }
     if (!mounted) return;
     final stored = prefs.getBool(_storageKey);
     if (stored != null) {

@@ -6,7 +6,6 @@ class AudioHandler {
   const AudioHandler();
 
   FutureOr<void> playAudio(JsBridgeContext bridge) {
-    bridge.requireCapability('play_audio');
     final source = bridge.params['source'];
     if (source != null && source is! String) {
       throw ArgumentError('playAudio source must be a string');

@@ -57,6 +57,23 @@ class _RecordingEmbeddingService extends EmbeddingService {
   }
 }
 
+class _RecordingEmbeddingRepo extends EmbeddingRepo {
+  int sourceIdsCalls = 0;
+  Set<String> requestedSourceIds = {};
+
+  _RecordingEmbeddingRepo(super.db);
+
+  @override
+  Future<List<EmbeddingRow>> getBySourceIds(
+    String sourceType,
+    Iterable<String> sourceIds,
+  ) {
+    sourceIdsCalls++;
+    requestedSourceIds = sourceIds.toSet();
+    return super.getBySourceIds(sourceType, sourceIds);
+  }
+}
+
 Future<void> _indexEntry(
   EmbeddingRepo repo,
   String lorebookId,
@@ -145,7 +162,7 @@ void main() {
   test('keeps same entry id from different lorebooks', () async {
     final db = AppDatabase.forTesting(NativeDatabase.memory());
     addTearDown(db.close);
-    final repo = EmbeddingRepo(db);
+    final repo = _RecordingEmbeddingRepo(db);
     final embeddings = _RecordingEmbeddingService();
     final search = LorebookVectorSearch(repo, embeddings);
 
@@ -161,6 +178,7 @@ void main() {
     );
     await _indexEntry(repo, 'one', first);
     await _indexEntry(repo, 'two', second);
+    await _indexEntry(repo, 'inactive', first);
 
     final results = await search.search(
       const [],
@@ -179,6 +197,8 @@ void main() {
 
     expect(results, hasLength(2));
     expect(results.map((r) => r.lorebookId).toSet(), {'one', 'two'});
+    expect(repo.sourceIdsCalls, 1);
+    expect(repo.requestedSourceIds, {'one', 'two'});
   });
 
   test('uses vector scan depth and does not duplicate current text', () async {

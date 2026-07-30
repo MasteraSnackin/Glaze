@@ -489,35 +489,13 @@ class InfoBlockService {
       final buffer = StringBuffer();
 
       await transport.stream(
-        request: ChatTransportRequest(
-          endpoint: apiConfig.endpoint,
-          apiKey: apiConfig.apiKey,
+        request: ChatTransportRequest.fromApiConfig(
+          apiConfig,
           model: blockConfig.model.isNotEmpty
               ? blockConfig.model
               : apiConfig.model,
           messages: requestMessages,
-          maxTokens: apiConfig.maxTokens,
-          temperature: apiConfig.temperature,
-          topP: apiConfig.topP,
-          topK: apiConfig.topK,
-          frequencyPenalty: apiConfig.frequencyPenalty,
-          presencePenalty: apiConfig.presencePenalty,
           stream: useStream,
-          requestReasoning: apiConfig.requestReasoning,
-          useResponsesApi: apiConfig.useResponsesApi,
-          reasoningEffort: apiConfig.reasoningEffort,
-          omitTemperature: apiConfig.omitTemperature,
-          omitTopP: apiConfig.omitTopP,
-          omitTopK: apiConfig.omitTopK,
-          omitFrequencyPenalty: apiConfig.omitFrequencyPenalty,
-          omitPresencePenalty: apiConfig.omitPresencePenalty,
-          omitReasoning: apiConfig.omitReasoning,
-          omitReasoningEffort: apiConfig.omitReasoningEffort,
-          showNativeReasoning: apiConfig.showNativeReasoning,
-          cacheControlTtl: apiConfig.cacheControlTtl,
-          cacheBreakpointMode: apiConfig.cacheBreakpointMode,
-          sessionIdMode: apiConfig.sessionIdMode,
-          extraRequestParameters: apiConfig.extraRequestParameters,
         ),
         cancelToken: cancelToken,
         onUpdate: useStream

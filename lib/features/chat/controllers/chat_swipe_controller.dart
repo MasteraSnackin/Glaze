@@ -23,25 +23,27 @@ class ChatSwipeController {
 
   ChatMessageService get _messageSvc => ChatMessageService(_ref);
 
-  void setSwipe(int messageIndex, int swipeId) {
+  Future<void> setSwipe(int messageIndex, int swipeId) async {
     final current = _getState().value;
     if (current == null || current.session == null) return;
-    final updated = _messageSvc.setSwipe(
+    final updated = await _messageSvc.commitMessageMutation(
       current.session!,
       messageIndex,
-      swipeId,
+      (latest, latestIndex) =>
+          _messageSvc.setSwipe(latest, latestIndex, swipeId),
     );
     _invalidateHistory();
     _setState(AsyncData(current.copyWith(session: updated)));
   }
 
-  void setAgentSwipe(int messageIndex, int agentSwipeId) {
+  Future<void> setAgentSwipe(int messageIndex, int agentSwipeId) async {
     final current = _getState().value;
     if (current == null || current.session == null) return;
-    final updated = _messageSvc.setAgentSwipe(
+    final updated = await _messageSvc.commitMessageMutation(
       current.session!,
       messageIndex,
-      agentSwipeId,
+      (latest, latestIndex) =>
+          _messageSvc.setAgentSwipe(latest, latestIndex, agentSwipeId),
     );
     _invalidateHistory();
     _setState(AsyncData(current.copyWith(session: updated)));
@@ -97,7 +99,7 @@ class ChatSwipeController {
     if (messageIndex < 0 || messageIndex >= current.messages.length) return;
 
     final isLast = messageIndex == current.messages.length - 1;
-    final result = _messageSvc.changeSwipe(
+    final preview = _messageSvc.changeSwipe(
       current.session!,
       messageIndex,
       dir,
@@ -105,13 +107,28 @@ class ChatSwipeController {
       isLastMessage: isLast,
     );
 
-    if (result.needsRegen) {
+    if (preview.needsRegen) {
       // This will be handled by the parent provider calling regenerateLastAssistant
       return;
     }
-    if (result.isUpdated) {
+    if (preview.isUpdated) {
+      final result = await _messageSvc.commitMessageMutation(
+        current.session!,
+        messageIndex,
+        (latest, latestIndex) =>
+            _messageSvc
+                .changeSwipe(
+                  latest,
+                  latestIndex,
+                  dir,
+                  fromSwipe: fromSwipe,
+                  isLastMessage: latestIndex == latest.messages.length - 1,
+                )
+                .session ??
+            latest,
+      );
       _invalidateHistory();
-      _setState(AsyncData(current.copyWith(session: result.session)));
+      _setState(AsyncData(current.copyWith(session: result)));
     }
   }
 
@@ -133,7 +150,7 @@ class ChatSwipeController {
     if (messageIndex < 0 || messageIndex >= current.messages.length) return;
 
     final isLast = messageIndex == current.messages.length - 1;
-    final result = _messageSvc.changeAgentSwipe(
+    final preview = _messageSvc.changeAgentSwipe(
       current.session!,
       messageIndex,
       dir,
@@ -141,12 +158,27 @@ class ChatSwipeController {
       isLastMessage: isLast,
     );
 
-    if (result.needsRegen) {
+    if (preview.needsRegen) {
       return;
     }
-    if (result.isUpdated) {
+    if (preview.isUpdated) {
+      final result = await _messageSvc.commitMessageMutation(
+        current.session!,
+        messageIndex,
+        (latest, latestIndex) =>
+            _messageSvc
+                .changeAgentSwipe(
+                  latest,
+                  latestIndex,
+                  dir,
+                  fromSwipe: fromSwipe,
+                  isLastMessage: latestIndex == latest.messages.length - 1,
+                )
+                .session ??
+            latest,
+      );
       _invalidateHistory();
-      _setState(AsyncData(current.copyWith(session: result.session)));
+      _setState(AsyncData(current.copyWith(session: result)));
     }
   }
 
@@ -174,11 +206,15 @@ class ChatSwipeController {
     if (greetings.length <= 1) return;
 
     final currentIdx = msg.greetingIndex ?? 0;
-    final updated = _messageSvc.setGreeting(
+    final updated = await _messageSvc.commitMessageMutation(
       current.session!,
       messageIndex,
-      currentIdx + direction,
-      greetings,
+      (latest, latestIndex) => _messageSvc.setGreeting(
+        latest,
+        latestIndex,
+        currentIdx + direction,
+        greetings,
+      ),
     );
     _invalidateHistory();
     _setState(AsyncData(current.copyWith(session: updated)));

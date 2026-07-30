@@ -623,6 +623,10 @@ class Lorebooks extends Table {
 @DataClassName('EmbeddingRow')
 @TableIndex(name: 'idx_embeddings_source_type', columns: {#sourceType})
 @TableIndex(name: 'idx_embeddings_source_id', columns: {#sourceId})
+@TableIndex(
+  name: 'idx_embeddings_source_type_id',
+  columns: {#sourceType, #sourceId},
+)
 class Embeddings extends Table {
   @override
   String get tableName => 'embeddings';

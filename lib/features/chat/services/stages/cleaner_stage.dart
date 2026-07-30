@@ -12,6 +12,7 @@ import '../../../../core/llm/prompt_builder.dart' show PromptPayload;
 import '../../../../core/llm/prompt/main_model_context_snapshot.dart';
 import '../../../../core/llm/studio_slot_resolver.dart';
 import '../../../../core/llm/tokenizer.dart';
+import '../../../../core/llm/studio_turn_config_snapshot.dart';
 import '../../../../core/llm/cleaner/audit_prompt_builder.dart'
     show AuditResult;
 import '../../../../core/models/agent_operation_record.dart';
@@ -24,6 +25,7 @@ import '../../../../core/state/active_studio_preset_provider.dart';
 import '../../../../core/state/db_provider.dart';
 import '../../../../core/state/memory_agent_providers.dart';
 import '../../../../core/state/character_provider.dart';
+import '../../../../core/state/studio_turn_config_resolver.dart';
 import '../../../settings/api_list_provider.dart';
 import '../../../chat_history/chat_history_provider.dart';
 import '../../chat_session_service.dart';
@@ -31,6 +33,7 @@ import '../../state/agent_operations_log_provider.dart';
 import '../../state/post_cleaner_state_provider.dart';
 import '../../chat_provider.dart' show streamingStateProvider;
 import '../../chat_state.dart';
+import '../cleaner_run_registry.dart';
 import '../pipeline_utils.dart';
 import 'ext_blocks_stage.dart';
 import 'ledger_stage.dart';
@@ -50,8 +53,39 @@ class CleanerStage {
   final ExtBlocksStage extBlocks;
   final LedgerStage ledger;
   late final FactCheckerRunner _factChecker = FactCheckerRunner(ctx);
+  final CleanerRunLease? _lease;
 
-  CleanerStage(this.ctx, {required this.extBlocks, required this.ledger});
+  CleanerStage(this.ctx, {required this.extBlocks, required this.ledger})
+    : _lease = null;
+
+  CleanerStage._worker(
+    this.ctx, {
+    required this.extBlocks,
+    required this.ledger,
+    required this._lease,
+  });
+
+  bool get _ownsRun => _lease?.isCurrent ?? true;
+  bool get _ownsSharedState => _lease?.ownsSharedState ?? true;
+
+  void _setCleanerState(PostCleanerState state) {
+    if (_ownsSharedState) {
+      ctx.ref.read(postCleanerStateProvider.notifier).state = state;
+    }
+  }
+
+  void _publishCancelToken(CancelToken token) {
+    _lease?.registerCancelToken(token);
+    if (_ownsSharedState) {
+      ctx.ref.read(cleanerCancelTokenProvider.notifier).state = token;
+    }
+  }
+
+  void _clearPublishedCancelToken(CancelToken? token) {
+    if (ctx.ref.read(cleanerCancelTokenProvider) == token) {
+      ctx.ref.read(cleanerCancelTokenProvider.notifier).state = null;
+    }
+  }
 
   /// Latest accumulated chunk from the cleaner's onCleanedChunk callback.
   /// Captured so we can persist partial text when the cleaner fails
@@ -97,12 +131,55 @@ class CleanerStage {
     PromptPayload? promptPayload,
     MainModelContextSnapshot? mainModelContextSnapshot,
     Character? character,
+    StudioTurnConfigSnapshot? studioTurnConfig,
   }) async {
-    if (!ctx.ref.mounted) return;
+    final trailing = messages.isNotEmpty ? messages.last : null;
+    if (trailing == null || trailing.role != 'assistant' || trailing.isError) {
+      return;
+    }
+    final key = CleanerRunKey(sessionId: sessionId, messageId: trailing.id);
+    await ctx.ref.read(cleanerRunRegistryProvider).run(key, (lease) async {
+      final worker = CleanerStage._worker(
+        ctx,
+        extBlocks: extBlocks,
+        ledger: ledger,
+        lease: lease,
+      );
+      await worker._run(
+        sessionId: sessionId,
+        messages: messages,
+        genId: genId,
+        promptPayload: promptPayload,
+        mainModelContextSnapshot: mainModelContextSnapshot,
+        character: character,
+        studioTurnConfig: studioTurnConfig,
+      );
+    });
+  }
+
+  Future<void> _run({
+    required String sessionId,
+    required List<ChatMessage> messages,
+    required int genId,
+    PromptPayload? promptPayload,
+    MainModelContextSnapshot? mainModelContextSnapshot,
+    Character? character,
+    StudioTurnConfigSnapshot? studioTurnConfig,
+  }) async {
+    if (!ctx.ref.mounted || !_ownsRun) return;
 
     try {
-      final pipeline = ctx.ref.read(pipelineSettingsProvider);
-      if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) return;
+      final turnConfig =
+          studioTurnConfig ??
+          await ctx.ref
+              .read(studioTurnConfigResolverProvider)
+              .resolve(sessionId);
+      final pipeline = turnConfig.pipelineSettings;
+      if (!ctx.ref.mounted ||
+          !_ownsRun ||
+          !ctx.abortHandler.isCurrentGen(genId)) {
+        return;
+      }
 
       // The cleaner must only rewrite the just-generated assistant message.
       // If the trailing message is an error (e.g. Studio returned an empty
@@ -159,15 +236,14 @@ class CleanerStage {
         debugPrint(
           '[PostCleaner] skipping — postCleanerEnabled=false session=$sessionId',
         );
-        ctx.ref.read(postCleanerStateProvider.notifier).state =
-            const PostCleanerState.idle();
+        _setCleanerState(const PostCleanerState.idle());
         final effectiveChar =
             character ?? ctx.ref.read(characterByIdProvider(ctx.charId));
-        if (effectiveChar != null && ctx.ref.mounted) {
+        if (effectiveChar != null && ctx.ref.mounted && _ownsRun) {
           final refreshed = await ctx.ref
               .read(chatRepoProvider)
               .getById(sessionId);
-          if (refreshed != null) {
+          if (refreshed != null && _ownsRun) {
             await extBlocks.launchForSwipe(
               session: refreshed,
               character: effectiveChar,
@@ -176,10 +252,11 @@ class CleanerStage {
             );
           }
         }
-        if (ctx.ref.mounted && ctx.abortHandler.isCurrentGen(genId)) {
+        if (ctx.ref.mounted &&
+            _ownsRun &&
+            ctx.abortHandler.isCurrentGen(genId)) {
           _cleanerCancelToken = CancelToken();
-          ctx.ref.read(cleanerCancelTokenProvider.notifier).state =
-              _cleanerCancelToken;
+          _publishCancelToken(_cleanerCancelToken!);
           await ledger.run(
             sessionId: sessionId,
             messages: messages,
@@ -187,6 +264,7 @@ class CleanerStage {
             finalAssistantText: lastAssistant.content,
             targetMessage: lastAssistant,
             cancelToken: _cleanerCancelToken,
+            studioTurnConfig: turnConfig,
           );
         }
         return;
@@ -194,34 +272,26 @@ class CleanerStage {
 
       final bookRepo = ctx.ref.read(memoryBookRepoProvider);
       final book = await bookRepo.getBySessionId(sessionId);
-      if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) return;
+      if (!ctx.ref.mounted ||
+          !_ownsRun ||
+          !ctx.abortHandler.isCurrentGen(genId)) {
+        return;
+      }
       if (book == null) return;
 
       // Load broadcast blocks (output language + prose guards) captured at
       // Studio build time so the cleaner applies the user's own rules instead
       // of a hardcoded English-only cliché list. Absent (no Studio) = defaults.
       // The cleaner is Studio-only — skip entirely when Studio is disabled.
-      List<String> broadcastBlocks = const [];
-      var studioConfigEnabled = false;
-      var studioCleanerApiConfigId = '';
-      StudioPreset? studioPreset;
-      var studioPresetId = 'default';
-      try {
-        final studioConfig = await ctx.ref
-            .read(studioConfigRepoProvider)
-            .getBySessionId(sessionId);
-        broadcastBlocks = studioConfig?.broadcastBlocks ?? const [];
-        studioConfigEnabled =
-            studioConfig?.enabled == true &&
-            ctx.ref.read(studioFeatureEnabledProvider);
-        studioCleanerApiConfigId = studioConfig?.cleanerApiConfigId ?? '';
-        studioPresetId = await ctx.ref.read(activeStudioPresetProvider.future);
-      } catch (e) {
-        debugPrint(
-          '[PostCleaner] broadcast load failed session=$sessionId error=$e',
-        );
+      final studioConfig = turnConfig.config;
+      final broadcastBlocks = studioConfig?.broadcastBlocks ?? const <String>[];
+      final studioConfigEnabled = turnConfig.enabled;
+      final studioPreset = turnConfig.preset;
+      if (!ctx.ref.mounted ||
+          !_ownsRun ||
+          !ctx.abortHandler.isCurrentGen(genId)) {
+        return;
       }
-      if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) return;
 
       // Cleaner is Studio-only. Skip when Studio is disabled.
       if (!studioConfigEnabled) {
@@ -229,39 +299,22 @@ class CleanerStage {
         return;
       }
 
-      // Load the Studio preset to get cleaner-section blocks.
-      try {
-        studioPreset = await ctx.ref
-            .read(studioPresetRepoProvider)
-            .getById(studioPresetId);
-      } catch (e) {
-        debugPrint(
-          '[PostCleaner] preset load failed session=$sessionId error=$e',
-        );
-      }
-      if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) return;
-
       // Resolve the Studio cleaner slot (fail-explicit).
       final AuxApiConfig cleanerConfig;
       try {
-        await ctx.ref.read(apiListProvider.future);
-        final apiConfigs =
-            ctx.ref.read(apiListProvider).value ?? const <ApiConfig>[];
-        cleanerConfig = StudioSlotResolver.resolve(
-          apiConfigs: apiConfigs,
-          apiConfigId: studioCleanerApiConfigId,
-          fallback: ctx.ref.read(activeApiConfigProvider),
+        cleanerConfig = turnConfig.resolveCleanerConfig(
           errorLabel: 'post-cleaner',
-          modelOverride: pipeline.cleaner.postCleanerModel,
-          extraRequestParameterOverrides:
-              pipeline.cleaner.postCleanerExtraRequestParameters,
           useResponsesApi: pipeline.cleaner.postCleanerUseResponsesApi,
         );
       } catch (e) {
         debugPrint('[PostCleaner] slot resolution failed: $e');
         return;
       }
-      if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) return;
+      if (!ctx.ref.mounted ||
+          !_ownsRun ||
+          !ctx.abortHandler.isCurrentGen(genId)) {
+        return;
+      }
 
       // Extract Beauty Shard brief from the assistant message's studioOutputs.
       var beautyBrief = '';
@@ -282,7 +335,11 @@ class CleanerStage {
           '[PostCleaner] beauty brief extraction failed session=$sessionId error=$e',
         );
       }
-      if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) return;
+      if (!ctx.ref.mounted ||
+          !_ownsRun ||
+          !ctx.abortHandler.isCurrentGen(genId)) {
+        return;
+      }
 
       // Build MacroContext for resolving preset-block macros.
       final cleanerMacroCtx = MacroContext(
@@ -314,15 +371,17 @@ class CleanerStage {
         beautyState: beautyState,
         cleanerBlocks: studioPreset?.blocks ?? const [],
         macroCtx: cleanerMacroCtx,
+        studioTurnConfig: turnConfig,
       );
     } catch (e) {
       debugPrint('[PostCleaner] failed session=$sessionId error=$e');
       if (ctx.ref.mounted) {
         // Reset any partial stream so the bubble doesn't stay isTyping.
-        ctx.ref.read(streamingStateProvider(ctx.charId).notifier).state =
-            const StreamingState();
-        ctx.ref.read(postCleanerStateProvider.notifier).state =
-            const PostCleanerState.idle();
+        if (_ownsSharedState) {
+          ctx.ref.read(streamingStateProvider(ctx.charId).notifier).state =
+              const StreamingState();
+        }
+        _setCleanerState(const PostCleanerState.idle());
         // Best-effort finalize the pre-created swipe on a hard pipeline
         // failure (e.g. runCleaner threw before returning). If the cascade
         // already committed (_finalized), skip to avoid double-removing.
@@ -369,9 +428,10 @@ class CleanerStage {
       if (_auditCancelToken != null && !_auditCancelToken!.isCancelled) {
         _auditCancelToken!.cancel();
       }
+      final publishedToken = _cleanerCancelToken ?? _auditCancelToken;
       _auditCancelToken = null;
       _cleanerCancelToken = null;
-      ctx.ref.read(cleanerCancelTokenProvider.notifier).state = null;
+      _clearPublishedCancelToken(publishedToken);
       // Best-effort: if no branch and no catch path finalized the swipe
       // (e.g. an error escaped both), remove it to avoid a stale empty
       // 'cleaned' bubble lingering in the UI.
@@ -426,10 +486,12 @@ class CleanerStage {
     String? beautyState,
     List<StudioPresetBlock> cleanerBlocks = const [],
     MacroContext? macroCtx,
+    StudioTurnConfigSnapshot? studioTurnConfig,
   }) async {
     final isManualRerun = genId < 0;
     bool abortCheck() =>
         ctx.ref.mounted &&
+        _ownsRun &&
         (isManualRerun || ctx.abortHandler.isCurrentGen(genId));
 
     // Manual rerun explicitly runs the cleaner even when the auto-cleaner
@@ -454,17 +516,19 @@ class CleanerStage {
     final factCheckEnabled =
         promptPayload != null && pipeline.cleaner.postCleanerEnabled;
 
-    ctx.ref.read(postCleanerStateProvider.notifier).state = factCheckEnabled
-        ? PostCleanerState.factChecking(
-            sessionId: sessionId,
-            messageId: targetMessage.id,
-            originalChars: assistantText.length,
-          )
-        : PostCleanerState.running(
-            sessionId: sessionId,
-            messageId: targetMessage.id,
-            originalChars: assistantText.length,
-          );
+    _setCleanerState(
+      factCheckEnabled
+          ? PostCleanerState.factChecking(
+              sessionId: sessionId,
+              messageId: targetMessage.id,
+              originalChars: assistantText.length,
+            )
+          : PostCleanerState.running(
+              sessionId: sessionId,
+              messageId: targetMessage.id,
+              originalChars: assistantText.length,
+            ),
+    );
 
     final cleanerService = ctx.ref.read(postCleanerServiceProvider);
 
@@ -483,8 +547,7 @@ class CleanerStage {
       // Dedicated cancel token so Stop can abort the auditor before the
       // cleaner prompt is built.
       _auditCancelToken = CancelToken();
-      ctx.ref.read(cleanerCancelTokenProvider.notifier).state =
-          _auditCancelToken;
+      _publishCancelToken(_auditCancelToken!);
       auditStartedAt = DateTime.now().millisecondsSinceEpoch;
       auditFuture = cleanerService
           .runCharacterAudit(
@@ -536,6 +599,7 @@ class CleanerStage {
               .firstOrNull;
           if (msg != null && msg.agentSwipeId > 0) {
             _preCreatedCleanerSwipeId = msg.agentSwipeId;
+            if (!_ownsRun) return;
             final parentAgentSwipeId = msg.agentSwipeId - 1;
             final snapshotRepo = ctx.ref.read(trackerSnapshotRepoProvider);
             final parent = await snapshotRepo.getByAnchor(
@@ -557,6 +621,7 @@ class CleanerStage {
           }
         }
       }
+      if (!_ownsRun) return;
     } catch (e) {
       debugPrint(
         '[PostCleaner] pre-create swipe failed session=$sessionId error=$e',
@@ -597,18 +662,18 @@ class CleanerStage {
         );
       }
     }
+    if (!_ownsRun) return;
 
     _cleanerCancelToken = CancelToken();
-    ctx.ref.read(cleanerCancelTokenProvider.notifier).state =
-        _cleanerCancelToken;
+    _publishCancelToken(_cleanerCancelToken!);
     if (factCheckEnabled) {
-      ctx.ref
-          .read(postCleanerStateProvider.notifier)
-          .state = PostCleanerState.running(
-        sessionId: sessionId,
-        messageId: targetMessage.id,
-        originalChars: assistantText.length,
-        factCheckEnabled: true,
+      _setCleanerState(
+        PostCleanerState.running(
+          sessionId: sessionId,
+          messageId: targetMessage.id,
+          originalChars: assistantText.length,
+          factCheckEnabled: true,
+        ),
       );
     }
     // When audit returned beauty assignments, use them as the beauty brief
@@ -642,19 +707,21 @@ class CleanerStage {
         // Deterministically wrap Lumia OOC blocks so the color is visible
         // during streaming, not only after the cleaner finalizes.
         displayText = wrapLumiaOocColors(displayText);
-        ctx.ref
-            .read(streamingStateProvider(ctx.charId).notifier)
-            .state = StreamingState(
-          text: displayText,
-          targetMessageId: targetMessage.id,
-        );
+        if (_ownsSharedState) {
+          ctx.ref
+              .read(streamingStateProvider(ctx.charId).notifier)
+              .state = StreamingState(
+            text: displayText,
+            targetMessageId: targetMessage.id,
+          );
+        }
         if (text.length >= _lastStreamedText.length) {
           _lastStreamedText = text;
         }
       },
     );
 
-    if (result.status == 'aborted') {
+    if (result.status == 'aborted' || !_ownsRun) {
       if (_preCreatedCleanerSwipeId >= 0) {
         try {
           await ctx.ref
@@ -667,8 +734,7 @@ class CleanerStage {
         } catch (_) {}
       }
       _finalized = true;
-      ctx.ref.read(postCleanerStateProvider.notifier).state =
-          const PostCleanerState.idle();
+      _setCleanerState(const PostCleanerState.idle());
       return;
     }
 
@@ -681,19 +747,21 @@ class CleanerStage {
       'partialChars=${_lastStreamedText.length}',
     );
 
-    ctx.ref.read(postCleanerStateProvider.notifier).state = result.wasCleaned
-        ? PostCleanerState.done(
-            sessionId: sessionId,
-            messageId: targetMessage.id,
-            originalChars: assistantText.length,
-            cleanedChars: result.cleanedText.length,
-          )
-        : (result.status == 'ok' || result.status == 'disabled')
-        ? const PostCleanerState.idle()
-        : PostCleanerState.error(
-            sessionId: sessionId,
-            messageId: targetMessage.id,
-          );
+    _setCleanerState(
+      result.wasCleaned
+          ? PostCleanerState.done(
+              sessionId: sessionId,
+              messageId: targetMessage.id,
+              originalChars: assistantText.length,
+              cleanedChars: result.cleanedText.length,
+            )
+          : (result.status == 'ok' || result.status == 'disabled')
+          ? const PostCleanerState.idle()
+          : PostCleanerState.error(
+              sessionId: sessionId,
+              messageId: targetMessage.id,
+            ),
+    );
 
     // Record the operation in the agentic operations log.
     ctx.ref.read(agentOperationsLogProvider.notifier).state = ctx.ref
@@ -919,7 +987,7 @@ class CleanerStage {
 
     // Reset the streaming state so the WebView stops treating the bubble
     // as isTyping.
-    if (ctx.ref.mounted) {
+    if (ctx.ref.mounted && _ownsSharedState) {
       if (ctx.abortHandler.isCurrentGen(genId)) {
         ctx.ref.read(streamingStateProvider(ctx.charId).notifier).state =
             const StreamingState();
@@ -975,6 +1043,7 @@ class CleanerStage {
         isManualRerun: isManualRerun,
         resolvedConfig: cleanerConfig,
         cancelToken: _cleanerCancelToken,
+        studioTurnConfig: studioTurnConfig,
       );
     }
   }
@@ -992,14 +1061,23 @@ class CleanerStage {
     required String sessionId,
     required String messageId,
   }) async {
-    if (!ctx.ref.mounted) return;
+    final key = CleanerRunKey(sessionId: sessionId, messageId: messageId);
+    await ctx.ref.read(cleanerRunRegistryProvider).run(key, (lease) async {
+      final worker = CleanerStage._worker(
+        ctx,
+        extBlocks: extBlocks,
+        ledger: ledger,
+        lease: lease,
+      );
+      await worker._rerun(sessionId: sessionId, messageId: messageId);
+    });
+  }
 
-    // Refuse concurrent cleaner runs — the pre-created swipe tracking
-    // is single-slot; a second run would clobber it.
-    if (_cleanerCancelToken != null) {
-      debugPrint('[PostCleaner] rerun skipped: cleaner already in flight');
-      return;
-    }
+  Future<void> _rerun({
+    required String sessionId,
+    required String messageId,
+  }) async {
+    if (!ctx.ref.mounted || !_ownsRun) return;
 
     final pipeline = ctx.ref.read(pipelineSettingsProvider);
 
@@ -1018,7 +1096,7 @@ class CleanerStage {
 
     final bookRepo = ctx.ref.read(memoryBookRepoProvider);
     final book = await bookRepo.getBySessionId(sessionId);
-    if (!ctx.ref.mounted) return;
+    if (!ctx.ref.mounted || !_ownsRun) return;
     if (book == null) {
       debugPrint('[PostCleaner] rerun skipped: no memory book for session');
       return;
@@ -1059,7 +1137,7 @@ class CleanerStage {
         '[PostCleaner] rerun broadcast load failed session=$sessionId error=$e',
       );
     }
-    if (!ctx.ref.mounted) return;
+    if (!ctx.ref.mounted || !_ownsRun) return;
 
     if (!studioConfigEnabled) {
       debugPrint('[PostCleaner] rerun skipped — Studio not enabled');
@@ -1076,7 +1154,7 @@ class CleanerStage {
         '[PostCleaner] rerun preset load failed session=$sessionId error=$e',
       );
     }
-    if (!ctx.ref.mounted) return;
+    if (!ctx.ref.mounted || !_ownsRun) return;
 
     // Resolve the Studio cleaner slot (fail-explicit).
     final AuxApiConfig cleanerConfig;
@@ -1098,7 +1176,7 @@ class CleanerStage {
       debugPrint('[PostCleaner] rerun slot resolution failed: $e');
       return;
     }
-    if (!ctx.ref.mounted) return;
+    if (!ctx.ref.mounted || !_ownsRun) return;
 
     // Manual rerun has no promptPayload snapshot (the original generation
     // context is gone), so the character-audit pass is skipped.
@@ -1122,7 +1200,7 @@ class CleanerStage {
         '[PostCleaner] rerun beauty extraction failed session=$sessionId error=$e',
       );
     }
-    if (!ctx.ref.mounted) return;
+    if (!ctx.ref.mounted || !_ownsRun) return;
 
     // Build MacroContext for resolving preset-block macros (rerun path).
     final cleanerMacroCtx = MacroContext(
@@ -1158,10 +1236,11 @@ class CleanerStage {
     } catch (e) {
       debugPrint('[PostCleaner] rerun failed session=$sessionId error=$e');
       if (ctx.ref.mounted) {
-        ctx.ref.read(streamingStateProvider(ctx.charId).notifier).state =
-            const StreamingState();
-        ctx.ref.read(postCleanerStateProvider.notifier).state =
-            const PostCleanerState.idle();
+        if (_ownsSharedState) {
+          ctx.ref.read(streamingStateProvider(ctx.charId).notifier).state =
+              const StreamingState();
+        }
+        _setCleanerState(const PostCleanerState.idle());
         if (_preCreatedCleanerSwipeId >= 0) {
           try {
             await ctx.ref
@@ -1178,9 +1257,10 @@ class CleanerStage {
       if (_auditCancelToken != null && !_auditCancelToken!.isCancelled) {
         _auditCancelToken!.cancel();
       }
+      final publishedToken = _cleanerCancelToken ?? _auditCancelToken;
       _auditCancelToken = null;
       _cleanerCancelToken = null;
-      ctx.ref.read(cleanerCancelTokenProvider.notifier).state = null;
+      _clearPublishedCancelToken(publishedToken);
       _lastStreamedText = '';
       _preCreatedCleanerSwipeId = -1;
       _preCreatedMessageId = null;

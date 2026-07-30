@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/models/api_config.dart';
-import 'package:glaze_flutter/core/llm/lorebook_providers.dart';
 import 'package:glaze_flutter/core/llm/embedding_request_gate.dart';
+import 'package:glaze_flutter/core/state/lorebook_embedding_provider.dart';
 
 void main() {
   group('resolveEmbeddingConfig', () {

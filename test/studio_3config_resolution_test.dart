@@ -14,6 +14,7 @@ import 'package:glaze_flutter/core/models/pipeline_settings.dart';
 import 'package:glaze_flutter/core/models/studio_agent_settings.dart';
 import 'package:glaze_flutter/core/models/studio_config.dart';
 import 'package:glaze_flutter/core/state/db_provider.dart';
+import 'package:glaze_flutter/core/state/memory_agent_providers.dart';
 import 'package:glaze_flutter/features/settings/api_list_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 

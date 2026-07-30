@@ -10,6 +10,7 @@ import '../../core/state/db_provider.dart';
 import '../../core/utils/sync_deletion_tracker.dart';
 import '../../shared/utils/time_formatter.dart';
 import '../chat/chat_session_service.dart';
+import '../extensions/state/message_variables_notifier.dart';
 
 class ChatSessionInfo {
   final String sessionId;
@@ -109,17 +110,19 @@ class ChatHistoryNotifier extends AsyncNotifier<List<ChatSessionInfo>> {
         lastMessage = formatOriginPreview(m.originKind!, m.originTimestamp);
         lastMessageTime = m.originTimestamp;
       }
-      result.add(ChatSessionInfo(
-        sessionId: m.sessionId,
-        characterId: m.characterId,
-        characterName: characterName,
-        avatarPath: char?.avatarPath,
-        lastMessage: lastMessage,
-        lastMessageTime: lastMessageTime,
-        messageCount: m.messageCount,
-        sessionIndex: m.sessionIndex,
-        sessionName: m.sessionName,
-      ));
+      result.add(
+        ChatSessionInfo(
+          sessionId: m.sessionId,
+          characterId: m.characterId,
+          characterName: characterName,
+          avatarPath: char?.avatarPath,
+          lastMessage: lastMessage,
+          lastMessageTime: lastMessageTime,
+          messageCount: m.messageCount,
+          sessionIndex: m.sessionIndex,
+          sessionName: m.sessionName,
+        ),
+      );
     }
 
     result.sort((a, b) => b.lastMessageTime.compareTo(a.lastMessageTime));
@@ -160,14 +163,7 @@ class ChatHistoryNotifier extends AsyncNotifier<List<ChatSessionInfo>> {
     final studioConfig = await ref
         .read(studioConfigRepoProvider)
         .getBySessionId(sessionId);
-    await ref.read(chatRepoProvider).delete(sessionId);
-    await ref.read(memoryBookRepoProvider).deleteBySessionId(sessionId);
-    await ref.read(trackerRepoProvider).clearForSession(sessionId);
-    await ref.read(trackerSnapshotRepoProvider).deleteBySessionId(sessionId);
-    await ref
-        .read(ledgerReconciliationCheckpointRepoProvider)
-        .deleteBySessionId(sessionId);
-    await ref.read(studioConfigRepoProvider).deleteBySessionId(sessionId);
+    await ref.read(sessionDeletionRepoProvider).deleteSession(sessionId);
     ChatSessionService.clearCache();
     await SyncDeletionTracker.record('chat', sessionId);
     await SyncDeletionTracker.record('memory_book', sessionId);
@@ -181,33 +177,25 @@ class ChatHistoryNotifier extends AsyncNotifier<List<ChatSessionInfo>> {
   }
 
   Future<void> clearChat(String sessionId) async {
-    final chatRepo = ref.read(chatRepoProvider);
-    final sessions = await chatRepo.getAllSessionMetadata();
-    final meta = sessions.where((s) => s.sessionId == sessionId).firstOrNull;
-    if (meta == null) return;
-
-    final clearedSession = ChatSession(
-      id: sessionId,
-      characterId: meta.characterId,
-      sessionIndex: meta.sessionIndex,
-      messages: [],
-    );
-    await chatRepo.put(clearedSession);
-    // Wipe tracker snapshots so stale state from before the clear does not
-    // leak into the fresh chat.
-    await ref.read(trackerSnapshotRepoProvider).deleteBySessionId(sessionId);
-    await ref
-        .read(ledgerReconciliationCheckpointRepoProvider)
-        .deleteBySessionId(sessionId);
+    final clearedSession = await ref
+        .read(sessionDeletionRepoProvider)
+        .clearSession(sessionId: sessionId, replacementMessages: const []);
+    if (clearedSession == null) return;
+    ChatSessionService.updateCache(clearedSession);
+    ref.invalidate(memoryBookProvider(sessionId));
+    ref.read(messageVariablesProvider.notifier).clearSession(sessionId);
+    await SyncDeletionTracker.recordSessionRuntimeClear(sessionId);
   }
 
   Future<void> renameSession(String sessionId, String newName) async {
     final chatRepo = ref.read(chatRepoProvider);
-    final session = await chatRepo.getById(sessionId);
-    if (session == null) return;
-    final updatedVars = Map<String, String>.from(session.sessionVars);
-    updatedVars['sessionName'] = newName;
-    await chatRepo.put(session.copyWith(sessionVars: updatedVars));
+    final updated = await chatRepo.renameSession(
+      sessionId: sessionId,
+      name: newName,
+    );
+    if (updated == null) return;
+    ChatSessionService.updateCache(updated);
+    final durableName = updated.sessionVars['sessionName'];
     state = state.whenData(
       (sessions) => [
         for (final item in sessions)
@@ -221,7 +209,7 @@ class ChatHistoryNotifier extends AsyncNotifier<List<ChatSessionInfo>> {
                   lastMessageTime: item.lastMessageTime,
                   messageCount: item.messageCount,
                   sessionIndex: item.sessionIndex,
-                  sessionName: newName,
+                  sessionName: durableName,
                 )
               : item,
       ],

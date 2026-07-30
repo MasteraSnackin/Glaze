@@ -3,6 +3,7 @@ import '../../models/pipeline_settings.dart';
 import '../../models/studio_config.dart';
 import '../agent_runner.dart' show ResolvedAgentConfig;
 import '../studio_api_config_resolver.dart';
+import '../studio_turn_config_snapshot.dart';
 import '../transport/extra_request_parameters.dart';
 
 /// Resolves which API config an agent uses.
@@ -39,16 +40,18 @@ class AgentConfigResolver {
     String sessionId, {
     bool isFinalResponse = false,
     String? apiConfigId,
+    StudioTurnConfigSnapshot? turnConfig,
   }) async {
-    final apiConfigs = await _loadApiConfigs();
+    final apiConfigs = turnConfig?.apiConfigs ?? await _loadApiConfigs();
     final runApiConfigId = (apiConfigId != null && apiConfigId.isNotEmpty)
         ? apiConfigId
-        : await _readRunApiConfigId(sessionId);
+        : turnConfig?.config?.runApiConfigId ??
+              await _readRunApiConfigId(sessionId);
     final resolver = StudioApiConfigResolver(
       apiConfigs: apiConfigs,
-      activeConfig: _readActiveApiConfig(),
+      activeConfig: turnConfig?.activeApiConfig ?? _readActiveApiConfig(),
     );
-    final pipeline = _readPipelineSettings();
+    final pipeline = turnConfig?.pipelineSettings ?? _readPipelineSettings();
     if (isFinalResponse) {
       return resolver
           .resolveAgentConfig(

@@ -9,7 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../utils/cast_helpers.dart';
 import '../utils/platform_paths.dart';
-import '../../features/cloud_sync/sync_repo_interfaces.dart';
+import '../application/sync_repo_interfaces.dart';
 
 /// Shorter-side target (px) of the pre-generated list/card thumbnails.
 /// Changing this must be paired with a bump of the thumbnail migration key (see

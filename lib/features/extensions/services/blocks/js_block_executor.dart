@@ -158,6 +158,9 @@ class JsBlockExecutor {
         return await engine.runScript(
           script: script,
           context: contextMap,
+          host: bridge == null
+              ? null
+              : JsEngineBridgeHost(bridge: bridge.extensionBridgeService),
           cancelToken: cancelToken,
         );
       } on HeadlessUnavailableError catch (e) {

@@ -75,22 +75,29 @@ class JsEngineBridgeHost {
   final JsBridgeService bridge;
   final String? Function()? currentCharIdProvider;
 
+  static Set<String> get supportedMethods =>
+      JsBridgeMethodRegistry.methodsFor(JsBridgeHostProfile.headless);
+
   Future<Map<String, dynamic>> handle(List<dynamic> args) async {
     if (args.isEmpty) {
-      return {'ok': false, 'error': {'code': 'invalid_request'}};
+      return {
+        'ok': false,
+        'error': {'code': 'invalid_request'},
+      };
     }
     final raw = args.first;
     final request = raw is Map<String, dynamic>
         ? raw
         : raw is Map
-            ? Map<String, dynamic>.from(raw)
-            : const <String, dynamic>{};
+        ? Map<String, dynamic>.from(raw)
+        : const <String, dynamic>{};
     final method = request['method'] as String? ?? '';
     if (method == 'triggerGeneration') {
       final context = request['context'];
       final hasCharId =
-          context is Map && context['characterId'] is String &&
-              (context['characterId'] as String).isNotEmpty;
+          context is Map &&
+          context['characterId'] is String &&
+          (context['characterId'] as String).isNotEmpty;
       if (!hasCharId) {
         final fallback = currentCharIdProvider?.call();
         if (fallback != null && fallback.isNotEmpty) {
@@ -114,15 +121,13 @@ class JsEngineBridgeHost {
 ///   - [init] is idempotent; concurrent callers observe the same future.
 ///   - [dispose] tears down the WebView; the service can be re-initialized.
 class JsEngineService {
-  JsEngineService._({
-    HeadlessInAppWebViewFactory? factory,
-  }) : _factory = factory ?? const _DefaultFactory();
+  JsEngineService._({HeadlessInAppWebViewFactory? factory})
+    : _factory = factory ?? const _DefaultFactory();
 
   static JsEngineService? _instance;
 
   /// Process-wide singleton.
-  static JsEngineService get instance =>
-      _instance ??= JsEngineService._();
+  static JsEngineService get instance => _instance ??= JsEngineService._();
 
   /// Test seam: replace the singleton with a custom service. Pass `null`
   /// to reset (next [instance] call re-creates the default).
@@ -135,11 +140,12 @@ class JsEngineService {
 
   HeadlessInAppWebView? _webView;
   JsEngineController? _controller;
-  JsEngineBridgeHost? _host;
   JsEngineStatus _status = JsEngineStatus.uninitialized;
   String? _lastError;
   Completer<void>? _initCompleter;
-  Completer<void>? _activeRun;
+  final Map<String, JsEngineBridgeHost> _runHosts = {};
+  final Map<String, Completer<void>> _activeRuns = {};
+  int _nextRunId = 0;
 
   JsEngineStatus get status => _status;
   String? get lastError => _lastError;
@@ -147,7 +153,7 @@ class JsEngineService {
 
   /// Initializes the headless engine. Safe to call from multiple call sites;
   /// only one WebView is created.
-  Future<void> init({JsEngineBridgeHost? host}) async {
+  Future<void> init() async {
     if (_status == JsEngineStatus.disposed) {
       throw StateError('JsEngineService was disposed');
     }
@@ -155,7 +161,6 @@ class JsEngineService {
     if (pending != null) return pending.future;
     if (_status == JsEngineStatus.ready) return;
 
-    _host = host ?? _host;
     _status = JsEngineStatus.initializing;
     _lastError = null;
     final completer = Completer<void>();
@@ -180,13 +185,10 @@ class JsEngineService {
       await controller.evaluateJavascript(
         source: 'window.__glazeSdkSource = ${_escapeJsonStr(sdkSource)};',
       );
-      final hostInstance = _host;
-      if (hostInstance != null) {
-        await controller.addJavaScriptHandler(
-          handlerName: 'glazeBridge',
-          callback: (args) => hostInstance.handle(args),
-        );
-      }
+      await controller.addJavaScriptHandler(
+        handlerName: 'glazeBridge',
+        callback: _handleBridgeCall,
+      );
       _status = JsEngineStatus.ready;
       completer.complete();
     } catch (e, st) {
@@ -200,12 +202,11 @@ class JsEngineService {
   }
 
   /// Test seam: initializes the engine with a pre-built [controller] and
-  /// an explicit [host], bypassing the [HeadlessInAppWebView] creation and
-  /// the asset bundle load. Production code must not call this directly.
+  /// bypassing the [HeadlessInAppWebView] creation and the asset bundle load.
+  /// Production code must not call this directly.
   @visibleForTesting
   Future<void> debugInitWithController({
     required JsEngineController controller,
-    required JsEngineBridgeHost host,
   }) async {
     if (_status == JsEngineStatus.disposed) {
       throw StateError('JsEngineService was disposed');
@@ -214,7 +215,6 @@ class JsEngineService {
     if (pending != null) return pending.future;
     if (_status == JsEngineStatus.ready) return;
 
-    _host = host;
     _status = JsEngineStatus.initializing;
     _lastError = null;
     final completer = Completer<void>();
@@ -226,7 +226,7 @@ class JsEngineService {
       );
       await controller.addJavaScriptHandler(
         handlerName: 'glazeBridge',
-        callback: (args) => host.handle(args),
+        callback: _handleBridgeCall,
       );
       _status = JsEngineStatus.ready;
       completer.complete();
@@ -239,12 +239,30 @@ class JsEngineService {
     }
   }
 
+  Future<Map<String, dynamic>> _handleBridgeCall(List<dynamic> args) {
+    final runId = args.length > 1 && args[1] is String
+        ? args[1] as String
+        : null;
+    final host = runId == null ? null : _runHosts[runId];
+    if (host == null) {
+      return Future.value({
+        'ok': false,
+        'error': {
+          'code': 'bridge_unavailable',
+          'message': 'Headless bridge authority is not active',
+        },
+      });
+    }
+    return host.handle(args);
+  }
+
   /// Runs [script] inside the headless sandbox and returns its string result.
   /// Throws [HeadlessUnavailableError] if the engine is not ready. Honors
   /// [timeout] and cooperatively cancels via [cancelToken].
   Future<String> runScript({
     required String script,
     required Map<String, dynamic> context,
+    required JsEngineBridgeHost? host,
     Duration timeout = const Duration(seconds: 30),
     CancelToken? cancelToken,
   }) async {
@@ -258,8 +276,10 @@ class JsEngineService {
       throw Exception('Cancelled before JS execution');
     }
 
+    final runId = 'run_${_nextRunId++}';
     final runCompleter = Completer<void>();
-    _activeRun = runCompleter;
+    if (host != null) _runHosts[runId] = host;
+    _activeRuns[runId] = runCompleter;
     if (cancelToken != null) {
       unawaited(
         cancelToken.whenCancel.whenComplete(() {
@@ -274,25 +294,30 @@ class JsEngineService {
     try {
       final jsFuture = controller.callAsyncJavaScript(
         functionBody:
-            'return window.headlessBridge.runSandboxedScript(script, contextJson);',
+            'return window.headlessBridge.runSandboxedScript(script, contextJson, runId);',
         arguments: {
           'script': script,
           'contextJson': jsonEncode(context),
+          'runId': runId,
         },
       );
       // Race the JS call against the cancellation sentinel. Whichever
       // completes first wins. The losing future is allowed to stay
       // pending; the timeout above will eventually unblock it.
-      final winner = await Future.any<dynamic>([
-        jsFuture.then((r) => _RaceResult.js(r)),
-        runCompleter.future.then(
-          (_) => _RaceResult.cancelled(),
-          onError: (Object error, StackTrace stackTrace) =>
-              Error.throwWithStackTrace(error, stackTrace),
-        ),
-      ]).timeout(timeout, onTimeout: () {
-        throw TimeoutException('Headless JS run timed out', timeout);
-      });
+      final winner =
+          await Future.any<dynamic>([
+            jsFuture.then((r) => _RaceResult.js(r)),
+            runCompleter.future.then(
+              (_) => _RaceResult.cancelled(),
+              onError: (Object error, StackTrace stackTrace) =>
+                  Error.throwWithStackTrace(error, stackTrace),
+            ),
+          ]).timeout(
+            timeout,
+            onTimeout: () {
+              throw TimeoutException('Headless JS run timed out', timeout);
+            },
+          );
       if (winner is _RaceResultJs) {
         if (!runCompleter.isCompleted) runCompleter.complete();
         final value = winner.result?.value;
@@ -303,16 +328,20 @@ class JsEngineService {
       // Cancellation path: jsFuture is abandoned.
       throw Exception('Cancelled during JS execution');
     } finally {
-      if (identical(_activeRun, runCompleter)) _activeRun = null;
+      _runHosts.remove(runId);
+      _activeRuns.remove(runId);
     }
   }
 
-  /// Cancels any in-flight run started by this service.
+  /// Cancels all in-flight runs started by this service.
   void cancel() {
-    final run = _activeRun;
-    _activeRun = null;
-    if (run != null && !run.isCompleted) {
-      run.completeError(Exception('Headless engine cancelled by user'));
+    final runs = _activeRuns.values.toList(growable: false);
+    _activeRuns.clear();
+    _runHosts.clear();
+    for (final run in runs) {
+      if (!run.isCompleted) {
+        run.completeError(Exception('Headless engine cancelled by user'));
+      }
     }
   }
 
@@ -322,7 +351,6 @@ class JsEngineService {
     final webView = _webView;
     _controller = null;
     _webView = null;
-    _host = null;
     _status = JsEngineStatus.disposed;
     if (controller != null) {
       try {

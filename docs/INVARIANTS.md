@@ -24,33 +24,35 @@ Note: `ChatNotifier` uses `ref.keepAlive()`, so provider disposal is not a clean
 
 ### INV-C3: Partial text is preserved on abort
 
-When the user aborts mid-stream and partial text exists, the partial response is saved
-as a completed message — not discarded. `AbortHandler.abortGeneration()` (called from
-`ChatNotifier.abortGeneration()`) reads `streamingStateProvider` and persists partial
-text before clearing state.
+When the user aborts mid-stream and partial text exists, the partial response is
+saved as a completed message, not discarded. `AbortHandler.abortGeneration()`
+captures the stream and atomically mutates the latest durable session. Generation
+remains blocked until persistence (or durable reload after a conflict/failure)
+settles; cache and reactive session state never receive a speculative snapshot.
 
 ### INV-C4: `isGenerating` is consistent with actual generation activity
 
-`ChatState.isGenerating == true` iff an SSE stream is currently active for this `charId`.
+`ChatState.isGenerating == true` while the generation owns the character,
+including durable abort finalization after the SSE request has been cancelled.
 On app restart, `build()` creates a fresh `ChatState` where `isGenerating` defaults to `false`.
 
 ### INV-C5: Session variables are restored on abort/error ✅
 
-If macro expansion mutates `sessionVars` during prompt build, those mutations must
-**not** be persisted on any non-happy exit path. Only the success path
-(`SavedMessageWriter.writeAssistant`) writes the `pendingSessionVars` snapshot returned
+If macro expansion mutates `sessionVars` during prompt build, those mutations
+must **not** be persisted on any non-happy exit path. Only the successful
+generation/continuation commit applies the `pendingSessionVars` delta returned
 by the isolate.
 
-`SavedMessageWriter.writeError` and `SavedMessageWriter.writeRegenError` keep the
-original `currentSession.sessionVars` unchanged. The pre-generation vars from the
-isolate only reach the database on the success branch (`stream_generation_service.dart`,
-`writeAssistant` call with `pendingSessionVars`).
+`SavedMessageWriter` carries the generated result, but
+`GenerationPipeline._commitGenerationResult` is the durable boundary: it merges
+the generated delta into the latest row inside `ChatRepo.mutateSession`.
+Continuation uses the same delta merge. Error, rollback, and abort paths do not
+apply the generated delta.
 
 `currentSessionVars` lives only inside the isolate's local scope during
 `buildPrompt()` (`lib/core/llm/prompt_builder.dart:279`) — nothing is persisted
-before the success branch, so there is no rollback to perform. The fix in PR-B
-(C11) was simply to stop **adding** `pendingSessionVars` to the error write paths
-where they were being leaked into the database despite the abort.
+before the success branch, so there is no variable rollback write. Non-success
+paths reload or preserve the latest durable variables.
 
 ### INV-C6: Background generation continues independently
 
@@ -301,7 +303,25 @@ OpenRouter `cache_control`) a long stable prefix to hit across turns.
 `cacheControlTtl` / `cacheBreakpointMode` are wired through
 `ResolvedAgentConfig.fromApiConfig` → `ChatTransportRequest` → transport.
 
-### INV-ST6: Memory Graph (entity extraction + salience) is DISABLED
+### INV-ST8: Studio configuration is turn-scoped ✅ ENFORCED
+
+A normal generation resolves one `StudioTurnConfigSnapshot` at turn start and
+passes it through prompt construction, trackers, final generation,
+POST-cleaner, and Ledger. Downstream stages must prefer the supplied snapshot
+and must not re-read mutable Studio preset, API, or pipeline settings during
+that turn. The API-config list is immutable. A manual action that starts a
+separate operation may resolve a fresh snapshot.
+
+### INV-ST9: Cleaner execution has lease authority ✅ ENFORCED
+
+Cleaner runs acquire a `CleanerRunLease` keyed by `(sessionId, messageId)`.
+Same-key execution is latest-wins: the successor cancels all registered tokens
+and waits for prior cleanup. Superseded queued runs do not start; distinct keys
+may run concurrently. A run may publish shared cleaner UI/token state only
+while `lease.ownsSharedState`, and may perform normal message-specific effects
+only while `lease.isCurrent`.
+
+### INV-ST10: Memory Graph (entity extraction + salience) is DISABLED
 
 `MemoryPostTurnService.runPostTurn` is a **no-op** — only the cadence
 counter is incremented. The heuristic `MemoryEntityExtractor` (relies on
@@ -313,7 +333,7 @@ receive no new rows.
 
 Entity tracking is handled by **Studio Ledger** (LLM-based, writes
 `npc:Name.field`, `world:location`, `scene.present_entities` into
-`tracker_rows`) — see INV-ST1 through INV-ST5.
+`tracker_rows`) — see INV-ST1 through INV-ST9.
 
 **Do NOT re-enable** the heuristic extractor without rewriting it for
 non-English text. Reference for a future LLM-based approach:
@@ -340,11 +360,12 @@ writes are:
   Phase 6).
 - Delete methods (`deleteForMessage` / `deleteAnchor` / `deleteBySessionId`).
 
-Rollback is **emergent**: deleting the rows for a message makes the
-previous committed snapshot become the new latest — there is no explicit
-"restore" code path. `getLatestCommitted` / `getLatestCommittedExcludingMessage`
+Selection of the rollback snapshot is **emergent**: deleting the rows for a
+message makes the previous committed snapshot become the new latest.
+`getLatestCommitted` / `getLatestCommittedExcludingMessage`
 return the highest-`createdAt` committed row, which naturally rolls back
-when newer rows are deleted.
+when newer rows are deleted. Applying that selected snapshot to the mutable
+`tracker_rows` materialization is explicit and transactional.
 
 Code refs: `lib/core/db/repositories/tracker_snapshot_repo.dart`,
 `lib/core/llm/studio_ledger_service.dart`,
@@ -420,8 +441,9 @@ Code ref: `lib/core/db/repositories/tracker_snapshot_repo.dart:copyForSessionBra
 
 ### INV-TS7: Snapshots are covered by backup + cloud sync ✅ ENFORCED (Phase 8, 9)
 
-`tracker_snapshots` is in the backup whitelist (`backup_exporter.dart`,
-backup `_schemaVersion` 5) and has full cloud sync coverage via
+`tracker_snapshots` entered the backup format at v5 and remains in the current
+backup whitelist (`backup_exporter.dart`, backup schema v10). It has full cloud
+sync coverage via
 `SyncTrackerSnapshotStore` + `TrackerSnapshotSyncStore` adapter (Phase 9).
 Session deletes record `SyncDeletionTracker.record('tracker_snapshot',
 sessionId)` so the cloud counterpart is deleted too.
@@ -703,10 +725,14 @@ If abort fails to clear `isGenerating`, the subsequent check rejects.
 
 `ChatNotifier.continueMessage()` calls `ChatGenerationService.generate()` directly
 (not `GenerationPipeline.run()`). After the stream completes, it joins the
-original and generated content with a paragraph boundary, replaces the existing
-assistant message while preserving its id, and persists via `chatRepo.put`. It
-does not create a new swipe or keep the temporary generated message. The active
-green and nested swipes are updated to the same merged content.
+original and generated content with a paragraph boundary, then uses
+`ChatRepo.mutateSession` to replace only the expected durable last assistant
+message. The guard checks target ID, last-message position, content, `swipeId`,
+and `agentSwipeId`; a conflict is reloaded instead of overwritten. The session
+variable delta is merged into the latest row, and only the returned durable
+session is published. It does not create a new swipe or keep the temporary
+generated message. The active green and nested swipes are updated to the same
+merged content.
 
 While the continuation streams, `ChatState.continuationTargetId` holds the id of
 that assistant message. The WebView layer keys off it: the sync dispatcher skips
@@ -811,15 +837,17 @@ reach `window.parent`, `window.flutter_inappwebview`, or any other
 parent-context object. API keys live in native Drift and are never
 serialised into the JS context.
 
-`glaze.*` calls are the only sanctioned way for the script to talk
-back to Dart, and every method is gated by `_requireCapability` (see
-INV-JS3). Two execution paths share the same `JsBridgeService`:
+`glaze.*` calls are the only sanctioned way for the script to talk back to
+Dart. `JsBridgeService.dispatch` resolves the canonical method registry and
+enforces its capability before handler dispatch (see INV-JS1). The two paths
+share the same contract, not mutable process-wide chat authority:
 
 * `ChatBridgeController.runJsBlock()` — visual WebView, used while a
   chat is open.
-* `JsEngineService.runScript()` — headless `HeadlessInAppWebView`,
-  preferred for periodic ticks / background scripts. Falls back to
-  the visual bridge on `HeadlessUnavailableError`.
+* `JsEngineService.runScript()` — headless `HeadlessInAppWebView`, with an
+  optional bridge host bound to an opaque per-run ID. Hostless or expired IDs
+  cannot call `window.glaze`. Falls back to visual execution when the engine is
+  unavailable.
 
 `runSandboxedScript` is implemented in
 `assets/chat_webview/bridge/chat_bridge_controller.js` (visual) and
@@ -834,7 +862,10 @@ matching source-check (`e.source !== iframe.contentWindow` /
 
 ### INV-JS1: `glaze.*` calls are gated by per-preset capability permissions (default-deny) ✅ ENFORCED
 
-Every bridge method is wrapped in `JsBridgeService._requireCapability(capabilityId)`.
+Every public bridge method is defined in the immutable
+`JsBridgeMethodRegistry`, including its capability resolver and host
+availability. `JsBridgeService.dispatch` rejects methods absent from that
+registry and enforces the resolved capability before invoking a handler.
 The default policy is **deny** when no `PermissionCheck` is registered (test seam).
 Production wires `_bridgePermissionCheck` in `ChatWebViewWidget`, which reads
 `activePresetPermissionsProvider`. The `PresetPermissions` model has 19
@@ -852,6 +883,11 @@ toggles; only `showToast` defaults to allow.
 | `glaze.playAudio` | `play_audio` |
 | `glaze.executeCommand` | `execute_command` |
 | `glaze.showToast` (default ALLOW) | `show_toast` |
+
+The visual and headless hosts currently expose the same registry-defined
+contract. Scope-sensitive variable methods resolve their capability from
+`params.scope`; fixed-capability methods carry a fixed resolver. Handler code
+does not maintain a second capability table.
 
 ### INV-JS2: Variable writes are atomic; payload is JSON-validated and ≤ 64 KiB ✅ ENFORCED
 
@@ -896,13 +932,25 @@ matching `audioplayers` `Source` subclass. Built-in cues
 ### INV-JS5: `executeCommand` routes `/trigger`, `/getvar`, `/setvar`, `/inject`, `/toast` to the same services as the dedicated bridge methods ✅ ENFORCED
 
 `buildWiredCommandRegistry(WiredCommandDeps)` is the production
-default. Each handler delegates to the same service that powers the
-dedicated `glaze.*` method:
+default. Each handler re-enters the same live `JsBridgeService` through
+canonical dispatch:
 
-* `/trigger` → `TriggerGenerationHandler.handle` (mirrors `glaze.triggerGeneration`)
-* `/getvar` / `/setvar` → `JsBridgeService.dispatch` (mirrors `glaze.getVariables` / `setVariables`)
-* `/inject` → `RuntimePromptInjectionNotifier.inject`
-* `/toast` → `JsBridgeToastController.show` (severity-aware)
+* `/trigger` → `glaze.triggerGeneration`
+* `/getvar` / `/setvar` → `glaze.getVariables` / `setVariables`
+* `/inject` → `glaze.injectPrompt`
+* `/toast` → `glaze.showToast`
+
+The outer call must have `execute_command`; canonical dispatch then also
+requires the dedicated capability (`trigger_generation`, scope-specific
+variable access, `inject_prompt`, or `show_toast`). The command context is
+forwarded unchanged so session, character, message, and global routing match
+the dedicated method.
+
+Headless execution binds that bridge authority to an opaque per-run id.
+Sandbox requests without an active id are denied, so the process-wide engine
+lifecycle cannot select one chat's authority for another chat's script.
+Runs without a visual chat bridge may execute pure JS, but receive no bridge
+authority and therefore cannot call `window.glaze` methods.
 
 `buildDefaultCommandRegistry` is retained for tests/CMS — its
 handlers echo arguments. The `CommandRegistry.run` contract catches

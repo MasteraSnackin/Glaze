@@ -396,61 +396,45 @@ class CharactersNotifier extends AsyncNotifier<List<Character>> {
   Future<void> removeMany(Set<String> ids) async {
     if (ids.isEmpty) return;
     final repo = ref.read(characterRepoProvider);
-    final chatRepo = ref.read(chatRepoProvider);
-    final lorebookRepo = ref.read(lorebookRepoProvider);
-    final embeddingRepo = ref.read(embeddingRepoProvider);
-
     final characters = <Character>[];
     for (final id in ids) {
       final character = await repo.getById(id);
       if (character != null) characters.add(character);
     }
 
-    await chatRepo.transaction(() async {
-      for (final id in ids) {
-        final deletedSessionIds = await chatRepo.deleteByCharacterId(id);
-        for (final sid in deletedSessionIds) {
-          final studioConfig = await ref
-              .read(studioConfigRepoProvider)
-              .getBySessionId(sid);
-          await ref.read(studioConfigRepoProvider).deleteBySessionId(sid);
-          await SyncDeletionTracker.record('chat', sid);
-          await SyncDeletionTracker.record('memory_book', sid);
-          await SyncDeletionTracker.record('tracker_value', sid);
-          await SyncDeletionTracker.record('tracker_snapshot', sid);
-          final studioProfileId = studioConfig?.profileId ?? '';
-          if (studioConfig != null &&
-              (studioProfileId.isEmpty || studioProfileId == sid)) {
-            await SyncDeletionTracker.record('studio_config', sid);
-          }
-        }
+    final result = await ref
+        .read(characterDeletionRepoProvider)
+        .deleteCharacters(ids);
 
-        final lorebooks =
-            await lorebookRepo.getByScopeAndTarget('character', id);
-        for (final lb in lorebooks) {
-          await lorebookRepo.delete(lb.id);
-          await embeddingRepo.deleteBySourceId(lb.id);
-          await SyncDeletionTracker.record('lorebooks', lb.id);
-        }
-
-        final activations = ref.read(lorebookActivationsProvider);
-        if (activations.character.containsKey(id)) {
-          final charMap = <String, List<String>>{};
-          for (final e in activations.character.entries) {
-            if (e.key != id) charMap[e.key] = List<String>.from(e.value);
-          }
-          final cleaned = LorebookActivations(
-            character: charMap,
-            chat: activations.chat,
-          );
-          ref.read(lorebookActivationsProvider.notifier).state = cleaned;
-          await saveLorebookActivations(cleaned);
-        }
-
-        await repo.delete(id);
-        await SyncDeletionTracker.record('character', id);
+    for (final sid in result.sessionIds) {
+      await SyncDeletionTracker.record('chat', sid);
+      await SyncDeletionTracker.record('memory_book', sid);
+      await SyncDeletionTracker.record('tracker_value', sid);
+      await SyncDeletionTracker.record('tracker_snapshot', sid);
+      if (result.studioConfigSessionIds.contains(sid)) {
+        await SyncDeletionTracker.record('studio_config', sid);
       }
-    });
+    }
+    for (final lorebookId in result.lorebookIds) {
+      await SyncDeletionTracker.record('lorebooks', lorebookId);
+    }
+    for (final id in result.characterIds) {
+      await SyncDeletionTracker.record('character', id);
+    }
+
+    final activations = ref.read(lorebookActivationsProvider);
+    if (result.characterIds.any(activations.character.containsKey)) {
+      final cleaned = LorebookActivations(
+        character: {
+          for (final entry in activations.character.entries)
+            if (!result.characterIds.contains(entry.key))
+              entry.key: List<String>.from(entry.value),
+        },
+        chat: activations.chat,
+      );
+      ref.read(lorebookActivationsProvider.notifier).state = cleaned;
+      await saveLorebookActivations(cleaned);
+    }
 
     for (final character in characters) {
       await _cleanupFiles(character);

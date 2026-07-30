@@ -6,7 +6,6 @@ import '../../core/models/chat_message.dart';
 import '../../core/models/tracker_snapshot.dart';
 import '../../core/utils/time_helpers.dart';
 import '../../core/state/db_provider.dart';
-import '../../shared/widgets/glaze_toast.dart';
 import '../extensions/providers/info_blocks_provider.dart';
 import 'chat_session_service.dart';
 
@@ -918,21 +917,54 @@ class ChatMessageService {
   }
 
   ChatSession _persist(ChatSession session, List<ChatMessage> newMessages) {
-    final updated = session.copyWith(
+    return session.copyWith(
       messages: newMessages,
       updatedAt: currentTimestampSeconds(),
     );
-    if (!_ref.mounted) return updated;
-    _ref.read(chatRepoProvider).put(updated).catchError((Object e) {
-      debugPrint('[ChatMessageService] failed to persist session: $e');
-      GlazeToast.showWithoutContext(
-        'Failed to save changes: $e',
-        isError: true,
-        duration: 5000,
-      );
-    });
-    ChatSessionService.updateCache(updated);
-    return updated;
+  }
+
+  /// Applies a single-message transformation to the latest durable session.
+  /// The UI snapshot is used only to resolve a stable message id.
+  Future<ChatSession> commitMessageMutation(
+    ChatSession snapshot,
+    int messageIndex,
+    ChatSession Function(ChatSession latest, int latestIndex) mutate,
+  ) async {
+    if (messageIndex < 0 || messageIndex >= snapshot.messages.length) {
+      return snapshot;
+    }
+    final messageId = snapshot.messages[messageIndex].id;
+    final repo = _ref.read(chatRepoProvider);
+    final durable = await repo.mutateMessages(
+      sessionId: snapshot.id,
+      updatedAt: currentTimestampSeconds(),
+      mutate: (messages) {
+        final latestIndex = messages.indexWhere((m) => m.id == messageId);
+        if (latestIndex < 0) return messages;
+        final latest = snapshot.copyWith(messages: messages);
+        return mutate(latest, latestIndex).messages;
+      },
+    );
+    if (durable == null) return snapshot;
+    ChatSessionService.updateCache(durable);
+    return durable;
+  }
+
+  /// Applies a session-wide message transformation to the latest durable row.
+  Future<ChatSession> commitMessagesMutation(
+    ChatSession snapshot,
+    ChatSession Function(ChatSession latest) mutate,
+  ) async {
+    final repo = _ref.read(chatRepoProvider);
+    final durable = await repo.mutateMessages(
+      sessionId: snapshot.id,
+      updatedAt: currentTimestampSeconds(),
+      mutate: (messages) =>
+          mutate(snapshot.copyWith(messages: messages)).messages,
+    );
+    if (durable == null) return snapshot;
+    ChatSessionService.updateCache(durable);
+    return durable;
   }
 }
 

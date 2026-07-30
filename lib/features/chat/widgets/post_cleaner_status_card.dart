@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../state/post_cleaner_state_provider.dart';
 import '../state/studio_cycle_state_provider.dart';
+import 'chat_status_card_shell.dart';
 
 /// Floating card shown at the top of the chat while the POST-cleaner is
 /// running, and for a brief moment after it finishes (done/error).
@@ -82,60 +83,25 @@ class _PostCleanerStatusCardState extends ConsumerState<PostCleanerStatusCard> {
       accent = Colors.grey;
     }
 
-    return Material(
-      color: Colors.transparent,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: cs.surface.withValues(alpha: 0.92),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: accent.withValues(alpha: 0.35)),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.22),
-              blurRadius: 18,
-              offset: const Offset(0, 8),
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            if (isFactChecking || isRunning)
-              SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(strokeWidth: 2, color: accent),
-              )
-            else
-              Icon(icon, size: 18, color: accent),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: cs.onSurface,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-            if (isFactChecking || isRunning)
-              IconButton(
-                onPressed: () {
-                  final token = ref.read(cleanerCancelTokenProvider);
-                  if (token != null && !token.isCancelled) {
-                    token.cancel('User aborted post-cleaner');
-                  }
-                },
-                icon: const Icon(Icons.stop_circle_outlined, size: 18),
-                tooltip: 'Stop cleaner',
-                visualDensity: VisualDensity.compact,
-                style: IconButton.styleFrom(foregroundColor: cs.error),
-              ),
-          ],
-        ),
-      ),
+    return ChatStatusCardShell(
+      label: label,
+      icon: icon,
+      accent: accent,
+      showSpinner: isFactChecking || isRunning,
+      action: isFactChecking || isRunning
+          ? IconButton(
+              onPressed: () {
+                final token = ref.read(cleanerCancelTokenProvider);
+                if (token != null && !token.isCancelled) {
+                  token.cancel('User aborted post-cleaner');
+                }
+              },
+              icon: const Icon(Icons.stop_circle_outlined, size: 18),
+              tooltip: 'Stop cleaner',
+              visualDensity: VisualDensity.compact,
+              style: IconButton.styleFrom(foregroundColor: cs.error),
+            )
+          : null,
     );
   }
 

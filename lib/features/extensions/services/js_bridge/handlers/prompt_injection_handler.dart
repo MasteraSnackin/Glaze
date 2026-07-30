@@ -6,7 +6,6 @@ class PromptInjectionHandler {
   const PromptInjectionHandler();
 
   FutureOr<Map<String, dynamic>> injectPrompt(JsBridgeContext bridge) {
-    bridge.requireCapability('inject_prompt');
     final id = bridge.params['id'];
     if (id is! String || id.trim().isEmpty) {
       throw ArgumentError('injectPrompt id is required');
@@ -29,7 +28,6 @@ class PromptInjectionHandler {
   }
 
   FutureOr<Map<String, dynamic>> uninjectPrompt(JsBridgeContext bridge) {
-    bridge.requireCapability('uninject_prompt');
     final id = bridge.params['id'];
     if (id is! String || id.trim().isEmpty) {
       throw ArgumentError('uninjectPrompt id is required');

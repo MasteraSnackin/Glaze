@@ -8,6 +8,7 @@ import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/llm/aux_llm_client.dart' show AuxApiConfig;
 import 'package:glaze_flutter/core/llm/prompt/main_model_context_snapshot.dart';
 import 'package:glaze_flutter/core/llm/studio_ledger_reconciliation.dart';
+import 'package:glaze_flutter/core/llm/studio_turn_config_snapshot.dart';
 import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
 import 'package:glaze_flutter/core/state/db_provider.dart';
@@ -56,6 +57,7 @@ class _RecordingLedgerStage extends LedgerStage {
     bool isManualRerun = false,
     AuxApiConfig? resolvedConfig,
     CancelToken? cancelToken,
+    StudioTurnConfigSnapshot? studioTurnConfig,
   }) async {
     calls++;
     this.finalAssistantText = finalAssistantText;
@@ -132,7 +134,8 @@ void main() {
           charId: 'c1',
           setState: (next) => state = next,
           getState: () => state,
-          persistSession: (_) {},
+          mutateSession: (_, _) async => null,
+          loadSession: (_) async => null,
         );
         final ctx = StageContext(
           ref: ref,

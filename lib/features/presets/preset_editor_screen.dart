@@ -19,7 +19,7 @@ import '../../shared/widgets/help_tip.dart';
 import 'preset_list_provider.dart';
 import 'preset_export.dart';
 import 'widgets/preset_block_row.dart';
-import '../../core/llm/summary_service.dart';
+import '../../core/state/summary_providers.dart';
 import '../chat/chat_provider.dart';
 import '../settings/app_settings_provider.dart';
 import '../chat/widgets/authors_note_sheet.dart';

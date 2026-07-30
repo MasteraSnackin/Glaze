@@ -208,14 +208,7 @@ class ChatWebViewSurface extends ConsumerWidget {
                 // Kick off the singleton headless engine. Failure is
                 // non-fatal — the visual bridge above remains the fallback
                 // for jsRunner blocks and for background scripts.
-                unawaited(
-                  JsEngineService.instance.init(
-                    host: JsEngineBridgeHost(
-                      bridge: jsBridgeService,
-                      currentCharIdProvider: () => charId,
-                    ),
-                  ),
-                );
+                unawaited(JsEngineService.instance.init());
                 // Do not call clearAll() here — it races with _initWebViewOnce
                 // (shows #loading-screen via JS) and broke UseVirtualScroll on
                 // keep-alive re-attach. Initializer.setMessages resets the DOM.

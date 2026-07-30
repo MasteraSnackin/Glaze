@@ -128,9 +128,7 @@ bool _passes(CharacterQuery q, Character c) {
     final query = q.search.toLowerCase();
     final displayName = c.displayName?.toLowerCase() ?? '';
     final matchesSearch =
-        c.fav ||
-        c.name.toLowerCase().contains(query) ||
-        displayName.contains(query);
+        c.name.toLowerCase().contains(query) || displayName.contains(query);
     if (!matchesSearch) return false;
   }
   if (q.favOnly && !c.fav) return false;

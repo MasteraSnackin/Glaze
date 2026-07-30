@@ -8,7 +8,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/llm/history_assembler.dart';
 import '../../../core/llm/prompt_isolate.dart';
-import '../../../core/llm/prompt_payload_builder.dart';
 import '../../../core/llm/prompt/main_model_context_snapshot.dart';
 import '../../../core/llm/studio/studio_stream_interceptor.dart';
 import '../../../core/llm/stream_accumulator.dart';
@@ -18,16 +17,20 @@ import '../../../core/llm/transport/chat_transport_request.dart';
 import '../../../core/llm/transport/transport_factory.dart';
 import '../../../core/utils/error_format.dart';
 import '../../../core/llm/tokenizer.dart';
+import '../../../core/llm/studio_turn_config_snapshot.dart';
+import '../../../core/state/studio_turn_config_resolver.dart';
 import '../../../core/models/chat_message.dart';
 import '../../../core/models/api_config.dart';
+import '../../../core/models/pipeline_settings.dart';
 import '../../../core/services/model_usage_service.dart';
 import '../../../core/state/active_selection_provider.dart';
 import '../../../core/state/memory_agent_providers.dart';
-import '../../../core/state/pipeline_settings_provider.dart';
 import '../chat_provider.dart';
 import '../chat_state.dart';
+import '../providers/prompt_build_providers.dart';
 import '../state/cached_token_breakdown.dart';
 import '../state/memory_activity_provider.dart';
+import '../state/studio_cycle_state_mapper.dart';
 import '../state/studio_cycle_state_provider.dart';
 import 'memory_agent_recorder.dart';
 import 'saved_message_writer.dart';
@@ -62,6 +65,7 @@ class StreamGenerationService {
     String? guidanceText,
     String? regenTargetId,
     required ChatState currentState,
+    StudioTurnConfigSnapshot? studioTurnConfig,
   }) async {
     final vsi = currentState.visibleStartIndex;
     final cancelToken = CancelToken();
@@ -78,7 +82,10 @@ class StreamGenerationService {
     }
     try {
       final studioService = _ref.read(memoryStudioServiceProvider);
-      final studioConfig = await studioService.getEnabledConfig(session.id);
+      final turnConfig =
+          studioTurnConfig ??
+          await _ref.read(studioTurnConfigResolverProvider).resolve(session.id);
+      final studioConfig = turnConfig.config;
       studioWasActive = studioConfig != null;
       if (_isAborted()) {
         return ChatState(
@@ -92,6 +99,7 @@ class StreamGenerationService {
       final payload = await builder.buildFromSession(
         charId: _charId,
         session: session,
+        apiConfigOverride: turnConfig.activeApiConfig,
         guidanceText: guidanceText,
         shouldAbort: _isAborted,
         cancelToken: cancelToken,
@@ -105,7 +113,7 @@ class StreamGenerationService {
       }
       final apiConfig = payload.apiConfig;
 
-      final pipelineSettings = _ref.read(pipelineSettingsProvider);
+      final pipelineSettings = turnConfig.pipelineSettings;
       final studioFinalContextSize = studioConfig == null
           ? 0
           : pipelineSettings.studioAgent.studioFinalContextSize > 0
@@ -252,6 +260,7 @@ class StreamGenerationService {
           finalPromptPayload: finalPayload,
           apiConfig: apiConfig,
           sessionId: session.id,
+          turnConfig: turnConfig,
           cancelToken: cancelToken,
           onFinalStart: () {
             if (_isAborted()) return;
@@ -315,7 +324,7 @@ class StreamGenerationService {
             sessionId: session.id,
             startGenTime: startGenTime,
             result: studioResult,
-            trackerModel: _resolvedTrackerModel(apiConfig),
+            trackerModel: _resolvedTrackerModel(apiConfig, pipelineSettings),
             finalModel: apiConfig.model,
           );
           _ref.read(studioCycleStateProvider.notifier).state =
@@ -343,7 +352,7 @@ class StreamGenerationService {
         );
         _ref
             .read(studioCycleStateProvider.notifier)
-            .state = StudioStreamInterceptor.studioFinalState(
+            .state = StudioCycleStateMapper.studioFinalState(
           session.id,
           studioResult,
           StudioCyclePhase.done,
@@ -402,7 +411,7 @@ class StreamGenerationService {
           startGenTime: startGenTime,
           finalStartTime: finalStartTime,
           result: studioResult,
-          trackerModel: _resolvedTrackerModel(apiConfig),
+          trackerModel: _resolvedTrackerModel(apiConfig, pipelineSettings),
           finalModel: apiConfig.model,
         );
         if (memoryDiagnostics is Map<String, dynamic> &&
@@ -466,35 +475,11 @@ class StreamGenerationService {
       });
 
       await transport.stream(
-        request: ChatTransportRequest(
-          endpoint: apiConfig.endpoint,
-          apiKey: apiConfig.apiKey,
-          model: apiConfig.model,
+        request: ChatTransportRequest.fromApiConfig(
+          apiConfig,
           messages: apiMessages,
-          maxTokens: apiConfig.maxTokens,
-          temperature: apiConfig.temperature,
-          topP: apiConfig.topP,
-          topK: apiConfig.topK,
-          frequencyPenalty: apiConfig.frequencyPenalty,
-          presencePenalty: apiConfig.presencePenalty,
-          stream: apiConfig.stream,
-          requestReasoning: apiConfig.requestReasoning,
-          useResponsesApi: apiConfig.useResponsesApi,
-          reasoningEffort: apiConfig.reasoningEffort,
-          omitTemperature: apiConfig.omitTemperature,
-          omitTopP: apiConfig.omitTopP,
-          omitTopK: apiConfig.omitTopK,
-          omitFrequencyPenalty: apiConfig.omitFrequencyPenalty,
-          omitPresencePenalty: apiConfig.omitPresencePenalty,
-          omitReasoning: apiConfig.omitReasoning,
-          omitReasoningEffort: apiConfig.omitReasoningEffort,
-          showNativeReasoning: apiConfig.showNativeReasoning,
           sessionId: session.id,
           previousMessages: previousApiMessages,
-          cacheControlTtl: apiConfig.cacheControlTtl,
-          cacheBreakpointMode: apiConfig.cacheBreakpointMode,
-          sessionIdMode: apiConfig.sessionIdMode,
-          extraRequestParameters: apiConfig.extraRequestParameters,
         ),
         cancelToken: cancelToken,
         onUpdate: (delta, reasoningDelta) {
@@ -760,11 +745,11 @@ class StreamGenerationService {
     unawaited(_ref.read(modelUsageServiceProvider).recordModelUse(model));
   }
 
-  String _resolvedTrackerModel(ApiConfig apiConfig) {
-    final override = _ref
-        .read(pipelineSettingsProvider)
-        .studioAgent
-        .studioTrackerModelOverride;
+  String _resolvedTrackerModel(
+    ApiConfig apiConfig,
+    PipelineSettings pipelineSettings,
+  ) {
+    final override = pipelineSettings.studioAgent.studioTrackerModelOverride;
     return override.isNotEmpty ? override : apiConfig.model;
   }
 }

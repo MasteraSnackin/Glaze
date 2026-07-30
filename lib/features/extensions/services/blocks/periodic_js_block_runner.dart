@@ -55,6 +55,12 @@ class PeriodicJsBlockRunner {
           return await engine.runScript(
             script: script,
             context: patchedContext,
+            host: bridge == null
+                ? null
+                : JsEngineBridgeHost(
+                    bridge: bridge.extensionBridgeService,
+                    currentCharIdProvider: () => charId,
+                  ),
             cancelToken: cancelToken,
           );
         } on HeadlessUnavailableError catch (_) {

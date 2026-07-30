@@ -3,8 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/models/tracker.dart';
 import '../../../core/models/tracker_snapshot.dart';
-import '../../../core/state/db_provider.dart';
 import '../../../shared/theme/app_colors.dart';
+import '../services/agentic_snapshots_service.dart';
 import 'agentic_operations_log_dialog.dart' show AgenticSessionScope;
 
 class AgenticSnapshotsTab extends ConsumerStatefulWidget {
@@ -35,8 +35,8 @@ class _AgenticSnapshotsTabState extends ConsumerState<AgenticSnapshotsTab> {
       return;
     }
     final snapshots = await ref
-        .read(trackerSnapshotRepoProvider)
-        .getBySessionId(sessionId);
+        .read(agenticSnapshotsServiceProvider)
+        .loadSnapshots(sessionId);
     if (!mounted) return;
     setState(() {
       _snapshots = snapshots;
@@ -157,26 +157,16 @@ class _SnapshotTile extends ConsumerWidget {
       ),
     );
     if (confirmed != true) return;
-    final snapshotRepo = ref.read(trackerSnapshotRepoProvider);
-    final trackerRepo = ref.read(trackerRepoProvider);
-    // Delete the target message's snapshots — getLatestCommitted then falls
-    // back to the previous committed snapshot (emergent rollback).
-    await snapshotRepo.deleteForMessage(sessionId, snapshot.messageId);
-    final fallback = await snapshotRepo.getLatestCommitted(sessionId);
-    if (fallback != null) {
-      // Sync live tracker rows to the fallback so the Inspector and the next
-      // prompt agree. Regular ledger state comes from the snapshot; only
-      // canon_override/canon_lock live rows are read separately by the loader,
-      // but replaceForSession gives a clean consistent view.
-      await trackerRepo.replaceForSession(sessionId, fallback.trackers);
-    }
+    final result = await ref
+        .read(agenticSnapshotsServiceProvider)
+        .rollback(sessionId: sessionId, messageId: snapshot.messageId);
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            fallback != null
-                ? 'Rolled back to ${fallback.messageId}.'
-                : 'Deleted snapshot for ${snapshot.messageId}. No earlier committed snapshot remains.',
+            result.fallbackMessageId != null
+                ? 'Rolled back to ${result.fallbackMessageId}.'
+                : 'Deleted snapshot for ${result.deletedMessageId}. No earlier committed snapshot remains.',
           ),
           duration: const Duration(seconds: 3),
         ),
@@ -186,12 +176,9 @@ class _SnapshotTile extends ConsumerWidget {
   }
 
   Future<void> _commit(WidgetRef ref) async {
-    await ref.read(trackerSnapshotRepoProvider).commit(
-      sessionId: sessionId,
-      messageId: snapshot.messageId,
-      swipeId: snapshot.swipeId,
-      agentSwipeId: snapshot.agentSwipeId,
-    );
+    await ref
+        .read(agenticSnapshotsServiceProvider)
+        .commitSnapshot(sessionId: sessionId, snapshot: snapshot);
     onChanged();
   }
 

@@ -70,9 +70,40 @@ void main() {
 
     // Now both chats surface.
     final revealedList = await container.read(chatHistoryProvider.future);
+    expect(revealedList.map((s) => s.characterId).toSet(), {'v', 'h'});
+  });
+
+  test('rename preserves concurrently added session variables', () async {
+    final chatRepo = ChatRepo(db);
+    await chatRepo.put(
+      const ChatSession(
+        id: 'session',
+        characterId: 'orphan',
+        sessionIndex: 0,
+        sessionVars: {'existing': 'value'},
+      ),
+    );
+    final container = makeContainer(db);
+    addTearDown(container.dispose);
+    await container.read(chatHistoryProvider.future);
+
+    await chatRepo.updateSessionVarsJson('session', (vars) {
+      vars['concurrent'] = 'keep';
+      return vars;
+    });
+    await container
+        .read(chatHistoryProvider.notifier)
+        .renameSession('session', 'Renamed');
+
+    final durable = await chatRepo.getById('session');
+    expect(durable?.sessionVars, {
+      'existing': 'value',
+      'concurrent': 'keep',
+      'sessionName': 'Renamed',
+    });
     expect(
-      revealedList.map((s) => s.characterId).toSet(),
-      {'v', 'h'},
+      container.read(chatHistoryProvider).requireValue.single.sessionName,
+      'Renamed',
     );
   });
 }

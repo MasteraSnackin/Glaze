@@ -32,6 +32,7 @@ import 'shared/theme/theme_preset.dart';
 import 'shared/theme/theme_provider.dart';
 
 import 'features/chat/widgets/chat_webview_preload.dart';
+import 'features/chat/widgets/lorebook_vector_search_diagnostic_listener.dart';
 import 'shared/widgets/app_launch_splash.dart';
 import 'shared/widgets/build_watermark.dart';
 import 'shared/widgets/glaze_toast.dart' show toastOverlayKey;
@@ -299,10 +300,12 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
       locale: context.locale,
       builder: (context, child) {
         final appChild = _startupReady
-            ? ChatWebViewPreloader(
-                child: Overlay(
-                  key: toastOverlayKey,
-                  initialEntries: [OverlayEntry(builder: (_) => child!)],
+            ? LorebookVectorSearchDiagnosticListener(
+                child: ChatWebViewPreloader(
+                  child: Overlay(
+                    key: toastOverlayKey,
+                    initialEntries: [OverlayEntry(builder: (_) => child!)],
+                  ),
                 ),
               )
             : const SizedBox.expand();
