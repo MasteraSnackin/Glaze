@@ -124,13 +124,15 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
 
   Future<void> _loadEmbeddingStatuses() async {
     final repo = ref.read(embeddingRepoProvider);
+    final records = await repo.getBySource('lorebook_entry', widget.lorebookId);
+    final recordsByEntryId = {
+      for (final record in records) record.entryId: record,
+    };
     final statuses = <String, String>{};
     final errorLabels = <String, String>{};
     for (final entry in _entries) {
       if (!entry.vectorSearch || !entry.enabled || entry.constant) continue;
-      final record = await repo.getByEntryId(
-        '${widget.lorebookId}_${entry.id}',
-      );
+      final record = recordsByEntryId['${widget.lorebookId}_${entry.id}'];
       if (record == null) {
         statuses[entry.id] = 'none';
       } else if (record.errorJson != null) {

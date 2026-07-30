@@ -38,15 +38,44 @@ void main() {
     expect(rows.map((row) => row.entryId), ['chat-s1']);
   });
 
+  test('getBySourceIds applies source type and source id predicates', () async {
+    for (final row in [
+      ('one_shared', 'lorebook_entry', 'one'),
+      ('two_shared', 'lorebook_entry', 'two'),
+      ('three_shared', 'lorebook_entry', 'three'),
+      ('memory-one', 'memory_entry', 'one'),
+    ]) {
+      await repo.putEmbeddingVector(
+        entryId: row.$1,
+        sourceType: row.$2,
+        sourceId: row.$3,
+        vectors: const [
+          [1, 0],
+        ],
+        textHash: row.$1,
+      );
+    }
+
+    final rows = await repo.getBySourceIds('lorebook_entry', ['one', 'two']);
+
+    expect(rows.map((row) => row.entryId).toSet(), {
+      'one_shared',
+      'two_shared',
+    });
+    expect(await repo.getBySourceIds('lorebook_entry', const []), isEmpty);
+  });
+
   test('composite source query uses the composite index', () async {
-    final plan = await db.customSelect(
-      'EXPLAIN QUERY PLAN SELECT * FROM embeddings '
-      'WHERE source_type = ? AND source_id = ?',
-      variables: [
-        Variable.withString('chat_message'),
-        Variable.withString('s1'),
-      ],
-    ).get();
+    final plan = await db
+        .customSelect(
+          'EXPLAIN QUERY PLAN SELECT * FROM embeddings '
+          'WHERE source_type = ? AND source_id = ?',
+          variables: [
+            Variable.withString('chat_message'),
+            Variable.withString('s1'),
+          ],
+        )
+        .get();
 
     expect(
       plan.map((row) => row.read<String>('detail')).join('\n'),
