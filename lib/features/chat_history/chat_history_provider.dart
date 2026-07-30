@@ -160,14 +160,7 @@ class ChatHistoryNotifier extends AsyncNotifier<List<ChatSessionInfo>> {
     final studioConfig = await ref
         .read(studioConfigRepoProvider)
         .getBySessionId(sessionId);
-    await ref.read(chatRepoProvider).delete(sessionId);
-    await ref.read(memoryBookRepoProvider).deleteBySessionId(sessionId);
-    await ref.read(trackerRepoProvider).clearForSession(sessionId);
-    await ref.read(trackerSnapshotRepoProvider).deleteBySessionId(sessionId);
-    await ref
-        .read(ledgerReconciliationCheckpointRepoProvider)
-        .deleteBySessionId(sessionId);
-    await ref.read(studioConfigRepoProvider).deleteBySessionId(sessionId);
+    await ref.read(sessionDeletionRepoProvider).deleteSession(sessionId);
     ChatSessionService.clearCache();
     await SyncDeletionTracker.record('chat', sessionId);
     await SyncDeletionTracker.record('memory_book', sessionId);

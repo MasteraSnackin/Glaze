@@ -1,9 +1,12 @@
 import 'dart:convert';
 
+// ignore_for_file: prefer_initializing_formals
+
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../core/services/generation_notification_service.dart';
 import '../../../core/models/lorebook.dart';
+import '../../../core/application/session_deletion_store.dart';
 import '../sync_repo_interfaces.dart';
 import 'dropbox/dropbox_adapter.dart';
 import 'dropbox/dropbox_auth.dart';
@@ -37,6 +40,7 @@ class SyncService {
   final SyncCharacterFolderStore? _characterFolderStore;
   final SyncMemoryGraphStore? _memoryGraphStore;
   final SyncCharacterKnowledgeStore? _characterKnowledgeStore;
+  final SessionDeletionStore _sessionDeletionStore;
   final Future<void> Function(LorebookActivations) _saveLorebookActivations;
 
   SyncProvider _provider = SyncProvider.dropbox;
@@ -105,9 +109,10 @@ class SyncService {
     this._characterFolderStore,
     this._memoryGraphStore,
     this._characterKnowledgeStore,
+    required SessionDeletionStore sessionDeletionStore,
     required Future<void> Function(LorebookActivations) saveLorebookActivations,
-    // ignore: prefer_initializing_formals
-  }) : _saveLorebookActivations = saveLorebookActivations;
+  }) : _sessionDeletionStore = sessionDeletionStore,
+       _saveLorebookActivations = saveLorebookActivations;
 
   CloudAdapter get _adapter {
     switch (_provider) {
@@ -165,6 +170,7 @@ class SyncService {
     _characterFolderStore,
     _memoryGraphStore,
     _characterKnowledgeStore,
+    _sessionDeletionStore,
     _saveLorebookActivations,
   );
 

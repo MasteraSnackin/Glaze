@@ -13,6 +13,7 @@ import 'package:glaze_flutter/core/models/persona.dart';
 import 'package:glaze_flutter/core/models/preset.dart';
 import 'package:glaze_flutter/features/cloud_sync/sync_repo_interfaces.dart';
 import 'package:glaze_flutter/core/utils/sync_deletion_tracker.dart';
+import 'package:glaze_flutter/core/application/session_deletion_store.dart';
 import 'package:glaze_flutter/features/cloud_sync/cloud_adapter.dart';
 import 'package:glaze_flutter/features/cloud_sync/services/sync_engine.dart';
 import 'package:glaze_flutter/features/cloud_sync/services/sync_manifest.dart';
@@ -60,6 +61,15 @@ class FakeChatStore implements SyncChatStore {
   Future<void> delete(String id) async {
     data.remove(id);
   }
+}
+
+class FakeSessionDeletionStore implements SessionDeletionStore {
+  final FakeChatStore chats;
+
+  FakeSessionDeletionStore(this.chats);
+
+  @override
+  Future<void> deleteSession(String sessionId) => chats.delete(sessionId);
 }
 
 class FakePersonaStore implements SyncPersonaStore {
@@ -442,9 +452,11 @@ class SyncWorld {
   final FakeTrackerSnapshotStore trackerSnapshots = FakeTrackerSnapshotStore();
   final FakeTrackerValueStore trackerValues = FakeTrackerValueStore();
   final FakeStudioConfigStore studioConfigs = FakeStudioConfigStore();
+  late final FakeSessionDeletionStore sessionDeletions;
   late final InMemoryManifestProvider manifestProvider;
 
   SyncWorld() {
+    sessionDeletions = FakeSessionDeletionStore(chats);
     manifestProvider = InMemoryManifestProvider(
       characterRepo: characters,
       chatRepo: chats,
@@ -487,6 +499,7 @@ class SyncWorld {
     null,
     null,
     null,
+    sessionDeletions,
     (_) async {},
   );
 }

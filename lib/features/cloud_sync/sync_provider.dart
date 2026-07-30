@@ -50,6 +50,7 @@ final syncServiceProvider = FutureProvider<SyncService>((ref) async {
     characterKnowledgeStore: CharacterKnowledgeSyncStore(
       ref.watch(appDbProvider),
     ),
+    sessionDeletionStore: ref.watch(sessionDeletionRepoProvider),
     saveLorebookActivations: saveLorebookActivations,
   );
   await service.init();

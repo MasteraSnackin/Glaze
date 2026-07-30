@@ -25,6 +25,7 @@ import '../db/repositories/character_knowledge_fact_repo.dart';
 import '../db/repositories/character_session_baseline_repo.dart';
 import '../db/repositories/extension_presets_repository.dart';
 import '../db/repositories/info_blocks_repository.dart';
+import '../db/repositories/session_deletion_repo.dart';
 import '../models/memory_book.dart';
 import '../services/character_importer.dart';
 import '../services/image_storage_service.dart';
@@ -75,6 +76,10 @@ final characterRepoProvider = Provider<CharacterRepo>((ref) {
 
 final chatRepoProvider = Provider<ChatRepo>((ref) {
   return ChatRepo(ref.watch(appDbProvider));
+});
+
+final sessionDeletionRepoProvider = Provider<SessionDeletionRepo>((ref) {
+  return SessionDeletionRepo(ref.watch(appDbProvider));
 });
 
 final presetRepoProvider = Provider<PresetRepo>((ref) {
