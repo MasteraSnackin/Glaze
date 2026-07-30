@@ -8,6 +8,7 @@ import '../../../core/llm/studio/studio_stream_interceptor.dart';
 import '../../../core/models/chat_message.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../core/state/memory_agent_providers.dart';
+import '../../../core/state/studio_turn_config_resolver.dart';
 import '../state/recovery_state_provider.dart';
 
 /// Result of a recovery batch.
@@ -92,9 +93,8 @@ class TrackerMemoryRecoveryService {
     }
 
     final studioConfig = recoverTrackers
-        ? await _ref
-              .read(memoryStudioServiceProvider)
-              .getEnabledConfig(sessionId)
+        ? (await _ref.read(studioTurnConfigResolverProvider).resolve(sessionId))
+              .config
         : null;
     var trackersWritten = 0;
     var failed = 0;

@@ -82,13 +82,6 @@ class MemoryStudioService {
 
   MemoryStudioService(this._ref, this._runner, this._batcher);
 
-  Future<StudioTurnConfigSnapshot> resolveTurnConfig(String sessionId) =>
-      StudioTurnConfigSnapshot.resolve(_ref, sessionId);
-
-  Future<StudioConfig?> getEnabledConfig(String sessionId) async {
-    return (await resolveTurnConfig(sessionId)).config;
-  }
-
   /// Run the tracker cycle: pre-generation trackers (intermediate agents)
   /// run first, then the main generator (final agent) produces the response.
   /// Trackers receive compact briefs; the generator gets the full context

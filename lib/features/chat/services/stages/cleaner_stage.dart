@@ -25,6 +25,7 @@ import '../../../../core/state/active_studio_preset_provider.dart';
 import '../../../../core/state/db_provider.dart';
 import '../../../../core/state/memory_agent_providers.dart';
 import '../../../../core/state/character_provider.dart';
+import '../../../../core/state/studio_turn_config_resolver.dart';
 import '../../../settings/api_list_provider.dart';
 import '../../../chat_history/chat_history_provider.dart';
 import '../../chat_session_service.dart';
@@ -170,7 +171,9 @@ class CleanerStage {
     try {
       final turnConfig =
           studioTurnConfig ??
-          await StudioTurnConfigSnapshot.resolve(ctx.ref, sessionId);
+          await ctx.ref
+              .read(studioTurnConfigResolverProvider)
+              .resolve(sessionId);
       final pipeline = turnConfig.pipelineSettings;
       if (!ctx.ref.mounted ||
           !_ownsRun ||

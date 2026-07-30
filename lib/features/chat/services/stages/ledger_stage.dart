@@ -14,6 +14,7 @@ import '../../../../core/models/pipeline_settings.dart';
 import '../../../../core/state/db_provider.dart';
 import '../../../../core/state/memory_agent_providers.dart';
 import '../../../../core/state/character_provider.dart';
+import '../../../../core/state/studio_turn_config_resolver.dart';
 import '../../../../shared/widgets/glaze_toast.dart';
 import '../../state/agent_operations_log_provider.dart';
 import '../../state/post_gen_status_provider.dart';
@@ -64,7 +65,9 @@ class LedgerStage {
     try {
       final turnConfig =
           studioTurnConfig ??
-          await StudioTurnConfigSnapshot.resolve(ctx.ref, sessionId);
+          await ctx.ref
+              .read(studioTurnConfigResolverProvider)
+              .resolve(sessionId);
       final pipeline = turnConfig.pipelineSettings;
 
       // Ledger is always-on when Studio is enabled. We check

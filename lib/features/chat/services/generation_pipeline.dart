@@ -9,7 +9,7 @@ import '../../../core/db/repositories/chat_repo.dart';
 import '../../../core/services/generation_notification_service.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../core/utils/time_helpers.dart';
-import '../../../core/state/memory_agent_providers.dart';
+import '../../../core/state/studio_turn_config_resolver.dart';
 import '../../chat_history/chat_history_provider.dart';
 import '../abort_handler.dart';
 import '../chat_generation_service.dart';
@@ -102,8 +102,8 @@ class GenerationPipeline {
 
     try {
       final studioTurnConfig = await ctx.ref
-          .read(memoryStudioServiceProvider)
-          .resolveTurnConfig(session.id);
+          .read(studioTurnConfigResolverProvider)
+          .resolve(session.id);
       if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) {
         return null;
       }

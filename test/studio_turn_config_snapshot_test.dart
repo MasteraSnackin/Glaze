@@ -13,11 +13,121 @@ import 'package:glaze_flutter/core/models/studio_agent_settings.dart';
 import 'package:glaze_flutter/core/models/studio_config.dart';
 import 'package:glaze_flutter/core/state/active_studio_preset_provider.dart';
 import 'package:glaze_flutter/core/state/db_provider.dart';
-import 'package:glaze_flutter/core/state/memory_agent_providers.dart';
+import 'package:glaze_flutter/core/state/studio_turn_config_resolver.dart';
 import 'package:glaze_flutter/features/settings/api_list_provider.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  test(
+    'resolver default-denies before loading enabled-only dependencies',
+    () async {
+      const settings = PipelineSettings(
+        studioAgent: StudioAgentSettings(
+          studioTrackerModelOverride: 'captured-model',
+        ),
+      );
+      const activeApi = ApiConfig(
+        id: 'active',
+        endpoint: 'https://active.example',
+        model: 'active-model',
+      );
+      var apiLoads = 0;
+      var configLoads = 0;
+      var presetLoads = 0;
+      final resolver = StudioTurnConfigResolver(
+        readPipelineSettings: () => settings,
+        readStudioFeatureEnabled: () => false,
+        loadApiConfigs: () async => apiLoads++,
+        readApiConfigs: () => throw StateError('API list must not be read'),
+        readActiveApiConfig: () => activeApi,
+        loadStudioConfig: (_) async {
+          configLoads++;
+          return null;
+        },
+        loadActivePresetId: () async {
+          presetLoads++;
+          return 'selected';
+        },
+        loadPreset: (_) async => throw StateError('preset must not be loaded'),
+        loadDefaultPreset: () async =>
+            throw StateError('default preset must not be loaded'),
+      );
+
+      final snapshot = await resolver.resolve('session');
+
+      expect(snapshot.enabled, isFalse);
+      expect(snapshot.config, isNull);
+      expect(snapshot.preset, isNull);
+      expect(snapshot.pipelineSettings, settings);
+      expect(snapshot.apiConfigs, isEmpty);
+      expect(snapshot.activeApiConfig, activeApi);
+      expect(apiLoads, 0);
+      expect(configLoads, 0);
+      expect(presetLoads, 0);
+    },
+  );
+
+  test(
+    'resolver loads APIs, falls back to default preset, and applies all gates',
+    () async {
+      const api = ApiConfig(
+        id: 'api',
+        endpoint: 'https://api.example',
+        model: 'model',
+      );
+      final sourceApis = <ApiConfig>[api];
+      var apiLoaded = false;
+      var defaultLoads = 0;
+      final resolver = StudioTurnConfigResolver(
+        readPipelineSettings: () => const PipelineSettings(),
+        readStudioFeatureEnabled: () => true,
+        loadApiConfigs: () async => apiLoaded = true,
+        readApiConfigs: () {
+          expect(apiLoaded, isTrue);
+          return sourceApis;
+        },
+        readActiveApiConfig: () => api,
+        loadStudioConfig: (_) async => const StudioConfig(
+          sessionId: 'session',
+          enabled: true,
+          agents: [
+            StudioAgent(id: 'final', order: 5),
+            StudioAgent(id: 'agency', order: 1),
+            StudioAgent(id: 'continuity', order: 3),
+            StudioAgent(id: 'narrative', order: 2),
+            StudioAgent(id: 'beauty', order: 4),
+          ],
+        ),
+        loadActivePresetId: () async => 'missing',
+        loadPreset: (_) async => null,
+        loadDefaultPreset: () async {
+          defaultLoads++;
+          return const StudioPreset(
+            id: 'default',
+            executionMode: StudioExecutionMode.assisted,
+            agentEnabled: {'narrative': false},
+          );
+        },
+      );
+
+      final snapshot = await resolver.resolve('session');
+      sourceApis.clear();
+
+      expect(snapshot.preset?.id, 'default');
+      expect(defaultLoads, 1);
+      expect(snapshot.config?.agents.map((agent) => agent.id), [
+        'continuity',
+        'final',
+      ]);
+      expect(snapshot.apiConfigs, [api]);
+      expect(
+        () => snapshot.apiConfigs.add(api),
+        throwsUnsupportedError,
+        reason: 'the turn must retain an immutable API-list snapshot',
+      );
+    },
+  );
 
   test(
     'active preset change does not alter a captured turn snapshot',
@@ -112,8 +222,8 @@ void main() {
           );
 
       final snapshot = await container
-          .read(memoryStudioServiceProvider)
-          .resolveTurnConfig('session');
+          .read(studioTurnConfigResolverProvider)
+          .resolve('session');
 
       await container
           .read(activeStudioPresetProvider.notifier)

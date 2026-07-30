@@ -19,6 +19,7 @@ import '../../../core/llm/transport/transport_factory.dart';
 import '../../../core/utils/error_format.dart';
 import '../../../core/llm/tokenizer.dart';
 import '../../../core/llm/studio_turn_config_snapshot.dart';
+import '../../../core/state/studio_turn_config_resolver.dart';
 import '../../../core/models/chat_message.dart';
 import '../../../core/models/api_config.dart';
 import '../../../core/models/pipeline_settings.dart';
@@ -81,7 +82,8 @@ class StreamGenerationService {
     try {
       final studioService = _ref.read(memoryStudioServiceProvider);
       final turnConfig =
-          studioTurnConfig ?? await studioService.resolveTurnConfig(session.id);
+          studioTurnConfig ??
+          await _ref.read(studioTurnConfigResolverProvider).resolve(session.id);
       final studioConfig = turnConfig.config;
       studioWasActive = studioConfig != null;
       if (_isAborted()) {
