@@ -825,10 +825,9 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
                 12,
                 16 + MediaQuery.of(context).padding.bottom,
               ),
-              child: Wrap(
-                spacing: 6,
-                runSpacing: 8,
-                children: List.generate(items.length, (index) {
+              child: MagicCardGrid(
+                columns: 3,
+                cells: List.generate(items.length, (index) {
                   final item = items[index];
                   final card = MagicCard(
                     item: item,
