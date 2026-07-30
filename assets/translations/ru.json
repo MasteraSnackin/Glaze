@@ -415,6 +415,7 @@
   "context_limit_glossary_hint": "Подробнее:",
   "context_limit_glossary_chip": "Контекст",
   "import_success": "Импорт завершен",
+  "import_failed_count": "с ошибкой: {}",
   "btn_reload": "Перезагрузить",
   "action_export_chat": "Экспорт чата (JSONL)",
   "action_export_st": "Экспорт",
@@ -1923,6 +1924,12 @@
     "few": "персонажа",
     "many": "персонажей",
     "other": "персонажей"
+  },
+  "count_lorebooks": {
+    "one": "лорбук",
+    "few": "лорбука",
+    "many": "лорбуков",
+    "other": "лорбуков"
   },
   "count_sessions_format": {
     "one": "{} сессия",
