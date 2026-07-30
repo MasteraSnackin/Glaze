@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
 import 'package:dio/dio.dart';
 
 import '../../features/settings/api_list_provider.dart';
@@ -46,12 +47,17 @@ class PromptPayloadBuilder {
   );
   late final LorebookVectorSearcher _vectorSearcher = LorebookVectorSearcher(
     _ref,
+    onDiagnostic: onLorebookVectorSearchDiagnostic,
   );
+
+  final void Function(LorebookVectorSearchDiagnostic diagnostic)?
+  onLorebookVectorSearchDiagnostic;
 
   PromptPayloadBuilder(
     Ref ref, {
     Future<List<Tracker>> Function(String sessionId)?
     loadEffectiveLedgerTrackers,
+    this.onLorebookVectorSearchDiagnostic,
   }) : _ref = ref,
        _loadEffectiveLedgerTrackers =
            loadEffectiveLedgerTrackers ??
@@ -586,5 +592,14 @@ class _GenerationAbortedException implements Exception {
 }
 
 final promptPayloadBuilderProvider = Provider<PromptPayloadBuilder>((ref) {
-  return PromptPayloadBuilder(ref);
+  return PromptPayloadBuilder(
+    ref,
+    onLorebookVectorSearchDiagnostic: (diagnostic) {
+      ref.read(lorebookVectorSearchDiagnosticProvider.notifier).state =
+          diagnostic;
+    },
+  );
 });
+
+final lorebookVectorSearchDiagnosticProvider =
+    StateProvider<LorebookVectorSearchDiagnostic?>((ref) => null);
