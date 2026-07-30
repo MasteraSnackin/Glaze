@@ -80,9 +80,15 @@ Description: AI chat client
  Glaze is a Native LLM frontend for AI roleplay.
 EOF
 
-    # Build the package
-    dpkg-deb --build "$DEB_DIR"
-    echo "Deb package created at build/linux/deb/$APP_NAME-${VERSION}_$DEB_ARCH.deb"
+    # Build the package. Guarded by an if so a dpkg-deb failure doesn't trip
+    # `set -e` and abort the whole script before the pacman package below gets
+    # a chance to build — each format's failure is independent and reported as
+    # a warning, not a fatal script error.
+    if dpkg-deb --build "$DEB_DIR"; then
+        echo "Deb package created at build/linux/deb/$APP_NAME-${VERSION}_$DEB_ARCH.deb"
+    else
+        echo "::warning::dpkg-deb failed — no .deb package was produced."
+    fi
 else
     echo "dpkg-deb not found. Skipping .deb package creation."
 fi
@@ -136,15 +142,24 @@ DESKTOP
 }
 EOF
 
-    # Build the package using makepkg (don't fail if we can't extract sources, since there are none, use -sf)
-    # We do not use sudo with makepkg
+    # Build the package using makepkg. --nodeps skips the depends=() check: the
+    # CI runner has no configured pacman repositories, so -s (syncdeps) cannot
+    # resolve anything, and even the local-only check can fail outright on a
+    # bare Ubuntu runner ("failed to initialize alpm library ... could not
+    # create database") before /var/lib/pacman exists. A real `pacman -U`
+    # install still enforces depends=() using the target machine's own
+    # database, so skipping the check here only affects this build step.
+    # We do not use sudo with makepkg. Guarded the same way as the .deb build
+    # above, so a makepkg failure doesn't abort the script and lose a .deb that
+    # already built successfully.
     cd "$ARCH_DIR"
-    # Execute makepkg: 
-    # -R repacks if needed, -f force, -s sync deps, --noconfirm for no prompts
-    makepkg -sf --noconfirm
-    cd - > /dev/null
-    
-    echo "Pacman package created in $ARCH_DIR"
+    if makepkg -f --nodeps --noconfirm; then
+        cd - > /dev/null
+        echo "Pacman package created in $ARCH_DIR"
+    else
+        cd - > /dev/null
+        echo "::warning::makepkg failed — no pacman package was produced. See the log above for the pacman/alpm error."
+    fi
 else
     echo "makepkg not found. Skipping pacman package creation."
 fi
