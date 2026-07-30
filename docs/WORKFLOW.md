@@ -145,7 +145,7 @@ Secrets used by the delivery step:
 | Secret | Meaning |
 |--------|---------|
 | `TG_BOT_TOKEN` | Bot token |
-| `TG_CHAT_ID` | Chat id of the public group builds are announced in |
+| `TG_CHAT_ID` | Chat id of the public group builds are announced in. A numeric `-100…` id, or `@username` for a group that has one |
 | `TG_TOPIC_ID` | Message thread id of the topic inside that group. Leave unset for a group without topics — the post then goes to the chat itself |
 | `TG_MENTIONS` | Text posted in a spoiler when `notify_people` is on |
 | `TG_DEV_CHAT_IDS` | Numeric private chat ids for `dm_developers`, comma- or whitespace-separated |
