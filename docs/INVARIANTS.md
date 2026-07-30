@@ -896,13 +896,25 @@ matching `audioplayers` `Source` subclass. Built-in cues
 ### INV-JS5: `executeCommand` routes `/trigger`, `/getvar`, `/setvar`, `/inject`, `/toast` to the same services as the dedicated bridge methods ✅ ENFORCED
 
 `buildWiredCommandRegistry(WiredCommandDeps)` is the production
-default. Each handler delegates to the same service that powers the
-dedicated `glaze.*` method:
+default. Each handler re-enters the same live `JsBridgeService` through
+canonical dispatch:
 
-* `/trigger` → `TriggerGenerationHandler.handle` (mirrors `glaze.triggerGeneration`)
-* `/getvar` / `/setvar` → `JsBridgeService.dispatch` (mirrors `glaze.getVariables` / `setVariables`)
-* `/inject` → `RuntimePromptInjectionNotifier.inject`
-* `/toast` → `JsBridgeToastController.show` (severity-aware)
+* `/trigger` → `glaze.triggerGeneration`
+* `/getvar` / `/setvar` → `glaze.getVariables` / `setVariables`
+* `/inject` → `glaze.injectPrompt`
+* `/toast` → `glaze.showToast`
+
+The outer call must have `execute_command`; canonical dispatch then also
+requires the dedicated capability (`trigger_generation`, scope-specific
+variable access, `inject_prompt`, or `show_toast`). The command context is
+forwarded unchanged so session, character, message, and global routing match
+the dedicated method.
+
+Headless execution binds that bridge authority to an opaque per-run id.
+Sandbox requests without an active id are denied, so the process-wide engine
+lifecycle cannot select one chat's authority for another chat's script.
+Runs without a visual chat bridge may execute pure JS, but receive no bridge
+authority and therefore cannot call `window.glaze` methods.
 
 `buildDefaultCommandRegistry` is retained for tests/CMS — its
 handlers echo arguments. The `CommandRegistry.run` contract catches

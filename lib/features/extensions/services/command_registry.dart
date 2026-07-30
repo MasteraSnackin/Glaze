@@ -3,10 +3,6 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../models/trigger_mode.dart';
-import 'js_bridge_service.dart';
-import 'js_bridge_toast_controller.dart';
-import 'runtime_prompt_injection_service.dart';
-import 'trigger_generation_handler.dart';
 
 /// One executable glaze slash-command. Commands are the audit-friendly
 /// alternative to direct method calls — they show up clearly in
@@ -37,17 +33,23 @@ class GlazeCommand {
   final FutureOr<CommandResult> Function(
     Map<String, dynamic> args,
     CommandContext context,
-  ) handler;
+  )
+  handler;
 }
 
 /// Per-call context. The dispatcher fills in `charId` and `presetId`
 /// from the caller. The handler can use it to address the right
 /// character/preset.
 class CommandContext {
-  const CommandContext({this.charId, this.presetId});
+  const CommandContext({
+    this.charId,
+    this.presetId,
+    this.bridgeContext = const {},
+  });
 
   final String? charId;
   final String? presetId;
+  final Map<String, dynamic> bridgeContext;
 }
 
 /// Result of a `/command` invocation. The bridge serializes this back
@@ -57,10 +59,9 @@ class CommandResult {
   const CommandResult({required this.ok, this.message, this.data});
 
   const CommandResult.ok({String? message, Object? data})
-      : this(ok: true, message: message, data: data);
+    : this(ok: true, message: message, data: data);
 
-  const CommandResult.error(String message)
-      : this(ok: false, message: message);
+  const CommandResult.error(String message) : this(ok: false, message: message);
 
   final bool ok;
   final String? message;
@@ -123,29 +124,12 @@ class CommandRegistry {
 /// dispatches `/trigger`, `/getvar`, `/setvar`, `/inject`, `/toast`
 /// to the same services the dedicated bridge methods use.
 class WiredCommandDeps {
-  const WiredCommandDeps({
-    required this.bridge,
-    required this.toastController,
-    required this.promptInjection,
-    required this.triggerHandler,
-  });
+  const WiredCommandDeps({required this.bridgeDispatch});
 
-  /// The live [JsBridgeService] to delegate `/getvar` and `/setvar` to.
-  /// We re-use the existing dispatcher so scope, permission, and JSON
-  /// validation are identical to the dedicated `glaze.getVariables` /
-  /// `glaze.setVariables` paths.
-  final JsBridgeService bridge;
-
-  /// Toast surface for `/toast`. Mirrors the dedicated `glaze.showToast`
-  /// bridge.
-  final JsBridgeToastController toastController;
-
-  /// Runtime prompt injection service for `/inject`.
-  final RuntimePromptInjectionNotifier promptInjection;
-
-  /// Trigger handler for `/trigger`. Mirrors the dedicated
-  /// `glaze.triggerGeneration` bridge.
-  final TriggerGenerationHandler triggerHandler;
+  /// Dispatches back through the live production bridge. This ensures each
+  /// command requires both `execute_command` and its dedicated capability.
+  final Future<Map<String, dynamic>> Function(Map<String, dynamic> request)
+  bridgeDispatch;
 }
 
 /// Builds a [CommandRegistry] whose handlers are wired to the real
@@ -155,24 +139,43 @@ class WiredCommandDeps {
 CommandRegistry buildWiredCommandRegistry(WiredCommandDeps deps) {
   final registry = CommandRegistry();
 
+  Future<CommandResult> dispatch(
+    String method,
+    Map<String, dynamic> params,
+    CommandContext context,
+    String successMessage,
+  ) async {
+    final response = await deps.bridgeDispatch({
+      'method': method,
+      'params': params,
+      'context': {
+        ...context.bridgeContext,
+        if (context.charId != null) 'characterId': context.charId,
+      },
+    });
+    if (response['ok'] != true) {
+      return CommandResult.error(
+        (response['error']?['message'] as String?) ?? '$method failed',
+      );
+    }
+    return CommandResult.ok(message: successMessage, data: response['result']);
+  }
+
   registry.register(
     GlazeCommand(
       name: '/trigger',
-      summary: 'Trigger a chat generation. Args: { mode?: "continue" | "regenerate" | "auto", reason?: string }',
+      summary:
+          'Trigger a chat generation. Args: { mode?: "continue" | "regenerate" | "auto", reason?: string }',
       handler: (args, context) async {
         final charId = context.charId;
         if (charId == null || charId.isEmpty) {
-          return const CommandResult.error(
-            '/trigger: charId is required',
-          );
+          return const CommandResult.error('/trigger: charId is required');
         }
-        final result = await deps.triggerHandler.handle(
-          charId: charId,
-          params: args,
-        );
-        return CommandResult.ok(
-          message: 'trigger dispatched',
-          data: result,
+        return dispatch(
+          'triggerGeneration',
+          args,
+          context,
+          'trigger dispatched',
         );
       },
     ),
@@ -181,7 +184,8 @@ CommandRegistry buildWiredCommandRegistry(WiredCommandDeps deps) {
   registry.register(
     GlazeCommand(
       name: '/getvar',
-      summary: 'Read a JS variable. Args: { scope: "chat"|"character"|"global"|"message", path?: string }',
+      summary:
+          'Read a JS variable. Args: { scope: "chat"|"character"|"global"|"message", path?: string }',
       handler: (args, context) async {
         // `/getvar` is the same as the dedicated `glaze.getVariables`
         // method, routed through the bridge's own dispatcher. We
@@ -192,22 +196,7 @@ CommandRegistry buildWiredCommandRegistry(WiredCommandDeps deps) {
           'scope': args['scope'] ?? 'chat',
           'path': ?path,
         };
-        final response = await deps.bridge.dispatch({
-          'method': 'getVariables',
-          'params': params,
-          'context': {
-            if (context.charId != null) 'characterId': context.charId,
-          },
-        });
-        if (response['ok'] != true) {
-          return CommandResult.error(
-            (response['error']?['message'] as String?) ?? 'getvar failed',
-          );
-        }
-        return CommandResult.ok(
-          message: 'getvar ok',
-          data: response['result'],
-        );
+        return dispatch('getVariables', params, context, 'getvar ok');
       },
     ),
   );
@@ -217,9 +206,7 @@ CommandRegistry buildWiredCommandRegistry(WiredCommandDeps deps) {
       name: '/setvar',
       summary: 'Write a JS variable. Args: { scope, path?, value? | values? }',
       handler: (args, context) async {
-        final params = <String, dynamic>{
-          'scope': args['scope'] ?? 'chat',
-        };
+        final params = <String, dynamic>{'scope': args['scope'] ?? 'chat'};
         if (args.containsKey('path')) {
           params['path'] = args['path'];
         }
@@ -228,19 +215,7 @@ CommandRegistry buildWiredCommandRegistry(WiredCommandDeps deps) {
         } else if (args.containsKey('values')) {
           params['values'] = args['values'];
         }
-        final response = await deps.bridge.dispatch({
-          'method': 'setVariables',
-          'params': params,
-          'context': {
-            if (context.charId != null) 'characterId': context.charId,
-          },
-        });
-        if (response['ok'] != true) {
-          return CommandResult.error(
-            (response['error']?['message'] as String?) ?? 'setvar failed',
-          );
-        }
-        return CommandResult.ok(message: 'setvar ok', data: response['result']);
+        return dispatch('setVariables', params, context, 'setvar ok');
       },
     ),
   );
@@ -248,12 +223,9 @@ CommandRegistry buildWiredCommandRegistry(WiredCommandDeps deps) {
   registry.register(
     GlazeCommand(
       name: '/inject',
-      summary: 'Inject a runtime prompt block. Args: { id, content, depth?, role? }',
+      summary:
+          'Inject a runtime prompt block. Args: { id, content, depth?, role? }',
       handler: (args, context) async {
-        final charId = context.charId;
-        if (charId == null || charId.isEmpty) {
-          return const CommandResult.error('/inject: charId is required');
-        }
         final id = args['id'];
         final content = args['content'];
         if (id is! String || id.trim().isEmpty) {
@@ -262,28 +234,18 @@ CommandRegistry buildWiredCommandRegistry(WiredCommandDeps deps) {
         if (content is! String || content.trim().isEmpty) {
           return const CommandResult.error('/inject: content is required');
         }
-        final rawDepth = args['depth'];
-        final depth = rawDepth is int
-            ? rawDepth
-            : (rawDepth is num ? rawDepth.toInt() : 0);
-        final role = (args['role'] as String?) ?? 'system';
-        // The injected block is session-scoped; we use a derived
-        // sessionId from the charId. Production code stores this on
-        // the active chat session; here we rely on the chat notifier
-        // having already established a session for this charId. The
-        // handler does NOT need a sessionId at the call site — the
-        // notifier resolves it lazily from the chat state.
-        // The `id` doubles as the persistence key.
-        final result = deps.promptInjection.inject(
-          sessionId: charId,
-          id: id,
-          content: content,
-          depth: depth,
-          role: role,
-        );
-        return CommandResult.ok(
-          message: 'inject ok',
-          data: {'id': result.id, 'depth': result.depth, 'role': result.role},
+        return dispatch(
+          'injectPrompt',
+          {
+            'id': id,
+            'content': content,
+            'options': {
+              if (args.containsKey('depth')) 'depth': args['depth'],
+              if (args.containsKey('role')) 'role': args['role'],
+            },
+          },
+          context,
+          'inject ok',
         );
       },
     ),
@@ -292,20 +254,25 @@ CommandRegistry buildWiredCommandRegistry(WiredCommandDeps deps) {
   registry.register(
     GlazeCommand(
       name: '/toast',
-      summary: 'Show a toast. Args: { message, severity?: "info"|"success"|"warning"|"error", action?: string }',
+      summary:
+          'Show a toast. Args: { message, severity?: "info"|"success"|"warning"|"error", action?: string }',
       handler: (args, context) async {
         final message = args['message'];
         if (message is! String) {
           return const CommandResult.error('/toast: message is required');
         }
-        final severity = GlazeToastSeverity.parse(args['severity'] as String?);
-        final action = args['action'] as String?;
-        deps.toastController.show(
-          message,
-          severity: severity,
-          actionLabel: action,
+        return dispatch(
+          'showToast',
+          {
+            'message': message,
+            'options': {
+              if (args.containsKey('severity')) 'severity': args['severity'],
+              if (args.containsKey('action')) 'action': args['action'],
+            },
+          },
+          context,
+          'toast shown',
         );
-        return CommandResult.ok(message: 'toast shown');
       },
     ),
   );
@@ -323,10 +290,12 @@ CommandRegistry buildDefaultCommandRegistry() {
   registry.register(
     GlazeCommand(
       name: '/trigger',
-      summary: 'Trigger a chat generation. Args: { mode?: "continue" | "regenerate" | "auto" }',
+      summary:
+          'Trigger a chat generation. Args: { mode?: "continue" | "regenerate" | "auto" }',
       handler: (args, context) async {
         return CommandResult.ok(
-          message: 'trigger ${args['mode'] ?? TriggerMode.auto.name} '
+          message:
+              'trigger ${args['mode'] ?? TriggerMode.auto.name} '
               'for charId=${context.charId ?? '(none)'}',
         );
       },
@@ -335,7 +304,8 @@ CommandRegistry buildDefaultCommandRegistry() {
   registry.register(
     GlazeCommand(
       name: '/getvar',
-      summary: 'Read a JS variable. Args: { scope: "chat"|"character"|"global"|"message", path: string }',
+      summary:
+          'Read a JS variable. Args: { scope: "chat"|"character"|"global"|"message", path: string }',
       handler: (args, context) async {
         return CommandResult.ok(
           message: 'getvar scope=${args['scope']} path=${args['path']}',
@@ -348,16 +318,15 @@ CommandRegistry buildDefaultCommandRegistry() {
       name: '/setvar',
       summary: 'Write a JS variable. Args: { scope, path?, values? }',
       handler: (args, context) async {
-        return CommandResult.ok(
-          message: 'setvar scope=${args['scope']}',
-        );
+        return CommandResult.ok(message: 'setvar scope=${args['scope']}');
       },
     ),
   );
   registry.register(
     GlazeCommand(
       name: '/inject',
-      summary: 'Inject a runtime prompt block. Args: { id, content, depth?, role? }',
+      summary:
+          'Inject a runtime prompt block. Args: { id, content, depth?, role? }',
       handler: (args, context) async {
         return CommandResult.ok(message: 'inject id=${args['id']}');
       },

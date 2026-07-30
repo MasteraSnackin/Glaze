@@ -88,6 +88,7 @@ class ChatBridgeController {
   List<PresetRegex> get displayRegexes => _displayRegexes;
   Character? get regexCharacter => _regexCharacter;
   Persona? get regexPersona => _regexPersona;
+  JsBridgeService get extensionBridgeService => _jsBridgeService;
 
   List<TriggeredEntry> triggeredRegexesFor(String messageId) =>
       _triggeredRegexesByMessageId[messageId] ?? const [];

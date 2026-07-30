@@ -4,27 +4,24 @@
 //
 // The wired registry replaced the previous echo-only MVP, so the
 // contract pinned here is:
-//   * `/getvar` / `/setvar` route through `JsBridgeService.dispatch`
-//     (so scope, permission, and JSON validation are identical to
-//     the dedicated `glaze.getVariables` / `glaze.setVariables` paths).
-//   * `/inject` calls `RuntimePromptInjectionNotifier.inject`.
-//   * `/toast` calls `JsBridgeToastController.show`.
-//   * `/trigger` calls `TriggerGenerationHandler.handle`.
+//   * Every command routes through `JsBridgeService.dispatch`, so the
+//     dedicated capability, validation, scope, and context rules apply.
 //   * Each command validates its args and returns `CommandResult.error`
 //     for malformed inputs instead of throwing.
 
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/db/repositories/character_repo.dart';
+import 'package:glaze_flutter/core/db/repositories/global_variables_repo.dart';
 import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/features/extensions/services/command_registry.dart';
 import 'package:glaze_flutter/features/extensions/models/trigger_mode.dart';
 import 'package:glaze_flutter/features/extensions/models/trigger_result.dart';
 import 'package:glaze_flutter/features/extensions/services/generation_dispatcher.dart';
 import 'package:glaze_flutter/features/extensions/services/js_bridge_service.dart';
-import 'package:glaze_flutter/features/extensions/services/js_bridge_toast_controller.dart';
 import 'package:glaze_flutter/features/extensions/services/runtime_prompt_injection_service.dart';
 import 'package:glaze_flutter/features/extensions/services/trigger_generation_handler.dart';
 
@@ -53,6 +50,7 @@ void main() {
   late CharacterRepo characterRepo;
 
   setUp(() async {
+    SharedPreferences.setMockInitialValues({});
     db = _testDb();
     characterRepo = CharacterRepo(db);
     await characterRepo.put(Character(id: 'c1', name: 'Alice'));
@@ -62,30 +60,46 @@ void main() {
     await db.close();
   });
 
-  /// Helper to build a wired registry backed by a real bridge.
-  WiredCommandDeps buildDeps() {
-    final bridge = JsBridgeService(
-      chatRepo: null,
-      characterRepo: characterRepo,
-      currentSessionId: () => 's1',
-      currentCharacterId: () => 'c1',
-      permissionCheck: (_) => true,
+  /// Helper to build a wired registry backed by one fully wired bridge.
+  CommandRegistry buildRegistry() {
+    late final JsBridgeService bridge;
+    final registry = buildWiredCommandRegistry(
+      WiredCommandDeps(bridgeDispatch: (request) => bridge.dispatch(request)),
     );
     final promptInjection = RuntimePromptInjectionNotifier();
     final triggerHandler = TriggerGenerationHandler(
       dispatcher: _NoopDispatcher(),
     );
-    return WiredCommandDeps(
-      bridge: bridge,
-      toastController: JsBridgeToastController(),
-      promptInjection: promptInjection,
-      triggerHandler: triggerHandler,
+    bridge = JsBridgeService(
+      chatRepo: null,
+      characterRepo: characterRepo,
+      currentSessionId: () => 's1',
+      currentCharacterId: () => 'c1',
+      permissionCheck: (_) => true,
+      injectPrompt: (id, content, options, context) {
+        final injected = promptInjection.inject(
+          sessionId: context['sessionId'] as String? ?? 's1',
+          id: id,
+          content: content,
+          depth: options['depth'] as int? ?? 0,
+          role: options['role'] as String? ?? 'system',
+        );
+        return {
+          'id': injected.id,
+          'depth': injected.depth,
+          'role': injected.role,
+        };
+      },
+      showToast: (_, _) {},
+      triggerGeneration: (charId, params) =>
+          triggerHandler.handle(charId: charId ?? 'c1', params: params),
     );
+    return registry;
   }
 
   group('wired registry setup', () {
     test('registers all five MVP commands', () {
-      final registry = buildWiredCommandRegistry(buildDeps());
+      final registry = buildRegistry();
       final names = registry.list().map((c) => c.name).toSet();
       expect(names, {'/trigger', '/getvar', '/setvar', '/inject', '/toast'});
     });
@@ -93,7 +107,7 @@ void main() {
 
   group('/getvar and /setvar route through the bridge', () {
     test('/getvar returns the stored value', () async {
-      final registry = buildWiredCommandRegistry(buildDeps());
+      final registry = buildRegistry();
       // Pre-populate the character variables.
       await characterRepo.put(
         Character(
@@ -113,7 +127,7 @@ void main() {
     });
 
     test('/getvar returns an error for unsupported scope', () async {
-      final registry = buildWiredCommandRegistry(buildDeps());
+      final registry = buildRegistry();
       final result = await registry.run('/getvar', {
         'scope': 'unknown',
         'path': 'x',
@@ -125,7 +139,7 @@ void main() {
     test(
       '/setvar writes to the requested scope and /getvar reads it back',
       () async {
-        final registry = buildWiredCommandRegistry(buildDeps());
+        final registry = buildRegistry();
         final setResult = await registry.run('/setvar', {
           'scope': 'character',
           'path': 'greeting',
@@ -145,7 +159,7 @@ void main() {
 
   group('/inject validation', () {
     test('rejects missing id', () async {
-      final registry = buildWiredCommandRegistry(buildDeps());
+      final registry = buildRegistry();
       final result = await registry.run('/inject', {
         'content': 'hi',
       }, context: const CommandContext(charId: 'c1'));
@@ -154,7 +168,7 @@ void main() {
     });
 
     test('rejects missing content', () async {
-      final registry = buildWiredCommandRegistry(buildDeps());
+      final registry = buildRegistry();
       final result = await registry.run('/inject', {
         'id': 'mood',
       }, context: const CommandContext(charId: 'c1'));
@@ -162,18 +176,17 @@ void main() {
       expect(result.message, contains('content'));
     });
 
-    test('rejects missing charId in context', () async {
-      final registry = buildWiredCommandRegistry(buildDeps());
+    test('uses session context without requiring charId', () async {
+      final registry = buildRegistry();
       final result = await registry.run('/inject', {
         'id': 'mood',
         'content': 'hi',
-      }, context: const CommandContext());
-      expect(result.ok, isFalse);
-      expect(result.message, contains('charId'));
+      }, context: const CommandContext(bridgeContext: {'sessionId': 's1'}));
+      expect(result.ok, isTrue);
     });
 
     test('successful inject echoes the result payload', () async {
-      final registry = buildWiredCommandRegistry(buildDeps());
+      final registry = buildRegistry();
       final result = await registry.run('/inject', {
         'id': 'mood',
         'content': 'tense',
@@ -191,7 +204,7 @@ void main() {
 
   group('/toast validation', () {
     test('rejects non-string message', () async {
-      final registry = buildWiredCommandRegistry(buildDeps());
+      final registry = buildRegistry();
       final result = await registry.run('/toast', {
         'message': 7,
       }, context: const CommandContext());
@@ -200,7 +213,7 @@ void main() {
     });
 
     test('successful toast resolves ok', () async {
-      final registry = buildWiredCommandRegistry(buildDeps());
+      final registry = buildRegistry();
       final result = await registry.run('/toast', {
         'message': 'hi',
         'severity': 'success',
@@ -212,7 +225,7 @@ void main() {
 
   group('/trigger validation', () {
     test('rejects missing charId in context', () async {
-      final registry = buildWiredCommandRegistry(buildDeps());
+      final registry = buildRegistry();
       final result = await registry.run('/trigger', const {
         'mode': 'auto',
       }, context: const CommandContext());
@@ -221,11 +234,213 @@ void main() {
     });
 
     test('rejects non-string mode', () async {
-      final registry = buildWiredCommandRegistry(buildDeps());
+      final registry = buildRegistry();
       final result = await registry.run('/trigger', {
         'mode': 5,
       }, context: const CommandContext(charId: 'c1'));
       expect(result.ok, isFalse);
+    });
+  });
+
+  group('executeCommand capability delegation', () {
+    test('requires execute_command and the command capability', () async {
+      final granted = <String>{'execute_command'};
+      var toastCalls = 0;
+      late final JsBridgeService bridge;
+      final registry = buildWiredCommandRegistry(
+        WiredCommandDeps(bridgeDispatch: (request) => bridge.dispatch(request)),
+      );
+      bridge = JsBridgeService(
+        permissionCheck: granted.contains,
+        showToast: (_, _) => toastCalls++,
+        executeCommand: (command, args, context) async {
+          final result = await registry.run(
+            command,
+            args,
+            context: CommandContext(bridgeContext: context),
+          );
+          return result.toMap();
+        },
+      );
+
+      Future<Map<String, dynamic>> executeToast() => bridge.dispatch({
+        'method': 'executeCommand',
+        'params': {
+          'command': '/toast',
+          'args': {'message': 'hello'},
+        },
+      });
+
+      final denied = await executeToast();
+      expect(denied['ok'], isTrue);
+      expect((denied['result'] as Map)['ok'], isFalse);
+      expect((denied['result'] as Map)['message'], contains('show_toast'));
+      expect(toastCalls, 0);
+
+      granted.add('show_toast');
+      final allowed = await executeToast();
+      expect((allowed['result'] as Map)['ok'], isTrue);
+      expect(toastCalls, 1);
+    });
+
+    test(
+      'forwards the complete bridge context to canonical dispatch',
+      () async {
+        Map<String, dynamic>? request;
+        final registry = buildWiredCommandRegistry(
+          WiredCommandDeps(
+            bridgeDispatch: (value) async {
+              request = value;
+              return {'ok': true, 'result': true};
+            },
+          ),
+        );
+        const bridgeContext = {
+          'sessionId': 'session-2',
+          'characterId': 'character-2',
+          'messageId': 'message-2',
+        };
+
+        final result = await registry.run(
+          '/getvar',
+          const {'scope': 'message', 'path': 'flag'},
+          context: const CommandContext(
+            charId: 'character-2',
+            bridgeContext: bridgeContext,
+          ),
+        );
+
+        expect(result.ok, isTrue);
+        expect(request!['method'], 'getVariables');
+        expect(request!['context'], bridgeContext);
+      },
+    );
+
+    test('requires the dedicated capability for every wired command', () async {
+      final granted = <String>{'execute_command'};
+      final globalRepo = GlobalVariablesRepo.withPrefsLoader(
+        SharedPreferences.getInstance,
+      );
+      late final JsBridgeService bridge;
+      final registry = buildWiredCommandRegistry(
+        WiredCommandDeps(bridgeDispatch: (request) => bridge.dispatch(request)),
+      );
+      bridge = JsBridgeService(
+        globalVariablesRepo: globalRepo,
+        currentSessionId: () => 's1',
+        currentCharacterId: () => 'c1',
+        permissionCheck: granted.contains,
+        triggerGeneration: (_, _) async => {'status': 'started'},
+        injectPrompt: (id, _, _, _) => {'id': id},
+        showToast: (_, _) {},
+        executeCommand: (command, args, context) async {
+          final result = await registry.run(
+            command,
+            args,
+            context: CommandContext(
+              charId: context['characterId'] as String?,
+              bridgeContext: context,
+            ),
+          );
+          return result.toMap();
+        },
+      );
+      final cases = <({String command, Map<String, dynamic> args, String cap})>[
+        (
+          command: '/trigger',
+          args: {'mode': 'auto'},
+          cap: 'trigger_generation',
+        ),
+        (
+          command: '/getvar',
+          args: {'scope': 'global'},
+          cap: 'read_global_vars',
+        ),
+        (
+          command: '/setvar',
+          args: {'scope': 'global', 'path': 'x', 'value': 1},
+          cap: 'write_global_vars',
+        ),
+        (
+          command: '/inject',
+          args: {'id': 'mood', 'content': 'tense'},
+          cap: 'inject_prompt',
+        ),
+        (command: '/toast', args: {'message': 'hi'}, cap: 'show_toast'),
+      ];
+
+      for (final testCase in cases) {
+        Future<Map<String, dynamic>> execute() => bridge.dispatch({
+          'method': 'executeCommand',
+          'params': {'command': testCase.command, 'args': testCase.args},
+          'context': {'sessionId': 's1', 'characterId': 'c1'},
+        });
+
+        final denied = await execute();
+        expect(
+          (denied['result'] as Map)['message'],
+          contains(testCase.cap),
+          reason: testCase.command,
+        );
+
+        granted.add(testCase.cap);
+        final allowed = await execute();
+        expect(
+          (allowed['result'] as Map)['ok'],
+          isTrue,
+          reason: testCase.command,
+        );
+        granted.remove(testCase.cap);
+      }
+    });
+
+    test('global variables have dedicated and command path parity', () async {
+      final globalRepo = GlobalVariablesRepo.withPrefsLoader(
+        SharedPreferences.getInstance,
+      );
+      late final JsBridgeService bridge;
+      final registry = buildWiredCommandRegistry(
+        WiredCommandDeps(bridgeDispatch: (request) => bridge.dispatch(request)),
+      );
+      bridge = JsBridgeService(
+        globalVariablesRepo: globalRepo,
+        permissionCheck: (_) => true,
+        executeCommand: (command, args, context) async {
+          final result = await registry.run(
+            command,
+            args,
+            context: CommandContext(bridgeContext: context),
+          );
+          return result.toMap();
+        },
+      );
+
+      await bridge.dispatch({
+        'method': 'setVariables',
+        'params': {'scope': 'global', 'path': 'fromDedicated', 'value': 1},
+      });
+      await bridge.dispatch({
+        'method': 'executeCommand',
+        'params': {
+          'command': '/setvar',
+          'args': {'scope': 'global', 'path': 'fromCommand', 'value': 2},
+        },
+      });
+
+      final commandRead = await bridge.dispatch({
+        'method': 'executeCommand',
+        'params': {
+          'command': '/getvar',
+          'args': {'scope': 'global'},
+        },
+      });
+      final dedicatedRead = await bridge.dispatch({
+        'method': 'getVariables',
+        'params': {'scope': 'global'},
+      });
+
+      expect((commandRead['result'] as Map)['data'], dedicatedRead['result']);
+      expect(dedicatedRead['result'], {'fromDedicated': 1, 'fromCommand': 2});
     });
   });
 }

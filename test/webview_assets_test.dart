@@ -123,6 +123,14 @@ void main() {
         );
       },
     );
+
+    test('headless sandbox relays requests with per-run authority', () {
+      expect(headlessHtml, contains("event.data.type === 'glaze:request'"));
+      expect(headlessHtml, contains("'glazeBridge'"));
+      expect(headlessHtml, contains('runId'));
+      expect(headlessHtml, contains("type: 'glaze:response'"));
+      expect(headlessHtml, contains('event.source !== frame.contentWindow'));
+    });
   });
 
   group('message script execution policy', () {

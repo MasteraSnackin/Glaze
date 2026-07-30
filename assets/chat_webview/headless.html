@@ -32,7 +32,7 @@
         return frame;
       }
 
-      function runSandboxedScript(script, contextJson) {
+      function runSandboxedScript(script, contextJson, runId) {
         return new Promise(function(resolve, reject) {
           try {
             var context = contextJson;
@@ -53,6 +53,36 @@
 
             function onMessage(event) {
               if (settled) return;
+              if (event.source !== frame.contentWindow) return;
+              if (event.data && event.data.type === 'glaze:request') {
+                window.flutter_inappwebview.callHandler(
+                  'glazeBridge',
+                  {
+                    method: event.data.method,
+                    params: event.data.params,
+                    context: event.data.context
+                  },
+                  runId
+                ).then(function(response) {
+                  if (settled) return;
+                  event.source.postMessage(Object.assign({
+                    type: 'glaze:response',
+                    id: event.data.id
+                  }, response), '*');
+                }, function(error) {
+                  if (settled) return;
+                  event.source.postMessage({
+                    type: 'glaze:response',
+                    id: event.data.id,
+                    ok: false,
+                    error: {
+                      code: 'bridge_error',
+                      message: error && error.message ? error.message : String(error)
+                    }
+                  }, '*');
+                });
+                return;
+              }
               if (!event || !event.data || event.data.type !== 'glaze:headless-result') return;
               if (event.data.scriptId !== currentScriptId) return;
               settled = true;
