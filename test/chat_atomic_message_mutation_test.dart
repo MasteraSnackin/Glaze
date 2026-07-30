@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/db/repositories/chat_repo.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
+import 'package:glaze_flutter/features/chat/services/image_gen_processor.dart';
 
 void main() {
   late AppDatabase db;
@@ -73,6 +74,133 @@ void main() {
     expect(durable?.messages.first.isHidden, isTrue);
     expect(durable?.messages.last.content, 'tail');
   });
+
+  test('image update by message ID preserves newer session fields', () async {
+    await repo.put(
+      const ChatSession(
+        id: 'session',
+        characterId: 'character',
+        sessionIndex: 0,
+        messages: [
+          ChatMessage(
+            id: 'image',
+            role: 'assistant',
+            content: '[IMG:GEN]',
+            swipes: ['[IMG:GEN]'],
+          ),
+        ],
+      ),
+    );
+    await repo.put(
+      const ChatSession(
+        id: 'session',
+        characterId: 'character',
+        sessionIndex: 0,
+        draft: 'new draft',
+        sessionVars: {'concurrent': 'keep'},
+        messages: [
+          ChatMessage(
+            id: 'image',
+            role: 'assistant',
+            content: '[IMG:GEN]',
+            swipes: ['[IMG:GEN]'],
+          ),
+          ChatMessage(id: 'tail', role: 'user', content: 'newer tail'),
+        ],
+      ),
+    );
+
+    final durable = await repo.mutateMessage(
+      sessionId: 'session',
+      messageId: 'image',
+      updatedAt: 12,
+      mutate: (message) => ImageGenProcessor.replaceActiveImageContent(
+        message,
+        '[IMG:RESULT:/new.png]',
+      ),
+    );
+
+    expect(durable?.messages.map((message) => message.id), ['image', 'tail']);
+    expect(durable?.messages.first.content, '[IMG:RESULT:/new.png]');
+    expect(durable?.draft, 'new draft');
+    expect(durable?.sessionVars, {'concurrent': 'keep'});
+  });
+
+  test('image update preserves a newer swipe topology', () async {
+    await repo.put(
+      const ChatSession(
+        id: 'session',
+        characterId: 'character',
+        sessionIndex: 0,
+        messages: [
+          ChatMessage(
+            id: 'image',
+            role: 'assistant',
+            content: 'new active',
+            swipes: ['[IMG:GEN]', 'new active'],
+            swipeId: 1,
+          ),
+        ],
+      ),
+    );
+
+    final durable = await repo.mutateMessage(
+      sessionId: 'session',
+      messageId: 'image',
+      updatedAt: 12,
+      mutate: (message) => ImageGenProcessor.replaceImageContentAt(
+        message,
+        '[IMG:RESULT:/new.png]',
+        swipeId: 0,
+        agentSwipeId: 0,
+      ),
+    );
+
+    final message = durable!.messages.single;
+    expect(message.swipes, ['[IMG:RESULT:/new.png]', 'new active']);
+    expect(message.swipeId, 1);
+    expect(message.content, 'new active');
+  });
+
+  test(
+    'author note mutation preserves concurrent draft and messages',
+    () async {
+      await repo.put(
+        const ChatSession(
+          id: 'session',
+          characterId: 'character',
+          sessionIndex: 0,
+          authorsNote: AuthorsNote(content: 'old'),
+          messages: [ChatMessage(id: 'm1', role: 'user', content: 'first')],
+        ),
+      );
+      await repo.updateDraftIfMessageCount(
+        sessionId: 'session',
+        draft: 'concurrent draft',
+        expectedMessageCount: 1,
+      );
+      await repo.appendUserMessageAndClearDraft(
+        sessionId: 'session',
+        message: const ChatMessage(id: 'm2', role: 'user', content: 'tail'),
+        updatedAt: 9,
+      );
+      await repo.updateDraftIfMessageCount(
+        sessionId: 'session',
+        draft: 'latest draft',
+        expectedMessageCount: 2,
+      );
+
+      final durable = await repo.mutateAuthorsNote(
+        sessionId: 'session',
+        updatedAt: 10,
+        mutate: (note) => note?.copyWith(content: 'new'),
+      );
+
+      expect(durable?.authorsNote?.content, 'new');
+      expect(durable?.messages.map((message) => message.id), ['m1', 'm2']);
+      expect(durable?.draft, 'latest draft');
+    },
+  );
 
   test('session var delta preserves concurrent keys', () {
     final merged = ChatRepo.applySessionVarDelta(

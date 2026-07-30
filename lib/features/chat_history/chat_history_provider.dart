@@ -110,17 +110,19 @@ class ChatHistoryNotifier extends AsyncNotifier<List<ChatSessionInfo>> {
         lastMessage = formatOriginPreview(m.originKind!, m.originTimestamp);
         lastMessageTime = m.originTimestamp;
       }
-      result.add(ChatSessionInfo(
-        sessionId: m.sessionId,
-        characterId: m.characterId,
-        characterName: characterName,
-        avatarPath: char?.avatarPath,
-        lastMessage: lastMessage,
-        lastMessageTime: lastMessageTime,
-        messageCount: m.messageCount,
-        sessionIndex: m.sessionIndex,
-        sessionName: m.sessionName,
-      ));
+      result.add(
+        ChatSessionInfo(
+          sessionId: m.sessionId,
+          characterId: m.characterId,
+          characterName: characterName,
+          avatarPath: char?.avatarPath,
+          lastMessage: lastMessage,
+          lastMessageTime: lastMessageTime,
+          messageCount: m.messageCount,
+          sessionIndex: m.sessionIndex,
+          sessionName: m.sessionName,
+        ),
+      );
     }
 
     result.sort((a, b) => b.lastMessageTime.compareTo(a.lastMessageTime));
@@ -187,11 +189,13 @@ class ChatHistoryNotifier extends AsyncNotifier<List<ChatSessionInfo>> {
 
   Future<void> renameSession(String sessionId, String newName) async {
     final chatRepo = ref.read(chatRepoProvider);
-    final session = await chatRepo.getById(sessionId);
-    if (session == null) return;
-    final updatedVars = Map<String, String>.from(session.sessionVars);
-    updatedVars['sessionName'] = newName;
-    await chatRepo.put(session.copyWith(sessionVars: updatedVars));
+    final updated = await chatRepo.renameSession(
+      sessionId: sessionId,
+      name: newName,
+    );
+    if (updated == null) return;
+    ChatSessionService.updateCache(updated);
+    final durableName = updated.sessionVars['sessionName'];
     state = state.whenData(
       (sessions) => [
         for (final item in sessions)
@@ -205,7 +209,7 @@ class ChatHistoryNotifier extends AsyncNotifier<List<ChatSessionInfo>> {
                   lastMessageTime: item.lastMessageTime,
                   messageCount: item.messageCount,
                   sessionIndex: item.sessionIndex,
-                  sessionName: newName,
+                  sessionName: durableName,
                 )
               : item,
       ],

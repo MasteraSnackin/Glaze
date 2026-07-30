@@ -4,7 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/models/chat_message.dart';
 import '../../../core/models/preset.dart';
-import '../../../core/state/chat_session_ops_provider.dart';
+import '../../../core/state/db_provider.dart';
+import '../../../core/utils/time_helpers.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/generic_editor.dart';
 import '../../../shared/widgets/sheet_view.dart';
@@ -26,16 +27,20 @@ Future<void> syncAuthorsNoteEnabled(
     final session = ref.read(chatProvider(charId)).value?.session;
     final note = session?.authorsNote;
     if (session != null && note != null && note.enabled != enabled) {
-      final updated = session.copyWith(
-        authorsNote: note.copyWith(enabled: enabled),
-        updatedAt: DateTime.now().millisecondsSinceEpoch ~/ 1000,
-      );
-      await ref.read(chatSessionOpsProvider.notifier).saveSession(updated);
-      // Keep the session cache in sync — switchToSession returns the cached
-      // ChatSession without re-reading the DB, so a stale entry would mask the
-      // new enabled state (and the note content) until the cache is evicted.
-      ChatSessionService.updateCache(updated);
-      ref.invalidate(chatProvider(charId));
+      final updated = await ref
+          .read(chatRepoProvider)
+          .mutateAuthorsNote(
+            sessionId: session.id,
+            updatedAt: currentTimestampSeconds(),
+            mutate: (latestNote) => latestNote?.copyWith(enabled: enabled),
+          );
+      if (updated != null) {
+        // Keep the session cache in sync — switchToSession returns the cached
+        // ChatSession without re-reading the DB, so a stale entry would mask
+        // the new enabled state (and note content) until the cache is evicted.
+        ChatSessionService.updateCache(updated);
+        ref.invalidate(chatProvider(charId));
+      }
     }
   }
   final presets = ref.read(presetListProvider).value ?? const [];
@@ -101,28 +106,31 @@ class _AuthorsNoteSheetState extends ConsumerState<AuthorsNoteSheet> {
     if (widget.charId == null) return;
     // Use the captured container, not ref — this method can be called from
     // GenericEditor.dispose() when the element is already deactivated.
-    final session = _container.read(chatProvider(widget.charId!)).value?.session;
+    final session = _container
+        .read(chatProvider(widget.charId!))
+        .value
+        ?.session;
     if (session == null) return;
 
     final content = (item['content'] as String?)?.trim() ?? '';
     // Preserve the session note's existing role/depth/insertion fields — they
     // are unused at runtime (preset-owned) but kept for backward compatibility.
-    final existing = session.authorsNote;
-    final note = content.isNotEmpty
-        ? AuthorsNote(
-            content: content,
-            role: existing?.role ?? 'system',
-            insertionMode: existing?.insertionMode ?? 'relative',
-            depth: existing?.depth ?? 0,
-            enabled: _enabled,
-          )
-        : null;
-
-    final updated = session.copyWith(
-      authorsNote: note,
-      updatedAt: DateTime.now().millisecondsSinceEpoch ~/ 1000,
-    );
-    await _container.read(chatSessionOpsProvider.notifier).saveSession(updated);
+    final updated = await _container
+        .read(chatRepoProvider)
+        .mutateAuthorsNote(
+          sessionId: session.id,
+          updatedAt: currentTimestampSeconds(),
+          mutate: (existing) => content.isNotEmpty
+              ? AuthorsNote(
+                  content: content,
+                  role: existing?.role ?? 'system',
+                  insertionMode: existing?.insertionMode ?? 'relative',
+                  depth: existing?.depth ?? 0,
+                  enabled: _enabled,
+                )
+              : null,
+        );
+    if (updated == null) return;
     // Keep the session cache in sync — switchToSession returns the cached
     // ChatSession without re-reading the DB, so a stale entry would mask the
     // edited note content until the cache is evicted.
@@ -131,24 +139,24 @@ class _AuthorsNoteSheetState extends ConsumerState<AuthorsNoteSheet> {
   }
 
   List<GenericEditorSection> get _config => [
-        GenericEditorSection(
-          fields: [
-            GenericEditorField(
-              key: 'content',
-              label: 'label_content'.tr(),
-              type: 'textarea',
-              placeholder: 'authors_note_placeholder'.tr(),
-              rows: 6,
-            ),
-            GenericEditorField(
-              key: '__roleHint',
-              label: '',
-              type: 'info',
-              text: 'authors_note_role_hint'.tr(),
-            ),
-          ],
+    GenericEditorSection(
+      fields: [
+        GenericEditorField(
+          key: 'content',
+          label: 'label_content'.tr(),
+          type: 'textarea',
+          placeholder: 'authors_note_placeholder'.tr(),
+          rows: 6,
         ),
-      ];
+        GenericEditorField(
+          key: '__roleHint',
+          label: '',
+          type: 'info',
+          text: 'authors_note_role_hint'.tr(),
+        ),
+      ],
+    ),
+  ];
 
   @override
   Widget build(BuildContext context) {
