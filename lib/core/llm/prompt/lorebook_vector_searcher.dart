@@ -3,9 +3,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../state/db_provider.dart';
+import '../../state/lorebook_embedding_provider.dart';
 import '../../state/lorebook_provider.dart';
 import '../embedding_types.dart';
-import '../lorebook_providers.dart';
 import '../lorebook_vector_search.dart';
 import '../../models/character.dart';
 import '../../models/chat_message.dart';

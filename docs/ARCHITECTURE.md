@@ -86,7 +86,6 @@ lib/
 │   │   ├── fallback_prompt_builder.dart # Minimal prompt when no preset configured
 │   │   ├── lorebook_scanner.dart      # Keyword scan: sticky/cooldown/probability/recursion
 │   │   ├── lorebook_merger.dart       # Merges keyword + vector results, deduplicates
-│   │   ├── lorebook_providers.dart    # Riverpod providers for vector search/embedding
 │   │   ├── lorebook_coverage.dart     # Diagnostic: full coverage report per entry/key
 │   │   ├── lorebook_vector_search.dart # Cosine search + hybrid boost
 │   │   ├── lorebook_embedding_service.dart # Indexes lorebook entries into embedding store
@@ -230,6 +229,7 @@ lib/
 │       ├── active_selection_provider.dart # Active preset/persona/globalVars/regexes
 │       ├── active_regex_provider.dart     # Active regex scripts for prompt build
 │       ├── character_provider.dart   # CharactersNotifier (watchAll reactive stream)
+│       ├── lorebook_embedding_provider.dart # Vector search/embedding composition
 │       ├── lorebook_provider.dart    # LorebooksNotifier + settings/activations
 │       ├── global_regex_provider.dart # GlobalRegexNotifier
 │       ├── memory_settings_provider.dart # MemoryGlobalSettings + notifier
@@ -735,7 +735,7 @@ finishes.
 ### Files
 - `lorebook_scanner.dart` — keyword scan: sticky/cooldown/probability/character-filter/recursion
 - `lorebook_merger.dart` — merges keyword + vector results, deduplicates by entry ID
-- `lorebook_providers.dart` — Riverpod providers for vector search and embedding
+- `core/state/lorebook_embedding_provider.dart` — Riverpod composition for vector search and embedding
 - `lorebook_coverage.dart` — diagnostic full coverage report
 - `lorebook_vector_search.dart` — cosine similarity, hybrid boost (name/key/hint overlap)
 - `lorebook_embedding_service.dart` — indexes lorebook entries (hash-based dirty check)
@@ -1292,7 +1292,7 @@ Resolved (kept for history; details in git / PR notes):
 - **magic_drawer_stats_service** — moved to `features/chat/services/`.
 - **prompt_payload_builder split** — `prompt_inputs_collector` + `prompt_payload_assembler`.
 - **chat_provider decomposition** — controllers + `generation_pipeline` + `saved_message_writer` (~420 lines; further splits possible).
-- **lorebook_vector_search providers** — extracted to `lorebook_providers.dart`.
+- **lorebook_vector_search providers** — moved to `core/state/lorebook_embedding_provider.dart`.
 - **Chat ↔ memory draft mutex** — `memory_active_drafts_provider` + `MemoryBookController` (INV-M3/INV-M4).
 - **Session vars on abort/error** — only success path persists isolate vars (INV-C5).
 - **Memory injection token budget** — `memory_budget.dart` + INV-PS4.

@@ -27,6 +27,40 @@ void main() {
     );
   });
 
+  test('lorebook LLM implementations remain provider-free', () {
+    expect(
+      File('lib/core/llm/lorebook_providers.dart').existsSync(),
+      isFalse,
+      reason: 'Lorebook provider composition belongs in core/state',
+    );
+
+    final files = <File>[
+      File('lib/core/llm/embedding_service.dart'),
+      File('lib/core/llm/lorebook_embedding_service.dart'),
+      File('lib/core/llm/lorebook_vector_search.dart'),
+    ];
+    final riverpodImport = RegExp(
+      r'''import\s+['"][^'"]*flutter_riverpod[^'"]*['"]''',
+    );
+    final providerDefinition = RegExp(
+      r'''\b(?:Provider|FutureProvider|StreamProvider|NotifierProvider|AsyncNotifierProvider)\s*<''',
+    );
+
+    for (final file in files) {
+      final source = file.readAsStringSync();
+      expect(
+        source,
+        isNot(matches(riverpodImport)),
+        reason: '${file.path} must receive dependencies by constructor',
+      );
+      expect(
+        source,
+        isNot(matches(providerDefinition)),
+        reason: '${file.path} must not define provider composition',
+      );
+    }
+  });
+
   test('core repositories do not import cloud sync features', () {
     final files = <File>[
       ...Directory('lib/core/db/repositories')

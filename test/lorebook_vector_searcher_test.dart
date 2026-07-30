@@ -7,12 +7,12 @@ import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/db/repositories/embedding_repo.dart';
 import 'package:glaze_flutter/core/llm/embedding_service.dart';
 import 'package:glaze_flutter/core/llm/embedding_types.dart';
-import 'package:glaze_flutter/core/llm/lorebook_providers.dart';
 import 'package:glaze_flutter/core/llm/lorebook_vector_search.dart';
 import 'package:glaze_flutter/core/llm/prompt/lorebook_vector_searcher.dart';
 import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/core/models/lorebook.dart';
 import 'package:glaze_flutter/core/state/db_provider.dart';
+import 'package:glaze_flutter/core/state/lorebook_embedding_provider.dart';
 import 'package:glaze_flutter/core/state/lorebook_provider.dart';
 
 class _StubVectorSearch extends LorebookVectorSearch {

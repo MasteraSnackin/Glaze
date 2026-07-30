@@ -1,11 +1,11 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/llm/lorebook_providers.dart';
 import '../../../core/llm/memory_injection_service.dart';
 import '../../../core/llm/memory_draft_planner.dart';
 import '../../../core/models/memory_book.dart';
 import '../../../core/models/pipeline_settings.dart';
+import '../../../core/state/lorebook_embedding_provider.dart';
 import '../../../core/state/memory_agent_providers.dart';
 import '../../../core/state/memory_book_ops_provider.dart';
 import '../../../core/state/memory_settings_provider.dart';

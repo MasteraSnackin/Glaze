@@ -6,9 +6,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/llm/embedding_error_labels.dart';
-import '../../core/llm/lorebook_providers.dart';
 import '../../core/models/lorebook.dart';
 import '../../core/state/db_provider.dart';
+import '../../core/state/lorebook_embedding_provider.dart';
 import '../../core/state/lorebook_provider.dart';
 import '../../core/utils/id_generator.dart';
 import '../../core/utils/time_helpers.dart';

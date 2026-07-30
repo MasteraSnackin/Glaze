@@ -4,10 +4,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../features/settings/api_list_provider.dart';
 import '../llm/embedding_service.dart';
-import '../llm/lorebook_providers.dart';
 import '../llm/memory_injection_service.dart';
 import '../llm/vector_rebuild_service.dart';
 import 'db_provider.dart';
+import 'lorebook_embedding_provider.dart';
 
 enum VectorRebuildStatus { idle, running, paused, cancelled, completed, error }
 
