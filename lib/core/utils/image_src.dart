@@ -5,11 +5,31 @@ import 'package:flutter/widgets.dart';
 
 import 'platform_paths.dart';
 
-const Map<String, String> _imageFetchHeaders = {
+const Map<String, String> _baseImageFetchHeaders = {
   'User-Agent': 'Mozilla/5.0 (compatible) AppleWebKit/537.36 (KHTML, like Gecko)'
       ' Chrome/124.0.0.0 Safari/537.36',
   'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
 };
+
+/// Headers for a remote image fetch, including a same-origin `Referer`.
+///
+/// The chat WebView loads messages from a real `http(s)` origin
+/// (`appassets.androidplatform.net` on Android, a `127.0.0.1` loopback
+/// server on iOS/Windows), so Chromium attaches a `Referer` when it fetches
+/// `<img>` sub-resources. The native viewer's bare `dart:io` request has no
+/// page context and sends none, and some hotlink-protected CDNs 403 a
+/// referer-less request while allowing the WebView's — sending the image's
+/// own origin as `Referer` satisfies that check without needing to know the
+/// real embedding page.
+Map<String, String> _imageFetchHeaders(String url) {
+  try {
+    final origin = Uri.parse(url).origin;
+    if (origin.isEmpty) return _baseImageFetchHeaders;
+    return {..._baseImageFetchHeaders, 'Referer': '$origin/'};
+  } catch (_) {
+    return _baseImageFetchHeaders;
+  }
+}
 
 /// Turns an image `src` as it appears inside the chat WebView into an
 /// [ImageProvider] usable by native Flutter widgets (the full-screen viewer).
@@ -54,7 +74,7 @@ ImageProvider? imageProviderForSrc(String src) {
     // The UA matters: several image CDNs answer 403 to the bare Dart client
     // (`Dart/3.x (dart:io)`) while happily serving the same URL to the WebView,
     // which is exactly the "renders in the message, blank in the viewer" case.
-    return CachedNetworkImageProvider(trimmed, headers: _imageFetchHeaders);
+    return CachedNetworkImageProvider(trimmed, headers: _imageFetchHeaders(trimmed));
   }
 
   return _fileProvider(imageSrcToFilePath(trimmed));

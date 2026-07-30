@@ -40,6 +40,15 @@ void main() {
       expect(provider.headers?['User-Agent'], isNotNull);
     });
 
+    test('remote URLs send a same-origin Referer', () {
+      // Some CDNs 403 a referer-less request from the bare Dart client while
+      // happily serving the WebView, which always fetches as a sub-resource
+      // of a real page and so always sends one.
+      final provider = imageProviderForSrc('https://cdn.example.com/a.webp');
+      expect((provider as CachedNetworkImageProvider).headers?['Referer'],
+          'https://cdn.example.com/');
+    });
+
     test('surrounding whitespace does not turn a URL into a file path', () {
       // The WebView trims this when loading <img src>, so the picture shows in
       // the message; the viewer has to trim it too or it looks for a file.
