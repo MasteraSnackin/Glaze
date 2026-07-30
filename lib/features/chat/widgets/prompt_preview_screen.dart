@@ -293,7 +293,9 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
                   ],
                   SliverToBoxAdapter(
                     child: _SectionTitle(
-                      'Messages (${_previewMessages.length})',
+                      'label_messages_count'.tr(
+                        args: ['${_previewMessages.length}'],
+                      ),
                     ),
                   ),
                   SliverToBoxAdapter(
@@ -425,7 +427,7 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
     // config to keep it visible across every protocol.
     final model = _apiConfig?.model;
     if (model != null && model.isNotEmpty) {
-      items.add(_ParamItem(label: 'model', value: model));
+      items.add(_ParamItem(label: 'label_model'.tr(), value: model));
     }
 
     void add(String label, dynamic value) {
