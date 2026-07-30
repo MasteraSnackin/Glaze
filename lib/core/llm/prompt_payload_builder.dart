@@ -11,6 +11,7 @@ import '../models/lorebook.dart';
 import '../models/memory_book.dart';
 import '../models/persona.dart';
 import '../models/preset.dart';
+import '../models/tracker.dart';
 import '../state/active_selection_provider.dart';
 import '../state/db_provider.dart';
 import '../state/global_regex_provider.dart';
@@ -38,17 +39,23 @@ export 'prompt/studio_session_state_compiler.dart'
 
 class PromptPayloadBuilder {
   final Ref _ref;
+  final Future<List<Tracker>> Function(String sessionId)
+  _loadEffectiveLedgerTrackers;
   late final PromptInputsCollector _inputsCollector = PromptInputsCollector(
-    _ref,
-  );
-  late final LedgerTrackerLoader _ledgerTrackerLoader = LedgerTrackerLoader(
     _ref,
   );
   late final LorebookVectorSearcher _vectorSearcher = LorebookVectorSearcher(
     _ref,
   );
 
-  PromptPayloadBuilder(this._ref);
+  PromptPayloadBuilder(
+    Ref ref, {
+    Future<List<Tracker>> Function(String sessionId)?
+    loadEffectiveLedgerTrackers,
+  }) : _ref = ref,
+       _loadEffectiveLedgerTrackers =
+           loadEffectiveLedgerTrackers ??
+           LedgerTrackerLoader(ref).loadEffectiveLedgerTrackers;
 
   /// Collects raw inputs from DB/providers for isolate-based processing.
   /// Fast path: DB reads only, no memory injection or vector search.
@@ -321,6 +328,7 @@ class PromptPayloadBuilder {
     // recall or optional InfBlocks.
     String? studioSessionStateContent;
     String? characterKnowledgeContent;
+    List<Tracker>? ledgerTrackers;
     if (sessionId != null) {
       try {
         final facts = await _ref
@@ -337,9 +345,15 @@ class PromptPayloadBuilder {
     }
     if (sessionId != null) {
       try {
-        final ledgerTrackers = await _ledgerTrackerLoader
-            .loadEffectiveLedgerTrackers(sessionId);
-        if (ledgerTrackers.isNotEmpty) {
+        ledgerTrackers = List.unmodifiable(
+          await _loadEffectiveLedgerTrackers(sessionId),
+        );
+      } catch (e) {
+        debugPrint('[PromptBuilder] studio_session_state load failed: $e');
+      }
+      try {
+        if (ledgerTrackers case final ledgerTrackers?
+            when ledgerTrackers.isNotEmpty) {
           studioSessionStateContent = compileStudioSessionState(
             ledgerTrackers,
             sessionId,
@@ -365,13 +379,13 @@ class PromptPayloadBuilder {
     String? entitiesContent;
     if (memorySettings.memoryMode != 'fast' && sessionId != null) {
       try {
-        final allLedger = await _ledgerTrackerLoader
-            .loadEffectiveLedgerTrackers(sessionId);
-        arcContent = buildArcContent(
-          allLedger,
-          latestUserText: latestUserTextFromHistory(history),
-          latestAssistantText: latestAssistantTextFromHistory(history),
-        );
+        if (ledgerTrackers != null) {
+          arcContent = buildArcContent(
+            ledgerTrackers,
+            latestUserText: latestUserTextFromHistory(history),
+            latestAssistantText: latestAssistantTextFromHistory(history),
+          );
+        }
       } catch (_) {}
       try {
         final entities = await _ref
@@ -473,11 +487,18 @@ class PromptPayloadBuilder {
 
     final memSettings = _ref.read(memoryGlobalSettingsProvider);
     String? studioSessionStateContent;
+    List<Tracker>? ledgerTrackers;
     if (session != null) {
       try {
-        final ledgerTrackers = await _ledgerTrackerLoader
-            .loadEffectiveLedgerTrackers(session.id);
-        if (ledgerTrackers.isNotEmpty) {
+        ledgerTrackers = List.unmodifiable(
+          await _loadEffectiveLedgerTrackers(session.id),
+        );
+      } catch (e) {
+        debugPrint('[PromptBuilder] studio_session_state load failed: $e');
+      }
+      try {
+        if (ledgerTrackers case final ledgerTrackers?
+            when ledgerTrackers.isNotEmpty) {
           studioSessionStateContent = compileStudioSessionState(
             ledgerTrackers,
             session.id,
@@ -493,13 +514,13 @@ class PromptPayloadBuilder {
     String? entitiesContent;
     if (memSettings.memoryMode != 'fast' && session != null) {
       try {
-        final allLedger = await _ledgerTrackerLoader
-            .loadEffectiveLedgerTrackers(session.id);
-        arcContent = buildArcContent(
-          allLedger,
-          latestUserText: latestUserTextFromHistory(history),
-          latestAssistantText: latestAssistantTextFromHistory(history),
-        );
+        if (ledgerTrackers != null) {
+          arcContent = buildArcContent(
+            ledgerTrackers,
+            latestUserText: latestUserTextFromHistory(history),
+            latestAssistantText: latestAssistantTextFromHistory(history),
+          );
+        }
       } catch (_) {}
       try {
         final entities = await _ref

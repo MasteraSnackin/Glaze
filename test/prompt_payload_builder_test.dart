@@ -1,0 +1,92 @@
+import 'package:drift/native.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import 'package:glaze_flutter/core/db/app_db.dart';
+import 'package:glaze_flutter/core/llm/prompt_payload_builder.dart';
+import 'package:glaze_flutter/core/models/api_config.dart';
+import 'package:glaze_flutter/core/models/character.dart';
+import 'package:glaze_flutter/core/models/chat_message.dart';
+import 'package:glaze_flutter/core/models/tracker.dart';
+import 'package:glaze_flutter/core/state/db_provider.dart';
+import 'package:glaze_flutter/core/state/memory_settings_provider.dart';
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  test(
+    'buildFromPreFetched loads ledger once and preserves fast-mode fields',
+    () async {
+      SharedPreferences.setMockInitialValues({});
+      final db = AppDatabase.forTesting(NativeDatabase.memory());
+      final container = ProviderContainer(
+        overrides: [appDbProvider.overrideWithValue(db)],
+      );
+      addTearDown(container.dispose);
+      addTearDown(db.close);
+      var loadCount = 0;
+      final builderProvider = Provider(
+        (ref) => PromptPayloadBuilder(
+          ref,
+          loadEffectiveLedgerTrackers: (sessionId) async {
+            loadCount++;
+            return [
+              Tracker(
+                sessionId: sessionId,
+                name: 'world:weather',
+                value: 'rain',
+                scope: 'ledger',
+              ),
+              Tracker(
+                sessionId: sessionId,
+                name: 'arc:escape.status',
+                value: 'active',
+                scope: 'ledger',
+              ),
+              Tracker(
+                sessionId: sessionId,
+                name: 'arc:escape.title',
+                value: 'Escape',
+                scope: 'ledger',
+              ),
+            ];
+          },
+        ),
+      );
+      final builder = container.read(builderProvider);
+
+      for (final (mode, expectedArc) in [('balanced', true), ('fast', false)]) {
+        await container
+            .read(memoryGlobalSettingsProvider.notifier)
+            .save(MemoryGlobalSettings(memoryMode: mode));
+        final callsBeforeBuild = loadCount;
+
+        final payload = await builder.buildFromPreFetched(
+          charId: 'c1',
+          session: const ChatSession(
+            id: 's1',
+            characterId: 'c1',
+            sessionIndex: 0,
+          ),
+          character: const Character(id: 'c1', name: 'Character'),
+          chatApi: const ApiConfig(id: 'api'),
+          preset: null,
+          persona: null,
+          lorebooks: const [],
+        );
+
+        expect(loadCount - callsBeforeBuild, 1, reason: mode);
+        expect(
+          payload.studioSessionStateContent,
+          contains('weather: rain'),
+          reason: mode,
+        );
+        expect(payload.arcContent != null, expectedArc, reason: mode);
+        if (expectedArc) {
+          expect(payload.arcContent, contains('- Escape'));
+        }
+      }
+    },
+  );
+}
