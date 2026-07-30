@@ -68,42 +68,50 @@ class _ConnectionStatusState extends State<ConnectionStatus> {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             widget.child,
-            Material(
-              color: Colors.transparent,
-              borderRadius: BorderRadius.circular(16),
-              child: InkWell(
-                borderRadius: BorderRadius.circular(16),
-                onTap: widget.onRetry,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      AnimatedContainer(
-                        duration: const Duration(milliseconds: 300),
-                        width: 8,
-                        height: 8,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: _statusColor,
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 200),
-                        child: Text(
-                          _statusText,
-                          key: ValueKey(widget.status),
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: context.cs.onSurfaceVariant,
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 300),
+              decoration: BoxDecoration(
+                color: _statusColor.withValues(alpha: 0.12),
+                border: Border.all(color: _statusColor.withValues(alpha: 0.5)),
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Material(
+                color: Colors.transparent,
+                borderRadius: BorderRadius.circular(999),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(999),
+                  onTap: widget.onRetry,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 5,
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 300),
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: _statusColor,
                           ),
                         ),
-                      ),
-                    ],
+                        const SizedBox(width: 6),
+                        AnimatedSwitcher(
+                          duration: const Duration(milliseconds: 200),
+                          child: Text(
+                            _statusText,
+                            key: ValueKey(widget.status),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: context.cs.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
