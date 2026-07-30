@@ -65,6 +65,36 @@ void main() {
     expect(await repo.getBySourceIds('lorebook_entry', const []), isEmpty);
   });
 
+  test('bulk entry deletion is scoped to source type and source id', () async {
+    for (final row in [
+      ('chat-s1-stale', 'chat_message', 's1'),
+      ('chat-s1-keep', 'chat_message', 's1'),
+      ('chat-s2-stale', 'chat_message', 's2'),
+      ('memory-s1-stale', 'memory_entry', 's1'),
+    ]) {
+      await repo.putEmbeddingVector(
+        entryId: row.$1,
+        sourceType: row.$2,
+        sourceId: row.$3,
+        vectors: const [
+          [1, 0],
+        ],
+        textHash: row.$1,
+      );
+    }
+
+    await repo.deleteBySourceAndEntryIds('chat_message', 's1', [
+      'chat-s1-stale',
+      'chat-s2-stale',
+      'memory-s1-stale',
+    ]);
+
+    expect(await repo.getByEntryId('chat-s1-stale'), isNull);
+    expect(await repo.getByEntryId('chat-s1-keep'), isNotNull);
+    expect(await repo.getByEntryId('chat-s2-stale'), isNotNull);
+    expect(await repo.getByEntryId('memory-s1-stale'), isNotNull);
+  });
+
   test('composite source query uses the composite index', () async {
     final plan = await db
         .customSelect(
