@@ -18,10 +18,33 @@ class ChatWebViewSyncState {
   bool streamingSent = false;
   bool regenStreamingSent = false;
 
-  /// The ordered persisted-message sync + virtual placeholder append for the
-  /// current generation. Streaming deltas wait for it instead of racing a
-  /// second append ahead of the just-sent user message.
-  Future<void>? streamingAppendPending;
+  /// Tail of the ordered message-list mutation queue. Persisted diffs,
+  /// placeholders, and streaming deltas must share one queue because mapping a
+  /// message can await image resolution before it reaches JavaScript.
+  Future<void>? messageMutationPending;
+
+  Future<void> enqueueMessageMutation(Future<void> Function() mutation) {
+    final previous = messageMutationPending;
+    late final Future<void> operation;
+    operation = () async {
+      try {
+        if (previous != null) {
+          try {
+            await previous;
+          } catch (_) {
+            // A failed bridge call must not permanently poison the queue.
+          }
+        }
+        await mutation();
+      } finally {
+        if (identical(messageMutationPending, operation)) {
+          messageMutationPending = null;
+        }
+      }
+    }();
+    messageMutationPending = operation;
+    return operation;
+  }
 
   /// Invalidates async streaming work when generation or session ownership
   /// changes. Callers capture the value and re-check it after every await.

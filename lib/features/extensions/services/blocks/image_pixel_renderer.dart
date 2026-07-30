@@ -8,6 +8,7 @@ import '../../../../core/constants/image_gen_patterns.dart';
 import '../../../../core/db/repositories/info_blocks_repository.dart';
 import '../../../../core/models/character.dart';
 import '../../../../core/models/persona.dart';
+import '../../../../core/services/image_storage_service.dart';
 import '../../../../core/state/db_provider.dart';
 import '../../../image_gen/image_gen_provider.dart';
 import '../../../image_gen/services/image_tag_markup.dart';
@@ -77,7 +78,13 @@ class ImagePixelRenderer {
         status: BlockRunStatus.done,
       );
       ref.read(infoBlocksProvider(sessionId).notifier).addOrReplace(done);
-      refreshPanelForMessage(charId, sessionId, messageId, swipeId, agentSwipeId);
+      refreshPanelForMessage(
+        charId,
+        sessionId,
+        messageId,
+        swipeId,
+        agentSwipeId,
+      );
       return done;
     }
 
@@ -190,7 +197,9 @@ class ImagePixelRenderer {
       final storage = await ref.read(imageStorageProvider.future);
       final dir = Directory(p.join(storage.baseDir, 'generated'));
       if (!await dir.exists()) await dir.create(recursive: true);
-      final filename = 'extblock_${DateTime.now().millisecondsSinceEpoch}.png';
+      final extension = imageExtensionForBytes(imageBytes);
+      final filename =
+          'extblock_${DateTime.now().millisecondsSinceEpoch}.$extension';
       final filePath = p.join(dir.path, filename);
       await File(filePath).writeAsBytes(imageBytes);
 
@@ -218,7 +227,13 @@ class ImagePixelRenderer {
         status: BlockRunStatus.done,
       );
       ref.read(infoBlocksProvider(sessionId).notifier).addOrReplace(done);
-      refreshPanelForMessage(charId, sessionId, messageId, swipeId, agentSwipeId);
+      refreshPanelForMessage(
+        charId,
+        sessionId,
+        messageId,
+        swipeId,
+        agentSwipeId,
+      );
       return done;
     } on DioException catch (e) {
       if (CancelToken.isCancel(e)) {

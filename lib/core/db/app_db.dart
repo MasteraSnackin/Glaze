@@ -49,7 +49,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 79;
+  int get schemaVersion => 80;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -1411,6 +1411,17 @@ class AppDatabase extends _$AppDatabase {
             'UPDATE api_configs SET reasoning_history_count = '
             'CASE WHEN include_last_reasoning = 1 THEN 1 ELSE 0 END',
           );
+        }
+      }
+      if (from < 80) {
+        final columns = await customSelect(
+          "PRAGMA table_info('api_configs')",
+        ).get();
+        final names = columns
+            .map((column) => column.read<String>('name'))
+            .toSet();
+        if (!names.contains('use_responses_api')) {
+          await m.addColumn(apiConfigs, apiConfigs.useResponsesApi);
         }
       }
     },

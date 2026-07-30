@@ -12,32 +12,18 @@ Future<void> pushStreamingMessageOwned({
   required bool Function() isCurrent,
 }) async {
   bool ownsStream() => isCurrent() && syncState.streamEpoch == epoch;
-  while (true) {
-    final pending = syncState.streamingAppendPending;
-    if (pending == null) break;
-    await pending;
-    if (!ownsStream()) return;
-  }
-  if (!ownsStream()) return;
-
-  final wasSent = syncState.streamingSent;
-  late final Future<void> operation;
-  operation = () async {
+  final operation = syncState.enqueueMessageMutation(() async {
     try {
-      if (wasSent) {
+      if (!ownsStream()) return;
+      if (syncState.streamingSent) {
         await bridge.updateMessage(message);
       } else {
         await bridge.appendMessage(message);
       }
-      if (!wasSent && ownsStream()) syncState.streamingSent = true;
+      if (ownsStream()) syncState.streamingSent = true;
     } catch (_) {
       // Leave streamingSent false so a later delta can retry the append.
-    } finally {
-      if (identical(syncState.streamingAppendPending, operation)) {
-        syncState.streamingAppendPending = null;
-      }
     }
-  }();
-  syncState.streamingAppendPending = operation;
+  });
   await operation;
 }

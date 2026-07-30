@@ -244,6 +244,7 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
   }
 
   void _scheduleTokenStats() {
+    if (!mounted) return;
     _debounceTimer?.cancel();
     final delay = ref.read(appSettingsProvider).value?.batterySaver == true
         ? const Duration(milliseconds: 700)
@@ -255,9 +256,15 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
     if (!mounted) return;
     setState(() => _loadingTokens = true);
     final request = _statsRequest;
-    final updated = await MagicDrawerStatsService(
-      ref,
-    ).computeTokenStats(widget.charId, _stats);
+    MagicDrawerStats updated;
+    try {
+      updated = await MagicDrawerStatsService(
+        ref,
+      ).computeTokenStats(widget.charId, _stats);
+    } catch (e) {
+      debugPrint('[MagicDrawer] _loadTokenStats error: $e');
+      return;
+    }
     if (!mounted || request != _statsRequest) return;
     setState(() {
       _stats = updated;
@@ -274,7 +281,8 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
     } catch (e) {
       debugPrint('[MagicDrawer] _refreshStats error: $e');
     }
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    setState(() {});
     _scheduleTokenStats();
   }
 

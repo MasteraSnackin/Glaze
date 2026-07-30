@@ -183,6 +183,10 @@ class ImageGenService {
             persona: persona,
             recentImageContexts: recentImageContexts,
           );
+    final injectedRefs = refs.take(routmyMaxInjectedReferenceImages).toList();
+    final referenceAwarePrompt = isRoutmy
+        ? imagePromptWithReferenceLabels(prompt, injectedRefs)
+        : prompt;
     switch (settings.apiType) {
       case ImageGenApiType.openai:
         return _generateOpenai(
@@ -198,22 +202,34 @@ class ImageGenService {
           prompt,
           llmEndpoint,
           llmApiKey,
+          instructionAspectRatio,
+          instructionImageSize,
           cancelToken,
         );
       case ImageGenApiType.naistera:
-        return _generateNaistera(settings, prompt, refs, cancelToken);
+        return _generateNaistera(
+          settings,
+          prompt,
+          refs,
+          instructionAspectRatio,
+          cancelToken,
+        );
       case ImageGenApiType.routmy:
         return _generateRoutmy(
           settings,
-          prompt,
-          refs.take(routmyMaxInjectedReferenceImages).toList(),
+          referenceAwarePrompt,
+          injectedRefs,
+          instructionAspectRatio,
+          instructionImageSize,
           cancelToken,
         );
       case ImageGenApiType.ruRoutmy:
         return _generateRuRoutmy(
           settings,
-          prompt,
-          refs.take(routmyMaxInjectedReferenceImages).toList(),
+          referenceAwarePrompt,
+          injectedRefs,
+          instructionAspectRatio,
+          instructionImageSize,
           cancelToken,
         );
     }
@@ -250,6 +266,8 @@ class ImageGenService {
     String prompt,
     String llmEndpoint,
     String llmApiKey,
+    String? instructionAspectRatio,
+    String? instructionImageSize,
     CancelToken? cancelToken,
   ) async {
     final endpoint = settings.useSameEndpoint
@@ -267,8 +285,16 @@ class ImageGenService {
       apiKey: apiKey,
       model: model,
       prompt: prompt,
-      aspectRatio: settings.geminiAspectRatio,
-      imageSize: settings.geminiImageSize,
+      aspectRatio: _validOverride(
+        instructionAspectRatio,
+        GeminiConstants.aspectRatios,
+        settings.geminiAspectRatio,
+      ),
+      imageSize: _validOverride(
+        instructionImageSize,
+        GeminiConstants.imageSizes,
+        settings.geminiImageSize,
+      ),
       cancelToken: cancelToken,
     );
   }
@@ -277,13 +303,18 @@ class ImageGenService {
     ImageGenSettings settings,
     String prompt,
     List<Map<String, String>> refs,
+    String? instructionAspectRatio,
     CancelToken? cancelToken,
   ) async {
     return NaisteraImageProvider().generate(
       apiKey: settings.naisteraApiKey,
       model: settings.naisteraModel,
       prompt: prompt,
-      aspectRatio: settings.naisteraAspectRatio,
+      aspectRatio: _validOverride(
+        instructionAspectRatio,
+        NaisteraConstants.aspectRatios,
+        settings.naisteraAspectRatio,
+      ),
       references: refs.isNotEmpty ? refs : null,
       cancelToken: cancelToken,
     );
@@ -293,14 +324,24 @@ class ImageGenService {
     ImageGenSettings settings,
     String prompt,
     List<Map<String, String>> refs,
+    String? instructionAspectRatio,
+    String? instructionImageSize,
     CancelToken? cancelToken,
   ) async {
     return RoutmyImageProvider(baseUrl: RoutMyConstants.baseUrl).generate(
       apiKey: settings.routmyApiKey,
       model: settings.routmyModel,
       prompt: prompt,
-      aspectRatio: settings.routmyAspectRatio,
-      imageSize: settings.routmyImageSize,
+      aspectRatio: _validOverride(
+        instructionAspectRatio,
+        RoutMyConstants.aspectRatios,
+        settings.routmyAspectRatio,
+      ),
+      imageSize: _validOverride(
+        instructionImageSize,
+        RoutMyConstants.imageSizes,
+        settings.routmyImageSize,
+      ),
       quality: settings.routmyQuality,
       referenceImages: refs.isNotEmpty
           ? refs.map((r) => r['image']!).where((s) => s.isNotEmpty).toList()
@@ -313,14 +354,24 @@ class ImageGenService {
     ImageGenSettings settings,
     String prompt,
     List<Map<String, String>> refs,
+    String? instructionAspectRatio,
+    String? instructionImageSize,
     CancelToken? cancelToken,
   ) async {
     return RoutmyImageProvider(baseUrl: RuRoutMyConstants.baseUrl).generate(
       apiKey: settings.ruRoutmyApiKey,
       model: settings.ruRoutmyModel,
       prompt: prompt,
-      aspectRatio: settings.ruRoutmyAspectRatio,
-      imageSize: settings.ruRoutmyImageSize,
+      aspectRatio: _validOverride(
+        instructionAspectRatio,
+        RuRoutMyConstants.aspectRatios,
+        settings.ruRoutmyAspectRatio,
+      ),
+      imageSize: _validOverride(
+        instructionImageSize,
+        RuRoutMyConstants.imageSizes,
+        settings.ruRoutmyImageSize,
+      ),
       quality: settings.ruRoutmyQuality,
       referenceImages: refs.isNotEmpty
           ? refs.map((r) => r['image']!).where((s) => s.isNotEmpty).toList()
@@ -438,6 +489,15 @@ class ImageGenService {
       .where((trigger) => trigger.isNotEmpty)
       .toList();
 
+  String _validOverride(
+    String? override,
+    List<String> allowed,
+    String fallback,
+  ) {
+    final value = override?.trim();
+    return value != null && allowed.contains(value) ? value : fallback;
+  }
+
   String _fileToBase64(String path) {
     try {
       final resolved = resolveGlazeFilePath(path) ?? path;
@@ -485,7 +545,7 @@ class ImageGenService {
     if (!await dir.exists()) {
       await dir.create(recursive: true);
     }
-    final extension = _generatedImageExtension(bytes);
+    final extension = imageExtensionForBytes(bytes);
     final path = p.join(
       dir.path,
       '${p.basenameWithoutExtension(filename)}.$extension',
@@ -495,28 +555,23 @@ class ImageGenService {
   }
 }
 
-String _generatedImageExtension(Uint8List bytes) {
-  if (bytes.length >= 12) {
-    if (bytes[0] == 0xff && bytes[1] == 0xd8 && bytes[2] == 0xff) return 'jpg';
-    if (bytes[0] == 0x52 &&
-        bytes[1] == 0x49 &&
-        bytes[2] == 0x46 &&
-        bytes[3] == 0x46 &&
-        bytes[8] == 0x57 &&
-        bytes[9] == 0x45 &&
-        bytes[10] == 0x42 &&
-        bytes[11] == 0x50) {
-      return 'webp';
-    }
+String imagePromptWithReferenceLabels(
+  String prompt,
+  List<Map<String, String>> references,
+) {
+  if (references.isEmpty) return prompt;
+  final labels = <String>[];
+  for (var i = 0; i < references.length; i++) {
+    final rawName = references[i]['name']?.trim() ?? '';
+    if (rawName.isEmpty || rawName == 'context') continue;
+    final name = rawName
+        .replaceAll(RegExp(r'[\r\n\t]+'), ' ')
+        .replaceAll('"', "'");
+    labels.add('Reference image ${i + 1} shows "$name".');
   }
-  if (bytes.length >= 6 &&
-      bytes[0] == 0x47 &&
-      bytes[1] == 0x49 &&
-      bytes[2] == 0x46 &&
-      bytes[3] == 0x38) {
-    return 'gif';
-  }
-  return 'png';
+  if (labels.isEmpty) return prompt;
+  return '${labels.join(' ')} Preserve these exact identities and assign each '
+      'person the role and position stated in the prompt.\n\n$prompt';
 }
 
 // ─── Isolate helpers for JPEG resize ────────────────────────────────────────

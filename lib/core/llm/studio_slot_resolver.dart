@@ -39,6 +39,7 @@ class StudioSlotResolver {
     String errorLabel = 'studio-slot',
     String modelOverride = '',
     List<ExtraRequestParameter> extraRequestParameterOverrides = const [],
+    bool? useResponsesApi,
   }) {
     if (apiConfigId.isEmpty) {
       if (fallback != null) {
@@ -52,6 +53,7 @@ class StudioSlotResolver {
           apiKey: fallback.apiKey,
           model: model,
           protocol: fallback.protocol,
+          useResponsesApi: useResponsesApi ?? fallback.useResponsesApi,
           extraRequestParameters: mergeExtraRequestParameters(
             fallback.extraRequestParameters,
             extraRequestParameterOverrides,
@@ -89,6 +91,7 @@ class StudioSlotResolver {
       apiKey: selected.apiKey,
       model: model,
       protocol: selected.protocol,
+      useResponsesApi: useResponsesApi ?? selected.useResponsesApi,
       extraRequestParameters: mergeExtraRequestParameters(
         selected.extraRequestParameters,
         extraRequestParameterOverrides,

@@ -629,10 +629,10 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     // dispatcher invalidated its epoch synchronously; wait for the call to
     // settle before replacing the DOM so a late old-session bubble cannot land
     // after the new session's setMessages.
-    final pendingStreamAppend = _syncState.streamingAppendPending;
-    if (pendingStreamAppend != null) {
+    final pendingMessageMutation = _syncState.messageMutationPending;
+    if (pendingMessageMutation != null) {
       try {
-        await pendingStreamAppend;
+        await pendingMessageMutation;
       } catch (_) {}
     }
 
@@ -816,59 +816,63 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       return;
     }
     final bridge = _bridge;
-    final messageSync = result.runMessageSync
-        ? _syncMessages(oldWidget.messages, bridge: bridge)
-        : Future<void>.value();
+    final oldMessages = oldWidget.messages;
+    final newMessages = widget.messages;
+    final visibleStartIndex = widget.visibleStartIndex;
+    final isGenerating = widget.isGenerating;
+    final sessionSwitching = _sessionSwitching;
     if (result.runMessageSync) unawaited(_syncExtBlockPanels());
-    if (result.appendPlaceholder &&
-        result.placeholder != null &&
-        bridge != null) {
+    if (bridge != null &&
+        (result.runMessageSync ||
+            (result.appendPlaceholder && result.placeholder != null))) {
       final charId = widget.charId;
       final sessionId = widget.sessionId;
-      final placeholder = result.placeholder!;
-      late final Future<void> pending;
-      pending = () async {
-        try {
-          bool isCurrent() =>
-              mounted &&
-              identical(_bridge, bridge) &&
-              _ready &&
-              !_sessionSwitching &&
-              widget.charId == charId &&
-              widget.sessionId == sessionId &&
-              widget.isGenerating &&
-              widget.regenTargetId == null &&
-              widget.continuationTargetId == null &&
-              !_syncState.streamingSent;
-          final appended = await appendStreamingPlaceholderAfterMessageSync(
-            messageSync: messageSync,
-            isCurrent: isCurrent,
-            appendPlaceholder: () => bridge.appendMessage(placeholder),
-          );
-          if (appended) {
-            _syncDispatcher.onPlaceholderAppended();
-          } else if (mounted &&
-              identical(_bridge, bridge) &&
-              widget.charId == charId &&
-              widget.sessionId == sessionId &&
-              !widget.isGenerating) {
-            // Stop can land while appendMessage is crossing the platform
-            // channel, after the falling edge already tried to remove it.
-            await bridge.removeMessage(_kStreamingId);
+      final placeholder = result.placeholder;
+      unawaited(
+        _syncState.enqueueMessageMutation(() async {
+          try {
+            bool isCurrent() =>
+                mounted &&
+                identical(_bridge, bridge) &&
+                _ready &&
+                !_sessionSwitching &&
+                widget.charId == charId &&
+                widget.sessionId == sessionId &&
+                widget.isGenerating &&
+                widget.regenTargetId == null &&
+                widget.continuationTargetId == null &&
+                !_syncState.streamingSent;
+            if (result.runMessageSync) {
+              await _syncMessages(
+                oldMessages,
+                newMessages: newMessages,
+                visibleStartIndex: visibleStartIndex,
+                isGenerating: isGenerating,
+                sessionSwitching: sessionSwitching,
+                bridge: bridge,
+              );
+            }
+            if (placeholder == null || !isCurrent()) return;
+            await bridge.appendMessage(placeholder);
+            final appended = isCurrent();
+            if (appended) {
+              _syncDispatcher.onPlaceholderAppended();
+            } else if (mounted &&
+                identical(_bridge, bridge) &&
+                widget.charId == charId &&
+                widget.sessionId == sessionId &&
+                !widget.isGenerating) {
+              // Stop can land while appendMessage is crossing the platform
+              // channel, after the falling edge already tried to remove it.
+              await bridge.removeMessage(_kStreamingId);
+            }
+          } catch (e, st) {
+            debugPrint(
+              '[ChatWebView] streaming placeholder append failed: $e\n$st',
+            );
           }
-        } catch (e, st) {
-          debugPrint(
-            '[ChatWebView] streaming placeholder append failed: $e\n$st',
-          );
-        } finally {
-          if (identical(_syncState.streamingAppendPending, pending)) {
-            _syncState.streamingAppendPending = null;
-          }
-        }
-      }();
-      _syncState.streamingAppendPending = pending;
-    } else {
-      unawaited(messageSync);
+        }),
+      );
     }
   }
 
@@ -876,15 +880,19 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
 
   Future<void> _syncMessages(
     List<ChatMessage> oldMsgs, {
+    required List<ChatMessage> newMessages,
+    required int visibleStartIndex,
+    required bool isGenerating,
+    required bool sessionSwitching,
     required ChatBridgeController? bridge,
   }) {
     return _messageSync.sync(
       bridge: bridge,
       oldMsgs: oldMsgs,
-      newMsgs: widget.messages,
-      visibleStartIndex: widget.visibleStartIndex,
-      isGenerating: widget.isGenerating,
-      sessionSwitching: _sessionSwitching,
+      newMsgs: newMessages,
+      visibleStartIndex: visibleStartIndex,
+      isGenerating: isGenerating,
+      sessionSwitching: sessionSwitching,
     );
   }
 

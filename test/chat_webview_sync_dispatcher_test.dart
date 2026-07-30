@@ -123,6 +123,47 @@ void main() {
   });
 
   group('ChatWebViewSyncDispatcher', () {
+    test('serializes persisted and streaming message mutations', () async {
+      final state = ChatWebViewSyncState();
+      final firstMutation = Completer<void>();
+      final calls = <String>[];
+
+      final first = state.enqueueMessageMutation(() async {
+        calls.add('user:start');
+        await firstMutation.future;
+        calls.add('user:done');
+      });
+      final second = state.enqueueMessageMutation(() async {
+        calls.add('assistant');
+      });
+
+      await Future<void>.delayed(Duration.zero);
+      expect(calls, ['user:start']);
+
+      firstMutation.complete();
+      await Future.wait([first, second]);
+      expect(calls, ['user:start', 'user:done', 'assistant']);
+      expect(state.messageMutationPending, isNull);
+    });
+
+    test('continues message mutation queue after a failed operation', () async {
+      final state = ChatWebViewSyncState();
+      final calls = <String>[];
+
+      final failed = state.enqueueMessageMutation(() async {
+        calls.add('failed');
+        throw StateError('bridge failed');
+      });
+      final recovered = state.enqueueMessageMutation(() async {
+        calls.add('recovered');
+      });
+
+      await expectLater(failed, throwsStateError);
+      await recovered;
+      expect(calls, ['failed', 'recovered']);
+      expect(state.messageMutationPending, isNull);
+    });
+
     test(
       'does not skip just-sent user message after stale streaming flag',
       () async {

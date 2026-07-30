@@ -27,15 +27,17 @@ void main() {
   }
 
   group('RoutmyImageProvider Seedream references', () {
-    for (final referenceCount in [1, 2]) {
+    for (final referenceCount in [0, 1, 2]) {
       test('uses generations with $referenceCount reference(s)', () async {
         final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
         addTearDown(server.close);
 
         late Uri requestUri;
+        late String requestMethod;
         late Map<String, dynamic> requestBody;
         final requestHandled = server.first.then((request) async {
           requestUri = request.uri;
+          requestMethod = request.method;
           requestBody =
               jsonDecode(await utf8.decoder.bind(request).join())
                   as Map<String, dynamic>;
@@ -67,11 +69,15 @@ void main() {
         await requestHandled;
 
         expect(requestUri.path, '/v1/images/generations');
+        expect(requestMethod, 'POST');
         expect(bytes, [1]);
-        final expectedRef = 'data:image/png;base64,${references.first}';
-        if (referenceCount == 1) {
+        if (referenceCount == 0) {
+          expect(requestBody, isNot(contains('image')));
+        } else if (referenceCount == 1) {
+          final expectedRef = 'data:image/png;base64,${references.first}';
           expect(requestBody['image'], expectedRef);
         } else {
+          final expectedRef = 'data:image/png;base64,${references.first}';
           expect(requestBody['image'], [expectedRef, expectedRef]);
         }
       });
@@ -132,6 +138,87 @@ void main() {
   });
 
   group('RoutmyImageProvider response parsing', () {
+    test('downloads bytes from a URL response', () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      final baseUrl = 'http://${server.address.host}:${server.port}';
+      final requests = <String>[];
+      server.listen((request) async {
+        requests.add('${request.method} ${request.uri.path}');
+        await request.drain<void>();
+        if (request.uri.path == '/generated/image.jpg') {
+          request.response.add([0xff, 0xd8, 0xff, 0x01]);
+        } else {
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'data': [
+                {'url': '$baseUrl/generated/image.jpg'},
+              ],
+            }),
+          );
+        }
+        await request.response.close();
+      });
+
+      final bytes = await RoutmyImageProvider(baseUrl: baseUrl).generate(
+        apiKey: 'test-key',
+        model: 'bytedance/seedream-5.0-pro',
+        prompt: 'test prompt',
+        aspectRatio: '1:1',
+        imageSize: '1K',
+        quality: 'auto',
+      );
+
+      expect(bytes, [0xff, 0xd8, 0xff, 0x01]);
+      expect(requests, [
+        'POST /v1/images/generations',
+        'GET /generated/image.jpg',
+      ]);
+    });
+
+    test('identifies a failed URL download as the error phase', () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      final baseUrl = 'http://${server.address.host}:${server.port}';
+      server.listen((request) async {
+        await request.drain<void>();
+        if (request.uri.path == '/generated/image.png') {
+          request.response.statusCode = HttpStatus.methodNotAllowed;
+        } else {
+          request.response.headers.contentType = ContentType.json;
+          request.response.write(
+            jsonEncode({
+              'data': [
+                {'url': '$baseUrl/generated/image.png'},
+              ],
+            }),
+          );
+        }
+        await request.response.close();
+      });
+
+      final future = RoutmyImageProvider(baseUrl: baseUrl).generate(
+        apiKey: 'test-key',
+        model: 'bytedance/seedream-5.0-pro',
+        prompt: 'test prompt',
+        aspectRatio: '1:1',
+        imageSize: '1K',
+        quality: 'auto',
+      );
+
+      await expectLater(
+        future,
+        throwsA(
+          predicate(
+            (error) =>
+                error.toString().contains('image download failed') &&
+                error.toString().contains('HTTP 405'),
+          ),
+        ),
+      );
+    });
+
     test(
       'accepts completed task metadata when data contains an image',
       () async {
