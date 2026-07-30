@@ -180,6 +180,7 @@ class ImpersonationService {
         presencePenalty: apiConfig.presencePenalty,
         stream: apiConfig.stream,
         requestReasoning: apiConfig.requestReasoning,
+        useResponsesApi: apiConfig.useResponsesApi,
         reasoningEffort: apiConfig.reasoningEffort,
         omitTemperature: apiConfig.omitTemperature,
         omitTopP: apiConfig.omitTopP,

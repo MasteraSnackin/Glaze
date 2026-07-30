@@ -151,6 +151,7 @@ class AgentRunner {
     final pipeline = _readPipelineSettings();
     final effectiveResolved = isFinalResponse
         ? resolved.copyWithReasoning(
+            useResponsesApi: pipeline.studioAgent.studioFinalUseResponsesApi,
             requestReasoning: pipeline.studioAgent.studioFinalDisableReasoning
                 ? false
                 : pipeline.studioAgent.studioFinalRequestReasoning,
@@ -163,6 +164,7 @@ class AgentRunner {
           )
         : agent.phase == 'post_processing'
         ? resolved.copyWithReasoning(
+            useResponsesApi: pipeline.cleaner.postCleanerUseResponsesApi,
             requestReasoning: pipeline.cleaner.postCleanerDisableReasoning
                 ? false
                 : pipeline.cleaner.postCleanerRequestReasoning,
@@ -174,6 +176,7 @@ class AgentRunner {
             reasoningEffort: pipeline.cleaner.postCleanerReasoningEffort,
           )
         : resolved.copyWithReasoning(
+            useResponsesApi: pipeline.studioAgent.studioTrackerUseResponsesApi,
             requestReasoning: pipeline.studioAgent.studioTrackerDisableReasoning
                 ? false
                 : pipeline.studioAgent.studioTrackerRequestReasoning,
@@ -358,6 +361,7 @@ class ResolvedAgentConfig {
   final bool omitTemperature;
   final bool omitTopP;
   final bool requestReasoning;
+  final bool useResponsesApi;
   final String? reasoningEffort;
   final bool omitReasoning;
   final bool omitReasoningEffort;
@@ -380,6 +384,7 @@ class ResolvedAgentConfig {
     this.omitTemperature = false,
     this.omitTopP = false,
     this.requestReasoning = false,
+    this.useResponsesApi = false,
     this.reasoningEffort,
     this.omitReasoning = false,
     this.omitReasoningEffort = false,
@@ -407,6 +412,7 @@ class ResolvedAgentConfig {
       omitTemperature: config.omitTemperature,
       omitTopP: config.omitTopP,
       requestReasoning: config.requestReasoning,
+      useResponsesApi: config.useResponsesApi,
       reasoningEffort: config.reasoningEffort,
       omitReasoning: config.omitReasoning,
       omitReasoningEffort: config.omitReasoningEffort,
@@ -422,6 +428,7 @@ class ResolvedAgentConfig {
   /// Per-call override of the reasoning-related flags. Used by
   /// [AgentRunner._runAgentInner] when `studioFinalDisableReasoning` is on.
   ResolvedAgentConfig copyWithReasoning({
+    bool? useResponsesApi,
     bool? requestReasoning,
     bool? omitReasoning,
     bool? omitReasoningEffort,
@@ -439,6 +446,7 @@ class ResolvedAgentConfig {
       omitTemperature: omitTemperature,
       omitTopP: omitTopP,
       requestReasoning: requestReasoning ?? this.requestReasoning,
+      useResponsesApi: useResponsesApi ?? this.useResponsesApi,
       reasoningEffort: reasoningEffort ?? this.reasoningEffort,
       omitReasoning: omitReasoning ?? this.omitReasoning,
       omitReasoningEffort: omitReasoningEffort ?? this.omitReasoningEffort,
@@ -472,6 +480,7 @@ class ResolvedAgentConfig {
       omitTemperature: omitTemperature ?? this.omitTemperature,
       omitTopP: omitTopP ?? this.omitTopP,
       requestReasoning: requestReasoning,
+      useResponsesApi: useResponsesApi,
       reasoningEffort: reasoningEffort,
       omitReasoning: omitReasoning,
       omitReasoningEffort: omitReasoningEffort,

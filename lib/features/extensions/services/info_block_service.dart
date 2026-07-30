@@ -504,6 +504,7 @@ class InfoBlockService {
           presencePenalty: apiConfig.presencePenalty,
           stream: useStream,
           requestReasoning: apiConfig.requestReasoning,
+          useResponsesApi: apiConfig.useResponsesApi,
           reasoningEffort: apiConfig.reasoningEffort,
           omitTemperature: apiConfig.omitTemperature,
           omitTopP: apiConfig.omitTopP,

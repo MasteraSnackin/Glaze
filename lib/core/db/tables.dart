@@ -535,6 +535,8 @@ class ApiConfigs extends Table {
   TextColumn get reasoningEffort => text().nullable()();
   BoolColumn get requestReasoning =>
       boolean().withDefault(const Constant(false))();
+  BoolColumn get useResponsesApi =>
+      boolean().withDefault(const Constant(false))();
   BoolColumn get showNativeReasoning =>
       boolean().withDefault(const Constant(true))();
   BoolColumn get includeLastReasoning =>

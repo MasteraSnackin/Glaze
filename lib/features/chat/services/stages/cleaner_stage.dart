@@ -255,6 +255,7 @@ class CleanerStage {
           modelOverride: pipeline.cleaner.postCleanerModel,
           extraRequestParameterOverrides:
               pipeline.cleaner.postCleanerExtraRequestParameters,
+          useResponsesApi: pipeline.cleaner.postCleanerUseResponsesApi,
         );
       } catch (e) {
         debugPrint('[PostCleaner] slot resolution failed: $e');
@@ -1091,6 +1092,7 @@ class CleanerStage {
         modelOverride: pipeline.cleaner.postCleanerModel,
         extraRequestParameterOverrides:
             pipeline.cleaner.postCleanerExtraRequestParameters,
+        useResponsesApi: pipeline.cleaner.postCleanerUseResponsesApi,
       );
     } catch (e) {
       debugPrint('[PostCleaner] rerun slot resolution failed: $e');

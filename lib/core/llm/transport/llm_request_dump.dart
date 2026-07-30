@@ -25,7 +25,8 @@ class LlmRequestDump {
   static bool enabled = false;
 
   /// Absolute path of the dump file. Defaults to the OS temp dir.
-  static String filePath = '${Directory.systemTemp.path}${Platform.pathSeparator}glaze_llm_dump.jsonl';
+  static String filePath =
+      '${Directory.systemTemp.path}${Platform.pathSeparator}glaze_llm_dump.jsonl';
 
   static bool _truncatedThisSession = false;
   static int _seq = 0;
@@ -52,6 +53,7 @@ class LlmRequestDump {
       'frequencyPenalty': r.frequencyPenalty,
       'presencePenalty': r.presencePenalty,
       'requestReasoning': r.requestReasoning,
+      'useResponsesApi': r.useResponsesApi,
       'omitReasoning': r.omitReasoning,
       'reasoningEffort': r.omitReasoningEffort ? null : r.reasoningEffort,
       'showNativeReasoning': r.showNativeReasoning,
@@ -128,6 +130,5 @@ class LoggingChatTransport implements ChatTransport {
   Future<List<Map<String, dynamic>>> fetchModels({
     required String endpoint,
     required String apiKey,
-  }) =>
-      _inner.fetchModels(endpoint: endpoint, apiKey: apiKey);
+  }) => _inner.fetchModels(endpoint: endpoint, apiKey: apiKey);
 }

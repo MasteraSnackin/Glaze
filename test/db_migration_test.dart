@@ -78,7 +78,7 @@ void main() {
 
       // user_version matches the Drift schema version (app_db.dart schemaVersion).
       // Update this constant whenever a new migration step is added.
-      expect(version, 79);
+      expect(version, 80);
     });
 
     test(
@@ -115,7 +115,7 @@ void main() {
         final version = await upgraded
             .customSelect('PRAGMA user_version')
             .get();
-        expect(version.first.read<int>('user_version'), 79);
+        expect(version.first.read<int>('user_version'), 80);
         expect(names, contains('variant_group_id'));
         expect(names, contains('hidden'));
       },
@@ -145,12 +145,12 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 79);
+      expect(version.read<int>('user_version'), 80);
     });
 
     test('current schema includes atomic character fact tables', () async {
       final version = await db.customSelect('PRAGMA user_version').getSingle();
-      expect(version.read<int>('user_version'), 79);
+      expect(version.read<int>('user_version'), 80);
 
       final factColumns = await db
           .customSelect("PRAGMA table_info('character_knowledge_fact_rows')")
@@ -214,6 +214,7 @@ void main() {
             'omit_top_k',
             'omit_frequency_penalty',
             'omit_presence_penalty',
+            'use_responses_api',
           ]),
         );
       },
@@ -261,7 +262,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 79);
+      expect(version.read<int>('user_version'), 80);
     });
 
     test(
@@ -371,7 +372,47 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 79);
+      expect(version.read<int>('user_version'), 80);
+    });
+
+    test('v80 adds Responses API toggle defaulting to off', () async {
+      final file = File(
+        '${Directory.systemTemp.path}/glaze_mig_responses_${DateTime.now().microsecondsSinceEpoch}.db',
+      );
+      addTearDown(() async {
+        if (file.existsSync()) await file.delete();
+      });
+
+      final seeded = AppDatabase.forTesting(
+        NativeDatabase.createInBackground(file),
+      );
+      await seeded.customSelect('SELECT 1').get();
+      await seeded.customStatement(
+        'INSERT INTO api_configs (config_id, name) VALUES (?, ?)',
+        ['existing', 'Existing'],
+      );
+      await seeded.customStatement(
+        'ALTER TABLE api_configs DROP COLUMN use_responses_api',
+      );
+      await seeded.customStatement('PRAGMA user_version = 79');
+      await seeded.close();
+
+      final upgraded = AppDatabase.forTesting(
+        NativeDatabase.createInBackground(file),
+      );
+      addTearDown(() async => upgraded.close());
+      final row = await upgraded
+          .customSelect(
+            'SELECT use_responses_api FROM api_configs WHERE config_id = ?',
+            variables: [Variable.withString('existing')],
+          )
+          .getSingle();
+
+      expect(row.read<bool>('use_responses_api'), isFalse);
+      final version = await upgraded
+          .customSelect('PRAGMA user_version')
+          .getSingle();
+      expect(version.read<int>('user_version'), 80);
     });
 
     test('v70 refreshes only the default Ledger prompt block', () async {
@@ -425,7 +466,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 79);
+      expect(version.read<int>('user_version'), 80);
       final row = await upgraded
           .customSelect(
             'SELECT blocks_json FROM studio_preset_rows WHERE preset_id = ?',
@@ -541,7 +582,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 79);
+      expect(version.read<int>('user_version'), 80);
       final check = await upgraded.customSelect('PRAGMA integrity_check').get();
       expect(check.single.read<String>('integrity_check'), 'ok');
     });
