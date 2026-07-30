@@ -7,7 +7,7 @@ import '../../../features/settings/api_list_provider.dart';
 
 import '../../../shared/widgets/generic_editor.dart';
 import '../../../shared/widgets/sheet_view.dart';
-import '../../../core/llm/summary_service.dart';
+import '../../../core/state/summary_providers.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glaze_error_dialog.dart';
 import '../chat_provider.dart';

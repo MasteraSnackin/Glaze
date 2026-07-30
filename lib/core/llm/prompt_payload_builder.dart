@@ -19,6 +19,7 @@ import '../state/global_regex_provider.dart';
 import '../state/lorebook_embedding_provider.dart';
 import '../state/lorebook_provider.dart';
 import '../state/memory_settings_provider.dart';
+import '../state/summary_providers.dart';
 import 'memory_injection_service.dart';
 import 'message_recall_service.dart';
 import 'memory_selector.dart';
@@ -32,7 +33,6 @@ import 'prompt/studio_session_state_compiler.dart';
 import 'knowledge/character_knowledge_projection.dart';
 import 'prompt_inputs.dart';
 import 'prompt_inputs_collector.dart';
-import 'summary_service.dart';
 
 // Re-export for backward compat — tests import this from here.
 export 'prompt/studio_session_state_compiler.dart'

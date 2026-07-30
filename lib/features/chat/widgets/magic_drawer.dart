@@ -16,7 +16,7 @@ import '../../../features/settings/app_settings_provider.dart';
 import '../../../core/state/active_selection_provider.dart';
 import '../../../core/state/chat_session_ops_provider.dart';
 import '../../../core/state/studio_feature_provider.dart';
-import '../../../core/llm/summary_service.dart';
+import '../../../core/state/summary_providers.dart';
 import '../../../features/chat_history/chat_history_provider.dart';
 import '../../../shared/utils/time_formatter.dart';
 import '../../../shared/theme/app_colors.dart';

@@ -9,9 +9,9 @@ import '../state/db_provider.dart';
 import '../state/global_regex_provider.dart';
 import '../state/lorebook_provider.dart';
 import '../state/memory_settings_provider.dart';
+import '../state/summary_providers.dart';
 import 'prompt_builder.dart';
 import 'prompt_inputs.dart';
-import 'summary_service.dart';
 
 class PromptInputsCollector {
   final Ref _ref;
