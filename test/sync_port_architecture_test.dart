@@ -14,6 +14,19 @@ void main() {
     );
   });
 
+  test('VectorRebuildService does not import features or Riverpod', () {
+    final file = File('lib/core/llm/vector_rebuild_service.dart');
+    final forbiddenImport = RegExp(
+      r'''import\s+['"][^'"]*(?:features/|flutter_riverpod)[^'"]*['"]''',
+    );
+
+    expect(
+      file.readAsStringSync(),
+      isNot(matches(forbiddenImport)),
+      reason: '${file.path} must receive dependencies by constructor',
+    );
+  });
+
   test('core repositories do not import cloud sync features', () {
     final files = <File>[
       ...Directory('lib/core/db/repositories')
