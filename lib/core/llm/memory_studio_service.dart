@@ -10,7 +10,6 @@ import '../state/active_studio_preset_provider.dart';
 import '../state/db_provider.dart';
 import 'agent_runner.dart';
 import 'prompt_builder.dart';
-import 'studio_controller_ontology.dart';
 import 'studio_activation_gate.dart';
 import 'studio_agent_executor.dart';
 import 'studio_batch_coordinator.dart';
@@ -21,6 +20,7 @@ import 'studio_context_bucketizer.dart';
 import 'studio_message_builder.dart';
 import 'studio_prompt_text.dart';
 import 'studio_stage_brief.dart';
+import 'studio_turn_config_snapshot.dart';
 import 'tracker_batcher.dart';
 import 'studio/studio_tracker_phase_runner.dart';
 import 'studio/studio_tracker_result_mapper.dart';
@@ -82,55 +82,11 @@ class MemoryStudioService {
 
   MemoryStudioService(this._ref);
 
+  Future<StudioTurnConfigSnapshot> resolveTurnConfig(String sessionId) =>
+      StudioTurnConfigSnapshot.resolve(_ref, sessionId);
+
   Future<StudioConfig?> getEnabledConfig(String sessionId) async {
-    // Global Experimental Features master switch overrides per-session config:
-    // Studio produces nothing when the feature is disabled app-wide.
-    if (!_ref.read(studioFeatureEnabledProvider)) {
-      return null;
-    }
-    final config = await _ref
-        .read(studioConfigRepoProvider)
-        .getBySessionId(sessionId);
-    if (config == null) {
-      return null;
-    }
-    if (!config.enabled) {
-      return null;
-    }
-
-    // Apply per-agent toggles from the Studio preset. A preset entry
-    // `false` overrides StudioAgent.enabled = true; `true` or absent
-    // preserves the agent's own enabled state.
-    final presetRepo = _ref.read(studioPresetRepoProvider);
-    final activePresetId = await _ref.read(activeStudioPresetProvider.future);
-    final preset =
-        (await presetRepo.getById(activePresetId)) ??
-        (await presetRepo.getDefault());
-    final agentEnabled = preset?.agentEnabled ?? const {};
-    final beautyPipelineEnabled =
-        preset?.blocks.any(
-          (block) => block.id == 'beauty_task' && block.enabled,
-        ) ??
-        false;
-    final overridden = config.agents.map((a) {
-      final specId = StudioControllerOntology.specForAgent(a).id;
-      final presetToggle = agentEnabled[specId];
-      final disableBeauty = specId == 'beauty' && !beautyPipelineEnabled;
-      return presetToggle == false || disableBeauty
-          ? a.copyWith(enabled: false)
-          : a;
-    }).toList();
-    final topologyGated = StudioActivationGate.applyExecutionMode(
-      overridden,
-      preset?.executionMode ?? StudioExecutionMode.legacy,
-    );
-
-    final enabledAgents = topologyGated.where((a) => a.enabled).toList()
-      ..sort((a, b) => a.order.compareTo(b.order));
-    if (enabledAgents.isEmpty) {
-      return null;
-    }
-    return config.copyWith(agents: enabledAgents);
+    return (await resolveTurnConfig(sessionId)).config;
   }
 
   /// Run the tracker cycle: pre-generation trackers (intermediate agents)
@@ -145,6 +101,7 @@ class MemoryStudioService {
     PromptPayload? finalPromptPayload,
     required ApiConfig apiConfig,
     required String sessionId,
+    StudioTurnConfigSnapshot? turnConfig,
     CancelToken? cancelToken,
     void Function(String text, String? reasoning)? onFinalResponseUpdate,
     void Function()? onFinalStart,
@@ -155,15 +112,18 @@ class MemoryStudioService {
       return const StudioPipelineResult(status: 'aborted', response: '');
     }
 
-    final presetId = await _ref.read(activeStudioPresetProvider.future);
     final phaseResult = await _phaseRunner.run(
       config: config,
-      presetId: presetId,
+      presetId:
+          turnConfig?.preset?.id ??
+          await _ref.read(activeStudioPresetProvider.future),
+      studioPreset: turnConfig?.preset,
       promptResult: promptResult,
       promptPayload: promptPayload,
       apiConfig: apiConfig,
       sessionId: sessionId,
       token: token,
+      turnConfig: turnConfig,
     );
 
     if (phaseResult.status != 'ok') {
@@ -203,6 +163,7 @@ class MemoryStudioService {
       apiConfigId: config.expensiveApiConfigId,
       onFinalResponseUpdate: onFinalResponseUpdate,
       onMessagesBuilt: onFinalMessagesBuilt,
+      turnConfig: turnConfig,
     );
     if (token.isCancelled) {
       return const StudioPipelineResult(status: 'aborted', response: '');
@@ -244,6 +205,7 @@ class MemoryStudioService {
         sessionId: sessionId,
         cancelToken: token,
         apiConfigId: config.cleanerApiConfigId,
+        turnConfig: turnConfig,
       );
       postBriefs.add(result);
       if (token.isCancelled) {

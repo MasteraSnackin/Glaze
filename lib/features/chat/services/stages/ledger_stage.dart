@@ -7,17 +7,13 @@ import '../../../../core/llm/aux_llm_client.dart' show AuxApiConfig;
 import '../../../../core/llm/macro_engine.dart';
 import '../../../../core/llm/studio_ledger_service.dart';
 import '../../../../core/llm/studio_ledger_reconciliation.dart';
-import '../../../../core/llm/studio_slot_resolver.dart';
+import '../../../../core/llm/studio_turn_config_snapshot.dart';
 import '../../../../core/models/agent_operation_record.dart';
-import '../../../../core/models/api_config.dart';
 import '../../../../core/models/chat_message.dart';
 import '../../../../core/models/pipeline_settings.dart';
-import '../../../../core/models/studio_config.dart';
-import '../../../../core/state/active_studio_preset_provider.dart';
 import '../../../../core/state/db_provider.dart';
 import '../../../../core/state/memory_agent_providers.dart';
 import '../../../../core/state/character_provider.dart';
-import '../../../settings/api_list_provider.dart';
 import '../../../../shared/widgets/glaze_toast.dart';
 import '../../state/agent_operations_log_provider.dart';
 import '../../state/post_gen_status_provider.dart';
@@ -57,6 +53,7 @@ class LedgerStage {
     bool isManualRerun = false,
     AuxApiConfig? resolvedConfig,
     CancelToken? cancelToken,
+    StudioTurnConfigSnapshot? studioTurnConfig,
   }) async {
     if (!ctx.ref.mounted) return;
 
@@ -65,24 +62,15 @@ class LedgerStage {
         : () => ctx.ref.mounted && ctx.abortHandler.isCurrentGen(genId);
 
     try {
-      final pipeline = ctx.ref.read(pipelineSettingsProvider);
+      final turnConfig =
+          studioTurnConfig ??
+          await StudioTurnConfigSnapshot.resolve(ctx.ref, sessionId);
+      final pipeline = turnConfig.pipelineSettings;
 
       // Ledger is always-on when Studio is enabled. We check
       // StudioConfig.enabled to decide whether the ledger should run.
-      var studioConfigEnabled = false;
-      var studioCleanerApiConfigId = '';
-      StudioPreset? studioPreset;
-      var studioPresetId = 'default';
-      try {
-        final studioConfig = await ctx.ref
-            .read(studioConfigRepoProvider)
-            .getBySessionId(sessionId);
-        studioConfigEnabled =
-            studioConfig?.enabled == true &&
-            ctx.ref.read(studioFeatureEnabledProvider);
-        studioCleanerApiConfigId = studioConfig?.cleanerApiConfigId ?? '';
-        studioPresetId = await ctx.ref.read(activeStudioPresetProvider.future);
-      } catch (_) {}
+      final studioConfigEnabled = turnConfig.enabled;
+      final studioPreset = turnConfig.preset;
       if (!studioConfigEnabled) {
         await _recordDiag(
           sessionId: sessionId,
@@ -90,15 +78,6 @@ class LedgerStage {
           reason: 'skipped, studio disabled',
         );
         return;
-      }
-
-      // Load the Studio preset to get ledger-section blocks.
-      try {
-        studioPreset = await ctx.ref
-            .read(studioPresetRepoProvider)
-            .getById(studioPresetId);
-      } catch (e) {
-        debugPrint('[StudioLedger] preset load failed: $e');
       }
 
       // Cadence (plan §Model Cadence). Studio Ledger is mandatory while Studio
@@ -144,17 +123,8 @@ class LedgerStage {
         ledgerConfig = resolvedConfig;
       } else {
         try {
-          await ctx.ref.read(apiListProvider.future);
-          final apiConfigs =
-              ctx.ref.read(apiListProvider).value ?? const <ApiConfig>[];
-          ledgerConfig = StudioSlotResolver.resolve(
-            apiConfigs: apiConfigs,
-            apiConfigId: studioCleanerApiConfigId,
-            fallback: ctx.ref.read(activeApiConfigProvider),
+          ledgerConfig = turnConfig.resolveCleanerConfig(
             errorLabel: 'studio-ledger',
-            modelOverride: pipeline.cleaner.postCleanerModel,
-            extraRequestParameterOverrides:
-                pipeline.cleaner.postCleanerExtraRequestParameters,
           );
         } catch (e) {
           debugPrint('[StudioLedger] slot resolution failed: $e');

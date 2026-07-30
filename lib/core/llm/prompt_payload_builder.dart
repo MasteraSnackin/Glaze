@@ -73,6 +73,7 @@ class PromptPayloadBuilder {
   Future<PromptPayload> buildFromSession({
     required String charId,
     required ChatSession? session,
+    ApiConfig? apiConfigOverride,
     String? guidanceText,
     bool skipVectorSearch = false,
     bool Function()? shouldAbort,
@@ -96,7 +97,7 @@ class PromptPayloadBuilder {
 
     await _ref.read(apiListProvider.future);
     throwIfAborted();
-    final chatApi = _ref.read(activeApiConfigProvider);
+    final chatApi = apiConfigOverride ?? _ref.read(activeApiConfigProvider);
     if (chatApi == null || chatApi.mode == 'embedding') {
       throw StateError('No chat API config available');
     }

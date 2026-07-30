@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
+import 'package:glaze_flutter/core/llm/studio_turn_config_snapshot.dart';
 import 'package:glaze_flutter/core/state/db_provider.dart';
 import 'package:glaze_flutter/features/chat/chat_generation_service.dart';
 import 'package:glaze_flutter/features/chat/chat_provider.dart';
@@ -37,6 +38,7 @@ class _HookGenerationService extends ChatGenerationService {
     List<Map<String, dynamic>>? previousSwipesMeta,
     String? guidanceText,
     String? regenTargetId,
+    StudioTurnConfigSnapshot? studioTurnConfig,
   }) async {
     calls++;
     return _onGenerate(session);

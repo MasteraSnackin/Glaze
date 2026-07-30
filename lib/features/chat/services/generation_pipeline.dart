@@ -9,6 +9,7 @@ import '../../../core/db/repositories/chat_repo.dart';
 import '../../../core/services/generation_notification_service.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../core/utils/time_helpers.dart';
+import '../../../core/state/memory_agent_providers.dart';
 import '../../chat_history/chat_history_provider.dart';
 import '../abort_handler.dart';
 import '../chat_generation_service.dart';
@@ -100,6 +101,12 @@ class GenerationPipeline {
     final notifService = GenerationNotificationService.instance;
 
     try {
+      final studioTurnConfig = await ctx.ref
+          .read(memoryStudioServiceProvider)
+          .resolveTurnConfig(session.id);
+      if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) {
+        return null;
+      }
       final charRepo = ctx.ref.read(characterRepoProvider);
       final character = await charRepo.getById(ctx.charId);
       if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) {
@@ -129,6 +136,7 @@ class GenerationPipeline {
         previousSwipesMeta: previousSwipesMeta,
         guidanceText: guidanceText,
         regenTargetId: regenTargetId,
+        studioTurnConfig: studioTurnConfig,
       );
 
       if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) {
@@ -209,6 +217,7 @@ class GenerationPipeline {
             service: service,
             notifService: notifService,
             regenTargetId: regenTargetId,
+            studioTurnConfig: studioTurnConfig,
           );
           // Post-gen finished — clear isPostGenRunning (unless a newer
           // generation has taken over, in which case leave its state
@@ -279,6 +288,7 @@ class GenerationPipeline {
         service: service,
         notifService: notifService,
         regenTargetId: regenTargetId,
+        studioTurnConfig: studioTurnConfig,
       );
       // Post-gen finished — clear isPostGenRunning (unless a newer
       // generation has taken over, in which case leave its state

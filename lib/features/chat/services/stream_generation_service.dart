@@ -18,12 +18,13 @@ import '../../../core/llm/transport/chat_transport_request.dart';
 import '../../../core/llm/transport/transport_factory.dart';
 import '../../../core/utils/error_format.dart';
 import '../../../core/llm/tokenizer.dart';
+import '../../../core/llm/studio_turn_config_snapshot.dart';
 import '../../../core/models/chat_message.dart';
 import '../../../core/models/api_config.dart';
+import '../../../core/models/pipeline_settings.dart';
 import '../../../core/services/model_usage_service.dart';
 import '../../../core/state/active_selection_provider.dart';
 import '../../../core/state/memory_agent_providers.dart';
-import '../../../core/state/pipeline_settings_provider.dart';
 import '../chat_provider.dart';
 import '../chat_state.dart';
 import '../state/cached_token_breakdown.dart';
@@ -62,6 +63,7 @@ class StreamGenerationService {
     String? guidanceText,
     String? regenTargetId,
     required ChatState currentState,
+    StudioTurnConfigSnapshot? studioTurnConfig,
   }) async {
     final vsi = currentState.visibleStartIndex;
     final cancelToken = CancelToken();
@@ -78,7 +80,9 @@ class StreamGenerationService {
     }
     try {
       final studioService = _ref.read(memoryStudioServiceProvider);
-      final studioConfig = await studioService.getEnabledConfig(session.id);
+      final turnConfig =
+          studioTurnConfig ?? await studioService.resolveTurnConfig(session.id);
+      final studioConfig = turnConfig.config;
       studioWasActive = studioConfig != null;
       if (_isAborted()) {
         return ChatState(
@@ -92,6 +96,7 @@ class StreamGenerationService {
       final payload = await builder.buildFromSession(
         charId: _charId,
         session: session,
+        apiConfigOverride: turnConfig.activeApiConfig,
         guidanceText: guidanceText,
         shouldAbort: _isAborted,
         cancelToken: cancelToken,
@@ -105,7 +110,7 @@ class StreamGenerationService {
       }
       final apiConfig = payload.apiConfig;
 
-      final pipelineSettings = _ref.read(pipelineSettingsProvider);
+      final pipelineSettings = turnConfig.pipelineSettings;
       final studioFinalContextSize = studioConfig == null
           ? 0
           : pipelineSettings.studioAgent.studioFinalContextSize > 0
@@ -252,6 +257,7 @@ class StreamGenerationService {
           finalPromptPayload: finalPayload,
           apiConfig: apiConfig,
           sessionId: session.id,
+          turnConfig: turnConfig,
           cancelToken: cancelToken,
           onFinalStart: () {
             if (_isAborted()) return;
@@ -315,7 +321,7 @@ class StreamGenerationService {
             sessionId: session.id,
             startGenTime: startGenTime,
             result: studioResult,
-            trackerModel: _resolvedTrackerModel(apiConfig),
+            trackerModel: _resolvedTrackerModel(apiConfig, pipelineSettings),
             finalModel: apiConfig.model,
           );
           _ref.read(studioCycleStateProvider.notifier).state =
@@ -402,7 +408,7 @@ class StreamGenerationService {
           startGenTime: startGenTime,
           finalStartTime: finalStartTime,
           result: studioResult,
-          trackerModel: _resolvedTrackerModel(apiConfig),
+          trackerModel: _resolvedTrackerModel(apiConfig, pipelineSettings),
           finalModel: apiConfig.model,
         );
         if (memoryDiagnostics is Map<String, dynamic> &&
@@ -736,11 +742,11 @@ class StreamGenerationService {
     unawaited(_ref.read(modelUsageServiceProvider).recordModelUse(model));
   }
 
-  String _resolvedTrackerModel(ApiConfig apiConfig) {
-    final override = _ref
-        .read(pipelineSettingsProvider)
-        .studioAgent
-        .studioTrackerModelOverride;
+  String _resolvedTrackerModel(
+    ApiConfig apiConfig,
+    PipelineSettings pipelineSettings,
+  ) {
+    final override = pipelineSettings.studioAgent.studioTrackerModelOverride;
     return override.isNotEmpty ? override : apiConfig.model;
   }
 }

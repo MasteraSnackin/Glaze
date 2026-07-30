@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/api_config.dart';
 import '../models/studio_config.dart';
 import 'agent_runner.dart';
+import 'studio_turn_config_snapshot.dart';
 import 'concurrency_limiter.dart';
 import 'tracker_batch_protocol.dart';
 
@@ -165,6 +166,7 @@ class TrackerBatcher {
     required ApiConfig apiConfig,
     required String sessionId,
     String? apiConfigId,
+    StudioTurnConfigSnapshot? turnConfig,
   }) async {
     final sorted = agents.toList()..sort((a, b) => a.order.compareTo(b.order));
     final individual = <StudioAgent>[];
@@ -193,6 +195,7 @@ class TrackerBatcher {
         apiConfig,
         sessionId,
         apiConfigId: apiConfigId,
+        turnConfig: turnConfig,
       );
       // Feature 6 — postProcessingDataKey: the grouping key now includes
       // the agent's `phase`. A pre-generation tracker and a post-processing
@@ -212,14 +215,16 @@ class TrackerBatcher {
     for (final entry in groups.entries) {
       final resolved = resolvedByKey[entry.key]!;
       final groupAgents = entry.value;
-      batchGroups.add(TrackerBatchGroup(
-        key: entry.key,
-        resolved: resolved,
-        agents: groupAgents,
-        batchMaxTokens: _capBatchMaxTokens(groupAgents, resolved),
-        batchTemperature: _minTemperature(groupAgents),
-        batchContextSize: _maxContextSize(groupAgents),
-      ));
+      batchGroups.add(
+        TrackerBatchGroup(
+          key: entry.key,
+          resolved: resolved,
+          agents: groupAgents,
+          batchMaxTokens: _capBatchMaxTokens(groupAgents, resolved),
+          batchTemperature: _minTemperature(groupAgents),
+          batchContextSize: _maxContextSize(groupAgents),
+        ),
+      );
     }
     return TrackerGrouping(
       batchGroups: batchGroups,
@@ -246,7 +251,8 @@ class TrackerBatcher {
     // `max_tokens` in the body — so we also clamp by `ApiConfig.maxTokens`
     // (carried on `agent.maxTokens` default 8000 but the resolved ApiConfig
     // value is the source of truth for the batch request).
-    final apiCap = agents.first.maxTokens; // per-agent cap; the SUM is what we send
+    final apiCap =
+        agents.first.maxTokens; // per-agent cap; the SUM is what we send
     // Final ceiling: the smaller of (provider context cap / 2) and (sum).
     // Half the context window is a sane max for output — the rest is input.
     final outputCeiling = cap ~/ 2;
@@ -255,9 +261,7 @@ class TrackerBatcher {
 
   double _minTemperature(List<StudioAgent> agents) {
     if (agents.isEmpty) return 0.3;
-    return agents
-        .map((a) => a.temperature)
-        .reduce((a, b) => a < b ? a : b);
+    return agents.map((a) => a.temperature).reduce((a, b) => a < b ? a : b);
   }
 
   int _maxContextSize(List<StudioAgent> agents) {
@@ -303,14 +307,16 @@ class TrackerBatcher {
         (i + chunkSize).clamp(0, group.agents.length),
       );
       if (chunk.isEmpty) break;
-      subGroups.add(TrackerBatchGroup(
-        key: '${group.key}#$i',
-        resolved: group.resolved,
-        agents: chunk,
-        batchMaxTokens: _capBatchMaxTokens(chunk, group.resolved),
-        batchTemperature: group.batchTemperature,
-        batchContextSize: group.batchContextSize,
-      ));
+      subGroups.add(
+        TrackerBatchGroup(
+          key: '${group.key}#$i',
+          resolved: group.resolved,
+          agents: chunk,
+          batchMaxTokens: _capBatchMaxTokens(chunk, group.resolved),
+          batchTemperature: group.batchTemperature,
+          batchContextSize: group.batchContextSize,
+        ),
+      );
     }
     return subGroups;
   }
@@ -350,13 +356,12 @@ class TrackerBatcher {
     required List<Map<String, dynamic>> sharedMessages,
     required Map<String, String> perAgentTaskText,
     required String roleText,
-  }) =>
-      _protocol.buildBatchSystemPrompt(
-        group: group,
-        sharedMessages: sharedMessages,
-        perAgentTaskText: perAgentTaskText,
-        roleText: roleText,
-      );
+  }) => _protocol.buildBatchSystemPrompt(
+    group: group,
+    sharedMessages: sharedMessages,
+    perAgentTaskText: perAgentTaskText,
+    roleText: roleText,
+  );
 
   /// Parse a batched model response into one [TrackerBatchResult] per agent
   /// in [group]. (Phase 5.1.)
@@ -375,8 +380,7 @@ class TrackerBatcher {
   List<TrackerBatchResult> parseBatchResponse(
     String raw,
     TrackerBatchGroup group,
-  ) =>
-      _protocol.parseBatchResponse(raw, group);
+  ) => _protocol.parseBatchResponse(raw, group);
 
   /// Run all batch groups + individual agents with a concurrency limit of
   /// [_maxConcurrentGroups] for batches. Individual agents run alongside,
@@ -392,7 +396,8 @@ class TrackerBatcher {
   Future<List<TrackerBatchResult>> runPhase({
     required List<TrackerBatchGroup> batchGroups,
     required List<StudioAgent> individualAgents,
-    required Future<List<TrackerBatchResult>> Function(TrackerBatchGroup) runBatch,
+    required Future<List<TrackerBatchResult>> Function(TrackerBatchGroup)
+    runBatch,
     required Future<TrackerBatchResult> Function(StudioAgent) runIndividual,
   }) async {
     final jobs = <_PhaseJob>[];
@@ -420,26 +425,26 @@ class TrackerBatcher {
     required List<I> items,
     required int limit,
     required Future<R> Function(I item) run,
-  }) =>
-      ConcurrencyLimiter.settle(items: items, limit: limit, run: run);
+  }) => ConcurrencyLimiter.settle(items: items, limit: limit, run: run);
 
   Future<List<TrackerBatchResult>> _settleWithConcurrencyLimit({
     required List<_PhaseJob> jobs,
     required int limit,
-    required Future<List<TrackerBatchResult>> Function(TrackerBatchGroup) runBatch,
+    required Future<List<TrackerBatchResult>> Function(TrackerBatchGroup)
+    runBatch,
     required Future<TrackerBatchResult> Function(StudioAgent) runIndividual,
   }) async {
-    final chunkResults = await ConcurrencyLimiter.settle<_PhaseJob,
-        List<TrackerBatchResult>>(
-      items: jobs,
-      limit: limit,
-      run: (job) async {
-        if (job.isBatch) {
-          return runBatch(job.batch!);
-        }
-        return [await runIndividual(job.agent!)];
-      },
-    );
+    final chunkResults =
+        await ConcurrencyLimiter.settle<_PhaseJob, List<TrackerBatchResult>>(
+          items: jobs,
+          limit: limit,
+          run: (job) async {
+            if (job.isBatch) {
+              return runBatch(job.batch!);
+            }
+            return [await runIndividual(job.agent!)];
+          },
+        );
     return [for (final list in chunkResults) ...list];
   }
 }
@@ -450,7 +455,7 @@ class _PhaseJob {
   final StudioAgent? agent;
 
   const _PhaseJob({required this.isBatch, this.batch, this.agent})
-      : assert(isBatch ? batch != null : agent != null);
+    : assert(isBatch ? batch != null : agent != null);
 }
 
 /// Riverpod provider for [TrackerBatcher]. Wraps [agentRunnerProvider].

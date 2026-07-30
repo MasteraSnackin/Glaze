@@ -13,6 +13,7 @@ import '../studio_batch_coordinator.dart';
 import '../studio_brief_cache.dart';
 import '../studio_brief_parser.dart';
 import '../studio_stage_brief.dart';
+import '../studio_turn_config_snapshot.dart';
 import '../tracker_batcher.dart';
 import 'studio_tracker_result_mapper.dart';
 
@@ -69,6 +70,7 @@ class StudioTrackerPhaseRunner {
     required this._readPipelineSettings,
     required this._log,
   });
+
   /// Resolves the DB Studio preset for [config]. Returns the preset or an
   /// error string if no preset is found.
   Future<({StudioPreset? preset, String? error})> resolvePreset(
@@ -99,16 +101,20 @@ class StudioTrackerPhaseRunner {
     required ApiConfig apiConfig,
     required String sessionId,
     required CancelToken token,
+    StudioPreset? studioPreset,
+    StudioTurnConfigSnapshot? turnConfig,
   }) async {
     if (token.isCancelled) {
       return const PreGenPhaseResult(status: 'aborted');
     }
 
-    final presetResult = await resolvePreset(presetId);
-    if (presetResult.error != null) {
-      return PreGenPhaseResult(status: 'error', error: presetResult.error);
+    final resolvedPreset = studioPreset == null
+        ? await resolvePreset(presetId)
+        : (preset: studioPreset, error: null);
+    if (resolvedPreset.error != null) {
+      return PreGenPhaseResult(status: 'error', error: resolvedPreset.error);
     }
-    final studioPreset = presetResult.preset!;
+    final effectivePreset = resolvedPreset.preset!;
 
     try {
       final agents = config.agents.where((a) => a.enabled).toList()
@@ -135,8 +141,9 @@ class StudioTrackerPhaseRunner {
           .where((m) => m.isHistory)
           .map((m) => m.content)
           .toList();
-      final historyForScan =
-          allHistory.length > 8 ? allHistory.sublist(allHistory.length - 8) : allHistory;
+      final historyForScan = allHistory.length > 8
+          ? allHistory.sublist(allHistory.length - 8)
+          : allHistory;
       final dueTrackers = preGenTrackers.where((a) {
         final interval = a.runInterval <= 0 ? 1 : a.runInterval;
         if (turnIndex % interval != 0) return false;
@@ -152,13 +159,16 @@ class StudioTrackerPhaseRunner {
       final fetchTrackers = <StudioAgent>[];
       final cacheProbeByAgent = <String, CacheProbe>{};
       final trackerContextOverride =
-          _readPipelineSettings().studioAgent.studioTrackerContextSize;
+          (turnConfig?.pipelineSettings ?? _readPipelineSettings())
+              .studioAgent
+              .studioTrackerContextSize;
       for (final agent in dueTrackers) {
         final resolvedConfig = await _executor.resolveTrackerConfig(
           agent: agent,
           apiConfig: apiConfig,
           sessionId: sessionId,
           apiConfigId: config.cheapApiConfigId,
+          turnConfig: turnConfig,
         );
         if (token.isCancelled) {
           return const PreGenPhaseResult(status: 'aborted');
@@ -166,12 +176,15 @@ class StudioTrackerPhaseRunner {
         final probe = _briefCache.probeCache(
           agent: agent,
           config: config,
-          studioPreset: studioPreset,
+          studioPreset: effectivePreset,
           sessionId: sessionId,
           resolvedConfig: resolvedConfig,
           trackerContextSize: trackerContextOverride,
-          maxTokensOverride: _executor.effectiveMaxTokens(agent),
-          temperatureOverride: _executor.effectiveTemperature(agent),
+          maxTokensOverride: _executor.effectiveMaxTokens(agent, turnConfig),
+          temperatureOverride: _executor.effectiveTemperature(
+            agent,
+            turnConfig,
+          ),
           promptPayload: promptPayload,
           sceneKey: sceneKey,
           turnIndex: turnIndex,
@@ -190,6 +203,7 @@ class StudioTrackerPhaseRunner {
         apiConfig: apiConfig,
         sessionId: sessionId,
         apiConfigId: config.cheapApiConfigId,
+        turnConfig: turnConfig,
       );
 
       final fetchedResults = await batcher.runPhase(
@@ -198,7 +212,7 @@ class StudioTrackerPhaseRunner {
         runBatch: (group) => _batchCoordinator.runBatchGroup(
           group: group,
           config: config,
-          studioPreset: studioPreset,
+          studioPreset: effectivePreset,
           promptResult: promptResult,
           promptPayload: promptPayload,
           apiConfig: apiConfig,
@@ -206,24 +220,27 @@ class StudioTrackerPhaseRunner {
           cancelToken: token,
           apiConfigId: config.cheapApiConfigId,
           batchContextSize: trackerContextOverride,
+          turnConfig: turnConfig,
         ),
         runIndividual: (agent) => _executor.runIndividualTracker(
           agent: agent.copyWith(contextSize: trackerContextOverride),
           config: config,
-          studioPreset: studioPreset,
+          studioPreset: effectivePreset,
           promptResult: promptResult,
           promptPayload: promptPayload,
           apiConfig: apiConfig,
           sessionId: sessionId,
           cancelToken: token,
           apiConfigId: config.cheapApiConfigId,
+          turnConfig: turnConfig,
         ),
       );
       if (token.isCancelled) {
         return const PreGenPhaseResult(status: 'aborted');
       }
-      final trackerFailure =
-          _resultMapper.firstFailedTrackerResult(fetchedResults);
+      final trackerFailure = _resultMapper.firstFailedTrackerResult(
+        fetchedResults,
+      );
       if (trackerFailure != null) {
         final failedBriefs = _resultMapper.trackerResultsToBriefs(
           fetchedResults,
@@ -271,14 +288,16 @@ class StudioTrackerPhaseRunner {
 
       final briefs = <StudioStageBrief>[];
       for (final agent in dueTrackers) {
-        final cached =
-            cachedBriefs.where((b) => b.agentId == agent.id).firstOrNull;
+        final cached = cachedBriefs
+            .where((b) => b.agentId == agent.id)
+            .firstOrNull;
         if (cached != null) {
           briefs.add(cached);
           continue;
         }
-        final fetched =
-            fetchedBriefs.where((b) => b.agentId == agent.id).firstOrNull;
+        final fetched = fetchedBriefs
+            .where((b) => b.agentId == agent.id)
+            .firstOrNull;
         if (fetched != null) briefs.add(fetched);
       }
 
@@ -292,7 +311,7 @@ class StudioTrackerPhaseRunner {
         split: split,
         turnIndex: turnIndex,
         historyForScan: historyForScan,
-        studioPreset: studioPreset,
+        studioPreset: effectivePreset,
       );
     } on TimeoutException catch (e) {
       _log('tracker cycle timeout session=$sessionId error=${e.message}');

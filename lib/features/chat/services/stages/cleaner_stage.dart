@@ -12,6 +12,7 @@ import '../../../../core/llm/prompt_builder.dart' show PromptPayload;
 import '../../../../core/llm/prompt/main_model_context_snapshot.dart';
 import '../../../../core/llm/studio_slot_resolver.dart';
 import '../../../../core/llm/tokenizer.dart';
+import '../../../../core/llm/studio_turn_config_snapshot.dart';
 import '../../../../core/llm/cleaner/audit_prompt_builder.dart'
     show AuditResult;
 import '../../../../core/models/agent_operation_record.dart';
@@ -129,6 +130,7 @@ class CleanerStage {
     PromptPayload? promptPayload,
     MainModelContextSnapshot? mainModelContextSnapshot,
     Character? character,
+    StudioTurnConfigSnapshot? studioTurnConfig,
   }) async {
     final trailing = messages.isNotEmpty ? messages.last : null;
     if (trailing == null || trailing.role != 'assistant' || trailing.isError) {
@@ -149,6 +151,7 @@ class CleanerStage {
         promptPayload: promptPayload,
         mainModelContextSnapshot: mainModelContextSnapshot,
         character: character,
+        studioTurnConfig: studioTurnConfig,
       );
     });
   }
@@ -160,11 +163,15 @@ class CleanerStage {
     PromptPayload? promptPayload,
     MainModelContextSnapshot? mainModelContextSnapshot,
     Character? character,
+    StudioTurnConfigSnapshot? studioTurnConfig,
   }) async {
     if (!ctx.ref.mounted || !_ownsRun) return;
 
     try {
-      final pipeline = ctx.ref.read(pipelineSettingsProvider);
+      final turnConfig =
+          studioTurnConfig ??
+          await StudioTurnConfigSnapshot.resolve(ctx.ref, sessionId);
+      final pipeline = turnConfig.pipelineSettings;
       if (!ctx.ref.mounted ||
           !_ownsRun ||
           !ctx.abortHandler.isCurrentGen(genId)) {
@@ -254,6 +261,7 @@ class CleanerStage {
             finalAssistantText: lastAssistant.content,
             targetMessage: lastAssistant,
             cancelToken: _cleanerCancelToken,
+            studioTurnConfig: turnConfig,
           );
         }
         return;
@@ -272,26 +280,10 @@ class CleanerStage {
       // Studio build time so the cleaner applies the user's own rules instead
       // of a hardcoded English-only cliché list. Absent (no Studio) = defaults.
       // The cleaner is Studio-only — skip entirely when Studio is disabled.
-      List<String> broadcastBlocks = const [];
-      var studioConfigEnabled = false;
-      var studioCleanerApiConfigId = '';
-      StudioPreset? studioPreset;
-      var studioPresetId = 'default';
-      try {
-        final studioConfig = await ctx.ref
-            .read(studioConfigRepoProvider)
-            .getBySessionId(sessionId);
-        broadcastBlocks = studioConfig?.broadcastBlocks ?? const [];
-        studioConfigEnabled =
-            studioConfig?.enabled == true &&
-            ctx.ref.read(studioFeatureEnabledProvider);
-        studioCleanerApiConfigId = studioConfig?.cleanerApiConfigId ?? '';
-        studioPresetId = await ctx.ref.read(activeStudioPresetProvider.future);
-      } catch (e) {
-        debugPrint(
-          '[PostCleaner] broadcast load failed session=$sessionId error=$e',
-        );
-      }
+      final studioConfig = turnConfig.config;
+      final broadcastBlocks = studioConfig?.broadcastBlocks ?? const <String>[];
+      final studioConfigEnabled = turnConfig.enabled;
+      final studioPreset = turnConfig.preset;
       if (!ctx.ref.mounted ||
           !_ownsRun ||
           !ctx.abortHandler.isCurrentGen(genId)) {
@@ -304,36 +296,11 @@ class CleanerStage {
         return;
       }
 
-      // Load the Studio preset to get cleaner-section blocks.
-      try {
-        studioPreset = await ctx.ref
-            .read(studioPresetRepoProvider)
-            .getById(studioPresetId);
-      } catch (e) {
-        debugPrint(
-          '[PostCleaner] preset load failed session=$sessionId error=$e',
-        );
-      }
-      if (!ctx.ref.mounted ||
-          !_ownsRun ||
-          !ctx.abortHandler.isCurrentGen(genId)) {
-        return;
-      }
-
       // Resolve the Studio cleaner slot (fail-explicit).
       final AuxApiConfig cleanerConfig;
       try {
-        await ctx.ref.read(apiListProvider.future);
-        final apiConfigs =
-            ctx.ref.read(apiListProvider).value ?? const <ApiConfig>[];
-        cleanerConfig = StudioSlotResolver.resolve(
-          apiConfigs: apiConfigs,
-          apiConfigId: studioCleanerApiConfigId,
-          fallback: ctx.ref.read(activeApiConfigProvider),
+        cleanerConfig = turnConfig.resolveCleanerConfig(
           errorLabel: 'post-cleaner',
-          modelOverride: pipeline.cleaner.postCleanerModel,
-          extraRequestParameterOverrides:
-              pipeline.cleaner.postCleanerExtraRequestParameters,
           useResponsesApi: pipeline.cleaner.postCleanerUseResponsesApi,
         );
       } catch (e) {
@@ -401,6 +368,7 @@ class CleanerStage {
         beautyState: beautyState,
         cleanerBlocks: studioPreset?.blocks ?? const [],
         macroCtx: cleanerMacroCtx,
+        studioTurnConfig: turnConfig,
       );
     } catch (e) {
       debugPrint('[PostCleaner] failed session=$sessionId error=$e');
@@ -515,6 +483,7 @@ class CleanerStage {
     String? beautyState,
     List<StudioPresetBlock> cleanerBlocks = const [],
     MacroContext? macroCtx,
+    StudioTurnConfigSnapshot? studioTurnConfig,
   }) async {
     final isManualRerun = genId < 0;
     bool abortCheck() =>
@@ -1071,6 +1040,7 @@ class CleanerStage {
         isManualRerun: isManualRerun,
         resolvedConfig: cleanerConfig,
         cancelToken: _cleanerCancelToken,
+        studioTurnConfig: studioTurnConfig,
       );
     }
   }
