@@ -415,6 +415,7 @@
   "context_limit_glossary_hint": "Learn more:",
   "context_limit_glossary_chip": "Context",
   "import_success": "Import successful",
+  "import_failed_count": "{} failed",
   "btn_reload": "Reload",
   "action_export_chat": "Export Chat (JSONL)",
   "action_export_st": "Export",
@@ -1910,6 +1911,10 @@
   "count_characters": {
     "one": "character",
     "other": "characters"
+  },
+  "count_lorebooks": {
+    "one": "lorebook",
+    "other": "lorebooks"
   },
   "count_sessions_format": {
     "one": "{} session",
