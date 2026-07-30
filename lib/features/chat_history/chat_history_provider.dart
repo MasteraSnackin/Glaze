@@ -10,6 +10,7 @@ import '../../core/state/db_provider.dart';
 import '../../core/utils/sync_deletion_tracker.dart';
 import '../../shared/utils/time_formatter.dart';
 import '../chat/chat_session_service.dart';
+import '../extensions/state/message_variables_notifier.dart';
 
 class ChatSessionInfo {
   final String sessionId;
@@ -174,24 +175,14 @@ class ChatHistoryNotifier extends AsyncNotifier<List<ChatSessionInfo>> {
   }
 
   Future<void> clearChat(String sessionId) async {
-    final chatRepo = ref.read(chatRepoProvider);
-    final sessions = await chatRepo.getAllSessionMetadata();
-    final meta = sessions.where((s) => s.sessionId == sessionId).firstOrNull;
-    if (meta == null) return;
-
-    final clearedSession = ChatSession(
-      id: sessionId,
-      characterId: meta.characterId,
-      sessionIndex: meta.sessionIndex,
-      messages: [],
-    );
-    await chatRepo.put(clearedSession);
-    // Wipe tracker snapshots so stale state from before the clear does not
-    // leak into the fresh chat.
-    await ref.read(trackerSnapshotRepoProvider).deleteBySessionId(sessionId);
-    await ref
-        .read(ledgerReconciliationCheckpointRepoProvider)
-        .deleteBySessionId(sessionId);
+    final clearedSession = await ref
+        .read(sessionDeletionRepoProvider)
+        .clearSession(sessionId: sessionId, replacementMessages: const []);
+    if (clearedSession == null) return;
+    ChatSessionService.updateCache(clearedSession);
+    ref.invalidate(memoryBookProvider(sessionId));
+    ref.read(messageVariablesProvider.notifier).clearSession(sessionId);
+    await SyncDeletionTracker.recordSessionRuntimeClear(sessionId);
   }
 
   Future<void> renameSession(String sessionId, String newName) async {

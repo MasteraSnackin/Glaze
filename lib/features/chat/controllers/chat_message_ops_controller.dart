@@ -12,6 +12,7 @@ import '../state/cached_token_breakdown.dart';
 import '../../../core/llm/regex_service.dart';
 import '../../../core/state/active_selection_provider.dart';
 import '../../../shared/widgets/glaze_toast.dart';
+import '../../extensions/state/message_variables_notifier.dart';
 import '../../personas/persona_list_provider.dart';
 
 class ChatMessageOpsController {
@@ -259,6 +260,7 @@ class ChatMessageOpsController {
       _ref,
     ).clearChat(_charId, current.session!);
     if (!_ref.mounted) return;
+    _ref.read(messageVariablesProvider.notifier).clearSession(cleared.id);
     _invalidateHistory();
     _setState(AsyncData(ChatState(session: cleared)));
   }
