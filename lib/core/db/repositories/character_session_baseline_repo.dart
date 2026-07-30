@@ -77,6 +77,21 @@ class CharacterSessionBaselineRepo {
     )..where((row) => row.chatSessionId.equals(sessionId))).go();
   }
 
+  Future<void> copyForSessionBranch({
+    required String fromSessionId,
+    required String toSessionId,
+  }) async {
+    final source = await getBySessionId(fromSessionId);
+    if (source == null) return;
+    await ensureBaseline(
+      source.copyWith(
+        chatSessionId: toSessionId,
+        createdAt: currentTimestampSeconds(),
+        updatedAt: currentTimestampSeconds(),
+      ),
+    );
+  }
+
   CharacterSessionBaseline _fromRow(CharacterSessionBaselineRow row) =>
       CharacterSessionBaseline(
         chatSessionId: row.chatSessionId,

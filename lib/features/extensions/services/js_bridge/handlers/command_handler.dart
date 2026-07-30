@@ -6,7 +6,6 @@ class CommandHandler {
   const CommandHandler();
 
   FutureOr<Map<String, dynamic>> executeCommand(JsBridgeContext bridge) {
-    bridge.requireCapability('execute_command');
     final command = bridge.params['command'];
     if (command is! String || command.isEmpty) {
       throw ArgumentError('executeCommand requires a non-empty string command');

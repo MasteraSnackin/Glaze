@@ -10,6 +10,7 @@ import 'studio_brief_parser.dart';
 import 'studio_message_builder.dart';
 import 'studio_stage_brief.dart';
 import 'tracker_batcher.dart';
+import 'studio_turn_config_snapshot.dart';
 
 /// Runs the per-agent LLM calls of the Studio chat-time pipeline: the
 /// pre-gen tracker, the post-processing tracker, the individual (non-batch)
@@ -35,6 +36,32 @@ class StudioAgentExecutor {
     this._readPipelineSettings,
   );
 
+  Future<ResolvedAgentConfig> resolveTrackerConfig({
+    required StudioAgent agent,
+    required ApiConfig apiConfig,
+    required String sessionId,
+    String? apiConfigId,
+    StudioTurnConfigSnapshot? turnConfig,
+  }) {
+    return _runner.resolveAgentConfig(
+      agent,
+      apiConfig,
+      sessionId,
+      apiConfigId: apiConfigId,
+      turnConfig: turnConfig,
+    );
+  }
+
+  int? effectiveMaxTokens(
+    StudioAgent agent, [
+    StudioTurnConfigSnapshot? turnConfig,
+  ]) => _runner.effectiveMaxTokens(agent, false, turnConfig);
+
+  double? effectiveTemperature(
+    StudioAgent agent, [
+    StudioTurnConfigSnapshot? turnConfig,
+  ]) => _runner.effectiveTemperature(agent, false, turnConfig);
+
   /// Delegate the actual LLM call to [AgentRunner]. This method still
   /// builds the `messages` list (prompt assembly via [StudioMessageBuilder])
   /// and adapts the result type to the internal [StudioStageBrief] pipeline.
@@ -53,6 +80,7 @@ class StudioAgentExecutor {
     required String sessionId,
     required CancelToken cancelToken,
     String? apiConfigId,
+    StudioTurnConfigSnapshot? turnConfig,
     void Function(String text)? onIntermediateUpdate,
   }) async {
     if (_briefParser.isMetaPolicyAgent(agent)) {
@@ -81,6 +109,7 @@ class StudioAgentExecutor {
         isFinalResponse: false,
         cancelToken: cancelToken,
         apiConfigId: apiConfigId,
+        turnConfig: turnConfig,
         onIntermediateUpdate: onIntermediateUpdate,
       );
       final sanitized = _briefParser.sanitizeIntermediateAgentOutput(
@@ -127,6 +156,7 @@ class StudioAgentExecutor {
     required String sessionId,
     required CancelToken cancelToken,
     String? apiConfigId,
+    StudioTurnConfigSnapshot? turnConfig,
   }) async {
     String? lastError;
     for (var attempt = 1; attempt <= 3; attempt++) {
@@ -141,7 +171,9 @@ class StudioAgentExecutor {
       }
       try {
         final override =
-            _readPipelineSettings().studioAgent.studioPostTrackerContextSize;
+            (turnConfig?.pipelineSettings ?? _readPipelineSettings())
+                .studioAgent
+                .studioPostTrackerContextSize;
         final effectiveAgent = override > 0
             ? agent.copyWith(contextSize: override)
             : agent;
@@ -164,6 +196,7 @@ class StudioAgentExecutor {
           isFinalResponse: false,
           cancelToken: cancelToken,
           apiConfigId: apiConfigId,
+          turnConfig: turnConfig,
           onIntermediateUpdate: null,
         );
         // Post-gen trackers produce prose (a rewrite), NOT a brief — skip the
@@ -203,6 +236,7 @@ class StudioAgentExecutor {
     required String sessionId,
     required CancelToken cancelToken,
     String? apiConfigId,
+    StudioTurnConfigSnapshot? turnConfig,
   }) async {
     String? lastError;
     for (var attempt = 1; attempt <= 3; attempt++) {
@@ -224,6 +258,7 @@ class StudioAgentExecutor {
           sessionId: sessionId,
           cancelToken: cancelToken,
           apiConfigId: apiConfigId,
+          turnConfig: turnConfig,
           onIntermediateUpdate: null,
         );
         if (brief.status == 'ok' && brief.brief.trim().isNotEmpty) {
@@ -258,6 +293,7 @@ class StudioAgentExecutor {
     required String sessionId,
     required CancelToken cancelToken,
     String? apiConfigId,
+    StudioTurnConfigSnapshot? turnConfig,
     void Function(String text, String? reasoning)? onFinalResponseUpdate,
     void Function(List<Map<String, dynamic>> messages)? onMessagesBuilt,
   }) async {
@@ -270,9 +306,13 @@ class StudioAgentExecutor {
       priorBriefs: priorBriefs,
       isFinalResponse: true,
       finalContextOverride:
-          _readPipelineSettings().studioAgent.studioFinalContextSize,
+          (turnConfig?.pipelineSettings ?? _readPipelineSettings())
+              .studioAgent
+              .studioFinalContextSize,
       reasoningHistoryCount:
-          _readPipelineSettings().studioAgent.studioFinalReasoningHistoryCount,
+          (turnConfig?.pipelineSettings ?? _readPipelineSettings())
+              .studioAgent
+              .studioFinalReasoningHistoryCount,
     );
     onMessagesBuilt?.call(messages);
     final runner = _runner;
@@ -284,6 +324,7 @@ class StudioAgentExecutor {
       isFinalResponse: true,
       cancelToken: cancelToken,
       apiConfigId: apiConfigId,
+      turnConfig: turnConfig,
       onFinalResponseUpdate: onFinalResponseUpdate,
     );
     return result;

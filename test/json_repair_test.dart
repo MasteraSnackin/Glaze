@@ -5,6 +5,97 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/llm/json_repair.dart';
 
 void main() {
+  group('extractJsonArray', () {
+    test('extracts a bare array', () {
+      expect(extractJsonArray('[1, 2, 3]'), '[1, 2, 3]');
+    });
+
+    test('extracts an array from a JSON code fence', () {
+      const input = '''
+```json
+[
+  {"id": 1},
+  {"id": 2}
+]
+```
+''';
+      expect(extractJsonArray(input), '[\n  {"id": 1},\n  {"id": 2}\n]');
+    });
+
+    test('extracts an array from a non-JSON code fence', () {
+      expect(extractJsonArray('```text\n[true, false]\n```'), '[true, false]');
+    });
+
+    test('ignores prose before and after the array', () {
+      const input = 'Here is the result:\n[{"ok": true}]\nHope this helps.';
+      expect(extractJsonArray(input), '[{"ok": true}]');
+    });
+
+    test('stops after the first complete array', () {
+      expect(extractJsonArray('first [1] then [2, 3]'), '[1]');
+    });
+
+    test('balances nested arrays and objects', () {
+      const input = 'prefix [{"items": [1, {"deep": [2, 3]}]}, [4, 5]] suffix';
+      expect(
+        extractJsonArray(input),
+        '[{"items": [1, {"deep": [2, 3]}]}, [4, 5]]',
+      );
+    });
+
+    test('ignores brackets and braces inside strings', () {
+      const input =
+          r'prose ["literal ] and }", {"value": "[still quoted]"}] tail';
+      expect(
+        extractJsonArray(input),
+        r'["literal ] and }", {"value": "[still quoted]"}]',
+      );
+    });
+
+    test('handles escaped quotes and backslashes inside strings', () {
+      const input = r'["escaped quote: \" ]", "path: C:\\tmp\\["] after';
+      expect(
+        extractJsonArray(input),
+        r'["escaped quote: \" ]", "path: C:\\tmp\\["]',
+      );
+    });
+
+    test('preserves balanced malformed JSON for repair', () {
+      const input = '''Result:
+[
+  {"id": 1,}, // model comment
+  {"id": 2,},
+]
+Done.''';
+      final extracted = extractJsonArray(input);
+      expect(extracted, isNotNull);
+      expect(jsonDecode(repairJson(extracted!)), [
+        {'id': 1},
+        {'id': 2},
+      ]);
+    });
+
+    test('returns null when there is no array root', () {
+      expect(extractJsonArray('prose only {"object": true}'), isNull);
+    });
+
+    test('returns null for an unclosed array', () {
+      expect(extractJsonArray('before [1, {"x": 2} after'), isNull);
+    });
+
+    test('returns null for mismatched nested delimiters', () {
+      expect(extractJsonArray('[{"x": 1]]'), isNull);
+    });
+
+    test('returns null for an unterminated quoted string', () {
+      expect(extractJsonArray('["unfinished ]'), isNull);
+    });
+
+    test('returns an empty array', () {
+      expect(extractJsonArray('response: []'), '[]');
+    });
+  });
+
   group('repairJson', () {
     test('passes through valid JSON unchanged (modulo whitespace)', () {
       const input = '{"a": 1, "b": ["x", "y"]}';

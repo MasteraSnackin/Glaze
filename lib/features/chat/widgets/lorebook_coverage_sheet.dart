@@ -4,10 +4,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/llm/embedding_types.dart';
 import '../../../core/llm/lorebook_coverage.dart';
-import '../../../core/llm/lorebook_providers.dart';
 import '../../../core/llm/tokenizer.dart';
 import '../../../core/models/lorebook.dart';
 import '../../../core/state/character_provider.dart';
+import '../../../core/state/lorebook_embedding_provider.dart';
 import '../../../core/state/lorebook_provider.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_filter_chip_bar.dart';

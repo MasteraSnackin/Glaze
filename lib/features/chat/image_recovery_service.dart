@@ -252,21 +252,35 @@ class ImageRecoveryService {
       return;
     }
 
-    final newMessages = List<ChatMessage>.from(session.messages);
-    newMessages[lastIdx] = ImageGenProcessor.appendImageRegenerationSwipe(
-      lastMsg,
-      resetContent,
-    );
-    final resetSession = session.copyWith(
-      messages: newMessages,
-      updatedAt: currentTimestampSeconds(),
-    );
+    final resetSession = await _ref
+        .read(chatRepoProvider)
+        .mutateMessage(
+          sessionId: session.id,
+          messageId: lastMsg.id,
+          updatedAt: currentTimestampSeconds(),
+          mutate: (message) {
+            if (message.role != 'assistant') return null;
+            final content = resetImgTagsToGen(message.content);
+            if (content == message.content &&
+                !ImageTagMarkup.hasImageGenTags(content)) {
+              return null;
+            }
+            return ImageGenProcessor.appendImageRegenerationSwipe(
+              message,
+              content,
+            );
+          },
+        );
+    if (resetSession == null) return;
+    ChatSessionService.updateCache(resetSession);
+    final liveState = _getState().value;
+    if (liveState?.session?.id != resetSession.id) return;
     final genId = startImageOperation();
     final imgCancelToken = CancelToken();
     _setImgGenCancelToken(imgCancelToken);
     _setState(
       AsyncData(
-        current.copyWith(session: resetSession, isGeneratingImage: true),
+        liveState!.copyWith(session: resetSession, isGeneratingImage: true),
       ),
     );
 
@@ -279,6 +293,7 @@ class ImageRecoveryService {
         liveState: _getState().value,
         update: update,
         sessionId: sessionId,
+        targetMessageId: lastMsg.id,
         ownsOperation: ownsOperation(),
       );
       if (merged != null) _setState(AsyncData(merged));
@@ -342,22 +357,33 @@ class ImageRecoveryService {
     var resetContent = resetImgTagsToGen(msg.content);
     if (resetContent == msg.content) return;
 
-    final newMessages = List<ChatMessage>.from(current.messages);
-    newMessages[messageIndex] = ImageGenProcessor.appendImageRegenerationSwipe(
-      msg,
-      resetContent,
-    );
-    final resetSession = current.session!.copyWith(
-      messages: newMessages,
-      updatedAt: currentTimestampSeconds(),
-    );
+    final resetSession = await _ref
+        .read(chatRepoProvider)
+        .mutateMessage(
+          sessionId: current.session!.id,
+          messageId: msg.id,
+          updatedAt: currentTimestampSeconds(),
+          mutate: (message) {
+            if (message.role != 'assistant') return null;
+            final content = resetImgTagsToGen(message.content);
+            if (content == message.content) return null;
+            return ImageGenProcessor.appendImageRegenerationSwipe(
+              message,
+              content,
+            );
+          },
+        );
+    if (resetSession == null) return;
+    ChatSessionService.updateCache(resetSession);
+    final liveState = _getState().value;
+    if (liveState?.session?.id != resetSession.id) return;
 
     final genId = startImageOperation();
     final imgCancelToken = CancelToken();
     _setImgGenCancelToken(imgCancelToken);
     _setState(
       AsyncData(
-        current.copyWith(session: resetSession, isGeneratingImage: true),
+        liveState!.copyWith(session: resetSession, isGeneratingImage: true),
       ),
     );
 
@@ -370,6 +396,7 @@ class ImageRecoveryService {
         liveState: _getState().value,
         update: update,
         sessionId: sessionId,
+        targetMessageId: msg.id,
         ownsOperation: ownsOperation(),
       );
       if (merged != null) _setState(AsyncData(merged));
@@ -420,6 +447,8 @@ class ImageRecoveryService {
     if (files.isEmpty) return;
 
     final msg = current.messages[msgIdx];
+    final targetSwipeId = msg.swipeId;
+    final targetAgentSwipeId = msg.agentSwipeId;
     final Set<String> claimedPaths = {};
     for (final m in current.messages) {
       claimedPaths.addAll(ImageTagMarkup.extractImageResultPaths(m.content));
@@ -479,17 +508,37 @@ class ImageRecoveryService {
 
     if (updatedContent == msg.content) return;
 
-    final newMessages = List<ChatMessage>.from(current.messages);
-    newMessages[msgIdx] = ImageGenProcessor.replaceActiveImageContent(
-      msg,
-      updatedContent,
-    );
-    final updatedSession = current.session!.copyWith(
-      messages: newMessages,
-      updatedAt: currentTimestampSeconds(),
-    );
-    await _ref.read(chatRepoProvider).put(updatedSession);
+    final sessionId = current.session!.id;
+    final updatedSession = await _ref
+        .read(chatRepoProvider)
+        .mutateMessage(
+          sessionId: sessionId,
+          messageId: messageId,
+          updatedAt: currentTimestampSeconds(),
+          mutate: (message) {
+            final content = replaceFirstImgErrorOrGen(
+              message.content,
+              foundPath,
+            );
+            if (content == message.content) return null;
+            return ImageGenProcessor.replaceImageContentAt(
+              message,
+              content,
+              swipeId: targetSwipeId,
+              agentSwipeId: targetAgentSwipeId,
+            );
+          },
+        );
+    if (updatedSession == null) return;
     ChatSessionService.updateCache(updatedSession);
-    _setState(AsyncData(current.copyWith(session: updatedSession)));
+    final liveState = _getState().value;
+    final merged = ImageGenProcessor.mergeOwnedStateUpdate(
+      liveState: liveState,
+      update: current.copyWith(session: updatedSession),
+      sessionId: sessionId,
+      targetMessageId: messageId,
+      ownsOperation: liveState?.session?.id == sessionId,
+    );
+    if (merged != null) _setState(AsyncData(merged));
   }
 }

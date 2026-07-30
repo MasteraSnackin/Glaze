@@ -10,6 +10,7 @@ import '../models/api_config.dart';
 import '../models/memory_book.dart';
 import '../models/pipeline_settings.dart';
 import 'aux_llm_client.dart';
+import 'json_repair.dart';
 import 'transport/llm_protocol.dart';
 import 'vector_math.dart';
 
@@ -365,14 +366,9 @@ Rules:
     List<({MemoryEntry a, MemoryEntry b, double score})> pairs,
   ) {
     try {
-      // Strip markdown code fences if present.
-      var cleaned = text.trim();
-      if (cleaned.startsWith('```')) {
-        cleaned = cleaned.replaceFirst(RegExp(r'^```(?:json)?\s*'), '');
-        cleaned = cleaned.replaceFirst(RegExp(r'\s*```$'), '');
-      }
-
-      final decoded = jsonDecode(cleaned);
+      final raw = extractJsonArray(text);
+      if (raw == null) return [];
+      final decoded = jsonDecode(repairJson(raw));
       if (decoded is! List) return [];
 
       final decisions = <DedupPairDecision>[];

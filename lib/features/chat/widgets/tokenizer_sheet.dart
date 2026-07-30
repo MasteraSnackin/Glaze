@@ -4,7 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/llm/context_calculator.dart';
 import '../../../core/llm/prompt_isolate.dart';
-import '../../../core/llm/prompt_payload_builder.dart';
+import '../providers/prompt_build_providers.dart';
 import '../../../core/models/api_config.dart';
 import '../../../features/settings/api_list_provider.dart';
 import '../../../features/settings/app_settings_provider.dart';
@@ -245,9 +245,7 @@ class _TokenizerSheetState extends ConsumerState<TokenizerSheet> {
     }
 
     return SheetView(
-      title: _showSettings
-          ? 'context_settings_title'.tr()
-          : 'tab_context'.tr(),
+      title: _showSettings ? 'context_settings_title'.tr() : 'tab_context'.tr(),
       showBack: true,
       fitContent: true,
       onBack: () => _showSettings
@@ -447,4 +445,3 @@ class _TokenizerSheetState extends ConsumerState<TokenizerSheet> {
     );
   }
 }
-

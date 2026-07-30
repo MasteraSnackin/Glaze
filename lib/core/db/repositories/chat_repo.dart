@@ -4,8 +4,9 @@ import 'dart:convert';
 import 'package:drift/drift.dart';
 
 import '../app_db.dart';
+import 'session_deletion_queries.dart';
 import '../../models/chat_message.dart';
-import '../../../features/cloud_sync/sync_repo_interfaces.dart';
+import '../../application/sync_repo_interfaces.dart';
 
 class ChatRepo implements SyncChatStore {
   final AppDatabase _db;
@@ -107,10 +108,11 @@ class ChatRepo implements SyncChatStore {
       )..where((t) => t.sessionId.equals(sessionId))).getSingleOrNull();
       if (row == null) return null;
 
-      final messages = (jsonDecode(row.messagesJson) as List<dynamic>)
-          .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>))
-          .toList()
-        ..add(message);
+      final messages =
+          (jsonDecode(row.messagesJson) as List<dynamic>)
+              .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>))
+              .toList()
+            ..add(message);
 
       await (_db.update(
         _db.chatSessions,
@@ -150,13 +152,136 @@ class ChatRepo implements SyncChatStore {
       final (messageCount, _) = _scanTopLevelObjects(row.messagesJson);
       if (messageCount != expectedMessageCount) return null;
 
+      await (_db.update(_db.chatSessions)
+            ..where((t) => t.sessionId.equals(sessionId)))
+          .write(ChatSessionsCompanion(draft: Value(draft)));
+
+      return _toModel(row.copyWith(draft: Value(draft)));
+    });
+  }
+
+  /// Atomically transforms the latest durable message list for a session.
+  ///
+  /// The callback runs inside the database transaction, so callers never have
+  /// to persist a full session snapshot captured before another mutation.
+  Future<ChatSession?> mutateMessages({
+    required String sessionId,
+    required List<ChatMessage> Function(List<ChatMessage> messages) mutate,
+    required int updatedAt,
+  }) async {
+    return mutateSession(
+      sessionId: sessionId,
+      updatedAt: updatedAt,
+      mutate: (session) => session.copyWith(
+        messages: mutate(List<ChatMessage>.from(session.messages)),
+      ),
+    );
+  }
+
+  /// Atomically transforms one message identified by its durable ID.
+  Future<ChatSession?> mutateMessage({
+    required String sessionId,
+    required String messageId,
+    required ChatMessage? Function(ChatMessage message) mutate,
+    required int updatedAt,
+  }) {
+    return mutateSession(
+      sessionId: sessionId,
+      updatedAt: updatedAt,
+      mutate: (session) {
+        final index = session.messages.indexWhere(
+          (message) => message.id == messageId,
+        );
+        if (index < 0) return null;
+        final updatedMessage = mutate(session.messages[index]);
+        if (updatedMessage == null) return null;
+        final messages = List<ChatMessage>.from(session.messages);
+        messages[index] = updatedMessage;
+        return session.copyWith(messages: messages);
+      },
+    );
+  }
+
+  /// Atomically updates only the author's note against the latest session.
+  Future<ChatSession?> mutateAuthorsNote({
+    required String sessionId,
+    required AuthorsNote? Function(AuthorsNote? note) mutate,
+    required int updatedAt,
+  }) {
+    return mutateSession(
+      sessionId: sessionId,
+      updatedAt: updatedAt,
+      mutate: (session) =>
+          session.copyWith(authorsNote: mutate(session.authorsNote)),
+    );
+  }
+
+  /// Atomically renames a session without replacing other session variables.
+  Future<ChatSession?> renameSession({
+    required String sessionId,
+    required String name,
+  }) {
+    return mutateSession(
+      sessionId: sessionId,
+      mutate: (session) => session.copyWith(
+        sessionVars: {...session.sessionVars, 'sessionName': name},
+      ),
+    );
+  }
+
+  /// Atomically transforms the latest durable chat session while preserving
+  /// columns the callback did not change.
+  Future<ChatSession?> mutateSession({
+    required String sessionId,
+    required ChatSession? Function(ChatSession session) mutate,
+    int? updatedAt,
+  }) async {
+    return _db.transaction(() async {
+      final row = await (_db.select(
+        _db.chatSessions,
+      )..where((t) => t.sessionId.equals(sessionId))).getSingleOrNull();
+      if (row == null) return null;
+
+      final current = _toModel(row);
+      final updated = mutate(current);
+      if (updated == null) return null;
+      final messagesJson = jsonEncode(
+        updated.messages.map((e) => e.toJson()).toList(),
+      );
+      final sessionVarsJson = updated.sessionVars.isNotEmpty
+          ? jsonEncode(updated.sessionVars)
+          : null;
+      final authorsNoteJson = updated.authorsNote != null
+          ? jsonEncode(updated.authorsNote!.toJson())
+          : null;
+      final lastScrollAnchorJson = updated.lastScrollAnchor.isNotEmpty
+          ? jsonEncode(updated.lastScrollAnchor)
+          : null;
+      final durableUpdatedAt = updatedAt ?? updated.updatedAt;
+
       await (_db.update(
         _db.chatSessions,
       )..where((t) => t.sessionId.equals(sessionId))).write(
-        ChatSessionsCompanion(draft: Value(draft)),
+        ChatSessionsCompanion(
+          messagesJson: Value(messagesJson),
+          sessionVarsJson: Value(sessionVarsJson),
+          authorsNoteJson: Value(authorsNoteJson),
+          draft: Value(updated.draft),
+          lastScrollAnchorJson: Value(lastScrollAnchorJson),
+          updatedAt: Value(durableUpdatedAt),
+        ),
       );
 
-      return _toModel(row.copyWith(draft: Value(draft)));
+      return _toModel(
+        row.copyWith(
+          messagesJson: messagesJson,
+          sessionVarsJson: Value(sessionVarsJson),
+          authorsNoteJson: Value(authorsNoteJson),
+          draft: Value(updated.draft),
+          lastScrollAnchorJson: Value(lastScrollAnchorJson),
+          updatedAt: durableUpdatedAt,
+        ),
+      );
     });
   }
 
@@ -185,6 +310,21 @@ class ChatRepo implements SyncChatStore {
       );
       return updated;
     });
+  }
+
+  static Map<String, String> applySessionVarDelta(
+    Map<String, String> latest,
+    Map<String, String> before,
+    Map<String, String> after,
+  ) {
+    final merged = Map<String, String>.from(latest);
+    for (final key in before.keys) {
+      if (!after.containsKey(key)) merged.remove(key);
+    }
+    for (final entry in after.entries) {
+      if (before[entry.key] != entry.value) merged[entry.key] = entry.value;
+    }
+    return merged;
   }
 
   @override
@@ -645,32 +785,17 @@ class ChatRepo implements SyncChatStore {
   /// dependent data (memory books, summaries). Returns the deleted session IDs
   /// for sync-deletion tracking.
   Future<List<String>> deleteByCharacterId(String characterId) async {
-    final rows = await (_db.select(
-      _db.chatSessions,
-    )..where((t) => t.characterId.equals(characterId))).get();
-    final ids = rows.map((r) => r.sessionId).toList();
-
-    if (ids.isNotEmpty) {
-      await (_db.delete(
-        _db.memoryBookRows,
-      )..where((t) => t.sessionId.isIn(ids))).go();
-      await (_db.delete(
-        _db.trackerRows,
-      )..where((t) => t.sessionId.isIn(ids))).go();
-      await (_db.delete(
-        _db.trackerSnapshots,
-      )..where((t) => t.sessionId.isIn(ids))).go();
-      await (_db.delete(
-        _db.ledgerReconciliationCheckpoints,
-      )..where((t) => t.sessionId.isIn(ids))).go();
-      await (_db.delete(
-        _db.chatSummaries,
-      )..where((t) => t.sessionId.isIn(ids))).go();
-      await (_db.delete(
+    return _db.transaction(() async {
+      final rows = await (_db.select(
         _db.chatSessions,
-      )..where((t) => t.characterId.equals(characterId))).go();
-    }
-    return ids;
+      )..where((t) => t.characterId.equals(characterId))).get();
+      final ids = rows.map((r) => r.sessionId).toList();
+      final deletion = SessionDeletionQueries(_db);
+      for (final id in ids) {
+        await deletion.deleteSessionRows(id);
+      }
+      return ids;
+    });
   }
 
   SessionMetadata _toMetadata(ChatSessionRow c) {

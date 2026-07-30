@@ -1,6 +1,5 @@
 import 'dart:convert';
 
-import '../capability_resolver.dart';
 import '../js_bridge_context.dart';
 
 class VariablesHandler {
@@ -12,19 +11,16 @@ class VariablesHandler {
 
   Future<dynamic> getVariables(JsBridgeContext bridge) {
     final scope = _scope(bridge.params);
-    bridge.requireCapability(readCapabilityForScope(scope));
     return _getVariables(bridge, scope);
   }
 
   Future<Map<String, dynamic>> setVariables(JsBridgeContext bridge) {
     final scope = _scope(bridge.params);
-    bridge.requireCapability(writeCapabilityForScope(scope));
     return _setVariables(bridge, scope);
   }
 
   Future<Map<String, dynamic>> deleteVariable(JsBridgeContext bridge) {
     final scope = _scope(bridge.params);
-    bridge.requireCapability(deleteCapabilityForScope(scope));
     return _deleteVariable(bridge, scope);
   }
 

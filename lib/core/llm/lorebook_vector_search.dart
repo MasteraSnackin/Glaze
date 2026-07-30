@@ -122,7 +122,14 @@ class LorebookVectorSearch {
 
     if (vectorEntries.isEmpty && fallbackEntries.isEmpty) return [];
 
-    final embeddingRows = await _repo.getBySourceType('lorebook_entry');
+    final relevantLorebookIds = {
+      for (final (_, lorebookId) in vectorEntries) lorebookId,
+      for (final (_, lorebookId) in fallbackEntries) lorebookId,
+    };
+    final embeddingRows = await _repo.getBySourceIds(
+      'lorebook_entry',
+      relevantLorebookIds,
+    );
 
     final embeddingMap = <String, EmbeddingRow>{};
     for (final row in embeddingRows) {

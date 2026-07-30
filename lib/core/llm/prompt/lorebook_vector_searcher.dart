@@ -2,16 +2,24 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../shared/widgets/glaze_toast.dart'
-    show GlazeToast, ToastPosition;
 import '../../state/db_provider.dart';
+import '../../state/lorebook_embedding_provider.dart';
 import '../../state/lorebook_provider.dart';
 import '../embedding_types.dart';
-import '../lorebook_providers.dart';
 import '../lorebook_vector_search.dart';
 import '../../models/character.dart';
 import '../../models/chat_message.dart';
 import '../../models/lorebook.dart';
+
+class LorebookVectorSearchDiagnostic {
+  final Object error;
+  final StackTrace stackTrace;
+
+  const LorebookVectorSearchDiagnostic({
+    required this.error,
+    required this.stackTrace,
+  });
+}
 
 /// Performs lorebook vector (embedding) search for prompt payload building.
 ///
@@ -21,8 +29,9 @@ import '../../models/lorebook.dart';
 /// the search fails.
 class LorebookVectorSearcher {
   final Ref _ref;
+  final void Function(LorebookVectorSearchDiagnostic diagnostic)? onDiagnostic;
 
-  LorebookVectorSearcher(this._ref);
+  LorebookVectorSearcher(this._ref, {this.onDiagnostic});
 
   Future<List<LorebookEntry>> search(
     List<ChatMessage> history,
@@ -93,11 +102,8 @@ class LorebookVectorSearcher {
         return [];
       }
       debugPrint('VECTOR SEARCH: failed: $e\n$st');
-      GlazeToast.showWithoutContext(
-        'Vector search failed — try reindexing embeddings',
-        duration: 4000,
-        position: ToastPosition.top,
-        isError: true,
+      onDiagnostic?.call(
+        LorebookVectorSearchDiagnostic(error: e, stackTrace: st),
       );
       return [];
     }

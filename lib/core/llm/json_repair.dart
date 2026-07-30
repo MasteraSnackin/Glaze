@@ -77,6 +77,56 @@ String? extractJsonObject(String text) {
   return trimmed.substring(start, end + 1);
 }
 
+/// Extracts the first complete JSON array from an LLM response that may be
+/// wrapped in a markdown code fence or surrounding prose.
+///
+/// Unlike a first/last-bracket slice, the scan balances nested arrays and
+/// objects and ignores brackets inside quoted strings, including escaped
+/// quotes. The returned text is not validated as JSON: common defects such as
+/// comments and trailing commas are intentionally left for [repairJson].
+/// Returns `null` when no complete, structurally balanced array is present.
+String? extractJsonArray(String text) {
+  final start = text.indexOf('[');
+  if (start < 0) return null;
+  return _extractBalancedJsonRoot(text, start);
+}
+
+String? _extractBalancedJsonRoot(String text, int start) {
+  final delimiters = <String>[];
+  var inString = false;
+  var escaped = false;
+
+  for (var i = start; i < text.length; i++) {
+    final ch = text[i];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch == r'\') {
+        escaped = true;
+      } else if (ch == '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch == '"') {
+      inString = true;
+      continue;
+    }
+    if (ch == '[' || ch == '{') {
+      delimiters.add(ch);
+      continue;
+    }
+    if (ch != ']' && ch != '}') continue;
+    if (delimiters.isEmpty) return null;
+    final opening = delimiters.removeLast();
+    if ((opening == '[' && ch != ']') || (opening == '{' && ch != '}')) {
+      return null;
+    }
+    if (delimiters.isEmpty) return text.substring(start, i + 1);
+  }
+  return null;
+}
+
 String repairJson(String input) {
   if (input.isEmpty) return input;
   final buf = StringBuffer();

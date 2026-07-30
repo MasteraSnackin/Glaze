@@ -7,13 +7,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../../core/services/character_book_converter.dart';
-import '../../../core/state/character_provider.dart';
+import '../../../core/services/character_import_persistence_coordinator.dart';
 import '../../../core/state/db_provider.dart';
-import '../../../core/state/lorebook_provider.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_toast.dart';
-import '../../character_gallery/gallery_provider.dart';
+import '../../character_list/character_import_persistence_provider.dart';
 import '../../settings/app_settings_provider.dart';
 import '../catalog_models.dart';
 import '../catalog_provider.dart';
@@ -332,26 +330,11 @@ class _ImportUrlDialogState extends ConsumerState<ImportUrlDialog> {
       );
       if (!mounted) return true;
 
-      await ref.read(charactersProvider.notifier).add(result.character);
-
-      if (result.characterBookData != null) {
-        final lorebook = convertCharacterBook(
-          result.characterBookData!,
-          result.character.id,
-        );
-        await ref.read(lorebooksProvider.notifier).put(lorebook);
-      }
-
-      if (result.galleryImages != null) {
-        final galleryService = await ref.read(galleryServiceProvider.future);
-        for (final img in result.galleryImages!) {
-          await galleryService.addImageBytes(
-            result.character.id,
-            img.bytes,
-            img.ext,
-            label: img.label,
-          );
-        }
+      final persisted = await ref
+          .read(characterImportPersistenceCoordinatorProvider)
+          .persist(result);
+      if (persisted case CharacterImportPersistenceFailure()) {
+        persisted.rethrowError();
       }
 
       if (mounted) {

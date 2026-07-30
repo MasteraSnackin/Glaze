@@ -12,6 +12,9 @@ import 'package:glaze_flutter/core/models/memory_book.dart';
 import 'package:glaze_flutter/core/models/persona.dart';
 import 'package:glaze_flutter/core/models/preset.dart';
 import 'package:glaze_flutter/core/models/studio_config.dart';
+import 'package:glaze_flutter/core/application/session_deletion_store.dart';
+import 'package:glaze_flutter/core/application/character_deletion_store.dart';
+import 'package:glaze_flutter/features/cloud_sync/sync_repo_interfaces.dart';
 import 'package:glaze_flutter/shared/theme/theme_preset.dart';
 import 'package:glaze_flutter/features/cloud_sync/cloud_adapter.dart';
 import 'package:glaze_flutter/features/cloud_sync/services/sync_conflict.dart';
@@ -20,7 +23,6 @@ import 'package:glaze_flutter/features/cloud_sync/services/sync_manifest.dart';
 import 'package:glaze_flutter/features/cloud_sync/services/sync_queue.dart';
 import 'package:glaze_flutter/features/cloud_sync/services/sync_serialization.dart';
 import 'package:glaze_flutter/features/cloud_sync/sync_models.dart';
-import 'package:glaze_flutter/features/cloud_sync/sync_repo_interfaces.dart';
 import 'package:glaze_flutter/features/extensions/models/extension_preset.dart';
 import 'package:glaze_flutter/features/extensions/models/extensions_settings.dart';
 import 'package:glaze_flutter/features/extensions/models/info_block.dart';
@@ -78,6 +80,42 @@ class FakeChatStore implements SyncChatStore {
   @override
   Future<void> delete(String id) async {
     data.remove(id);
+  }
+}
+
+class FakeSessionDeletionStore implements SessionDeletionStore {
+  final FakeChatStore chats;
+  final List<String> deletedSessionIds = [];
+
+  FakeSessionDeletionStore(this.chats);
+
+  @override
+  Future<void> deleteSession(String sessionId) async {
+    deletedSessionIds.add(sessionId);
+    await chats.delete(sessionId);
+  }
+}
+
+class FakeCharacterDeletionStore implements CharacterDeletionStore {
+  final FakeCharacterStore characters;
+  final List<Set<String>> deletedCharacterIds = [];
+
+  FakeCharacterDeletionStore(this.characters);
+
+  @override
+  Future<CharacterDeletionResult> deleteCharacters(
+    Set<String> characterIds,
+  ) async {
+    deletedCharacterIds.add(Set.of(characterIds));
+    for (final id in characterIds) {
+      await characters.delete(id);
+    }
+    return CharacterDeletionResult(
+      characterIds: characterIds,
+      sessionIds: const {},
+      studioConfigSessionIds: const {},
+      lorebookIds: const {},
+    );
   }
 }
 
@@ -519,6 +557,8 @@ class SyncWorld {
   late final FakeCloudAdapter cloud;
   late final FakeThemePresetStore uiThemes;
   late final InMemoryManifestProvider manifestProvider;
+  late final FakeSessionDeletionStore sessionDeletions;
+  late final FakeCharacterDeletionStore characterDeletions;
 
   SyncWorld() {
     characters = FakeCharacterStore();
@@ -532,6 +572,8 @@ class SyncWorld {
     images = FakeImageStore();
     cloud = FakeCloudAdapter();
     uiThemes = FakeThemePresetStore();
+    sessionDeletions = FakeSessionDeletionStore(chats);
+    characterDeletions = FakeCharacterDeletionStore(characters);
     manifestProvider = InMemoryManifestProvider(
       characterRepo: characters,
       chatRepo: chats,
@@ -568,6 +610,8 @@ class SyncWorld {
     null,
     null,
     null,
+    sessionDeletions,
+    characterDeletions,
     (_) async {},
   );
 }
@@ -786,6 +830,67 @@ void main() {
             'Manifest absence is not a deletion. Only an explicit tombstone may '
             'remove a local entity during pull.',
       );
+    },
+  );
+
+  test('Pull routes a chat tombstone through the session cascade', () async {
+    final world = SyncWorld();
+    await world.chats.put(makeChat('deleted-session'));
+
+    final cloudManifest = SyncManifest(
+      deviceId: 'cloud-device',
+      createdAt: 1,
+      entries: {
+        'chat:deleted-session': SyncManifestEntry(
+          type: 'chat',
+          id: 'deleted-session',
+          path: cloudPath('chat', 'deleted-session'),
+          updatedAt: 2,
+          hash: '',
+          deleted: true,
+        ),
+      },
+    );
+    world.cloud.files[cloudPath('manifest', 'manifest')] = jsonEncode(
+      cloudManifest.toJson(),
+    );
+
+    await world.engine.pullEntities(onProgress: (_) {}, onConflict: (_) {});
+
+    expect(world.chats.data['deleted-session'], isNull);
+    expect(world.sessionDeletions.deletedSessionIds, ['deleted-session']);
+  });
+
+  test(
+    'Pull routes a character tombstone through the character cascade',
+    () async {
+      final world = SyncWorld();
+      await world.characters.put(makeChar('deleted-character'));
+
+      final cloudManifest = SyncManifest(
+        deviceId: 'cloud-device',
+        createdAt: 1,
+        entries: {
+          'character:deleted-character': SyncManifestEntry(
+            type: 'character',
+            id: 'deleted-character',
+            path: cloudPath('character', 'deleted-character'),
+            updatedAt: 2,
+            hash: '',
+            deleted: true,
+          ),
+        },
+      );
+      world.cloud.files[cloudPath('manifest', 'manifest')] = jsonEncode(
+        cloudManifest.toJson(),
+      );
+
+      await world.engine.pullEntities(onProgress: (_) {}, onConflict: (_) {});
+
+      expect(world.characters.data['deleted-character'], isNull);
+      expect(world.characterDeletions.deletedCharacterIds, [
+        {'deleted-character'},
+      ]);
     },
   );
 

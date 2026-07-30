@@ -165,7 +165,10 @@ class _ChatHistoryListState extends ConsumerState<ChatHistoryList> {
 
     return ListView.builder(
       controller: widget.controller,
-      padding: EdgeInsets.only(top: widget.topPadding, bottom: 20),
+      padding: EdgeInsets.only(
+        top: widget.topPadding,
+        bottom: widget.bottomPadding,
+      ),
       itemCount: sortedGroups.length + 1,
       itemBuilder: (_, i) {
         if (i == 0) return _buildCountHeader(sessions.length);

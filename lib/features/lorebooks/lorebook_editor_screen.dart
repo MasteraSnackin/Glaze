@@ -6,9 +6,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/llm/embedding_error_labels.dart';
-import '../../core/llm/lorebook_providers.dart';
 import '../../core/models/lorebook.dart';
 import '../../core/state/db_provider.dart';
+import '../../core/state/lorebook_embedding_provider.dart';
 import '../../core/state/lorebook_provider.dart';
 import '../../core/utils/id_generator.dart';
 import '../../core/utils/time_helpers.dart';
@@ -124,13 +124,15 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
 
   Future<void> _loadEmbeddingStatuses() async {
     final repo = ref.read(embeddingRepoProvider);
+    final records = await repo.getBySource('lorebook_entry', widget.lorebookId);
+    final recordsByEntryId = {
+      for (final record in records) record.entryId: record,
+    };
     final statuses = <String, String>{};
     final errorLabels = <String, String>{};
     for (final entry in _entries) {
       if (!entry.vectorSearch || !entry.enabled || entry.constant) continue;
-      final record = await repo.getByEntryId(
-        '${widget.lorebookId}_${entry.id}',
-      );
+      final record = recordsByEntryId['${widget.lorebookId}_${entry.id}'];
       if (record == null) {
         statuses[entry.id] = 'none';
       } else if (record.errorJson != null) {
@@ -550,6 +552,7 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
         config,
         embeddingTarget: _settings?.embeddingTarget ?? 'content',
         onProgress: (current, total, name) {
+          if (!mounted) return;
           setState(
             () => _indexStatus = 'index_progress'.tr(
               namedArgs: {'done': '$current', 'total': '$total'},
@@ -614,6 +617,7 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
         retryFailedOnly: true,
         embeddingTarget: _settings?.embeddingTarget ?? 'content',
         onProgress: (current, total, name) {
+          if (!mounted) return;
           setState(
             () => _indexStatus = 'index_progress'.tr(
               namedArgs: {'done': '$current', 'total': '$total'},
@@ -709,6 +713,7 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
         forceReindex: true,
         embeddingTarget: _settings?.embeddingTarget ?? 'content',
         onProgress: (current, total, name) {
+          if (!mounted) return;
           setState(
             () => _indexStatus = 'index_progress'.tr(
               namedArgs: {'done': '$current', 'total': '$total'},

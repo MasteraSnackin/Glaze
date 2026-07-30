@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/models/tracker.dart';
-import '../../../core/state/db_provider.dart';
 import '../../../core/state/memory_agent_providers.dart';
 import '../../../shared/theme/app_colors.dart';
+import '../services/agentic_tracker_values_service.dart';
 import 'agentic_operations_log_dialog.dart' show AgenticSessionScope;
 
 class AgenticTrackerValuesTab extends ConsumerStatefulWidget {
@@ -81,11 +81,7 @@ class _AgenticTrackerValuesTabState
       ),
     );
     if (confirmed != true) return;
-    await ref.read(trackerRepoProvider).clearForSession(sessionId);
-    await ref.read(trackerSnapshotRepoProvider).deleteBySessionId(sessionId);
-    await ref
-        .read(ledgerReconciliationCheckpointRepoProvider)
-        .deleteBySessionId(sessionId);
+    await ref.read(agenticTrackerValuesServiceProvider).purgeSession(sessionId);
     if (!mounted) return;
     setState(() {
       _trackers = const <Tracker>[];
@@ -254,28 +250,9 @@ class _TrackerTile extends ConsumerWidget {
       initial: tracker.value,
     );
     if (newValue == null) return;
-    if (_isControlRow) {
-      // Editing a canon_override/canon_lock row directly — it's already a
-      // live manual control that the loader reads as-is.
-      await ref.read(trackerRepoProvider).upsertValue(
-        sessionId,
-        tracker.name,
-        newValue,
-        scope: tracker.scope,
-        provenance: tracker.provenance,
-      );
-    } else {
-      // Regular ledger key — the loader reads its value from the snapshot,
-      // not from live tracker_rows. The only way to change what the prompt
-      // sees is to set a canon_override, which the loader overlays on top.
-      await ref.read(trackerRepoProvider).upsertValue(
-        sessionId,
-        'canon_override:${tracker.name}',
-        newValue,
-        scope: 'ledger',
-        provenance: 'manual',
-      );
-    }
+    await ref
+        .read(agenticTrackerValuesServiceProvider)
+        .editValue(sessionId: sessionId, tracker: tracker, value: newValue);
     onChanged();
   }
 
@@ -301,23 +278,20 @@ class _TrackerTile extends ConsumerWidget {
       ),
     );
     if (confirmed != true) return;
-    await ref.read(trackerRepoProvider).delete(sessionId, tracker.name);
+    await ref
+        .read(agenticTrackerValuesServiceProvider)
+        .deleteTracker(sessionId: sessionId, trackerName: tracker.name);
     onChanged();
   }
 
   Future<void> _toggleLock(WidgetRef ref) async {
-    final lockKey = 'canon_lock:${tracker.name}';
-    if (_isLocked) {
-      await ref.read(trackerRepoProvider).delete(sessionId, lockKey);
-    } else {
-      await ref.read(trackerRepoProvider).upsertValue(
-        sessionId,
-        lockKey,
-        'true',
-        scope: 'ledger',
-        provenance: 'manual',
-      );
-    }
+    await ref
+        .read(agenticTrackerValuesServiceProvider)
+        .toggleCanonLock(
+          sessionId: sessionId,
+          trackerName: tracker.name,
+          isLocked: _isLocked,
+        );
     onChanged();
   }
 
@@ -328,21 +302,20 @@ class _TrackerTile extends ConsumerWidget {
       initial: tracker.value,
     );
     if (newValue == null) return;
-    await ref.read(trackerRepoProvider).upsertValue(
-      sessionId,
-      'canon_override:${tracker.name}',
-      newValue,
-      scope: 'ledger',
-      provenance: 'manual',
-    );
+    await ref
+        .read(agenticTrackerValuesServiceProvider)
+        .setCanonOverride(
+          sessionId: sessionId,
+          trackerName: tracker.name,
+          value: newValue,
+        );
     onChanged();
   }
 
   Future<void> _removeOverride(WidgetRef ref) async {
-    await ref.read(trackerRepoProvider).delete(
-      sessionId,
-      'canon_override:${tracker.name}',
-    );
+    await ref
+        .read(agenticTrackerValuesServiceProvider)
+        .removeCanonOverride(sessionId: sessionId, trackerName: tracker.name);
     onChanged();
   }
 
@@ -355,8 +328,12 @@ class _TrackerTile extends ConsumerWidget {
     final menuItems = <PopupMenuEntry<String>>[];
     if (_isControlRow) {
       // A canon_override/canon_lock row itself — edit or delete the control.
-      menuItems.add(PopupMenuItem(value: 'edit', child: const Text('Edit value')));
-      menuItems.add(PopupMenuItem(value: 'delete', child: const Text('Delete')));
+      menuItems.add(
+        PopupMenuItem(value: 'edit', child: const Text('Edit value')),
+      );
+      menuItems.add(
+        PopupMenuItem(value: 'delete', child: const Text('Delete')),
+      );
     } else {
       // Regular ledger key — value comes from the snapshot. To change what
       // the prompt sees, set a canon_override (Edit value does this). Lock
@@ -365,7 +342,9 @@ class _TrackerTile extends ConsumerWidget {
       menuItems.add(
         PopupMenuItem(
           value: 'override',
-          child: Text(_isOverridden ? 'Edit override' : 'Edit value (set override)'),
+          child: Text(
+            _isOverridden ? 'Edit override' : 'Edit value (set override)',
+          ),
         ),
       );
       menuItems.add(

@@ -49,7 +49,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 80;
+  int get schemaVersion => 81;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -1423,6 +1423,12 @@ class AppDatabase extends _$AppDatabase {
         if (!names.contains('use_responses_api')) {
           await m.addColumn(apiConfigs, apiConfigs.useResponsesApi);
         }
+      }
+      if (from < 81) {
+        await customStatement(
+          'CREATE INDEX IF NOT EXISTS idx_embeddings_source_type_id '
+          'ON embeddings (source_type, source_id)',
+        );
       }
     },
   );

@@ -2,17 +2,15 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:easy_localization/easy_localization.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../features/settings/api_list_provider.dart';
 import '../models/api_config.dart';
 import '../models/extra_request_parameter.dart';
 import '../models/pipeline_settings.dart';
 import '../models/studio_config.dart';
-import '../state/db_provider.dart';
 import '../utils/error_format.dart';
 import 'agent_stream_runner.dart';
 import 'studio/agent_config_resolver.dart';
+import 'studio_turn_config_snapshot.dart';
 import 'transport/transport_factory.dart';
 
 /// Thin LLM orchestrator extracted from `MemoryStudioService` (Phase 5.1,
@@ -67,6 +65,7 @@ class AgentRunner {
     CancelToken? cancelToken,
     ResolvedAgentConfig? preResolvedConfig,
     String? apiConfigId,
+    StudioTurnConfigSnapshot? turnConfig,
     void Function(String text, String? reasoning)? onFinalResponseUpdate,
     void Function(String text)? onIntermediateUpdate,
   }) async {
@@ -89,6 +88,7 @@ class AgentRunner {
         cancelToken: token,
         preResolvedConfig: preResolvedConfig,
         apiConfigId: apiConfigId,
+        turnConfig: turnConfig,
         onFinalResponseUpdate: onFinalResponseUpdate,
         onIntermediateUpdate: onIntermediateUpdate,
       );
@@ -121,6 +121,7 @@ class AgentRunner {
     required CancelToken cancelToken,
     ResolvedAgentConfig? preResolvedConfig,
     String? apiConfigId,
+    StudioTurnConfigSnapshot? turnConfig,
     void Function(String text, String? reasoning)? onFinalResponseUpdate,
     void Function(String text)? onIntermediateUpdate,
   }) async {
@@ -132,11 +133,12 @@ class AgentRunner {
           sessionId,
           isFinalResponse: isFinalResponse,
           apiConfigId: apiConfigId,
+          turnConfig: turnConfig,
         );
     if (resolved.endpoint.isEmpty || resolved.model.isEmpty) {
       throw Exception('Studio agent "${agent.name}" API is not configured');
     }
-    final timeoutMs = effectiveTimeoutMs(agent, isFinalResponse);
+    final timeoutMs = effectiveTimeoutMs(agent, isFinalResponse, turnConfig);
     // When preResolvedConfig is provided, skip global tracker maxTokens/
     // temperature overrides — the agent carries the batch budget (sum of
     // all group agents' maxTokens, min temperature). Global overrides are
@@ -144,11 +146,11 @@ class AgentRunner {
     // overwrite the computed batch budget with a per-agent cap.
     final maxTokensOverride = preResolvedConfig != null && !isFinalResponse
         ? null
-        : effectiveMaxTokens(agent, isFinalResponse);
+        : effectiveMaxTokens(agent, isFinalResponse, turnConfig);
     final temperatureOverride = preResolvedConfig != null && !isFinalResponse
         ? null
-        : effectiveTemperature(agent, isFinalResponse);
-    final pipeline = _readPipelineSettings();
+        : effectiveTemperature(agent, isFinalResponse, turnConfig);
+    final pipeline = turnConfig?.pipelineSettings ?? _readPipelineSettings();
     final effectiveResolved = isFinalResponse
         ? resolved.copyWithReasoning(
             useResponsesApi: pipeline.studioAgent.studioFinalUseResponsesApi,
@@ -216,6 +218,7 @@ class AgentRunner {
     String sessionId, {
     bool isFinalResponse = false,
     String? apiConfigId,
+    StudioTurnConfigSnapshot? turnConfig,
   }) {
     return _configResolver.resolveAgentConfig(
       agent,
@@ -223,6 +226,7 @@ class AgentRunner {
       sessionId,
       isFinalResponse: isFinalResponse,
       apiConfigId: apiConfigId,
+      turnConfig: turnConfig,
     );
   }
 
@@ -238,9 +242,13 @@ class AgentRunner {
   /// 2. [PipelineSettings.studioAgent.studioTimeoutMs] (>0, minimum 1000ms)
   ///    — global user setting from the Post-Building menu.
   /// 3. hardcoded fallback: final generator 90s, trackers 60s.
-  int effectiveTimeoutMs(StudioAgent agent, bool isFinalResponse) {
+  int effectiveTimeoutMs(
+    StudioAgent agent,
+    bool isFinalResponse, [
+    StudioTurnConfigSnapshot? turnConfig,
+  ]) {
     final fallback = isFinalResponse ? 90000 : 60000;
-    final pipeline = _readPipelineSettings();
+    final pipeline = turnConfig?.pipelineSettings ?? _readPipelineSettings();
     final slot = isFinalResponse
         ? pipeline.studioAgent.studioFinalTimeoutMs
         : agent.phase == 'post_processing'
@@ -267,20 +275,23 @@ class AgentRunner {
   ///   brief budget for all 7 pre-gen agents at once from the Studio menu.
   /// Returns null when the relevant global override is 0 and the caller should
   /// use the agent's own value.
-  int? effectiveMaxTokens(StudioAgent agent, bool isFinalResponse) {
+  int? effectiveMaxTokens(
+    StudioAgent agent,
+    bool isFinalResponse, [
+    StudioTurnConfigSnapshot? turnConfig,
+  ]) {
+    final pipeline = turnConfig?.pipelineSettings ?? _readPipelineSettings();
     if (isFinalResponse) {
-      final global = _readPipelineSettings().studioAgent.studioFinalMaxTokens;
+      final global = pipeline.studioAgent.studioFinalMaxTokens;
       if (global > 0) return global;
       return null;
     }
     if (agent.phase == 'post_processing') {
-      final cleanerGlobal =
-          _readPipelineSettings().cleaner.postCleanerMaxTokens;
+      final cleanerGlobal = pipeline.cleaner.postCleanerMaxTokens;
       if (cleanerGlobal > 0) return cleanerGlobal;
       return null;
     }
-    final trackerGlobal =
-        _readPipelineSettings().studioAgent.studioTrackerMaxTokens;
+    final trackerGlobal = pipeline.studioAgent.studioTrackerMaxTokens;
     if (trackerGlobal > 0) return trackerGlobal;
     return null;
   }
@@ -293,17 +304,21 @@ class AgentRunner {
   ///   7 pre-gen agents at once from the Studio menu.
   /// Returns null when the relevant global override is negative and the
   /// caller should use the agent's own value.
-  double? effectiveTemperature(StudioAgent agent, bool isFinalResponse) {
+  double? effectiveTemperature(
+    StudioAgent agent,
+    bool isFinalResponse, [
+    StudioTurnConfigSnapshot? turnConfig,
+  ]) {
+    final pipeline = turnConfig?.pipelineSettings ?? _readPipelineSettings();
     if (isFinalResponse) {
-      final global = _readPipelineSettings().studioAgent.studioFinalTemperature;
+      final global = pipeline.studioAgent.studioFinalTemperature;
       if (global >= 0) return global;
       return null;
     }
     if (agent.phase == 'post_processing') {
-      return _readPipelineSettings().cleaner.postCleanerTemperature;
+      return pipeline.cleaner.postCleanerTemperature;
     }
-    final trackerGlobal =
-        _readPipelineSettings().studioAgent.studioTrackerTemperature;
+    final trackerGlobal = pipeline.studioAgent.studioTrackerTemperature;
     if (trackerGlobal >= 0) return trackerGlobal;
     return null;
   }
@@ -494,25 +509,3 @@ class ResolvedAgentConfig {
     );
   }
 }
-
-/// Riverpod provider for [AgentRunner]. Single shared instance — it is
-/// stateless beyond the injected callbacks.
-final agentRunnerProvider = Provider<AgentRunner>((ref) {
-  return AgentRunner(
-    configResolver: AgentConfigResolver(
-      loadApiConfigs: () async {
-        await ref.read(apiListProvider.future);
-        return ref.read(apiListProvider).value ?? const <ApiConfig>[];
-      },
-      readActiveApiConfig: () => ref.read(activeApiConfigProvider),
-      readPipelineSettings: () => ref.read(pipelineSettingsProvider),
-      readRunApiConfigId: (sessionId) async {
-        final config = await ref
-            .read(studioConfigRepoProvider)
-            .getBySessionId(sessionId);
-        return config?.runApiConfigId ?? '';
-      },
-    ),
-    readPipelineSettings: () => ref.read(pipelineSettingsProvider),
-  );
-});

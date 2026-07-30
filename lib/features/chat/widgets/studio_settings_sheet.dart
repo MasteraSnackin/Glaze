@@ -18,6 +18,8 @@ import '../../../core/utils/time_helpers.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../../settings/api_list_provider.dart';
+import '../../studio/services/studio_preset_workflow_service.dart';
+import '../../studio/studio_preset_workflow_provider.dart';
 import '../state/recovery_state_provider.dart';
 import '../services/tracker_memory_recovery_service.dart';
 import 'studio_preset_editor_sheet.dart';
@@ -63,6 +65,7 @@ class StudioSettingsSheet extends ConsumerStatefulWidget {
 class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
   StudioConfig? _config;
   bool _loading = true;
+  late final StudioPresetWorkflowService _presetWorkflows;
 
   final Map<String, List<String>> _fetchedModelsBySlot = {};
   final Set<String> _fetchingModelSlots = {};
@@ -71,13 +74,13 @@ class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
   @override
   void initState() {
     super.initState();
+    _presetWorkflows = ref.read(studioPresetWorkflowServiceProvider);
     _load();
   }
 
   Future<void> _load() async {
     await ref.read(apiListProvider.future);
     final repo = ref.read(studioConfigRepoProvider);
-    final presetRepo = ref.read(studioPresetRepoProvider);
     var config = await repo.getBySessionId(widget.sessionId);
     // Studio is global — if no config exists at all, auto-create a default
     // profile instead of showing an "Enable Studio" dialog.
@@ -97,11 +100,11 @@ class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
       // Auto-create enables Studio for the first time — refresh dependents.
       ref.invalidate(sessionStudioEnabledProvider(widget.sessionId));
     }
-    final presets = await presetRepo.getAll();
+    final presets = await _presetWorkflows.loadPresets();
     if (!mounted) return;
     setState(() {
       _config = config;
-      _studioPresets = presets..sort((a, b) => a.name.compareTo(b.name));
+      _studioPresets = presets;
       _loading = false;
     });
   }
@@ -117,7 +120,7 @@ class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
 
   Future<void> _changeStudioPreset(String presetId) async {
     // Global: one SharedPreferences key, applies to every session instantly.
-    await ref.read(activeStudioPresetProvider.notifier).set(presetId);
+    await _presetWorkflows.selectPreset(presetId);
     setState(() {});
   }
 
@@ -150,7 +153,7 @@ class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
           const Divider(),
           _buildModeSelector(),
           const SizedBox(height: 4),
-          _buildPresetSelector(config),
+          _buildPresetSelector(),
           const Divider(),
           Text('Models', style: Theme.of(context).textTheme.titleSmall),
           const SizedBox(height: 8),
@@ -291,7 +294,7 @@ class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
     );
   }
 
-  Widget _buildPresetSelector(StudioConfig config) {
+  Widget _buildPresetSelector() {
     final activePresetId =
         ref.watch(activeStudioPresetProvider).value ?? 'default';
     final current = _activeStudioPreset;
@@ -308,7 +311,7 @@ class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
         overflow: TextOverflow.ellipsis,
       ),
       trailing: const Icon(Icons.arrow_drop_down),
-      onTap: () => _openStudioPresetSelector(config),
+      onTap: _openStudioPresetSelector,
     );
   }
 
@@ -363,7 +366,7 @@ class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
     await _changeStudioPreset(preset.id);
   }
 
-  Future<void> _openStudioPresetSelector(StudioConfig config) async {
+  Future<void> _openStudioPresetSelector() async {
     final items = <BottomSheetItem>[
       BottomSheetItem(
         label: 'Create new preset',
@@ -417,7 +420,7 @@ class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
                 color: Theme.of(context).colorScheme.error,
                 onTap: () {
                   Navigator.of(context, rootNavigator: true).pop();
-                  _deletePreset(preset, config);
+                  _deletePreset(preset);
                 },
               ),
           ],
@@ -463,34 +466,16 @@ class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
     final trimmedName = name?.trim() ?? '';
     if (!mounted || trimmedName.isEmpty) return;
 
-    final source =
-        _studioPresets
-            .where(
-              (preset) =>
-                  preset.id ==
-                  (ref.read(activeStudioPresetProvider).value ?? 'default'),
-            )
-            .firstOrNull ??
-        _studioPresets.firstOrNull;
-    if (source == null) {
+    final result = await _presetWorkflows.createPreset(
+      name: trimmedName,
+      availablePresets: _studioPresets,
+    );
+    if (!mounted) return;
+    if (result == null) {
       GlazeToast.show(context, 'No Studio preset to copy.');
       return;
     }
-
-    final now = currentTimestampSeconds();
-    final preset = source.copyWith(
-      id: 'studio_$now',
-      name: trimmedName,
-      blocks: [...source.blocks],
-      agentEnabled: {...source.agentEnabled},
-      updatedAt: now,
-    );
-    await ref.read(studioPresetRepoProvider).upsert(preset);
-    if (!mounted) return;
-    final nextPresets = await ref.read(studioPresetRepoProvider).getAll();
-    nextPresets.sort((a, b) => a.name.compareTo(b.name));
-    setState(() => _studioPresets = nextPresets);
-    await ref.read(activeStudioPresetProvider.notifier).set(preset.id);
+    setState(() => _studioPresets = result.presets);
   }
 
   Future<void> _importPreset() async {
@@ -544,18 +529,13 @@ class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
       final trimmedName = name?.trim() ?? '';
       if (!mounted || trimmedName.isEmpty) return;
 
-      final now = currentTimestampSeconds();
-      final preset = imported.copyWith(
-        id: 'studio_$now',
+      final importResult = await _presetWorkflows.importPreset(
+        imported: imported,
         name: trimmedName,
-        updatedAt: now,
       );
-      await ref.read(studioPresetRepoProvider).upsert(preset);
       if (!mounted) return;
-      final nextPresets = await ref.read(studioPresetRepoProvider).getAll();
-      nextPresets.sort((a, b) => a.name.compareTo(b.name));
-      setState(() => _studioPresets = nextPresets);
-      await ref.read(activeStudioPresetProvider.notifier).set(preset.id);
+      if (importResult == null) return;
+      setState(() => _studioPresets = importResult.presets);
       if (mounted) GlazeToast.show(context, 'Preset "$trimmedName" imported.');
     } catch (e) {
       if (mounted) GlazeToast.show(context, 'Failed to import preset: $e');
@@ -578,7 +558,7 @@ class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
     }
   }
 
-  Future<void> _deletePreset(StudioPreset preset, StudioConfig config) async {
+  Future<void> _deletePreset(StudioPreset preset) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
@@ -601,16 +581,9 @@ class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
     );
     if (confirmed != true) return;
 
-    await ref.read(studioPresetRepoProvider).delete(preset.id);
+    final nextPresets = await _presetWorkflows.deletePreset(preset.id);
     if (!mounted) return;
-
-    final nextPresets = await ref.read(studioPresetRepoProvider).getAll();
-    nextPresets.sort((a, b) => a.name.compareTo(b.name));
     setState(() => _studioPresets = nextPresets);
-
-    if ((await ref.read(activeStudioPresetProvider.future)) == preset.id) {
-      await ref.read(activeStudioPresetProvider.notifier).set('default');
-    }
     if (mounted) GlazeToast.show(context, 'theme_preset_deleted'.tr());
   }
 

@@ -128,6 +128,42 @@ class InfoBlocksRepository extends DatabaseAccessor<AppDatabase>
     await SyncDeletionTracker.record('info_block', sessionId);
   }
 
+  Future<void> copyForSessionBranch({
+    required String fromSessionId,
+    required String toSessionId,
+    required Set<String> messageIds,
+  }) async {
+    if (messageIds.isEmpty) return;
+    final rows =
+        await (select(infoBlocks)
+              ..where((row) => row.sessionId.equals(fromSessionId))
+              ..where((row) => row.messageId.isIn(messageIds))
+              ..where((row) => row.status.equals(BlockRunStatus.done.name)))
+            .get();
+    await batch((batch) {
+      for (final row in rows) {
+        batch.insert(
+          infoBlocks,
+          InfoBlocksCompanion.insert(
+            id: '${row.id}@$toSessionId',
+            sessionId: toSessionId,
+            messageId: row.messageId,
+            swipeId: Value(row.swipeId),
+            agentSwipeId: Value(row.agentSwipeId),
+            blockId: row.blockId,
+            blockType: row.blockType,
+            blockName: row.blockName,
+            content: row.content,
+            createdAt: Value(row.createdAt),
+            order_: Value(row.order_),
+            status: Value(row.status),
+          ),
+          mode: InsertMode.insertOrReplace,
+        );
+      }
+    });
+  }
+
   Future<void> deleteInfoBlock(String id) async {
     await (delete(infoBlocks)..where((tbl) => tbl.id.equals(id))).go();
   }

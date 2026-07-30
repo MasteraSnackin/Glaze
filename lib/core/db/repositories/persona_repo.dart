@@ -2,7 +2,7 @@ import 'package:drift/drift.dart';
 
 import '../app_db.dart';
 import '../../models/persona.dart';
-import '../../../features/cloud_sync/sync_repo_interfaces.dart';
+import '../../application/sync_repo_interfaces.dart';
 
 class PersonaRepo implements SyncPersonaStore {
   final AppDatabase _db;

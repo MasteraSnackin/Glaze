@@ -11,12 +11,14 @@ import 'package:glaze_flutter/core/models/lorebook.dart';
 import 'package:glaze_flutter/core/models/memory_book.dart';
 import 'package:glaze_flutter/core/models/persona.dart';
 import 'package:glaze_flutter/core/models/preset.dart';
+import 'package:glaze_flutter/features/cloud_sync/sync_repo_interfaces.dart';
 import 'package:glaze_flutter/core/utils/sync_deletion_tracker.dart';
+import 'package:glaze_flutter/core/application/session_deletion_store.dart';
+import 'package:glaze_flutter/core/application/character_deletion_store.dart';
 import 'package:glaze_flutter/features/cloud_sync/cloud_adapter.dart';
 import 'package:glaze_flutter/features/cloud_sync/services/sync_engine.dart';
 import 'package:glaze_flutter/features/cloud_sync/services/sync_manifest.dart';
 import 'package:glaze_flutter/features/cloud_sync/sync_models.dart';
-import 'package:glaze_flutter/features/cloud_sync/sync_repo_interfaces.dart';
 import 'package:glaze_flutter/features/extensions/models/block_config.dart';
 import 'package:glaze_flutter/features/extensions/models/block_run_status.dart';
 import 'package:glaze_flutter/features/extensions/models/extension_preset.dart';
@@ -59,6 +61,36 @@ class FakeChatStore implements SyncChatStore {
   @override
   Future<void> delete(String id) async {
     data.remove(id);
+  }
+}
+
+class FakeSessionDeletionStore implements SessionDeletionStore {
+  final FakeChatStore chats;
+
+  FakeSessionDeletionStore(this.chats);
+
+  @override
+  Future<void> deleteSession(String sessionId) => chats.delete(sessionId);
+}
+
+class FakeCharacterDeletionStore implements CharacterDeletionStore {
+  final FakeCharacterStore characters;
+
+  FakeCharacterDeletionStore(this.characters);
+
+  @override
+  Future<CharacterDeletionResult> deleteCharacters(
+    Set<String> characterIds,
+  ) async {
+    for (final id in characterIds) {
+      await characters.delete(id);
+    }
+    return CharacterDeletionResult(
+      characterIds: characterIds,
+      sessionIds: const {},
+      studioConfigSessionIds: const {},
+      lorebookIds: const {},
+    );
   }
 }
 
@@ -442,9 +474,13 @@ class SyncWorld {
   final FakeTrackerSnapshotStore trackerSnapshots = FakeTrackerSnapshotStore();
   final FakeTrackerValueStore trackerValues = FakeTrackerValueStore();
   final FakeStudioConfigStore studioConfigs = FakeStudioConfigStore();
+  late final FakeSessionDeletionStore sessionDeletions;
+  late final FakeCharacterDeletionStore characterDeletions;
   late final InMemoryManifestProvider manifestProvider;
 
   SyncWorld() {
+    sessionDeletions = FakeSessionDeletionStore(chats);
+    characterDeletions = FakeCharacterDeletionStore(characters);
     manifestProvider = InMemoryManifestProvider(
       characterRepo: characters,
       chatRepo: chats,
@@ -487,6 +523,8 @@ class SyncWorld {
     null,
     null,
     null,
+    sessionDeletions,
+    characterDeletions,
     (_) async {},
   );
 }

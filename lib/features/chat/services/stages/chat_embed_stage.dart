@@ -1,9 +1,10 @@
 import 'package:flutter/foundation.dart';
 
-import '../../../../core/llm/lorebook_providers.dart' show embeddingConfigProvider;
 import '../../../../core/llm/memory_injection_service.dart'
     show chatMessageEmbeddingServiceProvider;
 import '../../../../core/models/chat_message.dart';
+import '../../../../core/state/lorebook_embedding_provider.dart'
+    show embeddingConfigProvider;
 import 'stage_context.dart';
 
 /// Stage 3.5: embed raw chat-message chunks (fire-and-forget, best-effort

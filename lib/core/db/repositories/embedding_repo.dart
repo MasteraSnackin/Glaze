@@ -6,7 +6,7 @@ import '../app_db.dart';
 import '../tables.dart';
 import '../../llm/vector_math.dart';
 import '../../utils/time_helpers.dart';
-import '../../../features/cloud_sync/sync_repo_interfaces.dart';
+import '../../application/sync_repo_interfaces.dart';
 
 part 'embedding_repo.g.dart';
 
@@ -63,6 +63,25 @@ class EmbeddingRepo extends DatabaseAccessor<AppDatabase>
     )..where((e) => e.sourceId.equals(sourceId))).get();
   }
 
+  Future<List<EmbeddingRow>> getBySource(String sourceType, String sourceId) {
+    return (select(embeddings)
+          ..where((e) => e.sourceType.equals(sourceType))
+          ..where((e) => e.sourceId.equals(sourceId)))
+        .get();
+  }
+
+  Future<List<EmbeddingRow>> getBySourceIds(
+    String sourceType,
+    Iterable<String> sourceIds,
+  ) {
+    final ids = sourceIds.toSet();
+    if (ids.isEmpty) return Future.value(const []);
+    return (select(embeddings)
+          ..where((e) => e.sourceType.equals(sourceType))
+          ..where((e) => e.sourceId.isIn(ids)))
+        .get();
+  }
+
   Future<void> put(EmbeddingsCompanion entry) {
     return into(embeddings).insertOnConflictUpdate(entry);
   }
@@ -86,6 +105,20 @@ class EmbeddingRepo extends DatabaseAccessor<AppDatabase>
     return (delete(embeddings)
           ..where((e) => e.sourceType.equals(sourceType))
           ..where((e) => e.sourceId.equals(sourceId)))
+        .go();
+  }
+
+  Future<void> deleteBySourceAndEntryIds(
+    String sourceType,
+    String sourceId,
+    Iterable<String> entryIds,
+  ) {
+    final ids = entryIds.toSet();
+    if (ids.isEmpty) return Future.value();
+    return (delete(embeddings)
+          ..where((e) => e.sourceType.equals(sourceType))
+          ..where((e) => e.sourceId.equals(sourceId))
+          ..where((e) => e.entryId.isIn(ids)))
         .go();
   }
 

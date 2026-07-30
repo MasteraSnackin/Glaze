@@ -6,7 +6,6 @@ class ToastHandler {
   const ToastHandler();
 
   bool showToast(JsBridgeContext bridge) {
-    bridge.requireCapability('show_toast');
     final message = bridge.params['message'];
     if (message != null && message is! String) {
       throw ArgumentError('showToast message must be a string');

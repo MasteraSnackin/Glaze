@@ -8,7 +8,7 @@ import '../tables.dart';
 import '../../models/memory_book.dart';
 import '../../state/memory_settings_provider.dart';
 import '../../utils/time_helpers.dart';
-import '../../../features/cloud_sync/sync_repo_interfaces.dart';
+import '../../application/sync_repo_interfaces.dart';
 
 part 'memory_book_repo.g.dart';
 
@@ -346,11 +346,28 @@ class MemoryBookRepo extends DatabaseAccessor<AppDatabase>
   Future<void> copyForSessionBranch({
     required String fromSessionId,
     required String toSessionId,
+    required Set<String> messageIds,
   }) async {
     final source = await getBySessionId(fromSessionId);
     if (source == null) return;
+    bool isRetained(List<String> sourceIds) =>
+        sourceIds.isNotEmpty && sourceIds.every(messageIds.contains);
     await put(
-      source.copyWith(id: 'memorybook_$toSessionId', sessionId: toSessionId),
+      source.copyWith(
+        id: 'memorybook_$toSessionId',
+        sessionId: toSessionId,
+        entries: source.entries
+            .where((entry) => isRetained(entry.messageIds))
+            .map((entry) => entry.copyWith(id: '${entry.id}@$toSessionId'))
+            .toList(),
+        pendingDrafts: source.pendingDrafts
+            .where((draft) => isRetained(draft.messageIds))
+            .map((draft) => draft.copyWith(id: '${draft.id}@$toSessionId'))
+            .toList(),
+        // Derived indexes are intentionally not copied. Reprocessing the
+        // retained history is safer than inheriting an opaque source cursor.
+        lastProcessedMessageCount: 0,
+      ),
     );
   }
 

@@ -37,14 +37,16 @@ void main() {
 
     Future<void> putChunk({
       required String entryId,
+      String sourceType = 'chat_message',
+      String sourceId = 's1',
       required List<String> messageIds,
       required String text,
       required List<double> vector,
     }) {
       return repo.putEmbeddingVector(
         entryId: entryId,
-        sourceType: 'chat_message',
-        sourceId: 's1',
+        sourceType: sourceType,
+        sourceId: sourceId,
         vectors: [vector],
         textHash: entryId,
         retrievalMetadata: {
@@ -99,6 +101,38 @@ void main() {
 
       expect(result.matches.single.entryId, 'older');
       expect(result.matches.single.messageIds, ['m1']);
+    });
+
+    test('isolates recall rows by source type and session', () async {
+      await putChunk(
+        entryId: 'current-session',
+        messageIds: ['m1'],
+        text: 'current session chunk',
+        vector: [1, 0],
+      );
+      await putChunk(
+        entryId: 'other-session',
+        sourceId: 's2',
+        messageIds: ['m2'],
+        text: 'other session chunk',
+        vector: [1, 0],
+      );
+      await putChunk(
+        entryId: 'other-source',
+        sourceType: 'memory_entry',
+        messageIds: ['m3'],
+        text: 'other source chunk',
+        vector: [1, 0],
+      );
+
+      final result = await service.recall(
+        sessionId: 's1',
+        currentText: 'query',
+        config: const EmbeddingConfig(endpoint: 'test'),
+        threshold: 0,
+      );
+
+      expect(result.matches.map((match) => match.entryId), ['current-session']);
     });
   });
 }

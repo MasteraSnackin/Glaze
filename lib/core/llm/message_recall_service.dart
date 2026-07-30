@@ -68,15 +68,12 @@ class MessageRecallService {
       if (currentText.trim().isEmpty) return const MessageRecallResult();
       if (shouldAbort?.call() == true) return const MessageRecallResult();
 
-      final rows = await _repo.getBySourceType('chat_message');
+      final rows = await _repo.getBySource('chat_message', sessionId);
       if (shouldAbort?.call() == true) return const MessageRecallResult();
-      // Keep only rows for this session (the embeddings table is shared
-      // across sessions under one sourceType).
-      final sessionRows = rows.where((r) => r.sourceId == sessionId).toList();
-      if (sessionRows.isEmpty) return const MessageRecallResult();
+      if (rows.isEmpty) return const MessageRecallResult();
 
       final candidates = <VectorCandidate>[];
-      for (final row in sessionRows) {
+      for (final row in rows) {
         if (!_repo.hasUsableVectors(row)) continue;
         final vectors = _repo.decodeVectors(row);
         if (vectors == null || vectors.isEmpty) continue;

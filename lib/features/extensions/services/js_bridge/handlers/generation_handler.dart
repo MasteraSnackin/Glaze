@@ -6,7 +6,6 @@ class GenerationHandler {
   const GenerationHandler();
 
   FutureOr<Map<String, dynamic>> triggerGeneration(JsBridgeContext bridge) {
-    bridge.requireCapability('trigger_generation');
     final handler =
         bridge.triggerGeneration ??
         (throw UnsupportedError(
@@ -16,7 +15,6 @@ class GenerationHandler {
   }
 
   Future<String> generateText(JsBridgeContext bridge) {
-    bridge.requireCapability('generate_text');
     final prompt = bridge.params['prompt'];
     if (prompt is! String || prompt.trim().isEmpty) {
       throw ArgumentError('generateText prompt is required');

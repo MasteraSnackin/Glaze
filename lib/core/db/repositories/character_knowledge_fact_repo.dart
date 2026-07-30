@@ -627,11 +627,16 @@ class CharacterKnowledgeFactRepo {
         final journalMessageIds = (jsonDecode(journal.messageIdsJson) as List)
             .whereType<String>()
             .toList(growable: false);
-        if (!journalMessageIds.every(messageIds.contains)) continue;
+        if (!messageIds.contains(journal.endpointMessageId) ||
+            !journalMessageIds.every(messageIds.contains)) {
+          continue;
+        }
         final beforeImages = (jsonDecode(journal.beforeImagesJson) as List)
             .whereType<Map<String, dynamic>>()
+            .where((image) => copiedIds.contains(image['id']))
             .map((image) => {...image, 'id': '${image['id']}@$toSessionId'})
             .toList(growable: false);
+        if (beforeImages.isEmpty) continue;
         await db
             .into(db.ledgerReconciliationCleanupJournals)
             .insert(

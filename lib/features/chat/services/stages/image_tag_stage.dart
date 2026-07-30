@@ -21,6 +21,8 @@ class ImageTagStage {
     required int genId,
     required ChatGenerationService service,
   }) async {
+    final targetMessageId = result.session?.messages.lastOrNull?.id;
+    if (targetMessageId == null) return;
     final imgCancelToken = CancelToken();
     ctx.abortHandler.imgGenCancelToken = imgCancelToken;
 
@@ -37,6 +39,7 @@ class ImageTagStage {
             liveState: ctx.getState().value,
             update: update,
             sessionId: result.session!.id,
+            targetMessageId: targetMessageId,
             ownsOperation:
                 ctx.abortHandler.isCurrentGen(genId) &&
                 identical(ctx.abortHandler.imgGenCancelToken, imgCancelToken),
