@@ -371,7 +371,19 @@ class RoutmyImageProvider {
       if (commaIdx == -1) throw Exception('Invalid data URL');
       return ImageGenHttp.base64ToBytes(_base64Payload(url));
     }
-    final response = await _http.getRaw(url, cancelToken: cancelToken);
-    return response.data!;
+    try {
+      final response = await _http.getRaw(url, cancelToken: cancelToken);
+      final bytes = response.data;
+      if (bytes == null || bytes.isEmpty) {
+        throw Exception('rout.my image download returned an empty response');
+      }
+      return bytes;
+    } on DioException catch (error) {
+      if (CancelToken.isCancel(error)) rethrow;
+      final status = error.response?.statusCode;
+      throw Exception(
+        'rout.my image download failed${status == null ? '' : ' (HTTP $status)'}',
+      );
+    }
   }
 }

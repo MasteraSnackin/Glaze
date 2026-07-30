@@ -338,6 +338,6 @@ class ImageGenProcessor {
       final paths = ImageTagMarkup.extractImageResultPaths(messages[i].content);
       contexts.addAll(paths);
     }
-    return contexts.reversed.toList();
+    return contexts;
   }
 }
