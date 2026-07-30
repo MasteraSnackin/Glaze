@@ -9,7 +9,7 @@ import 'dart:convert';
 import '../../../core/llm/history_assembler.dart';
 import '../../../core/llm/prompt_builder.dart';
 import '../../../core/llm/prompt_isolate.dart';
-import '../../../core/llm/prompt_payload_builder.dart';
+import '../providers/prompt_build_providers.dart';
 import '../../../core/llm/transport/anthropic_chat_transport.dart';
 import '../../../core/llm/transport/chat_transport_request.dart';
 import '../../../core/llm/transport/gemini_chat_transport.dart';

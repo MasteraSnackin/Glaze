@@ -4,7 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:glaze_flutter/core/llm/prompt/lorebook_vector_searcher.dart';
-import 'package:glaze_flutter/core/llm/prompt_payload_builder.dart';
+import 'package:glaze_flutter/features/chat/providers/prompt_build_providers.dart';
 import 'package:glaze_flutter/features/chat/widgets/lorebook_vector_search_diagnostic_listener.dart';
 import 'package:glaze_flutter/shared/widgets/glaze_toast.dart';
 

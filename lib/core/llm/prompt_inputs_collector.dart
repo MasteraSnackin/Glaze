@@ -1,8 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../features/settings/api_list_provider.dart';
-import '../../features/extensions/services/ext_blocks_prompt_injection.dart';
-import '../../features/extensions/services/runtime_prompt_injection_service.dart';
+import '../models/api_config.dart';
 import '../models/chat_message.dart';
 import '../state/active_selection_provider.dart';
 import '../state/db_provider.dart';
@@ -13,10 +11,44 @@ import '../state/summary_providers.dart';
 import 'prompt_builder.dart';
 import 'prompt_inputs.dart';
 
+typedef ApiConfigInitializer = Future<void> Function();
+typedef ActiveApiConfigReader = ApiConfig? Function();
+typedef PromptHistoryInjector =
+    Future<List<ChatMessage>> Function({
+      required String sessionId,
+      required List<ChatMessage> messages,
+    });
+typedef RuntimePromptBlocksReader =
+    List<RuntimePromptBlock> Function(String sessionId);
+
 class PromptInputsCollector {
   final Ref _ref;
+  final ApiConfigInitializer _initializeApiConfigs;
+  final ActiveApiConfigReader _readActiveApiConfig;
+  final PromptHistoryInjector _injectHistory;
+  final RuntimePromptBlocksReader _readRuntimePromptBlocks;
 
-  PromptInputsCollector(this._ref);
+  factory PromptInputsCollector(
+    Ref ref, {
+    required ApiConfigInitializer initializeApiConfigs,
+    required ActiveApiConfigReader readActiveApiConfig,
+    required PromptHistoryInjector injectHistory,
+    required RuntimePromptBlocksReader readRuntimePromptBlocks,
+  }) => PromptInputsCollector._(
+    ref,
+    initializeApiConfigs,
+    readActiveApiConfig,
+    injectHistory,
+    readRuntimePromptBlocks,
+  );
+
+  PromptInputsCollector._(
+    this._ref,
+    this._initializeApiConfigs,
+    this._readActiveApiConfig,
+    this._injectHistory,
+    this._readRuntimePromptBlocks,
+  );
 
   /// Collects raw inputs from DB/providers for isolate-based processing.
   /// Fast path: DB reads only, no memory injection or vector search.
@@ -33,8 +65,8 @@ class PromptInputsCollector {
     final character = await charRepo.getById(charId);
     if (character == null) throw StateError('Character not found: $charId');
 
-    await _ref.read(apiListProvider.future);
-    final chatApi = _ref.read(activeApiConfigProvider);
+    await _initializeApiConfigs();
+    final chatApi = _readActiveApiConfig();
     if (chatApi == null || chatApi.mode == 'embedding') {
       throw StateError('No chat API config available');
     }
@@ -83,21 +115,8 @@ class PromptInputsCollector {
     var history = session?.messages ?? [];
     var runtimePromptBlocks = const <RuntimePromptBlock>[];
     if (session != null) {
-      history = await _ref
-          .read(extBlocksPromptInjectionProvider)
-          .injectIntoHistory(sessionId: session.id, messages: history);
-      runtimePromptBlocks = _ref
-          .read(runtimePromptInjectionProvider.notifier)
-          .bySession(session.id)
-          .map(
-            (block) => RuntimePromptBlock(
-              id: block.id,
-              content: block.content,
-              depth: block.depth,
-              role: block.role,
-            ),
-          )
-          .toList(growable: false);
+      history = await _injectHistory(sessionId: session.id, messages: history);
+      runtimePromptBlocks = _readRuntimePromptBlocks(session.id);
     }
 
     return PromptInputs(
@@ -163,7 +182,3 @@ class PromptInputsCollector {
     );
   }
 }
-
-final promptInputsCollectorProvider = Provider<PromptInputsCollector>((ref) {
-  return PromptInputsCollector(ref);
-});

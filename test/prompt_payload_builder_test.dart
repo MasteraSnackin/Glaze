@@ -5,6 +5,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/llm/prompt_payload_builder.dart';
+import 'package:glaze_flutter/core/llm/prompt_inputs_collector.dart';
+import 'package:glaze_flutter/core/llm/prompt_builder.dart';
 import 'package:glaze_flutter/core/models/api_config.dart';
 import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
@@ -26,9 +28,28 @@ void main() {
       addTearDown(container.dispose);
       addTearDown(db.close);
       var loadCount = 0;
-      final builderProvider = Provider(
-        (ref) => PromptPayloadBuilder(
+      final builderProvider = Provider((ref) {
+        Future<void> initializeApiConfigs() async {}
+        Future<List<ChatMessage>> injectHistory({
+          required String sessionId,
+          required List<ChatMessage> messages,
+        }) async => messages;
+        List<RuntimePromptBlock> readRuntimePromptBlocks(String sessionId) =>
+            const [];
+        final inputsCollector = PromptInputsCollector(
           ref,
+          initializeApiConfigs: initializeApiConfigs,
+          readActiveApiConfig: () => null,
+          injectHistory: injectHistory,
+          readRuntimePromptBlocks: readRuntimePromptBlocks,
+        );
+        return PromptPayloadBuilder(
+          ref,
+          inputsCollector: inputsCollector,
+          initializeApiConfigs: initializeApiConfigs,
+          readActiveApiConfig: () => null,
+          injectHistory: injectHistory,
+          readRuntimePromptBlocks: readRuntimePromptBlocks,
           loadEffectiveLedgerTrackers: (sessionId) async {
             loadCount++;
             return [
@@ -52,8 +73,8 @@ void main() {
               ),
             ];
           },
-        ),
-      );
+        );
+      });
       final builder = container.read(builderProvider);
 
       for (final (mode, expectedArc) in [('balanced', true), ('fast', false)]) {

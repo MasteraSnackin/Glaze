@@ -8,7 +8,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/llm/history_assembler.dart';
 import '../../../core/llm/prompt_isolate.dart';
-import '../../../core/llm/prompt_payload_builder.dart';
 import '../../../core/llm/prompt/main_model_context_snapshot.dart';
 import '../../../core/llm/studio/studio_stream_interceptor.dart';
 import '../../../core/llm/stream_accumulator.dart';
@@ -28,6 +27,7 @@ import '../../../core/state/active_selection_provider.dart';
 import '../../../core/state/memory_agent_providers.dart';
 import '../chat_provider.dart';
 import '../chat_state.dart';
+import '../providers/prompt_build_providers.dart';
 import '../state/cached_token_breakdown.dart';
 import '../state/memory_activity_provider.dart';
 import '../state/studio_cycle_state_mapper.dart';

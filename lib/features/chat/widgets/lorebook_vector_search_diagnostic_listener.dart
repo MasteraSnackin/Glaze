@@ -1,7 +1,7 @@
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/llm/prompt_payload_builder.dart';
+import '../providers/prompt_build_providers.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 
 class LorebookVectorSearchDiagnosticListener extends ConsumerWidget {

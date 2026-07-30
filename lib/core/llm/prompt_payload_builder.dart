@@ -1,9 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_riverpod/legacy.dart';
 import 'package:dio/dio.dart';
 
-import '../../features/settings/api_list_provider.dart';
 import '../models/api_config.dart';
 import '../models/character.dart';
 import '../models/chat_message.dart';
@@ -23,8 +21,6 @@ import '../state/summary_providers.dart';
 import 'memory_injection_service.dart';
 import 'message_recall_service.dart';
 import 'memory_selector.dart';
-import '../../features/extensions/services/ext_blocks_prompt_injection.dart';
-import '../../features/extensions/services/runtime_prompt_injection_service.dart';
 import 'prompt_builder.dart';
 import 'prompt/arc_state_builder.dart';
 import 'prompt/ledger_tracker_loader.dart';
@@ -42,9 +38,11 @@ class PromptPayloadBuilder {
   final Ref _ref;
   final Future<List<Tracker>> Function(String sessionId)
   _loadEffectiveLedgerTrackers;
-  late final PromptInputsCollector _inputsCollector = PromptInputsCollector(
-    _ref,
-  );
+  final PromptInputsCollector _inputsCollector;
+  final ApiConfigInitializer _initializeApiConfigs;
+  final ActiveApiConfigReader _readActiveApiConfig;
+  final PromptHistoryInjector _injectHistory;
+  final RuntimePromptBlocksReader _readRuntimePromptBlocks;
   late final LorebookVectorSearcher _vectorSearcher = LorebookVectorSearcher(
     _ref,
     onDiagnostic: onLorebookVectorSearchDiagnostic,
@@ -53,15 +51,39 @@ class PromptPayloadBuilder {
   final void Function(LorebookVectorSearchDiagnostic diagnostic)?
   onLorebookVectorSearchDiagnostic;
 
-  PromptPayloadBuilder(
+  factory PromptPayloadBuilder(
     Ref ref, {
+    required PromptInputsCollector inputsCollector,
+    required ApiConfigInitializer initializeApiConfigs,
+    required ActiveApiConfigReader readActiveApiConfig,
+    required PromptHistoryInjector injectHistory,
+    required RuntimePromptBlocksReader readRuntimePromptBlocks,
     Future<List<Tracker>> Function(String sessionId)?
     loadEffectiveLedgerTrackers,
+    void Function(LorebookVectorSearchDiagnostic diagnostic)?
+    onLorebookVectorSearchDiagnostic,
+  }) => PromptPayloadBuilder._(
+    ref,
+    inputsCollector,
+    initializeApiConfigs,
+    readActiveApiConfig,
+    injectHistory,
+    readRuntimePromptBlocks,
+    loadEffectiveLedgerTrackers ??
+        LedgerTrackerLoader(ref).loadEffectiveLedgerTrackers,
+    onLorebookVectorSearchDiagnostic,
+  );
+
+  PromptPayloadBuilder._(
+    this._ref,
+    this._inputsCollector,
+    this._initializeApiConfigs,
+    this._readActiveApiConfig,
+    this._injectHistory,
+    this._readRuntimePromptBlocks,
+    this._loadEffectiveLedgerTrackers,
     this.onLorebookVectorSearchDiagnostic,
-  }) : _ref = ref,
-       _loadEffectiveLedgerTrackers =
-           loadEffectiveLedgerTrackers ??
-           LedgerTrackerLoader(ref).loadEffectiveLedgerTrackers;
+  );
 
   /// Collects raw inputs from DB/providers for isolate-based processing.
   /// Fast path: DB reads only, no memory injection or vector search.
@@ -101,9 +123,9 @@ class PromptPayloadBuilder {
     throwIfAborted();
     if (character == null) throw StateError('Character not found: $charId');
 
-    await _ref.read(apiListProvider.future);
+    await _initializeApiConfigs();
     throwIfAborted();
-    final chatApi = apiConfigOverride ?? _ref.read(activeApiConfigProvider);
+    final chatApi = apiConfigOverride ?? _readActiveApiConfig();
     if (chatApi == null || chatApi.mode == 'embedding') {
       throw StateError('No chat API config available');
     }
@@ -157,22 +179,9 @@ class PromptPayloadBuilder {
     );
 
     if (session != null) {
-      history = await _ref
-          .read(extBlocksPromptInjectionProvider)
-          .injectIntoHistory(sessionId: session.id, messages: history);
+      history = await _injectHistory(sessionId: session.id, messages: history);
       throwIfAborted();
-      runtimePromptBlocks = _ref
-          .read(runtimePromptInjectionProvider.notifier)
-          .bySession(session.id)
-          .map(
-            (block) => RuntimePromptBlock(
-              id: block.id,
-              content: block.content,
-              depth: block.depth,
-              role: block.role,
-            ),
-          )
-          .toList(growable: false);
+      runtimePromptBlocks = _readRuntimePromptBlocks(session.id);
 
       final summaryService = _ref.read(summaryServiceProvider);
       summaryContent = await summaryService.getSummary(session.id);
@@ -478,9 +487,7 @@ class PromptPayloadBuilder {
     List<LorebookEntry> vectorEntries = [];
     List<ChatMessage> history = session?.messages ?? [];
     if (session != null) {
-      history = await _ref
-          .read(extBlocksPromptInjectionProvider)
-          .injectIntoHistory(sessionId: session.id, messages: history);
+      history = await _injectHistory(sessionId: session.id, messages: history);
     }
     if (!skipVectorSearch && session != null) {
       vectorEntries = await _vectorSearcher.search(
@@ -590,16 +597,3 @@ class PromptPayloadBuilder {
 class _GenerationAbortedException implements Exception {
   const _GenerationAbortedException();
 }
-
-final promptPayloadBuilderProvider = Provider<PromptPayloadBuilder>((ref) {
-  return PromptPayloadBuilder(
-    ref,
-    onLorebookVectorSearchDiagnostic: (diagnostic) {
-      ref.read(lorebookVectorSearchDiagnosticProvider.notifier).state =
-          diagnostic;
-    },
-  );
-});
-
-final lorebookVectorSearchDiagnosticProvider =
-    StateProvider<LorebookVectorSearchDiagnostic?>((ref) => null);
