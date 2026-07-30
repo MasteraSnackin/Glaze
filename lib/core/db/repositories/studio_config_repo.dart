@@ -179,7 +179,9 @@ class StudioConfigRepo implements SyncStudioConfigStore {
   }) async {
     final source = await getBySessionId(fromSessionId);
     if (source == null) return;
-    await upsert(
+    // A branch needs only its session binding. Do not route through upsert(),
+    // which would also rewrite the shared profile row and its updatedAt.
+    await _upsertRow(
       source.copyWith(
         sessionId: toSessionId,
         profileId: source.profileId.isNotEmpty

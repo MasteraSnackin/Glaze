@@ -335,3 +335,23 @@ tracked via `SyncDeletionTracker.record('tracker_snapshot', sessionId)`.
 - **Never** drop the sentinel anchor `(messageId='')` via
   `deleteForMessage`. Only `deleteBySessionId` / `deleteByCharacterId`
   may drop it.
+
+---
+
+## Session branch policy
+
+`ChatSessionService.branchSession` creates the branch and updates the
+character's current session in one Drift transaction. Session baseline and
+Studio configuration are copied as settings. Provenance-backed state is copied
+only when its complete source range is retained: tracker snapshots, character
+knowledge facts, reconciliation checkpoints and cleanup journals, completed
+InfoBlocks, and MemoryBook entries/drafts with non-empty `messageIds`.
+
+Live tracker rows are reconstructed from the latest copied snapshot. Generated
+summary content is reset while its enabled/prompt settings are retained.
+MemoryBook settings are retained, but unprovenanced entries and drafts are
+reset; retained items receive branch-local IDs. Memory Catalog, Memory Graph
+(entity/salience/cadence/consolidation), and memory embeddings are not copied:
+they are derived indexes and must rebuild from the branch's retained MemoryBook
+and chat history. Preference bindings live in SharedPreferences and are copied
+only after the database transaction commits.

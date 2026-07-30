@@ -90,6 +90,8 @@ class LedgerReconciliationCheckpointRepo {
   }) async {
     final checkpoint = await get(fromSessionId);
     if (checkpoint == null ||
+        !messageIds.contains(checkpoint.startMessageId) ||
+        !messageIds.contains(checkpoint.endMessageId) ||
         !checkpoint.messageIds.every(messageIds.contains)) {
       return;
     }

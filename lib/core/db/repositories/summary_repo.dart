@@ -65,4 +65,21 @@ class SummaryRepo extends DatabaseAccessor<AppDatabase>
         .go()
         .then((_) {});
   }
+
+  /// Carries user settings, but resets generated content because this model
+  /// has only a message count and cannot prove that a summary predates a cut.
+  Future<void> copySettingsForSessionBranch({
+    required String fromSessionId,
+    required String toSessionId,
+  }) async {
+    final source = await get(fromSessionId);
+    if (source == null) return;
+    await put(
+      sessionId: toSessionId,
+      content: '',
+      messageCount: 0,
+      enabled: source.enabled,
+      prompt: source.prompt,
+    );
+  }
 }

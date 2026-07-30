@@ -218,74 +218,101 @@ class ChatSessionService {
     int messageIndex,
   ) async {
     final repo = _ref.read(chatRepoProvider);
-    final nextIndex = await _nextSessionIndex(charId);
-    final session = ChatSession(
-      id: '${charId}_$nextIndex',
-      characterId: charId,
-      sessionIndex: nextIndex,
-      messages: current.messages.sublist(0, messageIndex + 1),
-      // Stamp the branch time (ms, to match message timestamps) so the WebView
-      // can render a "Branched on …" separator at the top of the new session.
-      // Overrides any inherited marker from the parent — this is the new
-      // session's own branch point.
-      sessionVars: {
-        ...current.sessionVars,
-        'branchedAt': DateTime.now().millisecondsSinceEpoch.toString(),
-      },
-      // Carry the chat-scoped author's note and summary into the branch —
-      // both are session state that the user set for this conversation and
-      // expects to continue in the fork.
-      authorsNote: current.authorsNote,
-      summary: current.summary,
-      updatedAt: currentTimestampSeconds(),
-    );
-    await repo.put(session);
-    // Carry chat-scoped connections (persona / preset / lorebook activations)
-    // keyed by the parent session id onto the new session id. Without this the
-    // branch loses its bound persona, preset and enabled lorebooks and silently
-    // falls back to character/global defaults.
-    _copyChatConnections(fromSessionId: current.id, toSessionId: session.id);
-    await _ref
-        .read(memoryBookRepoProvider)
-        .copyForSessionBranch(
-          fromSessionId: current.id,
-          toSessionId: session.id,
-        );
-    await _ref
-        .read(studioConfigRepoProvider)
-        .copyForSessionBranch(
-          fromSessionId: current.id,
-          toSessionId: session.id,
-        );
-    // Copy tracker snapshots for the sliced message range into the new
-    // sessionId. Messages are not re-id'd on branch, so the sessionId prefix
-    // in the snapshot PK isolates each branch's rows (no cross-session
-    // aliasing). Without this, a branched session would lose all tracker
-    // provenance — the read path (getLatestCommitted) would find no snapshots
-    // and fall back to an empty tracker list.
-    final branchedMessageIds = session.messages.map((m) => m.id).toSet();
-    await _ref
-        .read(trackerSnapshotRepoProvider)
-        .copyForSessionBranch(
-          fromSessionId: current.id,
-          toSessionId: session.id,
-          messageIds: branchedMessageIds,
-        );
-    await _ref
-        .read(characterKnowledgeFactRepoProvider)
-        .copyForSessionBranch(
-          fromSessionId: current.id,
-          toSessionId: session.id,
-          messageIds: branchedMessageIds,
-        );
-    await _ref
-        .read(ledgerReconciliationCheckpointRepoProvider)
-        .copyForSessionBranch(
-          fromSessionId: current.id,
-          toSessionId: session.id,
-          messageIds: branchedMessageIds,
-        );
-    await saveCurrentSessionIndex(charId, nextIndex);
+    final session = await repo.transaction(() async {
+      final nextIndex = await _nextSessionIndex(charId);
+      final branch = ChatSession(
+        id: '${charId}_$nextIndex',
+        characterId: charId,
+        sessionIndex: nextIndex,
+        messages: current.messages.sublist(0, messageIndex + 1),
+        sessionVars: {
+          ...current.sessionVars,
+          'branchedAt': DateTime.now().millisecondsSinceEpoch.toString(),
+        },
+        authorsNote: current.authorsNote,
+        updatedAt: currentTimestampSeconds(),
+      );
+      final messageIds = branch.messages.map((message) => message.id).toSet();
+      await repo.put(branch);
+      await _ref
+          .read(characterSessionBaselineRepoProvider)
+          .copyForSessionBranch(
+            fromSessionId: current.id,
+            toSessionId: branch.id,
+          );
+      await _ref
+          .read(memoryBookRepoProvider)
+          .copyForSessionBranch(
+            fromSessionId: current.id,
+            toSessionId: branch.id,
+            messageIds: messageIds,
+          );
+      await _ref
+          .read(studioConfigRepoProvider)
+          .copyForSessionBranch(
+            fromSessionId: current.id,
+            toSessionId: branch.id,
+          );
+      await _ref
+          .read(trackerSnapshotRepoProvider)
+          .copyForSessionBranch(
+            fromSessionId: current.id,
+            toSessionId: branch.id,
+            messageIds: messageIds,
+          );
+      final latestSnapshot = await _ref
+          .read(trackerSnapshotRepoProvider)
+          .getLatest(branch.id);
+      if (latestSnapshot != null) {
+        await _ref
+            .read(trackerRepoProvider)
+            .replaceForSession(branch.id, latestSnapshot.trackers);
+      }
+      await _ref
+          .read(characterKnowledgeFactRepoProvider)
+          .copyForSessionBranch(
+            fromSessionId: current.id,
+            toSessionId: branch.id,
+            messageIds: messageIds,
+          );
+      await _ref
+          .read(ledgerReconciliationCheckpointRepoProvider)
+          .copyForSessionBranch(
+            fromSessionId: current.id,
+            toSessionId: branch.id,
+            messageIds: messageIds,
+          );
+      await _ref
+          .read(infoBlocksRepoProvider)
+          .copyForSessionBranch(
+            fromSessionId: current.id,
+            toSessionId: branch.id,
+            messageIds: messageIds,
+          );
+      await _ref
+          .read(summaryRepoProvider)
+          .copySettingsForSessionBranch(
+            fromSessionId: current.id,
+            toSessionId: branch.id,
+          );
+      final character = await _ref.read(characterRepoProvider).getById(charId);
+      if (character == null) {
+        throw StateError('Character $charId not found');
+      }
+      await _ref
+          .read(characterRepoProvider)
+          .put(character.copyWith(currentSessionIndex: nextIndex));
+      return (await repo.getById(branch.id))!;
+    });
+
+    // These bindings live in SharedPreferences and cannot join the DB
+    // transaction. Copy them only after the durable branch has committed.
+    try {
+      _copyChatConnections(fromSessionId: current.id, toSessionId: session.id);
+    } catch (error) {
+      debugPrint('[ChatSessionService] branch preference copy error: $error');
+    }
+    updateCache(session);
     return session;
   }
 
@@ -298,9 +325,7 @@ class ChatSessionService {
     required String fromSessionId,
     required String toSessionId,
   }) {
-    final personaId = _ref
-        .read(personaConnectionsProvider)
-        .chat[fromSessionId];
+    final personaId = _ref.read(personaConnectionsProvider).chat[fromSessionId];
     if (personaId != null) {
       setPersonaConnectionRef(_ref, 'chat', toSessionId, personaId);
     }
