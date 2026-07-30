@@ -167,34 +167,10 @@ class ImpersonationService {
     });
 
     await transport.stream(
-      request: ChatTransportRequest(
-        endpoint: apiConfig.endpoint,
-        apiKey: apiConfig.apiKey,
-        model: apiConfig.model,
+      request: ChatTransportRequest.fromApiConfig(
+        apiConfig,
         messages: apiMessages,
-        maxTokens: apiConfig.maxTokens,
-        temperature: apiConfig.temperature,
-        topP: apiConfig.topP,
-        topK: apiConfig.topK,
-        frequencyPenalty: apiConfig.frequencyPenalty,
-        presencePenalty: apiConfig.presencePenalty,
-        stream: apiConfig.stream,
-        requestReasoning: apiConfig.requestReasoning,
-        useResponsesApi: apiConfig.useResponsesApi,
-        reasoningEffort: apiConfig.reasoningEffort,
-        omitTemperature: apiConfig.omitTemperature,
-        omitTopP: apiConfig.omitTopP,
-        omitTopK: apiConfig.omitTopK,
-        omitFrequencyPenalty: apiConfig.omitFrequencyPenalty,
-        omitPresencePenalty: apiConfig.omitPresencePenalty,
-        omitReasoning: apiConfig.omitReasoning,
-        omitReasoningEffort: apiConfig.omitReasoningEffort,
-        showNativeReasoning: apiConfig.showNativeReasoning,
         sessionId: session.id,
-        cacheControlTtl: apiConfig.cacheControlTtl,
-        cacheBreakpointMode: apiConfig.cacheBreakpointMode,
-        sessionIdMode: apiConfig.sessionIdMode,
-        extraRequestParameters: apiConfig.extraRequestParameters,
       ),
       cancelToken: cancelToken,
       onUpdate: (delta, reasoningDelta) {

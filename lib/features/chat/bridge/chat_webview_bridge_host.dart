@@ -138,33 +138,13 @@ class ChatWebViewBridgeHost {
     final transport = pickChatTransport(apiConfig.protocol);
     unawaited(
       transport.stream(
-        request: ChatTransportRequest(
-          endpoint: apiConfig.endpoint,
-          apiKey: apiConfig.apiKey,
-          model: apiConfig.model,
+        request: ChatTransportRequest.fromApiConfig(
+          apiConfig,
           messages: [
             {'role': 'user', 'content': prompt},
           ],
-          maxTokens: apiConfig.maxTokens,
-          temperature: apiConfig.temperature,
-          topP: apiConfig.topP,
-          topK: apiConfig.topK,
-          frequencyPenalty: apiConfig.frequencyPenalty,
-          presencePenalty: apiConfig.presencePenalty,
           stream: false,
-          requestReasoning: apiConfig.requestReasoning,
-          useResponsesApi: apiConfig.useResponsesApi,
-          reasoningEffort: apiConfig.reasoningEffort,
-          omitTemperature: apiConfig.omitTemperature,
-          omitTopP: apiConfig.omitTopP,
-          omitTopK: apiConfig.omitTopK,
-          omitFrequencyPenalty: apiConfig.omitFrequencyPenalty,
-          omitPresencePenalty: apiConfig.omitPresencePenalty,
-          omitReasoning: apiConfig.omitReasoning,
-          omitReasoningEffort: apiConfig.omitReasoningEffort,
-          showNativeReasoning: apiConfig.showNativeReasoning,
           sessionId: currentSessionId(),
-          cacheControlTtl: apiConfig.cacheControlTtl,
         ),
         cancelToken: cancelToken,
         onComplete: (text, _, {rawResponseJson}) {
