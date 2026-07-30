@@ -73,9 +73,13 @@ ChatNotifier.abortGeneration()
       → _activeGenId++              ← invalidates pending callbacks
       → _cancelToken?.cancel()      ← propagates to Dio / SSE
       → _imgGenCancelToken?.cancel()
-      → read streamingStateProvider → persist partial text if any
-      → isGenerating / isGeneratingImage → false
-      → restoration snapshot handling
+      → cancel cleaner / extension work
+      → capture partial stream and clear transient streaming indicators
+      → atomically persist partial/restoration against latest durable session
+      → re-check generation/ref ownership
+      → publish the durable session to cache/state
+      → isGenerating / isPostGenRunning / isGeneratingImage → false
+      → clear restoration snapshot
 
 Separately:
   → SseClient: DioException(cancel)
@@ -85,8 +89,10 @@ Separately:
 **Never break this chain.** If `CancelToken` doesn't reach `Dio`, stop only clears UI
 while the TCP stream continues.
 
-Partial text persistence lives in `AbortHandler`, not in `ChatNotifier` directly.
-See INV-C3 in `docs/INVARIANTS.md`.
+Partial/restoration persistence lives in `AbortHandler`, not in `ChatNotifier`
+directly. On a conflict or persistence failure, reload the durable row; never
+publish a speculative restoration. The generation mutex remains held until
+this durable settlement completes. See INV-C3 in `docs/INVARIANTS.md`.
 
 ---
 
@@ -150,6 +156,10 @@ Studio Mode (tracker-around-generator, Phase 5+):
 - Studio profiles are reusable prompt/agent presets stored in DB and can be
   bound to multiple chat sessions. Do not treat Studio config as purely
   session-local state.
+- A normal turn resolves one immutable `StudioTurnConfigSnapshot` before prompt
+  construction. Trackers, final generation, POST-cleaner, and Ledger consume
+  that same snapshot; mid-turn settings/preset/API changes affect the next
+  turn. Separate manual operations may resolve a fresh snapshot (INV-ST8).
 - POST-processing is separate from the tracker pipeline: the POST-cleaner
   runs after the full reply and writes a blue `'cleaned'` agent sub-swipe
   via `ChatRepo.appendAgentSwipe(kind: 'cleaned')`, preserving the original
@@ -164,6 +174,10 @@ Studio Mode (tracker-around-generator, Phase 5+):
   via `ChatRepo.removeAgentSwipe`. Each swipe carries its own `genTime`
   (cleaner elapsed) + `tokens` (estimateTokens) so the per-swipe badge
   persists.
+- Cleaner runs are lease-owned per `(sessionId, messageId)`. A newer same-key
+  run cancels and waits for the previous cleanup; superseded queued runs never
+  start. Only the latest shared-state owner may publish cleaner UI/token state
+  (INV-ST9).
 - **Separate audit model (UX phase):** `PipelineSettings.postCleanerAuditModel`
   overrides only the model for the character/world audit; endpoint/key/source/
   protocol are inherited from the cleaner config. Falls back to the
@@ -185,9 +199,10 @@ Studio Mode (tracker-around-generator, Phase 5+):
 
 ## Session variables on abort/error ✅ ENFORCED (PR-B C11)
 
-`pendingSessionVars` from the isolate are written only on the success path
-(`SavedMessageWriter.writeAssistant`). Error and regen-error paths keep the
-pre-generation `sessionVars`. See INV-C5.
+`SavedMessageWriter` carries `pendingSessionVars`, but persistence occurs only
+when `GenerationPipeline._commitGenerationResult` merges their delta into the
+latest durable row via `ChatRepo.mutateSession`. Continuation uses the same
+rule. Error, rollback, and abort paths do not apply the delta. See INV-C5.
 
 ---
 
