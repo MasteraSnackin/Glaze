@@ -550,6 +550,7 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
         config,
         embeddingTarget: _settings?.embeddingTarget ?? 'content',
         onProgress: (current, total, name) {
+          if (!mounted) return;
           setState(
             () => _indexStatus = 'index_progress'.tr(
               namedArgs: {'done': '$current', 'total': '$total'},
@@ -614,6 +615,7 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
         retryFailedOnly: true,
         embeddingTarget: _settings?.embeddingTarget ?? 'content',
         onProgress: (current, total, name) {
+          if (!mounted) return;
           setState(
             () => _indexStatus = 'index_progress'.tr(
               namedArgs: {'done': '$current', 'total': '$total'},
@@ -709,6 +711,7 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
         forceReindex: true,
         embeddingTarget: _settings?.embeddingTarget ?? 'content',
         onProgress: (current, total, name) {
+          if (!mounted) return;
           setState(
             () => _indexStatus = 'index_progress'.tr(
               namedArgs: {'done': '$current', 'total': '$total'},
