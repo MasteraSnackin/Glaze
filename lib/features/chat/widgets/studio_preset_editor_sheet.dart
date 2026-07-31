@@ -9,8 +9,8 @@ import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../studio/widgets/studio_block_editor_dialog.dart';
 import '../../studio/widgets/studio_preset_group_tile.dart';
 
-/// Studio Preset Editor as a bottom sheet — replaces the full-screen
-/// [StudioPresetEditorScreen]. Shows preset blocks grouped by section.
+/// Studio Preset Editor as a bottom sheet — the only preset editor left after
+/// the full-screen variant was removed. Shows preset blocks grouped by section.
 ///
 /// All prompt sections are visible so imported presets remain fully editable.
 class StudioPresetEditorSheet extends ConsumerStatefulWidget {

@@ -8,7 +8,6 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/models/preset.dart';
 import '../../core/state/active_selection_provider.dart';
-import '../../core/state/active_studio_preset_provider.dart';
 import '../../core/utils/platform_paths.dart';
 import '../../core/state/db_provider.dart';
 import '../../shared/shell/nav_height_provider.dart';
@@ -20,8 +19,10 @@ import '../../shared/shell/shell_header_provider.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glass_surface.dart';
 import '../chat/widgets/chat_stats_sheet.dart';
+import '../chat/widgets/studio_settings_sheet.dart';
+import '../extensions/providers/extensions_settings_provider.dart';
+import '../extensions/widgets/ext_blocks_settings_sheet.dart';
 import '../image_gen/widgets/image_gen_sheet.dart';
-import '../studio/screens/studio_preset_editor_screen.dart';
 
 class PersonaInfo {
   final String name;
@@ -122,16 +123,43 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
     super.dispose();
   }
 
-  /// Opens the Studio preset editor for the globally active Studio preset.
-  /// Studio presets are app-wide, so this needs no active chat session.
-  Future<void> _openStudio() async {
-    final presetId = await ref.read(activeStudioPresetProvider.future);
-    if (!mounted) return;
-    await Navigator.of(context, rootNavigator: true).push(
-      MaterialPageRoute<void>(
-        builder: (_) => StudioPresetEditorScreen(presetId: presetId),
-      ),
-    );
+  /// Opens the same Studio sheet as chat Quick Access. Studio settings and
+  /// presets are app-wide, so it runs here without a chat session (the
+  /// session-only Recovery block hides itself).
+  Future<void> _openStudio() => StudioSettingsSheet.show(context);
+
+  /// Opens the same Ext Blocks sheet as chat Quick Access.
+  Future<void> _openExtBlocks() => showModalBottomSheet<void>(
+    context: context,
+    useRootNavigator: true,
+    backgroundColor: context.cs.surfaceContainerHigh,
+    isScrollControlled: true,
+    builder: (_) => const ExtBlocksSettingsSheet(),
+  );
+
+  /// Lays [tiles] out two per row, 8px apart. IntrinsicHeight + stretch so
+  /// both tiles in a row share the taller one's height and fill the whole
+  /// allocated cell; an odd tile count leaves the trailing cell empty.
+  List<Widget> _gridRows(List<Widget> tiles) {
+    final rows = <Widget>[];
+    for (var i = 0; i < tiles.length; i += 2) {
+      if (rows.isNotEmpty) rows.add(const SizedBox(height: 8));
+      rows.add(
+        IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(child: tiles[i]),
+              const SizedBox(width: 8),
+              Expanded(
+                child: i + 1 < tiles.length ? tiles[i + 1] : const SizedBox(),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    return rows;
   }
 
   /// Animates the list back to the top (guarded against a detached / multiply
@@ -155,6 +183,9 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
         ref.watch(_activePresetProvider)?.name ?? 'label_default'.tr();
     final presetImage = ref.watch(_activePresetImageProvider);
     final studioEnabled = ref.watch(studioFeatureEnabledProvider);
+    final extBlocksEnabled = ref.watch(
+      extensionsSettingsProvider.select((s) => s.enabled),
+    );
     final topPad = MediaQuery.of(context).padding.top + 66.0;
 
     // Re-tap on the active Tools navbar tab → scroll to top (sub-routes are
@@ -188,99 +219,67 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
                 onTap: () => context.push('/tools/presets'),
               ),
               const SizedBox(height: 10),
-              // IntrinsicHeight + stretch so both tiles in a row share the
-              // taller one's height and fill the whole allocated cell.
-              IntrinsicHeight(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Expanded(
-                      child: _GridTile(
-                        iconPath: _kIconApi,
-                        title: 'tab_api'.tr(),
-                        subtitle: 'tools_api_subtitle'.tr(),
-                        showStatusDot: true,
-                        onTap: () => context.push('/tools/api'),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _GridTile(
-                        iconPath: _kIconLorebook,
-                        title: 'menu_lorebooks'.tr(),
-                        subtitle: 'tools_lorebooks_subtitle'.tr(),
-                        onTap: () => context.push('/tools/lorebooks'),
-                      ),
-                    ),
-                  ],
+              ..._gridRows([
+                _GridTile(
+                  iconPath: _kIconApi,
+                  title: 'tab_api'.tr(),
+                  subtitle: 'tools_api_subtitle'.tr(),
+                  showStatusDot: true,
+                  onTap: () => context.push('/tools/api'),
                 ),
-              ),
-              const SizedBox(height: 8),
-              IntrinsicHeight(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Expanded(
-                      child: _GridTile(
-                        iconPath: _kIconRegex,
-                        title: 'menu_regex'.tr(),
-                        subtitle: 'tools_regex_subtitle'.tr(),
-                        onTap: () => context.push('/tools/regex'),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _GridTile(
-                        iconPath: _kIconStats,
-                        title: 'stats_title'.tr(),
-                        subtitle: 'stats_subtitle'.tr(),
-                        onTap: () => showModalBottomSheet<void>(
-                          context: context,
-                          isScrollControlled: true,
-                          useRootNavigator: true,
-                          backgroundColor: Colors.transparent,
-                          builder: (_) =>
-                              const ChatStatsSheet(initialCharId: ''),
-                        ),
-                      ),
-                    ),
-                  ],
+                _GridTile(
+                  iconPath: _kIconLorebook,
+                  title: 'menu_lorebooks'.tr(),
+                  subtitle: 'tools_lorebooks_subtitle'.tr(),
+                  onTap: () => context.push('/tools/lorebooks'),
                 ),
-              ),
-              const SizedBox(height: 8),
-              IntrinsicHeight(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Expanded(
-                      child: _GridTile(
-                        iconPath: _kIconImageGen,
-                        title: 'imggen_title'.tr(),
-                        subtitle: 'imggen_subtitle'.tr(),
-                        onTap: () => showModalBottomSheet<void>(
-                          context: context,
-                          isScrollControlled: true,
-                          useRootNavigator: true,
-                          backgroundColor: Colors.transparent,
-                          builder: (_) => const ImageGenSheet(),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    // Studio only appears once its experimental master switch is on.
-                    Expanded(
-                      child: studioEnabled
-                          ? _GridTile(
-                              icon: Icons.movie_filter_outlined,
-                              title: 'menu_studio'.tr(),
-                              subtitle: 'tools_studio_subtitle'.tr(),
-                              onTap: _openStudio,
-                            )
-                          : const SizedBox(),
-                    ),
-                  ],
+                _GridTile(
+                  iconPath: _kIconRegex,
+                  title: 'menu_regex'.tr(),
+                  subtitle: 'tools_regex_subtitle'.tr(),
+                  onTap: () => context.push('/tools/regex'),
                 ),
-              ),
+                _GridTile(
+                  iconPath: _kIconStats,
+                  title: 'stats_title'.tr(),
+                  subtitle: 'stats_subtitle'.tr(),
+                  onTap: () => showModalBottomSheet<void>(
+                    context: context,
+                    isScrollControlled: true,
+                    useRootNavigator: true,
+                    backgroundColor: Colors.transparent,
+                    builder: (_) => const ChatStatsSheet(initialCharId: ''),
+                  ),
+                ),
+                _GridTile(
+                  iconPath: _kIconImageGen,
+                  title: 'imggen_title'.tr(),
+                  subtitle: 'imggen_subtitle'.tr(),
+                  onTap: () => showModalBottomSheet<void>(
+                    context: context,
+                    isScrollControlled: true,
+                    useRootNavigator: true,
+                    backgroundColor: Colors.transparent,
+                    builder: (_) => const ImageGenSheet(),
+                  ),
+                ),
+                // Ext Blocks and Studio only appear once their experimental
+                // master switches are on — same gating as chat Quick Access.
+                if (extBlocksEnabled)
+                  _GridTile(
+                    icon: Icons.extension_outlined,
+                    title: 'ext_blocks_title'.tr(),
+                    subtitle: 'tools_ext_blocks_subtitle'.tr(),
+                    onTap: _openExtBlocks,
+                  ),
+                if (studioEnabled)
+                  _GridTile(
+                    icon: Icons.movie_filter_outlined,
+                    title: 'menu_studio'.tr(),
+                    subtitle: 'tools_studio_subtitle'.tr(),
+                    onTap: _openStudio,
+                  ),
+              ]),
             ],
           ),
         ],

@@ -34,21 +34,28 @@ import 'studio_slot_settings_dialog.dart';
 ///   provider and stored in PipelineSettings
 /// - Edit Preset Blocks button → opens [StudioPresetEditorSheet]
 /// - Recovery button (re-run tracker/memory cycles)
+///
+/// Opened from chat Quick Access with a session (`charId`/`sessionId` set), and
+/// from the Tools tab without one. Session-less ("global") mode edits the
+/// global Studio profile — everything but Recovery, which needs a session to
+/// re-run.
 class StudioSettingsSheet extends ConsumerStatefulWidget {
-  final String charId;
-  final String sessionId;
+  final String? charId;
+  final String? sessionId;
 
-  const StudioSettingsSheet({
-    super.key,
-    required this.charId,
-    required this.sessionId,
-  });
+  const StudioSettingsSheet({super.key, this.charId, this.sessionId});
 
-  /// Convenience launcher.
+  /// Session id of the auto-created global profile, used when the sheet is
+  /// opened outside a chat and no Studio profile exists yet. Later sessions
+  /// inherit it through `StudioConfigRepo.getBySessionId`'s profile fallback.
+  static const globalProfileId = 'studio_global_profile';
+
+  /// Convenience launcher. Omit [charId]/[sessionId] to edit the global
+  /// Studio profile (Tools tab entry point).
   static Future<void> show(
     BuildContext context, {
-    required String charId,
-    required String sessionId,
+    String? charId,
+    String? sessionId,
   }) {
     return GlazeBottomSheet.show<void>(
       context,
@@ -81,16 +88,21 @@ class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
   Future<void> _load() async {
     await ref.read(apiListProvider.future);
     final repo = ref.read(studioConfigRepoProvider);
-    var config = await repo.getBySessionId(widget.sessionId);
+    final sessionId = widget.sessionId;
+    // No session (Tools entry point) → edit the global profile.
+    var config = sessionId != null
+        ? await repo.getBySessionId(sessionId)
+        : (await repo.getProfiles()).firstOrNull;
     // Studio is global — if no config exists at all, auto-create a default
     // profile instead of showing an "Enable Studio" dialog.
     if (config == null) {
       final now = currentTimestampSeconds();
+      final configId = sessionId ?? StudioSettingsSheet.globalProfileId;
       config = StudioConfig(
-        sessionId: widget.sessionId,
+        sessionId: configId,
         enabled: true,
         agents: StudioControllerOntology.buildDefaultAgents(
-          sessionId: widget.sessionId,
+          sessionId: configId,
           now: now,
         ),
         createdAt: now,
@@ -98,7 +110,9 @@ class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
       );
       await repo.upsert(config);
       // Auto-create enables Studio for the first time — refresh dependents.
-      ref.invalidate(sessionStudioEnabledProvider(widget.sessionId));
+      if (sessionId != null) {
+        ref.invalidate(sessionStudioEnabledProvider(sessionId));
+      }
     }
     final presets = await _presetWorkflows.loadPresets();
     if (!mounted) return;
@@ -114,7 +128,10 @@ class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
     await repo.upsert(config);
     // Refresh Studio-enablement-driven chat UI (e.g. the per-message "Re-run
     // cleaner" button) so toggling Studio reflects immediately.
-    ref.invalidate(sessionStudioEnabledProvider(widget.sessionId));
+    final sessionId = widget.sessionId;
+    if (sessionId != null) {
+      ref.invalidate(sessionStudioEnabledProvider(sessionId));
+    }
     setState(() => _config = config);
   }
 
@@ -252,8 +269,12 @@ class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
           ),
           const Divider(),
           _buildPostTrackerContextSetting(pipeline),
-          const Divider(),
-          _buildRecoverySection(),
+          // Recovery re-runs the cycle for one session, so it only shows when
+          // the sheet was opened from a chat.
+          if (widget.sessionId != null) ...[
+            const Divider(),
+            _buildRecoverySection(),
+          ],
         ],
       ),
     );
@@ -977,6 +998,9 @@ class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
   }
 
   Future<void> _startRecovery() async {
+    final sessionId = widget.sessionId;
+    final charId = widget.charId;
+    if (sessionId == null || charId == null) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (c) => AlertDialog(
@@ -1001,7 +1025,7 @@ class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
     unawaited(
       ref
           .read(trackerMemoryRecoveryServiceProvider)
-          .recover(sessionId: widget.sessionId, charId: widget.charId),
+          .recover(sessionId: sessionId, charId: charId),
     );
   }
 }
