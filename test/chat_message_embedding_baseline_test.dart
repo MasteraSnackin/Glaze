@@ -164,6 +164,7 @@ void main() {
     );
     stopwatch.stop();
     // Informational only: operation counters below are the test oracle.
+    // ignore: avoid_print
     print(
       'embedding baseline [$label]: ${stopwatch.elapsedMilliseconds}ms; '
       '${counts()}',

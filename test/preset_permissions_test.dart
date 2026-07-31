@@ -7,7 +7,6 @@ import 'package:glaze_flutter/core/db/repositories/chat_repo.dart';
 import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
 import 'package:glaze_flutter/features/extensions/models/preset_permissions.dart';
-import 'package:glaze_flutter/features/extensions/services/js_bridge_service.dart';
 import 'helpers/js_bridge_test_support.dart';
 
 AppDatabase _testDb() => AppDatabase.forTesting(NativeDatabase.memory());

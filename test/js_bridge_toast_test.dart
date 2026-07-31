@@ -1,6 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:glaze_flutter/features/extensions/services/js_bridge_service.dart';
 import 'package:glaze_flutter/features/extensions/services/js_bridge_toast_controller.dart';
 import 'helpers/js_bridge_test_support.dart';
 

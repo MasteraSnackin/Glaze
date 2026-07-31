@@ -37,6 +37,7 @@ void main() {
       0,
       (total, message) => total + message.content.length,
     );
+    // ignore: avoid_print
     print(
       'prompt/lorebook baseline: history=$historyCount '
       'lorebookEntries=$lorebookEntryCount cold=${coldWatch.elapsedMilliseconds}ms '

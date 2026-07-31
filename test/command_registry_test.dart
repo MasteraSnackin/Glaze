@@ -1,7 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:glaze_flutter/features/extensions/services/command_registry.dart';
-import 'package:glaze_flutter/features/extensions/services/js_bridge_service.dart';
 import 'helpers/js_bridge_test_support.dart';
 
 void main() {
