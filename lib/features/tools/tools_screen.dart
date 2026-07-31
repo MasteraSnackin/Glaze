@@ -19,7 +19,6 @@ import '../../shared/shell/shell_header_provider.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glass_surface.dart';
 import '../chat/widgets/chat_stats_sheet.dart';
-import '../chat/widgets/studio_settings_sheet.dart';
 import '../extensions/providers/extensions_settings_provider.dart';
 import '../extensions/widgets/ext_blocks_settings_sheet.dart';
 import '../image_gen/widgets/image_gen_sheet.dart';
@@ -123,11 +122,6 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
     super.dispose();
   }
 
-  /// Opens the same Studio sheet as chat Quick Access. Studio settings and
-  /// presets are app-wide, so it runs here without a chat session (the
-  /// session-only Recovery block hides itself).
-  Future<void> _openStudio() => StudioSettingsSheet.show(context);
-
   /// Opens the same Ext Blocks sheet as chat Quick Access.
   Future<void> _openExtBlocks() => showModalBottomSheet<void>(
     context: context,
@@ -182,7 +176,6 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
     final presetName =
         ref.watch(_activePresetProvider)?.name ?? 'label_default'.tr();
     final presetImage = ref.watch(_activePresetImageProvider);
-    final studioEnabled = ref.watch(studioFeatureEnabledProvider);
     final extBlocksEnabled = ref.watch(
       extensionsSettingsProvider.select((s) => s.enabled),
     );
@@ -271,13 +264,6 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
                     title: 'ext_blocks_title'.tr(),
                     subtitle: 'tools_ext_blocks_subtitle'.tr(),
                     onTap: _openExtBlocks,
-                  ),
-                if (studioEnabled)
-                  _GridTile(
-                    icon: Icons.movie_filter_outlined,
-                    title: 'menu_studio'.tr(),
-                    subtitle: 'tools_studio_subtitle'.tr(),
-                    onTap: _openStudio,
                   ),
               ]),
             ],
