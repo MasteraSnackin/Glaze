@@ -499,6 +499,11 @@ class AppliedCanonTransitionRows extends Table {
 
 @DataClassName('RewriteJobRow')
 @TableIndex(name: 'idx_rewrite_job_session', columns: {#chatSessionId})
+@TableIndex(
+  name: 'idx_rewrite_job_request_key',
+  columns: {#requestKey},
+  unique: true,
+)
 class RewriteJobs extends Table {
   @override
   String get tableName => 'rewrite_jobs';
@@ -507,9 +512,20 @@ class RewriteJobs extends Table {
   TextColumn get chatSessionId => text()();
   TextColumn get characterId => text()();
   TextColumn get status => text().withDefault(const Constant('pending'))();
+
+  /// Durable human-readable reason for failed/cancelled jobs; null otherwise.
+  TextColumn get statusReason => text().nullable()();
   TextColumn get requestJson => text().withDefault(const Constant('{}'))();
   IntColumn get basisRevision => integer().withDefault(const Constant(0))();
   TextColumn get basisRevisionHash => text().withDefault(const Constant(''))();
+
+  /// Effective-canon stamp captured when generation started. Audit/display
+  /// only; guarded apply always re-derives the live stamp.
+  TextColumn get canonStamp => text().withDefault(const Constant(''))();
+
+  /// Optional caller idempotency key. The unique index keeps NULL keys
+  /// distinct, so unkeyed jobs never collide.
+  TextColumn get requestKey => text().nullable()();
 
   /// Monotonic aggregate CAS version. Legacy jobs begin at version one.
   IntColumn get version => integer().withDefault(const Constant(1))();
@@ -522,6 +538,12 @@ class RewriteJobs extends Table {
 
   @override
   Set<Column> get primaryKey => {id};
+
+  @override
+  List<String> get customConstraints => [
+    "CHECK (status IN ('generating', 'pending', 'failed', 'cancelled', "
+    "'applied'))",
+  ];
 }
 
 @DataClassName('RewriteOperationRow')
@@ -563,6 +585,7 @@ class RewriteOperations extends Table {
 
   @override
   List<String> get customConstraints => [
+    "CHECK (status IN ('pending', 'reviewable', 'applied'))",
     "CHECK (decision IN ('pending', 'approved', 'rejected'))",
     "CHECK (validation_status IN ('pending', 'valid', 'invalid'))",
     'CHECK (current_revision >= 1)',

@@ -9,6 +9,7 @@ import '../../shared/shell/desktop/desktop_layout_provider.dart';
 import '../../features/character_list/character_detail_screen.dart';
 import '../../features/character_list/character_editor_screen.dart';
 import '../../features/character_list/character_list_screen.dart';
+import '../../features/card_rewrite/rewrite_review_screen.dart';
 import '../../features/character_gallery/gallery_screen.dart';
 import '../../features/chat/chat_screen.dart';
 import '../../features/chat_history/chat_history_screen.dart';
@@ -344,6 +345,15 @@ GoRouter buildRouter(
       ),
     ),
     GoRoute(
+      path: '/character/:charId/rewrite/:jobId',
+      pageBuilder: (_, state) => _adaptivePage(
+        state: state,
+        child: RewriteReviewScreen(
+          charId: state.pathParameters['charId']!,
+          jobId: state.pathParameters['jobId']!,
+        ),
+      ),
+    ),    GoRoute(
       path: '/sync',
       pageBuilder: (_, state) =>
           _overlayPage(state: state, child: const SyncSheet()),

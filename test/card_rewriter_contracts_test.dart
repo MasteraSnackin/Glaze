@@ -179,6 +179,32 @@ void main() {
     expect(result.isValid, isTrue);
   });
 
+  test('anchored patches preserve the exact macro-token multiset', () {
+    const anchor = '{{char}} meets {{user}} and {{char}} smiles.';
+    AnchoredScalarPatch patch(String value) => AnchoredScalarPatch(
+      scopeKey: 'npc:ada',
+      field: CardRewriteField.description,
+      anchor: anchor,
+      anchorSha256: CardCanonicalizer.scalarSha256(anchor),
+      value: value,
+    );
+    final rejected = AnchoredScalarPatchValidator.validate(
+      currentCardValues: {CardRewriteField.description: anchor},
+      fullCardBaselineSize: anchor.length,
+      patches: [patch('{{char}} meets {{user}} and smiles.')],
+    );
+    final accepted = AnchoredScalarPatchValidator.validate(
+      currentCardValues: {CardRewriteField.description: anchor},
+      fullCardBaselineSize: anchor.length,
+      patches: [patch('{{char}} warmly meets {{user}}; {{char}} smiles.')],
+    );
+    expect(
+      rejected.violations,
+      contains(CardPatchViolation.macroTokensChanged),
+    );
+    expect(accepted.isValid, isTrue);
+  });
+
   test(
     'anchors must occur exactly once and duplicate targets ignore scope',
     () {

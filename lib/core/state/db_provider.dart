@@ -28,6 +28,7 @@ import '../db/repositories/character_revision_repo.dart';
 import '../db/repositories/applied_canon_transition_repo.dart';
 import '../db/repositories/canon_transition_fact_ref_repo.dart';
 import '../db/repositories/manual_rewrite_apply_repo.dart';
+import '../db/repositories/manual_rewrite_job_repo.dart';
 import '../db/repositories/extension_presets_repository.dart';
 import '../db/repositories/info_blocks_repository.dart';
 import '../db/repositories/session_deletion_repo.dart';
@@ -256,6 +257,15 @@ final manualRewriteApplyRepoProvider = Provider<ManualRewriteApplyRepo>((ref) {
       transitionFactRefRepo: ref.watch(canonTransitionFactRefRepoProvider),
       rawTrackerStateReader: ref.watch(ledgerRawTrackerStateReaderProvider),
     ),
+  );
+});
+
+/// Owns the durable Phase-4 job/review lifecycle. Advisory validation reads
+/// through the same-DB raw Ledger reader; it never writes canon or characters.
+final manualRewriteJobRepoProvider = Provider<ManualRewriteJobRepo>((ref) {
+  return ManualRewriteJobRepo(
+    db: ref.watch(appDbProvider),
+    rawTrackerStateReader: ref.watch(ledgerRawTrackerStateReaderProvider),
   );
 });
 

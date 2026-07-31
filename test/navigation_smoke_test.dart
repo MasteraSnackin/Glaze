@@ -11,6 +11,7 @@ import 'package:glaze_flutter/core/db/app_db.dart';
 
 import 'package:glaze_flutter/features/chat_history/chat_history_screen.dart';
 import 'package:glaze_flutter/features/character_list/character_list_screen.dart';
+import 'package:glaze_flutter/features/character_list/character_detail_screen.dart';
 import 'package:glaze_flutter/features/tools/tools_screen.dart';
 import 'package:glaze_flutter/features/menu/menu_screen.dart';
 import 'package:glaze_flutter/features/settings/app_settings_screen.dart';
@@ -23,6 +24,7 @@ import 'package:glaze_flutter/features/lorebooks/embedding_settings_screen.dart'
 import 'package:glaze_flutter/features/settings/api_settings_screen.dart';
 import 'package:glaze_flutter/features/personas/persona_list_screen.dart';
 import 'package:glaze_flutter/features/presets/preset_list_screen.dart';
+import 'package:glaze_flutter/features/card_rewrite/rewrite_review_screen.dart';
 
 import 'helpers/pump_glaze_app.dart';
 import 'helpers/test_container.dart';
@@ -42,6 +44,12 @@ class ScreenEntry {
 }
 
 const screenRegistry = <ScreenEntry>[
+  ScreenEntry(
+    path: '/character/rewrite-character/rewrite/rewrite-job',
+    screenType: RewriteReviewScreen,
+    parentPath: '/characters',
+    description: 'Durable rewrite review',
+  ),
   ScreenEntry(
     path: '/',
     screenType: ChatHistoryScreen,
@@ -275,6 +283,40 @@ void main() {
     );
   });
 
+  testWidgets('Rewrite route renders without the character detail sheet', (
+    tester,
+  ) async {
+    final rewriteRouter = GoRouter(
+      initialLocation: '/character/test-character/rewrite/test-job',
+      routes: [
+        GoRoute(
+          path: '/character/:charId/rewrite/:jobId',
+          builder: (_, state) => Stack(
+            children: [
+              const _DurableRewriteRoute(),
+              CharacterDetailSheetLauncher(
+                charId: state.pathParameters['charId']!,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+    addTearDown(rewriteRouter.dispose);
+
+    await tester.pumpWidget(MaterialApp.router(routerConfig: rewriteRouter));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.byType(_DurableRewriteRoute), findsOneWidget);
+    expect(
+      find.byType(CharacterDetailScreen, skipOffstage: false),
+      findsNothing,
+      reason:
+          'The character detail bottom sheet must not overlay a rewrite route.',
+    );
+  });
+
   // Regression: pushing the lorebook global settings on top of the lorebook
   // list (which has live Tooltip OverlayPortals in its header actions) used to
   // crash during Scaffold layout — an OverlayPortal child reactivated mid
@@ -299,4 +341,12 @@ void main() {
     );
     expect(tester.takeException(), isNull);
   });
+}
+
+class _DurableRewriteRoute extends StatelessWidget {
+  const _DurableRewriteRoute();
+
+  @override
+  Widget build(BuildContext context) =>
+      const Scaffold(body: Center(child: Text('Durable rewrite screen')));
 }

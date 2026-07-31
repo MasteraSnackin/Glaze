@@ -56,7 +56,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 85;
+  int get schemaVersion => 86;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -1719,6 +1719,64 @@ class AppDatabase extends _$AppDatabase {
         // defaults so upgraded databases enforce the same invariants as a fresh
         // v85 database. TableMigration retains legacy rows and all declared
         // indexes, including the apply-CAS lookup index.
+        // The upgrade rebuild copies into the current table definition, which
+        // enforces the v86 operation-status CHECK. Normalize out-of-domain
+        // legacy statuses to the neutral non-reviewable 'pending' first, or
+        // the copy would abort (v86 repeats this for the jobs table and for
+        // databases that are already at v85).
+        await customStatement(
+          "UPDATE rewrite_operations SET status = 'pending' WHERE status NOT "
+          "IN ('pending', 'reviewable', 'applied')",
+        );
+        await m.alterTable(TableMigration(rewriteOperations));
+        await customStatement(
+          'CREATE INDEX IF NOT EXISTS idx_rewrite_operation_apply_cas '
+          'ON rewrite_operations '
+          '(rewrite_job_id, decision, validation_status, current_revision)',
+        );
+      }
+      if (from < 86) {
+        // v86 adds the durable Phase-4 job lifecycle fields. Existing jobs are
+        // pre-lifecycle, so the new columns carry neutral defaults: no reason
+        // text, an empty (audit-only) canon stamp, and a NULL idempotency key
+        // (NULL request keys remain distinct under the unique index).
+        final jobColumns = await customSelect(
+          "PRAGMA table_info('rewrite_jobs')",
+        ).get();
+        final jobNames = jobColumns
+            .map((row) => row.read<String>('name'))
+            .toSet();
+        if (!jobNames.contains('status_reason')) {
+          await m.addColumn(rewriteJobs, rewriteJobs.statusReason);
+        }
+        if (!jobNames.contains('canon_stamp')) {
+          await m.addColumn(rewriteJobs, rewriteJobs.canonStamp);
+        }
+        if (!jobNames.contains('request_key')) {
+          await m.addColumn(rewriteJobs, rewriteJobs.requestKey);
+        }
+        // CHECK constraints cannot be installed without a table rebuild, and
+        // the copy would abort on out-of-domain legacy statuses. Normalize
+        // them first, fail-closed: unknown job statuses become terminal
+        // 'cancelled' rows, unknown operation statuses become non-reviewable
+        // 'pending' rows. Legitimate legacy 'pending'/'applied' rows pass
+        // through unchanged.
+        await customStatement(
+          "UPDATE rewrite_jobs SET status = 'cancelled' WHERE status NOT IN "
+          "('generating', 'pending', 'failed', 'cancelled', 'applied')",
+        );
+        await customStatement(
+          "UPDATE rewrite_operations SET status = 'pending' WHERE status NOT "
+          "IN ('pending', 'reviewable', 'applied')",
+        );
+        // Rebuild both tables so upgraded databases enforce the same status
+        // CHECKs as a fresh v86 database while preserving rows and indexes
+        // (the v85 TableMigration precedent).
+        await m.alterTable(TableMigration(rewriteJobs));
+        await customStatement(
+          'CREATE UNIQUE INDEX IF NOT EXISTS idx_rewrite_job_request_key '
+          'ON rewrite_jobs (request_key)',
+        );
         await m.alterTable(TableMigration(rewriteOperations));
         await customStatement(
           'CREATE INDEX IF NOT EXISTS idx_rewrite_operation_apply_cas '

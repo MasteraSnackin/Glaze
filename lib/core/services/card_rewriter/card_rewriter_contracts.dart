@@ -177,6 +177,7 @@ enum CardPatchViolation {
   incompleteSet,
   overBudget,
   totalOverBudget,
+  macroTokensChanged,
 }
 
 /// Result of validating a patch batch. The validator never applies patches.
@@ -189,6 +190,23 @@ final class CardPatchValidation {
 
 /// Validates and simulates exactly-once anchored scalar replacements.
 abstract final class AnchoredScalarPatchValidator {
+  static final RegExp _macroToken = RegExp(r'\{\{[^}]*\}\}');
+
+  /// Macro tokens in an anchored fragment are executable card syntax, not
+  /// prose. A rewrite must preserve their exact byte-level multiset.
+  static bool preservesMacroTokens(String anchor, String value) {
+    List<String> tokens(String text) =>
+        _macroToken.allMatches(text).map((match) => match.group(0)!).toList()
+          ..sort();
+    final anchorTokens = tokens(anchor);
+    final valueTokens = tokens(value);
+    if (anchorTokens.length != valueTokens.length) return false;
+    for (var index = 0; index < anchorTokens.length; index++) {
+      if (anchorTokens[index] != valueTokens[index]) return false;
+    }
+    return true;
+  }
+
   static CardPatchValidation validate({
     required Iterable<AnchoredScalarPatch> patches,
     required Map<CardRewriteField, String?> currentCardValues,
@@ -212,6 +230,9 @@ abstract final class AnchoredScalarPatchValidator {
     };
 
     for (final patch in patchList) {
+      if (!preservesMacroTokens(patch.anchor, patch.value)) {
+        violations.add(CardPatchViolation.macroTokensChanged);
+      }
       if (CardRewriteScope.tryParse(patch.scopeKey) == null) {
         violations.add(CardPatchViolation.invalidScope);
       }
@@ -271,5 +292,177 @@ abstract final class AnchoredScalarPatchValidator {
       count++;
       from = index + anchor.length;
     }
+  }
+}
+
+/// An immutable canon-side transition descriptor carried by one rewrite
+/// operation snapshot. A `null` [chatSessionId] marks a global transition;
+/// session-scoped transitions are not writable by this workflow.
+final class CardRewriteTransitionSnapshot {
+  const CardRewriteTransitionSnapshot({
+    required this.id,
+    required this.scopeKey,
+    required this.canonicalClaim,
+    required this.promotionDestination,
+    required this.affectedTrackerKeys,
+    this.factIds = const [],
+    this.chatSessionId,
+  });
+
+  final String id;
+  final String scopeKey;
+  final String canonicalClaim;
+  final String promotionDestination;
+  final List<String> affectedTrackerKeys;
+  final List<String> factIds;
+  final String? chatSessionId;
+}
+
+/// An immutable, fully-typed rewrite operation: anchored patches for exactly
+/// one writable [field] plus the canon transition they promote.
+final class CardRewriteOperationSnapshot {
+  const CardRewriteOperationSnapshot({
+    required this.field,
+    required this.patches,
+    required this.transition,
+  });
+
+  final CardRewriteField field;
+  final List<AnchoredScalarPatch> patches;
+  final CardRewriteTransitionSnapshot transition;
+}
+
+/// The single serialization shape for operation snapshots.
+///
+/// [encode] emits exactly the durable request shape accepted by manual apply
+/// (`ManualRewriteApplyRepo`): `{field, patches, transition}` with patches as
+/// `{scopeKey, anchor, anchorSha256, value}` and transition as `{id, scopeKey,
+/// canonicalClaim, promotionDestination, affectedTrackerKeys, factIds,
+/// chatSessionId}`. Key order is fixed, so encoding is byte-deterministic.
+///
+/// [tryDecode] mirrors the apply-side structural bar (recognized field,
+/// non-empty patches of strings, required transition members) and applies the
+/// apply-side defaults (`promotionDestination` → `''`, `factIds` → `[]`).
+/// It performs NO semantic validation — scope grammar, anchor hashes, and
+/// budgets belong to the parser and [AnchoredScalarPatchValidator].
+abstract final class ManualRewriteOperationSnapshotCodec {
+  static String encode(CardRewriteOperationSnapshot snapshot) =>
+      jsonEncode(_operationJson(snapshot));
+
+  static CardRewriteOperationSnapshot? tryDecode(Object? json) {
+    if (json is! Map) return null;
+    final fieldValue = json['field'];
+    if (fieldValue is! String) return null;
+    final field = _fieldFromWireName(fieldValue);
+    if (field == null) return null;
+    final patchesValue = json['patches'];
+    if (patchesValue is! List || patchesValue.isEmpty) return null;
+    final patches = <AnchoredScalarPatch>[];
+    for (final rawPatch in patchesValue) {
+      if (rawPatch is! Map) return null;
+      final scopeKey = rawPatch['scopeKey'];
+      final anchor = rawPatch['anchor'];
+      final anchorSha256 = rawPatch['anchorSha256'];
+      final value = rawPatch['value'];
+      if (scopeKey is! String ||
+          anchor is! String ||
+          anchorSha256 is! String ||
+          value is! String) {
+        return null;
+      }
+      patches.add(
+        AnchoredScalarPatch(
+          scopeKey: scopeKey,
+          field: field,
+          anchor: anchor,
+          anchorSha256: anchorSha256,
+          value: value,
+        ),
+      );
+    }
+    final transition = _tryDecodeTransition(json['transition']);
+    if (transition == null) return null;
+    return CardRewriteOperationSnapshot(
+      field: field,
+      patches: List<AnchoredScalarPatch>.unmodifiable(patches),
+      transition: transition,
+    );
+  }
+
+  static Map<String, Object?> _operationJson(
+    CardRewriteOperationSnapshot snapshot,
+  ) => {
+    'field': snapshot.field.wireName,
+    'patches': [for (final patch in snapshot.patches) _patchJson(patch)],
+    'transition': _transitionJson(snapshot.transition),
+  };
+
+  static Map<String, Object?> _patchJson(AnchoredScalarPatch patch) => {
+    'scopeKey': patch.scopeKey,
+    'anchor': patch.anchor,
+    'anchorSha256': patch.anchorSha256,
+    'value': patch.value,
+  };
+
+  static Map<String, Object?> _transitionJson(
+    CardRewriteTransitionSnapshot transition,
+  ) => {
+    'id': transition.id,
+    'scopeKey': transition.scopeKey,
+    'canonicalClaim': transition.canonicalClaim,
+    'promotionDestination': transition.promotionDestination,
+    'affectedTrackerKeys': transition.affectedTrackerKeys,
+    'factIds': transition.factIds,
+    'chatSessionId': transition.chatSessionId,
+  };
+
+  static CardRewriteTransitionSnapshot? _tryDecodeTransition(Object? json) {
+    if (json is! Map) return null;
+    final id = json['id'];
+    final scopeKey = json['scopeKey'];
+    final canonicalClaim = json['canonicalClaim'];
+    final promotionDestination = json['promotionDestination'];
+    final chatSessionId = json['chatSessionId'];
+    if (id is! String || scopeKey is! String || canonicalClaim is! String) {
+      return null;
+    }
+    if (promotionDestination is! String? || chatSessionId is! String?) {
+      return null;
+    }
+    final affectedTrackerKeys = _tryDecodeStringList(
+      json['affectedTrackerKeys'],
+    );
+    if (affectedTrackerKeys == null) return null;
+    final factIdsValue = json['factIds'];
+    final factIds = factIdsValue == null
+        ? const <String>[]
+        : _tryDecodeStringList(factIdsValue);
+    if (factIds == null) return null;
+    return CardRewriteTransitionSnapshot(
+      id: id,
+      scopeKey: scopeKey,
+      canonicalClaim: canonicalClaim,
+      promotionDestination: promotionDestination ?? '',
+      affectedTrackerKeys: affectedTrackerKeys,
+      factIds: factIds,
+      chatSessionId: chatSessionId,
+    );
+  }
+
+  static List<String>? _tryDecodeStringList(Object? value) {
+    if (value is! List) return null;
+    final result = <String>[];
+    for (final element in value) {
+      if (element is! String) return null;
+      result.add(element);
+    }
+    return List<String>.unmodifiable(result);
+  }
+
+  static CardRewriteField? _fieldFromWireName(String wireName) {
+    for (final field in CardRewriteField.values) {
+      if (field.wireName == wireName) return field;
+    }
+    return null;
   }
 }

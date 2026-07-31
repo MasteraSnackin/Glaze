@@ -140,6 +140,15 @@ Migration history:
   character revision fields; rebuilt `rewrite_operations` after adding neutral
   defaults so upgraded databases retain rows/indexes and enforce the fresh-schema
   decision, validation-status, and revision CHECK constraints.
+- v86: added the durable Phase-4 rewrite job lifecycle columns
+  (`rewrite_jobs.status_reason` TEXT NULL, `canon_stamp` TEXT NOT NULL
+  DEFAULT '', `request_key` TEXT NULL with the unique
+  `idx_rewrite_job_request_key` index — NULL keys stay distinct) and rebuilt
+  both `rewrite_jobs` (status CHECK: generating/pending/failed/cancelled/
+  applied) and `rewrite_operations` (status CHECK: pending/reviewable/applied,
+  with the four v85 CHECKs and the apply-CAS index retained). Out-of-domain
+  legacy statuses are normalized fail-closed before the rebuild (jobs →
+  'cancelled', operations → 'pending'); rows are preserved.
 
 ---
 

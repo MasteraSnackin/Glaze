@@ -104,6 +104,7 @@ void main() {
             characterId: 'c',
             basisRevision: const Value(1),
             basisRevisionHash: Value(hash),
+            canonStamp: Value(stamp),
             version: const Value(1),
           ),
         );
@@ -257,6 +258,38 @@ void main() {
   });
 
   test(
+    'generation canon stamp blocks changed effective canon despite fresh caller stamp',
+    () async {
+      final generatedStamp = await seed();
+      raw = LedgerRawTrackerState(
+        committedTrackers: const [
+          Tracker(sessionId: 's', name: 'arc.status', value: 'advanced'),
+        ],
+        manualControls: const [],
+      );
+      final liveStamp = const EffectiveCanonAssembler()
+          .assemble(
+            await reader.readInTransaction(sessionId: 's', characterId: 'c'),
+          )
+          .identity;
+      expect(liveStamp, isNot(generatedStamp));
+
+      final outcome = await ManualRewriteApplyRepo(db: db, canonReader: reader)
+          .applyApproved(
+            jobId: 'job',
+            expectedCanonStamp: liveStamp,
+            expectedJobVersion: 1,
+          );
+
+      expect(outcome.kind, 'blocked');
+      expect(outcome.reason, 'staleJobCanonStamp');
+      expect((await characters.getById('c'))!.description, 'old text');
+      expect(await revisions.getForCharacter('c'), hasLength(1));
+      expect(await db.select(db.appliedCanonTransitionRows).get(), isEmpty);
+    },
+  );
+
+  test(
     'unrelated canonical source change blocks as stale lineage without writes',
     () async {
       final stamp = await seed();
@@ -287,7 +320,9 @@ void main() {
   test(
     'non-applyable job status and operation session block without writes',
     () async {
-      for (final status in ['reviewing', 'unknown']) {
+      // v86 constrains rewrite_jobs.status to the elegant lifecycle set, so
+      // non-applyable seeded states use in-domain non-'pending' values.
+      for (final status in ['generating', 'failed']) {
         final stamp = await seed();
         await (db.update(db.rewriteJobs)..where((t) => t.id.equals('job')))
             .write(RewriteJobsCompanion(status: Value(status)));
@@ -488,11 +523,11 @@ void main() {
       final snapshot = jsonEncode(decoded);
       await (db.update(db.rewriteOperations)..where((t) => t.id.equals('op')))
           .write(RewriteOperationsCompanion(operationJson: Value(snapshot)));
-      await (db.update(db.rewriteOperationRevisions)
-            ..where((t) => t.rewriteOperationId.equals('op')))
-          .write(
-            RewriteOperationRevisionsCompanion(snapshotJson: Value(snapshot)),
-          );
+      await (db.update(
+        db.rewriteOperationRevisions,
+      )..where((t) => t.rewriteOperationId.equals('op'))).write(
+        RewriteOperationRevisionsCompanion(snapshotJson: Value(snapshot)),
+      );
 
       final primaryReader = EffectiveCanonReadRepository(
         db: db,
@@ -511,15 +546,19 @@ void main() {
             ),
           )
           .identity;
-
-      final outcome = await ManualRewriteApplyRepo(
-        db: db,
-        canonReader: primaryReader,
-      ).applyApproved(
-        jobId: 'job',
-        expectedCanonStamp: stamp,
-        expectedJobVersion: 1,
+      await (db.update(db.rewriteJobs)..where((t) => t.id.equals('job'))).write(
+        RewriteJobsCompanion(canonStamp: Value(stamp)),
       );
+
+      final outcome =
+          await ManualRewriteApplyRepo(
+            db: db,
+            canonReader: primaryReader,
+          ).applyApproved(
+            jobId: 'job',
+            expectedCanonStamp: stamp,
+            expectedJobVersion: 1,
+          );
 
       expect(outcome.kind, 'blocked');
       expect(outcome.reason, 'manualControlOrTransition');
@@ -527,7 +566,10 @@ void main() {
       expect(await revisions.getForCharacter('c'), hasLength(1));
       expect(await db.select(db.appliedCanonTransitionRows).get(), isEmpty);
       expect(await db.select(db.canonTransitionFactRefs).get(), isEmpty);
-      expect((await db.select(db.rewriteOperations).getSingle()).status, 'reviewable');
+      expect(
+        (await db.select(db.rewriteOperations).getSingle()).status,
+        'reviewable',
+      );
       expect((await db.select(db.rewriteJobs).getSingle()).status, 'pending');
     },
   );
@@ -734,6 +776,9 @@ void main() {
             await reader.readInTransaction(sessionId: 's', characterId: 'c'),
           )
           .identity;
+      await (db.update(db.rewriteJobs)..where((t) => t.id.equals('job'))).write(
+        RewriteJobsCompanion(canonStamp: Value(currentStamp)),
+      );
       final failing = ManualRewriteApplyRepo(
         db: db,
         canonReader: reader,

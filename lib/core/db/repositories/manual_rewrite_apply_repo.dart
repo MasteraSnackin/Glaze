@@ -92,6 +92,9 @@ class ManualRewriteApplyRepo {
     if (assembly.identity != expectedCanonStamp) {
       return const ManualRewriteApplyOutcome.blocked('staleCanonStamp');
     }
+    if (assembly.identity != job.canonStamp) {
+      return const ManualRewriteApplyOutcome.blocked('staleJobCanonStamp');
+    }
     if (assembly.requiresBaselineDecision ||
         assembly.effectiveRevision.number != job.basisRevision ||
         assembly.effectiveRevision.hash != job.basisRevisionHash ||
