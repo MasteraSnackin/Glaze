@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/models/chat_message.dart';
+import '../../../../core/services/generation_notification_service.dart';
 import '../../../chat/bridge/chat_bridge_registry.dart';
 import '../../models/block_config.dart';
 import '../js_engine_service.dart';
@@ -15,9 +18,12 @@ class PeriodicJsBlockRunner {
 
   Future<String?> run({
     required String charId,
+    required String sessionId,
     required BlockConfig block,
     required List<ChatMessage> contextMessages,
+    bool Function()? isAuthorized,
   }) async {
+    if (!(isAuthorized?.call() ?? true)) return null;
     if (block.type != BlockType.jsRunner) {
       throw ArgumentError(
         'runJsBlock only supports BlockType.jsRunner (got ${block.type.name})',
@@ -36,7 +42,17 @@ class PeriodicJsBlockRunner {
       return null;
     }
     final cancelToken = CancelToken();
+    final authoritySub = GenerationNotificationService.instance
+        .activeChatContextChanges
+        .listen((_) {
+          if (!(isAuthorized?.call() ?? true) && !cancelToken.isCancelled) {
+            cancelToken.cancel('Periodic chat authority changed');
+          }
+        });
     try {
+      if (cancelToken.isCancelled || !(isAuthorized?.call() ?? true)) {
+        return null;
+      }
       if (engine.isReady) {
         try {
           final contextMap = JsBlockExecutor.jsContextMap(
@@ -44,15 +60,13 @@ class PeriodicJsBlockRunner {
                 .map((m) => {'role': m.role, 'text': m.content})
                 .toList(),
             character: null, // no character payload for periodic
-            sessionId: '',
+            sessionId: sessionId,
             previousOutput: null,
           );
-          // Periodic ticks have no character/session payload; the script
-          // can still read `messages` from the context (empty list by default).
           final patchedContext = Map<String, dynamic>.from(contextMap)
             ..['characterId'] = charId
-            ..['sessionId'] = '';
-          return await engine.runScript(
+            ..['sessionId'] = sessionId;
+          final result = await engine.runScript(
             script: script,
             context: patchedContext,
             host: bridge == null
@@ -63,6 +77,9 @@ class PeriodicJsBlockRunner {
                   ),
             cancelToken: cancelToken,
           );
+          return !cancelToken.isCancelled && (isAuthorized?.call() ?? true)
+              ? result
+              : null;
         } on HeadlessUnavailableError catch (_) {
           // Fall through to visual bridge.
         }
@@ -71,18 +88,24 @@ class PeriodicJsBlockRunner {
       if (visualBridge == null) {
         return null;
       }
-      return await visualBridge.runJsBlock(
+      if (cancelToken.isCancelled || !(isAuthorized?.call() ?? true)) return null;
+      final result = await visualBridge.runJsBlock(
         script: script,
         messages: contextMessages,
         character: null,
-        sessionId: '',
+        sessionId: sessionId,
         previousOutput: null,
         contextMessageCount: -1,
         cancelToken: cancelToken,
       );
+      return !cancelToken.isCancelled && (isAuthorized?.call() ?? true)
+          ? result
+          : null;
     } catch (e) {
       debugPrint('[ExtPostGen] runJsBlock failed: $e');
       return null;
+    } finally {
+      unawaited(authoritySub.cancel());
     }
   }
 }
