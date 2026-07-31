@@ -24,6 +24,7 @@ abstract class StudioConfig with _$StudioConfig {
     @Default('') String expensiveApiConfigId,
     @Default('') String cheapApiConfigId,
     @Default('') String cleanerApiConfigId,
+    @Default('') String ledgerApiConfigId,
     @Default('') String runModelOverride,
 
     /// Maximum number of trailing user/assistant chat messages forwarded to the

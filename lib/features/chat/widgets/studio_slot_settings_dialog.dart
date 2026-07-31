@@ -9,7 +9,7 @@ import '../../../shared/widgets/sheet_view.dart';
 import '../../../shared/widgets/extra_request_parameters_editor.dart';
 
 /// Which Studio model slot is being configured.
-enum StudioSlot { finalGenerator, tracker, cleaner }
+enum StudioSlot { finalGenerator, tracker, cleaner, ledger }
 
 /// Snapshot of per-slot settings captured in the dialog.
 class StudioSlotSettings {
@@ -112,6 +112,8 @@ class StudioSlotSettings {
             postCleanerExtraRequestParameters: extraRequestParameters,
           ),
         );
+      case StudioSlot.ledger:
+        return pipeline;
     }
   }
 }
@@ -233,6 +235,23 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
               : '',
         );
         _extraRequestParameters = p.cleaner.postCleanerExtraRequestParameters;
+      case StudioSlot.ledger:
+        _temperature = p.cleaner.postCleanerTemperature;
+        _topP = p.cleaner.postCleanerTopP;
+        _topK = p.cleaner.postCleanerTopK;
+        _frequencyPenalty = p.cleaner.postCleanerFrequencyPenalty;
+        _presencePenalty = p.cleaner.postCleanerPresencePenalty;
+        _requestReasoning = p.cleaner.postCleanerRequestReasoning;
+        _useResponsesApi = p.cleaner.postCleanerUseResponsesApi;
+        _reasoningEffort = p.cleaner.postCleanerReasoningEffort;
+        _omitTemperature = p.cleaner.postCleanerOmitTemperature;
+        _omitTopP = p.cleaner.postCleanerOmitTopP;
+        _omitReasoning = p.cleaner.postCleanerOmitReasoning;
+        _omitReasoningEffort = p.cleaner.postCleanerOmitReasoningEffort;
+        _reasoningHistoryCountCtrl = TextEditingController(text: '0');
+        _maxTokensCtrl = TextEditingController(text: '');
+        _timeoutCtrl = TextEditingController(text: '');
+        _extraRequestParameters = p.cleaner.postCleanerExtraRequestParameters;
     }
   }
 
@@ -252,6 +271,8 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
         return 'Trackers';
       case StudioSlot.cleaner:
         return 'Cleaner';
+      case StudioSlot.ledger:
+        return 'Трекер';
     }
   }
 
@@ -262,6 +283,8 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
       case StudioSlot.tracker:
         return 'Max response length (0 = default)';
       case StudioSlot.cleaner:
+        return 'Max response length (0 = default)';
+      case StudioSlot.ledger:
         return 'Max response length (0 = default)';
     }
   }
@@ -274,13 +297,12 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
         return '1600';
       case StudioSlot.cleaner:
         return '0';
+      case StudioSlot.ledger:
+        return '1600';
     }
   }
 
-  /// Slot-specific timeout label showing the fallback default (in seconds)
-  /// that applies when the field is left at 0. The defaults mirror the
-  /// hardcoded fallbacks in `AgentRunner.effectiveTimeoutMs` (final 90 s,
-  /// trackers 60 s) and `AuxLlmClient.resolveCleanerTimeout` (cleaner 60 s).
+  /// Slot-specific timeout label...
   String get _timeoutLabel {
     switch (widget.slot) {
       case StudioSlot.finalGenerator:
@@ -288,6 +310,8 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
       case StudioSlot.tracker:
         return 'Timeout seconds (0 = 60s default)';
       case StudioSlot.cleaner:
+        return 'Timeout seconds (0 = 60s default)';
+      case StudioSlot.ledger:
         return 'Timeout seconds (0 = 60s default)';
     }
   }
@@ -299,6 +323,8 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
       case StudioSlot.tracker:
         return '60';
       case StudioSlot.cleaner:
+        return '60';
+      case StudioSlot.ledger:
         return '60';
     }
   }
