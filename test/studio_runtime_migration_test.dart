@@ -29,7 +29,7 @@ void main() {
           id: 'configured',
           runtime: StudioRuntimeSettings(
             agents: StudioAgentSettings(
-              studioTrackerModelOverride: 'configured-model',
+              studioControllerModelOverride: 'configured-model',
             ),
           ),
         ),
@@ -37,7 +37,7 @@ void main() {
 
       const legacyPipeline = PipelineSettings(
         studioAgent: StudioAgentSettings(
-          studioTrackerModelOverride: 'legacy-model',
+          studioControllerModelOverride: 'legacy-model',
         ),
         cleaner: CleanerSettings(postCleanerModel: 'legacy-cleaner'),
         ledger: LedgerSettings(studioLedgerMaxTokens: 456),
@@ -57,7 +57,7 @@ void main() {
       expect(
         (await presetRepo.getById(
           'configured',
-        ))?.runtime.agents.studioTrackerModelOverride,
+        ))?.runtime.agents.studioControllerModelOverride,
         'configured-model',
       );
 
@@ -65,7 +65,7 @@ void main() {
         prefs: prefs,
         pipeline: const PipelineSettings(
           studioAgent: StudioAgentSettings(
-            studioTrackerModelOverride: 'must-not-overwrite',
+            studioControllerModelOverride: 'must-not-overwrite',
           ),
         ),
         loadPresets: presetRepo.getAll,
@@ -74,7 +74,7 @@ void main() {
       expect(
         (await presetRepo.getById(
           'empty',
-        ))?.runtime.agents.studioTrackerModelOverride,
+        ))?.runtime.agents.studioControllerModelOverride,
         'legacy-model',
       );
     },

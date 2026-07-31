@@ -28,7 +28,7 @@ class StudioBriefCache {
   /// Probe the cache for one tracker. [hit] = true when a usable cached brief
   /// exists for this turn; [brief] carries the sanitized cached brief. Used by
   /// the orchestrator to split trackers into cached (skip LLM) vs.
-  /// batchable/individual before invoking `TrackerBatcher`.
+  /// batchable/individual before invoking `ControllerBatcher`.
   CacheProbe probeCache({
     required StudioAgent agent,
     required StudioConfig config,

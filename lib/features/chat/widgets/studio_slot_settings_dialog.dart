@@ -72,24 +72,24 @@ class StudioSlotSettings {
             studioFinalExtraRequestParameters: extraRequestParameters,
           ),
         );
-      case StudioSlot.tracker:
+      case StudioSlot.controller:
         return pipeline.copyWith(
           studioAgent: pipeline.studioAgent.copyWith(
-            studioTrackerTemperature: temperature,
-            studioTrackerTopP: topP,
-            studioTrackerTopK: topK,
-            studioTrackerFrequencyPenalty: frequencyPenalty,
-            studioTrackerPresencePenalty: presencePenalty,
-            studioTrackerRequestReasoning: requestReasoning,
-            studioTrackerUseResponsesApi: useResponsesApi,
-            studioTrackerReasoningEffort: reasoningEffort,
-            studioTrackerOmitTemperature: omitTemperature,
-            studioTrackerOmitTopP: omitTopP,
-            studioTrackerOmitReasoning: omitReasoning,
-            studioTrackerOmitReasoningEffort: omitReasoningEffort,
-            studioTrackerMaxTokens: maxTokens,
-            studioTrackerTimeoutMs: timeoutMs,
-            studioTrackerExtraRequestParameters: extraRequestParameters,
+            studioControllerTemperature: temperature,
+            studioControllerTopP: topP,
+            studioControllerTopK: topK,
+            studioControllerFrequencyPenalty: frequencyPenalty,
+            studioControllerPresencePenalty: presencePenalty,
+            studioControllerRequestReasoning: requestReasoning,
+            studioControllerUseResponsesApi: useResponsesApi,
+            studioControllerReasoningEffort: reasoningEffort,
+            studioControllerOmitTemperature: omitTemperature,
+            studioControllerOmitTopP: omitTopP,
+            studioControllerOmitReasoning: omitReasoning,
+            studioControllerOmitReasoningEffort: omitReasoningEffort,
+            studioControllerMaxTokens: maxTokens,
+            studioControllerTimeoutMs: timeoutMs,
+            studioControllerExtraRequestParameters: extraRequestParameters,
           ),
         );
       case StudioSlot.cleaner:
@@ -184,32 +184,32 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
         );
         _extraRequestParameters =
             p.studioAgent.studioFinalExtraRequestParameters;
-      case StudioSlot.tracker:
-        _temperature = p.studioAgent.studioTrackerTemperature;
-        _topP = p.studioAgent.studioTrackerTopP;
-        _topK = p.studioAgent.studioTrackerTopK;
-        _frequencyPenalty = p.studioAgent.studioTrackerFrequencyPenalty;
-        _presencePenalty = p.studioAgent.studioTrackerPresencePenalty;
-        _requestReasoning = p.studioAgent.studioTrackerRequestReasoning;
-        _useResponsesApi = p.studioAgent.studioTrackerUseResponsesApi;
-        _reasoningEffort = p.studioAgent.studioTrackerReasoningEffort;
-        _omitTemperature = p.studioAgent.studioTrackerOmitTemperature;
-        _omitTopP = p.studioAgent.studioTrackerOmitTopP;
-        _omitReasoning = p.studioAgent.studioTrackerOmitReasoning;
-        _omitReasoningEffort = p.studioAgent.studioTrackerOmitReasoningEffort;
+      case StudioSlot.controller:
+        _temperature = p.studioAgent.studioControllerTemperature;
+        _topP = p.studioAgent.studioControllerTopP;
+        _topK = p.studioAgent.studioControllerTopK;
+        _frequencyPenalty = p.studioAgent.studioControllerFrequencyPenalty;
+        _presencePenalty = p.studioAgent.studioControllerPresencePenalty;
+        _requestReasoning = p.studioAgent.studioControllerRequestReasoning;
+        _useResponsesApi = p.studioAgent.studioControllerUseResponsesApi;
+        _reasoningEffort = p.studioAgent.studioControllerReasoningEffort;
+        _omitTemperature = p.studioAgent.studioControllerOmitTemperature;
+        _omitTopP = p.studioAgent.studioControllerOmitTopP;
+        _omitReasoning = p.studioAgent.studioControllerOmitReasoning;
+        _omitReasoningEffort = p.studioAgent.studioControllerOmitReasoningEffort;
         _reasoningHistoryCountCtrl = TextEditingController(text: '0');
         _maxTokensCtrl = TextEditingController(
-          text: p.studioAgent.studioTrackerMaxTokens > 0
-              ? '${p.studioAgent.studioTrackerMaxTokens}'
+          text: p.studioAgent.studioControllerMaxTokens > 0
+              ? '${p.studioAgent.studioControllerMaxTokens}'
               : '',
         );
         _timeoutCtrl = TextEditingController(
-          text: p.studioAgent.studioTrackerTimeoutMs > 0
-              ? '${p.studioAgent.studioTrackerTimeoutMs ~/ 1000}'
+          text: p.studioAgent.studioControllerTimeoutMs > 0
+              ? '${p.studioAgent.studioControllerTimeoutMs ~/ 1000}'
               : '',
         );
         _extraRequestParameters =
-            p.studioAgent.studioTrackerExtraRequestParameters;
+            p.studioAgent.studioControllerExtraRequestParameters;
       case StudioSlot.cleaner:
         _temperature = p.cleaner.postCleanerTemperature;
         _topP = p.cleaner.postCleanerTopP;
@@ -267,7 +267,7 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
     switch (widget.slot) {
       case StudioSlot.finalGenerator:
         return 'Final Generator';
-      case StudioSlot.tracker:
+      case StudioSlot.controller:
         return 'Trackers';
       case StudioSlot.cleaner:
         return 'Cleaner';
@@ -280,7 +280,7 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
     switch (widget.slot) {
       case StudioSlot.finalGenerator:
         return 'Max response length (0 = default)';
-      case StudioSlot.tracker:
+      case StudioSlot.controller:
         return 'Max response length (0 = default)';
       case StudioSlot.cleaner:
         return 'Max response length (0 = default)';
@@ -293,7 +293,7 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
     switch (widget.slot) {
       case StudioSlot.finalGenerator:
         return '8000';
-      case StudioSlot.tracker:
+      case StudioSlot.controller:
         return '1600';
       case StudioSlot.cleaner:
         return '0';
@@ -307,7 +307,7 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
     switch (widget.slot) {
       case StudioSlot.finalGenerator:
         return 'Timeout seconds (0 = 90s default)';
-      case StudioSlot.tracker:
+      case StudioSlot.controller:
         return 'Timeout seconds (0 = 60s default)';
       case StudioSlot.cleaner:
         return 'Timeout seconds (0 = 60s default)';
@@ -320,7 +320,7 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
     switch (widget.slot) {
       case StudioSlot.finalGenerator:
         return '90';
-      case StudioSlot.tracker:
+      case StudioSlot.controller:
         return '60';
       case StudioSlot.cleaner:
         return '60';

@@ -26,7 +26,7 @@ void main() {
     () async {
       const settings = PipelineSettings(
         studioAgent: StudioAgentSettings(
-          studioTrackerModelOverride: 'captured-model',
+          studioControllerModelOverride: 'captured-model',
         ),
       );
       const activeApi = ApiConfig(
@@ -100,7 +100,7 @@ void main() {
             id: 'default',
             runtime: StudioRuntimeSettings(
               agents: StudioAgentSettings(
-                studioTrackerModelOverride: 'preset-tracker-model',
+                studioControllerModelOverride: 'preset-tracker-model',
               ),
               cleaner: CleanerSettings(postCleanerModel: 'preset-cleaner'),
               ledger: LedgerSettings(studioLedgerMaxTokens: 321),
@@ -130,7 +130,7 @@ void main() {
       ]);
       expect(snapshot.apiConfigs, [api]);
       expect(
-        snapshot.pipelineSettings.studioAgent.studioTrackerModelOverride,
+        snapshot.pipelineSettings.studioAgent.studioControllerModelOverride,
         'preset-tracker-model',
       );
       expect(
@@ -186,7 +186,7 @@ void main() {
               ],
               runtime: StudioRuntimeSettings(
                 agents: StudioAgentSettings(
-                  studioTrackerModelOverride: 'preset-override',
+                  studioControllerModelOverride: 'preset-override',
                 ),
                 broadcastBlocks: ['preset broadcast'],
               ),
@@ -243,7 +243,7 @@ void main() {
           .save(
             const PipelineSettings(
               studioAgent: StudioAgentSettings(
-                studioTrackerModelOverride: 'old-override',
+                studioControllerModelOverride: 'old-override',
               ),
             ),
           );
@@ -271,7 +271,7 @@ void main() {
           .save(
             const PipelineSettings(
               studioAgent: StudioAgentSettings(
-                studioTrackerModelOverride: 'new-override',
+                studioControllerModelOverride: 'new-override',
               ),
             ),
           );
@@ -281,7 +281,7 @@ void main() {
       expect(snapshot.preset!.cheapApiConfigId, 'old-api');
       expect(snapshot.preset!.runtime.broadcastBlocks, ['preset broadcast']);
       expect(
-        snapshot.pipelineSettings.studioAgent.studioTrackerModelOverride,
+        snapshot.pipelineSettings.studioAgent.studioControllerModelOverride,
         'preset-override',
       );
       final cleanerConfig = snapshot.resolveCleanerConfig(
@@ -320,13 +320,13 @@ void main() {
         cheapApiConfigId: 'old-api',
         runtime: StudioRuntimeSettings(
           agents: StudioAgentSettings(
-            studioTrackerModelOverride: 'snapshot-model',
+            studioControllerModelOverride: 'snapshot-model',
           ),
         ),
       ),
       pipelineSettings: PipelineSettings(
         studioAgent: StudioAgentSettings(
-          studioTrackerModelOverride: 'snapshot-model',
+          studioControllerModelOverride: 'snapshot-model',
         ),
       ),
       apiConfigs: [oldApi],
@@ -335,7 +335,7 @@ void main() {
 
     currentSettings = const PipelineSettings(
       studioAgent: StudioAgentSettings(
-        studioTrackerModelOverride: 'changed-model',
+        studioControllerModelOverride: 'changed-model',
       ),
     );
     currentApis = const [newApi];

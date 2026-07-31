@@ -178,16 +178,16 @@ class AgentRunner {
             reasoningEffort: pipeline.cleaner.postCleanerReasoningEffort,
           )
         : resolved.copyWithReasoning(
-            useResponsesApi: pipeline.studioAgent.studioTrackerUseResponsesApi,
-            requestReasoning: pipeline.studioAgent.studioTrackerDisableReasoning
+            useResponsesApi: pipeline.studioAgent.studioControllerUseResponsesApi,
+            requestReasoning: pipeline.studioAgent.studioControllerDisableReasoning
                 ? false
-                : pipeline.studioAgent.studioTrackerRequestReasoning,
-            omitReasoning: pipeline.studioAgent.studioTrackerDisableReasoning
+                : pipeline.studioAgent.studioControllerRequestReasoning,
+            omitReasoning: pipeline.studioAgent.studioControllerDisableReasoning
                 ? true
-                : pipeline.studioAgent.studioTrackerOmitReasoning,
+                : pipeline.studioAgent.studioControllerOmitReasoning,
             omitReasoningEffort:
-                pipeline.studioAgent.studioTrackerOmitReasoningEffort,
-            reasoningEffort: pipeline.studioAgent.studioTrackerReasoningEffort,
+                pipeline.studioAgent.studioControllerOmitReasoningEffort,
+            reasoningEffort: pipeline.studioAgent.studioControllerReasoningEffort,
           );
     return _streamRunner.run(
       agent: agent,
@@ -209,7 +209,7 @@ class AgentRunner {
   }
 
   /// Resolve which API config an agent uses. Delegates to
-  /// [AgentConfigResolver]. Kept as a facade so callers (TrackerBatcher,
+  /// [AgentConfigResolver]. Kept as a facade so callers (ControllerBatcher,
   /// tests) can call `runner.resolveAgentConfig(...)` without importing the
   /// resolver directly.
   Future<ResolvedAgentConfig> resolveAgentConfig(
@@ -253,7 +253,7 @@ class AgentRunner {
         ? pipeline.studioAgent.studioFinalTimeoutMs
         : agent.phase == 'post_processing'
         ? pipeline.cleaner.postCleanerTimeoutMs
-        : pipeline.studioAgent.studioTrackerTimeoutMs;
+        : pipeline.studioAgent.studioControllerTimeoutMs;
     if (slot > 0) {
       return slot < 1000 ? 1000 : slot;
     }
@@ -270,7 +270,7 @@ class AgentRunner {
   /// Max tokens override. Two tiers:
   /// - Final generator: [PipelineSettings.studioAgent.studioFinalMaxTokens] (>0)
   ///   overrides the per-agent default (8000).
-  /// - Trackers: [PipelineSettings.studioAgent.studioTrackerMaxTokens] (>0) overrides the
+  /// - Trackers: [PipelineSettings.studioAgent.studioControllerMaxTokens] (>0) overrides the
   ///   per-agent default (1600). Lets the user tighten/loosen the compact JSON
   ///   brief budget for all 7 pre-gen agents at once from the Studio menu.
   /// Returns null when the relevant global override is 0 and the caller should
@@ -291,7 +291,7 @@ class AgentRunner {
       if (cleanerGlobal > 0) return cleanerGlobal;
       return null;
     }
-    final trackerGlobal = pipeline.studioAgent.studioTrackerMaxTokens;
+    final trackerGlobal = pipeline.studioAgent.studioControllerMaxTokens;
     if (trackerGlobal > 0) return trackerGlobal;
     return null;
   }
@@ -299,7 +299,7 @@ class AgentRunner {
   /// Temperature override. Two tiers:
   /// - Final generator: [PipelineSettings.studioAgent.studioFinalTemperature] (>= 0)
   ///   overrides the per-agent default (0.8).
-  /// - Trackers: [PipelineSettings.studioAgent.studioTrackerTemperature] (>= 0) overrides
+  /// - Trackers: [PipelineSettings.studioAgent.studioControllerTemperature] (>= 0) overrides
   ///   the per-agent default (0.3). Lets the user tune the creativity of all
   ///   7 pre-gen agents at once from the Studio menu.
   /// Returns null when the relevant global override is negative and the
@@ -318,7 +318,7 @@ class AgentRunner {
     if (agent.phase == 'post_processing') {
       return pipeline.cleaner.postCleanerTemperature;
     }
-    final trackerGlobal = pipeline.studioAgent.studioTrackerTemperature;
+    final trackerGlobal = pipeline.studioAgent.studioControllerTemperature;
     if (trackerGlobal >= 0) return trackerGlobal;
     return null;
   }

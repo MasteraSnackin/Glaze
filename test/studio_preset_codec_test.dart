@@ -172,7 +172,7 @@ void main() {
           studioFinalExtraRequestParameters: [
             ExtraRequestParameter(key: 'final_option', value: '{"x":1}'),
           ],
-          studioTrackerExtraRequestParameters: [
+          studioControllerExtraRequestParameters: [
             ExtraRequestParameter(key: 'tracker_option', value: 'alpha'),
           ],
         ),
