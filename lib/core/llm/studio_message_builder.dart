@@ -3,6 +3,7 @@ import 'history_assembler.dart';
 import 'prompt_builder.dart';
 import 'studio_brief_deduper.dart';
 import 'studio_context_bucketizer.dart';
+import 'studio_controller_ontology.dart';
 import 'studio_prompt_text.dart';
 import 'studio_stage_brief.dart';
 import 'studio/studio_brief_macro_renderer.dart';
@@ -83,7 +84,7 @@ class StudioMessageBuilder {
           if (!isFinalResponse) {
             control
               ..writeln()
-              ..writeln(_promptText.intermediateRuntimeEnvelope(agent));
+              ..writeln(_promptText.intermediateRuntimeEnvelope(StudioControllerOntology.specForAgent(agent), agent));
           }
           if (isFinalResponse &&
               (hasExplicitBriefMacros || priorBriefs.isNotEmpty)) {
@@ -284,7 +285,7 @@ class StudioMessageBuilder {
         buf.writeln();
       }
     }
-    buf.writeln(_promptText.intermediateRuntimeEnvelope(agent));
+    buf.writeln(_promptText.intermediateRuntimeEnvelope(StudioControllerOntology.specForAgent(agent), agent));
     return buf.toString().trim();
   }
 

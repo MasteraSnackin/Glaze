@@ -720,11 +720,12 @@ void main() {
     );
 
     test('runtime leaves numeric response budgets to the active preset', () {
-      final envelope = const StudioPromptText().intermediateRuntimeEnvelope(
-        narrativeAgent,
-      );
       final narrative = StudioControllerOntology.specs.firstWhere(
         (spec) => spec.id == 'narrative',
+      );
+      final envelope = const StudioPromptText().intermediateRuntimeEnvelope(
+        narrative,
+        narrativeAgent,
       );
 
       expect(envelope.toLowerCase(), isNot(contains('paragraph')));
