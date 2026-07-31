@@ -202,3 +202,6 @@ opencode.jsonc
 .opencode.json
 .opencode.jsonc
 .opencode/
+
+# Local deepwork progress state
+.slim/deepwork/

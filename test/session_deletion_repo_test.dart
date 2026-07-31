@@ -182,6 +182,12 @@ Future<void> _seedSession(AppDatabase db, String sessionId) async {
     "INSERT INTO ledger_reconciliation_checkpoints (session_id, start_message_id, end_message_id) VALUES ('$sessionId', 'start', 'end')",
     "INSERT INTO ledger_reconciliation_cleanup_journals (session_id, endpoint_message_id) VALUES ('$sessionId', 'end')",
     "INSERT INTO character_knowledge_fact_rows (id, chat_session_id, knower_key, subject_key, fact_class, predicate, object, epistemic_state) VALUES ('fact_$id', '$sessionId', 'knower', 'subject', 'fact', 'predicate', 'object', 'known')",
+    "INSERT INTO applied_canon_transition_rows (id, chat_session_id, character_id, transition_json) VALUES ('transition_$id', '$sessionId', 'char_$id', '{}')",
+    "INSERT INTO canon_transition_fact_refs (applied_canon_transition_id, character_knowledge_fact_id) VALUES ('transition_$id', 'fact_$id')",
+    "INSERT INTO rewrite_jobs (id, chat_session_id, character_id) VALUES ('job_$id', '$sessionId', 'char_$id')",
+    "INSERT INTO rewrite_operations (id, rewrite_job_id, chat_session_id) VALUES ('operation_$id', 'job_$id', '$sessionId')",
+    "INSERT INTO rewrite_operation_revisions (rewrite_operation_id, revision, snapshot_json) VALUES ('operation_$id', '1', '{}')",
+    "INSERT INTO rewrite_evidence_rows (id, rewrite_operation_id, evidence_json) VALUES ('evidence_$id', 'operation_$id', '{}')",
     "INSERT INTO character_session_baseline_rows (chat_session_id, character_id, baseline_card_json, baseline_hash) VALUES ('$sessionId', 'char_$id', '{}', 'hash')",
     "INSERT INTO studio_config_rows (session_id) VALUES ('$sessionId')",
     "INSERT INTO chat_summaries (session_id, content) VALUES ('$sessionId', 'summary')",
@@ -224,6 +230,19 @@ Future<void> _expectClearGroups(AppDatabase db, String sessionId) async {
   ]) {
     final count = await _count(db, table, '$column = ?', sessionId);
     expect(count, 1, reason: table);
+  }
+
+  // Clear chat keeps durable rewrite provenance and all of its children.
+  final id = sessionId.replaceAll('-', '_');
+  for (final (table, predicate, value) in [
+    ('applied_canon_transition_rows', 'chat_session_id = ?', sessionId),
+    ('rewrite_jobs', 'chat_session_id = ?', sessionId),
+    ('rewrite_operations', 'chat_session_id = ?', sessionId),
+    ('rewrite_operation_revisions', 'rewrite_operation_id = ?', 'operation_$id'),
+    ('rewrite_evidence_rows', 'rewrite_operation_id = ?', 'operation_$id'),
+    ('canon_transition_fact_refs', 'applied_canon_transition_id = ?', 'transition_$id'),
+  ]) {
+    expect(await _count(db, table, predicate, value), 1, reason: table);
   }
 
   final memoryBook = await db
@@ -302,6 +321,19 @@ Future<void> _expectSessionCount(
         )
         .getSingle();
     expect(row.read<int>('count'), expected, reason: table);
+  }
+
+  final id = sessionId.replaceAll('-', '_');
+  for (final (table, predicate, value) in [
+    ('rewrite_operation_revisions', 'rewrite_operation_id = ?', 'operation_$id'),
+    ('rewrite_evidence_rows', 'rewrite_operation_id = ?', 'operation_$id'),
+    ('canon_transition_fact_refs', 'applied_canon_transition_id = ?', 'transition_$id'),
+  ]) {
+    expect(
+      await _count(db, table, predicate, value),
+      expected,
+      reason: table,
+    );
   }
 
   final lorebookEmbedding = await db

@@ -79,7 +79,7 @@ All schema changes go in `AppDatabase.migration` in `app_db.dart`.
 Bump the schema version and add a `from → to` migration step.
 Never modify existing column types without a migration.
 
-Current version: **81**
+Current version: **84**
 
 Migration history:
 - v18: added `characters.picksHash`
@@ -132,6 +132,14 @@ Migration history:
 - v80: added `api_configs.useResponsesApi`.
 - v81: added composite index `idx_embeddings_source_type_id` on
   `(source_type, source_id)`.
+- v82: added durable card-rewriter revisions, jobs, operations, evidence,
+  transitions, references, and numeric revision provenance columns.
+- v83: rebuilt the unreleased v82 TEXT revision columns as INTEGER columns,
+  preserving rows, uniqueness, and indexes while normalizing numeric lineage.
+- v85: added durable rewrite job/operation CAS, decision/validation, and applied
+  character revision fields; rebuilt `rewrite_operations` after adding neutral
+  defaults so upgraded databases retain rows/indexes and enforce the fresh-schema
+  decision, validation-status, and revision CHECK constraints.
 
 ---
 

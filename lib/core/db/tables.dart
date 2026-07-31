@@ -293,6 +293,8 @@ class TrackerRows extends Table {
   // Provenance: which agent/turn wrote this tracker (e.g.
   // 'memory_agent:msg_10'). For debugging and cache invalidation.
   TextColumn get provenance => text().withDefault(const Constant(''))();
+  IntColumn get basisRevision => integer().withDefault(const Constant(0))();
+  TextColumn get basisRevisionHash => text().withDefault(const Constant(''))();
   IntColumn get updatedAt => integer().withDefault(const Constant(0))();
 
   // Composite PK: one value per (session, tracker name). upsert via
@@ -423,11 +425,197 @@ class CharacterKnowledgeFactRows extends Table {
       text().withDefault(const Constant('studio_ledger'))();
   TextColumn get supersedesId => text().nullable()();
   TextColumn get lifecycle => text().withDefault(const Constant('tentative'))();
+  IntColumn get basisRevision => integer().withDefault(const Constant(0))();
+  TextColumn get basisRevisionHash => text().withDefault(const Constant(''))();
   IntColumn get createdAt => integer().withDefault(const Constant(0))();
   IntColumn get updatedAt => integer().withDefault(const Constant(0))();
 
   @override
   Set<Column> get primaryKey => {id};
+}
+
+@DataClassName('CharacterRevisionRow')
+class CharacterRevisionRows extends Table {
+  @override
+  String get tableName => 'character_revision_rows';
+
+  TextColumn get characterId => text()();
+  IntColumn get revision => integer()();
+  TextColumn get revisionHash => text()();
+
+  /// Hash of the immediately preceding revision; empty for the lineage root.
+  TextColumn get parentRevisionHash => text().withDefault(const Constant(''))();
+  TextColumn get snapshotJson => text()();
+  IntColumn get createdAt => integer().withDefault(const Constant(0))();
+
+  @override
+  Set<Column> get primaryKey => {characterId, revision};
+
+  @override
+  List<String> get customConstraints => ['UNIQUE(character_id, revision_hash)'];
+}
+
+@DataClassName('AppliedCanonTransitionRow')
+@TableIndex(
+  name: 'idx_applied_canon_transition_session',
+  columns: {#chatSessionId},
+)
+@TableIndex(
+  name: 'idx_applied_canon_transition_character',
+  columns: {#characterId},
+)
+@TableIndex(
+  name: 'idx_applied_canon_transition_operation',
+  columns: {#rewriteOperationId},
+)
+class AppliedCanonTransitionRows extends Table {
+  @override
+  String get tableName => 'applied_canon_transition_rows';
+
+  TextColumn get id => text()();
+
+  /// Null means a character-global transition, not owned by any chat session.
+  TextColumn get chatSessionId => text().nullable()();
+  TextColumn get characterId => text()();
+  TextColumn get rewriteOperationId => text().withDefault(const Constant(''))();
+  IntColumn get revision => integer().withDefault(const Constant(0))();
+  TextColumn get revisionHash => text().withDefault(const Constant(''))();
+  TextColumn get semanticScopeKey => text().withDefault(const Constant(''))();
+  TextColumn get canonicalClaim => text().withDefault(const Constant(''))();
+  TextColumn get promotionDestination =>
+      text().withDefault(const Constant(''))();
+  TextColumn get affectedTrackerKeysJson =>
+      text().withDefault(const Constant('[]'))();
+
+  /// Legacy payload only; safety-critical fields above remain queryable.
+  TextColumn get transitionJson => text()();
+  IntColumn get basisRevision => integer().withDefault(const Constant(0))();
+  TextColumn get basisRevisionHash => text().withDefault(const Constant(''))();
+  IntColumn get appliedAt => integer().withDefault(const Constant(0))();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+@DataClassName('RewriteJobRow')
+@TableIndex(name: 'idx_rewrite_job_session', columns: {#chatSessionId})
+class RewriteJobs extends Table {
+  @override
+  String get tableName => 'rewrite_jobs';
+
+  TextColumn get id => text()();
+  TextColumn get chatSessionId => text()();
+  TextColumn get characterId => text()();
+  TextColumn get status => text().withDefault(const Constant('pending'))();
+  TextColumn get requestJson => text().withDefault(const Constant('{}'))();
+  IntColumn get basisRevision => integer().withDefault(const Constant(0))();
+  TextColumn get basisRevisionHash => text().withDefault(const Constant(''))();
+
+  /// Monotonic aggregate CAS version. Legacy jobs begin at version one.
+  IntColumn get version => integer().withDefault(const Constant(1))();
+  IntColumn get appliedCharacterRevision =>
+      integer().withDefault(const Constant(0))();
+  TextColumn get appliedCharacterRevisionHash =>
+      text().withDefault(const Constant(''))();
+  IntColumn get createdAt => integer().withDefault(const Constant(0))();
+  IntColumn get updatedAt => integer().withDefault(const Constant(0))();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+@DataClassName('RewriteOperationRow')
+@TableIndex(name: 'idx_rewrite_operation_job', columns: {#rewriteJobId})
+@TableIndex(name: 'idx_rewrite_operation_session', columns: {#chatSessionId})
+@TableIndex(
+  name: 'idx_rewrite_operation_apply_cas',
+  columns: {#rewriteJobId, #decision, #validationStatus, #currentRevision},
+)
+class RewriteOperations extends Table {
+  @override
+  String get tableName => 'rewrite_operations';
+
+  TextColumn get id => text()();
+  TextColumn get rewriteJobId => text()();
+  TextColumn get chatSessionId => text()();
+  TextColumn get operationJson => text().withDefault(const Constant('{}'))();
+  TextColumn get status => text().withDefault(const Constant('pending'))();
+
+  /// Current immutable operation-revision number selected by CAS.
+  IntColumn get currentRevision => integer().withDefault(const Constant(1))();
+
+  /// Durable reviewer decision: pending, approved, or rejected.
+  TextColumn get decision => text().withDefault(const Constant('pending'))();
+
+  /// Validation result bound to [decisionRevision].
+  TextColumn get validationStatus =>
+      text().withDefault(const Constant('pending'))();
+  IntColumn get decisionRevision => integer().withDefault(const Constant(0))();
+  IntColumn get appliedCharacterRevision =>
+      integer().withDefault(const Constant(0))();
+  TextColumn get appliedCharacterRevisionHash =>
+      text().withDefault(const Constant(''))();
+  IntColumn get createdAt => integer().withDefault(const Constant(0))();
+  IntColumn get updatedAt => integer().withDefault(const Constant(0))();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
+  @override
+  List<String> get customConstraints => [
+    "CHECK (decision IN ('pending', 'approved', 'rejected'))",
+    "CHECK (validation_status IN ('pending', 'valid', 'invalid'))",
+    'CHECK (current_revision >= 1)',
+    'CHECK (decision_revision >= 0)',
+  ];
+}
+
+@DataClassName('RewriteOperationRevisionRow')
+class RewriteOperationRevisions extends Table {
+  @override
+  String get tableName => 'rewrite_operation_revisions';
+
+  TextColumn get rewriteOperationId => text()();
+  IntColumn get revision => integer()();
+  TextColumn get snapshotJson => text()();
+  IntColumn get createdAt => integer().withDefault(const Constant(0))();
+
+  @override
+  Set<Column> get primaryKey => {rewriteOperationId, revision};
+}
+
+@DataClassName('RewriteEvidenceRow')
+@TableIndex(
+  name: 'idx_rewrite_evidence_operation',
+  columns: {#rewriteOperationId},
+)
+class RewriteEvidenceRows extends Table {
+  @override
+  String get tableName => 'rewrite_evidence_rows';
+
+  TextColumn get id => text()();
+  TextColumn get rewriteOperationId => text()();
+  TextColumn get evidenceJson => text()();
+  IntColumn get createdAt => integer().withDefault(const Constant(0))();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+@DataClassName('CanonTransitionFactRefRow')
+class CanonTransitionFactRefs extends Table {
+  @override
+  String get tableName => 'canon_transition_fact_refs';
+
+  TextColumn get appliedCanonTransitionId => text()();
+  TextColumn get characterKnowledgeFactId => text()();
+  IntColumn get createdAt => integer().withDefault(const Constant(0))();
+
+  @override
+  Set<Column> get primaryKey => {
+    appliedCanonTransitionId,
+    characterKnowledgeFactId,
+  };
 }
 
 /// Immutable source-card revision selected for a session.

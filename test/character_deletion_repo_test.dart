@@ -3,6 +3,7 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/db/repositories/character_deletion_repo.dart';
+import 'package:glaze_flutter/core/db/repositories/session_deletion_repo.dart';
 
 const _sessionTables = <(String, String)>[
   ('chat_sessions', 'session_id'),
@@ -17,6 +18,9 @@ const _sessionTables = <(String, String)>[
   ('ledger_reconciliation_checkpoints', 'session_id'),
   ('ledger_reconciliation_cleanup_journals', 'session_id'),
   ('character_knowledge_fact_rows', 'chat_session_id'),
+  ('applied_canon_transition_rows', 'chat_session_id'),
+  ('rewrite_jobs', 'chat_session_id'),
+  ('rewrite_operations', 'chat_session_id'),
   ('character_session_baseline_rows', 'chat_session_id'),
   ('studio_config_rows', 'session_id'),
   ('chat_summaries', 'session_id'),
@@ -81,6 +85,32 @@ void main() {
     )..where((row) => row.charId.equals('control'))).getSingle();
     expect(remaining.variantOrder, 0);
   });
+
+  test('session deletion retains global transitions until character deletion', () async {
+    await _seedCharacter(db, 'target', sessionId: 'target-session');
+    await db.customStatement('''
+      INSERT INTO applied_canon_transition_rows
+      (id, chat_session_id, character_id, rewrite_operation_id, revision,
+       revision_hash, semantic_scope_key, canonical_claim,
+       promotion_destination, affected_tracker_keys_json, transition_json)
+      VALUES ('global-transition', NULL, 'target', 'global-operation', 2,
+              'global-hash', 'scope', 'claim', 'destination', '["tracker"]', '{}')
+    ''');
+
+    await SessionDeletionRepo(db).deleteSession('target-session');
+
+    var count = await db.customSelect(
+      "SELECT COUNT(*) AS count FROM applied_canon_transition_rows WHERE id = 'global-transition'",
+    ).getSingle();
+    expect(count.read<int>('count'), 1);
+
+    await repo.deleteCharacters({'target'});
+
+    count = await db.customSelect(
+      "SELECT COUNT(*) AS count FROM applied_canon_transition_rows WHERE id = 'global-transition'",
+    ).getSingle();
+    expect(count.read<int>('count'), 0);
+  });
 }
 
 Future<void> _seedCharacter(
@@ -106,6 +136,13 @@ Future<void> _seedCharacter(
     "INSERT INTO ledger_reconciliation_checkpoints (session_id, start_message_id, end_message_id) VALUES ('$sessionId', 'start', 'end')",
     "INSERT INTO ledger_reconciliation_cleanup_journals (session_id, endpoint_message_id) VALUES ('$sessionId', 'end')",
     "INSERT INTO character_knowledge_fact_rows (id, chat_session_id, knower_key, subject_key, fact_class, predicate, object, epistemic_state) VALUES ('fact_$id', '$sessionId', 'knower', 'subject', 'fact', 'predicate', 'object', 'known')",
+    "INSERT INTO character_revision_rows (character_id, revision, revision_hash, snapshot_json) VALUES ('$characterId', '1', 'hash_$id', '{}')",
+    "INSERT INTO applied_canon_transition_rows (id, chat_session_id, character_id, transition_json) VALUES ('transition_$id', '$sessionId', '$characterId', '{}')",
+    "INSERT INTO canon_transition_fact_refs (applied_canon_transition_id, character_knowledge_fact_id) VALUES ('transition_$id', 'fact_$id')",
+    "INSERT INTO rewrite_jobs (id, chat_session_id, character_id) VALUES ('job_$id', '$sessionId', '$characterId')",
+    "INSERT INTO rewrite_operations (id, rewrite_job_id, chat_session_id) VALUES ('operation_$id', 'job_$id', '$sessionId')",
+    "INSERT INTO rewrite_operation_revisions (rewrite_operation_id, revision, snapshot_json) VALUES ('operation_$id', '1', '{}')",
+    "INSERT INTO rewrite_evidence_rows (id, rewrite_operation_id, evidence_json) VALUES ('evidence_$id', 'operation_$id', '{}')",
     "INSERT INTO character_session_baseline_rows (chat_session_id, character_id, baseline_card_json, baseline_hash) VALUES ('$sessionId', '$characterId', '{}', 'hash')",
     "INSERT INTO studio_config_rows (session_id) VALUES ('$sessionId')",
     "INSERT INTO chat_summaries (session_id, content) VALUES ('$sessionId', 'summary')",
@@ -130,6 +167,7 @@ Future<void> _expectCharacterCount(
   for (final (table, column, value) in [
     ('characters', 'char_id', characterId),
     ('character_folder_members', 'char_id', characterId),
+    ('character_revision_rows', 'character_id', characterId),
     ..._sessionTables.map((item) => (item.$1, item.$2, sessionId)),
   ]) {
     final row = await db
@@ -138,6 +176,19 @@ Future<void> _expectCharacterCount(
           variables: [Variable.withString(value)],
         )
         .getSingle();
+    expect(row.read<int>('count'), expected, reason: table);
+  }
+
+  final provenanceChildren = [
+    ('rewrite_operation_revisions', 'rewrite_operation_id', 'operation_${characterId.replaceAll('-', '_')}'),
+    ('rewrite_evidence_rows', 'rewrite_operation_id', 'operation_${characterId.replaceAll('-', '_')}'),
+    ('canon_transition_fact_refs', 'applied_canon_transition_id', 'transition_${characterId.replaceAll('-', '_')}'),
+  ];
+  for (final (table, column, value) in provenanceChildren) {
+    final row = await db.customSelect(
+      'SELECT COUNT(*) AS count FROM $table WHERE $column = ?',
+      variables: [Variable.withString(value)],
+    ).getSingle();
     expect(row.read<int>('count'), expected, reason: table);
   }
 

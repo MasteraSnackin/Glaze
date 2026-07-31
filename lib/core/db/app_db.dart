@@ -39,6 +39,13 @@ part 'app_db.g.dart';
     LedgerReconciliationCleanupJournals,
     CharacterKnowledgeFactRows,
     CharacterSessionBaselineRows,
+    CharacterRevisionRows,
+    AppliedCanonTransitionRows,
+    RewriteJobs,
+    RewriteOperations,
+    RewriteOperationRevisions,
+    RewriteEvidenceRows,
+    CanonTransitionFactRefs,
     ExtensionPresets,
     InfoBlocks,
   ],
@@ -49,7 +56,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 81;
+  int get schemaVersion => 85;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -1428,6 +1435,295 @@ class AppDatabase extends _$AppDatabase {
         await customStatement(
           'CREATE INDEX IF NOT EXISTS idx_embeddings_source_type_id '
           'ON embeddings (source_type, source_id)',
+        );
+      }
+      if (from < 82) {
+        // Additive and guarded to tolerate interrupted development upgrades.
+        final tables = await customSelect(
+          "SELECT name FROM sqlite_master WHERE type = 'table'",
+        ).get();
+        final names = tables.map((row) => row.read<String>('name')).toSet();
+        if (!names.contains('character_revision_rows')) {
+          await m.createTable(characterRevisionRows);
+        }
+        if (!names.contains('applied_canon_transition_rows')) {
+          await m.createTable(appliedCanonTransitionRows);
+        }
+        if (!names.contains('rewrite_jobs')) await m.createTable(rewriteJobs);
+        if (!names.contains('rewrite_operations')) {
+          await m.createTable(rewriteOperations);
+        }
+        if (!names.contains('rewrite_operation_revisions')) {
+          await m.createTable(rewriteOperationRevisions);
+        }
+        if (!names.contains('rewrite_evidence_rows')) {
+          await m.createTable(rewriteEvidenceRows);
+        }
+        if (!names.contains('canon_transition_fact_refs')) {
+          await m.createTable(canonTransitionFactRefs);
+        }
+
+        final factColumns = await customSelect(
+          "PRAGMA table_info('character_knowledge_fact_rows')",
+        ).get();
+        final factNames = factColumns
+            .map((column) => column.read<String>('name'))
+            .toSet();
+        if (!factNames.contains('basis_revision')) {
+          await m.addColumn(
+            characterKnowledgeFactRows,
+            characterKnowledgeFactRows.basisRevision,
+          );
+        }
+        if (!factNames.contains('basis_revision_hash')) {
+          await m.addColumn(
+            characterKnowledgeFactRows,
+            characterKnowledgeFactRows.basisRevisionHash,
+          );
+        }
+
+        final trackerColumns = await customSelect(
+          "PRAGMA table_info('tracker_rows')",
+        ).get();
+        final trackerNames = trackerColumns
+            .map((column) => column.read<String>('name'))
+            .toSet();
+        if (!trackerNames.contains('basis_revision')) {
+          await m.addColumn(trackerRows, trackerRows.basisRevision);
+        }
+        if (!trackerNames.contains('basis_revision_hash')) {
+          await m.addColumn(trackerRows, trackerRows.basisRevisionHash);
+        }
+      }
+      if (from < 83) {
+        // v82 was an unreleased interim schema that stored numeric lineage in
+        // TEXT columns. Rebuild tables whose declared affinity is wrong:
+        // SQLite's lax affinity makes ALTER insufficient for schema correctness.
+        // TableMigration preserves rows, keys, unique constraints, and indexes.
+        Future<bool> hasNonIntegerColumn(String table, String column) async {
+          final columns = await customSelect(
+            "PRAGMA table_info('$table')",
+          ).get();
+          final match = columns.where(
+            (row) => row.read<String>('name') == column,
+          );
+          return match.isNotEmpty &&
+              match.single.read<String>('type').toUpperCase() != 'INTEGER';
+        }
+
+        if (await hasNonIntegerColumn('tracker_rows', 'basis_revision')) {
+          await m.alterTable(
+            TableMigration(
+              trackerRows,
+              columnTransformer: {
+                trackerRows.basisRevision: const CustomExpression<int>(
+                  'CAST(basis_revision AS INTEGER)',
+                ),
+              },
+            ),
+          );
+        }
+        if (await hasNonIntegerColumn(
+          'character_knowledge_fact_rows',
+          'basis_revision',
+        )) {
+          await m.alterTable(
+            TableMigration(
+              characterKnowledgeFactRows,
+              columnTransformer: {
+                characterKnowledgeFactRows.basisRevision:
+                    const CustomExpression<int>(
+                      'CAST(basis_revision AS INTEGER)',
+                    ),
+              },
+            ),
+          );
+        }
+        if (await hasNonIntegerColumn('character_revision_rows', 'revision')) {
+          await m.alterTable(
+            TableMigration(
+              characterRevisionRows,
+              columnTransformer: {
+                characterRevisionRows.revision: const CustomExpression<int>(
+                  'CAST(revision AS INTEGER)',
+                ),
+              },
+            ),
+          );
+        }
+        if (await hasNonIntegerColumn(
+          'applied_canon_transition_rows',
+          'basis_revision',
+        )) {
+          await m.alterTable(
+            TableMigration(
+              appliedCanonTransitionRows,
+              columnTransformer: {
+                appliedCanonTransitionRows.basisRevision:
+                    const CustomExpression<int>(
+                      'CAST(basis_revision AS INTEGER)',
+                    ),
+              },
+            ),
+          );
+        }
+        if (await hasNonIntegerColumn('rewrite_jobs', 'basis_revision')) {
+          await m.alterTable(
+            TableMigration(
+              rewriteJobs,
+              columnTransformer: {
+                rewriteJobs.basisRevision: const CustomExpression<int>(
+                  'CAST(basis_revision AS INTEGER)',
+                ),
+              },
+            ),
+          );
+        }
+        if (await hasNonIntegerColumn(
+          'rewrite_operation_revisions',
+          'revision',
+        )) {
+          await m.alterTable(
+            TableMigration(
+              rewriteOperationRevisions,
+              columnTransformer: {
+                rewriteOperationRevisions.revision: const CustomExpression<int>(
+                  'CAST(revision AS INTEGER)',
+                ),
+              },
+            ),
+          );
+        }
+      }
+      if (from < 84) {
+        // v84 makes canon transitions structurally queryable. Existing v81-v83
+        // payloads have no reliable JSON shape to backfill, so retain their
+        // transition JSON and use neutral defaults. Rebuilding is required to
+        // make chat_session_id nullable; TableMigration preserves existing rows,
+        // primary/unique constraints, and declared indexes.
+        final revisionColumns = await customSelect(
+          "PRAGMA table_info('character_revision_rows')",
+        ).get();
+        final revisionNames = revisionColumns
+            .map((row) => row.read<String>('name'))
+            .toSet();
+        if (!revisionNames.contains('parent_revision_hash')) {
+          await m.addColumn(
+            characterRevisionRows,
+            characterRevisionRows.parentRevisionHash,
+          );
+        }
+
+        final transitionColumns = await customSelect(
+          "PRAGMA table_info('applied_canon_transition_rows')",
+        ).get();
+        final transitionNames = transitionColumns
+            .map((row) => row.read<String>('name'))
+            .toSet();
+        if (!transitionNames.contains('rewrite_operation_id') ||
+            transitionColumns
+                    .singleWhere(
+                      (row) => row.read<String>('name') == 'chat_session_id',
+                    )
+                    .read<int>('notnull') ==
+                1) {
+          await m.alterTable(
+            TableMigration(
+              appliedCanonTransitionRows,
+              columnTransformer: {
+                // v81-v83 rows predate structural fields. Preserve their
+                // legacy payload and provenance while filling neutral values.
+                appliedCanonTransitionRows.rewriteOperationId:
+                    const CustomExpression<String>("''"),
+                appliedCanonTransitionRows.revision:
+                    const CustomExpression<int>('0'),
+                appliedCanonTransitionRows.revisionHash:
+                    const CustomExpression<String>("''"),
+                appliedCanonTransitionRows.semanticScopeKey:
+                    const CustomExpression<String>("''"),
+                appliedCanonTransitionRows.canonicalClaim:
+                    const CustomExpression<String>("''"),
+                appliedCanonTransitionRows.promotionDestination:
+                    const CustomExpression<String>("''"),
+                appliedCanonTransitionRows.affectedTrackerKeysJson:
+                    const CustomExpression<String>("'[]'"),
+              },
+            ),
+          );
+        }
+      }
+      if (from < 85) {
+        // v85 adds explicit durable compare-and-swap/apply state. Existing
+        // operations and jobs have no reviewed/apply state, so use neutral
+        // defaults that cannot accidentally qualify an operation for apply.
+        final jobColumns = await customSelect(
+          "PRAGMA table_info('rewrite_jobs')",
+        ).get();
+        final jobNames = jobColumns
+            .map((row) => row.read<String>('name'))
+            .toSet();
+        if (!jobNames.contains('version')) {
+          await m.addColumn(rewriteJobs, rewriteJobs.version);
+        }
+        if (!jobNames.contains('applied_character_revision')) {
+          await m.addColumn(rewriteJobs, rewriteJobs.appliedCharacterRevision);
+        }
+        if (!jobNames.contains('applied_character_revision_hash')) {
+          await m.addColumn(
+            rewriteJobs,
+            rewriteJobs.appliedCharacterRevisionHash,
+          );
+        }
+
+        final operationColumns = await customSelect(
+          "PRAGMA table_info('rewrite_operations')",
+        ).get();
+        final operationNames = operationColumns
+            .map((row) => row.read<String>('name'))
+            .toSet();
+        if (!operationNames.contains('current_revision')) {
+          await m.addColumn(
+            rewriteOperations,
+            rewriteOperations.currentRevision,
+          );
+        }
+        if (!operationNames.contains('decision')) {
+          await m.addColumn(rewriteOperations, rewriteOperations.decision);
+        }
+        if (!operationNames.contains('validation_status')) {
+          await m.addColumn(
+            rewriteOperations,
+            rewriteOperations.validationStatus,
+          );
+        }
+        if (!operationNames.contains('decision_revision')) {
+          await m.addColumn(
+            rewriteOperations,
+            rewriteOperations.decisionRevision,
+          );
+        }
+        if (!operationNames.contains('applied_character_revision')) {
+          await m.addColumn(
+            rewriteOperations,
+            rewriteOperations.appliedCharacterRevision,
+          );
+        }
+        if (!operationNames.contains('applied_character_revision_hash')) {
+          await m.addColumn(
+            rewriteOperations,
+            rewriteOperations.appliedCharacterRevisionHash,
+          );
+        }
+        // SQLite cannot add CHECK constraints to an existing table. Rebuild the
+        // v84 table after its new columns have been populated with their safe
+        // defaults so upgraded databases enforce the same invariants as a fresh
+        // v85 database. TableMigration retains legacy rows and all declared
+        // indexes, including the apply-CAS lookup index.
+        await m.alterTable(TableMigration(rewriteOperations));
+        await customStatement(
+          'CREATE INDEX IF NOT EXISTS idx_rewrite_operation_apply_cas '
+          'ON rewrite_operations '
+          '(rewrite_job_id, decision, validation_status, current_revision)',
         );
       }
     },

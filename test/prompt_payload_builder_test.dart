@@ -19,7 +19,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   test(
-    'buildFromPreFetched only loads graph prompt content when memory is enabled',
+    'buildFromPreFetched never bypasses effective-canon resolution with legacy graph state',
     () async {
       SharedPreferences.setMockInitialValues({});
       final db = AppDatabase.forTesting(NativeDatabase.memory());
@@ -77,8 +77,11 @@ void main() {
         );
       });
       final builder = container.read(builderProvider);
+      await container.read(characterRepoProvider).put(
+        const Character(id: 'c1', name: 'Character'),
+      );
 
-      for (final (mode, expectedArc) in [('balanced', true), ('fast', false)]) {
+      for (final (mode, expectedArc) in [('balanced', false), ('fast', false)]) {
         await container
             .read(memoryGlobalSettingsProvider.notifier)
             .save(MemoryGlobalSettings(memoryMode: mode));
@@ -98,16 +101,9 @@ void main() {
           lorebooks: const [],
         );
 
-        expect(loadCount - callsBeforeBuild, 1, reason: mode);
-        expect(
-          payload.studioSessionStateContent,
-          contains('weather: rain'),
-          reason: mode,
-        );
+        expect(loadCount - callsBeforeBuild, 0, reason: mode);
+        expect(payload.studioSessionStateContent, isNull, reason: mode);
         expect(payload.arcContent != null, expectedArc, reason: mode);
-        if (expectedArc) {
-          expect(payload.arcContent, contains('- Escape'));
-        }
       }
 
       await container

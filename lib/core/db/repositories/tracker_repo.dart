@@ -42,6 +42,19 @@ class TrackerRepo {
     return row == null ? null : _rowToModel(row);
   }
 
+  /// Returns live user-owned override and lock rows only.
+  Future<List<Tracker>> getLiveCanonControls(String sessionId) {
+    return getBySessionAndScope(sessionId, 'ledger').then(
+      (trackers) => trackers
+          .where(
+            (tracker) =>
+                tracker.name.startsWith('canon_override:') ||
+                tracker.name.startsWith('canon_lock:'),
+          )
+          .toList(growable: false),
+    );
+  }
+
   /// Atomic upsert by natural key (sessionId, name). If a tracker with the
   /// same name already exists for the session, its value/scope/provenance/
   /// updatedAt are overwritten. Safe under concurrent writes — Drift resolves
@@ -56,6 +69,8 @@ class TrackerRepo {
             value: Value(tracker.value),
             scope: Value(tracker.scope),
             provenance: Value(tracker.provenance),
+            basisRevision: Value(tracker.basisRevisionNumber),
+            basisRevisionHash: Value(tracker.basisRevisionHash),
             updatedAt: Value(
               tracker.updatedAt == 0
                   ? currentTimestampSeconds()
@@ -73,6 +88,8 @@ class TrackerRepo {
     String value, {
     String scope = 'chat',
     String provenance = '',
+    int basisRevisionNumber = 0,
+    String basisRevisionHash = '',
   }) {
     return db
         .into(db.trackerRows)
@@ -83,6 +100,8 @@ class TrackerRepo {
             value: Value(value),
             scope: Value(scope),
             provenance: Value(provenance),
+            basisRevision: Value(basisRevisionNumber),
+            basisRevisionHash: Value(basisRevisionHash),
             updatedAt: Value(currentTimestampSeconds()),
           ),
         );
@@ -159,6 +178,8 @@ class TrackerRepo {
       value: row.value,
       scope: row.scope,
       provenance: row.provenance,
+      basisRevisionNumber: row.basisRevision,
+      basisRevisionHash: row.basisRevisionHash,
       updatedAt: row.updatedAt,
     );
   }

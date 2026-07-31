@@ -6,6 +6,7 @@ import '../models/api_config.dart';
 import '../models/lorebook.dart';
 import '../models/memory_book.dart';
 import 'prompt_builder.dart';
+import 'prompt/effective_canon_prompt_formatter.dart';
 
 /// Raw inputs collected from DB/providers on the main thread.
 /// Fully serializable for cross-isolate transfer.
@@ -60,6 +61,7 @@ class PromptInputs {
   final int memoryQueryMaxChars;
   final int memoryContextBudgetTokens;
   final List<RuntimePromptBlock> runtimePromptBlocks;
+  final EffectiveCanonPromptProjection? effectiveCanonProjection;
 
   const PromptInputs({
     required this.character,
@@ -107,6 +109,7 @@ class PromptInputs {
     this.memoryQueryMaxChars = 1500,
     this.memoryContextBudgetTokens = 0,
     this.runtimePromptBlocks = const [],
+    this.effectiveCanonProjection,
   });
 
   Map<String, dynamic> toJson() => {
@@ -157,6 +160,7 @@ class PromptInputs {
     'runtimePromptBlocks': runtimePromptBlocks
         .map((block) => block.toJson())
         .toList(),
+    'effectiveCanonProjection': effectiveCanonProjection?.toJson(),
   };
 
   factory PromptInputs.fromJson(Map<String, dynamic> json) => PromptInputs(
@@ -240,6 +244,11 @@ class PromptInputs {
           (block) => RuntimePromptBlock.fromJson(block as Map<String, dynamic>),
         )
         .toList(),
+    effectiveCanonProjection: json['effectiveCanonProjection'] == null
+        ? null
+        : EffectiveCanonPromptProjection.fromJson(
+            json['effectiveCanonProjection'] as Map<String, dynamic>,
+          ),
   );
 }
 

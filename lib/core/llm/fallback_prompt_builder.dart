@@ -2,8 +2,18 @@ import 'context_calculator.dart';
 import 'history_assembler.dart';
 import 'macro_engine.dart';
 import 'prompt_builder.dart';
+import 'prompt/effective_canon_prompt_formatter.dart';
+import '../models/chat_message.dart';
 
 PromptResult buildFallbackPrompt(PromptPayload payload) {
+  final canon = payload.effectiveCanonProjection == null
+      ? null
+      : EffectiveCanonPromptFormatter.format(
+          payload.effectiveCanonProjection!,
+          sessionId: payload.sessionId ?? '',
+          latestUserText: _latestText(payload.history, 'user'),
+          latestAssistantText: _latestText(payload.history, 'assistant'),
+        );
   final macroCtx = MacroContext(
     charName: payload.character.name,
     charDescription: payload.character.description,
@@ -55,9 +65,20 @@ PromptResult buildFallbackPrompt(PromptPayload payload) {
   );
 
   return PromptResult(
-    messages: [systemMessage, ...breakdown.trimmedHistory],
+    messages: [
+      systemMessage,
+      if (canon?.characterKnowledge case final content? when content.isNotEmpty)
+        PromptMessage(role: 'system', content: content, blockId: 'current_character_state'),
+      if (canon?.sessionState case final content? when content.isNotEmpty)
+        PromptMessage(role: 'system', content: content, blockId: 'studio_session_state'),
+      ...breakdown.trimmedHistory,
+    ],
     breakdown: breakdown,
     sessionVars: payload.sessionVars,
     globalVars: payload.globalVars,
   );
 }
+
+String _latestText(List<ChatMessage> history, String role) => history
+    .lastWhere((message) => message.role == role, orElse: () => const ChatMessage(id: '', role: '', content: ''))
+    .content;

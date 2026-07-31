@@ -78,7 +78,7 @@ void main() {
 
       // user_version matches the Drift schema version (app_db.dart schemaVersion).
       // Update this constant whenever a new migration step is added.
-      expect(version, 81);
+      expect(version, 85);
     });
 
     test(
@@ -115,7 +115,7 @@ void main() {
         final version = await upgraded
             .customSelect('PRAGMA user_version')
             .get();
-        expect(version.first.read<int>('user_version'), 81);
+        expect(version.first.read<int>('user_version'), 85);
         expect(names, contains('variant_group_id'));
         expect(names, contains('hidden'));
       },
@@ -145,12 +145,12 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 81);
+      expect(version.read<int>('user_version'), 85);
     });
 
     test('current schema includes atomic character fact tables', () async {
       final version = await db.customSelect('PRAGMA user_version').getSingle();
-      expect(version.read<int>('user_version'), 81);
+      expect(version.read<int>('user_version'), 85);
 
       final factColumns = await db
           .customSelect("PRAGMA table_info('character_knowledge_fact_rows')")
@@ -262,7 +262,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 81);
+      expect(version.read<int>('user_version'), 85);
     });
 
     test(
@@ -372,7 +372,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 81);
+      expect(version.read<int>('user_version'), 85);
     });
 
     test('v80 adds Responses API toggle defaulting to off', () async {
@@ -412,7 +412,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 81);
+      expect(version.read<int>('user_version'), 85);
     });
 
     test('v81 adds composite embedding source index', () async {
@@ -427,9 +427,7 @@ void main() {
         NativeDatabase.createInBackground(file),
       );
       await seeded.customSelect('SELECT 1').get();
-      await seeded.customStatement(
-        'DROP INDEX idx_embeddings_source_type_id',
-      );
+      await seeded.customStatement('DROP INDEX idx_embeddings_source_type_id');
       await seeded.customStatement('PRAGMA user_version = 80');
       await seeded.close();
 
@@ -437,9 +435,9 @@ void main() {
         NativeDatabase.createInBackground(file),
       );
       addTearDown(() async => upgraded.close());
-      final indexes = await upgraded.customSelect(
-        "PRAGMA index_list('embeddings')",
-      ).get();
+      final indexes = await upgraded
+          .customSelect("PRAGMA index_list('embeddings')")
+          .get();
 
       expect(
         indexes.map((row) => row.read<String>('name')),
@@ -448,8 +446,441 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 81);
+      expect(version.read<int>('user_version'), 85);
     });
+
+    test('v82 creates rewrite persistence schema and provenance columns', () async {
+      final file = File(
+        '${Directory.systemTemp.path}/glaze_mig_rewrite_${DateTime.now().microsecondsSinceEpoch}.db',
+      );
+      addTearDown(() async {
+        if (file.existsSync()) await file.delete();
+      });
+
+      final seeded = AppDatabase.forTesting(
+        NativeDatabase.createInBackground(file),
+      );
+      await seeded.customSelect('SELECT 1').get();
+      for (final table in [
+        'character_revision_rows',
+        'applied_canon_transition_rows',
+        'rewrite_jobs',
+        'rewrite_operations',
+        'rewrite_operation_revisions',
+        'rewrite_evidence_rows',
+        'canon_transition_fact_refs',
+      ]) {
+        await seeded.customStatement('DROP TABLE $table');
+      }
+      await seeded.customStatement(
+        'ALTER TABLE character_knowledge_fact_rows DROP COLUMN basis_revision',
+      );
+      await seeded.customStatement(
+        'ALTER TABLE character_knowledge_fact_rows DROP COLUMN basis_revision_hash',
+      );
+      await seeded.customStatement(
+        'ALTER TABLE tracker_rows DROP COLUMN basis_revision',
+      );
+      await seeded.customStatement(
+        'ALTER TABLE tracker_rows DROP COLUMN basis_revision_hash',
+      );
+      await seeded.customStatement('PRAGMA user_version = 81');
+      await seeded.close();
+
+      final upgraded = AppDatabase.forTesting(
+        NativeDatabase.createInBackground(file),
+      );
+      addTearDown(() async => upgraded.close());
+      await upgraded.customSelect('SELECT 1').get();
+
+      for (final table in [
+        'character_revision_rows',
+        'applied_canon_transition_rows',
+        'rewrite_jobs',
+        'rewrite_operations',
+        'rewrite_operation_revisions',
+        'rewrite_evidence_rows',
+        'canon_transition_fact_refs',
+      ]) {
+        final columns = await upgraded
+            .customSelect("PRAGMA table_info('$table')")
+            .get();
+        expect(columns, isNotEmpty, reason: table);
+      }
+      for (final table in ['character_knowledge_fact_rows', 'tracker_rows']) {
+        final columns = await upgraded
+            .customSelect("PRAGMA table_info('$table')")
+            .get();
+        expect(
+          columns.map((row) => row.read<String>('name')),
+          containsAll(['basis_revision', 'basis_revision_hash']),
+          reason: table,
+        );
+      }
+      final version = await upgraded
+          .customSelect('PRAGMA user_version')
+          .getSingle();
+      expect(version.read<int>('user_version'), 85);
+    });
+
+    test('v83 rebuilds interim text revision columns without losing rows', () async {
+      final file = File(
+        '${Directory.systemTemp.path}/glaze_mig_revision_types_${DateTime.now().microsecondsSinceEpoch}.db',
+      );
+      addTearDown(() async {
+        if (file.existsSync()) await file.delete();
+      });
+      final seeded = AppDatabase.forTesting(
+        NativeDatabase.createInBackground(file),
+      );
+      await seeded.customSelect('SELECT 1').get();
+      const tables = [
+        'tracker_rows',
+        'character_knowledge_fact_rows',
+        'character_revision_rows',
+        'applied_canon_transition_rows',
+        'rewrite_jobs',
+        'rewrite_operation_revisions',
+      ];
+      final schemas = <String, String>{};
+      for (final table in tables) {
+        final row = await seeded
+            .customSelect(
+              "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+              variables: [Variable.withString(table)],
+            )
+            .getSingle();
+        schemas[table] = row.read<String>('sql');
+        await seeded.customStatement('DROP TABLE $table');
+      }
+      for (final schema in schemas.values) {
+        await seeded.customStatement(
+          schema
+              .replaceAll('basis_revision INTEGER', 'basis_revision TEXT')
+              .replaceAll('revision INTEGER', 'revision TEXT'),
+        );
+      }
+      await seeded.customStatement(
+        "INSERT INTO tracker_rows (session_id, name, basis_revision) VALUES ('s', 't', '7')",
+      );
+      await seeded.customStatement(
+        "INSERT INTO character_knowledge_fact_rows (id, chat_session_id, knower_key, subject_key, fact_class, predicate, object, epistemic_state, basis_revision) VALUES ('f', 's', 'k', 'subject', 'fact', 'p', 'o', 'known', '7')",
+      );
+      await seeded.customStatement(
+        "INSERT INTO character_revision_rows (character_id, revision, revision_hash, snapshot_json) VALUES ('c', '7', 'hash', '{}')",
+      );
+      await seeded.customStatement(
+        "INSERT INTO applied_canon_transition_rows (id, chat_session_id, character_id, transition_json, basis_revision) VALUES ('t', 's', 'c', '{}', '7')",
+      );
+      await seeded.customStatement(
+        "INSERT INTO rewrite_jobs (id, chat_session_id, character_id, basis_revision) VALUES ('j', 's', 'c', '7')",
+      );
+      await seeded.customStatement(
+        "INSERT INTO rewrite_operation_revisions (rewrite_operation_id, revision, snapshot_json) VALUES ('o', '7', '{}')",
+      );
+      await seeded.customStatement('PRAGMA user_version = 82');
+      await seeded.close();
+
+      final upgraded = AppDatabase.forTesting(
+        NativeDatabase.createInBackground(file),
+      );
+      addTearDown(() async => upgraded.close());
+      await upgraded.customSelect('SELECT 1').get();
+      for (final (table, column) in const [
+        ('tracker_rows', 'basis_revision'),
+        ('character_knowledge_fact_rows', 'basis_revision'),
+        ('character_revision_rows', 'revision'),
+        ('applied_canon_transition_rows', 'basis_revision'),
+        ('rewrite_jobs', 'basis_revision'),
+        ('rewrite_operation_revisions', 'revision'),
+      ]) {
+        final info = await upgraded
+            .customSelect("PRAGMA table_info('$table')")
+            .get();
+        final type = info
+            .singleWhere((row) => row.read<String>('name') == column)
+            .read<String>('type');
+        expect(type.toUpperCase(), 'INTEGER', reason: '$table.$column');
+      }
+      expect(
+        await upgraded
+            .customSelect('SELECT basis_revision FROM tracker_rows')
+            .getSingle(),
+        isNotNull,
+      );
+      final values = await upgraded.customSelect('''
+        SELECT (SELECT basis_revision FROM tracker_rows) AS tracker,
+               (SELECT basis_revision FROM character_knowledge_fact_rows) AS fact,
+               (SELECT revision FROM character_revision_rows) AS character_revision,
+               (SELECT basis_revision FROM applied_canon_transition_rows) AS transition,
+               (SELECT basis_revision FROM rewrite_jobs) AS job,
+               (SELECT revision FROM rewrite_operation_revisions) AS operation_revision
+      ''').getSingle();
+      for (final name in [
+        'tracker',
+        'fact',
+        'character_revision',
+        'transition',
+        'job',
+        'operation_revision',
+      ]) {
+        expect(values.read<int>(name), 7, reason: name);
+      }
+    });
+
+    test(
+      'v84 transition schema has queryable columns and lineage constraints',
+      () async {
+        final transitionColumns = await db
+            .customSelect("PRAGMA table_info('applied_canon_transition_rows')")
+            .get();
+        final byName = {
+          for (final row in transitionColumns) row.read<String>('name'): row,
+        };
+        expect(
+          byName.keys,
+          containsAll([
+            'character_id',
+            'chat_session_id',
+            'rewrite_operation_id',
+            'revision',
+            'revision_hash',
+            'semantic_scope_key',
+            'canonical_claim',
+            'promotion_destination',
+            'affected_tracker_keys_json',
+          ]),
+        );
+        expect(byName['chat_session_id']!.read<int>('notnull'), 0);
+        expect(
+          byName['revision']!.read<String>('type').toUpperCase(),
+          'INTEGER',
+        );
+        final indexes = await db
+            .customSelect("PRAGMA index_list('applied_canon_transition_rows')")
+            .get();
+        expect(
+          indexes.map((row) => row.read<String>('name')),
+          containsAll([
+            'idx_applied_canon_transition_session',
+            'idx_applied_canon_transition_character',
+            'idx_applied_canon_transition_operation',
+          ]),
+        );
+
+        final revisions = await db
+            .customSelect("PRAGMA table_info('character_revision_rows')")
+            .get();
+        expect(
+          revisions.map((row) => row.read<String>('name')),
+          contains('parent_revision_hash'),
+        );
+        final revisionIndexes = await db
+            .customSelect("PRAGMA index_list('character_revision_rows')")
+            .get();
+        expect(
+          revisionIndexes.any((row) => row.read<int>('unique') == 1),
+          isTrue,
+        );
+      },
+    );
+
+    test('v85 exposes durable rewrite CAS and apply columns', () async {
+      final jobs = await db
+          .customSelect("PRAGMA table_info('rewrite_jobs')")
+          .get();
+      final operations = await db
+          .customSelect("PRAGMA table_info('rewrite_operations')")
+          .get();
+      expect(
+        jobs.map((row) => row.read<String>('name')),
+        containsAll([
+          'version',
+          'applied_character_revision',
+          'applied_character_revision_hash',
+        ]),
+      );
+      expect(
+        operations.map((row) => row.read<String>('name')),
+        containsAll([
+          'current_revision',
+          'decision',
+          'validation_status',
+          'decision_revision',
+          'applied_character_revision',
+          'applied_character_revision_hash',
+        ]),
+      );
+      final indexes = await db
+          .customSelect("PRAGMA index_list('rewrite_operations')")
+          .get();
+      expect(
+        indexes.map((row) => row.read<String>('name')),
+        contains('idx_rewrite_operation_apply_cas'),
+      );
+
+      for (final statement in [
+        "INSERT INTO rewrite_operations (id, rewrite_job_id, chat_session_id, decision) "
+            "VALUES ('invalid-decision', 'j', 's', 'unknown')",
+        "INSERT INTO rewrite_operations (id, rewrite_job_id, chat_session_id, validation_status) "
+            "VALUES ('invalid-validation', 'j', 's', 'unknown')",
+        "INSERT INTO rewrite_operations (id, rewrite_job_id, chat_session_id, current_revision) "
+            "VALUES ('invalid-current-revision', 'j', 's', 0)",
+        "INSERT INTO rewrite_operations (id, rewrite_job_id, chat_session_id, decision_revision) "
+            "VALUES ('invalid-decision-revision', 'j', 's', -1)",
+      ]) {
+        await expectLater(db.customStatement(statement), throwsA(anything));
+      }
+    });
+
+    test(
+      'v85 rebuilds v84 rewrite operations with constraints and CAS index',
+      () async {
+        final file = File(
+          '${Directory.systemTemp.path}/glaze_mig_rewrite_cas_${DateTime.now().microsecondsSinceEpoch}.db',
+        );
+        addTearDown(() async {
+          if (file.existsSync()) await file.delete();
+        });
+        final seeded = AppDatabase.forTesting(
+          NativeDatabase.createInBackground(file),
+        );
+        await seeded.customSelect('SELECT 1').get();
+        await seeded.customStatement(
+          'DROP INDEX idx_rewrite_operation_apply_cas',
+        );
+        await seeded.customStatement('DROP TABLE rewrite_operations');
+        await seeded.customStatement('DROP TABLE rewrite_jobs');
+        await seeded.customStatement('''
+        CREATE TABLE rewrite_jobs (
+          id TEXT NOT NULL PRIMARY KEY, chat_session_id TEXT NOT NULL,
+          character_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
+          request_json TEXT NOT NULL DEFAULT '{}', basis_revision INTEGER NOT NULL DEFAULT 0,
+          basis_revision_hash TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL DEFAULT 0,
+          updated_at INTEGER NOT NULL DEFAULT 0)
+      ''');
+        await seeded.customStatement('''
+        CREATE TABLE rewrite_operations (
+          id TEXT NOT NULL PRIMARY KEY, rewrite_job_id TEXT NOT NULL,
+          chat_session_id TEXT NOT NULL, operation_json TEXT NOT NULL DEFAULT '{}',
+          status TEXT NOT NULL DEFAULT 'pending', created_at INTEGER NOT NULL DEFAULT 0,
+          updated_at INTEGER NOT NULL DEFAULT 0)
+      ''');
+        await seeded.customStatement(
+          "INSERT INTO rewrite_jobs (id, chat_session_id, character_id) VALUES ('j', 's', 'c')",
+        );
+        await seeded.customStatement(
+          "INSERT INTO rewrite_operations "
+          "(id, rewrite_job_id, chat_session_id, operation_json, status, created_at, updated_at) "
+          "VALUES ('o', 'j', 's', '{\"preserved\":true}', 'complete', 12, 34)",
+        );
+        await seeded.customStatement('PRAGMA user_version = 84');
+        await seeded.close();
+        final upgraded = AppDatabase.forTesting(
+          NativeDatabase.createInBackground(file),
+        );
+        addTearDown(() => upgraded.close());
+        final row = await upgraded.customSelect('''
+        SELECT (SELECT version FROM rewrite_jobs WHERE id = 'j') AS job_version,
+          (SELECT operation_json FROM rewrite_operations WHERE id = 'o') AS operation_json,
+          (SELECT status FROM rewrite_operations WHERE id = 'o') AS status,
+          (SELECT created_at FROM rewrite_operations WHERE id = 'o') AS created_at,
+          (SELECT updated_at FROM rewrite_operations WHERE id = 'o') AS updated_at,
+          (SELECT decision FROM rewrite_operations WHERE id = 'o') AS decision,
+          (SELECT validation_status FROM rewrite_operations WHERE id = 'o') AS validation_status,
+          (SELECT current_revision FROM rewrite_operations WHERE id = 'o') AS current_revision
+      ''').getSingle();
+        expect(row.read<int>('job_version'), 1);
+        expect(row.read<String>('operation_json'), '{"preserved":true}');
+        expect(row.read<String>('status'), 'complete');
+        expect(row.read<int>('created_at'), 12);
+        expect(row.read<int>('updated_at'), 34);
+        expect(row.read<String>('decision'), 'pending');
+        expect(row.read<String>('validation_status'), 'pending');
+        expect(row.read<int>('current_revision'), 1);
+        final indexes = await upgraded
+            .customSelect("PRAGMA index_list('rewrite_operations')")
+            .get();
+        expect(
+          indexes.map((index) => index.read<String>('name')),
+          contains('idx_rewrite_operation_apply_cas'),
+        );
+        for (final statement in [
+          "UPDATE rewrite_operations SET decision = 'unknown' WHERE id = 'o'",
+          "UPDATE rewrite_operations SET validation_status = 'unknown' WHERE id = 'o'",
+          "UPDATE rewrite_operations SET current_revision = 0 WHERE id = 'o'",
+          "UPDATE rewrite_operations SET decision_revision = -1 WHERE id = 'o'",
+        ]) {
+          await expectLater(
+            upgraded.customStatement(statement),
+            throwsA(anything),
+          );
+        }
+      },
+    );
+
+    test(
+      'v84 upgrades a v83 transition row with defaults and preserved payload',
+      () async {
+        final file = File(
+          '${Directory.systemTemp.path}/glaze_mig_transition_v84_${DateTime.now().microsecondsSinceEpoch}.db',
+        );
+        addTearDown(() async {
+          if (file.existsSync()) await file.delete();
+        });
+        final seeded = AppDatabase.forTesting(
+          NativeDatabase.createInBackground(file),
+        );
+        await seeded.customSelect('SELECT 1').get();
+        await seeded.customStatement(
+          'DROP TABLE applied_canon_transition_rows',
+        );
+        await seeded.customStatement('''
+        CREATE TABLE applied_canon_transition_rows (
+          id TEXT NOT NULL PRIMARY KEY,
+          chat_session_id TEXT NOT NULL,
+          character_id TEXT NOT NULL,
+          transition_json TEXT NOT NULL,
+          basis_revision INTEGER NOT NULL DEFAULT 0,
+          basis_revision_hash TEXT NOT NULL DEFAULT '',
+          applied_at INTEGER NOT NULL DEFAULT 0
+        )
+      ''');
+        await seeded.customStatement('''
+        INSERT INTO applied_canon_transition_rows
+        (id, chat_session_id, character_id, transition_json, basis_revision,
+         basis_revision_hash, applied_at)
+        VALUES ('legacy-transition', 'legacy-session', 'legacy-character',
+                '{"legacy":true}', 4, 'basis-hash', 5)
+      ''');
+        await seeded.customStatement('PRAGMA user_version = 83');
+        await seeded.close();
+
+        final upgraded = AppDatabase.forTesting(
+          NativeDatabase.createInBackground(file),
+        );
+        addTearDown(() async => upgraded.close());
+        final row = await upgraded.customSelect('''
+        SELECT chat_session_id, character_id, transition_json, basis_revision,
+               basis_revision_hash, rewrite_operation_id, revision,
+               revision_hash, semantic_scope_key, canonical_claim,
+               promotion_destination, affected_tracker_keys_json
+        FROM applied_canon_transition_rows WHERE id = 'legacy-transition'
+      ''').getSingle();
+        expect(row.read<String>('chat_session_id'), 'legacy-session');
+        expect(row.read<String>('character_id'), 'legacy-character');
+        expect(row.read<String>('transition_json'), '{"legacy":true}');
+        expect(row.read<int>('basis_revision'), 4);
+        expect(row.read<String>('basis_revision_hash'), 'basis-hash');
+        expect(row.read<String>('rewrite_operation_id'), '');
+        expect(row.read<int>('revision'), 0);
+        expect(row.read<String>('revision_hash'), '');
+        expect(row.read<String>('semantic_scope_key'), '');
+        expect(row.read<String>('canonical_claim'), '');
+        expect(row.read<String>('promotion_destination'), '');
+        expect(row.read<String>('affected_tracker_keys_json'), '[]');
+      },
+    );
 
     test('v70 refreshes only the default Ledger prompt block', () async {
       final file = File(
@@ -502,7 +933,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 81);
+      expect(version.read<int>('user_version'), 85);
       final row = await upgraded
           .customSelect(
             'SELECT blocks_json FROM studio_preset_rows WHERE preset_id = ?',
@@ -618,7 +1049,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 81);
+      expect(version.read<int>('user_version'), 85);
       final check = await upgraded.customSelect('PRAGMA integrity_check').get();
       expect(check.single.read<String>('integrity_check'), 'ok');
     });

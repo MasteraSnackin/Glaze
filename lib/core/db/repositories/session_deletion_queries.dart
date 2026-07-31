@@ -14,6 +14,8 @@ class SessionDeletionQueries {
     required String? characterId,
     required bool preserveMemoryBookSettings,
   }) async {
+    // Durable rewrite provenance survives clear chat and message/swipe edits.
+    // A full session cascade removes it in [_deleteRewriteProvenance].
     if (preserveMemoryBookSettings) {
       await (_db.update(
         _db.memoryBookRows,
@@ -96,6 +98,8 @@ class SessionDeletionQueries {
       characterId: session?.characterId,
       preserveMemoryBookSettings: false,
     );
+    // Child-first ordering keeps this safe when foreign keys are enabled.
+    await _deleteRewriteProvenance(sessionId);
     await (_db.delete(
       _db.characterSessionBaselineRows,
     )..where((row) => row.chatSessionId.equals(sessionId))).go();
@@ -119,5 +123,46 @@ class SessionDeletionQueries {
     await (_db.delete(
       _db.chatSessions,
     )..where((row) => row.sessionId.equals(sessionId))).go();
+  }
+
+  Future<void> _deleteRewriteProvenance(String sessionId) async {
+    final rewriteJobs = await (_db.select(
+      _db.rewriteJobs,
+    )..where((row) => row.chatSessionId.equals(sessionId))).get();
+    final rewriteJobIds = rewriteJobs.map((row) => row.id).toSet();
+    final rewriteOperations = rewriteJobIds.isEmpty
+        ? const <RewriteOperationRow>[]
+        : await (_db.select(
+            _db.rewriteOperations,
+          )..where((row) => row.rewriteJobId.isIn(rewriteJobIds))).get();
+    final rewriteOperationIds = rewriteOperations.map((row) => row.id).toSet();
+    if (rewriteOperationIds.isNotEmpty) {
+      await (_db.delete(
+        _db.rewriteOperationRevisions,
+      )..where((row) => row.rewriteOperationId.isIn(rewriteOperationIds))).go();
+      await (_db.delete(
+        _db.rewriteEvidenceRows,
+      )..where((row) => row.rewriteOperationId.isIn(rewriteOperationIds))).go();
+      await (_db.delete(
+        _db.rewriteOperations,
+      )..where((row) => row.id.isIn(rewriteOperationIds))).go();
+    }
+    if (rewriteJobIds.isNotEmpty) {
+      await (_db.delete(
+        _db.rewriteJobs,
+      )..where((row) => row.id.isIn(rewriteJobIds))).go();
+    }
+    final transitions = await (_db.select(
+      _db.appliedCanonTransitionRows,
+    )..where((row) => row.chatSessionId.equals(sessionId))).get();
+    final transitionIds = transitions.map((row) => row.id).toSet();
+    if (transitionIds.isNotEmpty) {
+      await (_db.delete(
+        _db.canonTransitionFactRefs,
+      )..where((row) => row.appliedCanonTransitionId.isIn(transitionIds))).go();
+      await (_db.delete(
+        _db.appliedCanonTransitionRows,
+      )..where((row) => row.id.isIn(transitionIds))).go();
+    }
   }
 }

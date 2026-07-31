@@ -14,6 +14,7 @@ import 'memory_selector.dart';
 import 'prompt_builder.dart';
 import 'prompt_inputs.dart';
 import 'prompt_worker_codec.dart';
+import 'prompt/effective_canon_prompt_formatter.dart';
 import 'tokenizer.dart';
 
 /// Long-lived isolate worker that runs buildPrompt off the main thread.
@@ -292,6 +293,14 @@ PromptResult _buildFromInputs(PromptInputs inputs) {
       : '';
 
   // 2. Build payload
+  final canon = inputs.effectiveCanonProjection == null
+      ? null
+      : EffectiveCanonPromptFormatter.format(
+          inputs.effectiveCanonProjection!,
+          sessionId: inputs.sessionId ?? '',
+          latestUserText: _latestText(inputs.history, 'user'),
+          latestAssistantText: _latestText(inputs.history, 'assistant'),
+        );
   final payload = PromptPayload(
     character: inputs.character,
     persona: inputs.persona,
@@ -344,6 +353,12 @@ PromptResult _buildFromInputs(PromptInputs inputs) {
     memoryExcerptChunksPerEntry: inputs.memoryExcerptChunksPerEntry,
     chunkFirstTopEntries: inputs.chunkFirstTopEntries,
     chunkFirstTopChunks: inputs.chunkFirstTopChunks,
+    effectiveCanonProjection: inputs.effectiveCanonProjection,
+    effectiveCanonRevisionNumber: inputs.effectiveCanonProjection?.revisionNumber,
+    effectiveCanonRevisionHash: inputs.effectiveCanonProjection?.revisionHash,
+    effectiveCanonCacheIdentity: inputs.effectiveCanonProjection?.cacheIdentity ?? '',
+    characterKnowledgeContent: canon?.characterKnowledge,
+    studioSessionStateContent: canon?.sessionState,
   );
 
   // 3. Build prompt (lorebook scanning happens inside buildPrompt)
@@ -353,4 +368,8 @@ PromptResult _buildFromInputs(PromptInputs inputs) {
 bool _glazeMatch(String key, String text) {
   return glazeCheckMatch(key, text, false, WholeWordMode.glaze);
 }
+
+String _latestText(List<ChatMessage> history, String role) => history
+    .lastWhere((message) => message.role == role, orElse: () => const ChatMessage(id: '', role: '', content: ''))
+    .content;
 

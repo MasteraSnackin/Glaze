@@ -784,6 +784,8 @@ class CharacterKnowledgeFactRepo {
       sourceKind: fact.sourceKind,
       supersedesId: fact.supersedesId,
       lifecycle: fact.lifecycle.wireName,
+      basisRevision: fact.basisRevisionNumber,
+      basisRevisionHash: fact.basisRevisionHash,
       createdAt: fact.createdAt == 0 ? now : fact.createdAt,
       updatedAt: fact.updatedAt == 0 ? now : fact.updatedAt,
     );
@@ -814,6 +816,8 @@ class CharacterKnowledgeFactRepo {
         sourceKind: row.sourceKind,
         supersedesId: row.supersedesId,
         lifecycle: CharacterKnowledgeFactLifecycle.fromWireName(row.lifecycle),
+        basisRevisionNumber: row.basisRevision,
+        basisRevisionHash: row.basisRevisionHash,
         createdAt: row.createdAt,
         updatedAt: row.updatedAt,
       );
