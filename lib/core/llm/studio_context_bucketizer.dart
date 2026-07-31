@@ -25,6 +25,9 @@ class StudioContextBuckets {
   List<PromptMessage> messagesForKind(String kind) =>
       byKind[kind] ?? const <PromptMessage>[];
 
+  List<PromptMessage> messagesForBlockId(String id) =>
+      messagesForKind(id);
+
   String joinKind(String kind) =>
       messagesForKind(kind).map((message) => message.content).join('\n\n');
 

@@ -74,6 +74,12 @@ abstract class StudioPresetBlock with _$StudioPresetBlock {
     @Default(false) bool locked,
     @Default(0) int order,
     @Default('pregen') String section,
+    @Default('direct') String mode,
+    @Default(false) bool isStatic,
+    @Default('pregen') String injectionPoint,
+    @Default('') String targetAgentId,
+    @Default('') String sourceAgentId,
+    @Default('none') String groupBoundary,
   }) = _StudioPresetBlock;
 
   factory StudioPresetBlock.fromJson(Map<String, dynamic> json) =>

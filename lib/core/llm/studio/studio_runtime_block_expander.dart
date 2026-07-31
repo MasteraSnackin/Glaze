@@ -2,6 +2,7 @@ import '../macro_engine.dart';
 import '../prompt_builder.dart';
 import '../studio_context_bucketizer.dart';
 import '../studio_stage_brief.dart';
+import '../studio_controller_ontology.dart';
 import '../../models/studio_config.dart';
 import 'studio_brief_macro_renderer.dart';
 
@@ -74,11 +75,14 @@ class StudioRuntimeBlockExpander {
     return replaceMacros(studioExpanded, macroCtx).text;
   }
 
-  /// Returns the pipeline section for this run: `final` for the generator,
-  /// `cleaner` for post-processing trackers, `pregen` for pre-gen trackers.
+  /// Returns the pipeline injection point for this run: `final` for the
+  /// generator, `cleaner` for Post Clean, `ledger` for Трекер,
+  /// `pregen` for pre-gen trackers.
   String sectionForRun(StudioAgent agent, bool isFinalResponse) {
     if (isFinalResponse) return 'final';
-    if (agent.phase == 'post_processing') return 'cleaner';
+    final specId = StudioControllerOntology.specForAgent(agent).id;
+    if (specId == 'post_clean') return 'cleaner';
+    if (specId == 'ledger') return 'ledger';
     return 'pregen';
   }
 

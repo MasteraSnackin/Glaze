@@ -66,8 +66,9 @@ class StudioMessageBuilder {
     final messages = <Map<String, dynamic>>[];
 
     for (final block in blocks) {
-      switch (block.kind) {
-        case 'agent_instruction':
+      final blockMode = block.mode.isNotEmpty ? block.mode : _modeForKind(block.kind);
+      switch (blockMode) {
+        case 'direct':
           final control = StringBuffer();
           control.writeln(
             _blockExpander
@@ -110,7 +111,7 @@ class StudioMessageBuilder {
             });
           }
           break;
-        case 'previous_agents':
+        case 'pregenBrief':
           if (!isFinalResponse) break;
           if (hasExplicitBriefMacros) break;
           final sanitized = priorBriefs
@@ -129,54 +130,57 @@ class StudioMessageBuilder {
                 ),
           );
           break;
-        case 'static_context':
-          messages.addAll(context.staticContext.map((m) => m.toApiMap()));
-          break;
-        case 'chat_history':
-          final history = isFinalResponse
-              ? StudioHistoryLimiter.limitFinalHistory(
-                  context.history,
-                  config,
-                  pipelineOverride: finalContextOverride,
-                  reasoningHistoryCount: reasoningHistoryCount,
-                )
-              : StudioHistoryLimiter.limitTrackerHistory(
-                  context.history,
-                  agent.contextSize,
-                );
-          if (isFinalResponse &&
-              (reasoningHistoryCount == -1 || reasoningHistoryCount > 0)) {
-            messages.addAll(
-              _historyWithReasoning(history, reasoningHistoryCount),
-            );
-          } else {
-            messages.addAll(history.map((m) => m.toApiMap()));
-          }
-          break;
-        case 'dynamic_context':
-          messages.addAll(context.dynamicContext.map((m) => m.toApiMap()));
+        case 'agentResponse':
           break;
         default:
-          final promptMessages = context.messagesForKind(block.kind);
-          if (promptMessages.isNotEmpty) {
-            messages.addAll(promptMessages.map((m) => m.toApiMap()));
-            break;
-          }
-          final content = _blockExpander
-              .expandStudioBlockContent(
-                block.content,
-                promptPayload: promptPayload,
-                promptResult: promptResult,
-                context: context,
-                priorBriefs: priorBriefs,
-                config: config,
-              )
-              .trim();
-          if (content.isNotEmpty) {
-            messages.add({
-              'role': _blockExpander.normalizeInstructionRole(block.role),
-              'content': content,
-            });
+          final kind = block.kind;
+          final blockId = block.id;
+          if (kind == 'static_context') {
+            messages.addAll(context.staticContext.map((m) => m.toApiMap()));
+          } else if (kind == 'chat_history') {
+            final history = isFinalResponse
+                ? StudioHistoryLimiter.limitFinalHistory(
+                    context.history,
+                    config,
+                    pipelineOverride: finalContextOverride,
+                    reasoningHistoryCount: reasoningHistoryCount,
+                  )
+                : StudioHistoryLimiter.limitTrackerHistory(
+                    context.history,
+                    agent.contextSize,
+                  );
+            if (isFinalResponse &&
+                (reasoningHistoryCount == -1 || reasoningHistoryCount > 0)) {
+              messages.addAll(
+                _historyWithReasoning(history, reasoningHistoryCount),
+              );
+            } else {
+              messages.addAll(history.map((m) => m.toApiMap()));
+            }
+          } else if (kind == 'dynamic_context') {
+            messages.addAll(context.dynamicContext.map((m) => m.toApiMap()));
+          } else {
+            final promptMessages = context.messagesForBlockId(blockId);
+            if (promptMessages.isNotEmpty) {
+              messages.addAll(promptMessages.map((m) => m.toApiMap()));
+            } else {
+              final content = _blockExpander
+                  .expandStudioBlockContent(
+                    block.content,
+                    promptPayload: promptPayload,
+                    promptResult: promptResult,
+                    context: context,
+                    priorBriefs: priorBriefs,
+                    config: config,
+                  )
+                  .trim();
+              if (content.isNotEmpty) {
+                messages.add({
+                  'role': _blockExpander.normalizeInstructionRole(block.role),
+                  'content': content,
+                });
+              }
+            }
           }
       }
     }
@@ -198,6 +202,34 @@ class StudioMessageBuilder {
     }
 
     return messages;
+  }
+
+  String _modeForKind(String kind) {
+    switch (kind) {
+      case 'custom_text':
+      case 'slot':
+      case 'instruction':
+      case 'agent_instruction':
+      case 'tracker_instruction':
+        return 'direct';
+      case 'previous_agents':
+        return 'pregenBrief';
+      case 'static_context':
+      case 'chat_history':
+      case 'dynamic_context':
+      case 'char_card':
+      case 'scenario':
+      case 'user_persona':
+      case 'char_personality':
+      case 'example_dialogue':
+      case 'authors_note':
+      case 'memory':
+      case 'group_open':
+      case 'group_close':
+        return 'context';
+      default:
+        return 'direct';
+    }
   }
 
   List<Map<String, dynamic>> _historyWithReasoning(
@@ -245,8 +277,8 @@ class StudioMessageBuilder {
     return messages;
   }
 
-  /// Per-agent task text: the agent's `promptShard` + the preset's
-  /// `agent_instruction` block content + the runtime envelope.
+  /// Per-agent task text: the agent's prompt blocks addressed to it
+  /// via injectionPoint + the runtime envelope.
   String buildPerAgentTaskText({
     required StudioAgent agent,
     required StudioConfig config,
@@ -255,18 +287,12 @@ class StudioMessageBuilder {
     required PromptPayload promptPayload,
     required StudioContextBuckets context,
   }) {
+    final specId = StudioControllerOntology.specForAgent(agent).id;
     final blocks =
         studioPreset.blocks
-            .where((b) => b.enabled && b.section == 'pregen')
-            .where(
-              (b) =>
-                  b.kind == 'agent_instruction' ||
-                  (b.kind == 'tracker_instruction' &&
-                      _blockExpander.trackerInstructionAppliesToAgent(
-                        b,
-                        agent,
-                      )),
-            )
+            .where((b) => b.enabled)
+            .where((b) => b.section == 'pregen' || (b.injectionPoint == 'specificAgent' && b.targetAgentId == specId))
+            .where((b) => _blockAppliesToPregen(b, agent))
             .where((b) => !_blockExpander.isRuntimeComputedBlock(b))
             .toList()
           ..sort((a, b) => a.order.compareTo(b.order));
@@ -289,6 +315,17 @@ class StudioMessageBuilder {
     return buf.toString().trim();
   }
 
+  bool _blockAppliesToPregen(StudioPresetBlock block, StudioAgent agent) {
+    if (block.mode == 'direct' || block.mode.isEmpty) {
+      final kind = block.kind;
+      return kind == 'agent_instruction' || kind == 'custom_text' ||
+          kind == 'instruction' || kind == 'direct' ||
+          (kind == 'tracker_instruction' &&
+              _blockExpander.trackerInstructionAppliesToAgent(block, agent));
+    }
+    return false;
+  }
+
   /// Role text for the `<role>` element: the shared role/instruction text
   /// from the preset's non-`agent_instruction` blocks.
   String batchRoleText(
@@ -301,6 +338,7 @@ class StudioMessageBuilder {
     final blocks =
         studioPreset.blocks
             .where((b) => b.enabled && b.section == 'pregen')
+            .where((b) => b.mode.isEmpty || b.mode == 'direct')
             .where((b) => b.kind != 'agent_instruction')
             .where((b) => b.kind != 'tracker_instruction')
             .where((b) => !_blockExpander.isRuntimeComputedBlock(b))
@@ -311,7 +349,7 @@ class StudioMessageBuilder {
           ..sort((a, b) => a.order.compareTo(b.order));
     final buf = StringBuffer();
     for (final block in blocks) {
-      final promptMessages = context.messagesForKind(block.kind);
+      final promptMessages = context.messagesForBlockId(block.id);
       if (promptMessages.isNotEmpty) {
         for (final m in promptMessages) {
           if (m.content.isNotEmpty) buf.writeln(m.content);

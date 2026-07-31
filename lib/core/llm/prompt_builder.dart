@@ -274,7 +274,7 @@ PromptResult buildPrompt(PromptPayload payload) {
 
   for (final rawBlock in preset.blocks) {
     final id = normalizeBlockId(rawBlock.id);
-    if (!rawBlock.enabled || rawBlock.isStashed) continue;
+    if (!rawBlock.enabled) continue;
 
     final resolved = resolveBlockContent(
       id: id,
