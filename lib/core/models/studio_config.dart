@@ -99,6 +99,11 @@ abstract class StudioPreset with _$StudioPreset {
     /// Travel with the preset on import/export so agent toggles are portable.
     @Default({}) Map<String, bool> agentEnabled,
 
+    /// Agent states that were auto-disabled due to a cascade dependency
+    /// (e.g. Continuity was turned off because Ledger was disabled).
+    /// Restored when the required agent is re-enabled.
+    @Default({}) Map<String, bool> agentEnabledBeforeDependencyOff,
+
     /// Explicit topology prevents stale stored agents from reviving pregen
     /// calls when a Direct/Assisted preset is selected.
     @Default(StudioExecutionMode.legacy) StudioExecutionMode executionMode,
