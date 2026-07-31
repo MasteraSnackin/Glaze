@@ -407,7 +407,7 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
                     count: _blocks
                         .where(
                           (b) =>
-                              b.enabled && !b.isStashed && b.content.isNotEmpty,
+                               b.enabled && b.content.isNotEmpty,
                         )
                         .fold(0, (sum, b) => sum + estimateTokens(b.content)),
                   ),
@@ -737,7 +737,7 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
   /// edited, use the live in-memory blocks so unsaved edits are reflected.
   List<PresetBlock> _copyableBlocks(Preset preset) {
     final source = preset.id == _currentId ? _blocks : preset.blocks;
-    return source.where((b) => !b.isStashed).toList();
+    return source.toList();
   }
 
   void _copyBlockFromPreset(PresetBlock block) {
@@ -748,7 +748,6 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
       id: generateId(),
       name: '${block.name} (copy)',
       isStatic: false,
-      isStashed: false,
     );
     setState(() {
       if (atTop) {

@@ -137,7 +137,6 @@ Preset parseSillyTavernPreset(Map<String, dynamic> json, String fileName) {
           isStatic: _staticBlockIds.contains(normalizedId),
           insertionMode: insertionMode,
           depth: depth,
-          isStashed: pm['isStashed'] as bool? ?? false,
           appendToLastMessage: pm['appendToLastMessage'] as bool? ?? false,
         ),
       );

@@ -15,7 +15,6 @@ abstract class PresetBlock with _$PresetBlock {
     @Default('relative') String insertionMode,
     int? depth,
     String? prefix,
-    @Default(false) bool isStashed,
     /// When true, this block's content is appended (after macro expansion) to
     /// the last user-role message in the chat history at prompt-assembly time.
     /// The block's own `role` is ignored in this mode — content is always
@@ -106,7 +105,6 @@ Map<String, dynamic> _normalizeBlock(Map<String, dynamic> json) {
   final id = n['id'] as String?;
   final alreadyStatic = _coerceBool(n['isStatic'], false);
   n['isStatic'] = alreadyStatic || (id != null && _staticBlockIds.contains(id));
-  n['isStashed'] = _coerceBool(n['isStashed'], false);
   n['appendToLastMessage'] = _coerceBool(n['appendToLastMessage'], false);
   n['depth'] = _coerceInt(n['depth']);
   // Bring the guided-generation wrapper to parity with hydall/Glaze. Presets

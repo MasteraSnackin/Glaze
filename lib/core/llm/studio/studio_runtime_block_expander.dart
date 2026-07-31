@@ -34,11 +34,14 @@ class StudioRuntimeBlockExpander {
     return replaceMacros(studioExpanded, context.macroContext).text;
   }
 
-  /// Returns the pipeline section for this run: `final` for the generator,
-  /// `cleaner` for post-processing trackers, `pregen` for pre-gen trackers.
+  /// Returns the pipeline injection point for this run: `final` for the
+  /// generator, `cleaner` for Post Clean, `ledger` for Трекер,
+  /// `pregen` for pre-gen trackers.
   String sectionForRun(StudioAgent agent, bool isFinalResponse) {
     if (isFinalResponse) return 'final';
-    if (agent.phase == 'post_processing') return 'cleaner';
+    final specId = StudioControllerOntology.specForAgent(agent)?.id;
+    if (specId == 'post_clean') return 'cleaner';
+    if (specId == 'ledger') return 'ledger';
     return 'pregen';
   }
 
