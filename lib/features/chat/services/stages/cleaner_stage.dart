@@ -316,15 +316,11 @@ class CleanerStage {
         return;
       }
 
-      // Extract Beauty Shard brief from the assistant message's studioOutputs.
-      var beautyBrief = '';
       String? beautyState;
       Map<String, String> sessionVars = {};
       final Character? effectiveChar =
           character ?? ctx.ref.read(characterByIdProvider(ctx.charId));
       try {
-        beautyBrief = BeautyStateHandler.extractBeautyBrief(lastAssistant);
-        // Load current beauty state from session vars.
         final session = await ctx.ref.read(chatRepoProvider).getById(sessionId);
         if (session != null) {
           sessionVars = session.sessionVars;
@@ -332,7 +328,7 @@ class CleanerStage {
         }
       } catch (e) {
         debugPrint(
-          '[PostCleaner] beauty brief extraction failed session=$sessionId error=$e',
+          '[PostCleaner] beauty state load failed session=$sessionId error=$e',
         );
       }
       if (!ctx.ref.mounted ||
@@ -367,7 +363,6 @@ class CleanerStage {
         mainModelContextSnapshot: mainModelContextSnapshot,
         character: effectiveChar,
         cleanerConfig: cleanerConfig,
-        beautyBrief: beautyBrief,
         beautyState: beautyState,
         cleanerBlocks: studioPreset?.blocks ?? const [],
         macroCtx: cleanerMacroCtx,
@@ -482,7 +477,6 @@ class CleanerStage {
     MainModelContextSnapshot? mainModelContextSnapshot,
     Character? character,
     required AuxApiConfig cleanerConfig,
-    String beautyBrief = '',
     String? beautyState,
     List<StudioPresetBlock> cleanerBlocks = const [],
     MacroContext? macroCtx,
@@ -676,14 +670,10 @@ class CleanerStage {
         ),
       );
     }
-    // When audit returned beauty assignments, use them as the beauty brief
-    // instead of the pre-gen Beauty Shard brief (which ran before seeing
-    // the actual text). The audit-based brief is more accurate because it
-    // sees the actual speakers in the response.
     final effectiveBeautyBrief = auditBeauty != null
         ? 'Speaker colors: ${auditBeauty['speakers'] ?? <String, dynamic>{}}\n'
               'Thought colors: ${auditBeauty['thoughts'] ?? <String, dynamic>{}}'
-        : beautyBrief;
+        : '';
     final result = await cleanerService.runCleaner(
       sessionId: sessionId,
       settings: pipeline,
@@ -1182,12 +1172,9 @@ class CleanerStage {
     // context is gone), so the character-audit pass is skipped.
     final character = ctx.ref.read(characterByIdProvider(ctx.charId));
 
-    // Extract Beauty Shard brief + state (same as the auto path).
-    var beautyBrief = '';
     String? beautyState;
     Map<String, String> sessionVars = {};
     try {
-      beautyBrief = BeautyStateHandler.extractBeautyBrief(target);
       final rerunSession = await ctx.ref
           .read(chatRepoProvider)
           .getById(sessionId);
@@ -1197,7 +1184,7 @@ class CleanerStage {
       }
     } catch (e) {
       debugPrint(
-        '[PostCleaner] rerun beauty extraction failed session=$sessionId error=$e',
+        '[PostCleaner] rerun beauty state load failed session=$sessionId error=$e',
       );
     }
     if (!ctx.ref.mounted || !_ownsRun) return;
@@ -1228,7 +1215,6 @@ class CleanerStage {
         promptPayload: null,
         character: character,
         cleanerConfig: cleanerConfig,
-        beautyBrief: beautyBrief,
         beautyState: beautyState,
         cleanerBlocks: studioPreset?.blocks ?? const [],
         macroCtx: cleanerMacroCtx,

@@ -24,8 +24,7 @@ class StudioActivationGate {
       StudioExecutionMode.direct => specId == 'final',
       StudioExecutionMode.assisted =>
         specId == 'final' ||
-            specId == 'continuity' ||
-            specId == 'beauty',
+            specId == 'continuity',
     };
   }
 

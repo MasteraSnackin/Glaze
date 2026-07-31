@@ -120,7 +120,6 @@ class StudioRuntimeBlockExpander {
       'guard': ['guard', 'loop', 'prose'],
       'world': ['world', 'npc'],
       'meta': ['meta', 'ooc', 'lumia'],
-      'beauty': ['beauty'],
     };
     for (final entry in aliases.entries) {
       if (!entry.value.any(agentText.contains)) continue;

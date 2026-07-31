@@ -14,13 +14,6 @@ void main() {
       ),
       StudioPresetBlock(id: 'agency_task', kind: 'tracker_instruction'),
       StudioPresetBlock(
-        id: 'narrative_task_universal',
-        kind: 'tracker_instruction',
-        content: 'Authored narrative task.',
-      ),
-      StudioPresetBlock(id: 'beauty_task', kind: 'tracker_instruction'),
-      StudioPresetBlock(id: 'beauty_extractor', section: 'build'),
-      StudioPresetBlock(
         id: 'cleaner_beauty',
         section: 'cleaner',
         enabled: false,
@@ -30,11 +23,6 @@ void main() {
         section: 'final',
         enabled: false,
         content: 'Optional authored style.',
-      ),
-      StudioPresetBlock(
-        id: 'studio_briefs',
-        section: 'final',
-        content: '{{studio_continuity_brief}} {{studio_narrative_brief}}',
       ),
       StudioPresetBlock(
         id: 'mixed_briefs',
@@ -77,10 +65,6 @@ void main() {
       'Keep this independent instruction.\n\n',
     );
     expect(
-      preset.blocks.firstWhere((b) => b.id == 'beauty_extractor').enabled,
-      isFalse,
-    );
-    expect(
       preset.blocks.firstWhere((b) => b.id == 'cleaner_beauty').enabled,
       isTrue,
     );
@@ -96,10 +80,9 @@ void main() {
     );
     expect(preset.agentEnabled['final'], isTrue);
     expect(preset.agentEnabled['continuity'], isFalse);
-    expect(preset.agentEnabled['beauty'], isFalse);
   });
 
-  test('assisted preset includes continuity and beauty', () {
+  test('assisted preset includes continuity', () {
     final preset = prepareStudioPresetForMode(
       source,
       id: 'assisted',
@@ -112,13 +95,12 @@ void main() {
       preset.blocks
           .where((b) => b.kind == 'tracker_instruction')
           .map((b) => b.id),
-      ['continuity_task_universal', 'beauty_task'],
+      ['continuity_task_universal'],
     );
     expect(preset.agentEnabled['continuity'], isTrue);
     expect(preset.agentEnabled['meta'], isFalse);
-    expect(preset.agentEnabled['beauty'], isTrue);
     expect(
-      preset.blocks.firstWhere((b) => b.id == 'beauty_extractor').enabled,
+      preset.blocks.firstWhere((b) => b.id == 'cleaner_beauty').enabled,
       isTrue,
     );
     expect(

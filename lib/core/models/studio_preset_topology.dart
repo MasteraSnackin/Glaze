@@ -14,14 +14,12 @@ StudioPreset prepareStudioPresetForMode(
 }) {
   const assistedTaskIds = {
     'continuity_task_universal',
-    'beauty_task',
   };
   final allowedAgents = switch (mode) {
     StudioExecutionMode.legacy => null,
     StudioExecutionMode.direct => const {'final'},
     StudioExecutionMode.assisted => const {
       'continuity',
-      'beauty',
       'final',
     },
   };
@@ -35,7 +33,6 @@ StudioPreset prepareStudioPresetForMode(
       'guard',
       'world',
       'meta',
-      'beauty',
       'final',
     }) {
       agentEnabled[specId] = allowedAgents.contains(specId);
@@ -63,12 +60,8 @@ StudioPreset prepareStudioPresetForMode(
         candidate = candidate.copyWith(enabled: true);
       }
     }
-    if (mode == StudioExecutionMode.direct && block.id == 'beauty_extractor') {
-      blocks.add(candidate.copyWith(enabled: false));
-    } else if (mode != StudioExecutionMode.legacy &&
+    if (mode != StudioExecutionMode.legacy &&
         block.id == 'cleaner_beauty') {
-      // Direct derives Beauty in post-cleaner. Assisted passes its pregen
-      // Beauty brief into the same post-cleaner stage.
       blocks.add(candidate.copyWith(enabled: true));
     } else {
       blocks.add(candidate);

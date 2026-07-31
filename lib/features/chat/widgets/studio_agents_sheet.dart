@@ -7,12 +7,6 @@ import '../../../core/models/studio_config.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 
-const _beautyPipelineBlockIds = {
-  'beauty_extractor',
-  'beauty_task',
-  'cleaner_beauty',
-};
-
 StudioPreset applyStudioAgentToggle(
   StudioPreset preset,
   String specId,
@@ -22,18 +16,7 @@ StudioPreset applyStudioAgentToggle(
   if (spec.lockedOn) return preset;
   final updated = Map<String, bool>.from(preset.agentEnabled)
     ..[specId] = enabled;
-  if (specId != 'beauty') {
-    return preset.copyWith(agentEnabled: updated);
-  }
-  return preset.copyWith(
-    agentEnabled: updated,
-    blocks: [
-      for (final block in preset.blocks)
-        _beautyPipelineBlockIds.contains(block.id)
-            ? block.copyWith(enabled: enabled)
-            : block,
-    ],
-  );
+  return preset.copyWith(agentEnabled: updated);
 }
 
 class StudioAgentsSheet extends ConsumerStatefulWidget {
@@ -183,13 +166,7 @@ class _StudioAgentsSheetState extends ConsumerState<StudioAgentsSheet> {
             spec.id,
             _preset!.executionMode,
           );
-          final isOn = spec.id == 'beauty'
-              ? _preset!.blocks
-                        .where((block) => block.id == 'beauty_extractor')
-                        .firstOrNull
-                        ?.enabled ??
-                    false
-              : enabledMap[spec.id] ?? true;
+          final isOn = enabledMap[spec.id] ?? true;
           return SwitchListTile(
             contentPadding: const EdgeInsets.symmetric(
               horizontal: 16,
