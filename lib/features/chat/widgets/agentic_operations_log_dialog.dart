@@ -286,7 +286,7 @@ class OperationTile extends StatelessWidget {
       AgentOperationKind.agenticSearch => Icons.search,
       AgentOperationKind.classifier => Icons.category_outlined,
       AgentOperationKind.consolidation => Icons.merge_type_outlined,
-      AgentOperationKind.studioTracker => Icons.auto_awesome_outlined,
+      AgentOperationKind.studioController => Icons.auto_awesome_outlined,
       AgentOperationKind.studioFinal => Icons.edit_note,
       AgentOperationKind.factChecker => Icons.fact_check_outlined,
       AgentOperationKind.studioLedger => Icons.menu_book_outlined,

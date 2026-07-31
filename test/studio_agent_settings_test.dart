@@ -9,18 +9,18 @@ void main() {
       isFalse,
     );
     expect(
-      StudioAgentSettings.fromJson(const {}).studioTrackerUseResponsesApi,
+      StudioAgentSettings.fromJson(const {}).studioControllerUseResponsesApi,
       isFalse,
     );
 
     final restored = StudioAgentSettings.fromJson(
       const StudioAgentSettings(
         studioFinalUseResponsesApi: true,
-        studioTrackerUseResponsesApi: true,
+        studioControllerUseResponsesApi: true,
       ).toJson(),
     );
     expect(restored.studioFinalUseResponsesApi, isTrue);
-    expect(restored.studioTrackerUseResponsesApi, isTrue);
+    expect(restored.studioControllerUseResponsesApi, isTrue);
   });
 
   test('reasoning history count defaults to zero', () {

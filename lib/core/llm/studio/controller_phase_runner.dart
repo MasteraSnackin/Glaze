@@ -14,11 +14,11 @@ import '../studio_brief_cache.dart';
 import '../studio_brief_parser.dart';
 import '../studio_stage_brief.dart';
 import '../studio_turn_config_snapshot.dart';
-import '../tracker_batcher.dart';
-import 'studio_tracker_result_mapper.dart';
+import '../controller_batcher.dart';
+import 'controller_result_mapper.dart';
 
 /// Result of the shared pre-gen tracker phase. Both [MemoryStudioService.runTrackerCycle]
-/// and [MemoryStudioService.runTrackersOnly] call [StudioTrackerPhaseRunner.run]
+/// and [MemoryStudioService.runTrackersOnly] call [ControllerPhaseRunner.run]
 /// and receive this. `runTrackerCycle` continues with the generator + post-gen
 /// trackers using [split], [turnIndex], [historyForScan], [studioPreset];
 /// `runTrackersOnly` returns immediately with [briefs].
@@ -48,9 +48,9 @@ class PreGenPhaseResult {
 /// of duplication between `runTrackerCycle` and `runTrackersOnly`.
 ///
 /// Deps via constructor (no `Ref` — all repos/batcher are injected).
-class StudioTrackerPhaseRunner {
+class ControllerPhaseRunner {
   final StudioPresetRepo _presetRepo;
-  final TrackerBatcher _batcher;
+  final ControllerBatcher _batcher;
   final StudioBriefCache _briefCache;
   final StudioBriefParser _briefParser;
   final StudioBatchCoordinator _batchCoordinator;
@@ -59,7 +59,7 @@ class StudioTrackerPhaseRunner {
   final PipelineSettings Function() _readPipelineSettings;
   final void Function(String message) _log;
 
-  StudioTrackerPhaseRunner({
+  ControllerPhaseRunner({
     required this._presetRepo,
     required this._batcher,
     required this._briefCache,
@@ -161,7 +161,7 @@ class StudioTrackerPhaseRunner {
       final trackerContextOverride =
           (turnConfig?.pipelineSettings ?? _readPipelineSettings())
               .studioAgent
-              .studioTrackerContextSize;
+              .studioControllerContextSize;
       for (final agent in dueTrackers) {
         final resolvedConfig = await _executor.resolveTrackerConfig(
           agent: agent,

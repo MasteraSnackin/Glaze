@@ -8,7 +8,7 @@ import 'prompt_builder.dart';
 import 'studio_agent_executor.dart';
 import 'studio_context_bucketizer.dart';
 import 'studio_message_builder.dart';
-import 'tracker_batcher.dart';
+import 'controller_batcher.dart';
 import 'studio_turn_config_snapshot.dart';
 
 /// Runs a batch group of Studio chat-time trackers: builds the batched
@@ -17,12 +17,12 @@ import 'studio_turn_config_snapshot.dart';
 /// tracker failures to the Studio pipeline. Extracted from `MemoryStudioService`
 /// (plan §2.9).
 ///
-/// Deps: the injected [TrackerBatcher], [AgentRunner],
+/// Deps: the injected [ControllerBatcher], [AgentRunner],
 /// [StudioContextBucketizer], [StudioMessageBuilder], and
 /// [StudioAgentExecutor]. `_log` is injected as a callback so this specialist
 /// does not own the host's debug-print sink.
 class StudioBatchCoordinator {
-  final TrackerBatcher _batcher;
+  final ControllerBatcher _batcher;
   final AgentRunner _runner;
   final StudioContextBucketizer _bucketizer;
   final StudioMessageBuilder _messageBuilder;
@@ -43,8 +43,8 @@ class StudioBatchCoordinator {
   /// `<result>` blocks, and retry the batch twice for any transport failure or
   /// missing/unparseable tracker result. Exhausted retries return failed
   /// tracker results; the caller turns that into a hard Studio error.
-  Future<List<TrackerBatchResult>> runBatchGroup({
-    required TrackerBatchGroup group,
+  Future<List<ControllerBatchResult>> runBatchGroup({
+    required ControllerBatchGroup group,
     required StudioConfig config,
     required StudioPreset studioPreset,
     required PromptResult promptResult,
@@ -120,7 +120,7 @@ class StudioBatchCoordinator {
       contextSize: batchContextSize,
     );
     final runner = _runner;
-    List<TrackerBatchResult>? lastParsed;
+    List<ControllerBatchResult>? lastParsed;
     String? lastError;
     for (var attempt = 1; attempt <= 3; attempt++) {
       if (cancelToken.isCancelled) {
@@ -173,7 +173,7 @@ class StudioBatchCoordinator {
     return lastParsed ??
         group.agents
             .map(
-              (agent) => TrackerBatchResult.failed(
+              (agent) => ControllerBatchResult.failed(
                 agentId: agent.id,
                 agentName: agent.name,
                 reason: lastError ?? 'tracker batch failed after 2 retries',
@@ -184,7 +184,7 @@ class StudioBatchCoordinator {
 
   /// Legacy test seam for per-agent reruns. The chat-time Studio pipeline no
   /// longer falls back from failed batches to individual tracker calls.
-  Future<List<TrackerBatchResult>> retryFailedIndividually({
+  Future<List<ControllerBatchResult>> retryFailedIndividually({
     required List<StudioAgent> agents,
     required StudioConfig config,
     required StudioPreset studioPreset,
@@ -216,7 +216,7 @@ class StudioBatchCoordinator {
             turnConfig: turnConfig,
             onIntermediateUpdate: null,
           );
-          return TrackerBatchResult(
+          return ControllerBatchResult(
             agentId: agent.id,
             agentName: agent.name,
             text: brief.brief,
@@ -224,7 +224,7 @@ class StudioBatchCoordinator {
             error: brief.error,
           );
         } catch (e) {
-          return TrackerBatchResult.failed(
+          return ControllerBatchResult.failed(
             agentId: agent.id,
             agentName: agent.name,
             reason: formatError(e),
@@ -234,7 +234,7 @@ class StudioBatchCoordinator {
     );
   }
 
-  bool _allOk(List<TrackerBatchResult> results) {
+  bool _allOk(List<ControllerBatchResult> results) {
     return results.every((r) => r.status == 'ok' && r.text.isNotEmpty);
   }
 }

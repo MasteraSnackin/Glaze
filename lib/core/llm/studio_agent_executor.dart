@@ -9,7 +9,7 @@ import 'prompt_builder.dart';
 import 'studio_brief_parser.dart';
 import 'studio_message_builder.dart';
 import 'studio_stage_brief.dart';
-import 'tracker_batcher.dart';
+import 'controller_batcher.dart';
 import 'studio_turn_config_snapshot.dart';
 
 /// Runs the per-agent LLM calls of the Studio chat-time pipeline: the
@@ -19,7 +19,7 @@ import 'studio_turn_config_snapshot.dart';
 ///
 /// Each adapter assembles the agent's message list via the injected
 /// [StudioMessageBuilder], invokes [AgentRunner.runAgent], and adapts the
-/// result type to the pipeline-internal [StudioStageBrief] / [TrackerBatchResult]
+/// result type to the pipeline-internal [StudioStageBrief] / [ControllerBatchResult]
 /// / [AgentRunResult] shapes. Tracker failures are retried by the
 /// relevant adapter and returned as failed results when retries are exhausted;
 /// the final generator rethrows.
@@ -173,7 +173,7 @@ class StudioAgentExecutor {
         final override =
             (turnConfig?.pipelineSettings ?? _readPipelineSettings())
                 .studioAgent
-                .studioPostTrackerContextSize;
+                .studioPostControllerContextSize;
         final effectiveAgent = override > 0
             ? agent.copyWith(contextSize: override)
             : agent;
@@ -226,7 +226,7 @@ class StudioAgentExecutor {
 
   /// Run one individual tracker (not part of any batch group). Reuses the
   /// existing per-agent prompt assembly + AgentRunner.
-  Future<TrackerBatchResult> runIndividualTracker({
+  Future<ControllerBatchResult> runIndividualTracker({
     required StudioAgent agent,
     required StudioConfig config,
     required StudioPreset studioPreset,
@@ -241,7 +241,7 @@ class StudioAgentExecutor {
     String? lastError;
     for (var attempt = 1; attempt <= 3; attempt++) {
       if (cancelToken.isCancelled) {
-        return TrackerBatchResult.failed(
+        return ControllerBatchResult.failed(
           agentId: agent.id,
           agentName: agent.name,
           reason: 'cancelled',
@@ -262,7 +262,7 @@ class StudioAgentExecutor {
           onIntermediateUpdate: null,
         );
         if (brief.status == 'ok' && brief.brief.trim().isNotEmpty) {
-          return TrackerBatchResult(
+          return ControllerBatchResult(
             agentId: agent.id,
             agentName: agent.name,
             text: brief.brief,
@@ -275,7 +275,7 @@ class StudioAgentExecutor {
         lastError = formatError(e);
       }
     }
-    return TrackerBatchResult.failed(
+    return ControllerBatchResult.failed(
       agentId: agent.id,
       agentName: agent.name,
       reason: lastError ?? 'tracker failed after 2 retries',

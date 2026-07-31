@@ -201,7 +201,7 @@ class StreamGenerationService {
       if (studioConfig != null) {
         List<Map<String, dynamic>>? studioFinalMessages;
         final trackerContextSize =
-            pipelineSettings.studioAgent.studioTrackerContextSize;
+            pipelineSettings.studioAgent.studioControllerContextSize;
         final trackerVisibleMessageIds =
             StudioStreamInterceptor.computeStudioFinalVisibleMessageIds(
               payload.history,
@@ -749,7 +749,7 @@ class StreamGenerationService {
     ApiConfig apiConfig,
     PipelineSettings pipelineSettings,
   ) {
-    final override = pipelineSettings.studioAgent.studioTrackerModelOverride;
+    final override = pipelineSettings.studioAgent.studioControllerModelOverride;
     return override.isNotEmpty ? override : apiConfig.model;
   }
 }

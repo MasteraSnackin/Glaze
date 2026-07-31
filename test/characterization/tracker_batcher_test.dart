@@ -1,18 +1,18 @@
-ï»¿import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/llm/agent_runner.dart';
-import 'package:glaze_flutter/core/llm/tracker_batcher.dart';
+import 'package:glaze_flutter/core/llm/controller_batcher.dart';
 import 'package:glaze_flutter/core/models/studio_config.dart';
 
 void main() {
-  group('TrackerBatcher.buildBatchSystemPrompt', () {
-    late TrackerBatcher batcher;
+  group('ControllerBatcher.buildBatchSystemPrompt', () {
+    late ControllerBatcher batcher;
 
     setUp(() {
-      batcher = TrackerBatcher();
+      batcher = ControllerBatcher();
     });
 
     test('encodes per-agent tasks in <agent_task> XML with id+name', () {
-      final group = TrackerBatchGroup(
+      final group = ControllerBatchGroup(
         key: 'openai|gpt-4',
         resolved: _stubResolved(),
         agents: [
@@ -59,7 +59,7 @@ void main() {
     });
 
     test('escapes XML special chars in task body and attributes', () {
-      final group = TrackerBatchGroup(
+      final group = ControllerBatchGroup(
         key: 'openai|gpt-4',
         resolved: _stubResolved(),
         agents: [
@@ -85,11 +85,11 @@ void main() {
       expect(prompt, isNot(contains('<foo>')));
     });
 
-    test('Phase 6.1 â€” cache-friendly order: <role> â†’ <lore> â†’ <agents>', () {
+    test('Phase 6.1 — cache-friendly order: <role> ? <lore> ? <agents>', () {
       // The shared stable prefix must come FIRST (cache hit window), the
       // per-agent volatile tail LAST. Otherwise the prompt cache cannot
       // find a stable prefix across turns.
-      final group = TrackerBatchGroup(
+      final group = ControllerBatchGroup(
         key: 'anthropic|claude',
         resolved: _stubResolved(model: 'claude-3-5-sonnet'),
         agents: [
@@ -114,7 +114,7 @@ void main() {
       final agentsIdx = prompt.indexOf('<agents>');
       expect(roleIdx, lessThan(loreIdx), reason: '<role> must precede <lore>');
       expect(loreIdx, lessThan(agentsIdx), reason: '<lore> must precede <agents>');
-      // Output-format block comes AFTER <agents> (tail) â€” never inside the
+      // Output-format block comes AFTER <agents> (tail) — never inside the
       // cached prefix.
       final formatIdx = prompt.indexOf('REQUIRED OUTPUT FORMAT');
       expect(agentsIdx, lessThan(formatIdx));
@@ -126,15 +126,15 @@ void main() {
     });
   });
 
-  group('TrackerBatcher.parseBatchResponse', () {
-    late TrackerBatcher batcher;
+  group('ControllerBatcher.parseBatchResponse', () {
+    late ControllerBatcher batcher;
 
     setUp(() {
-      batcher = TrackerBatcher();
+      batcher = ControllerBatcher();
     });
 
     test('extracts one <result agent="id"> block per agent in order', () {
-      final group = TrackerBatchGroup(
+      final group = ControllerBatchGroup(
         key: 'openai|gpt-4',
         resolved: _stubResolved(),
         agents: [
@@ -171,8 +171,8 @@ Focus: anti-loop
       expect(results[2].text, contains('Focus: anti-loop'));
     });
 
-    test('tolerates missing closing tag â€” takes up to next <result', () {
-      final group = TrackerBatchGroup(
+    test('tolerates missing closing tag — takes up to next <result', () {
+      final group = ControllerBatchGroup(
         key: 'openai|gpt-4',
         resolved: _stubResolved(),
         agents: [
@@ -183,14 +183,14 @@ Focus: anti-loop
         batchTemperature: 0.3,
         batchContextSize: 5,
       );
-      // a1 has NO closing tag â€” parser should take up to <result agent="a2">.
+      // a1 has NO closing tag — parser should take up to <result agent="a2">.
       const raw =
           '<result agent="a1">first output\n<result agent="a2">second</result>';
 
       final results = batcher.parseBatchResponse(raw, group);
 
       expect(results[0].agentId, 'a1');
-      // a1 body is trimmed before return â€” `first output\n` â†’ `first output`.
+      // a1 body is trimmed before return — `first output\n` ? `first output`.
       // The next `<result` opening acted as the implicit boundary since a1
       // had no closing tag.
       expect(results[0].text, 'first output');
@@ -199,7 +199,7 @@ Focus: anti-loop
     });
 
     test('falls back to legacy <result_ID>...</result_ID> format', () {
-      final group = TrackerBatchGroup(
+      final group = ControllerBatchGroup(
         key: 'openai|gpt-4',
         resolved: _stubResolved(),
         agents: [
@@ -220,7 +220,7 @@ Focus: anti-loop
     });
 
     test('marks agent as failed when no block is found', () {
-      final group = TrackerBatchGroup(
+      final group = ControllerBatchGroup(
         key: 'openai|gpt-4',
         resolved: _stubResolved(),
         agents: [
@@ -244,10 +244,10 @@ Focus: anti-loop
     });
   });
 
-  group('TrackerBatcher.shouldRunIndividually', () {
-    late TrackerBatcher batcher;
+  group('ControllerBatcher.shouldRunIndividually', () {
+    late ControllerBatcher batcher;
     setUp(() {
-      batcher = TrackerBatcher();
+      batcher = ControllerBatcher();
     });
 
     test('returns true when agent.runIndividually is set', () {
@@ -296,10 +296,10 @@ Focus: anti-loop
     });
   });
 
-  group('TrackerBatcher.normalizeMaxParallelJobs + splitGroupForParallelJobs', () {
-    late TrackerBatcher batcher;
+  group('ControllerBatcher.normalizeMaxParallelJobs + splitGroupForParallelJobs', () {
+    late ControllerBatcher batcher;
     setUp(() {
-      batcher = TrackerBatcher();
+      batcher = ControllerBatcher();
     });
 
     test('clamps maxParallelJobs to [1, 16]', () {
@@ -312,7 +312,7 @@ Focus: anti-loop
     });
 
     test('returns group unchanged when maxParallelJobs=1 (MVP)', () {
-      final group = TrackerBatchGroup(
+      final group = ControllerBatchGroup(
         key: 'openai|gpt-4',
         resolved: _stubResolved(),
         agents: [
@@ -329,7 +329,7 @@ Focus: anti-loop
     });
 
     test('splits into N sub-groups when maxParallelJobs>1', () {
-      final group = TrackerBatchGroup(
+      final group = ControllerBatchGroup(
         key: 'openai|gpt-4',
         resolved: _stubResolved(),
         agents: [
@@ -363,6 +363,6 @@ ResolvedAgentConfig _stubResolved({String model = 'gpt-4'}) {
 }
 
 /// Pure prompt-building / parsing tests construct the batcher WITHOUT a
-/// runner â€” `TrackerBatcher()` is a no-arg constructor. Only `groupAgents` /
+/// runner — `ControllerBatcher()` is a no-arg constructor. Only `groupAgents` /
 /// `runPhase` require a runner; we don't touch them here.
 

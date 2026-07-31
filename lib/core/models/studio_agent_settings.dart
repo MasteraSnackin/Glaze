@@ -71,40 +71,40 @@ abstract class StudioAgentSettings with _$StudioAgentSettings {
     // The 7 pre-gen controllers share one logical batch. Model id override
     // applied to ALL non-final Studio agents when non-empty. Empty = use each
     // agent's own `modelOverride` or the chat's run model.
-    @Default('') String studioTrackerModelOverride,
+    @Default('') String studioControllerModelOverride,
     // Tracker idle timeout (ms). 0 = use agent/global fallback.
-    @Default(0) int studioTrackerTimeoutMs,
+    @Default(0) int studioControllerTimeoutMs,
     // Max tokens for ALL non-final Studio agents. When > 0, overrides the
     // per-agent default (1600). 0 = use the agent's own maxTokens.
-    @Default(0) int studioTrackerMaxTokens,
-    @Default(0.9) double studioTrackerTopP,
-    @Default(0) int studioTrackerTopK,
-    @Default(0.0) double studioTrackerFrequencyPenalty,
-    @Default(0.0) double studioTrackerPresencePenalty,
+    @Default(0) int studioControllerMaxTokens,
+    @Default(0.9) double studioControllerTopP,
+    @Default(0) int studioControllerTopK,
+    @Default(0.0) double studioControllerFrequencyPenalty,
+    @Default(0.0) double studioControllerPresencePenalty,
     // Temperature for ALL non-final Studio agents. When >= 0, overrides the
     // per-agent default (0.3). Negative = use the agent's own temperature.
-    @Default(0.5) double studioTrackerTemperature,
-    @Default(false) bool studioTrackerRequestReasoning,
-    @Default(false) bool studioTrackerUseResponsesApi,
-    @Default('auto') String studioTrackerReasoningEffort,
-    @Default(false) bool studioTrackerOmitTemperature,
-    @Default(false) bool studioTrackerOmitTopP,
-    @Default(true) bool studioTrackerOmitReasoning,
-    @Default(true) bool studioTrackerOmitReasoningEffort,
+    @Default(0.5) double studioControllerTemperature,
+    @Default(false) bool studioControllerRequestReasoning,
+    @Default(false) bool studioControllerUseResponsesApi,
+    @Default('auto') String studioControllerReasoningEffort,
+    @Default(false) bool studioControllerOmitTemperature,
+    @Default(false) bool studioControllerOmitTopP,
+    @Default(true) bool studioControllerOmitReasoning,
+    @Default(true) bool studioControllerOmitReasoningEffort,
     // When true, all non-final Studio agent requests force
     // requestReasoning=false and omitReasoning=true. Trackers emit compact
     // JSON briefs, so a hidden think-block wastes tokens. Gemini-only.
-    @Default(false) bool studioTrackerDisableReasoning,
+    @Default(false) bool studioControllerDisableReasoning,
     // Context size for ALL non-final Studio agents (batch + individual).
     // This is the single source of truth — per-agent contextSize is ignored.
-    @Default(8) int studioTrackerContextSize,
+    @Default(8) int studioControllerContextSize,
     @Default(<ExtraRequestParameter>[])
-    List<ExtraRequestParameter> studioTrackerExtraRequestParameters,
+    List<ExtraRequestParameter> studioControllerExtraRequestParameters,
 
     // ── Post-processing trackers ──────────────────────────────────────────
     // Number of trailing chat messages forwarded to post-processing
     // (post-gen) trackers. Default 1 (only the response to edit).
-    @Default(1) int studioPostTrackerContextSize,
+    @Default(1) int studioPostControllerContextSize,
   }) = _StudioAgentSettings;
 
   factory StudioAgentSettings.fromJson(Map<String, dynamic> json) =>
@@ -113,8 +113,17 @@ abstract class StudioAgentSettings with _$StudioAgentSettings {
 
 Map<String, dynamic> _normalizeStudioAgentSettingsJson(
   Map<String, dynamic> json,
-) => Map<String, dynamic>.from(json)
-  ..putIfAbsent(
+) {
+  final n = Map<String, dynamic>.from(json);
+  for (final oldKey in n.keys.where((k) => k.startsWith('studioTracker')).toList()) {
+    final newKey = oldKey.replaceFirst('studioTracker', 'studioController');
+    if (!n.containsKey(newKey)) {
+      n[newKey] = n[oldKey];
+    }
+  }
+  n.putIfAbsent(
     'studioFinalReasoningHistoryCount',
-    () => json['studioFinalIncludeLastReasoning'] == true ? 1 : 0,
+    () => n['studioFinalIncludeLastReasoning'] == true ? 1 : 0,
   );
+  return n;
+}

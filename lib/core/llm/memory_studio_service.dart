@@ -21,15 +21,15 @@ import 'studio_message_builder.dart';
 import 'studio_prompt_text.dart';
 import 'studio_stage_brief.dart';
 import 'studio_turn_config_snapshot.dart';
-import 'tracker_batcher.dart';
-import 'studio/studio_tracker_phase_runner.dart';
-import 'studio/studio_tracker_result_mapper.dart';
+import 'controller_batcher.dart';
+import 'studio/controller_phase_runner.dart';
+import 'studio/controller_result_mapper.dart';
 
 // Re-export so existing importers of `AgentPhaseSplit` via this file (e.g.
 // tests, studio_post_processing) keep their import path after the move to
 // studio_activation_gate.dart.
 export 'studio_activation_gate.dart' show AgentPhaseSplit;
-export 'studio/studio_tracker_phase_runner.dart' show PreGenPhaseResult;
+export 'studio/controller_phase_runner.dart' show PreGenPhaseResult;
 
 /// Session-bound Studio pipeline.
 ///
@@ -39,7 +39,7 @@ export 'studio/studio_tracker_phase_runner.dart' show PreGenPhaseResult;
 class MemoryStudioService {
   final Ref _ref;
   final AgentRunner _runner;
-  final TrackerBatcher _batcher;
+  final ControllerBatcher _batcher;
   final StudioPromptText _promptText = const StudioPromptText();
   final StudioContextBucketizer _bucketizer = const StudioContextBucketizer();
   late final StudioBriefParser _briefParser = StudioBriefParser(_log);
@@ -68,7 +68,7 @@ class MemoryStudioService {
   );
   late final StudioTrackerResultMapper _resultMapper =
       StudioTrackerResultMapper(_briefParser, _briefCache);
-  late final StudioTrackerPhaseRunner _phaseRunner = StudioTrackerPhaseRunner(
+  late final ControllerPhaseRunner _phaseRunner = ControllerPhaseRunner(
     presetRepo: _ref.read(studioPresetRepoProvider),
     batcher: _batcher,
     briefCache: _briefCache,
@@ -237,7 +237,7 @@ class MemoryStudioService {
 
   /// Tracker-only cycle: runs the pre-gen tracker phase and returns the
   /// produced briefs WITHOUT firing the final generator or post-gen
-  /// trackers. Used by [TrackerMemoryRecoveryService] to restore lost
+  /// trackers. Used by [ControllerMemoryRecoveryService] to restore lost
   /// `studioOutputs` without burning the final-generator model on every
   /// historical message.
   Future<StudioPipelineResult> runTrackersOnly({

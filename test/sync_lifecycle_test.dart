@@ -1023,7 +1023,7 @@ void main() {
 
   test('Push includes pipelineSettings in local_storage singleton', () async {
     final world = SyncWorld();
-    const settingsJson = '{"studioTrackerModelOverride":"gemini-pro"}';
+    const settingsJson = '{"studioControllerModelOverride":"gemini-pro"}';
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('pipelineSettings', settingsJson);
 
