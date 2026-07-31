@@ -71,9 +71,12 @@ class StudioMessageBuilder {
                 .trim(),
           );
         if (!isFinalResponse) {
-          control
-            ..writeln()
-            ..writeln(_promptText.intermediateRuntimeEnvelope(agent));
+          final spec = StudioControllerOntology.specForAgent(agent);
+          if (spec != null) {
+            control
+              ..writeln()
+              ..writeln(_promptText.intermediateRuntimeEnvelope(spec, agent));
+          }
         }
         if (isFinalResponse &&
             (hasExplicitBriefMacros || priorBriefs.isNotEmpty)) {
@@ -253,7 +256,10 @@ class StudioMessageBuilder {
         ..writeln(content)
         ..writeln();
     }
-    buffer.writeln(_promptText.intermediateRuntimeEnvelope(agent));
+    final spec = StudioControllerOntology.specForAgent(agent);
+    if (spec != null) {
+      buffer.writeln(_promptText.intermediateRuntimeEnvelope(spec, agent));
+    }
     return buffer.toString().trim();
   }
 

@@ -131,6 +131,7 @@ abstract class StudioAgent with _$StudioAgent {
     @Default(4000) int timeoutMs,
     @Default(0.3) double temperature,
     @Default(8000) int maxTokens,
+    @Default('') String specId,
 
     /// Controls whether an intermediate agent should be refreshed every turn
     /// or can reuse a previous brief. Supported values: static, scene, turn.

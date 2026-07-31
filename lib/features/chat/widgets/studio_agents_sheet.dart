@@ -13,13 +13,13 @@ const _beautyPipelineBlockIds = {
   'cleaner_beauty',
 };
 
-/// Applies a controller toggle to a preset. Beauty spans build, tracker, and
-/// cleaner stages, so its one visible toggle owns all three persisted blocks.
 StudioPreset applyStudioAgentToggle(
   StudioPreset preset,
   String specId,
   bool enabled,
 ) {
+  final spec = StudioControllerOntology.byId(specId);
+  if (spec.lockedOn) return preset;
   final updated = Map<String, bool>.from(preset.agentEnabled)
     ..[specId] = enabled;
   if (specId != 'beauty') {
@@ -36,11 +36,6 @@ StudioPreset applyStudioAgentToggle(
   );
 }
 
-/// Agent on/off toggles for a Studio preset.
-///
-/// Shows one switch per controller spec (continuity, narrative, final, etc.).
-/// State is persisted into `StudioPreset.agentEnabled` so it travels with
-/// the preset on import/export.
 class StudioAgentsSheet extends ConsumerStatefulWidget {
   final String presetId;
 
@@ -90,6 +85,78 @@ class _StudioAgentsSheetState extends ConsumerState<StudioAgentsSheet> {
     setState(() => _preset = next);
   }
 
+  void _showAgentCard(StudioControllerSpec spec) {
+    GlazeBottomSheet.show<void>(
+      context,
+      title: spec.name,
+      child: SizedBox(
+        height: MediaQuery.sizeOf(context).height * 0.55,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _cardRow(Icons.badge_outlined, 'Purpose', spec.purpose),
+              const SizedBox(height: 16),
+              _cardRow(
+                Icons.arrow_forward_rounded,
+                'Your Lane (owns)',
+                spec.laneOwns,
+              ),
+              const SizedBox(height: 16),
+              _cardRow(
+                Icons.block_rounded,
+                'Not Your Lane (skip)',
+                spec.laneSkip,
+              ),
+              const SizedBox(height: 16),
+              _cardRow(
+                Icons.terminal_rounded,
+                'Output Contract',
+                spec.outputContract,
+              ),
+              const SizedBox(height: 20),
+              Text(
+                'These instructions are fixed and cannot be edited.',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _cardRow(IconData icon, String label, String body) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(icon, size: 16, color: Theme.of(context).colorScheme.primary),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        Text(
+          body,
+          style: const TextStyle(fontSize: 13, height: 1.4),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -129,20 +196,28 @@ class _StudioAgentsSheetState extends ConsumerState<StudioAgentsSheet> {
               vertical: 0,
             ),
             secondary: Icon(
-              spec.isFinal ? Icons.star_outline : Icons.smart_toy_outlined,
+              spec.lockedOn ? Icons.lock_outline : spec.isFinal ? Icons.star_outline : Icons.smart_toy_outlined,
               color: spec.isFinal
                   ? Theme.of(context).colorScheme.primary
                   : null,
             ),
-            title: Text(spec.name),
-            subtitle: Text(
-              spec.purpose,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 12),
+            title: InkWell(
+              onTap: () => _showAgentCard(spec),
+              child: Text(spec.name),
+            ),
+            subtitle: InkWell(
+              onTap: () => _showAgentCard(spec),
+              child: Text(
+                spec.purpose,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 12),
+              ),
             ),
             value: isOn,
-            onChanged: allowedByTopology ? (v) => _toggle(spec.id, v) : null,
+            onChanged: (spec.lockedOn || !allowedByTopology)
+                ? null
+                : (v) => _toggle(spec.id, v),
           );
         },
       ),
