@@ -42,6 +42,8 @@ import '../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/image_viewer.dart';
 import '../../shared/widgets/sheet_view.dart';
 import '../../shared/widgets/colored_markdown.dart';
+import '../../shared/widgets/variation_chip.dart';
+import '../../shared/utils/variant_label.dart';
 import 'character_editor_screen.dart';
 import '../character_gallery/widgets/character_gallery_view.dart';
 import 'widgets/character_variations_sheet.dart';
@@ -535,6 +537,11 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
     }
   }
 
+  /// Label of the variation this sheet shows, or null when the character has no
+  /// variations and there is nothing to disambiguate — same rule as the card.
+  String? _variationLabelOf(Character char) =>
+      _variantCount(char) > 1 ? variantLabel(char) : null;
+
   /// Number of variations in [char]'s group (1 for a standalone character).
   int _variantCount(Character? char) {
     if (char == null) return 1;
@@ -769,6 +776,7 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
               previewAvatarUrl: widget.previewAvatarUrl,
               authorUrl: widget.previewAuthorUrl,
               onOpenAuthor: _openExternal,
+              variationLabel: _variationLabelOf(char),
             ),
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
@@ -1060,11 +1068,19 @@ class _HeroSection extends StatelessWidget {
   final String? previewAvatarUrl;
   final String? authorUrl;
   final void Function(String url)? onOpenAuthor;
+
+  /// Name of the variation this sheet belongs to, or null when the character
+  /// has none. Shown as a plain chip above the name, mirroring the card you
+  /// arrived from; it is a label, not a control — the sheet is already the
+  /// variation it names.
+  final String? variationLabel;
+
   const _HeroSection({
     required this.character,
     this.previewAvatarUrl,
     this.authorUrl,
     this.onOpenAuthor,
+    this.variationLabel,
   });
 
   String get _displayName {
@@ -1124,6 +1140,10 @@ class _HeroSection extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  if (variationLabel != null) ...[
+                    VariationChip(name: variationLabel!, maxWidth: 180),
+                    const SizedBox(height: 6),
+                  ],
                   Text(
                     _displayName,
                     style: const TextStyle(
