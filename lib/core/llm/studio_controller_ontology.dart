@@ -85,23 +85,6 @@ class StudioControllerOntology {
       timeoutMs: 60000,
     ),
     StudioControllerSpec(
-      id: 'narrative',
-      name: 'Narrative / Pacing / Style Controller',
-      purpose:
-          'Convert the active preset\'s narrative mode, style, POV, pacing, sensory budget, tone, and genre rules into a compact response-shape contract for the final writer.',
-      outputContract:
-          'At chat time, output a compact operational brief that applies the active Studio preset\'s response-shape rules to the current turn. Include only the dimensions the active preset requests, such as beat, pacing, POV/camera, sensory budget, opening constraint, dialogue/action balance, and stopping point. No scene prose, drafted actions, or dialogue.',
-      laneOwns:
-          'response shape only: the current beat, pacing, POV/camera, sensory budget, and where the reply should stop. The active Studio preset defines the applicable style, beat taxonomy, and response budget. Never require the response to end on motion, departure, or physical displacement if that motion depends on {{user}} taking the next action; instead stop at the character\'s response/hook.',
-      laneSkip:
-          'who-knows-what, character psychology, agency rules, specific dialogue lines, repetition bans, and world/NPC content.',
-      refreshPolicy: 'turn',
-      invalidationSignals: ['scene_changed', 'tone_changed', 'pacing_changed'],
-      temperature: 0.3,
-      maxTokens: 1600,
-      timeoutMs: 60000,
-    ),
-    StudioControllerSpec(
       id: 'dialogue',
       name: 'Dialogue Controller',
       purpose:

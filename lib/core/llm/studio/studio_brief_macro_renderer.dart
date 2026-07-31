@@ -46,9 +46,7 @@ class StudioBriefMacroRenderer {
       '{{studio_agency_brief}}': renderBriefs(
         briefsForController(briefs, 'agency'),
       ),
-      '{{studio_narrative_brief}}': renderBriefs(
-        briefsForController(briefs, 'narrative'),
-      ),
+      '{{studio_narrative_brief}}': '',
       '{{studio_dialogue_brief}}': renderBriefs(
         briefsForController(briefs, 'dialogue'),
       ),
@@ -97,7 +95,6 @@ class StudioBriefMacroRenderer {
     final aliases = const <String, List<String>>{
       'continuity': ['continuity'],
       'agency': ['agency', 'character'],
-      'narrative': ['narrative', 'pacing', 'style'],
       'dialogue': ['dialogue'],
       'guard': ['guard', 'loop', 'prose'],
       'world': ['world', 'npc'],

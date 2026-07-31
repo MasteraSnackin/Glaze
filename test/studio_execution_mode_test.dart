@@ -70,10 +70,10 @@ void main() {
     );
     expect(
       StudioActivationGate.isControllerAllowed(
-        'narrative',
+        'dialogue',
         StudioExecutionMode.assisted,
       ),
-      isTrue,
+      isFalse,
     );
   });
 }

@@ -116,7 +116,6 @@ class StudioRuntimeBlockExpander {
     const aliases = <String, List<String>>{
       'continuity': ['continuity'],
       'agency': ['agency', 'character'],
-      'narrative': ['narrative', 'pacing', 'style'],
       'dialogue': ['dialogue'],
       'guard': ['guard', 'loop', 'prose'],
       'world': ['world', 'npc'],

@@ -14,7 +14,6 @@ StudioPreset prepareStudioPresetForMode(
 }) {
   const assistedTaskIds = {
     'continuity_task_universal',
-    'narrative_task_universal',
     'beauty_task',
   };
   final allowedAgents = switch (mode) {
@@ -22,7 +21,6 @@ StudioPreset prepareStudioPresetForMode(
     StudioExecutionMode.direct => const {'final'},
     StudioExecutionMode.assisted => const {
       'continuity',
-      'narrative',
       'beauty',
       'final',
     },
@@ -33,7 +31,6 @@ StudioPreset prepareStudioPresetForMode(
     for (final specId in const {
       'continuity',
       'agency',
-      'narrative',
       'dialogue',
       'guard',
       'world',
