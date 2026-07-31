@@ -16,7 +16,30 @@ StudioPreset applyStudioAgentToggle(
   if (spec.lockedOn) return preset;
   final updated = Map<String, bool>.from(preset.agentEnabled)
     ..[specId] = enabled;
-  return preset.copyWith(agentEnabled: updated);
+  final restored = Map<String, bool>.from(
+    preset.agentEnabledBeforeDependencyOff,
+  );
+
+  if (!enabled) {
+    for (final s in StudioControllerOntology.specs) {
+      if (s.requiresSpecId == specId) {
+        restored[s.id] = updated[s.id] ?? true;
+        updated[s.id] = false;
+      }
+    }
+  } else {
+    for (final s in StudioControllerOntology.specs) {
+      if (s.requiresSpecId == specId && restored.containsKey(s.id)) {
+        updated[s.id] = restored[s.id]!;
+        restored.remove(s.id);
+      }
+    }
+  }
+
+  return preset.copyWith(
+    agentEnabled: updated,
+    agentEnabledBeforeDependencyOff: restored,
+  );
 }
 
 class StudioAgentsSheet extends ConsumerStatefulWidget {
