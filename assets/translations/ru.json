@@ -1779,6 +1779,7 @@
   "tools_lorebooks_subtitle": "Лорбуки",
   "tools_regex_subtitle": "Скрипты поиска и замены",
   "tools_studio_subtitle": "Агентные блоки пресета",
+  "tools_ext_blocks_subtitle": "Автоинфоблоки и картинки",
   "ext_block_delete_confirm": "Блок будет удалён из базы данных. Это нельзя отменить.",
   "preset_not_found": "Пресет не найден",
   "common_close": "Закрыть",
