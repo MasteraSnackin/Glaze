@@ -12,13 +12,12 @@ StudioPreset prepareStudioPresetForMode(
   required StudioExecutionMode mode,
   required int updatedAt,
 }) {
-  const assistedTargets = {'continuity', 'narrative', 'beauty'};
+  const assistedTargets = {'continuity', 'beauty'};
   final allowedAgents = switch (mode) {
     StudioExecutionMode.legacy => null,
     StudioExecutionMode.direct => const {'final'},
     StudioExecutionMode.assisted => const {
       'continuity',
-      'narrative',
       'beauty',
       'final',
     },
@@ -29,7 +28,6 @@ StudioPreset prepareStudioPresetForMode(
     for (final specId in const {
       'continuity',
       'agency',
-      'narrative',
       'dialogue',
       'guard',
       'world',

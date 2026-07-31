@@ -61,10 +61,11 @@ class StudioTurnConfigResolver {
           (block) => block.id == 'beauty_task' && block.enabled,
         );
         final agents = preset.agents.map((agent) {
-          final specId = StudioControllerOntology.targetIdForAgent(agent);
-          if (specId == null) return agent.copyWith(enabled: false);
-          final disableBeauty = specId == 'beauty' && !beautyPipelineEnabled;
-          return agentEnabled[specId] == false || disableBeauty
+          final spec = StudioControllerOntology.specForAgent(agent);
+          if (spec == null) return agent.copyWith(enabled: false);
+          if (spec.isFinal) return agent.copyWith(enabled: true);
+          final disableBeauty = spec.id == 'beauty' && !beautyPipelineEnabled;
+          return agentEnabled[spec.id] == false || disableBeauty
               ? agent.copyWith(enabled: false)
               : agent;
         }).toList();

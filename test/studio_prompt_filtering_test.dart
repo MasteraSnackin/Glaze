@@ -567,26 +567,26 @@ void main() {
     });
   });
 
-  group('Studio Narrative length ownership', () {
-    const narrativeAgent = StudioAgent(
-      id: 'narrative',
-      name: 'Narrative / Pacing / Style Controller',
+  group('Studio agent envelope lane ownership', () {
+    const guardAgent = StudioAgent(
+      id: 'guard',
+      name: 'Anti-Loop & Prose Guard',
     );
 
     test('runtime leaves numeric response budgets to the active preset', () {
-      final narrative = StudioControllerOntology.specs.firstWhere(
-        (spec) => spec.id == 'narrative',
+      final guard = StudioControllerOntology.specs.firstWhere(
+        (spec) => spec.id == 'guard',
       );
       final envelope = const StudioPromptText().intermediateRuntimeEnvelope(
-        narrative,
-        narrativeAgent,
+        guard,
+        guardAgent,
       );
 
       expect(envelope.toLowerCase(), isNot(contains('paragraph')));
       expect(envelope.toLowerCase(), isNot(contains('word budget')));
-      expect(narrative.purpose.toLowerCase(), isNot(contains('paragraph')));
+      expect(guard.purpose.toLowerCase(), isNot(contains('paragraph')));
       expect(
-        narrative.outputContract.toLowerCase(),
+        guard.outputContract.toLowerCase(),
         isNot(contains('paragraph')),
       );
     });

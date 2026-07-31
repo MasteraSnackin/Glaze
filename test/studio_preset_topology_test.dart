@@ -96,7 +96,7 @@ void main() {
     expect(preset.agentEnabled['beauty'], isFalse);
   });
 
-  test('assisted preset includes continuity, narrative, and beauty', () {
+  test('assisted preset includes continuity and beauty', () {
     final preset = prepareStudioPresetForMode(
       source,
       id: 'assisted',
@@ -109,10 +109,9 @@ void main() {
       preset.blocks
           .where((b) => b.targetAgentId != null)
           .map((b) => b.targetAgentId),
-      ['continuity', 'narrative', 'beauty'],
+      ['continuity', 'beauty'],
     );
     expect(preset.agentEnabled['continuity'], isTrue);
-    expect(preset.agentEnabled['narrative'], isTrue);
     expect(preset.agentEnabled['meta'], isFalse);
     expect(preset.agentEnabled['beauty'], isTrue);
     expect(
@@ -124,12 +123,6 @@ void main() {
           .firstWhere((b) => b.id == 'continuity_task_universal')
           .content,
       'Authored continuity task.',
-    );
-    expect(
-      preset.blocks
-          .firstWhere((b) => b.id == 'narrative_task_universal')
-          .content,
-      'Authored narrative task.',
     );
     expect(
       preset.blocks
