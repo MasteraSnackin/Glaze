@@ -50,7 +50,6 @@ class StudioPresetRepo implements SyncStudioPresetStore {
               jsonEncode(normalized.blocks.map((b) => b.toJson()).toList()),
             ),
             agentEnabledJson: Value(jsonEncode(normalized.agentEnabled)),
-            executionMode: Value(normalized.executionMode.wireName),
             updatedAt: Value(normalized.updatedAt),
           ),
         );
@@ -88,7 +87,6 @@ class StudioPresetRepo implements SyncStudioPresetStore {
         name: row.name,
         blocks: blocks,
         agentEnabled: agentEnabled,
-        executionMode: StudioExecutionMode.fromWireName(row.executionMode),
         updatedAt: row.updatedAt,
       ),
     );

@@ -115,7 +115,6 @@ const _agent = StudioAgent(
 
 const _preset = StudioPreset(
   id: 'preset-id',
-  executionMode: StudioExecutionMode.assisted,
   agentEnabled: {'continuity': true},
   blocks: [
     StudioPresetBlock(

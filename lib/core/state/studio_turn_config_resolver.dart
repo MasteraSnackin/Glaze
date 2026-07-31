@@ -1,7 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../features/settings/api_list_provider.dart';
-import '../llm/studio_activation_gate.dart';
 import '../llm/studio_controller_ontology.dart';
 import '../llm/studio_turn_config_snapshot.dart';
 import '../models/api_config.dart';
@@ -65,12 +64,8 @@ class StudioTurnConfigResolver {
               ? agent.copyWith(enabled: false)
               : agent;
         }).toList();
-        final gated =
-            StudioActivationGate.applyExecutionMode(
-                agents,
-                preset.executionMode,
-              ).where((agent) => agent.enabled).toList()
-              ..sort((a, b) => a.order.compareTo(b.order));
+        final gated = agents.where((agent) => agent.enabled).toList()
+          ..sort((a, b) => a.order.compareTo(b.order));
         if (gated.isNotEmpty) {
           effectiveConfig = storedConfig.copyWith(agents: gated);
         }

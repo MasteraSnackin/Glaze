@@ -168,8 +168,6 @@ class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
             onChanged: (v) => _save(config.copyWith(enabled: v)),
           ),
           const Divider(),
-          _buildModeSelector(),
-          const SizedBox(height: 4),
           _buildPresetSelector(),
           const Divider(),
           Text('Models', style: Theme.of(context).textTheme.titleSmall),
@@ -293,28 +291,6 @@ class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
     return _studioPresets.where((p) => p.id == activePresetId).firstOrNull;
   }
 
-  String _modeLabel(StudioExecutionMode mode) {
-    return switch (mode) {
-      StudioExecutionMode.legacy => 'Legacy — full controller pipeline',
-      StudioExecutionMode.direct => 'Direct Loom — FINAL without pregen',
-      StudioExecutionMode.assisted =>
-        'Assisted Loom — Continuity + Scene Director + Beauty',
-    };
-  }
-
-  Widget _buildModeSelector() {
-    final current = _activeStudioPreset;
-    final mode = current?.executionMode ?? StudioExecutionMode.legacy;
-    return ListTile(
-      contentPadding: EdgeInsets.zero,
-      leading: const Icon(Icons.account_tree_outlined),
-      title: const Text('Studio Mode'),
-      subtitle: Text(_modeLabel(mode)),
-      trailing: const Icon(Icons.arrow_drop_down),
-      onTap: _openStudioModeSelector,
-    );
-  }
-
   Widget _buildPresetSelector() {
     final activePresetId =
         ref.watch(activeStudioPresetProvider).value ?? 'default';
@@ -334,57 +310,6 @@ class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
       trailing: const Icon(Icons.arrow_drop_down),
       onTap: _openStudioPresetSelector,
     );
-  }
-
-  Future<void> _openStudioModeSelector() async {
-    final current = _activeStudioPreset;
-    final items = <BottomSheetItem>[
-      for (final mode in StudioExecutionMode.values)
-        BottomSheetItem(
-          label: _modeLabel(mode),
-          hint: switch (mode) {
-            StudioExecutionMode.legacy =>
-              'Keep the selected full Studio preset and all enabled controllers.',
-            StudioExecutionMode.direct => 'FINAL only; no pregen controllers.',
-            StudioExecutionMode.assisted =>
-              'Continuity, Scene Director, and Beauty before FINAL.',
-          },
-          icon: current?.executionMode == mode ? Icons.check : null,
-          iconColor: Theme.of(context).colorScheme.primary,
-          onTap: () {
-            Navigator.of(context, rootNavigator: true).pop();
-            unawaited(_selectStudioMode(mode));
-          },
-        ),
-    ];
-    await GlazeBottomSheet.show<void>(
-      context,
-      title: 'Studio Mode',
-      items: items,
-    );
-  }
-
-  Future<void> _selectStudioMode(StudioExecutionMode mode) async {
-    final current = _activeStudioPreset;
-    if (current?.executionMode == mode) return;
-    final candidates = _studioPresets
-        .where((preset) => preset.executionMode == mode)
-        .toList();
-    final preset =
-        candidates
-            .where((candidate) => candidate.name.startsWith('Loom Adapt v1'))
-            .firstOrNull ??
-        candidates.firstOrNull;
-    if (preset == null) {
-      if (mounted) {
-        GlazeToast.show(
-          context,
-          'Import a ${mode.wireName} Studio preset first.',
-        );
-      }
-      return;
-    }
-    await _changeStudioPreset(preset.id);
   }
 
   Future<void> _openStudioPresetSelector() async {

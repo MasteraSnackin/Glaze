@@ -24,7 +24,6 @@ void main() {
     const preset = StudioPreset(
       id: 'studio_loom_causal_direct_v1',
       name: 'Loom Direct',
-      executionMode: StudioExecutionMode.direct,
       agentEnabled: {'final': true, 'narrative': false},
       blocks: [
         StudioPresetBlock(

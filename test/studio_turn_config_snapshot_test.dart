@@ -92,11 +92,9 @@ void main() {
           sessionId: 'session',
           enabled: true,
           agents: [
-            StudioAgent(id: 'final', order: 5),
-            StudioAgent(id: 'agency', order: 1),
-            StudioAgent(id: 'continuity', order: 3),
-            StudioAgent(id: 'narrative', order: 2),
-            StudioAgent(id: 'beauty', order: 4),
+            StudioAgent(id: 'final', order: 5, specId: 'final'),
+            StudioAgent(id: 'agency', order: 1, specId: 'agency'),
+            StudioAgent(id: 'continuity', order: 3, specId: 'continuity'),
           ],
         ),
         loadActivePresetId: () async => 'missing',
@@ -105,8 +103,7 @@ void main() {
           defaultLoads++;
           return const StudioPreset(
             id: 'default',
-            executionMode: StudioExecutionMode.assisted,
-            agentEnabled: {'narrative': false},
+            agentEnabled: {'agency': false},
           );
         },
       );
@@ -163,7 +160,6 @@ void main() {
           .upsert(
             const StudioPreset(
               id: 'old-preset',
-              executionMode: StudioExecutionMode.assisted,
               blocks: [
                 StudioPresetBlock(
                   id: 'old-ledger',
@@ -178,7 +174,6 @@ void main() {
           .upsert(
             const StudioPreset(
               id: 'new-preset',
-              executionMode: StudioExecutionMode.direct,
               blocks: [
                 StudioPresetBlock(
                   id: 'new-ledger',
