@@ -319,7 +319,14 @@ class _PsCard extends ConsumerWidget {
         : context.cs.outline;
     final idleWidth = cover != null ? _accentBorderWidth : 1.0;
     final activeBorder = context.cs.primary.withValues(alpha: 0.5);
-    final baseTint = context.cs.surfaceContainerHighest;
+    // GlassSurface multiplies a tint's own alpha into the theme's element
+    // opacity, and only falls back to `surface × elementOpacity` when no tint
+    // is given. A theme whose UI colour is translucent (8-digit hex) therefore
+    // renders a card handed `surfaceContainerHighest` verbatim thinner than
+    // every other glass surface in the app. Pinning both tints to full alpha
+    // makes the multiplication a no-op, so an idle card is exactly the app's
+    // plain glass and the active one is that same glass plus the highlight.
+    final baseTint = context.cs.surfaceContainerHighest.withValues(alpha: 1.0);
     final activeTint = Color.alphaBlend(
       context.cs.primary.withValues(alpha: 0.12),
       baseTint,
