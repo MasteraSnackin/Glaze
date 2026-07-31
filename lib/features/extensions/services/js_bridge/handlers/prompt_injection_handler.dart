@@ -14,11 +14,7 @@ class PromptInjectionHandler {
     if (content is! String || content.trim().isEmpty) {
       throw ArgumentError('injectPrompt content is required');
     }
-    final handler =
-        bridge.injectPrompt ??
-        (throw UnsupportedError(
-          'glaze.injectPrompt is not available in this context',
-        ));
+    final handler = bridge.injectPrompt;
     return handler(
       id,
       content,
@@ -32,11 +28,7 @@ class PromptInjectionHandler {
     if (id is! String || id.trim().isEmpty) {
       throw ArgumentError('uninjectPrompt id is required');
     }
-    final handler =
-        bridge.uninjectPrompt ??
-        (throw UnsupportedError(
-          'glaze.uninjectPrompt is not available in this context',
-        ));
+    final handler = bridge.uninjectPrompt;
     return handler(id, bridge.context);
   }
 }

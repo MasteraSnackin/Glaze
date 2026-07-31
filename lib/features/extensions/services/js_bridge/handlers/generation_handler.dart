@@ -6,11 +6,7 @@ class GenerationHandler {
   const GenerationHandler();
 
   FutureOr<Map<String, dynamic>> triggerGeneration(JsBridgeContext bridge) {
-    final handler =
-        bridge.triggerGeneration ??
-        (throw UnsupportedError(
-          'glaze.triggerGeneration is not available in this context',
-        ));
+    final handler = bridge.triggerGeneration;
     return handler(bridge.characterIdOrNull(), bridge.params);
   }
 
@@ -31,11 +27,7 @@ class GenerationHandler {
         preset != 'small') {
       throw ArgumentError('Unsupported generateText preset "$preset"');
     }
-    final handler =
-        bridge.generateText ??
-        (throw UnsupportedError(
-          'glaze.generateText is not available in this context',
-        ));
+    final handler = bridge.generateText;
     return handler(prompt, options, bridge.context);
   }
 }

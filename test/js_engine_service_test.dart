@@ -3,8 +3,8 @@ import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:glaze_flutter/features/extensions/services/js_bridge_service.dart';
 import 'package:glaze_flutter/features/extensions/services/js_engine_service.dart';
+import 'helpers/js_bridge_test_support.dart';
 
 class _FakeEngineController implements JsEngineController {
   _FakeEngineController();
@@ -72,7 +72,7 @@ void main() {
     test('runScript returns the controller value as a string', () async {
       final fake = _FakeEngineController()
         ..scriptResult = 'hello from headless';
-      final host = JsEngineBridgeHost(bridge: JsBridgeService());
+      final host = JsEngineBridgeHost(bridge: TestJsBridge.create());
       final service = JsEngineService.instance;
       await service.debugInitWithController(controller: fake);
 
@@ -94,13 +94,13 @@ void main() {
       var firstCalls = 0;
       var secondCalls = 0;
       final firstHost = JsEngineBridgeHost(
-        bridge: JsBridgeService(
+        bridge: TestJsBridge.create(
           permissionCheck: (_) => true,
           showToast: (_, _) => firstCalls++,
         ),
       );
       final secondHost = JsEngineBridgeHost(
-        bridge: JsBridgeService(
+        bridge: TestJsBridge.create(
           permissionCheck: (_) => true,
           showToast: (_, _) => secondCalls++,
         ),
@@ -159,7 +159,7 @@ void main() {
         script: 'return 1;',
         context: const {},
         host: JsEngineBridgeHost(
-          bridge: JsBridgeService(
+          bridge: TestJsBridge.create(
             permissionCheck: (_) => true,
             showToast: (_, _) => firstCalls++,
           ),
@@ -176,7 +176,7 @@ void main() {
       ]);
 
       final secondHost = JsEngineBridgeHost(
-        bridge: JsBridgeService(
+        bridge: TestJsBridge.create(
           permissionCheck: (_) => true,
           showToast: (_, _) => secondCalls++,
         ),
@@ -214,7 +214,7 @@ void main() {
         () => service.runScript(
           script: 'return 1;',
           context: const {},
-          host: JsEngineBridgeHost(bridge: JsBridgeService()),
+          host: JsEngineBridgeHost(bridge: TestJsBridge.create()),
         ),
         throwsA(isA<HeadlessUnavailableError>()),
       );
@@ -222,7 +222,7 @@ void main() {
 
     test('cancel rejects an in-flight run', () async {
       final fake = _FakeEngineController()..pendingResult = Completer<Object>();
-      final host = JsEngineBridgeHost(bridge: JsBridgeService());
+      final host = JsEngineBridgeHost(bridge: TestJsBridge.create());
       final service = JsEngineService.instance;
       await service.debugInitWithController(controller: fake);
 

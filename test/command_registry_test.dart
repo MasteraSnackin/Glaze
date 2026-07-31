@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:glaze_flutter/features/extensions/services/command_registry.dart';
-import 'package:glaze_flutter/features/extensions/services/js_bridge_service.dart';
+import 'helpers/js_bridge_test_support.dart';
 
 void main() {
   group('CommandRegistry', () {
@@ -9,7 +9,11 @@ void main() {
       final r = CommandRegistry();
       expect(
         () => r.register(
-          GlazeCommand(name: 'trigger', summary: '', handler: (_, _) async => const CommandResult.ok()),
+          GlazeCommand(
+            name: 'trigger',
+            summary: '',
+            handler: (_, _) async => const CommandResult.ok(),
+          ),
         ),
         throwsA(isA<ArgumentError>()),
       );
@@ -26,11 +30,9 @@ void main() {
           ),
         ),
       );
-      final result = await r.run(
-        '/echo',
-        {'text': 'hi'},
-        context: const CommandContext(charId: 'c1'),
-      );
+      final result = await r.run('/echo', {
+        'text': 'hi',
+      }, context: const CommandContext(charId: 'c1'));
       expect(result.ok, isTrue);
       expect(result.message, 'echoed hi');
       expect(result.data, {'charId': 'c1'});
@@ -59,40 +61,39 @@ void main() {
     test('list() exposes every registered command', () {
       final r = buildDefaultCommandRegistry();
       final names = r.list().map((c) => c.name).toSet();
-      expect(names, {
-        '/trigger',
-        '/getvar',
-        '/setvar',
-        '/inject',
-        '/toast',
-      });
+      expect(names, {'/trigger', '/getvar', '/setvar', '/inject', '/toast'});
     });
   });
 
   group('JsBridgeService executeCommand', () {
-    test('delegates command + args + context to the injected handler',
-        () async {
-      String? seenCommand;
-      Map<String, dynamic>? seenArgs;
-      final bridge = JsBridgeService(
-        permissionCheck: (_) => true,
-        executeCommand: (command, args, context) async {
-          seenCommand = command;
-          seenArgs = args;
-          return {'ok': true, 'message': 'done'};
-        },
-      );
-      final result = await bridge.dispatch({
-        'method': 'executeCommand',
-        'params': {'command': '/toast', 'args': {'message': 'hi'}},
-      });
-      expect(result['ok'], isTrue);
-      expect(seenCommand, '/toast');
-      expect(seenArgs, {'message': 'hi'});
-    });
+    test(
+      'delegates command + args + context to the injected handler',
+      () async {
+        String? seenCommand;
+        Map<String, dynamic>? seenArgs;
+        final bridge = TestJsBridge.create(
+          permissionCheck: (_) => true,
+          executeCommand: (command, args, context) async {
+            seenCommand = command;
+            seenArgs = args;
+            return {'ok': true, 'message': 'done'};
+          },
+        );
+        final result = await bridge.dispatch({
+          'method': 'executeCommand',
+          'params': {
+            'command': '/toast',
+            'args': {'message': 'hi'},
+          },
+        });
+        expect(result['ok'], isTrue);
+        expect(seenCommand, '/toast');
+        expect(seenArgs, {'message': 'hi'});
+      },
+    );
 
     test('rejects empty command with invalid_request', () async {
-      final bridge = JsBridgeService(
+      final bridge = TestJsBridge.create(
         permissionCheck: (_) => true,
         executeCommand: (_, _, _) async => const {'ok': true},
       );
@@ -105,7 +106,7 @@ void main() {
     });
 
     test('denies when execute_command capability is not granted', () async {
-      final bridge = JsBridgeService(
+      final bridge = TestJsBridge.create(
         permissionCheck: (_) => false,
         executeCommand: (_, _, _) async => const {'ok': true},
       );
@@ -114,12 +115,14 @@ void main() {
         'params': {'command': '/toast'},
       });
       expect(result['ok'], isFalse);
-      expect((result['error']['message'] as String),
-          contains('execute_command'));
+      expect(
+        (result['error']['message'] as String),
+        contains('execute_command'),
+      );
     });
 
     test('returns unsupported_method when no handler is registered', () async {
-      final bridge = JsBridgeService(permissionCheck: (_) => true);
+      final bridge = TestJsBridge.create(permissionCheck: (_) => true);
       final result = await bridge.dispatch({
         'method': 'executeCommand',
         'params': {'command': '/toast'},

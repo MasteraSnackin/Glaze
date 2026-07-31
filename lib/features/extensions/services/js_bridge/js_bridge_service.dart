@@ -33,20 +33,20 @@ export 'js_bridge_method_registry.dart'
         JsBridgeOperation;
 
 class JsBridgeService {
-  final ChatRepo? _chatRepo;
-  final CharacterRepo? _characterRepo;
-  final GlobalVariablesRepo? _globalVariablesRepo;
-  final MessageVariablesAccessor? _messageVariables;
-  final String? Function()? _currentSessionId;
-  final String? Function()? _currentCharacterId;
-  final GenerateTextHandler? _generateText;
-  final InjectPromptHandler? _injectPrompt;
-  final UninjectPromptHandler? _uninjectPrompt;
-  final TriggerGenerationHandlerFn? _triggerGeneration;
-  final PermissionCheck? _permissionCheck;
-  final PlayAudioHandler? _playAudio;
-  final ExecuteCommandHandler? _executeCommand;
-  final ShowToastHandler? _showToast;
+  final ChatRepo _chatRepo;
+  final CharacterRepo _characterRepo;
+  final GlobalVariablesRepo _globalVariablesRepo;
+  final MessageVariablesAccessor _messageVariables;
+  final String? Function() _currentSessionId;
+  final String? Function() _currentCharacterId;
+  final GenerateTextHandler _generateText;
+  final InjectPromptHandler _injectPrompt;
+  final UninjectPromptHandler _uninjectPrompt;
+  final TriggerGenerationHandlerFn _triggerGeneration;
+  final PermissionCheck _permissionCheck;
+  final PlayAudioHandler _playAudio;
+  final ExecuteCommandHandler _executeCommand;
+  final ShowToastHandler _showToast;
 
   final VariablesHandler _variablesHandler;
   final GenerationHandler _generationHandler;
@@ -56,20 +56,20 @@ class JsBridgeService {
   final ToastHandler _toastHandler;
 
   JsBridgeService({
-    ChatRepo? chatRepo,
-    CharacterRepo? characterRepo,
-    GlobalVariablesRepo? globalVariablesRepo,
-    MessageVariablesAccessor? messageVariables,
-    String? Function()? currentSessionId,
-    String? Function()? currentCharacterId,
-    GenerateTextHandler? generateText,
-    InjectPromptHandler? injectPrompt,
-    UninjectPromptHandler? uninjectPrompt,
-    TriggerGenerationHandlerFn? triggerGeneration,
-    PermissionCheck? permissionCheck,
-    PlayAudioHandler? playAudio,
-    ExecuteCommandHandler? executeCommand,
-    ShowToastHandler? showToast,
+    required ChatRepo chatRepo,
+    required CharacterRepo characterRepo,
+    required GlobalVariablesRepo globalVariablesRepo,
+    required MessageVariablesAccessor messageVariables,
+    required String? Function() currentSessionId,
+    required String? Function() currentCharacterId,
+    required GenerateTextHandler generateText,
+    required InjectPromptHandler injectPrompt,
+    required UninjectPromptHandler uninjectPrompt,
+    required TriggerGenerationHandlerFn triggerGeneration,
+    required PermissionCheck permissionCheck,
+    required PlayAudioHandler playAudio,
+    required ExecuteCommandHandler executeCommand,
+    required ShowToastHandler showToast,
   }) : this._(
          chatRepo,
          characterRepo,

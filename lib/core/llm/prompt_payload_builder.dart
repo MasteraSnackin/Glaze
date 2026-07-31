@@ -169,7 +169,17 @@ class PromptPayloadBuilder {
     String? recalledMessagesContent;
     List<RecalledMessageChunk> recalledMessageChunks = const [];
     final g = _ref.read(memoryGlobalSettingsProvider);
+    MemoryBook? memoryBook;
+    var memoryGraphEnabled = g.enabled;
+    if (memoryGraphEnabled && sessionId != null) {
+      memoryBook = await _ref
+          .read(memoryBookRepoProvider)
+          .getBySessionId(sessionId);
+      throwIfAborted();
+      memoryGraphEnabled = memoryBook?.settings.enabled ?? true;
+    }
     var memorySettings = MemoryBookSettings(
+      enabled: g.enabled,
       memoryExcerptingEnabled: g.memoryExcerptingEnabled,
       memoryPackingMode: g.memoryPackingMode,
       memoryExcerptTokensPerChunk: g.memoryExcerptTokensPerChunk,
@@ -210,15 +220,23 @@ class PromptPayloadBuilder {
                 .timeout(const Duration(seconds: 30), onTimeout: () => const [])
           : Future<List<LorebookEntry>>.value(const []);
 
-      final memoryFuture = memoryService.buildCandidatesWithDiagnostics(
-        sessionId: session.id,
-        history: session.messages,
-        currentText: currentText,
-        embeddingConfig: embeddingConfig,
-        shouldAbort: shouldAbort,
-        cancelToken: cancelToken,
-        contextBudgetTokens: chatApi.contextSize,
-      );
+      final memoryFuture = memoryGraphEnabled && memoryBook != null
+          ? memoryService.buildCandidatesWithDiagnostics(
+              sessionId: session.id,
+              history: session.messages,
+              currentText: currentText,
+              embeddingConfig: embeddingConfig,
+              shouldAbort: shouldAbort,
+              cancelToken: cancelToken,
+              contextBudgetTokens: chatApi.contextSize,
+            )
+          : Future.value(
+              MemoryCandidateBuildResult(
+                selection: const MemorySelection(),
+                diagnostics: null,
+                settings: memoryBook?.settings,
+              ),
+            );
 
       // NEW (patch #3): raw-message recall — cosine search over
       // `sourceType='chat_message'` chunks embedded by
@@ -345,7 +363,7 @@ class PromptPayloadBuilder {
     String? studioSessionStateContent;
     String? characterKnowledgeContent;
     List<Tracker>? ledgerTrackers;
-    if (sessionId != null) {
+    if (memoryGraphEnabled && sessionId != null) {
       try {
         final facts = await _ref
             .read(characterKnowledgeFactRepoProvider)
@@ -359,7 +377,7 @@ class PromptPayloadBuilder {
         debugPrint('[PromptBuilder] character knowledge load failed: $e');
       }
     }
-    if (sessionId != null) {
+    if (memoryGraphEnabled && sessionId != null) {
       try {
         ledgerTrackers = List.unmodifiable(
           await _loadEffectiveLedgerTrackers(sessionId),
@@ -393,7 +411,9 @@ class PromptPayloadBuilder {
     // unrelated completed arcs unless needed to prevent card-baseline regression.
     String? arcContent;
     String? entitiesContent;
-    if (memorySettings.memoryMode != 'fast' && sessionId != null) {
+    if (memoryGraphEnabled &&
+        memorySettings.memoryMode != 'fast' &&
+        sessionId != null) {
       try {
         if (ledgerTrackers != null) {
           arcContent = buildArcContent(
@@ -500,9 +520,17 @@ class PromptPayloadBuilder {
     }
 
     final memSettings = _ref.read(memoryGlobalSettingsProvider);
+    MemoryBook? memoryBook;
+    var memoryGraphEnabled = memSettings.enabled;
+    if (memoryGraphEnabled && session != null) {
+      memoryBook = await _ref
+          .read(memoryBookRepoProvider)
+          .getBySessionId(session.id);
+      memoryGraphEnabled = memoryBook?.settings.enabled ?? true;
+    }
     String? studioSessionStateContent;
     List<Tracker>? ledgerTrackers;
-    if (session != null) {
+    if (memoryGraphEnabled && session != null) {
       try {
         ledgerTrackers = List.unmodifiable(
           await _loadEffectiveLedgerTrackers(session.id),
@@ -526,7 +554,9 @@ class PromptPayloadBuilder {
     }
     String? arcContent;
     String? entitiesContent;
-    if (memSettings.memoryMode != 'fast' && session != null) {
+    if (memoryGraphEnabled &&
+        (memoryBook?.settings.memoryMode ?? memSettings.memoryMode) != 'fast' &&
+        session != null) {
       try {
         if (ledgerTrackers != null) {
           arcContent = buildArcContent(

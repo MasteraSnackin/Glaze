@@ -24,6 +24,7 @@ import 'package:glaze_flutter/features/extensions/services/generation_dispatcher
 import 'package:glaze_flutter/features/extensions/services/js_bridge_service.dart';
 import 'package:glaze_flutter/features/extensions/services/runtime_prompt_injection_service.dart';
 import 'package:glaze_flutter/features/extensions/services/trigger_generation_handler.dart';
+import 'helpers/js_bridge_test_support.dart';
 
 AppDatabase _testDb() => AppDatabase.forTesting(NativeDatabase.memory());
 
@@ -70,8 +71,7 @@ void main() {
     final triggerHandler = TriggerGenerationHandler(
       dispatcher: _NoopDispatcher(),
     );
-    bridge = JsBridgeService(
-      chatRepo: null,
+    bridge = TestJsBridge.create(
       characterRepo: characterRepo,
       currentSessionId: () => 's1',
       currentCharacterId: () => 'c1',
@@ -286,7 +286,7 @@ void main() {
       final registry = buildWiredCommandRegistry(
         WiredCommandDeps(bridgeDispatch: (request) => bridge.dispatch(request)),
       );
-      bridge = JsBridgeService(
+      bridge = TestJsBridge.create(
         permissionCheck: granted.contains,
         showToast: (_, _) => toastCalls++,
         executeCommand: (command, args, context) async {
@@ -361,7 +361,7 @@ void main() {
       final registry = buildWiredCommandRegistry(
         WiredCommandDeps(bridgeDispatch: (request) => bridge.dispatch(request)),
       );
-      bridge = JsBridgeService(
+      bridge = TestJsBridge.create(
         globalVariablesRepo: globalRepo,
         currentSessionId: () => 's1',
         currentCharacterId: () => 'c1',
@@ -438,7 +438,7 @@ void main() {
       final registry = buildWiredCommandRegistry(
         WiredCommandDeps(bridgeDispatch: (request) => bridge.dispatch(request)),
       );
-      bridge = JsBridgeService(
+      bridge = TestJsBridge.create(
         globalVariablesRepo: globalRepo,
         permissionCheck: (_) => true,
         executeCommand: (command, args, context) async {

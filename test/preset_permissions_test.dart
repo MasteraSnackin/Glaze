@@ -7,7 +7,7 @@ import 'package:glaze_flutter/core/db/repositories/chat_repo.dart';
 import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
 import 'package:glaze_flutter/features/extensions/models/preset_permissions.dart';
-import 'package:glaze_flutter/features/extensions/services/js_bridge_service.dart';
+import 'helpers/js_bridge_test_support.dart';
 
 AppDatabase _testDb() => AppDatabase.forTesting(NativeDatabase.memory());
 
@@ -57,34 +57,40 @@ void main() {
       const base = PresetPermissions();
       for (final cap in GlazeCapability.values) {
         final flipped = base.copyWithField(cap, true);
-        expect(flipped.isGranted(cap), isTrue,
-            reason: 'capability ${cap.id} should be true after flip');
+        expect(
+          flipped.isGranted(cap),
+          isTrue,
+          reason: 'capability ${cap.id} should be true after flip',
+        );
       }
     });
   });
 
   group('JsBridgeService permission gating', () {
-    test('denies setVariables when no permission check is registered',
-        () async {
-      final bridge = JsBridgeService(
-        chatRepo: chatRepo,
-        characterRepo: characterRepo,
-        currentSessionId: () => 's1',
-        currentCharacterId: () => 'c1',
-      );
-      final result = await bridge.dispatch({
-        'method': 'setVariables',
-        'params': {'scope': 'chat', 'path': 'hp', 'value': 1},
-      });
-      expect(result['ok'], isFalse);
-      expect(result['error']['code'], 'bridge_error');
-      expect((result['error']['message'] as String).toLowerCase(),
-          contains('permission denied'));
-    });
+    test(
+      'denies setVariables when no permission check is registered',
+      () async {
+        final bridge = TestJsBridge.create(
+          chatRepo: chatRepo,
+          characterRepo: characterRepo,
+          currentSessionId: () => 's1',
+          currentCharacterId: () => 'c1',
+        );
+        final result = await bridge.dispatch({
+          'method': 'setVariables',
+          'params': {'scope': 'chat', 'path': 'hp', 'value': 1},
+        });
+        expect(result['ok'], isFalse);
+        expect(result['error']['code'], 'bridge_error');
+        expect(
+          (result['error']['message'] as String).toLowerCase(),
+          contains('permission denied'),
+        );
+      },
+    );
 
-    test('denies setVariables when permission check returns false',
-        () async {
-      final bridge = JsBridgeService(
+    test('denies setVariables when permission check returns false', () async {
+      final bridge = TestJsBridge.create(
         chatRepo: chatRepo,
         characterRepo: characterRepo,
         currentSessionId: () => 's1',
@@ -96,11 +102,14 @@ void main() {
         'params': {'scope': 'chat', 'path': 'hp', 'value': 1},
       });
       expect(result['ok'], isFalse);
-      expect((result['error']['message'] as String), contains('write_chat_vars'));
+      expect(
+        (result['error']['message'] as String),
+        contains('write_chat_vars'),
+      );
     });
 
     test('allows setVariables when permission is granted', () async {
-      final bridge = JsBridgeService(
+      final bridge = TestJsBridge.create(
         chatRepo: chatRepo,
         characterRepo: characterRepo,
         currentSessionId: () => 's1',
@@ -121,32 +130,40 @@ void main() {
       expect(read['result'], 7);
     });
 
-    test('read requires read capability, write requires write capability',
-        () async {
-      final bridge = JsBridgeService(
-        chatRepo: chatRepo,
-        characterRepo: characterRepo,
-        currentSessionId: () => 's1',
-        currentCharacterId: () => 'c1',
-        permissionCheck: (cap) => cap == 'write_chat_vars',
-      );
+    test(
+      'read requires read capability, write requires write capability',
+      () async {
+        final bridge = TestJsBridge.create(
+          chatRepo: chatRepo,
+          characterRepo: characterRepo,
+          currentSessionId: () => 's1',
+          currentCharacterId: () => 'c1',
+          permissionCheck: (cap) => cap == 'write_chat_vars',
+        );
 
-      final readDenied = await bridge.dispatch({
-        'method': 'getVariables',
-        'params': {'scope': 'chat'},
-      });
-      expect(readDenied['ok'], isFalse);
-      expect((readDenied['error']['message'] as String), contains('read_chat_vars'));
+        final readDenied = await bridge.dispatch({
+          'method': 'getVariables',
+          'params': {'scope': 'chat'},
+        });
+        expect(readDenied['ok'], isFalse);
+        expect(
+          (readDenied['error']['message'] as String),
+          contains('read_chat_vars'),
+        );
 
-      final writeOk = await bridge.dispatch({
-        'method': 'setVariables',
-        'params': {'scope': 'chat', 'values': {'hp': 9}},
-      });
-      expect(writeOk['ok'], isTrue);
-    });
+        final writeOk = await bridge.dispatch({
+          'method': 'setVariables',
+          'params': {
+            'scope': 'chat',
+            'values': {'hp': 9},
+          },
+        });
+        expect(writeOk['ok'], isTrue);
+      },
+    );
 
     test('character scope is gated by its own capability id', () async {
-      final bridge = JsBridgeService(
+      final bridge = TestJsBridge.create(
         chatRepo: chatRepo,
         characterRepo: characterRepo,
         currentSessionId: () => 's1',
@@ -161,7 +178,7 @@ void main() {
     });
 
     test('generateText is gated by generate_text capability', () async {
-      final bridge = JsBridgeService(
+      final bridge = TestJsBridge.create(
         currentCharacterId: () => 'c1',
         permissionCheck: (cap) => cap == 'generate_text',
         generateText: (p, o, c) async => 'ok',
@@ -172,7 +189,7 @@ void main() {
       });
       expect(allowed['ok'], isTrue);
 
-      final deniedBridge = JsBridgeService(
+      final deniedBridge = TestJsBridge.create(
         currentCharacterId: () => 'c1',
         permissionCheck: (cap) => false,
         generateText: (p, o, c) async => 'ok',
@@ -185,7 +202,7 @@ void main() {
     });
 
     test('showToast is allowed by default', () async {
-      final bridge = JsBridgeService(
+      final bridge = TestJsBridge.create(
         permissionCheck: (cap) => cap == 'show_toast',
       );
       final result = await bridge.dispatch({

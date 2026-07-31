@@ -48,8 +48,10 @@ class _FakePostGen extends ExtensionPostGenService {
   @override
   Future<String?> runJsBlock({
     required String charId,
+    required String sessionId,
     required BlockConfig block,
     required List<ChatMessage> contextMessages,
+    bool Function()? isAuthorized,
   }) async {
     tickBlockIds.add(block.id);
     if (!_signalled) {

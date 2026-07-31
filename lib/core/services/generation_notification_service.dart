@@ -25,6 +25,20 @@ class NotificationNavigationData {
   });
 }
 
+/// Immutable authority for work that may only target the chat currently
+/// visible to the user. [revision] invalidates snapshots on context changes.
+class ActiveChatContext {
+  const ActiveChatContext({
+    required this.charId,
+    required this.sessionId,
+    required this.revision,
+  });
+
+  final String charId;
+  final String sessionId;
+  final int revision;
+}
+
 class GenerationNotificationService {
   GenerationNotificationService._();
   static final GenerationNotificationService instance =
@@ -42,6 +56,8 @@ class GenerationNotificationService {
       FlutterLocalNotificationsPlugin();
   final StreamController<NotificationNavigationData> _navigationController =
       StreamController<NotificationNavigationData>.broadcast();
+  final StreamController<void> _activeContextChanges =
+      StreamController<void>.broadcast();
 
   bool _isGenerating = false;
   bool _initialized = false;
@@ -50,9 +66,13 @@ class GenerationNotificationService {
   NotificationNavigationData? _pendingNotificationData;
   String? _activeCharId;
   String? _activeSessionId;
+  int _activeContextRevision = 0;
 
   Stream<NotificationNavigationData> get navigationStream =>
       _navigationController.stream;
+
+  /// Emits whenever an active-chat authority snapshot becomes stale.
+  Stream<void> get activeChatContextChanges => _activeContextChanges.stream;
 
   bool get _isMobile => !kIsWeb && (Platform.isAndroid || Platform.isIOS);
 
@@ -197,7 +217,33 @@ class GenerationNotificationService {
   }
 
   void updateLifecycleState(AppLifecycleState state) {
+    if (_lifecycleState == state) return;
     _lifecycleState = state;
+    _activeContextRevision++;
+    _activeContextChanges.add(null);
+  }
+
+  /// Read-only authority snapshot for user-visible chat work.
+  ActiveChatContext? get activeChatContext {
+    final charId = _activeCharId;
+    final sessionId = _activeSessionId;
+    if (_lifecycleState != AppLifecycleState.resumed ||
+        charId == null || charId.isEmpty ||
+        sessionId == null || sessionId.isEmpty) {
+      return null;
+    }
+    return ActiveChatContext(
+      charId: charId,
+      sessionId: sessionId,
+      revision: _activeContextRevision,
+    );
+  }
+
+  bool isCurrentActiveChatContext(ActiveChatContext context) {
+    final current = activeChatContext;
+    return current != null && current.charId == context.charId &&
+        current.sessionId == context.sessionId &&
+        current.revision == context.revision;
   }
 
   /// True when the given character+session is the one the user currently has
@@ -213,8 +259,11 @@ class GenerationNotificationService {
   /// Call when the user opens / focuses a chat screen to suppress redundant
   /// notifications for that character+session. Pass nulls when leaving.
   void setActiveContext(String? charId, String? sessionId) {
+    if (_activeCharId == charId && _activeSessionId == sessionId) return;
     _activeCharId = charId;
     _activeSessionId = sessionId;
+    _activeContextRevision++;
+    _activeContextChanges.add(null);
   }
 
   Future<void> onGenerationStarted(String charName) async {
@@ -487,6 +536,7 @@ class GenerationNotificationService {
 
   void dispose() {
     _navigationController.close();
+    _activeContextChanges.close();
   }
 }
 

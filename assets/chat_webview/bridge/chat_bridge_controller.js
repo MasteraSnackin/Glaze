@@ -189,7 +189,7 @@ export class Bridge {
           type: 'glaze:response',
           id: data.id,
           ok: false,
-          error: { message: String(error && error.message ? error.message : error) },
+          error: { code: error && error.code, message: String(error && error.message ? error.message : error) },
         }, '*');
       }
     });
@@ -202,7 +202,9 @@ export class Bridge {
     const response = await window.flutter_inappwebview.callHandler('glazeBridge', request);
     if (response && response.ok === false) {
       const error = response.error || {};
-      throw new Error(error.message || 'Glaze bridge error');
+      const bridgeError = new Error(error.message || 'Glaze bridge error');
+      bridgeError.code = error.code;
+      throw bridgeError;
     }
     return response && Object.prototype.hasOwnProperty.call(response, 'result')
       ? response.result
