@@ -168,6 +168,7 @@ class CatalogControls extends ConsumerWidget {
                     label: e.value,
                     isActive: e.key == state.filters.sort,
                     value: e.key,
+                    icon: sortIconForKey(e.key),
                   ),
                 )
                 .toList(),
@@ -192,9 +193,25 @@ class CatalogControls extends ConsumerWidget {
       items: items
           .map(
             (item) => BottomSheetItem(
-              icon: item.isActive ? Icons.check_rounded : null,
-              iconColor: context.cs.primary,
+              icon: item.icon ?? (item.isActive ? Icons.check_rounded : null),
+              iconColor: item.icon != null
+                  ? (item.isActive
+                        ? context.cs.primary
+                        : context.cs.onSurfaceVariant)
+                  : context.cs.primary,
               label: item.label,
+              actions: item.icon != null && item.isActive
+                  ? [
+                      BottomSheetAction(
+                        icon: Icons.check_rounded,
+                        color: context.cs.primary,
+                        onTap: () {
+                          Navigator.of(context, rootNavigator: true).pop();
+                          onSelect(item.value);
+                        },
+                      ),
+                    ]
+                  : const [],
               onTap: () {
                 Navigator.of(context, rootNavigator: true).pop();
                 onSelect(item.value);
@@ -210,10 +227,12 @@ class _PickerItem {
   final String label;
   final bool isActive;
   final dynamic value;
+  final IconData? icon;
   const _PickerItem({
     required this.label,
     required this.isActive,
     required this.value,
+    this.icon,
   });
 }
 
