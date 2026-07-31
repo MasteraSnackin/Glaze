@@ -838,7 +838,10 @@ class _SheetViewHeader extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
             child: Row(
               children: [
-                if (showBack)
+                // No reserved slot when there is no back button: the title is
+                // left-aligned anyway, so an empty 40pt gap in front of it only
+                // reads as a misalignment.
+                if (showBack) ...[
                   _HeaderIconButton(
                     onPressed: onBack ?? () => Navigator.of(context).maybePop(),
                     child: Icon(
@@ -846,10 +849,9 @@ class _SheetViewHeader extends StatelessWidget {
                       size: 20,
                       color: context.cs.primary,
                     ),
-                  )
-                else
-                  const SizedBox(width: 40),
-                const SizedBox(width: 8),
+                  ),
+                  const SizedBox(width: 8),
+                ],
                 Expanded(
                   child:
                       titleWidget ??
