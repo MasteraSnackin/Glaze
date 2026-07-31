@@ -147,6 +147,10 @@ final studioPresetProvider = FutureProvider<StudioPreset?>((ref) async {
   return ref.watch(studioPresetRepoProvider).getDefault();
 });
 
+final studioPresetListProvider = FutureProvider<List<StudioPreset>>((ref) async {
+  return ref.watch(studioPresetRepoProvider).getAll();
+});
+
 /// Whether Studio is enabled for a given session. Drives Studio-only chat UI
 /// affordances (e.g. the per-message "Re-run cleaner" button, which is a no-op
 /// when Studio is off). Invalidated by the Studio settings sheet on save so the
