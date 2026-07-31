@@ -9,21 +9,6 @@ import 'studio_agent_settings.dart';
 part 'studio_config.freezed.dart';
 part 'studio_config.g.dart';
 
-enum StudioExecutionMode {
-  legacy,
-  direct,
-  assisted;
-
-  String get wireName => name;
-
-  static StudioExecutionMode fromWireName(String value) {
-    return StudioExecutionMode.values.firstWhere(
-      (mode) => mode.wireName == value,
-      orElse: () => StudioExecutionMode.legacy,
-    );
-  }
-}
-
 enum StudioBlockType { instruction, context, history, priorBriefs }
 
 @freezed
@@ -40,8 +25,11 @@ abstract class StudioRuntimeSettings with _$StudioRuntimeSettings {
       _$StudioRuntimeSettingsFromJson(json);
 }
 
-/// Per-session Studio activation. Reusable pipeline settings live in
-/// [StudioPreset].
+/// Reusable Studio configuration profile.
+///
+/// Created when the user clicks "Build Studio" in the MagicDrawer Studio menu.
+/// Agents are built from [StudioControllerOntology.specs] directly — no LLM
+/// decomposition. Prompt shards come from the DB-backed StudioPreset.
 @freezed
 abstract class StudioConfig with _$StudioConfig {
   const factory StudioConfig({
@@ -104,9 +92,6 @@ abstract class StudioPreset with _$StudioPreset {
     /// Restored when the required agent is re-enabled.
     @Default({}) Map<String, bool> agentEnabledBeforeDependencyOff,
 
-    /// Explicit topology prevents stale stored agents from reviving pregen
-    /// calls when a Direct/Assisted preset is selected.
-    @Default(StudioExecutionMode.legacy) StudioExecutionMode executionMode,
     @Default(StudioRuntimeSettings()) StudioRuntimeSettings runtime,
     @Default(0) int updatedAt,
   }) = _StudioPreset;

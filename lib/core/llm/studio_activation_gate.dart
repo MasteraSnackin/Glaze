@@ -3,49 +3,13 @@ import 'package:flutter/foundation.dart';
 import '../models/studio_config.dart';
 import 'studio_controller_ontology.dart';
 
-/// Pure agent-gating specialist extracted from `MemoryStudioService`
-/// (plan §2): keyword-based tracker activation + the 3-phase agent split.
+/// Pure agent-gating specialist: keyword-based tracker activation +
+/// the 3-phase agent split. Execution modes (Direct/Assisted/Legacy)
+/// have been removed — agent toggles are the sole topology control.
 ///
-/// Stateless, no `Ref`. `MemoryStudioService` keeps static
-/// `@visibleForTesting` delegators (`matchesActivationKeywords`,
-/// `splitAgentsByPhase`) and re-exports [AgentPhaseSplit] because tests
-/// reference them via `MemoryStudioService.<name>`.
+/// Stateless, no `Ref`.
 class StudioActivationGate {
   StudioActivationGate._();
-
-  /// Whether a controller belongs to [mode]'s pre-generation topology.
-  ///
-  /// This deliberately says nothing about post-generation processing: the
-  /// Post Cleaner / fact-checker switch remains an independent pipeline
-  /// setting in every Studio mode.
-  static bool isControllerAllowed(String specId, StudioExecutionMode mode) {
-    return switch (mode) {
-      StudioExecutionMode.legacy => true,
-      StudioExecutionMode.direct => specId == 'final',
-      StudioExecutionMode.assisted =>
-        specId == 'final' ||
-            specId == 'continuity',
-    };
-  }
-
-  /// Applies an explicit preset topology to persisted runtime agents.
-  /// Runtime `agents_json` can outlive a preset switch, so Direct must not
-  /// rely on callers having already disabled individual pregen agents.
-  static List<StudioAgent> applyExecutionMode(
-    List<StudioAgent> agents,
-    StudioExecutionMode mode,
-  ) {
-    return agents
-        .map((agent) {
-          final specId = StudioControllerOntology.targetIdForAgent(agent);
-          final isPreGen = agent.phase == 'pre_generation';
-          final disabled =
-              specId == null ||
-              (isPreGen && !isControllerAllowed(specId, mode));
-          return disabled ? agent.copyWith(enabled: false) : agent;
-        })
-        .toList(growable: false);
-  }
 
   /// True if at least one of [keywords] appears (case-insensitive substring
   /// match) in the last [scanDepth] entries of [historyContents]. When

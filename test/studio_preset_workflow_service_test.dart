@@ -19,7 +19,6 @@ void main() {
           name: 'Source',
           blocks: [StudioPresetBlock(id: 'block', content: 'source')],
           agentEnabled: {'continuity': false},
-          executionMode: StudioExecutionMode.assisted,
           updatedAt: 12,
         ),
       ]);
@@ -41,7 +40,6 @@ void main() {
       expect(result.preset.name, 'My Copy');
       expect(result.preset.blocks.single.content, 'source');
       expect(result.preset.agentEnabled, {'continuity': false});
-      expect(result.preset.executionMode, StudioExecutionMode.assisted);
       expect(result.preset.updatedAt, 100);
       expect(activeId, 'studio_100');
       expect((await store.getById('active'))!.updatedAt, 12);
@@ -68,14 +66,12 @@ void main() {
           name: 'Exported',
           blocks: [StudioPresetBlock(id: 'first', content: 'First')],
           agentEnabled: {'final': false},
-          executionMode: StudioExecutionMode.direct,
           updatedAt: 1,
         );
         const second = StudioPreset(
           id: 'other-exported-id',
           name: 'Other',
           blocks: [StudioPresetBlock(id: 'second', content: 'Second')],
-          executionMode: StudioExecutionMode.assisted,
           updatedAt: 2,
         );
 
@@ -90,16 +86,11 @@ void main() {
 
         expect(firstResult!.preset.id, 'studio_200');
         expect(firstResult.preset.name, 'Imported');
-        expect(firstResult.preset.agentEnabled, {'final': false});
-        expect(firstResult.preset.executionMode, StudioExecutionMode.direct);
-        expect(secondResult!.presets, hasLength(1));
+      expect(firstResult.preset.agentEnabled, {'final': false});
+      expect(secondResult!.presets, hasLength(1));
         expect(secondResult.presets.single.name, 'Replacement');
-        expect(secondResult.presets.single.blocks.single.id, 'second');
-        expect(
-          secondResult.presets.single.executionMode,
-          StudioExecutionMode.assisted,
-        );
-        expect(activeId, 'studio_200');
+      expect(secondResult.presets.single.blocks.single.id, 'second');
+      expect(activeId, 'studio_200');
       },
     );
 

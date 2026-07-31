@@ -24,8 +24,7 @@ void main() {
     const preset = StudioPreset(
       id: 'studio_direct_loom_v1',
       name: 'Direct Loom v1',
-      executionMode: StudioExecutionMode.direct,
-      agentEnabled: {'continuity': false, 'narrative': false, 'final': true},
+      agentEnabled: {'continuity': false, 'final': true},
       agents: [
         StudioAgent(id: 'continuity', controllerId: 'continuity'),
         StudioAgent(id: 'final', controllerId: 'final'),
@@ -48,7 +47,6 @@ void main() {
     await repo.upsert(preset);
     final restored = await repo.getById(preset.id);
 
-    expect(restored?.executionMode, StudioExecutionMode.direct);
     expect(restored?.agentEnabled, preset.agentEnabled);
     expect(restored?.agents, preset.agents);
     expect(restored?.expensiveApiConfigId, 'expensive');
@@ -57,13 +55,7 @@ void main() {
     expect(restored?.maxFinalHistoryMessages, 17);
     expect(restored?.runtime, preset.runtime);
     expect(restored?.runtime.broadcastBlocks, preset.runtime.broadcastBlocks);
-  });
-
-  test('unknown persisted execution mode safely falls back to legacy', () {
-    expect(
-      StudioExecutionMode.fromWireName('future-topology'),
-      StudioExecutionMode.legacy,
-    );
+    expect(restored?.name, preset.name);
   });
 
   test('reads legacy block rows and upserts canonical JSON', () async {

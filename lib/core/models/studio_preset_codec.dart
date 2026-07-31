@@ -140,9 +140,6 @@ abstract final class StudioPresetCodec {
           fallback: 30,
         ),
         agentEnabled: enabled,
-        executionMode: StudioExecutionMode.fromWireName(
-          _string(json['executionMode'], StudioExecutionMode.legacy.name),
-        ),
         runtime: runtime,
         updatedAt: _integer(json['updatedAt']),
       ),
@@ -263,7 +260,6 @@ abstract final class StudioPresetCodec {
       'cleanerApiConfigId': preset.cleanerApiConfigId,
       'maxFinalHistoryMessages': preset.maxFinalHistoryMessages,
       'agentEnabled': preset.agentEnabled,
-      'executionMode': preset.executionMode.name,
       'runtime': encodeRuntime(preset.runtime),
       'updatedAt': preset.updatedAt,
     };

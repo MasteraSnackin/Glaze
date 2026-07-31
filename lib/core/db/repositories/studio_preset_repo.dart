@@ -57,7 +57,6 @@ class StudioPresetRepo implements SyncStudioPresetStore {
             cleanerApiConfigId: Value(normalized.cleanerApiConfigId),
             maxFinalHistoryMessages: Value(normalized.maxFinalHistoryMessages),
             agentEnabledJson: Value(jsonEncode(normalized.agentEnabled)),
-            executionMode: Value(normalized.executionMode.wireName),
             runtimeSettingsJson: Value(
               jsonEncode(StudioPresetCodec.encodeRuntime(normalized.runtime)),
             ),
@@ -126,7 +125,6 @@ class StudioPresetRepo implements SyncStudioPresetStore {
         cleanerApiConfigId: row.cleanerApiConfigId,
         maxFinalHistoryMessages: row.maxFinalHistoryMessages,
         agentEnabled: agentEnabled,
-        executionMode: StudioExecutionMode.fromWireName(row.executionMode),
         runtime: runtime,
         updatedAt: row.updatedAt,
       ),

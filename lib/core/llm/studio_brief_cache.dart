@@ -232,7 +232,6 @@ class StudioBriefCache {
       },
       'preset': {
         'id': studioPreset.id,
-        'executionMode': studioPreset.executionMode.wireName,
         'agentEnabled': {
           for (final key in agentEnabledKeys)
             key: studioPreset.agentEnabled[key],

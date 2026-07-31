@@ -167,7 +167,6 @@ const _agent = StudioAgent(
 const _preset = StudioPreset(
   id: 'preset-id',
   cheapApiConfigId: 'tracker-api',
-  executionMode: StudioExecutionMode.assisted,
   agentEnabled: {'continuity': true},
   blocks: [
     StudioPresetBlock(

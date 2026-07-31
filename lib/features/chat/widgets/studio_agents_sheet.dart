@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/llm/studio_controller_ontology.dart';
-import '../../../core/llm/studio_activation_gate.dart';
 import '../../../core/models/studio_config.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
@@ -185,10 +184,6 @@ class _StudioAgentsSheetState extends ConsumerState<StudioAgentsSheet> {
         itemCount: StudioControllerOntology.specs.length,
         itemBuilder: (context, index) {
           final spec = StudioControllerOntology.specs[index];
-          final allowedByTopology = StudioActivationGate.isControllerAllowed(
-            spec.id,
-            _preset!.executionMode,
-          );
           final isOn = enabledMap[spec.id] ?? true;
           return SwitchListTile(
             contentPadding: const EdgeInsets.symmetric(
@@ -215,7 +210,7 @@ class _StudioAgentsSheetState extends ConsumerState<StudioAgentsSheet> {
               ),
             ),
             value: isOn,
-            onChanged: (spec.lockedOn || !allowedByTopology)
+            onChanged: spec.lockedOn
                 ? null
                 : (v) => _toggle(spec.id, v),
           );
