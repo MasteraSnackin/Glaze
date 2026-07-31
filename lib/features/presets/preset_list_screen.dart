@@ -538,7 +538,7 @@ class _PsCard extends ConsumerWidget {
           isActive: isActive,
           hasChatBinding: hasChatBinding,
           hasCharBinding: hasCharBinding,
-          onTap: onConnections,
+          onTap: onConnections ?? () {},
         ),
         const SizedBox(width: 8),
         // Edit button
@@ -610,12 +610,13 @@ class _PsCard extends ConsumerWidget {
     );
   }
 
-  static int _estimateTokens(StudioPreset sp) {
+  static String _estimateTokens(StudioPreset sp) {
     var total = 0;
     for (final b in sp.blocks) {
       total += b.content.length ~/ 4;
     }
-    return total;
+    if (total >= 1000) return '${total ~/ 1000}K';
+    return '$total';
   }
 
   static String _estimateRequests(StudioPreset sp) {
