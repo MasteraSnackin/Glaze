@@ -10,7 +10,11 @@ import 'package:go_router/go_router.dart';
 import '../../core/import/silly_tavern_preset_parser.dart';
 import '../../core/llm/preset_macro_attribution.dart';
 import '../../core/models/preset.dart';
+import '../../core/models/studio_config.dart';
 import '../../core/state/active_selection_provider.dart';
+import '../../core/state/db_provider.dart';
+import '../../core/state/studio_feature_provider.dart';
+import '../../core/state/active_studio_preset_provider.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glass_surface.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
@@ -81,6 +85,8 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
   Widget build(BuildContext context) {
     final presets = ref.watch(presetListProvider);
     final activeId = ref.watch(activePresetIdProvider);
+    final studioPresets = ref.watch(studioPresetListProvider);
+    final activeStudioId = ref.watch(activeStudioPresetProvider).valueOrNull ?? 'default';
 
     return SheetView(
       startExpanded: widget.startExpanded,
@@ -100,7 +106,10 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
           : presets.when(
               loading: () => const Center(child: CircularProgressIndicator()),
               error: (e, _) => Center(child: Text('${'title_error'.tr()}: $e')),
-              data: (list) => _buildBody(context, ref, list, activeId),
+              data: (list) => _buildBody(
+                context, ref, list, activeId,
+                studioPresets.valueOrNull ?? [], activeStudioId,
+              ),
             ),
     );
   }
@@ -110,7 +119,13 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
     WidgetRef ref,
     List<Preset> list,
     String? activeId,
+    List<StudioPreset> studioList,
+    String activeStudioId,
   ) {
+    final items = <_PresetItem>[
+      for (final p in list) _PresetItem(preset: p),
+      for (final sp in studioList) _PresetItem(studioPreset: sp),
+    ];
     return Builder(
       builder: (context) => ListView.builder(
         padding: const EdgeInsets.fromLTRB(
@@ -122,23 +137,35 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
           top: MediaQuery.paddingOf(context).top,
           bottom: MediaQuery.paddingOf(context).bottom,
         )),
-        itemCount: list.length + 1,
+        itemCount: items.length + 1,
         itemBuilder: (_, i) {
-          if (i == list.length) return _buildAddButton(context, ref);
-          final preset = list[i];
-          final isActive = activeId == preset.id;
+          if (i == items.length) return _buildAddButton(context, ref);
+          final item = items[i];
+          final isActive = item.isAgentic
+              ? item.studioPreset!.id == activeStudioId
+              : activeId == item.preset!.id;
           return Padding(
             padding: const EdgeInsets.only(bottom: 10),
             child: _PsCard(
-              preset: preset,
+              item: item,
               isActive: isActive,
               onActivate: () {
                 if (!isActive) {
-                  setActivePreset(ref, preset.id);
+                  if (item.isAgentic) {
+                    ref.read(activeStudioPresetProvider.notifier)
+                        .set(item.studioPreset!.id);
+                    ref.read(studioFeatureEnabledProvider.notifier).enable();
+                  } else {
+                    setActivePreset(ref, item.preset!.id);
+                  }
                 }
               },
-              onConnections: () => showPresetConnections(context, preset.id),
-              onEdit: () => _openEditor(preset),
+              onConnections: item.isAgentic
+                  ? null
+                  : () => showPresetConnections(context, item.preset!.id),
+              onEdit: item.isAgentic
+                  ? null
+                  : () => _openEditor(item.preset),
             ),
           );
         },
@@ -277,21 +304,30 @@ int _presetTokenCount(Preset preset) => presetOnlyTokenCount(preset);
 
 
 
+// ─── preset item wrapper ──────────────────────────────────────────────────────
+
+class _PresetItem {
+  final Preset? preset;
+  final StudioPreset? studioPreset;
+  _PresetItem({this.preset, this.studioPreset});
+  bool get isAgentic => studioPreset != null;
+}
+
 // ─── ps-card ─────────────────────────────────────────────────────────────────
 
 class _PsCard extends ConsumerWidget {
-  final Preset preset;
+  final _PresetItem item;
   final bool isActive;
   final VoidCallback onActivate;
-  final VoidCallback onConnections;
-  final VoidCallback onEdit;
+  final VoidCallback? onConnections;
+  final VoidCallback? onEdit;
 
   const _PsCard({
-    required this.preset,
+    required this.item,
     required this.isActive,
     required this.onActivate,
-    required this.onConnections,
-    required this.onEdit,
+    this.onConnections,
+    this.onEdit,
   });
 
   /// Height of a card that shows a cover image. Plain cards keep their
@@ -307,6 +343,8 @@ class _PsCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    if (item.isAgentic) return _buildAgenticCard(context, ref);
+    final preset = item.preset!;
     final connections = ref.watch(presetConnectionsProvider);
     final hasCharBinding = connections.character.values.contains(preset.id);
     final hasChatBinding = connections.chat.values.contains(preset.id);
@@ -581,6 +619,101 @@ class _SmallBadge extends StatelessWidget {
 ///   purple  — character-level binding active (no chat binding)
 ///   green   — globally active (no specific bindings)
 ///   grey    — not active, no bindings
+  Widget _buildAgenticCard(BuildContext context, WidgetRef ref) {
+    final sp = item.studioPreset!;
+    final tokens = _estimateTokens(sp);
+    final requests = _estimateRequests(sp);
+    return GlassSurface(
+      enableRipple: true,
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(
+        color: isActive
+            ? context.cs.primary.withValues(alpha: 0.5)
+            : context.cs.outline,
+        width: isActive ? 2.0 : 1.0,
+      ),
+      onTap: onActivate,
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Row(
+          children: [
+            Icon(
+              Icons.smart_toy_outlined,
+              size: 20,
+              color: context.cs.primary,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    sp.name.isNotEmpty ? sp.name : 'Agentic Preset',
+                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${sp.blocks.length} blocks',
+                    style: TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant),
+                  ),
+                ],
+              ),
+            ),
+            _SmallBadge(icon: Icons.memory, label: tokens),
+            const SizedBox(width: 6),
+            _SmallBadge(icon: Icons.bolt, label: requests),
+          ],
+        ),
+      ),
+    );
+  }
+
+  int _estimateTokens(StudioPreset sp) {
+    var total = 0;
+    for (final b in sp.blocks) {
+      total += b.content.length ~/ 4;
+    }
+    return total;
+  }
+
+  String _estimateRequests(StudioPreset sp) {
+    int count = 1; // final always runs
+    final enabled = sp.agentEnabled;
+    for (final block in sp.blocks) {
+      if (block.kind == 'tracker_instruction' && block.enabled) count++;
+      if (block.kind == 'agent_instruction' && block.enabled) count++;
+    }
+    if (enabled['post_clean'] == true || (!enabled.containsKey('post_clean'))) count += 2;
+    if (enabled['ledger'] == true || (!enabled.containsKey('ledger'))) count += 1;
+    return '$count/ход';
+  }
+
+  Widget _SmallBadge({required IconData icon, required String label}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12),
+          const SizedBox(width: 3),
+          Text(label, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
+        ],
+      ),
+    );
+  }
+
+  _SmallBadge({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+}
+
 class _ConnBadge extends StatelessWidget {
   final bool isActive;
   final bool hasChatBinding;
