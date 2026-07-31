@@ -86,7 +86,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
     final presets = ref.watch(presetListProvider);
     final activeId = ref.watch(activePresetIdProvider);
     final studioPresets = ref.watch(studioPresetListProvider);
-    final activeStudioId = ref.watch(activeStudioPresetProvider).valueOrNull ?? 'default';
+    final activeStudioId = ref.watch(activeStudioPresetProvider).value ?? 'default';
 
     return SheetView(
       startExpanded: widget.startExpanded,
@@ -108,7 +108,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
               error: (e, _) => Center(child: Text('${'title_error'.tr()}: $e')),
               data: (list) => _buildBody(
                 context, ref, list, activeId,
-                studioPresets.valueOrNull ?? [], activeStudioId,
+                studioPresets.value ?? [], activeStudioId,
               ),
             ),
     );
@@ -473,6 +473,7 @@ class _PsCard extends ConsumerWidget {
     final secondaryText = onCover
         ? Colors.white.withValues(alpha: 0.75)
         : context.cs.onSurfaceVariant;
+    final preset = item.preset!;
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
@@ -561,6 +562,73 @@ class _PsCard extends ConsumerWidget {
       ],
     );
   }
+
+  Widget _buildAgenticCard(BuildContext context, WidgetRef ref) {
+    final sp = item.studioPreset!;
+    final tokens = _estimateTokens(sp);
+    final requests = _estimateRequests(sp);
+    return GlassSurface(
+      enableRipple: true,
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(
+        color: isActive
+            ? context.cs.primary.withValues(alpha: 0.5)
+            : context.cs.outline,
+        width: isActive ? 2.0 : 1.0,
+      ),
+      onTap: onActivate,
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Row(
+          children: [
+            Icon(Icons.smart_toy_outlined, size: 20, color: context.cs.primary),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    sp.name.isNotEmpty ? sp.name : 'Agentic Preset',
+                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${sp.blocks.length} blocks',
+                    style: TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant),
+                  ),
+                ],
+              ),
+            ),
+            _SmallBadge(icon: Icons.memory, label: tokens),
+            const SizedBox(width: 6),
+            _SmallBadge(icon: Icons.bolt, label: requests),
+          ],
+        ),
+      ),
+    );
+  }
+
+  static int _estimateTokens(StudioPreset sp) {
+    var total = 0;
+    for (final b in sp.blocks) {
+      total += b.content.length ~/ 4;
+    }
+    return total;
+  }
+
+  static String _estimateRequests(StudioPreset sp) {
+    int count = 1;
+    final enabled = sp.agentEnabled;
+    for (final block in sp.blocks) {
+      if (block.kind == 'tracker_instruction' && block.enabled) count++;
+      if (block.kind == 'agent_instruction' && block.enabled) count++;
+    }
+    if (enabled['post_clean'] == true || (!enabled.containsKey('post_clean'))) count += 2;
+    if (enabled['ledger'] == true || (!enabled.containsKey('ledger'))) count += 1;
+    return '$count/ход';
+  }
 }
 
 // ─── shared small widgets ─────────────────────────────────────────────────────
@@ -613,106 +681,6 @@ class _SmallBadge extends StatelessWidget {
 }
 
 /// Tappable link badge that shows the preset's binding scope visually.
-///
-/// Colour logic (mirrors JS Glaze `getPresetConnectionType`):
-///   orange  — chat-level binding active
-///   purple  — character-level binding active (no chat binding)
-///   green   — globally active (no specific bindings)
-///   grey    — not active, no bindings
-  Widget _buildAgenticCard(BuildContext context, WidgetRef ref) {
-    final sp = item.studioPreset!;
-    final tokens = _estimateTokens(sp);
-    final requests = _estimateRequests(sp);
-    return GlassSurface(
-      enableRipple: true,
-      borderRadius: BorderRadius.circular(12),
-      border: Border.all(
-        color: isActive
-            ? context.cs.primary.withValues(alpha: 0.5)
-            : context.cs.outline,
-        width: isActive ? 2.0 : 1.0,
-      ),
-      onTap: onActivate,
-      child: Padding(
-        padding: const EdgeInsets.all(10),
-        child: Row(
-          children: [
-            Icon(
-              Icons.smart_toy_outlined,
-              size: 20,
-              color: context.cs.primary,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    sp.name.isNotEmpty ? sp.name : 'Agentic Preset',
-                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '${sp.blocks.length} blocks',
-                    style: TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant),
-                  ),
-                ],
-              ),
-            ),
-            _SmallBadge(icon: Icons.memory, label: tokens),
-            const SizedBox(width: 6),
-            _SmallBadge(icon: Icons.bolt, label: requests),
-          ],
-        ),
-      ),
-    );
-  }
-
-  int _estimateTokens(StudioPreset sp) {
-    var total = 0;
-    for (final b in sp.blocks) {
-      total += b.content.length ~/ 4;
-    }
-    return total;
-  }
-
-  String _estimateRequests(StudioPreset sp) {
-    int count = 1; // final always runs
-    final enabled = sp.agentEnabled;
-    for (final block in sp.blocks) {
-      if (block.kind == 'tracker_instruction' && block.enabled) count++;
-      if (block.kind == 'agent_instruction' && block.enabled) count++;
-    }
-    if (enabled['post_clean'] == true || (!enabled.containsKey('post_clean'))) count += 2;
-    if (enabled['ledger'] == true || (!enabled.containsKey('ledger'))) count += 1;
-    return '$count/ход';
-  }
-
-  Widget _SmallBadge({required IconData icon, required String label}) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 12),
-          const SizedBox(width: 3),
-          Text(label, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
-        ],
-      ),
-    );
-  }
-
-  _SmallBadge({required this.icon, required this.label});
-
-  final IconData icon;
-  final String label;
-}
 
 class _ConnBadge extends StatelessWidget {
   final bool isActive;
