@@ -74,8 +74,7 @@ class ChatBridgeController {
   late final LayoutBridgeCommands layout = LayoutBridgeCommands(this);
   late final MemoryBridgeCommands memory = MemoryBridgeCommands(this);
 
-  ChatBridgeController(this._controller, {JsBridgeService? jsBridgeService})
-    : _jsBridgeService = jsBridgeService ?? JsBridgeService() {
+  ChatBridgeController(this._controller, this._jsBridgeService) {
     setupHandlers();
   }
 

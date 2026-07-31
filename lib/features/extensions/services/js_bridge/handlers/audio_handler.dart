@@ -10,11 +10,7 @@ class AudioHandler {
     if (source != null && source is! String) {
       throw ArgumentError('playAudio source must be a string');
     }
-    final handler =
-        bridge.playAudio ??
-        (throw UnsupportedError(
-          'glaze.playAudio is not available in this context',
-        ));
+    final handler = bridge.playAudio;
     return handler(source as String?, asBridgeMap(bridge.params['options']));
   }
 }

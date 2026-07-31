@@ -14,7 +14,6 @@ import '../bridge/chat_webview_bridge_host.dart';
 import '../bridge/chat_webview_environment.dart';
 import '../bridge/chat_webview_keep_alive.dart';
 import '../bridge/chat_webview_settings.dart';
-import '../../extensions/services/js_engine_service.dart';
 import '../../settings/app_settings_provider.dart';
 import 'chat_webview_callbacks.dart';
 import 'chat_webview_ext_block_callbacks.dart';
@@ -193,7 +192,7 @@ class ChatWebViewSurface extends ConsumerWidget {
                 if (!isMounted()) return;
                 final bridge = ChatBridgeController(
                   controller,
-                  jsBridgeService: jsBridgeService,
+                  jsBridgeService,
                 );
                 final allowMessageScripts =
                     ref.read(appSettingsProvider).value?.allowMessageScripts ??
@@ -208,10 +207,6 @@ class ChatWebViewSurface extends ConsumerWidget {
                 onBridgeReady(bridge);
                 PerfDebug.chatWebViewBridgeReady();
 
-                // Kick off the singleton headless engine. Failure is
-                // non-fatal — the visual bridge above remains the fallback
-                // for jsRunner blocks and for background scripts.
-                unawaited(JsEngineService.instance.init());
                 // Do not call clearAll() here — it races with _initWebViewOnce
                 // (shows #loading-screen via JS) and broke UseVirtualScroll on
                 // keep-alive re-attach. Initializer.setMessages resets the DOM.

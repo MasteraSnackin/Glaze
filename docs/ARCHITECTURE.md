@@ -1072,17 +1072,14 @@ feature-local adapters to `SyncService`.
 
 ## 9. Extensions (Info Blocks + JS Bridge SDK)
 
-The extensions feature ships two surfaces with the same registry-defined bridge
-contract. Each visual chat owns its fully wired `JsBridgeService`; headless
-authority is bound explicitly per run rather than selected globally:
+The extensions feature supports the Chat WebView bridge and sandboxed panels
+that relay through it. Each visual chat owns its fully wired `JsBridgeService`:
 
 1. **Post-generation block chain** — preset-driven infoblock / imageGen /
    jsRunner / interactive blocks that run after the assistant message
    is saved on the normal/regen path.
 2. **JS Bridge SDK** (`window.glaze`) — extension authors can call
-   `glaze.*` from sandboxed iframes (interactive panels) or from a
-   headless `InAppWebView` that runs in the background even when no
-   chat is open.
+   `glaze.*` from the Chat WebView or sandboxed interactive panels.
 
 Formal invariants: `docs/INVARIANTS.md` INV-EG1–INV-EG8 and
 INV-JS1–INV-JS6.
@@ -1110,7 +1107,7 @@ per block via `InfoBlocksRepository.updateStatus()`.
 |---|---|---|
 | `infoblock` | `blocks/infoblock_handler.dart` | Calls `InfoBlockService`; injects last N results into prompt context |
 | `imageGen` | `blocks/image_gen_block_handler.dart` | Reads `[img gen:…]` tag, calls `ImageGenService`, saves via `ImageStorageService`; result stored as `[IMG:RESULT:<path>]` |
-| `jsRunner` | `blocks/js_runner_block_handler.dart` | Runs JS via `JsBlockExecutor`: headless `JsEngineService` preferred, visual bridge fallback. Periodic ticks only ever run here. |
+| `jsRunner` | `blocks/js_runner_block_handler.dart` | Runs JS through the Chat WebView via `JsBlockExecutor`; absent bridges produce a bounded unavailable error. |
 | `interactive` | `blocks/interactive_block_handler.dart` | LLM → strip code-fence → sandboxed iframe island under the assistant message. JS inside the panel has access to `window.glaze.*` |
 
 ### Block triggers
@@ -1119,7 +1116,7 @@ per block via `InfoBlocksRepository.updateStatus()`.
 |---|---|---|
 | `afterAssistant` | `PostGenCoordinator`: background when Studio is off; `CleanerStage` after canonical swipe selection when Studio is on | all block types |
 | `afterUser` | `ChatNotifier.sendMessage` (fire-and-forget `unawaited(_dispatchAfterUserBlocks(...))`) | all block types |
-| `periodic` | `PeriodicTriggerScheduler` (`Timer.periodic(block.periodicIntervalSeconds)`) | `jsRunner` only — headless engine preferred, visual bridge fallback |
+| `periodic` | `PeriodicTriggerScheduler` (`Timer.periodic(block.periodicIntervalSeconds)`) | `jsRunner` only — no supported bridge runtime is available without the Chat WebView |
 
 The chain filter is enforced by `BlockProcessor` and `SingleBlockRunner`, with
 `ExtensionPostGenService` kept as the public entrypoint. The same chain is reused
@@ -1166,11 +1163,10 @@ independent of the chat text-generation token (INV-EG5).
 Each extension preset carries a `PresetPermissions` freezed model with
 19 capability toggles (default-deny except `showToast`). The immutable
 `JsBridgeMethodRegistry` is the canonical public method set and records each
-method's capability resolver plus visual/headless host availability.
+method's capability resolver plus Chat WebView host availability.
 `JsBridgeService.dispatch` rejects unregistered methods, enforces the registered
 capability through the injected `PermissionCheck`, and then selects the
-registered operation. Visual/headless declarations and parity tests consume the
-registry's host sets. Production
+registered operation. Supported-profile tests consume the registry's host sets. Production
 wiring in `ChatWebViewWidget` reads `activePresetPermissionsProvider`.
 
 | Capability | Bridge method |
@@ -1239,25 +1235,15 @@ returns the `Source` subclass (or `null` for built-in cues).
 
 User-authored JS runs in a `<iframe sandbox="allow-scripts">` (without
 `allow-same-origin`) — null origin, no access to `window.parent`,
-`window.flutter_inappwebview`, or any API keys. Two execution paths:
+`window.flutter_inappwebview`, or any API keys. The supported execution path is:
 
 * **Visual WebView** — `ChatBridgeController.runJsBlock()` is used
   when the chat is open; the script is forwarded into the chat
   WebView's `assets/chat_webview/bridge/chat_bridge_controller.js`
   `runSandboxedScript()` path.
-* **Headless engine** — `JsEngineService` is a process-wide
-  `HeadlessInAppWebView` that loads `assets/chat_webview/headless.html`. Each
-  `runScript` allocates an opaque `runId` and may bind it to a
-  `JsEngineBridgeHost` wrapping the relevant visual bridge. Missing, hostless,
-  completed, or expired run IDs receive `bridge_unavailable`; bindings are
-  removed in `finally`. Concurrent runs therefore cannot borrow another chat's
-  authority. Callers may fall back to the visual execution path when the engine
-  itself is unavailable.
-
-The headless path calls
-`window.headlessBridge.runSandboxedScript(script, contextJson, runId)`. Both
-paths ultimately use the same registry and `JsBridgeService.dispatch` contract
-for `glaze.*` calls, but they do not share mutable process-wide chat authority.
+The retained headless engine assets are not a supported bridge profile or
+fallback runtime. JS block runners never retry a script in another runtime;
+when the Chat WebView is absent they return an explicit unavailable outcome.
 
 ### Dart files
 
@@ -1267,18 +1253,18 @@ for `glaze.*` calls, but they do not share mutable process-wide chat authority.
 * `blocks/block_status_tracker.dart` — placeholder/status/error/dedupe lifecycle
 * `blocks/block_panel_updater.dart` — shared panel update/throttling plumbing
 * `blocks/image_pixel_renderer.dart` — image bytes → persisted file/result token
-* `blocks/js_block_executor.dart` — message-bound `jsRunner` execution + headless/visual fallback persistence
-* `blocks/periodic_js_block_runner.dart` — periodic headless/visual fallback execution
+* `blocks/js_block_executor.dart` — message-bound `jsRunner` execution through the Chat WebView
+* `blocks/periodic_js_block_runner.dart` — periodic JS-runner integration (not a supported bridge profile)
 * `blocks/image_only_rerunner.dart` — manual image-only rerun validation/status update flow
 * `blocks/*_block_handler.dart` — concrete `infoblock`, `imageGen`, `jsRunner`, `interactive` handlers
 * `info_block_service.dart` — LLM call + prompt assembly for `infoblock` type
 * `info_block_injector.dart` — inserts stored `InfoBlock` outputs into the prompt context
 * `js_bridge_service.dart` — compatibility export for `js_bridge/js_bridge_service.dart`
 * `js_bridge/js_bridge_service.dart` — pure dispatcher: `{ method, params, context }` → `{ ok, result/error }`; no Riverpod
-* `js_bridge/js_bridge_method_registry.dart` — immutable canonical method set with operation, capability resolver, and host availability metadata
+* `js_bridge/js_bridge_method_registry.dart` — immutable canonical method set with operation, capability resolver, and supported-host metadata
 * `js_bridge/handlers/*_handler.dart` — variables, generation, prompt injection, audio, commands, toast
 * `js_bridge/capability_resolver.dart` + `permission_gate.dart` — method/scope capability mapping and default-deny enforcement
-* `js_engine_service.dart` — singleton headless engine + `JsEngineBridgeHost` (optional `currentCharIdProvider` for `triggerGeneration` in headless mode)
+* `js_engine_service.dart` — retained unused headless-engine compatibility implementation
 * `panel_host_service.dart` — singleton panel registry + resize/event broadcast streams
 * `audio_bridge_service.dart` — `SystemSound` + `audioplayers` routing
 * `command_registry.dart` — `/trigger` / `/getvar` / `/setvar` / `/inject` / `/toast` registry; `buildWiredCommandRegistry(WiredCommandDeps)` is the production default
@@ -1306,7 +1292,7 @@ Active chat WebView JS is loaded as ES modules from `assets/chat_webview/index.h
 * `assets/chat_webview/bridge/index.js` — imports `Formatter` and `Renderer`, creates `window.bridge`, registers scaled wheel handling and `onWebViewReady`
 * `assets/chat_webview/bridge/chat_bridge_controller.js` — main JS bridge facade, Flutter transport, message list API, ext-block panel, sandbox runner
 * `assets/chat_webview/bridge/panel_host.js` — sandboxed interactive iframe lifecycle and `glaze:*` relay
-* `assets/chat_webview/headless.html` — headless engine host
+* `assets/chat_webview/headless.html` — retained unused headless-engine asset
 
 Legacy single-file paths (`bridge.js`, `renderer.js`, `formatter.js`) are
 compatibility markers only; `bridge.legacy.js` is the retained pre-module bridge
@@ -1362,7 +1348,7 @@ Resolved (kept for history; details in git / PR notes):
 - **Session vars on abort/error** — only a successful guarded commit applies the
   isolate variable delta (INV-C5).
 - **Memory injection token budget** — `memory_budget.dart` + INV-PS4.
-- **JS extensions MVP** — `window.glaze` SDK, headless `JsEngineService`, capability permissions, periodic/afterUser triggers, interactive panels, audioplayers-backed audio, big/medium/small connection profiles, wired `CommandRegistry`, lifecycle-paused periodic scheduler. Current module boundaries are documented in § 9.
+- **JS extensions MVP** — `window.glaze` SDK, Chat WebView bridge, capability permissions, periodic/afterUser triggers, interactive panels, audioplayers-backed audio, big/medium/small connection profiles, wired `CommandRegistry`, lifecycle-paused periodic scheduler. Current module boundaries are documented in § 9.
 - **`sync_engine.dart` decomposition** — `SyncBinaryAssetSyncer` (avatar/gallery push/pull) + `sync_image_stripper.dart` extracted; `saveLorebookActivations` injected as callback (removed provider-layer import from service).
 - **`prompt_builder.dart` decomposition** — regex application extracted to `prompt_regex_applicator.dart`; deferred-memory finalization extracted to `_finalizeDeferredMemory()`.
 - **`image_gen_service.dart` decomposition** — `[IMG:*]` tag-markup text transforms extracted to `image_tag_markup.dart` (`ImageTagMarkup`).

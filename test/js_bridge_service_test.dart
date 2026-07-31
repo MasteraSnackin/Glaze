@@ -7,6 +7,7 @@ import 'package:glaze_flutter/core/db/repositories/chat_repo.dart';
 import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
 import 'package:glaze_flutter/features/extensions/services/js_bridge_service.dart';
+import 'helpers/js_bridge_test_support.dart';
 
 AppDatabase _testDb() => AppDatabase.forTesting(NativeDatabase.memory());
 
@@ -20,7 +21,7 @@ void main() {
     db = _testDb();
     characterRepo = CharacterRepo(db);
     chatRepo = ChatRepo(db);
-    bridge = JsBridgeService(
+    bridge = TestJsBridge.create(
       chatRepo: chatRepo,
       characterRepo: characterRepo,
       currentSessionId: () => 's1',
@@ -118,7 +119,7 @@ void main() {
 
   group('JsBridgeService generateText', () {
     test('delegates prompt and options to injected handler', () async {
-      final bridge = JsBridgeService(
+      final bridge = TestJsBridge.create(
         chatRepo: chatRepo,
         characterRepo: characterRepo,
         currentSessionId: () => 's1',
@@ -161,7 +162,7 @@ void main() {
 
   group('JsBridgeService prompt injection', () {
     test('delegates injectPrompt to injected handler', () async {
-      final bridge = JsBridgeService(
+      final bridge = TestJsBridge.create(
         currentSessionId: () => 's1',
         permissionCheck: (_) => true,
         injectPrompt: (id, content, options, context) {
@@ -188,7 +189,7 @@ void main() {
     });
 
     test('delegates uninjectPrompt to injected handler', () async {
-      final bridge = JsBridgeService(
+      final bridge = TestJsBridge.create(
         currentSessionId: () => 's1',
         permissionCheck: (_) => true,
         uninjectPrompt: (id, context) {
@@ -221,7 +222,7 @@ void main() {
 
   group('JsBridgeService triggerGeneration', () {
     test('delegates to injected handler with resolved charId', () async {
-      final bridge = JsBridgeService(
+      final bridge = TestJsBridge.create(
         currentSessionId: () => 's1',
         currentCharacterId: () => 'c1',
         permissionCheck: (_) => true,
@@ -229,11 +230,7 @@ void main() {
           expect(charId, 'c1');
           expect(params['mode'], 'continue');
           expect(params['reason'], 'tick');
-          return {
-            'accepted': true,
-            'mode': 'continue',
-            'reason': 'tick',
-          };
+          return {'accepted': true, 'mode': 'continue', 'reason': 'tick'};
         },
       );
 
@@ -251,7 +248,7 @@ void main() {
     });
 
     test('prefers context.characterId over currentCharacterId', () async {
-      final bridge = JsBridgeService(
+      final bridge = TestJsBridge.create(
         currentCharacterId: () => 'fallback',
         permissionCheck: (_) => true,
         triggerGeneration: (charId, params) async {
@@ -269,41 +266,43 @@ void main() {
       expect(result['result'], {'accepted': true, 'charId': 'explicit'});
     });
 
-    test('rejects non-string params when the typed handler validates them',
-        () async {
-      // The validation contract lives in `TriggerGenerationHandler`; the
-      // bridge service itself is a thin dispatcher that propagates
-      // exceptions. We simulate the typed handler throwing an
-      // ArgumentError (mirroring real behavior) and check the bridge
-      // converts it into `invalid_request`.
-      final bridge = JsBridgeService(
-        currentCharacterId: () => 'c1',
-        permissionCheck: (_) => true,
-        triggerGeneration: (charId, params) async {
-          if (params['mode'] is! String && params['mode'] != null) {
-            throw ArgumentError('triggerGeneration mode must be a string');
-          }
-          if (params['reason'] is! String && params['reason'] != null) {
-            throw ArgumentError('triggerGeneration reason must be a string');
-          }
-          return {'accepted': true};
-        },
-      );
+    test(
+      'rejects non-string params when the typed handler validates them',
+      () async {
+        // The validation contract lives in `TriggerGenerationHandler`; the
+        // bridge service itself is a thin dispatcher that propagates
+        // exceptions. We simulate the typed handler throwing an
+        // ArgumentError (mirroring real behavior) and check the bridge
+        // converts it into `invalid_request`.
+        final bridge = TestJsBridge.create(
+          currentCharacterId: () => 'c1',
+          permissionCheck: (_) => true,
+          triggerGeneration: (charId, params) async {
+            if (params['mode'] is! String && params['mode'] != null) {
+              throw ArgumentError('triggerGeneration mode must be a string');
+            }
+            if (params['reason'] is! String && params['reason'] != null) {
+              throw ArgumentError('triggerGeneration reason must be a string');
+            }
+            return {'accepted': true};
+          },
+        );
 
-      final badMode = await bridge.dispatch({
-        'method': 'triggerGeneration',
-        'params': {'mode': 42},
-      });
-      expect(badMode['ok'], isFalse);
-      expect(badMode['error']['code'], 'invalid_request');
+        final badMode = await bridge.dispatch({
+          'method': 'triggerGeneration',
+          'params': {'mode': 42},
+        });
+        expect(badMode['ok'], isFalse);
+        expect(badMode['error']['code'], 'invalid_request');
 
-      final badReason = await bridge.dispatch({
-        'method': 'triggerGeneration',
-        'params': {'mode': 'auto', 'reason': 7},
-      });
-      expect(badReason['ok'], isFalse);
-      expect(badReason['error']['code'], 'invalid_request');
-    });
+        final badReason = await bridge.dispatch({
+          'method': 'triggerGeneration',
+          'params': {'mode': 'auto', 'reason': 7},
+        });
+        expect(badReason['ok'], isFalse);
+        expect(badReason['error']['code'], 'invalid_request');
+      },
+    );
 
     test('returns bridge_error when no handler is registered', () async {
       final result = await bridge.dispatch({

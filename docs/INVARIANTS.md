@@ -844,14 +844,11 @@ share the same contract, not mutable process-wide chat authority:
 
 * `ChatBridgeController.runJsBlock()` — visual WebView, used while a
   chat is open.
-* `JsEngineService.runScript()` — headless `HeadlessInAppWebView`, with an
-  optional bridge host bound to an opaque per-run ID. Hostless or expired IDs
-  cannot call `window.glaze`. Falls back to visual execution when the engine is
-  unavailable.
+* Sandboxed panels relay through that same Chat WebView and receive the host's
+  authoritative panel and message identifiers.
 
 `runSandboxedScript` is implemented in
-`assets/chat_webview/bridge/chat_bridge_controller.js` (visual) and
-`headless.html` (headless). Both wire the iframe's
+`assets/chat_webview/bridge/chat_bridge_controller.js`. It wires the iframe's
 `postMessage` channel to a Dart `glazeBridge` handler with a
 matching source-check (`e.source !== iframe.contentWindow` /
 `!== contentWindow`).
@@ -866,7 +863,8 @@ Every public bridge method is defined in the immutable
 `JsBridgeMethodRegistry`, including its capability resolver and host
 availability. `JsBridgeService.dispatch` rejects methods absent from that
 registry and enforces the resolved capability before invoking a handler.
-The default policy is **deny** when no `PermissionCheck` is registered (test seam).
+The production constructor requires a `PermissionCheck`; test compositions use
+an explicit harmless fake.
 Production wires `_bridgePermissionCheck` in `ChatWebViewWidget`, which reads
 `activePresetPermissionsProvider`. The `PresetPermissions` model has 19
 toggles; only `showToast` defaults to allow.
@@ -884,10 +882,10 @@ toggles; only `showToast` defaults to allow.
 | `glaze.executeCommand` | `execute_command` |
 | `glaze.showToast` (default ALLOW) | `show_toast` |
 
-The visual and headless hosts currently expose the same registry-defined
-contract. Scope-sensitive variable methods resolve their capability from
-`params.scope`; fixed-capability methods carry a fixed resolver. Handler code
-does not maintain a second capability table.
+The Chat WebView is the sole registry-defined bridge host. Scope-sensitive
+variable methods resolve their capability from `params.scope`; fixed-capability
+methods carry a fixed resolver. Handler code does not maintain a second
+capability table.
 
 ### INV-JS2: Variable writes are atomic; payload is JSON-validated and ≤ 64 KiB ✅ ENFORCED
 
@@ -946,11 +944,9 @@ variable access, `inject_prompt`, or `show_toast`). The command context is
 forwarded unchanged so session, character, message, and global routing match
 the dedicated method.
 
-Headless execution binds that bridge authority to an opaque per-run id.
-Sandbox requests without an active id are denied, so the process-wide engine
-lifecycle cannot select one chat's authority for another chat's script.
-Runs without a visual chat bridge may execute pure JS, but receive no bridge
-authority and therefore cannot call `window.glaze` methods.
+Sandboxed panel requests relay only through their containing Chat WebView.
+Absent Chat WebView bridges produce the explicit unavailable outcome; they do
+not execute or retry in a headless runtime.
 
 `buildDefaultCommandRegistry` is retained for tests/CMS — its
 handlers echo arguments. The `CommandRegistry.run` contract catches
