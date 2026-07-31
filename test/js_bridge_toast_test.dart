@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:glaze_flutter/features/extensions/services/js_bridge_service.dart';
 import 'package:glaze_flutter/features/extensions/services/js_bridge_toast_controller.dart';
+import 'helpers/js_bridge_test_support.dart';
 
 void main() {
   group('GlazeToastSeverity.parse', () {
@@ -14,12 +14,9 @@ void main() {
     test('maps known severities', () {
       expect(GlazeToastSeverity.parse('info'), GlazeToastSeverity.info);
       expect(GlazeToastSeverity.parse('INFO'), GlazeToastSeverity.info);
-      expect(GlazeToastSeverity.parse('success'),
-          GlazeToastSeverity.success);
-      expect(GlazeToastSeverity.parse('warning'),
-          GlazeToastSeverity.warning);
-      expect(GlazeToastSeverity.parse('warn'),
-          GlazeToastSeverity.warning);
+      expect(GlazeToastSeverity.parse('success'), GlazeToastSeverity.success);
+      expect(GlazeToastSeverity.parse('warning'), GlazeToastSeverity.warning);
+      expect(GlazeToastSeverity.parse('warn'), GlazeToastSeverity.warning);
       expect(GlazeToastSeverity.parse('error'), GlazeToastSeverity.error);
     });
   });
@@ -34,16 +31,17 @@ void main() {
     test('passes severity through to the user-supplied resolver', () {
       String? captured;
       GlazeToastSeverity? capturedSeverity;
-      final controller = JsBridgeToastController(
-        overlayResolver: () => null,
-      );
+      final controller = JsBridgeToastController(overlayResolver: () => null);
       // Re-point the debug hook by replacing the resolver. We test the
       // controller's pure-data path: the controller never inspects the
       // BuildContext directly, so a null overlay is enough to trigger
       // the log branch.
       controller.show('hi', severity: GlazeToastSeverity.error);
-      expect(captured, isNull,
-          reason: 'this test only exercises the no-overlay path');
+      expect(
+        captured,
+        isNull,
+        reason: 'this test only exercises the no-overlay path',
+      );
       expect(capturedSeverity, isNull);
     });
   });
@@ -52,7 +50,7 @@ void main() {
     test('delegates message + options to the injected handler', () async {
       String? seenMessage;
       Map<String, dynamic>? seenOptions;
-      final bridge = JsBridgeService(
+      final bridge = TestJsBridge.create(
         permissionCheck: (_) => true,
         showToast: (message, options) {
           seenMessage = message;
@@ -72,7 +70,7 @@ void main() {
     });
 
     test('rejects non-string message with invalid_request', () async {
-      final bridge = JsBridgeService(
+      final bridge = TestJsBridge.create(
         permissionCheck: (_) => true,
         showToast: (_, _) {},
       );
@@ -85,7 +83,7 @@ void main() {
     });
 
     test('denies when show_toast capability is not granted', () async {
-      final bridge = JsBridgeService(
+      final bridge = TestJsBridge.create(
         permissionCheck: (_) => false,
         showToast: (_, _) {},
       );

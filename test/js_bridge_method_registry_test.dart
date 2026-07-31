@@ -3,7 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/features/chat/bridge/chat_bridge_controller.dart';
 import 'package:glaze_flutter/features/extensions/models/preset_permissions.dart';
 import 'package:glaze_flutter/features/extensions/services/js_bridge_service.dart';
-import 'package:glaze_flutter/features/extensions/services/js_engine_service.dart';
+import 'helpers/js_bridge_test_support.dart';
 
 void main() {
   group('JsBridgeMethodRegistry', () {
@@ -62,20 +62,20 @@ void main() {
       }
     });
 
-    test('visual and headless hosts expose the same intended contract', () {
+    test('only the Chat WebView profile exposes the bridge contract', () {
       final canonical = JsBridgeMethodRegistry.methods
           .map((e) => e.name)
           .toSet();
 
       expect(ChatBridgeController.supportedExtensionMethods, canonical);
-      expect(JsEngineBridgeHost.supportedMethods, canonical);
+      expect(JsBridgeHostProfile.values, [JsBridgeHostProfile.visual]);
     });
 
     test(
       'unknown methods remain unsupported without a permission lookup',
       () async {
         var permissionChecks = 0;
-        final response = await JsBridgeService(
+        final response = await TestJsBridge.create(
           permissionCheck: (_) {
             permissionChecks++;
             return true;

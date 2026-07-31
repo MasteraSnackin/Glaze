@@ -626,9 +626,15 @@ class ExtensionPostGenService {
   /// does not need the chat history, it just runs on a timer.
   Future<String?> runJsBlock({
     required String charId,
+    required String sessionId,
     required BlockConfig block,
     required List<ChatMessage> contextMessages,
-  }) => PeriodicJsBlockRunner(
-    ref: _ref,
-  ).run(charId: charId, block: block, contextMessages: contextMessages);
+    bool Function()? isAuthorized,
+  }) => PeriodicJsBlockRunner(ref: _ref).run(
+    charId: charId,
+    sessionId: sessionId,
+    block: block,
+    contextMessages: contextMessages,
+    isAuthorized: isAuthorized,
+  );
 }

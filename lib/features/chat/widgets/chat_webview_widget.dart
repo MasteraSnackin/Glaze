@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/debug/perf_debug.dart';
 import '../../../core/state/active_regex_provider.dart';
 import '../../../core/state/character_provider.dart';
 import '../../../core/state/persona_resolution.dart';
@@ -212,6 +213,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
   @override
   void initState() {
     super.initState();
+    PerfDebug.chatWebViewWidgetInitialized();
     _bindBridgeRegistry(widget.charId);
     // Keep-alive re-attach safety net: when the chat body is rebuilt (e.g. a
     // full-screen spinner during an import-driven session switch destroys and
@@ -281,6 +283,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
 
   @override
   void dispose() {
+    PerfDebug.chatWebViewWidgetDisposed();
     // Unregister bridge so the service doesn't hold a stale reference.
     _clearBridgeRegistry?.call();
     // Drop interactive panel state for this character so the singleton
@@ -306,7 +309,10 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     final alreadyReady = await bridge.evalJsWithResult(
       'typeof window.bridge !== "undefined" && window.bridge != null',
     );
-    if (alreadyReady == true) return;
+    if (alreadyReady == true) {
+      PerfDebug.chatWebViewJsBridgeReady();
+      return;
+    }
 
     // Slow path: race between the JS-side onWebViewReady signal (event-driven)
     // and a polling fallback. The event wins on normal loads; the poll catches
@@ -344,6 +350,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
           );
         },
       );
+      PerfDebug.chatWebViewJsBridgeReady();
     } finally {
       // Restore the previous callback if we were disposed before the signal.
       if (!completer.isCompleted) bridge.onReady = prevOnReady;
@@ -354,6 +361,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     final bridge = _bridge;
     if (bridge == null) return;
     final initSessionId = widget.sessionId;
+    PerfDebug.chatWebViewInitAttempted();
     try {
       await _waitForJsBridgeReady();
       // The WebView is kept alive across chats, so the JS header tracker still
@@ -408,6 +416,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
         onSyncExtBlockPanels: _syncExtBlockPanels,
         applyTheme: _applyThemeToBridge,
       ).run().timeout(_kWebViewInitTimeout);
+      PerfDebug.chatWebViewInitCompleted();
     } on TimeoutException catch (e, st) {
       _handleWebViewFailure(e, st, phase: 'init');
       return;
@@ -801,6 +810,11 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       isImpersonating: ref
           .read(impersonationStateProvider(widget.charId))
           .active,
+    );
+    // Aggregate only: streaming chunks can make this method very hot.
+    PerfDebug.chatWebViewSyncResult(
+      runMessageSync: result.runMessageSync,
+      sessionSwitched: result.sessionSwitched,
     );
     if (result.sessionSwitched) {
       // Raise the cover synchronously (build runs right after didUpdateWidget)

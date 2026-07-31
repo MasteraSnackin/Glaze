@@ -10,11 +10,7 @@ class CommandHandler {
     if (command is! String || command.isEmpty) {
       throw ArgumentError('executeCommand requires a non-empty string command');
     }
-    final handler =
-        bridge.executeCommand ??
-        (throw UnsupportedError(
-          'glaze.executeCommand is not available in this context',
-        ));
+    final handler = bridge.executeCommand;
     return handler(command, asBridgeMap(bridge.params['args']), bridge.context);
   }
 }

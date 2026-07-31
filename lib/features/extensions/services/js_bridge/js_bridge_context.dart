@@ -68,38 +68,38 @@ typedef ShowToastHandler =
 class JsBridgeContext {
   final Map<String, dynamic> params;
   final Map<String, dynamic> context;
-  final ChatRepo? chatRepo;
-  final CharacterRepo? characterRepo;
-  final GlobalVariablesRepo? globalVariablesRepo;
-  final MessageVariablesAccessor? messageVariables;
-  final String? Function()? currentSessionId;
-  final String? Function()? currentCharacterId;
-  final GenerateTextHandler? generateText;
-  final InjectPromptHandler? injectPrompt;
-  final UninjectPromptHandler? uninjectPrompt;
-  final TriggerGenerationHandlerFn? triggerGeneration;
-  final PermissionCheck? permissionCheck;
-  final PlayAudioHandler? playAudio;
-  final ExecuteCommandHandler? executeCommand;
-  final ShowToastHandler? showToast;
+  final ChatRepo chatRepo;
+  final CharacterRepo characterRepo;
+  final GlobalVariablesRepo globalVariablesRepo;
+  final MessageVariablesAccessor messageVariables;
+  final String? Function() currentSessionId;
+  final String? Function() currentCharacterId;
+  final GenerateTextHandler generateText;
+  final InjectPromptHandler injectPrompt;
+  final UninjectPromptHandler uninjectPrompt;
+  final TriggerGenerationHandlerFn triggerGeneration;
+  final PermissionCheck permissionCheck;
+  final PlayAudioHandler playAudio;
+  final ExecuteCommandHandler executeCommand;
+  final ShowToastHandler showToast;
 
   const JsBridgeContext({
     required this.params,
     required this.context,
-    this.chatRepo,
-    this.characterRepo,
-    this.globalVariablesRepo,
-    this.messageVariables,
-    this.currentSessionId,
-    this.currentCharacterId,
-    this.generateText,
-    this.injectPrompt,
-    this.uninjectPrompt,
-    this.triggerGeneration,
-    this.permissionCheck,
-    this.playAudio,
-    this.executeCommand,
-    this.showToast,
+    required this.chatRepo,
+    required this.characterRepo,
+    required this.globalVariablesRepo,
+    required this.messageVariables,
+    required this.currentSessionId,
+    required this.currentCharacterId,
+    required this.generateText,
+    required this.injectPrompt,
+    required this.uninjectPrompt,
+    required this.triggerGeneration,
+    required this.permissionCheck,
+    required this.playAudio,
+    required this.executeCommand,
+    required this.showToast,
   });
 
   void requireCapability(String capabilityId) {
@@ -107,7 +107,7 @@ class JsBridgeContext {
   }
 
   String sessionId() {
-    final value = (context['sessionId'] as String?) ?? currentSessionId?.call();
+    final value = (context['sessionId'] as String?) ?? currentSessionId();
     if (value == null || value.isEmpty) {
       throw StateError('Chat session context is not available');
     }
@@ -115,8 +115,7 @@ class JsBridgeContext {
   }
 
   String characterId() {
-    final value =
-        (context['characterId'] as String?) ?? currentCharacterId?.call();
+    final value = (context['characterId'] as String?) ?? currentCharacterId();
     if (value == null || value.isEmpty) {
       throw StateError('Character context is not available');
     }
@@ -126,7 +125,7 @@ class JsBridgeContext {
   String? characterIdOrNull() {
     final raw = context['characterId'];
     if (raw is String && raw.isNotEmpty) return raw;
-    final fallback = currentCharacterId?.call();
+    final fallback = currentCharacterId();
     if (fallback == null || fallback.isEmpty) return null;
     return fallback;
   }

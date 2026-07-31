@@ -5,7 +5,9 @@ import 'capability_resolver.dart';
 typedef JsBridgeCapabilityResolver =
     String Function(Map<String, dynamic> params);
 
-enum JsBridgeHostProfile { visual, headless }
+/// The Chat WebView is the only bridge host. Sandboxed panels relay through it.
+/// `visual` is retained as the public name to avoid a needless API migration.
+enum JsBridgeHostProfile { visual }
 
 enum JsBridgeOperation {
   showToast,
@@ -43,10 +45,7 @@ class JsBridgeMethodDefinition {
 /// A method cannot be registered without a capability resolver or an explicit
 /// host set.
 abstract final class JsBridgeMethodRegistry {
-  static const _allHosts = {
-    JsBridgeHostProfile.visual,
-    JsBridgeHostProfile.headless,
-  };
+  static const _allHosts = {JsBridgeHostProfile.visual};
 
   static final List<JsBridgeMethodDefinition> methods = List.unmodifiable([
     JsBridgeMethodDefinition(

@@ -10,6 +10,7 @@ import 'package:glaze_flutter/core/llm/prompt_builder.dart';
 import 'package:glaze_flutter/core/models/api_config.dart';
 import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
+import 'package:glaze_flutter/core/models/memory_book.dart';
 import 'package:glaze_flutter/core/models/tracker.dart';
 import 'package:glaze_flutter/core/state/db_provider.dart';
 import 'package:glaze_flutter/core/state/memory_settings_provider.dart';
@@ -18,7 +19,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   test(
-    'buildFromPreFetched loads ledger once and preserves fast-mode fields',
+    'buildFromPreFetched only loads graph prompt content when memory is enabled',
     () async {
       SharedPreferences.setMockInitialValues({});
       final db = AppDatabase.forTesting(NativeDatabase.memory());
@@ -108,6 +109,59 @@ void main() {
           expect(payload.arcContent, contains('- Escape'));
         }
       }
+
+      await container
+          .read(memoryGlobalSettingsProvider.notifier)
+          .save(const MemoryGlobalSettings(enabled: false));
+      final callsBeforeGlobalDisable = loadCount;
+      final globallyDisabledPayload = await builder.buildFromPreFetched(
+        charId: 'c1',
+        session: const ChatSession(
+          id: 's1',
+          characterId: 'c1',
+          sessionIndex: 0,
+        ),
+        character: const Character(id: 'c1', name: 'Character'),
+        chatApi: const ApiConfig(id: 'api'),
+        preset: null,
+        persona: null,
+        lorebooks: const [],
+      );
+
+      expect(loadCount, callsBeforeGlobalDisable);
+      expect(globallyDisabledPayload.studioSessionStateContent, isNull);
+      expect(globallyDisabledPayload.arcContent, isNull);
+      expect(globallyDisabledPayload.entitiesContent, isNull);
+
+      await container
+          .read(memoryGlobalSettingsProvider.notifier)
+          .save(const MemoryGlobalSettings());
+      await container.read(memoryBookRepoProvider).put(
+        const MemoryBook(
+          id: 'memorybook_s1',
+          sessionId: 's1',
+          settings: MemoryBookSettings(enabled: false),
+        ),
+      );
+      final callsBeforeBookDisable = loadCount;
+      final bookDisabledPayload = await builder.buildFromPreFetched(
+        charId: 'c1',
+        session: const ChatSession(
+          id: 's1',
+          characterId: 'c1',
+          sessionIndex: 0,
+        ),
+        character: const Character(id: 'c1', name: 'Character'),
+        chatApi: const ApiConfig(id: 'api'),
+        preset: null,
+        persona: null,
+        lorebooks: const [],
+      );
+
+      expect(loadCount, callsBeforeBookDisable);
+      expect(bookDisabledPayload.studioSessionStateContent, isNull);
+      expect(bookDisabledPayload.arcContent, isNull);
+      expect(bookDisabledPayload.entitiesContent, isNull);
     },
   );
 }

@@ -115,13 +115,20 @@ void main() {
       },
     );
 
-    test('headless sandbox relays requests with per-run authority', () {
-      expect(headlessHtml, contains("event.data.type === 'glaze:request'"));
-      expect(headlessHtml, contains("'glazeBridge'"));
-      expect(headlessHtml, contains('runId'));
-      expect(headlessHtml, contains("type: 'glaze:response'"));
-      expect(headlessHtml, contains('event.source !== frame.contentWindow'));
-    });
+    test(
+      'panel relay preserves authoritative context and bridge error codes',
+      () {
+        expect(panelHostJs, contains('panelId: panel.panelId'));
+        expect(panelHostJs, contains('messageId: panel.messageId'));
+        expect(panelHostJs, contains('code: error && error.code'));
+        expect(
+          panelHostJs,
+          contains('_buildSrcdoc(html, options, panelId, messageId)'),
+        );
+        expect(panelHostJs, contains("sandbox = 'allow-scripts'"));
+        expect(panelHostJs, isNot(contains('allow-same-origin')));
+      },
+    );
   });
 
   group('message script execution policy', () {
