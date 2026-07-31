@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/debug/perf_debug.dart';
 import '../bridge/chat_bridge_controller.dart';
 import '../bridge/chat_bridge_registry.dart';
 import '../bridge/chat_webview_bridge_host.dart';
@@ -187,6 +188,7 @@ class ChatWebViewSurface extends ConsumerWidget {
               initialUrlRequest: chatWebViewInitialUrlRequest(),
               initialSettings: chatWebViewInAppSettings(),
               onWebViewCreated: (controller) async {
+                PerfDebug.chatWebViewSurfaceCreated();
                 final jsBridgeService = await bridgeHost.buildJsBridgeService();
                 if (!isMounted()) return;
                 final bridge = ChatBridgeController(
@@ -204,6 +206,7 @@ class ChatWebViewSurface extends ConsumerWidget {
                 ref.read(chatBridgeRegistryProvider(charId).notifier).state =
                     bridge;
                 onBridgeReady(bridge);
+                PerfDebug.chatWebViewBridgeReady();
 
                 // Kick off the singleton headless engine. Failure is
                 // non-fatal — the visual bridge above remains the fallback
@@ -276,6 +279,7 @@ class ChatWebViewSurface extends ConsumerWidget {
                 }
               },
               onLoadStop: (controller, url) async {
+                PerfDebug.chatWebViewLoadStopped();
                 // The init path is also wired through onWebViewCreated. When
                 // load stop wins the race, run init here.
                 await ref

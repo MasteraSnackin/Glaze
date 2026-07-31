@@ -15,6 +15,7 @@ import 'package:path/path.dart' as p;
 // ignore: depend_on_referenced_packages
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+import '../../core/debug/perf_debug.dart';
 import '../../core/utils/image_src.dart';
 import '../../core/utils/platform_paths.dart';
 import 'editing_message_provider.dart';
@@ -244,6 +245,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
 
   @override
   Widget build(BuildContext context) {
+    PerfDebug.chatScreenBuilt();
     final charId = widget.charId;
     final chatStateAsync = ref.watch(chatProvider(charId));
     final chatState = chatStateAsync.value;
@@ -1315,8 +1317,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                       index == widget.state.messages.length - 1,
                                   isError: false,
                                   isLast:
-                                      index ==
-                                      widget.state.messages.length - 1,
+                                      index == widget.state.messages.length - 1,
                                   isGenerating: widget.state.isGenerating,
                                   isHidden:
                                       widget.state.messages[index].isHidden,
