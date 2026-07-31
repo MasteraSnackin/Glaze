@@ -15,6 +15,7 @@ import '../../core/state/active_selection_provider.dart';
 import '../../core/state/db_provider.dart';
 import '../../core/state/studio_feature_provider.dart';
 import '../../core/state/active_studio_preset_provider.dart';
+import '../studio/studio_preset_workflow_provider.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glass_surface.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
@@ -220,18 +221,38 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
           },
         ),
         BottomSheetItem(
+          icon: Icons.smart_toy_outlined,
+          label: 'Add Agentic Preset',
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            _createAgenticPreset(ref);
+          },
+        ),
+        BottomSheetItem(
           icon: Icons.file_upload_outlined,
           label: 'Import from File',
           onTap: () {
             Navigator.of(context, rootNavigator: true).pop();
-            _importPreset();
+            _importPreset(ref);
           },
         ),
       ],
     );
   }
 
-  Future<void> _importPreset() async {
+  Future<void> _createAgenticPreset(WidgetRef ref) async {
+    final service = ref.read(studioPresetWorkflowServiceProvider);
+    final presets = await ref.read(studioPresetRepoProvider).getAll();
+    final result = await service.createPreset(
+      name: 'New Agentic Preset',
+      availablePresets: presets,
+    );
+    if (result != null && mounted) {
+      GlazeToast.show(context, 'Created "${result.preset.name}"');
+    }
+  }
+
+  Future<void> _importPreset(WidgetRef ref) async {
     final ctx = context;
     FilePickerResult? result;
     try {
@@ -246,7 +267,8 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
     if (result == null || result.files.isEmpty) return;
 
     final notifier = ref.read(presetListProvider.notifier);
-    final imported = <Preset>[];
+    final studioWorkflow = ref.read(studioPresetWorkflowServiceProvider);
+    final imported = <String>[];
     Object? lastError;
     var unreadable = 0;
 
@@ -263,9 +285,19 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
         }
 
         final json = jsonDecode(jsonString) as Map<String, dynamic>;
-        final preset = parseSillyTavernPreset(json, picked.name);
-        await notifier.add(preset);
-        imported.add(preset);
+
+        if (json.containsKey('agentEnabled')) {
+          final studioPreset = StudioPreset.fromJson(json);
+          await studioWorkflow.importPreset(
+            imported: studioPreset,
+            name: studioPreset.name,
+          );
+          imported.add(studioPreset.name);
+        } else {
+          final preset = parseSillyTavernPreset(json, picked.name);
+          await notifier.add(preset);
+          imported.add(preset.name);
+        }
       } catch (e) {
         lastError = e;
       }
@@ -282,20 +314,12 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
       return;
     }
 
-    if (imported.length == 1 && result.files.length == 1) {
-      final preset = imported.single;
-      GlazeToast.show(
-        ctx,
-        'Imported "${preset.name}" (${preset.blocks.length} blocks)',
-      );
-      return;
-    }
-
-    final failed = result.files.length - imported.length;
+    final name = imported.first;
     GlazeToast.show(
       ctx,
-      'Imported ${imported.length} presets'
-      '${failed > 0 ? ' — $failed failed' : ''}',
+      imported.length == 1
+          ? 'Imported "$name"'
+          : 'Imported ${imported.length} presets',
     );
   }
 }

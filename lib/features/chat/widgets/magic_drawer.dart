@@ -166,12 +166,6 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
       category: MagicDrawerCategory.config,
     ),
     MagicDrawerItemDef(
-      id: 'studio',
-      label: 'menu_studio'.tr(),
-      icon: Icons.movie_filter_outlined,
-      category: MagicDrawerCategory.tools,
-    ),
-    MagicDrawerItemDef(
       id: 'agent-ops',
       label: 'Agentic Ops',
       icon: Icons.smart_toy_outlined,
@@ -323,7 +317,6 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
   ) {
     return switch (id) {
       'ext-blocks' => extSettings.enabled,
-      'studio' => studioFeatureEnabled,
       _ => true,
     };
   }
