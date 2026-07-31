@@ -144,22 +144,6 @@ class StudioControllerOntology {
       timeoutMs: 60000,
     ),
     StudioControllerSpec(
-      id: 'beauty',
-      name: 'Beauty Shard',
-      purpose:
-          'Track reusable visual styling state only: HTML/CSS palette, background, text/font colors, speaker colors, typography, gradients, and art-style labels. Skip concrete HTML widgets, trackers, infoblocks, and image-generation instructions.',
-      outputContract:
-          'At chat time, output a compact beauty-state brief only: current reusable style variables, constraints for preserving/updating them, and items to avoid. Do NOT write scene prose. Do NOT handle concrete UI artifacts (phone screens, taxi menus, terminals), trackers, infoblocks, topbars, or image-gen blocks.',
-      laneOwns:
-          'reusable presentation/style state only: HTML/CSS palette, background and text colors, font family, speaker/thought colors, gradients, typography, glow/mark/highlight styles, and art-style labels that should remain consistent across turns.',
-      laneSkip:
-          'concrete HTML widgets/windows (phone screens, taxi menus, terminals, HUDs, cards, maps, buttons), trackers, stats panels, infoblocks, topbar/infoboard instructions, image-generation prompts, plot facts, character psychology, and scene prose.',
-      refreshPolicy: 'turn',
-      temperature: 0.2,
-      maxTokens: 1200,
-      timeoutMs: 60000,
-    ),
-    StudioControllerSpec(
       id: 'final',
       name: 'Main Responder',
       purpose:

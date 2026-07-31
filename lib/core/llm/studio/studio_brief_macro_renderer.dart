@@ -99,7 +99,6 @@ class StudioBriefMacroRenderer {
       'guard': ['guard', 'loop', 'prose'],
       'world': ['world', 'npc'],
       'meta': ['meta', 'ooc', 'lumia'],
-      'beauty': ['beauty'],
     };
     final keys = aliases[controller] ?? const <String>[];
     return briefs.where((brief) {

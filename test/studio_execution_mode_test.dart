@@ -15,11 +15,6 @@ void main() {
       name: 'Agency & Character Controller',
     ),
     const StudioAgent(
-      id: 'agent_s_narrative',
-      controllerId: 'narrative',
-      name: 'Narrative / Pacing / Style Controller',
-    ),
-    const StudioAgent(
       id: 'agent_s_dialogue',
       controllerId: 'dialogue',
       name: 'Dialogue Controller',
@@ -40,11 +35,6 @@ void main() {
       name: 'Meta-Weaver / OOC Policy',
     ),
     const StudioAgent(
-      id: 'agent_s_beauty',
-      controllerId: 'beauty',
-      name: 'Beauty Shard',
-    ),
-    const StudioAgent(
       id: 'agent_s_final',
       controllerId: 'final',
       name: 'Main Responder',
@@ -62,7 +52,7 @@ void main() {
     ]);
   });
 
-  test('assisted permits continuity, scene director, beauty, and final', () {
+  test('assisted permits continuity and final', () {
     final gated = StudioActivationGate.applyExecutionMode(
       staleAgents,
       StudioExecutionMode.assisted,
@@ -70,8 +60,6 @@ void main() {
 
     expect(gated.where((agent) => agent.enabled).map((agent) => agent.name), [
       'Continuity Controller',
-      'Narrative / Pacing / Style Controller',
-      'Beauty Shard',
       'Main Responder',
     ]);
   });
@@ -79,24 +67,24 @@ void main() {
   test('topology reports controllers that a mode cannot enable', () {
     expect(
       StudioActivationGate.isControllerAllowed(
-        'beauty',
+        'agency',
         StudioExecutionMode.direct,
       ),
       isFalse,
     );
     expect(
       StudioActivationGate.isControllerAllowed(
-        'beauty',
+        'agency',
+        StudioExecutionMode.assisted,
+      ),
+      isFalse,
+    );
+    expect(
+      StudioActivationGate.isControllerAllowed(
+        'continuity',
         StudioExecutionMode.assisted,
       ),
       isTrue,
-    );
-    expect(
-      StudioActivationGate.isControllerAllowed(
-        'meta',
-        StudioExecutionMode.direct,
-      ),
-      isFalse,
     );
     expect(
       StudioActivationGate.isControllerAllowed(
