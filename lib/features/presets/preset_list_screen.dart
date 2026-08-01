@@ -695,7 +695,7 @@ class _PsCard extends ConsumerWidget {
                 children: [
                   _SmallBadge(
                     icon: Icons.memory,
-                    label: studioPresetTokenLabel(sp),
+                    label: '${studioPresetTokenEstimate(sp)}',
                     foreground: context.cs.onSurfaceVariant,
                   ),
                   const SizedBox(width: 8),
