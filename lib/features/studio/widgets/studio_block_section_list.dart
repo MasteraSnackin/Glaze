@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/models/studio_config.dart';
@@ -121,7 +122,7 @@ class StudioBlockSectionList extends StatelessWidget {
         key: ValueKey('studio_section_empty_${row.point}'),
         padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
         child: Text(
-          'No blocks',
+          'studio_section_empty'.tr(),
           style: TextStyle(
             fontSize: 13,
             color: context.cs.onSurfaceVariant.withValues(alpha: 0.7),

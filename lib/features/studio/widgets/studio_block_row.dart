@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/llm/studio_controller_ontology.dart';
@@ -132,7 +133,7 @@ class StudioBlockRow extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               if (block.locked) ...[
-                const StudioBlockBadge(label: 'Locked', muted: true),
+                StudioBlockBadge(label: 'studio_badge_locked'.tr(), muted: true),
                 const SizedBox(width: 6),
               ],
               if (modeLabel != null) ...[
@@ -214,9 +215,9 @@ class StudioBlockRow extends StatelessWidget {
   /// unbadged so the common case reads clean.
   String? _modeLabel() {
     return switch (block.mode) {
-      'pregenBrief' => 'Brief',
+      'pregenBrief' => 'studio_badge_brief'.tr(),
       'agentResponse' => block.sourceAgentId.isEmpty
-          ? 'Agent'
+          ? 'studio_badge_agent'.tr()
           : '← ${studioAgentShortName(block.sourceAgentId)}',
       _ => null,
     };
@@ -375,9 +376,11 @@ class _StudioBlockGroupRowState extends State<StudioBlockGroupRow> {
     final selected = group.children.where((b) => b.enabled).firstOrNull;
     final subtitle = group.exclusive
         ? (selected == null
-            ? 'None'
-            : (selected.title.isEmpty ? selected.id : selected.title))
-        : '$enabledCount / ${group.children.length} enabled';
+              ? 'studio_group_none'.tr()
+              : (selected.title.isEmpty ? selected.id : selected.title))
+        : 'studio_group_enabled'.tr(
+            args: ['$enabledCount', '${group.children.length}'],
+          );
 
     final boundaries = <StudioPresetBlock>[
       if (group.openingBoundary case final b?) b,
@@ -426,7 +429,7 @@ class _StudioBlockGroupRowState extends State<StudioBlockGroupRow> {
                 ),
                 const SizedBox(width: 8),
                 if (group.exclusive) ...[
-                  const StudioBlockBadge(label: 'Pick one'),
+                  StudioBlockBadge(label: 'studio_badge_pick_one'.tr()),
                   const SizedBox(width: 6),
                 ],
                 Expanded(

@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/llm/studio_controller_ontology.dart';
@@ -50,7 +51,7 @@ class StudioAgentsPanel extends StatelessWidget {
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    'Agents',
+                    'studio_agents'.tr(),
                     style: TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.w600,
@@ -146,31 +147,36 @@ void showStudioAgentCard(BuildContext context, StudioControllerSpec spec) {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _cardRow(context, Icons.badge_outlined, 'Purpose', spec.purpose),
+            _cardRow(
+              context,
+              Icons.badge_outlined,
+              'studio_agent_purpose'.tr(),
+              spec.purpose,
+            ),
             const SizedBox(height: 16),
             _cardRow(
               context,
               Icons.arrow_forward_rounded,
-              'Your Lane (owns)',
+              'studio_agent_lane_owns'.tr(),
               spec.laneOwns,
             ),
             const SizedBox(height: 16),
             _cardRow(
               context,
               Icons.block_rounded,
-              'Not Your Lane (skip)',
+              'studio_agent_lane_skip'.tr(),
               spec.laneSkip,
             ),
             const SizedBox(height: 16),
             _cardRow(
               context,
               Icons.terminal_rounded,
-              'Output Contract',
+              'studio_agent_output_contract'.tr(),
               spec.outputContract,
             ),
             const SizedBox(height: 20),
             Text(
-              'These instructions are fixed and cannot be edited.',
+              'studio_agent_fixed_hint'.tr(),
               style: TextStyle(
                 fontSize: 12,
                 color: context.cs.onSurfaceVariant,

@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/models/studio_config.dart';
@@ -27,11 +28,15 @@ Future<void> exportStudioPreset(
       subfolder: 'presets',
     );
     if (context.mounted) {
-      GlazeToast.show(context, 'Exported to $savedPath');
+      GlazeToast.show(context, 'export_saved_to'.tr(args: [savedPath]));
     }
   } catch (e) {
     if (context.mounted) {
-      GlazeErrorDialog.show(context, e, prefix: 'Export failed: ');
+      GlazeErrorDialog.show(
+        context,
+        e,
+        prefix: 'error_export_failed_prefix'.tr(),
+      );
     }
   }
 }

@@ -701,7 +701,9 @@ class _PsCard extends ConsumerWidget {
                   const SizedBox(width: 8),
                   _SmallBadge(
                     icon: Icons.bolt,
-                    label: '${studioPresetRequestCount(sp)}/ход',
+                    label: 'studio_requests_per_turn'.tr(
+                      args: ['${studioPresetRequestCount(sp)}'],
+                    ),
                     foreground: context.cs.onSurfaceVariant,
                   ),
                 ],

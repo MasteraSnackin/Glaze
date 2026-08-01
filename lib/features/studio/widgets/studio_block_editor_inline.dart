@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/llm/studio_controller_ontology.dart';
@@ -5,6 +6,7 @@ import '../../../core/models/studio_config.dart';
 import '../../../shared/shell/nav_bar_suppression_provider.dart';
 import '../../../shared/widgets/generic_editor.dart';
 import '../../../shared/widgets/glass_surface.dart';
+import '../studio_injection_points.dart';
 
 /// Inline block editor built on the shared [GenericEditor] (the same engine the
 /// plain preset block editor uses), so editing an agentic block feels identical
@@ -40,10 +42,14 @@ class StudioBlockEditorInline extends StatelessWidget {
       GenericEditorSection(
         title: null,
         fields: [
-          GenericEditorField(key: 'title', label: 'Title', type: 'text'),
+          GenericEditorField(
+            key: 'title',
+            label: 'placeholder_block_name'.tr(),
+            type: 'text',
+          ),
           GenericEditorField(
             key: 'role',
-            label: 'Role',
+            label: 'label_role'.tr(),
             type: 'select',
             options: const [
               {'label': 'System', 'value': 'system'},
@@ -53,36 +59,32 @@ class StudioBlockEditorInline extends StatelessWidget {
           ),
           GenericEditorField(
             key: 'mode',
-            label: 'Mode',
+            label: 'studio_field_mode'.tr(),
             type: 'select',
-            options: const [
-              {'label': 'Direct instruction', 'value': 'direct'},
-              {'label': 'Pregen Brief', 'value': 'pregenBrief'},
-              {'label': 'Agent response', 'value': 'agentResponse'},
+            options: [
+              for (final mode in const ['direct', 'pregenBrief', 'agentResponse'])
+                {'label': studioBlockModeLabel(mode), 'value': mode},
             ],
           ),
           GenericEditorField(
             key: 'sourceAgentId',
-            label: '← Take response from agent',
+            label: 'studio_field_source_agent'.tr(),
             type: 'select',
             options: agentOptions,
             showIf: (item) => item['mode'] == 'agentResponse',
           ),
           GenericEditorField(
             key: 'injectionPoint',
-            label: 'Injection point',
+            label: 'studio_field_injection_point'.tr(),
             type: 'select',
-            options: const [
-              {'label': 'Pre-generation', 'value': 'pregen'},
-              {'label': 'Final', 'value': 'final'},
-              {'label': 'Post-processing', 'value': 'cleaner'},
-              {'label': 'Трекер', 'value': 'ledger'},
-              {'label': 'Specific agent', 'value': 'specificAgent'},
+            options: [
+              for (final point in studioInjectionPoints)
+                {'label': studioInjectionPointLabel(point), 'value': point},
             ],
           ),
           GenericEditorField(
             key: 'targetAgentId',
-            label: '→ Send to agent',
+            label: 'studio_field_target_agent'.tr(),
             type: 'select',
             options: agentOptions,
             showIf: (item) => item['injectionPoint'] == 'specificAgent',
@@ -93,7 +95,7 @@ class StudioBlockEditorInline extends StatelessWidget {
           // content comes back if the mode is switched to direct again.
           GenericEditorField(
             key: 'content',
-            label: 'Content',
+            label: 'section_content'.tr(),
             type: 'textarea',
             rows: 8,
             expandable: true,
@@ -131,16 +133,20 @@ class StudioBlockEditorInline extends StatelessWidget {
               border: Border.all(color: _danger.withValues(alpha: 0.35)),
               glowColor: _danger,
               onTap: onDelete,
-              child: const Padding(
-                padding: EdgeInsets.symmetric(vertical: 14),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 14),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.delete_outlined, size: 20, color: _danger),
-                    SizedBox(width: 8),
+                    const Icon(
+                      Icons.delete_outlined,
+                      size: 20,
+                      color: _danger,
+                    ),
+                    const SizedBox(width: 8),
                     Text(
-                      'Delete Block',
-                      style: TextStyle(
+                      'blocks_delete_block'.tr(),
+                      style: const TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w600,
                         color: _danger,

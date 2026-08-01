@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
 import '../../../shared/theme/app_colors.dart';
@@ -70,7 +71,9 @@ class PresetDashboardCard extends StatelessWidget {
 
   /// Mirrors the `addBlockAtTop` app setting: puts the add row above the list.
   final bool addBlockAtTop;
-  final String addBlockLabel;
+
+  /// Null falls back to the shared `add_block` string.
+  final String? addBlockLabel;
 
   const PresetDashboardCard({
     super.key,
@@ -87,7 +90,7 @@ class PresetDashboardCard extends StatelessWidget {
     this.blockList,
     this.onAddBlock,
     this.addBlockAtTop = false,
-    this.addBlockLabel = 'Add Block',
+    this.addBlockLabel,
   });
 
   /// Height of the cover band. The header and the utils row both sit inside it,
@@ -268,13 +271,15 @@ class PresetAddBlockRow extends StatelessWidget {
   /// When true the row sits above the block list: drop the bottom-rounded
   /// corners and use a bottom divider instead of a top one.
   final bool atTop;
-  final String label;
+
+  /// Null falls back to the shared `add_block` string.
+  final String? label;
 
   const PresetAddBlockRow({
     super.key,
     required this.onTap,
     this.atTop = false,
-    this.label = 'Add Block',
+    this.label,
   });
 
   @override
@@ -309,7 +314,7 @@ class PresetAddBlockRow extends StatelessWidget {
               Icon(Icons.add, size: 16, color: context.cs.primary),
               const SizedBox(width: 8),
               Text(
-                label,
+                label ?? 'add_block'.tr(),
                 style: TextStyle(
                   fontSize: 15,
                   fontWeight: FontWeight.w600,
