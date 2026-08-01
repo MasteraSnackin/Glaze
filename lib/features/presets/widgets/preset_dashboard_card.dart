@@ -27,8 +27,9 @@ class PresetDashboardCard extends StatelessWidget {
   /// Stat badges pinned to the right of the utils row.
   final List<Widget> utilsTrailing;
 
-  /// Optional strip between the utils row and the block list (e.g. the Studio
-  /// editor's injection-point filter chips). Supplies its own padding.
+  /// Optional strip between the utils row and the block list (the Studio
+  /// editor puts its agent list and injection-point filter here). Supplies its
+  /// own padding.
   final Widget? belowUtils;
 
   final Widget? blockList;

@@ -23,15 +23,15 @@ import 'widgets/preset_dashboard_card.dart';
 /// Full editor for a single agentic (Studio) preset, rendered inline inside the
 /// [PresetListScreen] SheetView.
 ///
-/// Same shape as the plain [PresetEditorBody]: a dashboard card (identity +
-/// overflow menu + stat badges + reorderable block list + "Add Block"), then a
-/// collapsible panel below it — "Agents" here, "Advanced Settings" there.
-/// Editing a block replaces the body with the shared [GenericEditor], and back
-/// returns to the dashboard.
+/// Same shape as the plain [PresetEditorBody]: one dashboard card holding the
+/// identity + overflow menu, the stat badges, and the reorderable block list
+/// with its "Add Block" row. Editing a block replaces the body with the shared
+/// [GenericEditor], and back returns to the dashboard.
 ///
-/// The one agentic-only element is the injection-point filter above the list:
-/// blocks are addressed to different pipeline stages (§5), so the list shows
-/// one stage at a time.
+/// Two agentic-only sections sit between the badges and the list, in the order
+/// the pipeline reads them: the collapsible agent list (which stages run at
+/// all), then the injection-point filter (blocks are addressed to different
+/// stages per §5, so the list shows one stage at a time).
 class StudioPresetEditorBody extends ConsumerStatefulWidget {
   final String presetId;
   final VoidCallback onClose;
@@ -390,13 +390,6 @@ class StudioPresetEditorBodyState
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _buildDashboard(preset),
-          StudioAgentsPanel(
-            preset: preset,
-            expanded: _agentsExpanded,
-            onToggleExpanded: () =>
-                setState(() => _agentsExpanded = !_agentsExpanded),
-            onToggle: _toggleAgent,
-          ),
           const SizedBox(height: 60),
         ],
       ),
@@ -444,7 +437,21 @@ class StudioPresetEditorBodyState
           label: '${studioPresetTokenLabel(preset)}t',
         ),
       ],
-      belowUtils: _buildPointChips(),
+      // Agents come before the block list: they decide which stages run, and
+      // the blocks below are addressed to those stages.
+      belowUtils: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          StudioAgentsPanel(
+            preset: preset,
+            expanded: _agentsExpanded,
+            onToggleExpanded: () =>
+                setState(() => _agentsExpanded = !_agentsExpanded),
+            onToggle: _toggleAgent,
+          ),
+          _buildPointChips(),
+        ],
+      ),
       blockList: _buildBlockList(entries),
       addBlockAtTop: addBlockAtTop,
       onAddBlock: _addBlock,
