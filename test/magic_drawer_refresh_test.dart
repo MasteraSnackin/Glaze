@@ -23,7 +23,7 @@ void main() {
         'Future<void> _handleTap(MagicDrawerItemDef item)',
       );
       final nextMethod = source.indexOf(
-        'Future<void> _showStudioMenu()',
+        'Future<void> _showAgentOpsLog()',
         handlerStart,
       );
       final handler = source.substring(handlerStart, nextMethod);
