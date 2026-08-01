@@ -3,25 +3,35 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/llm/studio_controller_ontology.dart';
 import '../../core/models/studio_config.dart';
 import '../../core/models/studio_preset_block_groups.dart';
+import '../../core/models/studio_preset_block_reorder.dart';
 import '../../core/state/db_provider.dart';
 import '../../core/utils/id_generator.dart';
 import '../../shared/theme/app_colors.dart';
-import '../../shared/widgets/generic_editor.dart';
-import '../../shared/widgets/glass_surface.dart';
-import '../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../shared/widgets/glaze_toast.dart';
+import '../settings/app_settings_provider.dart';
 import '../studio/studio_agent_toggle.dart';
 import '../studio/studio_preset_stats.dart';
-import '../studio/widgets/studio_preset_group_tile.dart';
+import '../studio/widgets/studio_agents_panel.dart';
+import '../studio/widgets/studio_block_editor_inline.dart';
+import '../studio/widgets/studio_block_row.dart';
+import '../studio/widgets/studio_preset_options_sheet.dart';
+import 'studio_preset_export.dart';
+import 'widgets/preset_dashboard_card.dart';
 
-/// Full editor for a single agentic (Studio) preset. Rendered inline inside the
-/// [PresetListScreen] SheetView (like the plain preset editor). Layout, top to
-/// bottom: a stats plaque (agent count + calls/turn), the agent enable/disable
-/// list with descriptions, then the preset's prompt blocks. Editing a block
-/// opens the shared [GenericEditor] full-body inline, mirroring the plain
-/// preset editor.
+/// Full editor for a single agentic (Studio) preset, rendered inline inside the
+/// [PresetListScreen] SheetView.
+///
+/// Same shape as the plain [PresetEditorBody]: a dashboard card (identity +
+/// overflow menu + stat badges + reorderable block list + "Add Block"), then a
+/// collapsible panel below it — "Agents" here, "Advanced Settings" there.
+/// Editing a block replaces the body with the shared [GenericEditor], and back
+/// returns to the dashboard.
+///
+/// The one agentic-only element is the injection-point filter above the list:
+/// blocks are addressed to different pipeline stages (§5), so the list shows
+/// one stage at a time.
 class StudioPresetEditorBody extends ConsumerStatefulWidget {
   final String presetId;
   final VoidCallback onClose;
@@ -43,7 +53,11 @@ class StudioPresetEditorBodyState
   bool _loading = true;
   String _point = 'pregen';
   String? _editingBlockId;
+  bool _agentsExpanded = false;
   Timer? _saveTimer;
+
+  final ScrollController _scrollController = ScrollController();
+  double? _savedScrollOffset;
 
   /// Injection points and their labels, in pipeline order (§5).
   static const _points = <(String, String)>[
@@ -69,6 +83,7 @@ class StudioPresetEditorBodyState
   @override
   void dispose() {
     _flushSave();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -88,6 +103,7 @@ class StudioPresetEditorBodyState
     if (_editingBlockId != null) {
       _flushSave();
       setState(() => _editingBlockId = null);
+      _restoreScrollAfterFrame();
       return true;
     }
     return false;
@@ -124,6 +140,42 @@ class StudioPresetEditorBodyState
     // ref is still valid in deactivate(); dispose() flush is a best-effort.
     unawaited(ref.read(studioPresetRepoProvider).upsert(preset));
     ref.invalidate(studioPresetListProvider);
+  }
+
+  // ── Scroll position across the inline editor ───────────────────────────────
+
+  void _saveScrollOffset() {
+    if (_scrollController.hasClients) {
+      _savedScrollOffset = _scrollController.offset;
+    }
+  }
+
+  void _restoreScrollAfterFrame() {
+    if (_savedScrollOffset == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted ||
+          _savedScrollOffset == null ||
+          !_scrollController.hasClients) {
+        return;
+      }
+      _scrollController.jumpTo(
+        _savedScrollOffset!.clamp(
+          0.0,
+          _scrollController.position.maxScrollExtent,
+        ),
+      );
+      _savedScrollOffset = null;
+    });
+  }
+
+  void _openBlock(StudioPresetBlock block) {
+    // The grouper synthesizes a "Tense" header that has no stored block — it
+    // has nothing to edit, so tapping it is a no-op rather than an editor that
+    // opens onto nothing.
+    final preset = _preset;
+    if (preset == null || !preset.blocks.any((b) => b.id == block.id)) return;
+    _saveScrollOffset();
+    setState(() => _editingBlockId = block.id);
   }
 
   // ── Agent toggles ──────────────────────────────────────────────────────────
@@ -198,35 +250,19 @@ class StudioPresetEditorBodyState
       order: maxOrder + 1,
     );
     await _persistNow(preset.copyWith(blocks: [...preset.blocks, draft]));
-    if (mounted) setState(() => _editingBlockId = draft.id);
+    if (mounted) _openBlock(draft);
   }
 
   Future<void> _deleteBlock(StudioPresetBlock block) async {
     final preset = _preset;
     if (preset == null) return;
-    final ok = await GlazeBottomSheet.show<bool>(
+    final ok = await confirmStudioDelete(
       context,
       title: 'Delete Block',
-      bigInfo: BottomSheetBigInfo(
-        icon: Icons.delete_outline,
-        description:
-            'Delete "${block.title.isNotEmpty ? block.title : block.id}"?',
-      ),
-      items: [
-        BottomSheetItem(
-          label: 'Delete',
-          centered: true,
-          isDestructive: true,
-          onTap: () => Navigator.of(context, rootNavigator: true).pop(true),
-        ),
-        BottomSheetItem(
-          label: 'Cancel',
-          centered: true,
-          onTap: () => Navigator.of(context, rootNavigator: true).pop(false),
-        ),
-      ],
+      description:
+          'Delete "${block.title.isNotEmpty ? block.title : block.id}"?',
     );
-    if (ok != true) return;
+    if (!ok) return;
     await _persistNow(
       preset.copyWith(
         blocks: preset.blocks
@@ -239,70 +275,81 @@ class StudioPresetEditorBodyState
     }
   }
 
-  // ── Agent detail card ────────────────────────────────────────────────────
+  // ── Reordering ─────────────────────────────────────────────────────────────
 
-  void _showAgentCard(StudioControllerSpec spec) {
-    GlazeBottomSheet.show<void>(
+  void _onReorder(int oldIndex, int newIndex) {
+    final preset = _preset;
+    if (preset == null) return;
+    final entries = groupStudioPresetBlocks(_pointBlocks);
+    if (oldIndex < 0 || oldIndex >= entries.length) return;
+    if (newIndex > oldIndex) newIndex -= 1;
+    final reordered = [...entries];
+    reordered.insert(newIndex, reordered.removeAt(oldIndex));
+    final blocks = reorderStudioPresetBlocks(
+      all: preset.blocks,
+      entries: reordered,
+    );
+    if (identical(blocks, preset.blocks)) return;
+    unawaited(_persistNow(preset.copyWith(blocks: blocks)));
+  }
+
+  // ── Preset-level actions ───────────────────────────────────────────────────
+
+  void _showRenameDialog() {
+    final preset = _preset;
+    if (preset == null) return;
+    showStudioPresetRename(
       context,
-      title: spec.name,
-      child: SizedBox(
-        height: MediaQuery.sizeOf(context).height * 0.55,
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _cardRow(Icons.badge_outlined, 'Purpose', spec.purpose),
-              const SizedBox(height: 16),
-              _cardRow(
-                Icons.arrow_forward_rounded,
-                'Your Lane (owns)',
-                spec.laneOwns,
-              ),
-              const SizedBox(height: 16),
-              _cardRow(Icons.block_rounded, 'Not Your Lane (skip)', spec.laneSkip),
-              const SizedBox(height: 16),
-              _cardRow(
-                Icons.terminal_rounded,
-                'Output Contract',
-                spec.outputContract,
-              ),
-              const SizedBox(height: 20),
-              Text(
-                'These instructions are fixed and cannot be edited.',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: context.cs.onSurfaceVariant,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+      preset: preset,
+      onRename: (name) =>
+          unawaited(_persistNow(preset.copyWith(name: name))),
     );
   }
 
-  Widget _cardRow(IconData icon, String label, String body) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Icon(icon, size: 16, color: context.cs.primary),
-            const SizedBox(width: 6),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: context.cs.primary,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 4),
-        Text(body, style: const TextStyle(fontSize: 13, height: 1.4)),
-      ],
+  Future<void> _clonePreset() async {
+    final preset = _preset;
+    if (preset == null) return;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    // Cloning stays passive on purpose (the plain preset editor behaves the
+    // same): the copy is created but the active selection does not move.
+    final clone = preset.copyWith(
+      id: 'studio_$now',
+      name: '${preset.name} (copy)',
+      blocks: [...preset.blocks],
+      agentEnabled: {...preset.agentEnabled},
+      updatedAt: now,
+    );
+    await ref.read(studioPresetRepoProvider).upsert(clone);
+    ref.invalidate(studioPresetListProvider);
+    if (mounted) GlazeToast.show(context, 'Preset cloned');
+  }
+
+  Future<void> _deletePreset() async {
+    final preset = _preset;
+    if (preset == null) return;
+    final ok = await confirmStudioDelete(
+      context,
+      title: 'Delete Preset',
+      description: 'Delete "${preset.name}"? This cannot be undone.',
+    );
+    if (!ok) return;
+    _saveTimer?.cancel();
+    await ref.read(studioPresetRepoProvider).deleteById(preset.id);
+    if (!mounted) return;
+    ref.invalidate(studioPresetListProvider);
+    widget.onClose();
+  }
+
+  void _showOptionsMenu() {
+    final preset = _preset;
+    if (preset == null) return;
+    showStudioPresetOptions(
+      context,
+      preset: preset,
+      onRename: _showRenameDialog,
+      onClone: () => unawaited(_clonePreset()),
+      onExport: () => unawaited(exportStudioPreset(context, preset)),
+      onDelete: () => unawaited(_deletePreset()),
     );
   }
 
@@ -322,381 +369,162 @@ class StudioPresetEditorBodyState
         ? null
         : preset.blocks.where((b) => b.id == _editingBlockId).firstOrNull;
     if (editing != null) {
-      return _StudioBlockEditorInline(
+      return StudioBlockEditorInline(
         key: ValueKey(editing.id),
         block: editing,
-        agentOptions: _agentOptions,
         onChanged: _onBlockChanged,
         onDelete: () => _deleteBlock(editing),
       );
     }
 
-    final blockGroups = groupStudioPresetBlocks(_pointBlocks);
-
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-      children: [
-        _StatsPlaque(preset: preset),
-        const SizedBox(height: 20),
-        _sectionHeader(context, 'Agents'),
-        const SizedBox(height: 4),
-        ...StudioControllerOntology.specs.map(
-          (spec) => _agentTile(context, preset, spec),
-        ),
-        const SizedBox(height: 20),
-        _sectionHeader(context, 'Prompt Blocks'),
-        const SizedBox(height: 8),
-        _pointChips(context),
-        const SizedBox(height: 8),
-        if (blockGroups.isEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 24),
-            child: Center(
-              child: Text(
-                'No blocks for this injection point',
-                style: TextStyle(color: context.cs.onSurfaceVariant),
-              ),
-            ),
-          )
-        else
-          ...blockGroups.map((group) => _blockRow(context, group)),
-        const SizedBox(height: 12),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: FilledButton.tonalIcon(
-            onPressed: _addBlock,
-            icon: const Icon(Icons.add, size: 18),
-            label: const Text('Add Block'),
-          ),
-        ),
-      ],
-    );
-  }
-
-  /// Agent dropdown options — the pre-gen controllers (they produce briefs and
-  /// receive specific-agent blocks). The final and post-processing agents are
-  /// excluded.
-  List<Map<String, dynamic>> get _agentOptions => [
-    for (final spec in StudioControllerOntology.specs)
-      if (!spec.isFinal && spec.phase != 'post_processing')
-        {'label': spec.name, 'value': spec.id},
-  ];
-
-  Widget _sectionHeader(BuildContext context, String label) {
-    return Text(
-      label,
-      style: TextStyle(
-        fontSize: 13,
-        fontWeight: FontWeight.w700,
-        letterSpacing: 0.4,
-        color: context.cs.onSurfaceVariant,
+    return SingleChildScrollView(
+      controller: _scrollController,
+      key: const ValueKey('studio_dashboard'),
+      padding: EdgeInsets.only(
+        top: MediaQuery.paddingOf(context).top,
+        bottom:
+            MediaQuery.paddingOf(context).bottom +
+            MediaQuery.viewInsetsOf(context).bottom,
       ),
-    );
-  }
-
-  Widget _agentTile(
-    BuildContext context,
-    StudioPreset preset,
-    StudioControllerSpec spec,
-  ) {
-    final isOn = studioAgentEnabled(preset, spec);
-    return SwitchListTile(
-      contentPadding: EdgeInsets.zero,
-      secondary: Icon(
-        spec.lockedOn
-            ? Icons.lock_outline
-            : spec.isFinal
-            ? Icons.star_outline
-            : Icons.smart_toy_outlined,
-        color: spec.isFinal ? context.cs.primary : null,
-      ),
-      title: InkWell(
-        onTap: () => _showAgentCard(spec),
-        child: Text(spec.name),
-      ),
-      subtitle: InkWell(
-        onTap: () => _showAgentCard(spec),
-        child: Text(
-          spec.purpose,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: const TextStyle(fontSize: 12),
-        ),
-      ),
-      value: isOn,
-      onChanged: spec.lockedOn ? null : (v) => _toggleAgent(spec.id, v),
-    );
-  }
-
-  Widget _pointChips(BuildContext context) {
-    return Wrap(
-      spacing: 8,
-      runSpacing: 4,
-      children: _points.map((point) {
-        final count = (_preset?.blocks ?? const <StudioPresetBlock>[])
-            .where((b) => b.injectionPoint == point.$1)
-            .length;
-        return FilterChip(
-          label: Text('${point.$2} ($count)'),
-          selected: point.$1 == _point,
-          onSelected: (_) => setState(() => _point = point.$1),
-        );
-      }).toList(growable: false),
-    );
-  }
-
-  Widget _blockRow(BuildContext context, StudioPresetBlockGroup group) {
-    if (group.header != null) {
-      return StudioPresetGroupTile(
-        group: group,
-        onSelectExclusive: (id) => _selectExclusive(group, id),
-        onToggle: _toggleBlock,
-        onEdit: (block) => setState(() => _editingBlockId = block.id),
-        onDelete: _deleteBlock,
-      );
-    }
-    final block = group.standalone!;
-    return ListTile(
-      key: ValueKey('block_${block.id}'),
-      contentPadding: EdgeInsets.zero,
-      title: Text(
-        block.title.isNotEmpty ? block.title : block.id,
-        style: block.enabled
-            ? null
-            : const TextStyle(decoration: TextDecoration.lineThrough),
-      ),
-      subtitle: Text(
-        _blockSubtitle(block),
-        style: const TextStyle(fontSize: 12),
-      ),
-      trailing: Switch(
-        value: block.enabled,
-        onChanged: block.locked ? null : (v) => _toggleBlock(block, v),
-      ),
-      onTap: () => setState(() => _editingBlockId = block.id),
-      onLongPress: () => _deleteBlock(block),
-    );
-  }
-
-  String _blockSubtitle(StudioPresetBlock block) {
-    final mode = switch (block.mode) {
-      'pregenBrief' => 'Pregen Brief',
-      'agentResponse' => 'Agent response',
-      '' => 'Context',
-      _ => 'Direct',
-    };
-    if (block.injectionPoint == 'specificAgent' &&
-        block.targetAgentId.isNotEmpty) {
-      return '$mode → ${StudioControllerOntology.byId(block.targetAgentId).name}';
-    }
-    return mode;
-  }
-}
-
-/// Inline block editor built on the shared [GenericEditor] (the same engine the
-/// plain preset block editor uses). Fields follow STUDIO_UX_ANALYSIS §5. The two
-/// agent dropdowns mean opposite directions, so they are labelled `←`/`→`.
-class _StudioBlockEditorInline extends StatelessWidget {
-  final StudioPresetBlock block;
-  final List<Map<String, dynamic>> agentOptions;
-  final ValueChanged<StudioPresetBlock> onChanged;
-  final VoidCallback onDelete;
-
-  const _StudioBlockEditorInline({
-    super.key,
-    required this.block,
-    required this.agentOptions,
-    required this.onChanged,
-    required this.onDelete,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final config = [
-      GenericEditorSection(
-        title: null,
-        fields: [
-          GenericEditorField(
-            key: 'title',
-            label: 'Title',
-            type: 'text',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _buildDashboard(preset),
+          StudioAgentsPanel(
+            preset: preset,
+            expanded: _agentsExpanded,
+            onToggleExpanded: () =>
+                setState(() => _agentsExpanded = !_agentsExpanded),
+            onToggle: _toggleAgent,
           ),
-          GenericEditorField(
-            key: 'role',
-            label: 'Role',
-            type: 'select',
-            options: const [
-              {'label': 'System', 'value': 'system'},
-              {'label': 'User', 'value': 'user'},
-              {'label': 'Assistant', 'value': 'assistant'},
-            ],
-          ),
-          GenericEditorField(
-            key: 'mode',
-            label: 'Mode',
-            type: 'select',
-            options: const [
-              {'label': 'Direct instruction', 'value': 'direct'},
-              {'label': 'Pregen Brief', 'value': 'pregenBrief'},
-              {'label': 'Agent response', 'value': 'agentResponse'},
-            ],
-          ),
-          GenericEditorField(
-            key: 'sourceAgentId',
-            label: '← Take response from agent',
-            type: 'select',
-            options: agentOptions,
-            showIf: (item) => item['mode'] == 'agentResponse',
-          ),
-          GenericEditorField(
-            key: 'injectionPoint',
-            label: 'Injection point',
-            type: 'select',
-            options: const [
-              {'label': 'Pre-generation', 'value': 'pregen'},
-              {'label': 'Final', 'value': 'final'},
-              {'label': 'Post-processing', 'value': 'cleaner'},
-              {'label': 'Трекер', 'value': 'ledger'},
-              {'label': 'Specific agent', 'value': 'specificAgent'},
-            ],
-          ),
-          GenericEditorField(
-            key: 'targetAgentId',
-            label: '→ Send to agent',
-            type: 'select',
-            options: agentOptions,
-            showIf: (item) => item['injectionPoint'] == 'specificAgent',
-          ),
-          GenericEditorField(
-            key: 'content',
-            label: 'Content',
-            type: 'textarea',
-            rows: 8,
-            expandable: true,
-          ),
+          const SizedBox(height: 60),
         ],
       ),
-    ];
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Expanded(
-          child: GenericEditor(
-            item: block.toJson(),
-            config: config,
-            scrollable: true,
-            onChanged: (values) => onChanged(StudioPresetBlock.fromJson(values)),
-          ),
-        ),
-        Padding(
-          padding: EdgeInsets.fromLTRB(
-            16,
-            0,
-            16,
-            MediaQuery.paddingOf(context).bottom + 16,
-          ),
-          child: Material(
-            color: const Color(0xFFFF4444).withValues(alpha: 0.1),
-            borderRadius: BorderRadius.circular(12),
-            child: InkWell(
-              onTap: onDelete,
-              borderRadius: BorderRadius.circular(12),
-              child: const Padding(
-                padding: EdgeInsets.symmetric(vertical: 14),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.delete_outlined, size: 20, color: Color(0xFFFF4444)),
-                    SizedBox(width: 8),
-                    Text(
-                      'Delete Block',
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFFFF4444),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
     );
   }
-}
 
-/// Top plaque: agent count and estimated LLM calls per turn.
-class _StatsPlaque extends StatelessWidget {
-  final StudioPreset preset;
+  Widget _buildDashboard(StudioPreset preset) {
+    final addBlockAtTop =
+        ref.watch(appSettingsProvider).value?.addBlockAtTop ?? false;
+    final entries = groupStudioPresetBlocks(_pointBlocks);
 
-  const _StatsPlaque({required this.preset});
-
-  @override
-  Widget build(BuildContext context) {
-    final agents = studioPresetEnabledAgentCount(preset);
-    final calls = studioPresetRequestCount(preset);
-    return GlassSurface(
-      borderRadius: BorderRadius.circular(12),
-      border: Border.all(color: context.cs.outline, width: 1),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
-        child: Row(
-          children: [
-            Expanded(
-              child: _stat(
-                context,
-                icon: Icons.smart_toy_outlined,
-                value: '$agents',
-                label: agents == 1 ? 'agent' : 'agents',
-              ),
-            ),
-            Container(
-              width: 1,
-              height: 36,
-              color: context.cs.outline.withValues(alpha: 0.4),
-            ),
-            Expanded(
-              child: _stat(
-                context,
-                icon: Icons.bolt,
-                value: '$calls',
-                label: 'calls / turn',
-              ),
-            ),
-          ],
+    return PresetDashboardCard(
+      leading: Container(
+        width: 52,
+        height: 52,
+        decoration: BoxDecoration(
+          color: context.cs.primary.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(10),
         ),
+        child: Icon(
+          Icons.smart_toy_outlined,
+          size: 26,
+          color: context.cs.primary,
+        ),
+      ),
+      title: preset.name.isNotEmpty ? preset.name : 'Agentic Preset',
+      subtitle: 'agentic preset',
+      onTitleTap: _showRenameDialog,
+      onMenuTap: _showOptionsMenu,
+      utilsLeading: [
+        PresetUtilButton(
+          icon: Icons.smart_toy_outlined,
+          count: studioPresetEnabledAgentCount(preset),
+          onTap: () => setState(() => _agentsExpanded = !_agentsExpanded),
+        ),
+      ],
+      utilsTrailing: [
+        PresetStatBadge(
+          icon: Icons.bolt,
+          label: '${studioPresetRequestCount(preset)}/ход',
+        ),
+        const SizedBox(width: 8),
+        PresetStatBadge(
+          icon: Icons.description,
+          label: '${studioPresetTokenLabel(preset)}t',
+        ),
+      ],
+      belowUtils: _buildPointChips(),
+      blockList: _buildBlockList(entries),
+      addBlockAtTop: addBlockAtTop,
+      onAddBlock: _addBlock,
+    );
+  }
+
+  /// Injection-point filter. Each chip carries the number of blocks addressed
+  /// to that stage so an empty stage is obvious before tapping it.
+  Widget _buildPointChips() {
+    final blocks = _preset?.blocks ?? const <StudioPresetBlock>[];
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: Wrap(
+        spacing: 6,
+        runSpacing: 4,
+        children: [
+          for (final point in _points)
+            ChoiceChip(
+              label: Text(
+                '${point.$2} '
+                '(${blocks.where((b) => b.injectionPoint == point.$1).length})',
+                style: const TextStyle(fontSize: 12),
+              ),
+              visualDensity: VisualDensity.compact,
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              selected: point.$1 == _point,
+              onSelected: (_) => setState(() => _point = point.$1),
+            ),
+        ],
       ),
     );
   }
 
-  Widget _stat(
-    BuildContext context, {
-    required IconData icon,
-    required String value,
-    required String label,
-  }) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, size: 18, color: context.cs.primary),
-        const SizedBox(height: 6),
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.w700,
-            color: context.cs.onSurface,
+  Widget _buildBlockList(List<StudioPresetBlockGroup> entries) {
+    if (entries.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 20),
+        child: Center(
+          child: Text(
+            'No blocks for this injection point',
+            style: TextStyle(fontSize: 13, color: context.cs.onSurfaceVariant),
           ),
         ),
-        const SizedBox(height: 2),
-        Text(
-          label,
-          style: TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant),
-        ),
-      ],
+      );
+    }
+    return ReorderableListView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      padding: EdgeInsets.zero,
+      buildDefaultDragHandles: false,
+      itemCount: entries.length,
+      // TODO: migrate to onReorderItem (newIndex semantics differ — see Flutter changelog).
+      // ignore: deprecated_member_use
+      onReorder: _onReorder,
+      itemBuilder: (_, i) {
+        final entry = entries[i];
+        final isLast = i == entries.length - 1;
+        if (entry.header != null) {
+          return StudioBlockGroupRow(
+            key: ValueKey('studio_group_${entry.header!.id}'),
+            group: entry,
+            dragIndex: i,
+            isLast: isLast,
+            onSelectExclusive: (id) => _selectExclusive(entry, id),
+            onToggle: _toggleBlock,
+            onEdit: _openBlock,
+            onDelete: _deleteBlock,
+          );
+        }
+        final block = entry.standalone!;
+        return StudioBlockRow(
+          key: ValueKey('studio_block_${block.id}'),
+          block: block,
+          dragIndex: i,
+          isLast: isLast,
+          onEdit: () => _openBlock(block),
+          onToggle: (v) => _toggleBlock(block, v),
+          onLongPress: () => _deleteBlock(block),
+        );
+      },
     );
   }
 }

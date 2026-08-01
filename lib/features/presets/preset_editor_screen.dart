@@ -26,6 +26,7 @@ import 'preset_image.dart';
 import 'preset_list_provider.dart';
 import 'preset_export.dart';
 import 'widgets/preset_block_row.dart';
+import 'widgets/preset_dashboard_card.dart';
 import '../../core/state/summary_providers.dart';
 import '../chat/chat_provider.dart';
 import '../settings/app_settings_provider.dart';
@@ -326,103 +327,44 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
       imagePath: _imagePath,
     );
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-      child: GlassSurface(
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: context.cs.outline),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // Header: name + author + three-dot menu
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 12, 12, 0),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (cover != null) ...[
-                    GestureDetector(
-                      onTap: _isFeatured ? null : _pickImage,
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(10),
-                        child: Image(
-                          image: cover,
-                          width: 52,
-                          height: 52,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, _, _) => const SizedBox.shrink(),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                  ],
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: _showRenameDialog,
-                      child: Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              displayName,
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w700,
-                                color: context.cs.onSurface,
-                              ),
-                            ),
-                            if (_author.isNotEmpty)
-                              Text(
-                                'by $_author',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w500,
-                                  color: context.cs.primary.withValues(
-                                    alpha: 0.8,
-                                  ),
-                                ),
-                              ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                  _DotsButton(onTap: _showOptionsMenu),
-                ],
+    final tokens = _blocks
+        .where((b) => b.enabled && b.content.isNotEmpty)
+        .fold(0, (sum, b) => sum + estimateTokens(b.content));
+
+    return PresetDashboardCard(
+      leading: cover == null
+          ? null
+          : GestureDetector(
+              onTap: _isFeatured ? null : _pickImage,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: Image(
+                  image: cover,
+                  width: 52,
+                  height: 52,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                ),
               ),
             ),
-            // Utils row: regex button | spacer | block count badge
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
-              child: Row(
-                children: [
-                  _UtilButton(
-                    icon: Icons.code,
-                    count: _regexes.length,
-                    onTap: _showRegexSheet,
-                  ),
-                  const Spacer(),
-                  _BlocksBadge(
-                    count: _blocks
-                        .where(
-                          (b) =>
-                               b.enabled && b.content.isNotEmpty,
-                        )
-                        .fold(0, (sum, b) => sum + estimateTokens(b.content)),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 12),
-            // Add block row position follows the app setting (top or bottom).
-            if (addBlockAtTop) _AddBlockRow(onTap: _addBlock, atTop: true),
-            // Reorderable block list
-            if (_blocks.isNotEmpty) _buildBlockList(),
-            if (!addBlockAtTop) _AddBlockRow(onTap: _addBlock),
-          ],
+      title: displayName,
+      subtitle: _author.isNotEmpty ? 'by $_author' : null,
+      onTitleTap: _showRenameDialog,
+      onMenuTap: _showOptionsMenu,
+      utilsLeading: [
+        PresetUtilButton(
+          icon: Icons.code,
+          count: _regexes.length,
+          onTap: _showRegexSheet,
         ),
-      ),
+      ],
+      utilsTrailing: [
+        PresetStatBadge(icon: Icons.description, label: '${tokens}t'),
+      ],
+      // Add block row position follows the app setting (top or bottom).
+      addBlockAtTop: addBlockAtTop,
+      blockList: _blocks.isNotEmpty ? _buildBlockList() : null,
+      onAddBlock: _addBlock,
     );
   }
 
@@ -1049,183 +991,6 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
         borderSide: BorderSide(color: context.cs.primary),
       ),
       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-    );
-  }
-}
-
-// ─── _AddBlockRow ─────────────────────────────────────────────────────────────
-
-class _AddBlockRow extends StatelessWidget {
-  final VoidCallback onTap;
-
-  /// When true the row sits above the block list: drop the bottom-rounded
-  /// corners and use a bottom divider instead of a top one.
-  final bool atTop;
-  const _AddBlockRow({required this.onTap, this.atTop = false});
-
-  @override
-  Widget build(BuildContext context) {
-    final radius = atTop
-        ? BorderRadius.zero
-        : const BorderRadius.only(
-            bottomLeft: Radius.circular(14),
-            bottomRight: Radius.circular(14),
-          );
-    return Material(
-      color: Colors.transparent,
-      borderRadius: radius,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: radius,
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          decoration: BoxDecoration(
-            border: Border(
-              top: atTop
-                  ? BorderSide.none
-                  : const BorderSide(color: Color(0x33808080), width: 1),
-              bottom: atTop
-                  ? const BorderSide(color: Color(0x33808080), width: 1)
-                  : BorderSide.none,
-            ),
-          ),
-          child: Row(
-            children: [
-              const SizedBox(width: 30), // align with drag handle column
-              Icon(Icons.add, size: 16, color: context.cs.primary),
-              const SizedBox(width: 8),
-              Text(
-                'Add Block',
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                  color: context.cs.primary,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ─── _DotsButton ──────────────────────────────────────────────────────────────
-
-class _DotsButton extends StatelessWidget {
-  final VoidCallback onTap;
-  const _DotsButton({required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: context.cs.primary.withValues(alpha: 0.1),
-      shape: const CircleBorder(),
-      child: InkWell(
-        onTap: onTap,
-        customBorder: const CircleBorder(),
-        child: SizedBox(
-          width: 32,
-          height: 32,
-          child: Icon(
-            Icons.more_vert,
-            size: 20,
-            color: context.cs.primary.withValues(alpha: 0.8),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ─── _UtilButton ──────────────────────────────────────────────────────────────
-
-class _UtilButton extends StatelessWidget {
-  final IconData icon;
-  final int count;
-  final VoidCallback onTap;
-  const _UtilButton({
-    required this.icon,
-    required this.count,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(
-              color: context.cs.primary.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Icon(
-              icon,
-              size: 14,
-              color: context.cs.primary.withValues(alpha: 0.7),
-            ),
-          ),
-          if (count > 0)
-            Positioned(
-              top: -4,
-              right: -4,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 3),
-                height: 12,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFF4444),
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: context.cs.surface, width: 1),
-                ),
-                child: Text(
-                  '$count',
-                  style: const TextStyle(
-                    fontSize: 9,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.white,
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-// ─── _BlocksBadge ─────────────────────────────────────────────────────────────
-
-class _BlocksBadge extends StatelessWidget {
-  final int count;
-  const _BlocksBadge({required this.count});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.description, size: 14, color: context.cs.onSurfaceVariant),
-          const SizedBox(width: 4),
-          Text(
-            '${count}t',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: context.cs.onSurfaceVariant,
-            ),
-          ),
-        ],
-      ),
     );
   }
 }

@@ -1,0 +1,37 @@
+import 'dart:convert';
+
+import 'package:flutter/material.dart';
+
+import '../../core/models/studio_config.dart';
+import '../../core/services/file_export_service.dart';
+import '../../shared/widgets/glaze_error_dialog.dart';
+import '../../shared/widgets/glaze_toast.dart';
+
+/// Exports an agentic (Studio) preset to JSON and shows a toast with the
+/// result. The payload is the model's own `toJson()` — it keeps the
+/// `agentEnabled` map, which is what the importer in `PresetListScreen` sniffs
+/// to tell an agentic file apart from a SillyTavern preset.
+Future<void> exportStudioPreset(
+  BuildContext context,
+  StudioPreset preset,
+) async {
+  try {
+    final encoded = const JsonEncoder.withIndent(
+      '  ',
+    ).convert(preset.toJson());
+    final safeName = preset.name.replaceAll(RegExp(r'[^\w\s-]'), '').trim();
+    final savedPath = await FileExportService.export(
+      data: encoded,
+      filename:
+          '${safeName.isNotEmpty ? safeName : 'agentic_preset'}.json',
+      subfolder: 'presets',
+    );
+    if (context.mounted) {
+      GlazeToast.show(context, 'Exported to $savedPath');
+    }
+  } catch (e) {
+    if (context.mounted) {
+      GlazeErrorDialog.show(context, e, prefix: 'Export failed: ');
+    }
+  }
+}

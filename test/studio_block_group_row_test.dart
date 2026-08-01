@@ -2,12 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/models/studio_config.dart';
 import 'package:glaze_flutter/core/models/studio_preset_block_groups.dart';
-import 'package:glaze_flutter/features/studio/widgets/studio_preset_group_tile.dart';
+import 'package:glaze_flutter/features/studio/widgets/studio_block_row.dart';
+
+Widget _host(Widget child) =>
+    MaterialApp(home: Scaffold(body: ListView(children: [child])));
 
 void main() {
-  testWidgets('exclusive group renders a dropdown and selects one option', (
-    tester,
-  ) async {
+  testWidgets('exclusive group expands and selects one option', (tester) async {
     const blocks = [
       StudioPresetBlock(
         id: 'pov_header_group_open',
@@ -40,37 +41,39 @@ void main() {
     StudioPresetBlock? edited;
 
     await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: StudioPresetGroupTile(
-            group: group,
-            onSelectExclusive: (id) => selected = id,
-            onToggle: (_, _) {},
-            onEdit: (block) => edited = block,
-          ),
+      _host(
+        StudioBlockGroupRow(
+          group: group,
+          dragIndex: 0,
+          isLast: true,
+          onSelectExclusive: (id) => selected = id,
+          onToggle: (_, _) {},
+          onEdit: (block) => edited = block,
+          onDelete: (_) {},
         ),
       ),
     );
 
+    // Collapsed: only the header row and the currently selected child's name
+    // (as the row subtitle) are visible.
     expect(find.text('Point-of-View'), findsOneWidget);
-    expect(find.text('Third Person Narrator'), findsOneWidget);
+    expect(find.text('Second Person'), findsNothing);
 
     await tester.tap(find.text('Point-of-View'));
     await tester.pumpAndSettle();
 
+    expect(find.text('Second Person'), findsOneWidget);
     expect(find.text('Opening tag'), findsOneWidget);
-    expect(find.text('<loompov>'), findsOneWidget);
     expect(find.text('Closing tag'), findsOneWidget);
-    expect(find.text('</loompov>'), findsOneWidget);
 
-    await tester.tap(find.text('<loompov>'));
+    await tester.tap(find.text('Opening tag'));
+    await tester.pumpAndSettle();
     expect(edited?.id, 'pov_header_group_open');
 
-    await tester.tap(find.byType(DropdownButton<String>));
+    // Exclusive children carry radios, not switches.
+    expect(find.byType(Switch), findsNothing);
+    await tester.tap(find.byIcon(Icons.radio_button_off));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Second Person').last);
-    await tester.pumpAndSettle();
-
     expect(selected, 'second_person');
   });
 
@@ -83,17 +86,19 @@ void main() {
     var toggled = false;
 
     await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: StudioPresetGroupTile(
-            group: group,
-            onSelectExclusive: (_) {},
-            onToggle: (_, _) => toggled = true,
-            onEdit: (_) {},
-          ),
+      _host(
+        StudioBlockGroupRow(
+          group: group,
+          dragIndex: 0,
+          isLast: true,
+          onSelectExclusive: (_) {},
+          onToggle: (_, _) => toggled = true,
+          onEdit: (_) {},
+          onDelete: (_) {},
         ),
       ),
     );
+
     await tester.tap(find.text('Core'));
     await tester.pumpAndSettle();
 
