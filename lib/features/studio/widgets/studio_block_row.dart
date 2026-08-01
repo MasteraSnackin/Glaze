@@ -223,6 +223,67 @@ class StudioBlockRow extends StatelessWidget {
   }
 }
 
+// ─── StudioBlockSectionHeader ─────────────────────────────────────────────────
+
+/// Label above one injection point's blocks. The whole preset is rendered at
+/// once, split into these sections in pipeline order, so the header is what
+/// tells the reader which stage the rows underneath are addressed to.
+class StudioBlockSectionHeader extends StatelessWidget {
+  final String label;
+  final int count;
+
+  /// The first header follows the agents section's own divider, so it drops
+  /// its rule to avoid two hairlines a gap apart.
+  final bool isFirst;
+
+  const StudioBlockSectionHeader({
+    super.key,
+    required this.label,
+    required this.count,
+    this.isFirst = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        border: Border(
+          top: isFirst
+              ? BorderSide.none
+              : const BorderSide(color: Color(0x33808080), width: 1),
+        ),
+      ),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              label.toUpperCase(),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.6,
+                color: context.cs.onSurfaceVariant,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            '$count',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: context.cs.onSurfaceVariant.withValues(alpha: 0.6),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 // ─── StudioBlockBadge ─────────────────────────────────────────────────────────
 
 /// Compact pill used for a block's mode / routing hints, matching the plain

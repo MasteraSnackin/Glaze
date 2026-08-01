@@ -28,10 +28,10 @@ import 'widgets/preset_dashboard_card.dart';
 /// with its "Add Block" row. Editing a block replaces the body with the shared
 /// [GenericEditor], and back returns to the dashboard.
 ///
-/// Two agentic-only sections sit between the badges and the list, in the order
-/// the pipeline reads them: the collapsible agent list (which stages run at
-/// all), then the injection-point filter (blocks are addressed to different
-/// stages per §5, so the list shows one stage at a time).
+/// Agentic-only: the collapsible agent list sits between the badges and the
+/// blocks (it decides which stages run at all), and the block list itself is
+/// the whole preset at once, split into one section per injection point (§5)
+/// in pipeline order. Rows drag only within their own section.
 class StudioPresetEditorBody extends ConsumerStatefulWidget {
   final String presetId;
   final VoidCallback onClose;
@@ -51,7 +51,6 @@ class StudioPresetEditorBodyState
     extends ConsumerState<StudioPresetEditorBody> {
   StudioPreset? _preset;
   bool _loading = true;
-  String _point = 'pregen';
   String? _editingBlockId;
   bool _agentsExpanded = false;
   Timer? _saveTimer;
@@ -59,13 +58,15 @@ class StudioPresetEditorBodyState
   final ScrollController _scrollController = ScrollController();
   double? _savedScrollOffset;
 
-  /// Injection points and their labels, in pipeline order (§5).
-  static const _points = <(String, String)>[
+  /// Injection points and their labels, in the order the sections are rendered:
+  /// the pipeline order a turn actually runs in (§5). Blocks for a specific
+  /// agent are fed in during pre-generation, so they sit right after it.
+  static const _sections = <(String, String)>[
     ('pregen', 'Pre-generation'),
+    ('specificAgent', 'Specific agent'),
     ('final', 'Final'),
     ('cleaner', 'Post-processing'),
     ('ledger', 'Трекер'),
-    ('specificAgent', 'Specific agent'),
   ];
 
   @override
@@ -188,9 +189,9 @@ class StudioPresetEditorBodyState
 
   // ── Block ops ──────────────────────────────────────────────────────────────
 
-  List<StudioPresetBlock> get _pointBlocks =>
+  List<StudioPresetBlock> _blocksAt(String injectionPoint) =>
       (_preset?.blocks ?? const <StudioPresetBlock>[])
-          .where((b) => b.injectionPoint == _point)
+          .where((b) => b.injectionPoint == injectionPoint)
           .toList()
         ..sort((a, b) => a.order.compareTo(b.order));
 
@@ -230,7 +231,30 @@ class StudioPresetEditorBodyState
     );
   }
 
-  Future<void> _addBlock() async {
+  /// Asks which stage the new block belongs to — with every section on screen
+  /// there is no longer a "current" one to infer it from — then appends it
+  /// there and opens the editor.
+  void _addBlock() {
+    final preset = _preset;
+    if (preset == null) return;
+    GlazeBottomSheet.show<void>(
+      context,
+      title: 'Add Block',
+      items: [
+        for (final section in _sections)
+          BottomSheetItem(
+            icon: Icons.add,
+            label: section.$2,
+            onTap: () {
+              Navigator.of(context, rootNavigator: true).pop();
+              unawaited(_createBlock(section.$1));
+            },
+          ),
+      ],
+    );
+  }
+
+  Future<void> _createBlock(String injectionPoint) async {
     final preset = _preset;
     if (preset == null) return;
     final maxOrder = preset.blocks.fold<int>(
@@ -246,7 +270,7 @@ class StudioPresetEditorBodyState
       section: '',
       role: 'system',
       mode: 'direct',
-      injectionPoint: _point,
+      injectionPoint: injectionPoint,
       order: maxOrder + 1,
     );
     await _persistNow(preset.copyWith(blocks: [...preset.blocks, draft]));
@@ -277,10 +301,13 @@ class StudioPresetEditorBodyState
 
   // ── Reordering ─────────────────────────────────────────────────────────────
 
-  void _onReorder(int oldIndex, int newIndex) {
+  /// Rows only move inside their own section — an injection point is what a
+  /// block is addressed to, not a position, so dragging across sections would
+  /// silently re-target it. Changing the stage is the editor's job.
+  void _onReorder(String injectionPoint, int oldIndex, int newIndex) {
     final preset = _preset;
     if (preset == null) return;
-    final entries = groupStudioPresetBlocks(_pointBlocks);
+    final entries = groupStudioPresetBlocks(_blocksAt(injectionPoint));
     if (oldIndex < 0 || oldIndex >= entries.length) return;
     if (newIndex > oldIndex) newIndex -= 1;
     final reordered = [...entries];
@@ -399,7 +426,6 @@ class StudioPresetEditorBodyState
   Widget _buildDashboard(StudioPreset preset) {
     final addBlockAtTop =
         ref.watch(appSettingsProvider).value?.addBlockAtTop ?? false;
-    final entries = groupStudioPresetBlocks(_pointBlocks);
 
     return PresetDashboardCard(
       leading: Container(
@@ -438,66 +464,66 @@ class StudioPresetEditorBodyState
         ),
       ],
       // Agents come before the block list: they decide which stages run, and
-      // the blocks below are addressed to those stages.
-      belowUtils: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          StudioAgentsPanel(
-            preset: preset,
-            expanded: _agentsExpanded,
-            onToggleExpanded: () =>
-                setState(() => _agentsExpanded = !_agentsExpanded),
-            onToggle: _toggleAgent,
-          ),
-          _buildPointChips(),
-        ],
+      // every block below is addressed to one of those stages.
+      belowUtils: StudioAgentsPanel(
+        preset: preset,
+        expanded: _agentsExpanded,
+        onToggleExpanded: () =>
+            setState(() => _agentsExpanded = !_agentsExpanded),
+        onToggle: _toggleAgent,
       ),
-      blockList: _buildBlockList(entries),
+      blockList: _buildSections(),
       addBlockAtTop: addBlockAtTop,
       onAddBlock: _addBlock,
     );
   }
 
-  /// Injection-point filter. Each chip carries the number of blocks addressed
-  /// to that stage so an empty stage is obvious before tapping it.
-  Widget _buildPointChips() {
-    final blocks = _preset?.blocks ?? const <StudioPresetBlock>[];
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-      child: Wrap(
-        spacing: 6,
-        runSpacing: 4,
-        children: [
-          for (final point in _points)
-            ChoiceChip(
-              label: Text(
-                '${point.$2} '
-                '(${blocks.where((b) => b.injectionPoint == point.$1).length})',
-                style: const TextStyle(fontSize: 12),
-              ),
-              visualDensity: VisualDensity.compact,
-              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              selected: point.$1 == _point,
-              onSelected: (_) => setState(() => _point = point.$1),
-            ),
-        ],
-      ),
+  /// The whole preset at once, split by injection point in pipeline order.
+  /// Every stage keeps its header even when empty, so the pipeline reads the
+  /// same whatever the preset happens to contain.
+  Widget _buildSections() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (var i = 0; i < _sections.length; i++)
+          ..._buildSection(_sections[i], isFirst: i == 0),
+      ],
     );
   }
 
-  Widget _buildBlockList(List<StudioPresetBlockGroup> entries) {
-    if (entries.isEmpty) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 20),
-        child: Center(
+  List<Widget> _buildSection((String, String) section, {required bool isFirst}) {
+    final (point, label) = section;
+    final blocks = _blocksAt(point);
+    final entries = groupStudioPresetBlocks(blocks);
+    return [
+      StudioBlockSectionHeader(
+        key: ValueKey('studio_section_$point'),
+        label: label,
+        count: blocks.length,
+        isFirst: isFirst,
+      ),
+      if (entries.isEmpty)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
           child: Text(
-            'No blocks for this injection point',
-            style: TextStyle(fontSize: 13, color: context.cs.onSurfaceVariant),
+            'No blocks',
+            style: TextStyle(
+              fontSize: 13,
+              color: context.cs.onSurfaceVariant.withValues(alpha: 0.7),
+            ),
           ),
-        ),
-      );
-    }
+        )
+      else
+        _buildSectionList(point, entries),
+    ];
+  }
+
+  Widget _buildSectionList(
+    String point,
+    List<StudioPresetBlockGroup> entries,
+  ) {
     return ReorderableListView.builder(
+      key: ValueKey('studio_section_list_$point'),
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
       padding: EdgeInsets.zero,
@@ -505,9 +531,12 @@ class StudioPresetEditorBodyState
       itemCount: entries.length,
       // TODO: migrate to onReorderItem (newIndex semantics differ — see Flutter changelog).
       // ignore: deprecated_member_use
-      onReorder: _onReorder,
+      onReorder: (oldIndex, newIndex) =>
+          _onReorder(point, oldIndex, newIndex),
       itemBuilder: (_, i) {
         final entry = entries[i];
+        // The last row keeps no bottom rule — the next section header draws
+        // its own, and the "Add Block" row draws the closing one.
         final isLast = i == entries.length - 1;
         if (entry.header != null) {
           return StudioBlockGroupRow(
