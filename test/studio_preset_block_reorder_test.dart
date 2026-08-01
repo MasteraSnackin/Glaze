@@ -18,6 +18,18 @@ StudioPresetBlock _block(
   );
 }
 
+/// Places [entries] in the given section, mirroring what the section list
+/// reports after a drag.
+List<StudioPresetRowPlacement> _rows(
+  List<StudioPresetBlockGroup> entries, {
+  String at = 'pregen',
+}) {
+  return [
+    for (final entry in entries)
+      StudioPresetRowPlacement(entry: entry, injectionPoint: at),
+  ];
+}
+
 List<String> _idsInOrder(List<StudioPresetBlock> blocks) {
   final sorted = [...blocks]..sort((a, b) => a.order.compareTo(b.order));
   return sorted.map((b) => b.id).toList();
@@ -35,33 +47,59 @@ void main() {
       expect(entries.length, 3);
 
       // Drag the last row to the top.
-      final reordered = [entries[2], entries[0], entries[1]];
-      final result = reorderStudioPresetBlocks(all: blocks, entries: reordered);
+      final result = reorderStudioPresetBlocks(
+        all: blocks,
+        rows: _rows([entries[2], entries[0], entries[1]]),
+      );
 
       expect(_idsInOrder(result), ['c', 'a', 'b']);
       expect(result.map((b) => b.order).toList()..sort(), [0, 1, 2]);
     });
 
-    test('leaves blocks at other injection points in their slots', () {
+    test('re-targets a row dropped under another section header', () {
       final blocks = [
         _block('pre1', order: 0),
-        _block('final1', order: 1, injectionPoint: 'final'),
-        _block('pre2', order: 2),
+        _block('pre2', order: 1),
+        _block('fin1', order: 2, injectionPoint: 'final'),
       ];
-      final visible = blocks
-          .where((b) => b.injectionPoint == 'pregen')
-          .toList();
-      final entries = groupStudioPresetBlocks(visible);
+      final entries = groupStudioPresetBlocks(blocks);
+      // pre2 lands in the Final section; the others stay put.
       final result = reorderStudioPresetBlocks(
         all: blocks,
-        entries: [entries[1], entries[0]],
+        rows: [
+          StudioPresetRowPlacement(entry: entries[0], injectionPoint: 'pregen'),
+          StudioPresetRowPlacement(entry: entries[2], injectionPoint: 'final'),
+          StudioPresetRowPlacement(entry: entries[1], injectionPoint: 'final'),
+        ],
       );
 
-      // `final1` keeps the middle slot; only the two pregen rows swap.
-      expect(_idsInOrder(result), ['pre2', 'final1', 'pre1']);
+      final byId = {for (final b in result) b.id: b};
+      expect(byId['pre1']!.injectionPoint, 'pregen');
+      expect(byId['pre2']!.injectionPoint, 'final');
+      expect(byId['fin1']!.injectionPoint, 'final');
+      expect(_idsInOrder(result), ['pre1', 'fin1', 'pre2']);
     });
 
-    test('moves a section header together with its children', () {
+    test('leaves blocks no row claims in their slots', () {
+      final blocks = [
+        _block('pre1', order: 0),
+        _block('orphan', order: 1),
+        _block('pre2', order: 2),
+      ];
+      // Only the two `pre` rows are handed in; `orphan` is not surfaced by any
+      // row and must keep the middle slot.
+      final result = reorderStudioPresetBlocks(
+        all: blocks,
+        rows: _rows([
+          StudioPresetBlockGroup.standalone(blocks[2]),
+          StudioPresetBlockGroup.standalone(blocks[0]),
+        ]),
+      );
+
+      expect(_idsInOrder(result), ['pre2', 'orphan', 'pre1']);
+    });
+
+    test('moves and re-targets a section header with its children', () {
       final blocks = [
         _block('lead', order: 0),
         _block('head', order: 1, title: '━ Narrative'),
@@ -76,10 +114,30 @@ void main() {
 
       final result = reorderStudioPresetBlocks(
         all: blocks,
-        entries: [entries.last, entries.first],
+        rows: [
+          StudioPresetRowPlacement(
+            entry: entries.last,
+            injectionPoint: 'cleaner',
+          ),
+          StudioPresetRowPlacement(
+            entry: entries.first,
+            injectionPoint: 'pregen',
+          ),
+        ],
       );
 
       expect(_idsInOrder(result), ['head', 'child1', 'child2', 'lead']);
+      for (final id in ['head', 'child1', 'child2']) {
+        expect(
+          result.firstWhere((b) => b.id == id).injectionPoint,
+          'cleaner',
+          reason: '$id should follow its section',
+        );
+      }
+      expect(
+        result.firstWhere((b) => b.id == 'lead').injectionPoint,
+        'pregen',
+      );
     });
 
     test('skips the synthesized Tense header instead of bailing out', () {
@@ -96,7 +154,7 @@ void main() {
 
       final result = reorderStudioPresetBlocks(
         all: blocks,
-        entries: [entries.last, entries.first],
+        rows: _rows([entries.last, entries.first]),
       );
 
       expect(_idsInOrder(result), ['tense_past', 'pov', 'pov_first']);
@@ -108,10 +166,10 @@ void main() {
       final blocks = [duplicated, _block('b', order: 1)];
       final result = reorderStudioPresetBlocks(
         all: blocks,
-        entries: [
+        rows: _rows([
           StudioPresetBlockGroup.standalone(duplicated),
           StudioPresetBlockGroup.standalone(duplicated),
-        ],
+        ]),
       );
       expect(identical(result, blocks), isTrue);
     });
