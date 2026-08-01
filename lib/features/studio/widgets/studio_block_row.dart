@@ -2,6 +2,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/llm/studio_controller_ontology.dart';
+import '../../../core/llm/tokenizer.dart';
 import '../../../core/models/studio_config.dart';
 import '../../../core/models/studio_preset_block_groups.dart';
 import '../../../shared/theme/app_colors.dart';
@@ -21,9 +22,10 @@ String studioAgentShortName(String specId) {
   return specId;
 }
 
-/// Rough token estimate for one block (~4 chars/token), matching
-/// `studioPresetTokenEstimate`.
-int _blockTokens(StudioPresetBlock block) => block.content.length ~/ 4;
+/// Token estimate for one block, through the same tokenizer
+/// `studioPresetTokenEstimate` sums — so the row pills add up to the
+/// dashboard's total.
+int _blockTokens(StudioPresetBlock block) => estimateTokens(block.content);
 
 /// One row of the agentic preset's block list — the [PresetBlockRow] layout
 /// (drag handle, role icon, badges, name + token pill, edit, switch) applied to
