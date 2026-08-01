@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
 import '../../../core/models/studio_config.dart';
@@ -15,11 +16,11 @@ void showStudioPresetOptions(
 }) {
   GlazeBottomSheet.show<void>(
     context,
-    title: 'Preset Options',
+    title: 'preset_options'.tr(),
     items: [
       BottomSheetItem(
         icon: Icons.drive_file_rename_outline,
-        label: 'Rename',
+        label: 'action_rename'.tr(),
         onTap: () {
           Navigator.of(context, rootNavigator: true).pop();
           onRename();
@@ -27,7 +28,7 @@ void showStudioPresetOptions(
       ),
       BottomSheetItem(
         icon: Icons.copy_outlined,
-        label: 'Clone',
+        label: 'action_clone_block'.tr(),
         onTap: () {
           Navigator.of(context, rootNavigator: true).pop();
           onClone();
@@ -35,7 +36,7 @@ void showStudioPresetOptions(
       ),
       BottomSheetItem(
         icon: Icons.upload_file_outlined,
-        label: 'Export',
+        label: 'action_export_st'.tr(),
         onTap: () {
           Navigator.of(context, rootNavigator: true).pop();
           onExport();
@@ -47,7 +48,7 @@ void showStudioPresetOptions(
         BottomSheetItem(
           icon: Icons.delete_outlined,
           iconColor: const Color(0xFFFF4444),
-          label: 'Delete',
+          label: 'action_delete'.tr(),
           isDestructive: true,
           onTap: () {
             Navigator.of(context, rootNavigator: true).pop();
@@ -67,11 +68,11 @@ void showStudioPresetRename(
 }) {
   GlazeBottomSheet.show<void>(
     context,
-    title: 'Rename Preset',
+    title: 'action_rename_preset'.tr(),
     input: BottomSheetInput(
-      placeholder: 'Preset name',
+      placeholder: 'placeholder_preset_name'.tr(),
       value: preset.name,
-      confirmLabel: 'Rename',
+      confirmLabel: 'action_rename'.tr(),
       onConfirm: (value) {
         Navigator.of(context, rootNavigator: true).pop();
         final name = value.trim();
@@ -97,13 +98,13 @@ Future<bool> confirmStudioDelete(
     ),
     items: [
       BottomSheetItem(
-        label: 'Delete',
+        label: 'action_delete'.tr(),
         centered: true,
         isDestructive: true,
         onTap: () => Navigator.of(context, rootNavigator: true).pop(true),
       ),
       BottomSheetItem(
-        label: 'Cancel',
+        label: 'action_cancel'.tr(),
         centered: true,
         onTap: () => Navigator.of(context, rootNavigator: true).pop(false),
       ),

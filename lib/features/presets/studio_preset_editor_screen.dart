@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -13,6 +14,7 @@ import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import '../settings/app_settings_provider.dart';
 import '../studio/studio_agent_toggle.dart';
+import '../studio/studio_injection_points.dart';
 import '../studio/studio_preset_stats.dart';
 import '../studio/widgets/studio_agents_panel.dart';
 import '../studio/widgets/studio_block_editor_inline.dart';
@@ -59,15 +61,13 @@ class StudioPresetEditorBodyState
   final ScrollController _scrollController = ScrollController();
   double? _savedScrollOffset;
 
-  /// Injection points and their labels, in the order the sections are rendered:
+  /// `(injectionPoint, label)` pairs in the order the sections are rendered:
   /// the pipeline order a turn actually runs in (§5). Blocks for a specific
   /// agent are fed in during pre-generation, so they sit right after it.
-  static const _sections = <(String, String)>[
-    ('pregen', 'Pre-generation'),
-    ('specificAgent', 'Specific agent'),
-    ('final', 'Final'),
-    ('cleaner', 'Post-processing'),
-    ('ledger', 'Трекер'),
+  /// Resolved per build so a locale switch relabels the sections.
+  List<(String, String)> get _sections => [
+    for (final point in studioInjectionPoints)
+      (point, studioInjectionPointLabel(point)),
   ];
 
   @override
@@ -234,7 +234,7 @@ class StudioPresetEditorBodyState
     if (preset == null) return;
     GlazeBottomSheet.show<void>(
       context,
-      title: 'Add Block',
+      title: 'add_block'.tr(),
       items: [
         for (final section in _sections)
           BottomSheetItem(
@@ -277,9 +277,10 @@ class StudioPresetEditorBodyState
     if (preset == null) return;
     final ok = await confirmStudioDelete(
       context,
-      title: 'Delete Block',
-      description:
-          'Delete "${block.title.isNotEmpty ? block.title : block.id}"?',
+      title: 'blocks_delete_block'.tr(),
+      description: 'studio_confirm_delete_block'.tr(
+        args: [block.title.isNotEmpty ? block.title : block.id],
+      ),
     );
     if (!ok) return;
     await _persistNow(
@@ -338,7 +339,7 @@ class StudioPresetEditorBodyState
     );
     await ref.read(studioPresetRepoProvider).upsert(clone);
     ref.invalidate(studioPresetListProvider);
-    if (mounted) GlazeToast.show(context, 'Preset cloned');
+    if (mounted) GlazeToast.show(context, 'studio_preset_cloned'.tr());
   }
 
   Future<void> _deletePreset() async {
@@ -346,8 +347,8 @@ class StudioPresetEditorBodyState
     if (preset == null) return;
     final ok = await confirmStudioDelete(
       context,
-      title: 'Delete Preset',
-      description: 'Delete "${preset.name}"? This cannot be undone.',
+      title: 'studio_delete_preset'.tr(),
+      description: 'studio_confirm_delete_preset'.tr(args: [preset.name]),
     );
     if (!ok) return;
     _saveTimer?.cancel();
@@ -379,7 +380,7 @@ class StudioPresetEditorBodyState
     }
     final preset = _preset;
     if (preset == null) {
-      return const Center(child: Text('Preset not found'));
+      return Center(child: Text('studio_preset_not_found'.tr()));
     }
 
     final editing = _editingBlockId == null
@@ -438,8 +439,10 @@ class StudioPresetEditorBodyState
           color: context.cs.primary,
         ),
       ),
-      title: preset.name.isNotEmpty ? preset.name : 'Agentic Preset',
-      subtitle: 'agentic preset',
+      title: preset.name.isNotEmpty
+          ? preset.name
+          : 'studio_preset_fallback_name'.tr(),
+      subtitle: 'studio_preset_subtitle'.tr(),
       onTitleTap: _showRenameDialog,
       onMenuTap: _showOptionsMenu,
       utilsLeading: [
@@ -452,7 +455,9 @@ class StudioPresetEditorBodyState
       utilsTrailing: [
         PresetStatBadge(
           icon: Icons.bolt,
-          label: '${studioPresetRequestCount(preset)}/ход',
+          label: 'studio_requests_per_turn'.tr(
+            args: ['${studioPresetRequestCount(preset)}'],
+          ),
         ),
         const SizedBox(width: 8),
         PresetStatBadge(
