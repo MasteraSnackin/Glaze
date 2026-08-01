@@ -22,7 +22,7 @@ class StudioHistoryLimiter {
   /// Cap how many trailing chat messages reach the FINAL responder.
   ///
   /// Two limits, whichever is hit first:
-  /// 1. **Message count** — at most [StudioConfig.maxFinalHistoryMessages]
+  /// 1. **Message count** — at most [StudioPreset.maxFinalHistoryMessages]
   ///    (default 30) trailing messages.
   /// 2. **Token budget** — at most [finalHistoryTokenBudget] (60K) estimated
   ///    tokens across the selected messages.
@@ -33,13 +33,13 @@ class StudioHistoryLimiter {
   /// (token budget still applies). Each message has `<font>` tags stripped.
   static List<PromptMessage> limitFinalHistory(
     List<PromptMessage> history,
-    StudioConfig config, {
+    StudioPreset preset, {
     int pipelineOverride = 0,
     int reasoningHistoryCount = 0,
   }) {
     final msgLimit = pipelineOverride > 0
         ? pipelineOverride
-        : config.maxFinalHistoryMessages;
+        : preset.maxFinalHistoryMessages;
 
     if (history.isEmpty) return const [];
 

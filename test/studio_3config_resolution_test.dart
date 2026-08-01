@@ -103,16 +103,16 @@ void main() {
     });
   });
 
-  group('StudioConfig 3-config fields', () {
+  group('StudioPreset 3-config fields', () {
     test('default values are empty strings', () {
-      final config = StudioConfig(sessionId: 'test');
+      final config = StudioPreset(id: 'test');
       expect(config.expensiveApiConfigId, '');
       expect(config.cheapApiConfigId, '');
       expect(config.cleanerApiConfigId, '');
     });
 
     test('copyWith updates config fields', () {
-      final config = StudioConfig(sessionId: 'test');
+      final config = StudioPreset(id: 'test');
       final updated = config.copyWith(
         expensiveApiConfigId: 'exp-1',
         cheapApiConfigId: 'cheap-1',
@@ -290,11 +290,10 @@ void main() {
         container.invalidate(apiListProvider);
         await container.read(apiListProvider.future);
         await container
-            .read(studioConfigRepoProvider)
+            .read(studioPresetRepoProvider)
             .upsert(
-              StudioConfig(
-                sessionId: 'session-1',
-                enabled: true,
+              StudioPreset(
+                id: 'default',
                 expensiveApiConfigId: expensive.id,
               ),
             );
@@ -355,11 +354,10 @@ void main() {
         container.invalidate(apiListProvider);
         await container.read(apiListProvider.future);
         await container
-            .read(studioConfigRepoProvider)
+            .read(studioPresetRepoProvider)
             .upsert(
-              StudioConfig(
-                sessionId: 'session-1',
-                enabled: true,
+              StudioPreset(
+                id: 'default',
                 expensiveApiConfigId: expensive.id,
               ),
             );

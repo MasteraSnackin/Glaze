@@ -134,7 +134,7 @@ class MemoryStudioService {
       priorBriefs: briefs,
       sessionId: sessionId,
       cancelToken: token,
-      apiConfigId: config.expensiveApiConfigId,
+      apiConfigId: studioPreset.expensiveApiConfigId,
       onFinalResponseUpdate: onFinalResponseUpdate,
       onMessagesBuilt: onFinalMessagesBuilt,
       turnConfig: turnConfig,
@@ -168,7 +168,7 @@ class MemoryStudioService {
         studioPreset: studioPreset,
         sessionId: sessionId,
         cancelToken: token,
-        apiConfigId: config.cleanerApiConfigId,
+        apiConfigId: studioPreset.cleanerApiConfigId,
         turnConfig: turnConfig,
       );
       postBriefs.add(result);

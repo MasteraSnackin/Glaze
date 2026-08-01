@@ -33,10 +33,10 @@ class StudioBriefMacroRenderer {
   String replaceStudioBriefMacros(
     String content, {
     required List<StudioStageBrief> priorBriefs,
-    StudioConfig? config,
+    StudioPreset? preset,
   }) {
     if (!hasStudioBriefMacro(content)) return content;
-    final briefs = finalBriefsForMacros(priorBriefs, config);
+    final briefs = finalBriefsForMacros(priorBriefs, preset);
     final replacements = <String, String>{
       '{{studio_agent_briefs}}': renderBriefs(briefs),
       '{{studio_tracker_briefs}}': renderBriefs(briefs),
@@ -74,14 +74,14 @@ class StudioBriefMacroRenderer {
 
   List<StudioStageBrief> finalBriefsForMacros(
     List<StudioStageBrief> priorBriefs,
-    StudioConfig? config,
+    StudioPreset? preset,
   ) {
     final nonEmpty = priorBriefs
         .where((b) => b.brief.trim().isNotEmpty)
         .map(
-          (b) => config == null
+          (b) => preset == null
               ? b
-              : _briefDeduper.sanitizePriorBriefForFinal(b, config),
+              : _briefDeduper.sanitizePriorBriefForFinal(b, preset),
         )
         .toList();
     return _briefDeduper

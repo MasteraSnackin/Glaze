@@ -3,8 +3,6 @@ import 'dart:convert';
 import 'package:drift/drift.dart';
 
 import '../../models/studio_config.dart';
-import '../../models/studio_agent_codec.dart';
-import '../../llm/studio_controller_ontology.dart';
 import '../../utils/time_helpers.dart';
 import '../app_db.dart';
 import '../../application/sync_repo_interfaces.dart';
@@ -151,11 +149,6 @@ class StudioConfigRepo implements SyncStudioConfigStore {
             ),
             profileName: Value(config.profileName),
             enabled: Value(config.enabled),
-            agentsJson: Value(StudioAgentCodec.encodeAgents(config.agents)),
-            expensiveApiConfigId: Value(config.expensiveApiConfigId),
-            cheapApiConfigId: Value(config.cheapApiConfigId),
-            cleanerApiConfigId: Value(config.cleanerApiConfigId),
-            maxFinalHistoryMessages: Value(config.maxFinalHistoryMessages),
             broadcastBlocksJson: Value(jsonEncode(config.broadcastBlocks)),
             createdAt: Value(config.createdAt),
             updatedAt: Value(currentTimestampSeconds()),
@@ -190,12 +183,6 @@ class StudioConfigRepo implements SyncStudioConfigStore {
   }
 
   StudioConfig _rowToModel(StudioConfigRow row) {
-    List<StudioAgent> agents;
-    try {
-      agents = StudioAgentCodec.decodeAgentsJson(row.agentsJson);
-    } catch (_) {
-      agents = [];
-    }
     List<String> broadcastBlocks;
     try {
       broadcastBlocks = (jsonDecode(row.broadcastBlocksJson) as List<dynamic>)
@@ -205,136 +192,14 @@ class StudioConfigRepo implements SyncStudioConfigStore {
       broadcastBlocks = const [];
     }
 
-    return _normalizeLoadedConfig(
-      StudioConfig(
+    return StudioConfig(
         sessionId: row.sessionId,
         profileId: row.profileId.isNotEmpty ? row.profileId : row.sessionId,
         profileName: row.profileName,
         enabled: row.enabled,
-        agents: agents,
-        expensiveApiConfigId: row.expensiveApiConfigId,
-        cheapApiConfigId: row.cheapApiConfigId,
-        cleanerApiConfigId: row.cleanerApiConfigId,
-        maxFinalHistoryMessages: row.maxFinalHistoryMessages,
         broadcastBlocks: broadcastBlocks,
         createdAt: row.createdAt,
         updatedAt: row.updatedAt,
-      ),
-    );
-  }
-
-  /// Silent migration of loaded Studio configs:
-  ///
-  /// 1. Meta-Weaver (plan §Part 6): upgrade from the old `'static'` refresh
-  ///    policy to the meta-weaver architecture — `refreshPolicy: 'turn'`
-  ///    (runs every turn so it can apply the period rule). Keep the user's
-  ///    existing `contextSize`: in batched Studio runs the largest tracker
-  ///    context becomes the shared history window for the whole group, so a
-  ///    high Meta-Weaver default would inflate every tracker request.
-  ///
-  /// 2. All trackers run every turn (Marinara parity, see
-  ///    `studio_controller_ontology.dart`): any agent still carrying
-  ///    `refreshPolicy: 'scene'` or `'static'` from a pre-parity build is
-  ///    migrated to `'turn'`. The `'scene'` policy's gate was a regex over
-  ///    the last user message only — it missed real scene changes that
-  ///    weren't phrased with time-skip words, and stale scene-cached briefs
-  ///    degraded the final response. Running every turn is cheaper to reason
-  ///    about and matches upstream Marinara-Engine's `runInterval: 1`
-  ///    default for all tracker agents.
-  ///
-  /// Returns [config] unchanged when no agent needs migration. This is a
-  /// normalization in memory, so existing configs benefit immediately without
-  /// a rebuild.
-  StudioConfig _normalizeLoadedConfig(StudioConfig config) {
-    if (config.enabled && config.agents.isEmpty) {
-      final now = config.updatedAt != 0
-          ? config.updatedAt
-          : currentTimestampSeconds();
-      return config.copyWith(
-        agents: StudioControllerOntology.buildDefaultAgents(
-          sessionId: config.sessionId,
-          now: now,
-        ),
-        createdAt: config.createdAt == 0 ? now : config.createdAt,
-        updatedAt: config.updatedAt == 0 ? now : config.updatedAt,
       );
-    }
-    if (config.agents.isEmpty) return config;
-    final migrated = <StudioAgent>[];
-    var changed = false;
-    for (final agent in config.agents) {
-      var current = agent;
-      if (_isMetaWeaver(current) && current.refreshPolicy != 'turn') {
-        current = current.copyWith(refreshPolicy: 'turn');
-        changed = true;
-      }
-      if (current.refreshPolicy != 'turn') {
-        current = current.copyWith(refreshPolicy: 'turn');
-        changed = true;
-      }
-      // Migrate old pre-gen tracker defaults down to the focused 5-message
-      // window. Post-processing trackers get 2 (last turn + response to edit).
-      if (current.phase == 'post_processing') {
-        if (current.contextSize != 2) {
-          current = current.copyWith(contextSize: 2);
-          changed = true;
-        }
-      } else if (!_isFinalResponder(current) && current.contextSize == 20) {
-        current = current.copyWith(contextSize: 5);
-        changed = true;
-      }
-      migrated.add(current);
-    }
-    final withBeauty = _ensureBeautyShardAgent(config, migrated);
-    if (!identical(withBeauty, migrated)) changed = true;
-    return changed ? config.copyWith(agents: withBeauty) : config;
-  }
-
-  List<StudioAgent> _ensureBeautyShardAgent(
-    StudioConfig config,
-    List<StudioAgent> agents,
-  ) {
-    if (agents.any(_isBeautyShard)) return agents;
-    final spec = StudioControllerOntology.specs.firstWhere(
-      (s) => s.id == 'beauty',
-      orElse: () => throw StateError('Beauty Shard spec missing'),
-    );
-    final finalIdx = agents.indexWhere(_isFinalResponder);
-    final insertAt = finalIdx >= 0 ? finalIdx : agents.length;
-    final beauty = StudioAgent(
-      id: 'agent_${config.sessionId}_beauty_migrated',
-      controllerId: 'beauty',
-      name: spec.name,
-      role: 'system',
-      order: insertAt,
-      enabled: true,
-      temperature: spec.temperature,
-      maxTokens: spec.maxTokens,
-      timeoutMs: spec.timeoutMs,
-      refreshPolicy: spec.refreshPolicy,
-      invalidationSignals: spec.invalidationSignals,
-      phase: spec.phase,
-      contextSize: spec.contextSize > 0 ? spec.contextSize : 5,
-    );
-    final updated = <StudioAgent>[
-      ...agents.take(insertAt),
-      beauty,
-      ...agents.skip(insertAt),
-    ];
-    return [
-      for (var i = 0; i < updated.length; i++) updated[i].copyWith(order: i),
-    ];
-  }
-
-  bool _isBeautyShard(StudioAgent agent) {
-    return agent.controllerId == 'beauty';
-  }
-
-  bool _isFinalResponder(StudioAgent agent) {
-    return agent.controllerId == 'final';
-  }
-
-  bool _isMetaWeaver(StudioAgent agent) {
-    return agent.controllerId == 'meta';
   }
 }

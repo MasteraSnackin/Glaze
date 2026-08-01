@@ -23,13 +23,13 @@ class StudioRuntimeBlockExpander {
     String content, {
     required StudioContext context,
     List<StudioStageBrief> priorBriefs = const [],
-    StudioConfig? config,
+    StudioPreset? preset,
   }) {
     if (!content.contains('{')) return content;
     final studioExpanded = _briefMacroRenderer.replaceStudioBriefMacros(
       content,
       priorBriefs: priorBriefs,
-      config: config,
+      preset: preset,
     );
     return replaceMacros(studioExpanded, context.macroContext).text;
   }

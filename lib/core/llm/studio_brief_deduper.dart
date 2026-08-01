@@ -104,9 +104,9 @@ class StudioBriefDeduper {
   /// against their owning agent.
   StudioStageBrief sanitizePriorBriefForFinal(
     StudioStageBrief brief,
-    StudioConfig config,
+    StudioPreset preset,
   ) {
-    final agent = _agentForBrief(brief, config);
+    final agent = _agentForBrief(brief, preset);
     if (!_parser.isMetaPolicyAgent(agent)) {
       return StudioStageBrief(
         agentId: brief.agentId,
@@ -131,8 +131,8 @@ class StudioBriefDeduper {
     );
   }
 
-  StudioAgent _agentForBrief(StudioStageBrief brief, StudioConfig config) {
-    return config.agents.firstWhere(
+  StudioAgent _agentForBrief(StudioStageBrief brief, StudioPreset preset) {
+    return preset.agents.firstWhere(
       (agent) => agent.id == brief.agentId || agent.name == brief.agentName,
       orElse: () => StudioAgent(id: brief.agentId, name: brief.agentName),
     );

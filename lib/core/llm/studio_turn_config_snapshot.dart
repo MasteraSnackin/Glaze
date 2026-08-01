@@ -28,7 +28,7 @@ class StudioTurnConfigSnapshot {
   }) {
     return StudioSlotResolver.resolve(
       apiConfigs: apiConfigs,
-      apiConfigId: config?.cleanerApiConfigId ?? '',
+      apiConfigId: preset?.cleanerApiConfigId ?? '',
       fallback: activeApiConfig,
       errorLabel: errorLabel,
       modelOverride: pipelineSettings.cleaner.postCleanerModel,

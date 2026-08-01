@@ -66,7 +66,7 @@ class StudioMessageBuilder {
                   block.content,
                   context: context,
                   priorBriefs: priorBriefs,
-                  config: config,
+                  preset: studioPreset,
                 )
                 .trim(),
           );
@@ -100,7 +100,7 @@ class StudioMessageBuilder {
             .where((brief) => brief.brief.trim().isNotEmpty)
             .map(
               (brief) =>
-                  _briefDeduper.sanitizePriorBriefForFinal(brief, config),
+                  _briefDeduper.sanitizePriorBriefForFinal(brief, studioPreset),
             )
             .toList();
         final deduped = _briefDeduper.dedupePriorBriefs(sanitized);
@@ -121,7 +121,7 @@ class StudioMessageBuilder {
         final history = isFinalResponse
             ? StudioHistoryLimiter.limitFinalHistory(
                 context.history,
-                config,
+                studioPreset,
                 pipelineOverride: finalContextOverride,
                 reasoningHistoryCount: reasoningHistoryCount,
               )
@@ -245,7 +245,7 @@ class StudioMessageBuilder {
           .expandStudioBlockContent(
             block.content,
             context: context,
-            config: config,
+            preset: studioPreset,
           )
           .trim();
       if (content.isEmpty) continue;
@@ -278,7 +278,7 @@ class StudioMessageBuilder {
           .expandStudioBlockContent(
             block.content,
             context: context,
-            config: config,
+            preset: studioPreset,
           )
           .trim();
       if (content.isNotEmpty) buffer.writeln(content);

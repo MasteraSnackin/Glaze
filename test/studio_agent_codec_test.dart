@@ -75,7 +75,7 @@ void main() {
       expect(decoded[2]['enabled'], isFalse);
     });
 
-    test('cloud config decoding canonicalizes legacy agent identities', () {
+    test('cloud config decoding ignores moved runtime fields', () {
       final config = StudioAgentCodec.decodeConfig({
         'sessionId': 'session',
         'runApiConfigId': 'legacy-api',
@@ -85,14 +85,8 @@ void main() {
         ],
       });
 
-      expect(config.agents.single.controllerId, 'continuity');
-      expect(
-        config.agents.single.toJson(),
-        isNot(contains('sourceBlockNames')),
-      );
-      expect(config.expensiveApiConfigId, 'explicit-api');
-      expect(config.cheapApiConfigId, 'legacy-api');
-      expect(config.cleanerApiConfigId, 'legacy-api');
+      expect(config.toJson(), isNot(contains('agents')));
+      expect(config.toJson(), isNot(contains('expensiveApiConfigId')));
       expect(config.toJson(), isNot(contains('runApiConfigId')));
     });
 

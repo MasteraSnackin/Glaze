@@ -60,7 +60,7 @@ class StudioTurnConfigResolver {
         final beautyPipelineEnabled = preset.blocks.any(
           (block) => block.id == 'beauty_task' && block.enabled,
         );
-        final agents = storedConfig!.agents.map((agent) {
+        final agents = preset.agents.map((agent) {
           final specId = StudioControllerOntology.targetIdForAgent(agent);
           if (specId == null) return agent.copyWith(enabled: false);
           final disableBeauty = specId == 'beauty' && !beautyPipelineEnabled;
@@ -75,7 +75,8 @@ class StudioTurnConfigResolver {
               ).where((agent) => agent.enabled).toList()
               ..sort((a, b) => a.order.compareTo(b.order));
         if (gated.isNotEmpty) {
-          effectiveConfig = storedConfig.copyWith(agents: gated);
+          preset = preset.copyWith(agents: gated);
+          effectiveConfig = storedConfig;
         }
       }
     }

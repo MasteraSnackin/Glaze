@@ -159,7 +159,6 @@ const _config = StudioConfig(
   sessionId: 'profile-storage-id',
   profileId: 'shared-profile',
   enabled: true,
-  cheapApiConfigId: 'tracker-api',
 );
 
 const _agent = StudioAgent(
@@ -171,6 +170,7 @@ const _agent = StudioAgent(
 
 const _preset = StudioPreset(
   id: 'preset-id',
+  cheapApiConfigId: 'tracker-api',
   executionMode: StudioExecutionMode.assisted,
   agentEnabled: {'continuity': true},
   blocks: [

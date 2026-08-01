@@ -17,12 +17,20 @@ void main() {
   });
   tearDown(() => db.close());
 
-  test('round-trips execution mode and per-agent overrides', () async {
+  test('round-trips complete preset runtime payload', () async {
     const preset = StudioPreset(
       id: 'studio_direct_loom_v1',
       name: 'Direct Loom v1',
       executionMode: StudioExecutionMode.direct,
       agentEnabled: {'continuity': false, 'narrative': false, 'final': true},
+      agents: [
+        StudioAgent(id: 'continuity', controllerId: 'continuity'),
+        StudioAgent(id: 'final', controllerId: 'final'),
+      ],
+      expensiveApiConfigId: 'expensive',
+      cheapApiConfigId: 'cheap',
+      cleanerApiConfigId: 'cleaner',
+      maxFinalHistoryMessages: 17,
     );
 
     await repo.upsert(preset);
@@ -30,6 +38,11 @@ void main() {
 
     expect(restored?.executionMode, StudioExecutionMode.direct);
     expect(restored?.agentEnabled, preset.agentEnabled);
+    expect(restored?.agents, preset.agents);
+    expect(restored?.expensiveApiConfigId, 'expensive');
+    expect(restored?.cheapApiConfigId, 'cheap');
+    expect(restored?.cleanerApiConfigId, 'cleaner');
+    expect(restored?.maxFinalHistoryMessages, 17);
   });
 
   test('unknown persisted execution mode safely falls back to legacy', () {

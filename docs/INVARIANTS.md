@@ -189,7 +189,7 @@ rune-counted) and `_stripHtmlTags` (conservative tag regex preserving `==...==`
 markers and code fences). `StudioAgent.contextSize` default 5, hard-cap 200.
 
 The final generator does NOT use this trim — it uses
-`StudioConfig.maxFinalHistoryMessages` (default 30). MemoryBook injection
+`StudioPreset.maxFinalHistoryMessages` (default 30). MemoryBook injection
 (`dynamic_context` block: memory, summary, worldInfo) is NOT trimmed — only
 the `chat_history` block is. Users without rolling summary keep long-term memory
 via MemoryBook (static `dynamic_context` injection), not via chat history.
@@ -197,7 +197,7 @@ via MemoryBook (static `dynamic_context` injection), not via chat history.
 ### INV-ST2: maxFinalHistoryMessages applies to the generator ✅ ENFORCED
 
 `_limitFinalHistory` trims `chat_history` to the last
-`StudioConfig.maxFinalHistoryMessages` (default 30) messages for the final
+`StudioPreset.maxFinalHistoryMessages` (default 30) messages for the final
 generator only (`_runFinalGenerator` → `_buildAgentMessages(isFinalResponse:
 true)`). An additional token budget of 60K (estimated via o200k_base) is
 enforced: messages are accumulated from the end of history until either the

@@ -130,12 +130,12 @@ void main() {
           readActive: () async => globalActiveId,
           writeActive: (id) async => globalActiveId = id,
         );
-        const firstConfig = StudioConfig(
-          sessionId: 'session-a',
+        const firstConfig = StudioPreset(
+          id: 'session-a',
           expensiveApiConfigId: 'api-a',
         );
-        const secondConfig = StudioConfig(
-          sessionId: 'session-b',
+        const secondConfig = StudioPreset(
+          id: 'session-b',
           expensiveApiConfigId: 'api-b',
         );
 

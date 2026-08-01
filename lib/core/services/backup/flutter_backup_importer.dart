@@ -21,6 +21,7 @@ class FlutterBackupImporter extends BackupHelpers {
   @override
   final ImageStorageService imageStorage;
   final ImportCancellationToken _cancel;
+  final List<Map<String, dynamic>> _legacyStudioRuntimeRows = [];
 
   FlutterBackupImporter(this.db, this.imageStorage, [this._cancel = noCancel]);
 
@@ -30,8 +31,13 @@ class FlutterBackupImporter extends BackupHelpers {
     String filePath, {
     void Function(String stage)? onProgress,
   }) async {
-    final archive = ZipDecoder().decodeStream(InputFileStream(filePath));
-    await _importFromZip(archive, onProgress: onProgress);
+    _legacyStudioRuntimeRows.clear();
+    try {
+      final archive = ZipDecoder().decodeStream(InputFileStream(filePath));
+      await _importFromZip(archive, onProgress: onProgress);
+    } finally {
+      _legacyStudioRuntimeRows.clear();
+    }
   }
 
   /// Imports a legacy v1 Glaze JSON-monolith. Kept for completeness but
@@ -40,11 +46,16 @@ class FlutterBackupImporter extends BackupHelpers {
     Map<String, dynamic> data, {
     void Function(String stage)? onProgress,
   }) async {
-    final tables = data['tables'] as Map<String, dynamic>?;
-    if (tables == null) return;
-    await _importTablesFromJson(tables, onProgress: onProgress);
-    await restoreGalleryImages(data['gallery'] as Map<String, dynamic>?);
-    await _restoreAvatars(data['avatars'] as Map<String, dynamic>?);
+    _legacyStudioRuntimeRows.clear();
+    try {
+      final tables = data['tables'] as Map<String, dynamic>?;
+      if (tables == null) return;
+      await _importTablesFromJson(tables, onProgress: onProgress);
+      await restoreGalleryImages(data['gallery'] as Map<String, dynamic>?);
+      await _restoreAvatars(data['avatars'] as Map<String, dynamic>?);
+    } finally {
+      _legacyStudioRuntimeRows.clear();
+    }
   }
 
   Future<void> import(
@@ -124,6 +135,7 @@ class FlutterBackupImporter extends BackupHelpers {
         // Truncate WAL between tables to keep heap small.
         await db.customStatement('PRAGMA wal_checkpoint(TRUNCATE)');
       }
+      await db.applyLegacyStudioRuntimePayloads(_legacyStudioRuntimeRows);
     } finally {
       await db.customStatement('PRAGMA foreign_keys = ON');
     }
@@ -210,6 +222,7 @@ class FlutterBackupImporter extends BackupHelpers {
           Map<String, dynamic> r;
           try {
             r = jsonDecode(line) as Map<String, dynamic>;
+            _stageLegacyStudioRuntimeRow(tableName, r);
             r = _canonicalizeStudioRow(tableName, r);
           } catch (_) {
             continue;
@@ -277,10 +290,9 @@ class FlutterBackupImporter extends BackupHelpers {
             var i = 0;
             for (final row in rows) {
               if ((++i % _batchSize) == 0) _cancel.check();
-              final r = _canonicalizeStudioRow(
-                tableName,
-                Map<String, dynamic>.from(row as Map),
-              );
+              final source = Map<String, dynamic>.from(row as Map);
+              _stageLegacyStudioRuntimeRow(tableName, source);
+              final r = _canonicalizeStudioRow(tableName, source);
               final columns = r.keys.where(knownCols.contains).toList();
               if (columns.isEmpty) continue;
               final placeholders = columns.map((_) => '?').join(', ');
@@ -302,6 +314,7 @@ class FlutterBackupImporter extends BackupHelpers {
         });
         await db.customStatement('PRAGMA wal_checkpoint(TRUNCATE)');
       }
+      await db.applyLegacyStudioRuntimePayloads(_legacyStudioRuntimeRows);
     } finally {
       await db.customStatement('PRAGMA foreign_keys = ON');
     }
@@ -315,10 +328,18 @@ class FlutterBackupImporter extends BackupHelpers {
       if (tableName == 'studio_preset_rows') {
         final blocks = row['blocks_json'];
         final source = blocks is String ? blocks : jsonEncode(blocks);
-        return {
+        final canonical = <String, dynamic>{
           ...row,
           'blocks_json': StudioPresetCodec.canonicalizeBlocksJson(source),
         };
+        if (row.containsKey('agents_json')) {
+          final agents = row['agents_json'];
+          final agentsSource = agents is String ? agents : jsonEncode(agents);
+          canonical['agents_json'] = StudioAgentCodec.canonicalizeAgentsJson(
+            agentsSource,
+          );
+        }
+        return canonical;
       }
       if (tableName == 'studio_config_rows') {
         final agents = row['agents_json'];
@@ -332,6 +353,30 @@ class FlutterBackupImporter extends BackupHelpers {
       return row;
     }
     return row;
+  }
+
+  void _stageLegacyStudioRuntimeRow(
+    String tableName,
+    Map<String, dynamic> row,
+  ) {
+    if (tableName != 'studio_config_rows') return;
+    const executionKeys = {
+      'agents_json',
+      'agents',
+      'run_api_config_id',
+      'runApiConfigId',
+      'expensive_api_config_id',
+      'expensiveApiConfigId',
+      'cheap_api_config_id',
+      'cheapApiConfigId',
+      'cleaner_api_config_id',
+      'cleanerApiConfigId',
+      'max_final_history_messages',
+      'maxFinalHistoryMessages',
+    };
+    if (row.keys.any(executionKeys.contains)) {
+      _legacyStudioRuntimeRows.add(Map<String, dynamic>.from(row));
+    }
   }
 
   Future<void> restoreGalleryImages(Map<String, dynamic>? galleryData) async {

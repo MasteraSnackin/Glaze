@@ -203,7 +203,7 @@ class StudioBriefCache {
       'sessionId': sessionId,
       'profileId': config.profileId,
       'studioConfigId': config.sessionId,
-      'cheapApiConfigId': config.cheapApiConfigId,
+      'cheapApiConfigId': studioPreset.cheapApiConfigId,
       'resolvedExecution': {
         'endpoint': resolvedConfig.endpoint,
         'model': resolvedConfig.model,

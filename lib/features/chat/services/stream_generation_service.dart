@@ -91,6 +91,7 @@ class StreamGenerationService {
           studioTurnConfig ??
           await _ref.read(studioTurnConfigResolverProvider).resolve(session.id);
       final studioConfig = turnConfig.config;
+      final studioPreset = turnConfig.preset;
       studioWasActive = studioConfig != null;
       if (_isAborted()) {
         return ChatState(
@@ -119,11 +120,11 @@ class StreamGenerationService {
       final apiConfig = inputs.apiConfig;
 
       final pipelineSettings = turnConfig.pipelineSettings;
-      final studioFinalContextSize = studioConfig == null
+      final studioFinalContextSize = studioConfig == null || studioPreset == null
           ? 0
           : pipelineSettings.studioAgent.studioFinalContextSize > 0
           ? pipelineSettings.studioAgent.studioFinalContextSize
-          : studioConfig.maxFinalHistoryMessages;
+          : studioPreset.maxFinalHistoryMessages;
       final studioFinalVisibleMessageIds = studioConfig == null
           ? const <String>{}
           : StudioStreamInterceptor.computeStudioVisibleMessageIds(
@@ -242,13 +243,13 @@ class StreamGenerationService {
         }
         _log(
           'studio intercept char=$_charId session=${session.id} '
-          'agents=${studioConfig.agents.length}',
+          'agents=${studioPreset!.agents.length}',
         );
         _ref
             .read(studioCycleStateProvider.notifier)
             .state = StudioCycleState.running(
           sessionId: session.id,
-          totalAgents: studioConfig.agents.length,
+          totalAgents: studioPreset.agents.length,
         );
         final startGenTime = DateTime.now();
         DateTime? finalStartTime;

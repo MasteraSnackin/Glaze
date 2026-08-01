@@ -116,7 +116,9 @@ class StudioTrackerPhaseRunner {
     }
     final effectivePreset = resolvedPreset.preset!;
     try {
-      final agents = config.agents.where((agent) => agent.enabled).toList()
+      final agents = effectivePreset.agents
+          .where((agent) => agent.enabled)
+          .toList()
         ..sort((a, b) => a.order.compareTo(b.order));
       if (agents.isEmpty) return const PreGenPhaseResult(status: 'disabled');
       if (token.isCancelled) return const PreGenPhaseResult(status: 'aborted');
@@ -156,7 +158,7 @@ class StudioTrackerPhaseRunner {
           agent: agent,
           apiConfig: apiConfig,
           sessionId: sessionId,
-          apiConfigId: config.cheapApiConfigId,
+          apiConfigId: effectivePreset.cheapApiConfigId,
           turnConfig: turnConfig,
         );
         if (token.isCancelled) {
@@ -190,7 +192,7 @@ class StudioTrackerPhaseRunner {
         agents: fetchTrackers,
         apiConfig: apiConfig,
         sessionId: sessionId,
-        apiConfigId: config.cheapApiConfigId,
+        apiConfigId: effectivePreset.cheapApiConfigId,
         turnConfig: turnConfig,
       );
       final fetchedResults = await _batcher.runPhase(
@@ -204,7 +206,7 @@ class StudioTrackerPhaseRunner {
           apiConfig: apiConfig,
           sessionId: sessionId,
           cancelToken: token,
-          apiConfigId: config.cheapApiConfigId,
+          apiConfigId: effectivePreset.cheapApiConfigId,
           batchContextSize: trackerContextOverride,
           turnConfig: turnConfig,
         ),
@@ -216,7 +218,7 @@ class StudioTrackerPhaseRunner {
           apiConfig: apiConfig,
           sessionId: sessionId,
           cancelToken: token,
-          apiConfigId: config.cheapApiConfigId,
+          apiConfigId: effectivePreset.cheapApiConfigId,
           turnConfig: turnConfig,
         ),
       );

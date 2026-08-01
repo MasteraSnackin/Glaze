@@ -159,7 +159,6 @@ void main() {
               sessionId: 'c1_0',
               profileId: 'c1_0',
               enabled: true,
-              expensiveApiConfigId: 'studio-api',
             ),
           );
       await container
@@ -342,7 +341,7 @@ void main() {
           .read(studioConfigRepoProvider)
           .getBySessionId('c1_2');
       expect(studio?.enabled, isTrue);
-      expect(studio?.expensiveApiConfigId, 'studio-api');
+      expect(studio?.profileId, 'c1_0');
 
       final memory = await container
           .read(memoryBookRepoProvider)

@@ -115,4 +115,41 @@ void main() {
 
     expect(twice, once);
   });
+
+  test('canonicalizes imported agents and defaults runtime fields', () {
+    final decoded = StudioPresetCodec.decodePreset({
+      'id': 'imported',
+      'agents': [
+        {'id': 'agent_session_continuity_123', 'sourceBlockNames': 'legacy'},
+        {'id': 'unknown', 'enabled': true},
+      ],
+    });
+
+    expect(decoded.preset.agents[0].controllerId, 'continuity');
+    expect(decoded.preset.agents[1].enabled, isFalse);
+    expect(decoded.preset.maxFinalHistoryMessages, 30);
+    expect(decoded.preset.expensiveApiConfigId, isEmpty);
+    final canonical = StudioPresetCodec.canonicalizePresetJson({
+      'id': 'imported',
+      'agents': [
+        {'id': 'agent_session_continuity_123'},
+      ],
+    });
+    expect((canonical['agents'] as List).single['controllerId'], 'continuity');
+  });
+
+  test('missing agents gets preset-scoped defaults but explicit empty stays empty', () {
+    final missing = StudioPresetCodec.decodePreset({
+      'id': 'legacy-preset',
+      'updatedAt': 42,
+    }).preset;
+    final explicit = StudioPresetCodec.decodePreset({
+      'id': 'explicit-empty',
+      'agents': <dynamic>[],
+    }).preset;
+
+    expect(missing.agents, isNotEmpty);
+    expect(missing.agents.every((agent) => agent.id.contains('legacy-preset')), isTrue);
+    expect(explicit.agents, isEmpty);
+  });
 }

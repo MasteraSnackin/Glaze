@@ -91,13 +91,6 @@ void main() {
         loadStudioConfig: (_) async => const StudioConfig(
           sessionId: 'session',
           enabled: true,
-          agents: [
-            StudioAgent(id: 'final', controllerId: 'final', order: 5),
-            StudioAgent(id: 'agency', controllerId: 'agency', order: 1),
-            StudioAgent(id: 'continuity', controllerId: 'continuity', order: 3),
-            StudioAgent(id: 'narrative', controllerId: 'narrative', order: 2),
-            StudioAgent(id: 'beauty', controllerId: 'beauty', order: 4),
-          ],
         ),
         loadActivePresetId: () async => 'missing',
         loadPreset: (_) async => null,
@@ -107,6 +100,17 @@ void main() {
             id: 'default',
             executionMode: StudioExecutionMode.assisted,
             agentEnabled: {'narrative': false},
+            agents: [
+              StudioAgent(id: 'final', controllerId: 'final', order: 5),
+              StudioAgent(id: 'agency', controllerId: 'agency', order: 1),
+              StudioAgent(
+                id: 'continuity',
+                controllerId: 'continuity',
+                order: 3,
+              ),
+              StudioAgent(id: 'narrative', controllerId: 'narrative', order: 2),
+              StudioAgent(id: 'beauty', controllerId: 'beauty', order: 4),
+            ],
           );
         },
       );
@@ -116,7 +120,7 @@ void main() {
 
       expect(snapshot.preset?.id, 'default');
       expect(defaultLoads, 1);
-      expect(snapshot.config?.agents.map((agent) => agent.id), [
+      expect(snapshot.preset?.agents.map((agent) => agent.id), [
         'continuity',
         'final',
       ]);
@@ -149,6 +153,16 @@ void main() {
             const StudioConfig(
               sessionId: 'session',
               enabled: true,
+              broadcastBlocks: ['old broadcast'],
+            ),
+          );
+      await container
+          .read(studioPresetRepoProvider)
+          .upsert(
+            const StudioPreset(
+              id: 'old-preset',
+              cheapApiConfigId: 'old-api',
+              cleanerApiConfigId: 'old-api',
               agents: [
                 StudioAgent(
                   id: 'continuity',
@@ -163,16 +177,6 @@ void main() {
                   order: 1,
                 ),
               ],
-              cheapApiConfigId: 'old-api',
-              cleanerApiConfigId: 'old-api',
-              broadcastBlocks: ['old broadcast'],
-            ),
-          );
-      await container
-          .read(studioPresetRepoProvider)
-          .upsert(
-            const StudioPreset(
-              id: 'old-preset',
               executionMode: StudioExecutionMode.assisted,
               blocks: [
                 StudioPresetBlock(
@@ -188,6 +192,8 @@ void main() {
           .upsert(
             const StudioPreset(
               id: 'new-preset',
+              cheapApiConfigId: 'new-api',
+              cleanerApiConfigId: 'new-api',
               executionMode: StudioExecutionMode.direct,
               blocks: [
                 StudioPresetBlock(
@@ -239,13 +245,15 @@ void main() {
           .read(activeStudioPresetProvider.notifier)
           .set('new-preset');
       await container
-          .read(studioConfigRepoProvider)
+          .read(studioPresetRepoProvider)
           .upsert(
-            snapshot.config!.copyWith(
+            snapshot.preset!.copyWith(
               cheapApiConfigId: 'new-api',
               cleanerApiConfigId: 'new-api',
-              broadcastBlocks: const ['new broadcast'],
             ),
+          );
+      await container.read(studioConfigRepoProvider).upsert(
+            snapshot.config!.copyWith(broadcastBlocks: const ['new broadcast']),
           );
       await container
           .read(pipelineSettingsProvider.notifier)
@@ -259,7 +267,7 @@ void main() {
 
       expect(snapshot.preset!.id, 'old-preset');
       expect(snapshot.preset!.blocks.single.content, 'old ledger instructions');
-      expect(snapshot.config!.cheapApiConfigId, 'old-api');
+      expect(snapshot.preset!.cheapApiConfigId, 'old-api');
       expect(snapshot.config!.broadcastBlocks, ['old broadcast']);
       expect(
         snapshot.pipelineSettings.studioAgent.studioTrackerModelOverride,
@@ -298,9 +306,8 @@ void main() {
       config: StudioConfig(
         sessionId: 'session',
         enabled: true,
-        cheapApiConfigId: 'old-api',
       ),
-      preset: StudioPreset(id: 'old-preset'),
+      preset: StudioPreset(id: 'old-preset', cheapApiConfigId: 'old-api'),
       pipelineSettings: PipelineSettings(
         studioAgent: StudioAgentSettings(
           studioTrackerModelOverride: 'snapshot-model',
@@ -320,7 +327,7 @@ void main() {
       const StudioAgent(id: 'tracker', name: 'Tracker'),
       newApi,
       'session',
-      apiConfigId: snapshot.config!.cheapApiConfigId,
+      apiConfigId: snapshot.preset!.cheapApiConfigId,
       turnConfig: snapshot,
     );
 

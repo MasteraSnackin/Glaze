@@ -42,7 +42,7 @@ class AuxApiConfig {
 /// const client = AuxLlmClient();
 /// final resolver = StudioSlotResolver();
 /// final config = await resolver.resolve(
-///   apiConfigId: studioConfig.cleanerApiConfigId,
+///   apiConfigId: studioPreset.cleanerApiConfigId,
 ///   modelOverride: pipeline.cleaner.postCleanerModel,
 /// );
 /// final raw = await client.callOnce(

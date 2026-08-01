@@ -1,7 +1,9 @@
 import 'dart:convert';
 
 import '../llm/studio/studio_context.dart';
+import '../llm/studio_controller_ontology.dart';
 import 'studio_config.dart';
+import 'studio_agent_codec.dart';
 
 final class StudioBlockCanonicalizationResult {
   final StudioPresetBlock block;
@@ -86,11 +88,38 @@ abstract final class StudioPresetCodec {
         enabled[entry.key.toString()] = entry.value == true;
       }
     }
+    final presetId = _string(json['id']);
+    List<StudioAgent> agents;
+    final rawAgents = json['agents'];
+    if (rawAgents is List) {
+      agents = const [];
+      try {
+        agents = StudioAgentCodec.decodeAgentsJson(jsonEncode(rawAgents));
+      } on Object {
+        warnings.add('Malformed Studio agents were disabled.');
+      }
+    } else if (!json.containsKey('agents')) {
+      agents = StudioControllerOntology.buildDefaultAgents(
+        sessionId: presetId,
+        now: _integer(json['updatedAt']),
+      );
+    } else {
+      agents = const [];
+      warnings.add('Malformed Studio agents were disabled.');
+    }
     return StudioPresetDecodeResult(
       StudioPreset(
-        id: _string(json['id']),
+        id: presetId,
         name: _string(json['name']),
         blocks: blocks,
+        agents: agents,
+        expensiveApiConfigId: _string(json['expensiveApiConfigId']),
+        cheapApiConfigId: _string(json['cheapApiConfigId']),
+        cleanerApiConfigId: _string(json['cleanerApiConfigId']),
+        maxFinalHistoryMessages: _integer(
+          json['maxFinalHistoryMessages'],
+          fallback: 30,
+        ),
         agentEnabled: enabled,
         executionMode: StudioExecutionMode.fromWireName(
           _string(json['executionMode'], StudioExecutionMode.legacy.name),
@@ -208,6 +237,11 @@ abstract final class StudioPresetCodec {
       'id': preset.id,
       'name': preset.name,
       'blocks': [for (final block in preset.blocks) block.toJson()],
+      'agents': [for (final agent in preset.agents) agent.toJson()],
+      'expensiveApiConfigId': preset.expensiveApiConfigId,
+      'cheapApiConfigId': preset.cheapApiConfigId,
+      'cleanerApiConfigId': preset.cleanerApiConfigId,
+      'maxFinalHistoryMessages': preset.maxFinalHistoryMessages,
       'agentEnabled': preset.agentEnabled,
       'executionMode': preset.executionMode.name,
       'updatedAt': preset.updatedAt,
@@ -276,5 +310,6 @@ abstract final class StudioPresetCodec {
   static String? _nullableString(Object? value) =>
       value is String && value.trim().isNotEmpty ? value : null;
 
-  static int _integer(Object? value) => value is num ? value.toInt() : 0;
+  static int _integer(Object? value, {int fallback = 0}) =>
+      value is num ? value.toInt() : fallback;
 }

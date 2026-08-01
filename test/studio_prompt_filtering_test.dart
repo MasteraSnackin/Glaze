@@ -475,8 +475,9 @@ void main() {
     });
 
     test('final brief macros expand and suppress previous_agents block', () {
-      const macroConfig = StudioConfig(
-        sessionId: 's1',
+      const macroConfig = StudioConfig(sessionId: 's1');
+      const macroPreset = StudioPreset(
+        id: 'studio',
         agents: [
           StudioAgent(
             id: 'agent_s_continuity_1',
@@ -484,9 +485,6 @@ void main() {
           ),
           StudioAgent(id: 'agent_s_dialogue_1', name: 'Dialogue Controller'),
         ],
-      );
-      const macroPreset = StudioPreset(
-        id: 'studio',
         blocks: [
           StudioPresetBlock(
             id: 'previous_agents',

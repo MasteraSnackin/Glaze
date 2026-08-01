@@ -1130,7 +1130,6 @@ class CleanerStage {
       studioConfigEnabled =
           studioConfig?.enabled == true &&
           ctx.ref.read(studioFeatureEnabledProvider);
-      studioCleanerApiConfigId = studioConfig?.cleanerApiConfigId ?? '';
       studioPresetId = await ctx.ref.read(activeStudioPresetProvider.future);
     } catch (e) {
       debugPrint(
@@ -1149,6 +1148,7 @@ class CleanerStage {
       studioPreset = await ctx.ref
           .read(studioPresetRepoProvider)
           .getById(studioPresetId);
+      studioCleanerApiConfigId = studioPreset?.cleanerApiConfigId ?? '';
     } catch (e) {
       debugPrint(
         '[PostCleaner] rerun preset load failed session=$sessionId error=$e',

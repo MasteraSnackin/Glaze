@@ -37,19 +37,6 @@ abstract class StudioConfig with _$StudioConfig {
     @Default('') String profileId,
     @Default('') String profileName,
     @Default(false) bool enabled,
-    @Default([]) List<StudioAgent> agents,
-    @Default('') String expensiveApiConfigId,
-    @Default('') String cheapApiConfigId,
-    @Default('') String cleanerApiConfigId,
-
-    /// Maximum number of trailing user/assistant chat messages forwarded to the
-    /// FINAL Studio agent (the generator). Trackers (intermediate agents) are
-    /// trimmed per their own [StudioAgent.contextSize]. The final writer leans
-    /// on the tracker briefs instead of re-reading the whole transcript.
-    /// 0 = no message-count limit (a 60K token budget still applies).
-    /// See [StudioHistoryLimiter.finalHistoryTokenBudget].
-    @Default(30) int maxFinalHistoryMessages,
-
     /// Verbatim content of "broadcast" preset blocks — cross-cutting rules
     /// (output language + prose-quality guards: anti-loop/echo/cliché/slop,
     /// banlists) that must govern not only their primary agent but also the
@@ -94,6 +81,14 @@ abstract class StudioPreset with _$StudioPreset {
     required String id,
     @Default('') String name,
     @Default([]) List<StudioPresetBlock> blocks,
+    @Default([]) List<StudioAgent> agents,
+    @Default('') String expensiveApiConfigId,
+    @Default('') String cheapApiConfigId,
+    @Default('') String cleanerApiConfigId,
+
+    /// Maximum trailing messages sent to the final generator. Trackers use
+    /// their own [StudioAgent.contextSize]. 0 disables the message-count cap.
+    @Default(30) int maxFinalHistoryMessages,
 
     /// Per-agent on/off overrides keyed by controller spec id
     /// (e.g. `'continuity'`, `'narrative'`, `'final'`).
@@ -141,7 +136,7 @@ abstract class StudioAgent with _$StudioAgent {
 
     /// Number of trailing chat messages forwarded to this tracker (intermediate
     /// agent). Default 5 to keep trackers focused on local turn state; the
-    /// final agent ignores this and uses [StudioConfig.maxFinalHistoryMessages]
+    /// final agent ignores this and uses [StudioPreset.maxFinalHistoryMessages]
     /// instead. 0 = no limit (not recommended for trackers).
     @Default(5) int contextSize,
 
