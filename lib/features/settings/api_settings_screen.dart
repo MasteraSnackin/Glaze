@@ -20,6 +20,7 @@ import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/sheet_view.dart';
 import 'api_config_draft.dart';
+import '../studio/widgets/studio_slots_tab.dart';
 import 'api_list_provider.dart';
 import 'widgets/connection_status.dart';
 import '../../shared/widgets/menu_group.dart';
@@ -34,7 +35,7 @@ class ApiSettingsScreen extends ConsumerStatefulWidget {
 }
 
 class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
-  int _tab = 0; // 0 = LLM, 1 = Embeddings
+  int _tab = 0; // 0 = LLM, 1 = Embeddings, 2 = Studio agents
 
   bool _showApiKey = false;
   bool _isLoadingModels = false;
@@ -90,6 +91,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   // is pointed at whichever controller belongs to the active tab.
   final _llmScrollController = ScrollController();
   final _embScrollController = ScrollController();
+  final _agentsScrollController = ScrollController();
   Timer? _saveTimer;
   bool _loading = false;
 
@@ -142,6 +144,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     _flushSave();
     _llmScrollController.dispose();
     _embScrollController.dispose();
+    _agentsScrollController.dispose();
     for (final c in _ctrls) {
       c.dispose();
     }
@@ -368,7 +371,11 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       title: 'menu_app_settings'.tr(),
       showBack: true,
       onBack: _goBack,
-      scrollController: _tab == 0 ? _llmScrollController : _embScrollController,
+      scrollController: switch (_tab) {
+        0 => _llmScrollController,
+        1 => _embScrollController,
+        _ => _agentsScrollController,
+      },
       // The LLM/Embeddings switcher stays fixed in the header so it never
       // slides with the tab bodies — a single segmented control that keeps its
       // own pill animation while the content swipes beneath it.
@@ -380,13 +387,15 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
             ? _buildEmptyState()
             : SwipeTabSwitcher(
                 index: _tab,
-                length: 2,
+                length: 3,
                 onChanged: (i) => setState(() => _tab = i),
                 child: TabSlideSwitcher(
                   index: _tab,
-                  child: _tab == 0
-                      ? _buildLlmTab(list, activeName)
-                      : _buildEmbeddingsTab(list, activeName),
+                  child: switch (_tab) {
+                    0 => _buildLlmTab(list, activeName),
+                    1 => _buildEmbeddingsTab(list, activeName),
+                    _ => StudioSlotsTab(controller: _agentsScrollController),
+                  },
                 ),
               ),
       ),
@@ -409,6 +418,10 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       tabs: [
         GlazeTabItem(label: 'LLM', icon: Icons.chat_bubble_outline_rounded),
         GlazeTabItem(label: 'tab_embeddings'.tr(), icon: Icons.layers_outlined),
+        GlazeTabItem(
+          label: 'studio_agents'.tr(),
+          icon: Icons.smart_toy_outlined,
+        ),
       ],
       activeIndex: _tab,
       onChanged: (i) => setState(() => _tab = i),
