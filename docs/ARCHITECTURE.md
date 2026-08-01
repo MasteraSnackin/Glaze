@@ -503,10 +503,14 @@ part of the Studio cycle and are distinct from the later POST-cleaner.
 
 Studio has two separate persisted layers:
 
-- `studio_config_rows` stores reusable agent profiles, model slots, scheduling,
-  and session-to-profile binding through `profileId`;
+- `studio_config_rows` stores per-session Studio activation (`enabled` flag);
 - `studio_preset_rows` stores user-owned prompt presets as JSON block lists,
-  per-controller toggles, and an explicit `executionMode`.
+  per-controller toggles, an explicit `executionMode`, and nested
+  `StudioRuntimeSettings` (agent/cleaner/ledger tuning and broadcast blocks).
+
+The active Studio preset is a global selection (`activeStudioPresetId` in
+SharedPreferences, synced via `local_storage`). Session rows carry only the
+on/off toggle — they do not bind to a specific preset.
 
 Studio prompt presets are imported, copied, edited, and exported by the user.
 The application does not expose a public default-seed reset and does not ship
@@ -644,24 +648,21 @@ in `message_renderer.js` and incremental `_syncMessageControls` in
 condition. Otherwise the button appears only after reopening the session and
 forcing a full render.
 
-### Preset decomposition (auto + manual)
+### Studio agents and block routing
 
-`StudioDecompositionService.decompose()` builds the `StudioAgent` list from
-the chat's effective preset: enabled blocks are macro-expanded, reasoning
-blocks dropped, then routed (LLM router with keyword fallback) to stable
-controller lanes (continuity / agency / narrative / dialogue / guard / world
-/ meta / final). The last lane (`Main Responder`, `isFinal`) is the
-generator; all earlier lanes are trackers — the exact shape
-`runTrackerCycle` consumes. `routingMode = 'verbatim'` concatenates each
-agent's assigned blocks дословно (no LLM call); `'compiled'` asks the build
-LLM to synthesize a shard. `collectBroadcastBlocks` surfaces cross-cutting
-rules (output language, prose guards) for the POST-cleaner;
-`computePresetHash` detects preset changes.
+Studio agents are defined directly in `StudioPreset.agents`, each with an
+explicit `controllerId` (continuity / agency / narrative / dialogue / guard /
+world / meta / beauty / final). The last enabled pre-generation agent is the
+generator; all earlier agents are trackers. `StudioMessageBuilder` routes
+preset blocks to agents by `targetAgentId` and expands chat-time macros
+(`{{char}}`, `{{user}}`, `{{studio_*_brief}}`). Broadcast rules for the
+POST-cleaner live in `StudioPreset.runtime.broadcastBlocks`.
 
 Manual editing: `studio_settings_sheet.dart` exposes a "Edit Preset Blocks"
 button (opens `StudioPresetEditorSheet`), and a per-slot settings dialog
-for model parameters (temperature, topP, reasoning, etc.). Edits persist
-via `studioConfigRepo.upsert`.
+for model parameters (temperature, topP, reasoning, etc.). Studio
+agent/cleaner/ledger settings are written to the active preset's
+`StudioRuntimeSettings`, not to global `PipelineSettings`.
 
 ### Nested swipes (agentSwipes)
 
@@ -985,7 +986,7 @@ canonical tracker state.
 | `MemoryGraph*` | `memory_*_repo.dart` | v35; 4 tables (`memory_entity_rows`, `memory_salience_rows`, `memory_cadence_rows`, `memory_consolidation_rows`). **DISABLED** — heuristic entity extractor produces garbage on non-English text (see §"Disabled features" below). Tables remain for forward compat; no new rows written. |
 | `ExtensionPresets` | `extension_presets_repository.dart` | v20 |
 | `InfoBlocks` | `info_blocks_repository.dart` | v20; v22 adds `status` TEXT (default `'done'`) + `order` INTEGER (default 0); v27 adds `swipe_id` |
-| `StudioConfigRows` | `studio_config_repo.dart` | v36; reusable Studio profiles, v42 adds `profileId`/`profileName` for session-to-profile binding, v43 `builderPromptTemplate`, v44 `maxFinalHistoryMessages`, v46 `routingMode` |
+| `StudioConfigRows` | `studio_config_repo.dart` | v36; v42 adds `profileId`/`profileName` (removed v101); v101 rebuilds to session-only activation (`session_id`, `enabled`, timestamps) |
 | `TrackerRows` | `tracker_repo.dart` | v45; lightweight key-value canonical session state (e.g. `world:location`). Composite PK `{sessionId, name}`. Studio Ledger is the sole automatic writer; snapshots provide lifecycle-safe rollback. |
 | `TrackerSnapshots` | `tracker_snapshot_repo.dart` | v50; per-agent-swipe immutable snapshots of all trackers (mirrors Marinara-Engine's `game_state_snapshots`). Composite PK `{sessionId, messageId, swipeId, agentSwipeId}`; `trackersJson`, `committed`, `createdAt`. See INV-TS1–7 in `docs/INVARIANTS.md`. |
 | `LedgerReconciliationCheckpoints` / `LedgerReconciliationCleanupJournals` | reconciliation repos | Reconciliation progress and reversible cleanup provenance. |

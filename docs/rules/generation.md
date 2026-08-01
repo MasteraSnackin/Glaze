@@ -153,9 +153,11 @@ Studio Mode (tracker-around-generator, Phase 5+):
   60%) + `stripHtmlTags`. The generator uses `maxFinalHistoryMessages`
   (default 30) with a 60K token budget (whichever limit is hit first) instead.
   trimmed — only `chat_history` is. See INV-ST1, INV-ST2.
-- Studio profiles are reusable prompt/agent presets stored in DB and can be
-  bound to multiple chat sessions. Do not treat Studio config as purely
-  session-local state.
+- Studio presets are reusable prompt/agent configurations stored in
+  `studio_preset_rows` and selected globally via `activeStudioPresetId`.
+  Per-session state is limited to an on/off toggle in `studio_config_rows`.
+  Agent, cleaner, and Ledger runtime settings live in the preset's
+  `StudioRuntimeSettings`, not in global `PipelineSettings`.
 - A normal turn resolves one immutable `StudioTurnConfigSnapshot` before prompt
   construction. Trackers, final generation, POST-cleaner, and Ledger consume
   that same snapshot; mid-turn settings/preset/API changes affect the next

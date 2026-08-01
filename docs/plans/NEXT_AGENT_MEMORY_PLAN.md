@@ -1,5 +1,13 @@
 # Plan For Memory Hardening
 
+> **Historical note (2026-08):** The `PromptPayload` dual-payload design
+> described below (building a base payload, then cloning with source-window
+> IDs) has been superseded by the Studio preset decoupling. Studio now uses
+> typed `StudioContext` with explicit source windows per tracker/final agent,
+> and `GenerationContextInputs` is preset-neutral. The recall exclusion
+> approach described here was implemented via `sourceWindowVisibleMessageIds`
+> on `PromptPayload` and through `StudioContextPreparer` for Studio paths.
+
 Goal: strengthen memory duplicate/noise protection after the current Studio memory-window changes.
 
 ## Branch And State
