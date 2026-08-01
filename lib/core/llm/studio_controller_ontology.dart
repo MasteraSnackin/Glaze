@@ -135,8 +135,8 @@ class StudioControllerOntology {
       outputContract:
           'At chat time, output a compact meta brief ONLY. Decide one of: '
           '`meta_ooc: due | topic: <X>` (user addressed the meta-persona OOC), '
-          '`meta_periodic_note: due | last_note: <N turns ago> | voice: <from block> | length: <from block> | format: <from block>` (the Nth assistant turn fired the period rule — relay the voice/length/format/wrapper from the assigned meta block so the Main Responder writes in the user\'s chosen style), '
-          'or `meta: silent` (neither condition met). Never write in-scene prose, never write the actual OOC reply — that is the Main Responder\'s job, guided by your brief.',
+          '`meta_periodic_note: due | last_note: <N turns ago> | voice: <from block> | length: <from block> | format: <from block>` (the Nth assistant turn fired the period rule — relay the voice/length/format/wrapper from the assigned meta block so the Main Writer writes in the user\'s chosen style), '
+          'or `meta: silent` (neither condition met). Never write in-scene prose, never write the actual OOC reply — that is the Main Writer\'s job, guided by your brief.',
       laneOwns: 'only this controller\'s configured specialty.',
       laneSkip: 'concerns that belong to the other Studio controllers.',
       refreshPolicy: 'turn',
@@ -146,7 +146,7 @@ class StudioControllerOntology {
     ),
     StudioControllerSpec(
       id: 'final',
-      name: 'Main Responder',
+      name: 'Main Writer',
       purpose:
           'Write the final visible RP response using the full prompt and the prior controller briefs.',
       outputContract:
@@ -166,7 +166,7 @@ class StudioControllerOntology {
       purpose: 'Audit the final response for factual errors and cliches, then rewrite it cleanly. Applies styling state from the current beauty state.',
       outputContract: 'Output the cleaned/rewritten assistant message. Append a <glaze_beauty_state> JSON marker if styling state changed.',
       laneOwns: 'factual accuracy, cliche/echo removal, prose cleanup, and styling application.',
-      laneSkip: 'scene content, character decisions, dialogue substance — the Main Responder already wrote those.',
+      laneSkip: 'scene content, character decisions, dialogue substance — the Main Writer already wrote those.',
       refreshPolicy: 'turn',
       invalidationSignals: ['last_user_message_changed'],
       temperature: 0.3,

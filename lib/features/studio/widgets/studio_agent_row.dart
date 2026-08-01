@@ -50,11 +50,7 @@ class StudioAgentRow extends StatelessWidget {
             children: [
               const SizedBox(width: 30, height: 44),
               Icon(
-                spec.lockedOn
-                    ? Icons.lock_outline
-                    : spec.isFinal
-                    ? Icons.star_outline
-                    : Icons.smart_toy_outlined,
+                spec.isFinal ? Icons.star_outline : Icons.smart_toy_outlined,
                 size: 16,
                 color: spec.isFinal
                     ? context.cs.primary
@@ -94,15 +90,30 @@ class StudioAgentRow extends StatelessWidget {
               const SizedBox(width: 8),
               Padding(
                 padding: const EdgeInsets.only(right: 12),
-                child: Transform.scale(
-                  scale: 0.8,
-                  alignment: Alignment.centerRight,
-                  child: Switch(
-                    value: enabled,
-                    onChanged: spec.lockedOn ? null : onToggle,
-                    activeThumbColor: context.cs.primary,
-                  ),
-                ),
+                // An always-on agent gets a padlock, not a dead switch: a
+                // greyed-out toggle reads as "you turned this off".
+                child: spec.lockedOn
+                    ? Tooltip(
+                        message: 'studio_agent_always_on'.tr(),
+                        child: SizedBox(
+                          width: 40,
+                          height: 40,
+                          child: Icon(
+                            Icons.lock_outline,
+                            size: 18,
+                            color: context.cs.onSurfaceVariant,
+                          ),
+                        ),
+                      )
+                    : Transform.scale(
+                        scale: 0.8,
+                        alignment: Alignment.centerRight,
+                        child: Switch(
+                          value: enabled,
+                          onChanged: onToggle,
+                          activeThumbColor: context.cs.primary,
+                        ),
+                      ),
               ),
             ],
           ),
