@@ -60,7 +60,11 @@ class _NavBarSuppressorState extends ConsumerState<NavBarSuppressor> {
     // provider is forbidden.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      _registry = ref.read(navBarSuppressionProvider.notifier)..suppress(this);
+      // Two statements, not a cascade: `a = b..m()` binds the cascade to the
+      // assignment, whose static type is the nullable field.
+      final registry = ref.read(navBarSuppressionProvider.notifier);
+      _registry = registry;
+      registry.suppress(this);
     });
   }
 

@@ -107,18 +107,14 @@ class StudioBatchCoordinator {
             'listed above, in order.',
       },
     ];
-    // Use a synthetic StudioAgent for the batch request: carry the group's
-    // budget/temperature. The AgentRunner will resolve the API config from
-    // this agent's fields (modelSource='current' → use the group's resolved
-    // (provider, model) via runApiConfigId). We override maxTokens/temperature
-    // on a per-call basis by passing them through ChatTransportRequest — but
-    // AgentRunner.runAgent reads them off the agent. So we synthesize a
-    // per-batch agent that carries the batch budget.
-    final batchAgent = group.agents.first.copyWith(
-      maxTokens: group.batchMaxTokens,
-      temperature: group.batchTemperature,
-      contextSize: batchContextSize,
-    );
+    // The batch runs under the first agent's identity (the API config is
+    // resolved from the group's `resolved` config anyway), but with the
+    // group's own budget: the summed token allowance and the lowest
+    // temperature. Those are passed explicitly rather than copied onto a
+    // synthetic agent — an agent carries no generation parameters of its own
+    // (§4). The shared history is already trimmed to [batchContextSize] by
+    // `buildSharedBatchMessages` above.
+    final batchAgent = group.agents.first;
     final runner = _runner;
     List<ControllerBatchResult>? lastParsed;
     String? lastError;
@@ -140,6 +136,8 @@ class StudioBatchCoordinator {
           cancelToken: cancelToken,
           preResolvedConfig: group.resolved,
           turnConfig: turnConfig,
+          batchMaxTokens: group.batchMaxTokens,
+          batchTemperature: group.batchTemperature,
         );
         final parsed = batcher.parseBatchResponse(result.text, group);
         if (_allOk(parsed)) {

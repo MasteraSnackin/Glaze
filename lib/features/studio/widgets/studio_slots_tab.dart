@@ -6,7 +6,6 @@ import '../../../core/models/api_config.dart';
 import '../../../core/models/pipeline_settings.dart';
 import '../../../core/models/studio_config.dart';
 import '../../../core/state/db_provider.dart';
-import '../../../core/state/pipeline_settings_provider.dart';
 import '../../../core/state/studio_default_profile_provider.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glass_surface.dart';

@@ -22,10 +22,10 @@ class StudioPresetRowPlacement {
 List<StudioPresetBlock> studioPresetEntryBlocks(StudioPresetBlockGroup entry) {
   if (entry.header == null) return [entry.standalone!];
   return [
-    if (entry.openingBoundary case final block?) block,
+    ?entry.openingBoundary,
     entry.header!,
     ...entry.children,
-    if (entry.closingBoundary case final block?) block,
+    ?entry.closingBoundary,
   ];
 }
 

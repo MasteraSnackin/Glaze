@@ -385,8 +385,8 @@ class _StudioBlockGroupRowState extends State<StudioBlockGroupRow> {
           );
 
     final boundaries = <StudioPresetBlock>[
-      if (group.openingBoundary case final b?) b,
-      if (group.closingBoundary case final b?) b,
+      ?group.openingBoundary,
+      ?group.closingBoundary,
     ];
 
     return Container(
