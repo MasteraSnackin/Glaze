@@ -450,20 +450,17 @@ class PresetUtilButton extends StatelessWidget {
 // ─── PresetStatBadge ──────────────────────────────────────────────────────────
 
 /// Pill badge in the dashboard's utils row (token estimate, requests/turn,
-/// agent count…). Interactive when [onTap] is given — the agentic editor's
-/// agent badge opens its panel.
+/// agent count…).
 class PresetStatBadge extends StatelessWidget {
   final IconData icon;
   final String label;
   final bool onCover;
-  final VoidCallback? onTap;
 
   const PresetStatBadge({
     super.key,
     required this.icon,
     required this.label,
     this.onCover = false,
-    this.onTap,
   });
 
   @override
@@ -471,7 +468,7 @@ class PresetStatBadge extends StatelessWidget {
     final foreground = onCover
         ? Colors.white.withValues(alpha: 0.9)
         : context.cs.onSurfaceVariant;
-    final pill = Container(
+    return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: onCover
@@ -498,7 +495,5 @@ class PresetStatBadge extends StatelessWidget {
         ],
       ),
     );
-    if (onTap == null) return pill;
-    return GestureDetector(onTap: onTap, child: pill);
   }
 }

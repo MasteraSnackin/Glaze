@@ -16,7 +16,6 @@ import '../settings/app_settings_provider.dart';
 import '../studio/studio_agent_toggle.dart';
 import '../studio/studio_injection_points.dart';
 import '../studio/studio_preset_stats.dart';
-import '../studio/widgets/studio_agents_panel.dart';
 import '../studio/widgets/studio_block_editor_inline.dart';
 import '../studio/widgets/studio_block_section_list.dart';
 import '../studio/widgets/studio_preset_options_sheet.dart';
@@ -26,15 +25,16 @@ import 'widgets/preset_dashboard_card.dart';
 /// Full editor for a single agentic (Studio) preset, rendered inline inside the
 /// [PresetListScreen] SheetView.
 ///
-/// Built from the plain [PresetEditorBody]'s parts, in three boxes: the
-/// identity dashboard (name, overflow menu, stat badges), the collapsible agent
-/// list, and the blocks. Editing a block replaces the body with the shared
-/// [GenericEditor], and back returns to the dashboard.
+/// Built from the plain [PresetEditorBody]'s parts, in two boxes: the identity
+/// dashboard (name, overflow menu, stat badges) and the pipeline. Editing a
+/// block replaces the body with the shared [GenericEditor], and back returns to
+/// the dashboard.
 ///
-/// The agents come before the blocks because they decide which stages run at
-/// all. The block box holds the whole preset at once, split into one section
-/// per injection point (§5) in pipeline order; dragging a row under another
-/// section header re-targets the block to that stage.
+/// The pipeline box holds the whole preset at once, split into one section per
+/// injection point (§5) in pipeline order. A section reads as the stage itself:
+/// its header, the agents that run there with their settings, then the blocks
+/// addressed to them. Dragging a block under another section header re-targets
+/// it to that stage.
 class StudioPresetEditorBody extends ConsumerStatefulWidget {
   final String presetId;
   final VoidCallback onClose;
@@ -55,7 +55,6 @@ class StudioPresetEditorBodyState
   StudioPreset? _preset;
   bool _loading = true;
   String? _editingBlockId;
-  bool _agentsExpanded = false;
   Timer? _saveTimer;
 
   final ScrollController _scrollController = ScrollController();
@@ -408,13 +407,6 @@ class StudioPresetEditorBodyState
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _buildDashboard(preset),
-          StudioAgentsPanel(
-            preset: preset,
-            expanded: _agentsExpanded,
-            onToggleExpanded: () =>
-                setState(() => _agentsExpanded = !_agentsExpanded),
-            onToggle: _toggleAgent,
-          ),
           _buildBlocksCard(preset),
           const SizedBox(height: 60),
         ],
@@ -445,13 +437,11 @@ class StudioPresetEditorBodyState
       subtitle: 'studio_preset_subtitle'.tr(),
       onTitleTap: _showRenameDialog,
       onMenuTap: _showOptionsMenu,
-      // All three stats read as the same pill; the agent one is tappable and
-      // opens the agents card below.
+      // All three stats read as the same pill.
       utilsTrailing: [
         PresetStatBadge(
           icon: Icons.smart_toy_outlined,
           label: '${studioPresetEnabledAgentCount(preset)}',
-          onTap: () => setState(() => _agentsExpanded = !_agentsExpanded),
         ),
         const SizedBox(width: 8),
         PresetStatBadge(
@@ -474,13 +464,14 @@ class StudioPresetEditorBodyState
     final addBlockAtTop =
         ref.watch(appSettingsProvider).value?.addBlockAtTop ?? false;
     final list = StudioBlockSectionList(
-      blocks: preset.blocks,
+      preset: preset,
       sections: _sections,
       onReorder: _onReorder,
       onEdit: _openBlock,
       onToggle: _toggleBlock,
       onSelectExclusive: _selectExclusive,
       onDelete: _deleteBlock,
+      onToggleAgent: _toggleAgent,
     );
     return PresetCard(
       child: Column(
