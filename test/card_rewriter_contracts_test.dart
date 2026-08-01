@@ -68,15 +68,11 @@ void main() {
   );
 
   test(
-    'policy has the exact writable field allowlist and explicit budgets',
+    'policy has the exact writable field allowlist',
     () {
       expect(
-        CardRewritePolicy.budgets.keys,
+        CardRewritePolicy.writableFields,
         unorderedEquals(CardRewriteField.values),
-      );
-      expect(
-        CardRewritePolicy.budgets.values.every((budget) => budget > 0),
-        isTrue,
       );
     },
   );
@@ -102,7 +98,7 @@ void main() {
   });
 
   test(
-    'anchored patch validator reports stale, duplicate, full-set, and budget violations',
+    'anchored patch validator reports stale, duplicate, and full-set violations',
     () {
       final current = {
         for (final field in CardRewriteField.values)
@@ -122,15 +118,11 @@ void main() {
 
       final invalid = AnchoredScalarPatchValidator.validate(
         currentCardValues: current,
-        fullCardBaselineSize: current.values.fold(
-          0,
-          (total, value) => total + value.length,
-        ),
         patches: [
           patch(CardRewriteField.description),
           patch(CardRewriteField.description),
           patch(CardRewriteField.personality, anchor: 'outdated'),
-          patch(CardRewriteField.scenario, value: 'x' * 12001),
+          patch(CardRewriteField.scenario),
         ],
         requiredFields: CardRewriteField.values,
       );
@@ -142,7 +134,6 @@ void main() {
           CardPatchViolation.duplicateAnchor,
           CardPatchViolation.staleAnchor,
           CardPatchViolation.incompleteSet,
-          CardPatchViolation.overBudget,
         ]),
       );
     },
@@ -154,10 +145,6 @@ void main() {
     };
     final result = AnchoredScalarPatchValidator.validate(
       currentCardValues: current,
-      fullCardBaselineSize: current.values.fold(
-        0,
-        (total, value) => total + (value?.length ?? 0),
-      ),
       patches: [
         AnchoredScalarPatch(
           scopeKey: 'npc:ada',
@@ -190,12 +177,10 @@ void main() {
     );
     final rejected = AnchoredScalarPatchValidator.validate(
       currentCardValues: {CardRewriteField.description: anchor},
-      fullCardBaselineSize: anchor.length,
       patches: [patch('{{char}} meets {{user}} and smiles.')],
     );
     final accepted = AnchoredScalarPatchValidator.validate(
       currentCardValues: {CardRewriteField.description: anchor},
-      fullCardBaselineSize: anchor.length,
       patches: [patch('{{char}} warmly meets {{user}}; {{char}} smiles.')],
     );
     expect(
@@ -211,7 +196,6 @@ void main() {
       final anchor = CardCanonicalizer.scalarSha256('repeat');
       final result = AnchoredScalarPatchValidator.validate(
         currentCardValues: {CardRewriteField.description: 'repeat repeat'},
-        fullCardBaselineSize: 'repeat repeat'.length,
         patches: [
           AnchoredScalarPatch(
             scopeKey: 'npc:ada',
@@ -234,92 +218,22 @@ void main() {
     },
   );
 
-  test('simulates projected field and total card budgets', () {
-    final fieldAnchor = CardCanonicalizer.scalarSha256('old');
-    final fieldResult = AnchoredScalarPatchValidator.validate(
-      currentCardValues: {CardRewriteField.description: 'old'},
-      fullCardBaselineSize: 3,
-      patches: [
-        AnchoredScalarPatch(
-          scopeKey: 'npc:ada',
-          field: CardRewriteField.description,
-          anchor: 'old',
-          anchorSha256: fieldAnchor,
-          value: 'x' * 12001,
-        ),
-      ],
-    );
-    final totalResult = AnchoredScalarPatchValidator.validate(
-      currentCardValues: {
-        CardRewriteField.description: 'old',
-        CardRewriteField.personality: 'x' * 10,
-      },
-      fullCardBaselineSize: 13,
-      totalCardBudget: 12,
-      patches: [
-        AnchoredScalarPatch(
-          scopeKey: 'npc:ada',
-          field: CardRewriteField.description,
-          anchor: 'old',
-          anchorSha256: fieldAnchor,
-          value: 'xxxx',
-        ),
-      ],
-    );
-    expect(fieldResult.violations, contains(CardPatchViolation.overBudget));
-    expect(
-      totalResult.violations,
-      contains(CardPatchViolation.totalOverBudget),
-    );
-  });
-
-  test('total budget includes non-writable canonical baseline content', () {
+  test('does not reject a large replacement by size', () {
     final result = AnchoredScalarPatchValidator.validate(
-      currentCardValues: {CardRewriteField.description: 'old'},
-      // Full canonical snapshot size: most content is non-writable.
-      fullCardBaselineSize: 99,
-      totalCardBudget: 100,
+      currentCardValues: {
+        CardRewriteField.description: 'anchor text',
+      },
       patches: [
         AnchoredScalarPatch(
           scopeKey: 'npc:ada',
           field: CardRewriteField.description,
-          anchor: 'old',
-          anchorSha256: CardCanonicalizer.scalarSha256('old'),
-          value: 'newer',
+          anchor: 'anchor text',
+          anchorSha256: CardCanonicalizer.scalarSha256('anchor text'),
+          value: 'x' * 100000,
         ),
       ],
     );
-    expect(result.violations, contains(CardPatchViolation.totalOverBudget));
-  });
 
-  test('total budget applies writable replacement deltas to baseline', () {
-    CardPatchValidation validate(String replacement) =>
-        AnchoredScalarPatchValidator.validate(
-          currentCardValues: {CardRewriteField.description: 'anchor'},
-          fullCardBaselineSize: 100,
-          totalCardBudget: 100,
-          patches: [
-            AnchoredScalarPatch(
-              scopeKey: 'npc:ada',
-              field: CardRewriteField.description,
-              anchor: 'anchor',
-              anchorSha256: CardCanonicalizer.scalarSha256('anchor'),
-              value: replacement,
-            ),
-          ],
-        );
-
-    expect(
-      validate('x').violations,
-      isNot(contains(CardPatchViolation.totalOverBudget)),
-    );
-    expect(
-      validate('anchor').violations,
-      isNot(contains(CardPatchViolation.totalOverBudget)),
-    );
-    expect(
-      validate('longer-than-anchor').violations,
-      contains(CardPatchViolation.totalOverBudget),
-    );
+    expect(result.isValid, isTrue);
   });
 }

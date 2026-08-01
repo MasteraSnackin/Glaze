@@ -56,6 +56,8 @@ final class CardEvolutionFinalizeOutcome {
 /// commit. The immutable chat-history snapshot is the primary evidence; the
 /// current effective canon supplies Ledger's durable facts and tracker state.
 class CardEvolutionRepo {
+  static const _minimumEvolutionAnchorCodeUnits = 12;
+
   CardEvolutionRepo({
     required this.db,
     required this.canonReader,
@@ -258,12 +260,18 @@ class CardEvolutionRepo {
         field: _fieldValue(assembly.character, field),
     };
     for (final operation in cardOperations) {
+      if (operation.patches.any(
+        (patch) => patch.anchor.trim().length < _minimumEvolutionAnchorCodeUnits,
+      )) {
+        return CardEvolutionFinalizeOutcome(
+          'invalidOperation',
+          null,
+          '${operation.field.wireName}: anchorTooShort',
+        );
+      }
       final validation = AnchoredScalarPatchValidator.validate(
         patches: operation.patches,
         currentCardValues: values,
-        fullCardBaselineSize: CardCanonicalizer.serialize(
-          assembly.character,
-        ).length,
         requiredFields: [operation.field],
       );
       if (!validation.isValid) {

@@ -136,6 +136,21 @@ void main() {
     );
   });
 
+  test('evolution batches recompute model-supplied anchor hashes', () {
+    final payload = validPayload();
+    (payload['patches'] as List).single['anchorSha256'] = 'not-a-real-hash';
+
+    final operations = CardRewriteOperationParser.parseEvolutionBatch(
+      jsonEncode({'operations': [payload]}),
+    );
+
+    expect(operations, hasLength(1));
+    expect(
+      operations!.single.patches.single.anchorSha256,
+      CardCanonicalizer.scalarSha256(anchor),
+    );
+  });
+
   test('rejects multiple concatenated JSON payloads', () {
     final result = CardRewriteOperationParser.parse(
       '${jsonEncode(validPayload())}\n${jsonEncode(validPayload())}',
@@ -313,14 +328,11 @@ void main() {
     );
   });
 
-  test('rejects values that structurally exceed the field budget', () {
-    final oversized = 'x' * 12001;
+  test('accepts a large replacement when its patch contract is otherwise valid', () {
+    final oversized = '${'x' * 12001} {{char}} {{user}}';
     final payload = validPayload()
       ..['patches'] = [validPatch()..['value'] = oversized];
-    expect(
-      rejectionOf(payload),
-      CardRewriteOperationParseRejection.valueExceedsFieldBudget,
-    );
+    expect(parsePayload(payload).isSuccess, isTrue);
   });
 
   test('rejects malformed transitions', () {
@@ -448,7 +460,6 @@ void main() {
     final validation = AnchoredScalarPatchValidator.validate(
       patches: result.snapshot!.patches,
       currentCardValues: {CardRewriteField.description: card.description},
-      fullCardBaselineSize: CardCanonicalizer.serialize(card).length,
     );
     expect(validation.isValid, isTrue, reason: '${validation.violations}');
   });

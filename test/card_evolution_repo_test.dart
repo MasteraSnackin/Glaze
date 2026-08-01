@@ -209,6 +209,29 @@ void main() {
     expect(await db.select(db.rewriteJobs).get(), isEmpty);
   });
 
+  test('finalize rejects a tiny automated anchor', () async {
+    final claim = (await evolution.claim(
+      sessionId: 'session',
+      ownerId: 'owner',
+      now: 10,
+      leaseSeconds: 30,
+    )).claim!;
+
+    final result = await evolution.finalize(
+      claimId: claim.row.id,
+      ownerId: 'owner',
+      now: 11,
+      modelOutput: 'raw',
+      operations: [
+        _operation(CardRewriteField.scenario, '8', 'Afterlife with Danvi'),
+      ],
+    );
+
+    expect(result.kind, 'invalidOperation');
+    expect(result.detail, 'scenario: anchorTooShort');
+    expect(await db.select(db.rewriteJobs).get(), isEmpty);
+  });
+
   test('finalization rollback keeps no partial proposal', () async {
     final reader = evolution.canonReader;
     evolution = CardEvolutionRepo(
@@ -260,18 +283,18 @@ const _nextUser = {
 List<CardRewriteOperationSnapshot> _operations() => [
   _operation(
     CardRewriteField.description,
-    'cautious',
-    'cautious but increasingly trusting',
+    'Alice is cautious.',
+    'Alice is cautious but increasingly trusting.',
   ),
   _operation(
     CardRewriteField.personality,
-    'Reserved',
-    'Reserved, observant, and increasingly open',
+    'Reserved and observant.',
+    'Reserved, observant, and increasingly open.',
   ),
   _operation(
     CardRewriteField.scenario,
-    'quiet city',
-    'quiet city where trust is cautiously growing',
+    'A quiet city after midnight.',
+    'A quiet city after midnight where trust is cautiously growing.',
   ),
 ];
 

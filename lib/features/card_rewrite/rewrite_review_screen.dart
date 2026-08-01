@@ -31,9 +31,18 @@ class RewriteReviewScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final snapshot = ref.watch(rewriteJobSnapshotProvider(jobId));
+    final job = snapshot.whenOrNull(data: (value) => value)?.job;
+    final sessionIndex = job == null
+        ? null
+        : ref
+              .watch(rewriteSessionIndexProvider(job.chatSessionId))
+              .whenOrNull(data: (value) => value);
+    final backLocation = sessionIndex == null
+        ? '/chat/$charId'
+        : '/chat/$charId?session=$sessionIndex';
     return GlazeScaffold(
       title: 'rewrite_title'.tr(),
-      onBack: () => context.go('/character/$charId'),
+      onBack: () => context.go(backLocation),
       body: snapshot.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (_, _) => _MessageState(
@@ -45,16 +54,25 @@ class RewriteReviewScreen extends ConsumerWidget {
                 icon: Icons.find_in_page_outlined,
                 text: 'rewrite_not_found'.tr(),
               )
-            : _ReviewBody(snapshot: data, jobId: jobId),
+            : _ReviewBody(
+                snapshot: data,
+                jobId: jobId,
+                backLocation: backLocation,
+              ),
       ),
     );
   }
 }
 
 class _ReviewBody extends ConsumerWidget {
-  const _ReviewBody({required this.snapshot, required this.jobId});
+  const _ReviewBody({
+    required this.snapshot,
+    required this.jobId,
+    required this.backLocation,
+  });
   final ManualRewriteJobSnapshot snapshot;
   final String jobId;
+  final String backLocation;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -85,6 +103,33 @@ class _ReviewBody extends ConsumerWidget {
               controller.selectOperation(snapshot.operations[i].operation.id),
         ),
     ];
+    final railTiles = <Widget>[
+      for (var i = 0; i < snapshot.operations.length; i++)
+        () {
+          final view = snapshot.operations[i];
+          final operation = decodeRewriteOperationSnapshot(
+            view.currentSnapshotJson,
+          );
+          final scopeKey = switch (operation) {
+            CardRewriteOperationSnapshot card => card.transition.scopeKey,
+            LorebookRewriteOperationSnapshot lore =>
+              'lorebook:${lore.lorebookId}/${lore.entryId}',
+            _ => 'invalid operation',
+          };
+          final locked = operation is CardRewriteOperationSnapshot &&
+              lockOverlap(operation, lockedNames).isNotEmpty;
+          return RewriteOperationRailTile(
+            index: i,
+            view: view,
+            scopeKey: scopeKey,
+            invalid: view.operation.validationStatus == 'invalid' ||
+                operation == null,
+            locked: locked,
+            selected: ui.selectedOperationId == view.operation.id,
+            onTap: () => controller.selectOperation(view.operation.id),
+          );
+        }(),
+    ];
     return Column(
       children: [
         _StatusStrip(snapshot: snapshot, freshness: ui.freshness),
@@ -105,7 +150,7 @@ class _ReviewBody extends ConsumerWidget {
                       width: 320,
                       child: ListView(
                         padding: const EdgeInsets.all(16),
-                        children: cards,
+                        children: railTiles,
                       ),
                     ),
                     VerticalDivider(color: context.cs.outlineVariant, width: 1),
@@ -135,6 +180,7 @@ class _ReviewBody extends ConsumerWidget {
         _ApplyFooter(
           snapshot: snapshot,
           jobId: jobId,
+          backLocation: backLocation,
           enabled: interactive,
           manualControlNames: lockedNames,
         ),
@@ -340,11 +386,13 @@ class _ApplyFooter extends ConsumerWidget {
   const _ApplyFooter({
     required this.snapshot,
     required this.jobId,
+    required this.backLocation,
     required this.enabled,
     required this.manualControlNames,
   });
   final ManualRewriteJobSnapshot snapshot;
   final String jobId;
+  final String backLocation;
   final bool enabled;
   final Set<String> manualControlNames;
   @override
@@ -352,6 +400,11 @@ class _ApplyFooter extends ConsumerWidget {
     final approved = snapshot.operations
         .where((v) => v.operation.decision == 'approved')
         .length;
+    final hasPending = snapshot.operations.any(
+      (view) =>
+          view.operation.status == 'reviewable' &&
+          view.operation.decision == 'pending',
+    );
     final canApply = enabled && approved > 0;
     final canApproveAll =
         enabled &&
@@ -373,22 +426,32 @@ class _ApplyFooter extends ConsumerWidget {
         borderRadius: BorderRadius.circular(16),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'rewrite_apply_summary'.tr(namedArgs: {'count': '$approved'}),
-                ),
-              ),
-              TextButton.icon(
-                onPressed: canApproveAll
-                    ? () => _approveAll(context, ref)
-                    : null,
+           child: Wrap(
+             alignment: WrapAlignment.end,
+             crossAxisAlignment: WrapCrossAlignment.center,
+             spacing: 8,
+             runSpacing: 8,
+             children: [
+               Text('rewrite_apply_summary'.tr(namedArgs: {'count': '$approved'})),
+               TextButton.icon(
+                 onPressed: canApproveAll
+                     ? () => _approveAll(context, ref)
+                     : null,
                 icon: const Icon(Icons.done_all_rounded),
-                label: Text('rewrite_approve_all'.tr()),
-              ),
-              const SizedBox(width: 8),
-              FilledButton.icon(
+                 label: Text('rewrite_approve_all'.tr()),
+               ),
+               if (approved == 0)
+                 TextButton.icon(
+                   onPressed: enabled
+                       ? () => _rejectAndClose(context, ref, hasPending)
+                       : null,
+                   icon: const Icon(Icons.close_rounded),
+                   label: const Text('Reject and close'),
+                   style: TextButton.styleFrom(
+                     foregroundColor: context.cs.error,
+                   ),
+                 ),
+               FilledButton.icon(
                 onPressed: canApply ? () => _confirm(context, ref) : null,
                 icon: const Icon(Icons.done_all_rounded),
                 label: Text('rewrite_apply'.tr()),
@@ -413,6 +476,20 @@ class _ApplyFooter extends ConsumerWidget {
         'rewrite_approve_all_result'.tr(namedArgs: {'count': '$approved'}),
       );
     }
+  }
+
+  Future<void> _rejectAndClose(
+    BuildContext context,
+    WidgetRef ref,
+    bool hasPending,
+  ) async {
+    if (hasPending) {
+      await ref
+          .read(rewriteReviewUiProvider(jobId).notifier)
+          .rejectAllPending(ops: snapshot.operations);
+    }
+    await ref.read(rewriteReviewUiProvider(jobId).notifier).cancelJob(jobId);
+    if (context.mounted) context.go(backLocation);
   }
 
   void _confirm(BuildContext context, WidgetRef ref) {

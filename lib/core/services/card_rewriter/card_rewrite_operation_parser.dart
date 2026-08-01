@@ -47,10 +47,6 @@ enum CardRewriteOperationParseRejection {
   /// A patch or transition `scopeKey` failed [CardRewriteScope.tryParse].
   invalidScope,
 
-  /// A single replacement `value` already exceeds the field budget, so the
-  /// snapshot can never pass [AnchoredScalarPatchValidator].
-  valueExceedsFieldBudget,
-
   /// A replacement changed the exact multiset of `{{...}}` macro tokens from
   /// its anchored source fragment.
   macroTokensChanged,
@@ -116,10 +112,7 @@ final class CardRewriteOperationParseResult {
 /// - `field` is a writable [CardRewriteField] equal to [expectedField];
 /// - `patches` is a non-empty list of single-field, non-empty-anchor patches
 ///   whose `scopeKey` parses per [CardRewriteScope], whose `anchorSha256`
-///   matches the RECOMPUTED [CardCanonicalizer.scalarSha256] of the anchor,
-///   and whose `value` alone fits inside the field budget (since the anchor
-///   occurs in the current field, `value.length > budget` structurally
-///   cannot validate);
+  ///   matches the RECOMPUTED [CardCanonicalizer.scalarSha256] of the anchor;
 /// - the transition is global (`chatSessionId` absent or null) with
 ///   non-empty `id`/`canonicalClaim`/`promotionDestination`, a valid scope
 ///   shared by every patch, and a present `affectedTrackerKeys` list whose
@@ -199,7 +192,8 @@ abstract final class CardRewriteOperationParser {
       final parsed = parse(
         jsonEncode(rawOperation),
         expectedField: field,
-          allowEmptyAnchor: false,
+        allowEmptyAnchor: false,
+        recomputeAnchorHash: true,
       );
       if (parsed.snapshot == null) {
         final reason = parsed.rejection?.name ?? 'unknown rejection';
@@ -249,6 +243,7 @@ abstract final class CardRewriteOperationParser {
     String output, {
     required CardRewriteField expectedField,
     bool allowEmptyAnchor = false,
+    bool recomputeAnchorHash = false,
   }) {
     final raw = extractJsonObject(output);
     if (raw == null) {
@@ -302,8 +297,6 @@ abstract final class CardRewriteOperationParser {
         'expected "${expectedField.wireName}", got "${field.wireName}"',
       );
     }
-    final budget = CardRewritePolicy.budgets[field]!;
-
     final patchesValue = decoded['patches'];
     if (patchesValue is! List) {
       return const CardRewriteOperationParseResult.failure(
@@ -355,16 +348,10 @@ abstract final class CardRewriteOperationParser {
           CardRewriteOperationParseRejection.emptyAnchor,
         );
       }
-      // Never trust the provided hash: recompute from the anchor bytes.
-      if (CardCanonicalizer.scalarSha256(anchor) != anchorSha256) {
+      final computedAnchorHash = CardCanonicalizer.scalarSha256(anchor);
+      if (!recomputeAnchorHash && computedAnchorHash != anchorSha256) {
         return const CardRewriteOperationParseResult.failure(
           CardRewriteOperationParseRejection.staleAnchorHash,
-        );
-      }
-      if (value.length > budget) {
-        return CardRewriteOperationParseResult.failure(
-          CardRewriteOperationParseRejection.valueExceedsFieldBudget,
-          'value of ${value.length} code units exceeds budget $budget',
         );
       }
       if (!AnchoredScalarPatchValidator.preservesMacroTokens(anchor, value)) {
@@ -378,7 +365,11 @@ abstract final class CardRewriteOperationParser {
           scopeKey: canonicalScopeKey,
           field: field,
           anchor: anchor,
-          anchorSha256: anchorSha256,
+          // The automated batch is still bounded by exact live-anchor checks,
+          // but an LLM cannot reliably produce a cryptographic digest.
+          anchorSha256: recomputeAnchorHash
+              ? computedAnchorHash
+              : anchorSha256,
           value: value,
         ),
       );

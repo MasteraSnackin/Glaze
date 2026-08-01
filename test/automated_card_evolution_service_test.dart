@@ -245,6 +245,19 @@ void main() {
     expect(receivedTimeout, 180000);
   });
 
+  test('uses a 20k response budget for each writer call', () async {
+    int? receivedMaxTokens;
+    final result = await fixture
+        .service(
+          (_, _) async => _ok(fixture.cardBatchOutput),
+          onMaxTokens: (maxTokens) => receivedMaxTokens = maxTokens,
+        )
+        .runOneBatch('session');
+
+    expect(result.kind, 'persisted');
+    expect(receivedMaxTokens, 20000);
+  });
+
   test('disabled lorebook evolution skips its second model call', () async {
     await _seedManifest(fixture.db, 'a1', 'entry one');
     var calls = 0;
@@ -343,9 +356,11 @@ final class _Fixture {
         'patches': [
           {
             'scopeKey': 'npc:alice',
-            'anchor': 'cautious',
-            'anchorSha256': CardCanonicalizer.scalarSha256('cautious'),
-            'value': 'increasingly trusting',
+            'anchor': 'Alice is cautious.',
+            'anchorSha256': CardCanonicalizer.scalarSha256(
+              'Alice is cautious.',
+            ),
+            'value': 'Alice is increasingly trusting.',
           },
         ],
         'transition': {
@@ -384,6 +399,7 @@ final class _Fixture {
     bool Function()? isLorebookEvolutionEnabled,
     int timeoutMs = 180000,
     void Function(int timeoutMs)? onTimeout,
+    void Function(int maxTokens)? onMaxTokens,
   }) =>
       AutomatedCardEvolutionService(
         repo: repo,
@@ -403,6 +419,7 @@ final class _Fixture {
               cancelToken,
             }) {
               onTimeout?.call(timeoutMs);
+              onMaxTokens?.call(maxTokens);
               return executor(cancelToken, prompt);
             },
         isLorebookEvolutionEnabled: isLorebookEvolutionEnabled,

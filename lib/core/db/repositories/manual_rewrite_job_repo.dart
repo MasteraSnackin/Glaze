@@ -759,7 +759,6 @@ class ManualRewriteJobRepo {
     final validation = AnchoredScalarPatchValidator.validate(
       patches: parsed.patches,
       currentCardValues: values,
-      fullCardBaselineSize: CardCanonicalizer.serialize(character).length,
     );
     if (!validation.isValid) return 'invalid';
     if (parsed.transition.affectedTrackerKeys.isNotEmpty) {

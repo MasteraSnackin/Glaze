@@ -160,12 +160,9 @@ class ManualRewriteApplyRepo {
       final validation = AnchoredScalarPatchValidator.validate(
         patches: patches,
         currentCardValues: _values(input.sourceCharacter),
-        fullCardBaselineSize: CardCanonicalizer.serialize(
-          input.sourceCharacter,
-        ).length,
       );
       if (!validation.isValid) {
-        return const ManualRewriteApplyOutcome.blocked('anchorOrBudget');
+        return const ManualRewriteApplyOutcome.blocked('anchor');
       }
     }
     for (

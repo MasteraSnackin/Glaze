@@ -28,6 +28,12 @@ final rewriteCharacterProvider = FutureProvider.family<Character?, String>((
   return ref.watch(characterRepoProvider).getById(charId);
 });
 
+/// The durable job stores a session id, while chat navigation needs its index.
+final rewriteSessionIndexProvider = FutureProvider.family<int?, String>(
+  (ref, sessionId) async =>
+      (await ref.watch(chatRepoProvider).getById(sessionId))?.sessionIndex,
+);
+
 /// Raw names of the session's manual canon controls (`canon_lock:<key>` /
 /// `canon_override:<key>`). Advisory only — guarded apply re-checks these
 /// transactionally.
@@ -184,6 +190,20 @@ class RewriteReviewController extends Notifier<RewriteReviewUiState> {
       if (kind == 'updated') approved++;
     }
     return approved;
+  }
+
+  /// Rejects remaining reviewable operations before closing a proposal without
+  /// applying any card or session-lorebook changes.
+  Future<int> rejectAllPending({
+    required List<ManualRewriteOperationView> ops,
+  }) async {
+    var rejected = 0;
+    for (final view in ops) {
+      final op = view.operation;
+      if (op.status != 'reviewable' || op.decision != 'pending') continue;
+      if (await decide(view, 'rejected') == 'updated') rejected++;
+    }
+    return rejected;
   }
 
   /// Reviewer edit: immutable revision +1 through the repo (decision and
@@ -351,7 +371,6 @@ List<CardPatchViolation> advisoryViolations(
   final validation = AnchoredScalarPatchValidator.validate(
     patches: snapshot.patches,
     currentCardValues: rewriteFieldValues(character),
-    fullCardBaselineSize: CardCanonicalizer.serialize(character).length,
   );
   return validation.violations;
 }

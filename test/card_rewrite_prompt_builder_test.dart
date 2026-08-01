@@ -61,16 +61,9 @@ void main() {
     expect(buildPrompt(card: uiOnly), equals(buildPrompt()));
   });
 
-  test('prompt names the target field and lists the field budget', () {
+  test('prompt names the target field and current field size', () {
     final prompt = buildPrompt(field: CardRewriteField.creatorNotes);
     expect(prompt, contains('- field: creatorNotes'));
-    expect(prompt, contains('- fieldBudgetCodeUnits: 12000'));
-    expect(
-      prompt,
-      contains(
-        '- totalCardBudgetCodeUnits: ${CardRewritePolicy.totalCardBudget}',
-      ),
-    );
     expect(
       prompt,
       contains('- currentFieldCodeUnits: ${'Keep the tone dry.'.length}'),
@@ -93,6 +86,27 @@ void main() {
     );
     expect(prompt, contains('For THIS operation only "scenario" is writable.'));
     expect(prompt, contains('read-only'));
+  });
+
+  test('evolution prompt prioritizes refining existing card text', () {
+    final prompt = CardRewriterPromptBuilder.buildEvolution(
+      character: character(),
+      instruction: 'Reflect durable changes.',
+    );
+
+    expect(prompt, contains('Prefer replacing or refining an existing outdated'));
+    expect(prompt, contains('Append only when no existing fragment'));
+  });
+
+  test('evolution prompt keeps one-off events in Ledger', () {
+    final prompt = CardRewriterPromptBuilder.buildEvolution(
+      character: character(),
+      instruction: 'Reflect durable changes.',
+    );
+
+    expect(prompt, contains('long-term character reference, not an event log'));
+    expect(prompt, contains('accepting a drink is a Ledger event'));
+    expect(prompt, contains('Do not turn a single event into a permanent'));
   });
 
   test(
@@ -164,7 +178,7 @@ void main() {
     expect(prompt, isNot(contains('"scenario":""')));
   });
 
-  test('evolution prompts use history and Ledger as evidence, not deduplication', () {
+  test('evolution prompts use Ledger as evidence without copying its event log', () {
     final cardPrompt = CardRewriterPromptBuilder.buildEvolution(
       character: character(),
       instruction: 'Update durable facts.',
@@ -173,10 +187,10 @@ void main() {
       instruction: 'Update injected setting facts.',
     );
 
-    expect(cardPrompt, contains('not against chat history or Ledger'));
+    expect(cardPrompt, contains('event records are not themselves card content'));
     expect(
       cardPrompt,
-      contains('Ledger fact is accepted evidence, not a reason to omit a card patch'),
+      contains('Ledger may establish the evidence'),
     );
     expect(lorePrompt, contains('Avoid only card-lorebook duplication'));
     expect(lorePrompt, contains('proposed card operations'));

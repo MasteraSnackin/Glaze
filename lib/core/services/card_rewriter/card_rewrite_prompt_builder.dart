@@ -55,6 +55,27 @@ abstract final class CardRewriterPromptBuilder {
         'to omit a card patch. Use one or more exact anchors per changed field, '
         'never a full-field rewrite.',
       )
+       ..writeln(
+         'Prefer replacing or refining an existing outdated card fragment over '
+         'appending a new standalone fact. Append only when no existing fragment '
+         'can accurately absorb the durable development. This keeps the card '
+         'compact while allowing it to grow gradually when necessary.',
+       )
+       ..writeln(
+         'The card is a long-term character reference, not an event log. Keep '
+         'one-off actions, recent scene beats, invitations, travel, meals, and '
+         'the current state of a relationship in Ledger. Do not patch the card '
+         'merely because {{user}} and the character went somewhere or did '
+         'something together. Patch it only when the evidence establishes a '
+         'lasting change in personality, relationship pattern, enduring goal, '
+         'boundary, worldview, or baseline premise that future scenes need.',
+       )
+       ..writeln(
+         'For example, accepting a drink is a Ledger event; a repeatedly '
+         'demonstrated shift from guarded distrust to cautious trust may justify '
+         'a small card refinement. Do not turn a single event into a permanent '
+         'trait or relationship claim.',
+       )
       ..writeln()
       ..writeln('# Patch rules')
       ..writeln(
@@ -64,21 +85,25 @@ abstract final class CardRewriterPromptBuilder {
         'only: for example relationship:danvi, never relationship:Danvi.',
       )
       ..writeln(
-        '- Each anchor must occur exactly once in its current field and its '
-        'anchorSha256 must be the lowercase SHA-256 of the anchor UTF-8 bytes. '
-        'Empty anchors are forbidden. Never '
-        'use chat-history text as an anchor: anchors are copied only from the '
-        'canonical card field you are patching.',
+         '- Each anchor must occur exactly once in its current field and its '
+         'anchorSha256 must be present as a string; the application recomputes '
+         'it from the anchor bytes. '
+         'Empty anchors are forbidden. Use a meaningful literal phrase of at '
+         'least 12 code units, never an isolated word, number, punctuation mark, '
+         'or identifier. Never '
+         'use chat-history text as an anchor: anchors are copied only from the '
+         'canonical card field you are patching.',
       )
       ..writeln(
         '- Preserve every {{...}} macro token byte-for-byte in a replacement.',
       )
-      ..writeln(
-        '- Treat the immutable chat history and Ledger facts as evidence for '
-        'card evolution. A supported change remains eligible even when Ledger '
-        'already records it. Avoid duplication only against the supplied '
-        'injected lorebook entries, not against chat history or Ledger.',
-      )
+       ..writeln(
+         '- Treat the immutable chat history and Ledger facts as evidence for '
+         'card evolution. Ledger may establish the evidence, but its event '
+         'records are not themselves card content. Avoid duplication only '
+         'against the supplied injected lorebook entries, not against chat '
+         'history or Ledger.',
+       )
       ..writeln('- Emit no keys beyond those shown above.')
       ..writeln()
       ..writeln('# User instruction')
@@ -112,8 +137,7 @@ $instruction''';
     final snapshot = CardCanonicalizer.snapshot(character);
     final canonicalJson = jsonEncode(snapshot);
     final currentValue = snapshot[field.wireName]! as String;
-    final fieldBudget = CardRewritePolicy.budgets[field]!;
-    final writableFields = CardRewritePolicy.budgets.keys
+    final writableFields = CardRewritePolicy.writableFields
         .map((candidate) => candidate.wireName)
         .join(', ');
 
@@ -125,11 +149,7 @@ $instruction''';
       ..writeln()
       ..writeln('# Target field')
       ..writeln('- field: ${field.wireName}')
-      ..writeln('- fieldBudgetCodeUnits: $fieldBudget')
       ..writeln('- currentFieldCodeUnits: ${currentValue.length}')
-      ..writeln(
-        '- totalCardBudgetCodeUnits: ${CardRewritePolicy.totalCardBudget}',
-      )
       ..writeln()
       ..writeln('# Writable fields')
       ..writeln('Writable fields across this workflow: $writableFields.')
@@ -173,11 +193,6 @@ $instruction''';
       ..writeln(
         '- "anchorSha256" MUST be the lowercase hex SHA-256 of the anchor\'s '
         'UTF-8 bytes. The receiver recomputes it and rejects any mismatch.',
-      )
-      ..writeln(
-        '- Keep "${field.wireName}" within $fieldBudget code units after '
-        'replacement; a single "value" already larger than the field budget '
-        'is rejected as unverifiable.',
       )
       ..writeln(
         '- "transition.id", "transition.canonicalClaim", and '

@@ -98,22 +98,21 @@ enum CardRewriteField {
 
 /// Explicit per-field limits, measured in Unicode code units.
 abstract final class CardRewritePolicy {
-  static const int totalCardBudget = 64000;
   static const Set<CardRewriteField> evolutionFields = {
     CardRewriteField.description,
     CardRewriteField.personality,
     CardRewriteField.scenario,
   };
-  static const Map<CardRewriteField, int> budgets = {
-    CardRewriteField.description: 12000,
-    CardRewriteField.personality: 12000,
-    CardRewriteField.scenario: 12000,
-    CardRewriteField.systemPrompt: 16000,
-    CardRewriteField.postHistoryInstructions: 12000,
-    CardRewriteField.creatorNotes: 12000,
+  static const Set<CardRewriteField> writableFields = {
+    CardRewriteField.description,
+    CardRewriteField.personality,
+    CardRewriteField.scenario,
+    CardRewriteField.systemPrompt,
+    CardRewriteField.postHistoryInstructions,
+    CardRewriteField.creatorNotes,
   };
 
-  static bool isWritable(CardRewriteField field) => budgets.containsKey(field);
+  static bool isWritable(CardRewriteField field) => writableFields.contains(field);
 
   static Set<CardRewriteField> nonEmptyEvolutionFields(Character character) => {
     if (character.description?.isNotEmpty == true) CardRewriteField.description,
@@ -186,8 +185,6 @@ enum CardPatchViolation {
   staleAnchor,
   ambiguousAnchor,
   incompleteSet,
-  overBudget,
-  totalOverBudget,
   macroTokensChanged,
 }
 
@@ -221,17 +218,8 @@ abstract final class AnchoredScalarPatchValidator {
   static CardPatchValidation validate({
     required Iterable<AnchoredScalarPatch> patches,
     required Map<CardRewriteField, String?> currentCardValues,
-    required int fullCardBaselineSize,
     Iterable<CardRewriteField>? requiredFields,
-    int totalCardBudget = CardRewritePolicy.totalCardBudget,
   }) {
-    if (fullCardBaselineSize < 0) {
-      throw ArgumentError.value(
-        fullCardBaselineSize,
-        'fullCardBaselineSize',
-        'must not be negative',
-      );
-    }
     final violations = <CardPatchViolation>[];
     final seenTargets = <String>{};
     final patchList = patches.toList(growable: false);
@@ -267,24 +255,6 @@ abstract final class AnchoredScalarPatchValidator {
       }
       projected[patch.field] = current.replaceFirst(patch.anchor, patch.value);
     }
-    for (final entry in projected.entries) {
-      if (entry.value.length > CardRewritePolicy.budgets[entry.key]!) {
-        violations.add(CardPatchViolation.overBudget);
-      }
-    }
-    // [fullCardBaselineSize] is the complete canonical-card size, including
-    // non-writable data. Replacements alter it only by their field deltas.
-    final projectedTotal =
-        fullCardBaselineSize +
-        CardRewriteField.values.fold<int>(0, (total, field) {
-          return total +
-              projected[field]!.length -
-              (currentCardValues[field] ?? '').length;
-        });
-    if (projectedTotal > totalCardBudget) {
-      violations.add(CardPatchViolation.totalOverBudget);
-    }
-
     final required = requiredFields?.toSet();
     final seenFields = {for (final patch in patchList) patch.field};
     if (required != null && !seenFields.containsAll(required)) {

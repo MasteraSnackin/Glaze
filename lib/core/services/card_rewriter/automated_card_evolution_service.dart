@@ -14,6 +14,8 @@ import 'card_rewrite_prompt_builder.dart';
 import 'card_rewriter_contracts.dart';
 import 'manual_rewrite_service.dart';
 
+const _writerMaxTokens = 20000;
+
 /// Dedicated review-only automation lane. Claim and final commit are repository
 /// operations; the only work between them is shared-context prompt assembly and
 /// two bounded, cancellable writer calls.
@@ -87,7 +89,7 @@ class AutomatedCardEvolutionService {
         final cardOutcome = await _executor(
           config: config,
           prompt: cardPrompt,
-          maxTokens: 4096,
+          maxTokens: _writerMaxTokens,
           temperature: 0.2,
           timeoutMs: timeoutMs,
           cancelToken: token,
@@ -138,7 +140,7 @@ class AutomatedCardEvolutionService {
           config: config,
           prompt:
                '${CardRewriterPromptBuilder.buildLorebookEvolution(instruction: 'Use the shared card, chat, and Ledger context to keep only the supplied injected lorebook entries current. Prefer the card for character relationships and enduring behavior; prefer lorebook entries for their specific locations, people, objects, or setting facts. Do not duplicate a current or proposed card fact into lorebook. Return a patch whenever the chat supports a durable update that belongs in an injected entry and is not already covered by the card.')}\n\n# Shared immutable context\n$sharedContext\n\n# Proposed card operations (read-only)\n${_cardProposalContext(cardOperations)}',
-          maxTokens: 4096,
+          maxTokens: _writerMaxTokens,
           temperature: 0.2,
           timeoutMs: timeoutMs,
           cancelToken: token,

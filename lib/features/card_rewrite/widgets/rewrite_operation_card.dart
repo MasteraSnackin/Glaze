@@ -75,21 +75,26 @@ class RewriteOperationCard extends StatelessWidget {
       approveBlock = null;
     }
 
-    return Container(
-      decoration: BoxDecoration(
+    return Material(
+      color: cs.surfaceContainerHigh.withValues(alpha: 0.35),
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(
+        side: BorderSide(
           color: selected
               ? cs.primary.withValues(alpha: 0.55)
               : cs.outlineVariant,
           width: selected ? 1.4 : 1,
         ),
-        color: cs.surfaceContainerHigh.withValues(alpha: 0.35),
       ),
-      padding: const EdgeInsets.all(12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
           Row(
             children: [
               Text(
@@ -238,7 +243,9 @@ class RewriteOperationCard extends StatelessWidget {
               lockedKeys: lockedKeys,
             ),
           ],
-        ],
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -263,8 +270,10 @@ class _DecisionButtons extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = context.cs;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
+    return Wrap(
+      alignment: WrapAlignment.end,
+      spacing: 6,
+      runSpacing: 6,
       children: [
         _DecisionPill(
           label: 'rewrite_btn_approve'.tr(),
@@ -273,7 +282,6 @@ class _DecisionButtons extends StatelessWidget {
           color: cs.primary,
           onTap: canApprove && decision != 'approved' ? onApprove : null,
         ),
-        const SizedBox(width: 6),
         _DecisionPill(
           label: 'rewrite_btn_reject'.tr(),
           icon: Icons.close_rounded,
@@ -393,9 +401,6 @@ class _ViolationChip extends StatelessWidget {
       CardPatchViolation.ambiguousAnchor =>
         'rewrite_violation_ambiguous_anchor',
       CardPatchViolation.incompleteSet => 'rewrite_violation_incomplete_set',
-      CardPatchViolation.overBudget => 'rewrite_violation_over_budget',
-      CardPatchViolation.totalOverBudget =>
-        'rewrite_violation_total_over_budget',
       CardPatchViolation.macroTokensChanged =>
         'rewrite_violation_macro_tokens_changed',
     };

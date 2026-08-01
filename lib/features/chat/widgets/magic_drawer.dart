@@ -275,6 +275,7 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
   /// Lightweight refresh: only stats, no layout re-read from disk.
   /// Called by the debounce timer when messages change.
   Future<void> _refreshStats() async {
+    if (!mounted) return;
     TokenBreakdownCache.invalidate();
     try {
       await _loadStats();
@@ -287,6 +288,7 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
   }
 
   void _scheduleRefresh() {
+    if (!mounted) return;
     _debounceTimer?.cancel();
     _debounceTimer = Timer(const Duration(milliseconds: 500), _refreshStats);
   }

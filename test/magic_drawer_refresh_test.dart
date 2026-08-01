@@ -9,7 +9,8 @@ void main() {
         'lib/features/chat/services/magic_drawer_stats_service.dart',
       ).readAsStringSync();
 
-      expect(source, contains('await _ref.read(apiListProvider.future);'));
+      expect(source, contains('final apiListFuture = _ref.read(apiListProvider.future);'));
+      expect(source, contains('await apiListFuture;'));
       expect(source, contains('_ref.read(activeApiConfigProvider)'));
       expect(source, isNot(contains('apiConfigRepoProvider')));
     });
