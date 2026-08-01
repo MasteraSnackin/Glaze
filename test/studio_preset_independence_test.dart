@@ -12,6 +12,7 @@ import 'package:glaze_flutter/core/llm/studio_prompt_text.dart';
 import 'package:glaze_flutter/core/models/api_config.dart';
 import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
+import 'package:glaze_flutter/core/models/persona.dart';
 import 'package:glaze_flutter/core/models/preset.dart';
 import 'package:glaze_flutter/core/models/studio_config.dart';
 
@@ -134,5 +135,146 @@ void main() {
     expect(recovery, contains('.runTrackersOnly('));
     expect(recovery, isNot(contains('buildFromSession(')));
     expect(recovery, isNot(contains('buildPromptInIsolate(')));
+  });
+
+  test('changing ordinary preset regex tags has no Studio effect', () {
+    const inputs = GenerationContextInputs(
+      character: Character(id: 'char', name: 'Lucy', description: 'Detective'),
+      history: [ChatMessage(id: 'user', role: 'user', content: 'Continue')],
+      apiConfig: ApiConfig(
+        id: 'api',
+        reasoningTagStart: '<api-think>',
+        reasoningTagEnd: '</api-think>',
+      ),
+    );
+    final builder = StudioMessageBuilder(
+      const StudioPromptText(),
+      StudioBriefDeduper(StudioBriefParser((_) {})),
+    );
+    const studioPreset = StudioPreset(
+      id: 'studio',
+      blocks: [
+        StudioPresetBlock(
+          id: 'instruction',
+          content:
+              'Write {{char}} {{reasoningPrefix}}carefully{{reasoningSuffix}}',
+          section: 'final',
+          order: 1,
+        ),
+      ],
+    );
+
+    List<Map<String, dynamic>> buildWithOrdinaryRegex(
+      String reasoningStart,
+      String reasoningEnd,
+    ) {
+      final context = const StudioContextPreparer().prepare(
+        inputs: inputs,
+        visibleMessageIds: const {'user'},
+      );
+      return builder.buildAgentMessages(
+        agent: const StudioAgent(id: 'final'),
+        context: context,
+        config: const StudioConfig(sessionId: 'session'),
+        studioPreset: studioPreset,
+        priorBriefs: const [],
+        isFinalResponse: true,
+      );
+    }
+
+    final withOrdinaryA = buildWithOrdinaryRegex('<ordinary-a>', '</ordinary-a>');
+    final withOrdinaryB = buildWithOrdinaryRegex('<ordinary-b>', '</ordinary-b>');
+    final withEmpty = buildWithOrdinaryRegex('', '');
+
+    expect(withOrdinaryB, withOrdinaryA);
+    expect(withEmpty, withOrdinaryA);
+    expect(
+      withOrdinaryA.join(),
+      contains('<api-think>carefully</api-think>'),
+    );
+    expect(withOrdinaryA.join(), isNot(contains('ordinary')));
+  });
+
+  test('all standard macros are expanded with no residual braces', () {
+    const inputs = GenerationContextInputs(
+      character: Character(
+        id: 'char',
+        name: 'Lucy',
+        description: 'Detective',
+        personality: 'Kind',
+        scenario: 'At home',
+      ),
+      persona: Persona(id: 'persona', name: 'Sam', prompt: 'Curious'),
+      history: [ChatMessage(id: 'user', role: 'user', content: 'Continue')],
+      apiConfig: ApiConfig(id: 'api'),
+      summaryContent: 'The case is open.',
+    );
+    final builder = StudioMessageBuilder(
+      const StudioPromptText(),
+      StudioBriefDeduper(StudioBriefParser((_) {})),
+    );
+    const studioPreset = StudioPreset(
+      id: 'studio',
+      blocks: [
+        StudioPresetBlock(
+          id: 'instruction',
+          content:
+              '{{char}} ({{user}}) in {{scenario}}. {{persona}}. Summary: {{summary}}',
+          section: 'final',
+          order: 1,
+        ),
+      ],
+    );
+
+    final context = const StudioContextPreparer().prepare(
+      inputs: inputs,
+      visibleMessageIds: const {'user'},
+    );
+    final messages = builder.buildAgentMessages(
+      agent: const StudioAgent(id: 'final'),
+      context: context,
+      config: const StudioConfig(sessionId: 'session'),
+      studioPreset: studioPreset,
+      priorBriefs: const [],
+      isFinalResponse: true,
+    );
+
+    final text = messages.map((m) => m['content']).join('\n');
+    expect(text, contains('Lucy'));
+    expect(text, contains('Sam'));
+    expect(text, contains('At home'));
+    expect(text, contains('The case is open.'));
+    expect(text, isNot(contains('{{')));
+    expect(text, isNot(contains('}}')));
+  });
+
+  test('Studio source files do not import ordinary Preset beyond codec', () {
+    final studioContextFile = File(
+      'lib/core/llm/studio/studio_context.dart',
+    ).readAsStringSync();
+    final preparerFile = File(
+      'lib/core/llm/studio/studio_context_preparer.dart',
+    ).readAsStringSync();
+    final builderFile = File(
+      'lib/core/llm/studio_message_builder.dart',
+    ).readAsStringSync();
+
+    expect(studioContextFile, isNot(contains('PresetBlock')));
+    expect(studioContextFile, isNot(contains("import 'preset.dart'")));
+    expect(preparerFile, isNot(contains('PresetBlock')));
+    expect(preparerFile, isNot(contains("import 'preset.dart'")));
+    expect(builderFile, isNot(contains('PresetBlock')));
+    expect(builderFile, isNot(contains("import 'preset.dart'")));
+  });
+
+  test('StudioConfig has no profile fields or broadcast blocks', () {
+    const config = StudioConfig(sessionId: 'session', enabled: true);
+
+    expect(config.sessionId, 'session');
+    expect(config.enabled, isTrue);
+    expect(config.toJson().keys, contains('sessionId'));
+    expect(config.toJson().keys, isNot(contains('profileId')));
+    expect(config.toJson().keys, isNot(contains('profileName')));
+    expect(config.toJson().keys, isNot(contains('broadcastBlocks')));
   });
 }

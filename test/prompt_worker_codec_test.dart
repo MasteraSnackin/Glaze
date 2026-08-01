@@ -1,7 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/llm/prompt_builder.dart';
 import 'package:glaze_flutter/core/llm/prompt_worker_codec.dart';
-import 'package:glaze_flutter/core/llm/studio/studio_stream_interceptor.dart';
 import 'package:glaze_flutter/core/models/api_config.dart';
 import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
@@ -34,15 +33,23 @@ void main() {
     expect(restored.effectiveCanonCacheIdentity, 'canon-cache-identity');
   });
 
-  test('Studio source-window clone preserves both current-canon layers', () {
-    final cloned = StudioStreamInterceptor.payloadWithSourceWindow(
-      payload(),
-      const {'message'},
+  test('Studio source-window payload preserves both current-canon layers', () {
+    final sourcePayload = PromptPayload(
+      character: const Character(id: 'character', name: 'Alison'),
+      history: const [],
+      apiConfig: const ApiConfig(id: 'api'),
+      studioSessionStateContent: sessionState,
+      characterKnowledgeContent: characterState,
+      effectiveCanonRevisionNumber: 7,
+      effectiveCanonRevisionHash: 'revision-hash',
+      effectiveCanonCacheIdentity: 'canon-cache-identity',
+      sourceWindowVisibleMessageIds: const {'message'},
     );
 
-    expect(cloned.studioSessionStateContent, sessionState);
-    expect(cloned.characterKnowledgeContent, characterState);
-    expect(cloned.effectiveCanonCacheIdentity, 'canon-cache-identity');
+    expect(sourcePayload.studioSessionStateContent, sessionState);
+    expect(sourcePayload.characterKnowledgeContent, characterState);
+    expect(sourcePayload.effectiveCanonCacheIdentity, 'canon-cache-identity');
+    expect(sourcePayload.sourceWindowVisibleMessageIds, const {'message'});
   });
 
   test('prompt orders canon above memory and card', () {

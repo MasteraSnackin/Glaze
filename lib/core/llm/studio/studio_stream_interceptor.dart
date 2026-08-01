@@ -1,5 +1,4 @@
 import '../../models/chat_message.dart';
-import '../prompt_builder.dart' show PromptPayload;
 import '../studio_stage_brief.dart';
 import '../../models/agent_operation_record.dart';
 import '../tokenizer.dart';
@@ -59,62 +58,6 @@ class StudioStreamInterceptor {
   ) {
     final visibleCount = contextSize > 0 ? contextSize : history.length;
     return computeStudioFinalVisibleMessageIds(history, visibleCount);
-  }
-
-  /// Clone a [PromptPayload] with a different `sourceWindowVisibleMessageIds`.
-  static PromptPayload payloadWithSourceWindow(
-    PromptPayload payload,
-    Set<String> sourceWindowVisibleMessageIds,
-  ) {
-    return PromptPayload(
-      character: payload.character,
-      persona: payload.persona,
-      preset: payload.preset,
-      history: payload.history,
-      sessionId: payload.sessionId,
-      apiConfig: payload.apiConfig,
-      sessionVars: payload.sessionVars,
-      globalVars: payload.globalVars,
-      summaryContent: payload.summaryContent,
-      summaryPrefix: payload.summaryPrefix,
-      memoryContent: payload.memoryContent,
-      memoryMacroContent: payload.memoryMacroContent,
-      memoryInjectionTarget: payload.memoryInjectionTarget,
-      guidanceText: payload.guidanceText,
-      lorebooks: payload.lorebooks,
-      lorebookSettings: payload.lorebookSettings,
-      lorebookActivations: payload.lorebookActivations,
-      vectorEntries: payload.vectorEntries,
-      authorsNote: payload.authorsNote,
-      characterDepthPrompt: payload.characterDepthPrompt,
-      characterDepthPromptDepth: payload.characterDepthPromptDepth,
-      characterDepthPromptRole: payload.characterDepthPromptRole,
-      memoryCoverage: payload.memoryCoverage,
-      globalRegexes: payload.globalRegexes,
-      preScannedEntries: payload.preScannedEntries,
-      triggeredMemories: payload.triggeredMemories,
-      runtimePromptBlocks: payload.runtimePromptBlocks,
-      memorySelection: payload.memorySelection,
-      memoryExcerptingEnabled: payload.memoryExcerptingEnabled,
-      memoryPackingMode: payload.memoryPackingMode,
-      memoryExcerptTokensPerChunk: payload.memoryExcerptTokensPerChunk,
-      memoryExcerptChunksPerEntry: payload.memoryExcerptChunksPerEntry,
-      chunkFirstTopEntries: payload.chunkFirstTopEntries,
-      chunkFirstTopChunks: payload.chunkFirstTopChunks,
-      arcContent: payload.arcContent,
-      entitiesContent: payload.entitiesContent,
-      studioSessionStateContent: payload.studioSessionStateContent,
-      characterKnowledgeContent: payload.characterKnowledgeContent,
-      recalledMessagesContent: payload.recalledMessagesContent,
-      recalledMessageChunks: payload.recalledMessageChunks,
-      disableSourceWindowExclusion: payload.disableSourceWindowExclusion,
-      sourceWindowVisibleMessageIds: sourceWindowVisibleMessageIds,
-      memoryInjectionFingerprint: payload.memoryInjectionFingerprint,
-      effectiveCanonProjection: payload.effectiveCanonProjection,
-      effectiveCanonRevisionNumber: payload.effectiveCanonRevisionNumber,
-      effectiveCanonRevisionHash: payload.effectiveCanonRevisionHash,
-      effectiveCanonCacheIdentity: payload.effectiveCanonCacheIdentity,
-    );
   }
 
   /// Convert Studio stage briefs into the compact JSON format stored on
