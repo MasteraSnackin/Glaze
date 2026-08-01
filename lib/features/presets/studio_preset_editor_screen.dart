@@ -445,14 +445,15 @@ class StudioPresetEditorBodyState
       subtitle: 'studio_preset_subtitle'.tr(),
       onTitleTap: _showRenameDialog,
       onMenuTap: _showOptionsMenu,
-      utilsLeading: [
-        PresetUtilButton(
+      // All three stats read as the same pill; the agent one is tappable and
+      // opens the agents card below.
+      utilsTrailing: [
+        PresetStatBadge(
           icon: Icons.smart_toy_outlined,
-          count: studioPresetEnabledAgentCount(preset),
+          label: '${studioPresetEnabledAgentCount(preset)}',
           onTap: () => setState(() => _agentsExpanded = !_agentsExpanded),
         ),
-      ],
-      utilsTrailing: [
+        const SizedBox(width: 8),
         PresetStatBadge(
           icon: Icons.bolt,
           label: 'studio_requests_per_turn'.tr(
