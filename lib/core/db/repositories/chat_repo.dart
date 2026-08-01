@@ -4,6 +4,8 @@ import 'dart:convert';
 import 'package:drift/drift.dart';
 
 import '../app_db.dart';
+import '../../llm/prompt/exact_lorebook_manifest.dart';
+import 'lorebook_use_manifest_repo.dart';
 import 'session_deletion_queries.dart';
 import '../../models/chat_message.dart';
 import '../../application/sync_repo_interfaces.dart';
@@ -157,6 +159,83 @@ class ChatRepo implements SyncChatStore {
     });
   }
 
+  /// Atomically appends a user message, clears the draft, and records that the
+  /// caller-observed assistant variation was accepted.
+  ///
+  /// The assistant identity is a compare-and-swap guard: selection may change
+  /// between the UI capturing it and this transaction reading the session. A
+  /// legacy variation without a manifest remains sendable; an immutable
+  /// manifest, when present, must receive its acceptance in this transaction.
+  Future<ChatSession?> appendUserMessageAndAcceptCurrentVariation({
+    required String sessionId,
+    required ChatMessage message,
+    required LorebookUseGenerationIdentity expectedPrecedingAssistant,
+    required int updatedAt,
+  }) async {
+    if (expectedPrecedingAssistant.sessionId != sessionId) {
+      return null;
+    }
+    return _db.transaction(() async {
+      final row = await (_db.select(
+        _db.chatSessions,
+      )..where((t) => t.sessionId.equals(sessionId))).getSingleOrNull();
+      if (row == null) return null;
+
+      final messages = (jsonDecode(row.messagesJson) as List<dynamic>)
+          .map((e) => ChatMessage.fromJson(e as Map<String, dynamic>))
+          .toList();
+
+      // A retry after a completed transaction must not append the same user
+      // message or a second acceptance event.
+      if (messages.any((existing) => existing.id == message.id)) {
+        return _toModel(row);
+      }
+
+      // A user send accepts only the assistant immediately before it, never an
+      // older assistant found by scanning history after a concurrent change.
+      final preceding = messages.isNotEmpty ? messages.last : null;
+      if (preceding == null ||
+          preceding.role != 'assistant' ||
+          preceding.id != expectedPrecedingAssistant.messageId ||
+          preceding.swipeId != expectedPrecedingAssistant.swipeId ||
+          preceding.agentSwipeId != expectedPrecedingAssistant.agentSwipeId) {
+        return null;
+      }
+
+      final manifest = await (_db.select(_db.lorebookUseManifests)
+            ..where((t) => t.sessionId.equals(sessionId))
+            ..where((t) => t.messageId.equals(expectedPrecedingAssistant.messageId))
+            ..where((t) => t.swipeId.equals(expectedPrecedingAssistant.swipeId))
+            ..where((t) => t.agentSwipeId.equals(expectedPrecedingAssistant.agentSwipeId)))
+          .getSingleOrNull();
+
+      messages.add(message);
+      final messagesJson = jsonEncode(messages.map((e) => e.toJson()).toList());
+      await (_db.update(_db.chatSessions)
+            ..where((t) => t.sessionId.equals(sessionId)))
+          .write(ChatSessionsCompanion(
+            messagesJson: Value(messagesJson),
+            draft: const Value(''),
+            updatedAt: Value(updatedAt),
+          ));
+
+      if (manifest != null) {
+        await LorebookUseManifestRepo(_db).insertVariationAcceptance(
+          acceptanceId: 'variation:$sessionId:${message.id}',
+          identity: expectedPrecedingAssistant,
+          acceptedByUserMessageId: message.id,
+          acceptedAt: updatedAt,
+        );
+      }
+
+      return _toModel(row.copyWith(
+        messagesJson: messagesJson,
+        draft: const Value(''),
+        updatedAt: updatedAt,
+      ));
+    });
+  }
+
   /// Updates only the draft column, and only if [expectedMessageCount] still
   /// matches the row. A delayed input debounce from before Send must not write
   /// an old draft over a session that has since gained the user message.
@@ -305,6 +384,151 @@ class ChatRepo implements SyncChatStore {
         ),
       );
     });
+  }
+
+  /// Commits a generated assistant variation and, when supplied, its exact
+  /// lorebook-use manifest in one database transaction.  The message mutation
+  /// deliberately mirrors the guarded generation commit path: a stale regen
+  /// cannot attach provenance (or replace text) after its anchor changed.
+  Future<ChatSession?> commitGenerationResult({
+    required ChatSession baseSession,
+    required ChatSession generatedSession,
+    required String? regenTargetId,
+    ExactLorebookManifest? manifest,
+  }) async {
+    return _db.transaction(() async {
+      final row =
+          await (_db.select(_db.chatSessions)
+                ..where((table) => table.sessionId.equals(generatedSession.id)))
+              .getSingleOrNull();
+      if (row == null) return null;
+
+      final latest = _toModel(row);
+      final messages = List<ChatMessage>.from(latest.messages);
+      ChatMessage? committed;
+      if (regenTargetId != null) {
+        final baseIndex = baseSession.messages.indexWhere(
+          (message) => message.id == regenTargetId,
+        );
+        final generatedIndex = generatedSession.messages.indexWhere(
+          (message) => message.id == regenTargetId,
+        );
+        final latestIndex = messages.indexWhere(
+          (message) => message.id == regenTargetId,
+        );
+        if (baseIndex < 0 || generatedIndex < 0 || latestIndex < 0) {
+          return null;
+        }
+        final base = baseSession.messages[baseIndex];
+        final current = messages[latestIndex];
+        if (!_sameGenerationAnchor(base, current)) return null;
+        committed = generatedSession.messages[generatedIndex].copyWith(
+          isHidden: current.isHidden,
+          imageHidden: current.imageHidden,
+        );
+        messages[latestIndex] = committed;
+      } else {
+        if (generatedSession.messages.length !=
+            baseSession.messages.length + 1) {
+          return null;
+        }
+        final expectedTail = baseSession.messages.lastOrNull?.id;
+        final currentTail = messages.lastOrNull?.id;
+        if (expectedTail != currentTail) return null;
+        committed = generatedSession.messages.last;
+        messages.add(committed);
+      }
+
+      final updated = latest.copyWith(
+        messages: messages,
+        sessionVars: applySessionVarDelta(
+          latest.sessionVars,
+          baseSession.sessionVars,
+          generatedSession.sessionVars,
+        ),
+      );
+      final messagesJson = jsonEncode(
+        updated.messages.map((e) => e.toJson()).toList(),
+      );
+      final sessionVarsJson = updated.sessionVars.isNotEmpty
+          ? jsonEncode(updated.sessionVars)
+          : null;
+      final authorsNoteJson = updated.authorsNote != null
+          ? jsonEncode(updated.authorsNote!.toJson())
+          : null;
+      final lastScrollAnchorJson = updated.lastScrollAnchor.isNotEmpty
+          ? jsonEncode(updated.lastScrollAnchor)
+          : null;
+
+      await (_db.update(
+        _db.chatSessions,
+      )..where((table) => table.sessionId.equals(generatedSession.id))).write(
+        ChatSessionsCompanion(
+          messagesJson: Value(messagesJson),
+          sessionVarsJson: Value(sessionVarsJson),
+          authorsNoteJson: Value(authorsNoteJson),
+          draft: Value(updated.draft),
+          lastScrollAnchorJson: Value(lastScrollAnchorJson),
+          updatedAt: Value(generatedSession.updatedAt),
+        ),
+      );
+
+      if (manifest != null) {
+        // A durable round trip verifies all strict schema/content/hash
+        // invariants before any provenance row can be written.
+        final durable = ExactLorebookManifest.decodeDurable(manifest.toJson());
+        await LorebookUseManifestRepo(_db).insertGenerationManifest(
+          identity: LorebookUseGenerationIdentity(
+            sessionId: updated.id,
+            messageId: committed.id,
+            swipeId: committed.swipeId,
+            agentSwipeId: committed.agentSwipeId,
+          ),
+          manifest: LorebookUseManifestInput(
+            manifestJson: durable.canonicalJson,
+            manifestHash: durable.canonicalHash,
+            manifestSchemaVersion: 1,
+            finalPromptHash: durable.providerMessagesHash,
+            presetSnapshotHash: durable.promptProvenance.presetSnapshotHash,
+          ),
+          createdAt: generatedSession.updatedAt,
+          entries: [
+            for (var index = 0; index < durable.entries.length; index++)
+              LorebookUseManifestEntryInput(
+                lorebookId: durable.entries[index].lorebookId,
+                entryId: durable.entries[index].entryId,
+                entryOrder: index,
+                evidenceJson: jsonEncode(durable.entries[index].toJson()),
+              ),
+          ],
+        );
+      }
+
+      return _toModel(
+        row.copyWith(
+          messagesJson: messagesJson,
+          sessionVarsJson: Value(sessionVarsJson),
+          authorsNoteJson: Value(authorsNoteJson),
+          draft: Value(updated.draft),
+          lastScrollAnchorJson: Value(lastScrollAnchorJson),
+          updatedAt: generatedSession.updatedAt,
+        ),
+      );
+    });
+  }
+
+  static bool _sameGenerationAnchor(ChatMessage expected, ChatMessage current) {
+    return expected.content == current.content &&
+        expected.swipeId == current.swipeId &&
+        expected.agentSwipeId == current.agentSwipeId &&
+        jsonEncode(expected.swipes) == jsonEncode(current.swipes) &&
+        jsonEncode(expected.swipesMeta) == jsonEncode(current.swipesMeta) &&
+        jsonEncode(
+              expected.agentSwipes.map((swipe) => swipe.toJson()).toList(),
+            ) ==
+            jsonEncode(
+              current.agentSwipes.map((swipe) => swipe.toJson()).toList(),
+            );
   }
 
   Future<Map<String, dynamic>> updateSessionVarsJson(

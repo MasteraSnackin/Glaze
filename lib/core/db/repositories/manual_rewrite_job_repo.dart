@@ -310,13 +310,94 @@ class ManualRewriteJobRepo {
   Future<RewriteJobTransitionOutcome> retry({
     required String jobId,
     required int expectedVersion,
-  }) => _transition(
-    jobId: jobId,
-    expectedVersion: expectedVersion,
-    fromStatuses: const ['failed'],
-    toStatus: 'generating',
-    clearStatusReason: true,
-  );
+  }) async {
+    final job = await (_db.select(_db.rewriteJobs)
+          ..where((row) => row.id.equals(jobId)))
+        .getSingleOrNull();
+    if (job == null) return const RewriteJobTransitionOutcome.notFound();
+    try {
+      final request = jsonDecode(job.requestJson);
+      if (request is Map && request['provenance'] == 'automatedEvolution') {
+        return RewriteJobTransitionOutcome.invalidState(job);
+      }
+    } catch (_) {
+      // Malformed manual request provenance remains governed by normal CAS.
+    }
+    return _transition(
+      jobId: jobId,
+      expectedVersion: expectedVersion,
+      fromStatuses: const ['failed'],
+      toStatus: 'generating',
+      clearStatusReason: true,
+    );
+  }
+
+  /// Caller-owned transaction helper for automation. It creates the same
+  /// pending/reviewable aggregate as manual generation without exposing any
+  /// approve, edit, retry, or apply behavior to the automated service.
+  Future<RewriteJobRow> insertPendingInTransaction({
+    required String jobId,
+    required String operationId,
+    required String chatSessionId,
+    required String characterId,
+    required String requestJson,
+    required String requestKey,
+    required int basisRevision,
+    required String basisRevisionHash,
+    required String canonStamp,
+    required String snapshotJson,
+    required List<ManualRewriteEvidenceDraft> evidence,
+    required int now,
+  }) async {
+    await _db.into(_db.rewriteJobs).insert(RewriteJobsCompanion.insert(
+      id: jobId,
+      chatSessionId: chatSessionId,
+      characterId: characterId,
+      status: const Value('pending'),
+      requestJson: Value(requestJson),
+      requestKey: Value(requestKey),
+      basisRevision: Value(basisRevision),
+      basisRevisionHash: Value(basisRevisionHash),
+      canonStamp: Value(canonStamp),
+      version: const Value(1),
+      createdAt: Value(now),
+      updatedAt: Value(now),
+    ));
+    await _db.into(_db.rewriteOperations).insert(
+          RewriteOperationsCompanion.insert(
+            id: operationId,
+            rewriteJobId: jobId,
+            chatSessionId: chatSessionId,
+            operationJson: Value(snapshotJson),
+            status: const Value('reviewable'),
+            currentRevision: const Value(1),
+            validationStatus: const Value('valid'),
+            createdAt: Value(now),
+            updatedAt: Value(now),
+          ),
+        );
+    await _db.into(_db.rewriteOperationRevisions).insert(
+          RewriteOperationRevisionsCompanion.insert(
+            rewriteOperationId: operationId,
+            revision: 1,
+            snapshotJson: snapshotJson,
+            createdAt: Value(now),
+          ),
+        );
+    for (final item in evidence) {
+      await _db.into(_db.rewriteEvidenceRows).insert(
+            RewriteEvidenceRowsCompanion.insert(
+              id: item.id,
+              rewriteOperationId: operationId,
+              evidenceJson: item.evidenceJson,
+              createdAt: Value(now),
+            ),
+          );
+    }
+    return (_db.select(_db.rewriteJobs)
+          ..where((row) => row.id.equals(jobId)))
+        .getSingle();
+  }
 
   Future<RewriteJobTransitionOutcome> _transition({
     required String jobId,

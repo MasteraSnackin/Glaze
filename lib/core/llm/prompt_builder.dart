@@ -1,4 +1,8 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
+
+import '../utils/cast_helpers.dart';
 
 import '../models/character.dart';
 import '../models/persona.dart';
@@ -13,10 +17,12 @@ import 'lorebook_scanner.dart';
 import 'lorebook_merger.dart';
 import 'prompt_block_resolver.dart';
 import 'prompt_regex_applicator.dart';
+import 'regex_service.dart';
 import 'fallback_prompt_builder.dart';
 import 'tokenizer.dart';
 import 'memory_excerpt_selector.dart';
 import 'prompt/lorebook_classifier.dart';
+import 'prompt/exact_lorebook_manifest.dart';
 import 'prompt/memory_block_injector.dart';
 import 'prompt/prompt_payload.dart';
 import 'prompt/prompt_result.dart';
@@ -30,6 +36,7 @@ export 'prompt/recalled_message_chunk.dart';
 export 'prompt/resolved_block.dart';
 export 'prompt/lorebook_classifier.dart';
 export 'prompt/memory_block_injector.dart';
+export 'prompt/exact_lorebook_manifest.dart';
 
 const _stToInternalBlockId = <String, String>{
   'personaDescription': 'user_persona',
@@ -230,6 +237,31 @@ PromptResult buildPrompt(PromptPayload payload) {
     currentMacroCtx,
     payload.lorebookSettings,
   );
+  final exactLorebookManifest = _buildExactLorebookManifest(
+    entries: mergedEntries,
+    payload: payload,
+    preset: preset,
+    macroContext: currentMacroCtx,
+    keywordEntries: keywordIdToEntry,
+    coverageKeywordEntries: coverageKeywordIdToEntry,
+    vectorEntries: vectorIdToEntry,
+  );
+  // Capture attribution from the actual block assembly path.  This is an
+  // assembly declaration, not an inference from matching prompt text.
+  final blockLoreClassifications = <String, Set<String>>{};
+  for (final block in preset.blocks) {
+    if (!block.enabled || block.isStashed) continue;
+    final content = block.content.toLowerCase();
+    final classifications = <String>{
+      if (content.contains('{{lorebooks}}')) 'lorebooksMacro',
+      if (content.contains('{{scenario}}')) 'charScenario',
+      if (content.contains('{{personality}}')) 'charPersonality',
+      if (content.contains('{{description}}')) 'charDescription',
+    };
+    if (classifications.isNotEmpty) {
+      blockLoreClassifications[normalizeBlockId(block.id)] = classifications;
+    }
+  }
   final loreBefore = classified.loreBefore;
   final loreAfter = classified.loreAfter;
   final macroLoreContent = classified.loreMacroBuffer.join('\n\n');
@@ -428,9 +460,71 @@ PromptResult buildPrompt(PromptPayload payload) {
     char: char,
     persona: persona,
     triggeredLorebooks: triggeredLorebooks,
+    exactLorebookManifest: exactLorebookManifest,
+    blockLoreClassifications: blockLoreClassifications,
     triggeredMemories: payload.triggeredMemories,
     macroTokens: macroTokens,
     vectorLoreTokens: vectorLoreTokens,
+  );
+}
+
+ExactLorebookManifest _buildExactLorebookManifest({
+  required List<LorebookEntry> entries,
+  required PromptPayload payload,
+  required Preset preset,
+  required MacroContext macroContext,
+  required Map<String, ScannedEntry> keywordEntries,
+  required Map<String, CoverageEntry> coverageKeywordEntries,
+  required Map<String, LorebookEntry> vectorEntries,
+}) {
+  final promptProvenance = ExactLorebookPromptProvenance(
+    characterId: payload.character.id,
+    personaId: payload.persona?.id ?? '',
+    presetSnapshotHash: computeHash(jsonEncode(preset.toJson())),
+    sessionId: payload.sessionId ?? '',
+  );
+  final canon =
+      payload.effectiveCanonRevisionNumber == null &&
+          payload.effectiveCanonRevisionHash == null &&
+          payload.effectiveCanonCacheIdentity.isEmpty
+      ? null
+      : ExactLorebookEffectiveCanonProvenance(
+          revisionNumber: payload.effectiveCanonRevisionNumber ?? 0,
+          revisionHash: payload.effectiveCanonRevisionHash ?? '',
+          cacheIdentity: payload.effectiveCanonCacheIdentity,
+        );
+  final manifestEntries = <ExactLorebookManifestEntry>[];
+  for (var index = 0; index < entries.length; index++) {
+    final entry = entries[index];
+    final key = '${entry.lorebookId}_${entry.id}';
+    final source =
+        keywordEntries[key]?.constant == true ||
+            coverageKeywordEntries[key]?.constant == true
+        ? 'constant'
+        : keywordEntries.containsKey(key) ||
+              coverageKeywordEntries.containsKey(key)
+        ? 'keyword'
+        : vectorEntries.containsKey(key)
+        ? 'vector'
+        : 'unknown';
+    final position = entry.position == 'matchGlobal'
+        ? payload.lorebookSettings.injectionPosition
+        : entry.position;
+    manifestEntries.add(
+      ExactLorebookManifestEntry.fromMergedEntry(
+        entry: entry,
+        source: source,
+        classification: position,
+        injectionIndex: index,
+        renderedContent: replaceMacros(entry.content, macroContext).text,
+      ),
+    );
+  }
+  return ExactLorebookManifest(
+    entries: manifestEntries,
+    promptProvenance: promptProvenance,
+    effectiveCanonProvenance: canon,
+    providerMessagesHash: '',
   );
 }
 
@@ -448,32 +542,63 @@ PromptResult _assembleMessages({
   required Character char,
   Persona? persona,
   List<TriggeredEntry> triggeredLorebooks = const [],
+  ExactLorebookManifest? exactLorebookManifest,
+  Map<String, Set<String>> blockLoreClassifications = const {},
   List<TriggeredEntry> triggeredMemories = const [],
   Map<String, int> macroTokens = const {},
   int vectorLoreTokens = 0,
 }) {
   final messages = <PromptMessage>[];
+  final assemblyReports = <ExactLorebookInjectionReport>[];
   final attributionBlocks = <StaticBlock>[];
   String? mergeBuffer;
   String? mergeRole;
 
-  final resolvedDepthMsgs = depthBlocks
+  // Keep the attribution declaration alongside each resolved block until its
+  // concrete emission site.  Do not recover it from rendered message text.
+  final resolvedDepthBlocks = depthBlocks
       .map(
-        (b) => PromptMessage(
-          role: b.role,
-          content: b.content,
-          blockId: b.id,
-          depth: b.depth,
-          isDepth: true,
-          isSummary: b.isSummary,
+        (b) => (
+          message: PromptMessage(
+            role: b.role,
+            content: b.content,
+            blockId: b.id,
+            depth: b.depth,
+            isDepth: true,
+            isSummary: b.isSummary,
+          ),
+          classifications: blockLoreClassifications[b.id] ?? const <String>{},
         ),
       )
+      .toList();
+  final resolvedDepthMsgs = resolvedDepthBlocks
+      .map((block) => block.message)
       .toList();
 
   // Track whether loreBefore/loreAfter were injected via char_card trigger.
   // If the preset has no char_card block, they fall through to the end.
   bool loreBeforeInjected = false;
   bool loreAfterInjected = false;
+
+  void recordAssembly(Iterable<String> classifications) {
+    final manifest = exactLorebookManifest;
+    if (manifest == null) return;
+    final expected = classifications.toSet();
+    for (final entry in manifest.entries) {
+      if (!expected.contains(entry.classification) ||
+          entry.renderedContent.trim().isEmpty) {
+        continue;
+      }
+      assemblyReports.add(
+        ExactLorebookInjectionReport(
+          namespacedId: entry.namespacedId,
+          placement: entry.injectionIndex,
+          renderedContent: entry.renderedContent,
+          classification: entry.classification,
+        ),
+      );
+    }
+  }
 
   void injectLoreBefore() {
     if (loreBeforeInjected || loreBefore.isEmpty) return;
@@ -490,6 +615,7 @@ PromptResult _assembleMessages({
     attributionBlocks.add(
       StaticBlock(id: 'worldInfoBefore', content: combined),
     );
+    recordAssembly(const {'worldInfoBefore'});
     loreBeforeInjected = true;
   }
 
@@ -506,6 +632,7 @@ PromptResult _assembleMessages({
       ),
     );
     attributionBlocks.add(StaticBlock(id: 'worldInfoAfter', content: combined));
+    recordAssembly(const {'worldInfoAfter'});
     loreAfterInjected = true;
   }
 
@@ -519,6 +646,10 @@ PromptResult _assembleMessages({
     if (block.content.trim().isEmpty) continue;
     appendedEntries.add(block);
   }
+  final appendedClassifications = <String>{
+    for (final block in appendedEntries) ...?blockLoreClassifications[block.id],
+  };
+  final appendedHistoryMessageIds = <String>{};
 
   for (final block in relativeBlocks) {
     // worldInfoBefore injects just before char_card (mirrors JS generationWorker.js:739)
@@ -559,9 +690,23 @@ PromptResult _assembleMessages({
           .map((b) => (name: b.name, content: b.content))
           .toList();
       applyAppendToLastMessage(historyMsgs, appendedForHistory);
+      if (appendedEntries.isNotEmpty) {
+        final lastUser = historyMsgs.lastWhere(
+          (message) => message.role == 'user' && message.isHistory,
+          orElse: () => const PromptMessage(role: '', content: ''),
+        );
+        if (lastUser.sourceMessageId != null) {
+          appendedHistoryMessageIds.add(lastUser.sourceMessageId!);
+        }
+      }
       messages.addAll(
         interleaveDepthWithHistory(historyMsgs, resolvedDepthMsgs),
       );
+      for (final block in resolvedDepthBlocks) {
+        if (block.message.content.trim().isNotEmpty) {
+          recordAssembly(block.classifications);
+        }
+      }
       for (final db in resolvedDepthMsgs) {
         attributionBlocks.add(
           StaticBlock(id: db.blockId ?? 'preset', content: db.content),
@@ -598,6 +743,8 @@ PromptResult _assembleMessages({
       // also be added to messages here — that would send the same content
       // twice. See docs/INVARIANTS.md INV-PS9.
       if (block.appendToLastMessage) continue;
+
+      recordAssembly(blockLoreClassifications[block.id] ?? const {});
 
       if (preset.mergePrompts && block.role != 'assistant') {
         if (mergeBuffer != null) {
@@ -798,6 +945,9 @@ PromptResult _assembleMessages({
         // Use live history messages so deferred {{memory}} replacement on
         // appendToLastMessage blocks is not lost to a stale trimmed copy.
         finalMessages.add(msg);
+        if (appendedHistoryMessageIds.contains(msg.sourceMessageId)) {
+          recordAssembly(appendedClassifications);
+        }
       }
       historySeen++;
     } else if (msg.content.trim().isNotEmpty) {
@@ -821,6 +971,14 @@ PromptResult _assembleMessages({
           globalVars: currentGlobalVars,
           regexScripts: regexScripts,
         );
+  final injectionReports = _transformLorebookAssemblyReports(
+    reports: assemblyReports,
+    regexScripts: regexScripts,
+    char: char,
+    persona: persona,
+    sessionVars: currentSessionVars,
+    globalVars: currentGlobalVars,
+  );
 
   final finalMemoryCoverage = finalizeMemoryCoverage(
     payload.memoryCoverage,
@@ -840,9 +998,75 @@ PromptResult _assembleMessages({
     sessionVars: currentSessionVars,
     globalVars: currentGlobalVars,
     triggeredLorebooks: triggeredLorebooks,
+    exactLorebookManifest: exactLorebookManifest
+        ?.confirmedBy(injectionReports)
+        .withProviderMessagesHash(
+          computeHash(
+            jsonEncode(
+              buildApiMessages(
+                finalMessagesWithRegex,
+                reasoningHistoryCount: payload.apiConfig.reasoningHistoryCount,
+              ),
+            ),
+          ),
+        ),
     triggeredMemories: finalTriggeredMemories,
     memoryCoverage: finalMemoryCoverage,
   );
+}
+
+List<ExactLorebookInjectionReport> _transformLorebookAssemblyReports({
+  required List<ExactLorebookInjectionReport> reports,
+  required List<PresetRegex> regexScripts,
+  required Character char,
+  required Persona? persona,
+  required Map<String, String> sessionVars,
+  required Map<String, String> globalVars,
+}) {
+  if (reports.isEmpty) return const [];
+  // Events originate at real assembly sites.  Deliberately never search the
+  // final prompt (or preset) for matching content to infer attribution.
+  final transformedReports = <ExactLorebookInjectionReport>[];
+  final context = RegexApplyContext(
+    char: char,
+    persona: persona,
+    sessionVars: sessionVars,
+    globalVars: globalVars,
+  );
+  final byClassification = <String, List<ExactLorebookInjectionReport>>{};
+  for (final report in reports) {
+    byClassification.putIfAbsent(report.classification, () => []).add(report);
+  }
+  for (final group in byClassification.values) {
+    group.sort((a, b) => a.placement.compareTo(b.placement));
+    final joined = group.map((report) => report.renderedContent).join('\n\n');
+    final transformed = regexScripts.isEmpty
+        ? joined
+        : applyRegexes(
+            joined,
+            group.first.classification.startsWith('worldInfo') ? 5 : 4,
+            2,
+            regexScripts,
+            context,
+            isPrompt: true,
+          );
+    // A transform that crosses entry boundaries cannot be mapped back to an
+    // exact entry snapshot.  Fail closed instead of guessing from substrings.
+    final parts = transformed.split('\n\n');
+    if (parts.length != group.length) continue;
+    for (var index = 0; index < group.length; index++) {
+      if (parts[index].trim().isEmpty) continue;
+      transformedReports.add(
+        ExactLorebookInjectionReport(
+          namespacedId: group[index].namespacedId,
+          placement: group[index].placement,
+          renderedContent: parts[index],
+          classification: group[index].classification,
+        ),
+      );
+    }
+  }
+  return transformedReports;
 }
 
 /// Filters [PromptPayload.recalledMessageChunks] by the source-window

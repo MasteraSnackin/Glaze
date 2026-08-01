@@ -23,6 +23,9 @@ part 'app_db.g.dart';
     ApiConfigs,
     Personas,
     Lorebooks,
+    LorebookUseManifests,
+    LorebookUseManifestEntries,
+    LorebookUseAcceptanceRecords,
     Embeddings,
     ChatSummaries,
     MemoryBookRows,
@@ -37,6 +40,11 @@ part 'app_db.g.dart';
     TrackerSnapshots,
     LedgerReconciliationCheckpoints,
     LedgerReconciliationCleanupJournals,
+    LedgerReconciliationSuccessfulRuns,
+    LedgerReconciliationRunInvalidations,
+    LedgerReconciliationCursors,
+    CardEvolutionClaims,
+    CardEvolutionProposalRuns,
     CharacterKnowledgeFactRows,
     CharacterSessionBaselineRows,
     CharacterRevisionRows,
@@ -56,12 +64,16 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 86;
+  int get schemaVersion => 92;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
     onCreate: (Migrator m) async {
       await m.createAll();
+      await _createLorebookUseManifestImmutabilityTriggers();
+      await _createLorebookUseManifestIntegrityTriggers();
+      await _createLedgerReconciliationImmutabilityTriggers();
+      await _createCardEvolutionIntegrity();
     },
     onUpgrade: (Migrator m, int from, int to) async {
       if (from < 2) {
@@ -1784,8 +1796,160 @@ class AppDatabase extends _$AppDatabase {
           '(rewrite_job_id, decision, validation_status, current_revision)',
         );
       }
+      if (from < 87) {
+        await m.createTable(lorebookUseManifests);
+        await m.createTable(lorebookUseManifestEntries);
+        await m.createTable(lorebookUseAcceptanceRecords);
+        await _createLorebookUseManifestImmutabilityTriggers();
+      }
+      if (from < 88) {
+        // v87 used prompt_hash as part of the manifest identity. Rebuild the
+        // unpublished tables so the variation anchor is authoritative and the
+        // canonical payload/hash are immutable values instead.
+        // v87 had no canonical payload to preserve, so its provisional rows
+        // cannot be truthfully upgraded into the v88 contract. Drop children
+        // first, then recreate the fully constrained immutable lane.
+        await m.drop(lorebookUseAcceptanceRecords);
+        await m.drop(lorebookUseManifestEntries);
+        await m.drop(lorebookUseManifests);
+        await m.createTable(lorebookUseManifests);
+        await m.createTable(lorebookUseManifestEntries);
+        await m.createTable(lorebookUseAcceptanceRecords);
+        await _createLorebookUseManifestImmutabilityTriggers();
+        await _createLorebookUseManifestIntegrityTriggers();
+      }
+      if (from < 89) {
+        // v88 called the provisional record a `generation` acceptance, but no
+        // production path created it. It cannot establish the required fact
+        // that a *subsequent user message* accepted an assistant variation.
+        // Delete those unprovable records, retain immutable manifests/evidence,
+        // and rebuild so upgraded databases enforce the v89 contract.
+        await customStatement(
+          'DROP TRIGGER IF EXISTS lorebook_use_acceptance_records_no_update',
+        );
+        final acceptanceColumns = await customSelect(
+          'PRAGMA table_info("lorebook_use_acceptance_records")',
+        ).get();
+        final acceptanceColumnNames = acceptanceColumns
+            .map((row) => row.read<String>('name'))
+            .toSet();
+        if (!acceptanceColumnNames.contains('accepted_by_user_message_id')) {
+          await m.addColumn(
+            lorebookUseAcceptanceRecords,
+            lorebookUseAcceptanceRecords.acceptedByUserMessageId,
+          );
+        }
+        await customStatement('DELETE FROM lorebook_use_acceptance_records');
+        await m.alterTable(TableMigration(lorebookUseAcceptanceRecords));
+        // alterTable rebuilds the table and drops its append-only trigger.
+        await _createLorebookUseManifestImmutabilityTriggers();
+        await _createLorebookUseManifestIntegrityTriggers();
+      }
+      if (from < 90) {
+        await m.createTable(ledgerReconciliationSuccessfulRuns);
+        await m.createTable(ledgerReconciliationRunInvalidations);
+        await m.createTable(ledgerReconciliationCursors);
+        await _createLedgerReconciliationImmutabilityTriggers();
+      }
+      if (from < 91) {
+        // v90 accidentally rejected the empty predecessor required by the
+        // genesis cursor. Rebuild to match the fresh-schema contract.
+        await m.alterTable(TableMigration(ledgerReconciliationCursors));
+        await _createLedgerReconciliationImmutabilityTriggers();
+      }
+      if (from < 92) {
+        await m.createTable(cardEvolutionClaims);
+        await m.createTable(cardEvolutionProposalRuns);
+        await _createCardEvolutionIntegrity();
+      }
     },
   );
+
+  Future<void> _createLorebookUseManifestImmutabilityTriggers() async {
+    for (final table in const [
+      'lorebook_use_manifests',
+      'lorebook_use_manifest_entries',
+      'lorebook_use_acceptance_records',
+    ]) {
+      await customStatement(
+        'CREATE TRIGGER IF NOT EXISTS ${table}_no_update '
+        'BEFORE UPDATE ON $table BEGIN '
+        "SELECT RAISE(ABORT, '$table is immutable'); END",
+      );
+    }
+  }
+
+  Future<void> _createLedgerReconciliationImmutabilityTriggers() async {
+    for (final table in const [
+      'reconciliation_successful_runs',
+      'reconciliation_run_invalidations',
+      'ledger_reconciliation_cursors',
+    ]) {
+      await customStatement(
+        'CREATE TRIGGER IF NOT EXISTS ${table}_no_update '
+        'BEFORE UPDATE ON $table BEGIN '
+        "SELECT RAISE(ABORT, '$table is immutable'); END",
+      );
+    }
+  }
+
+  Future<void> _createCardEvolutionIntegrity() async {
+    await customStatement(
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_card_evolution_active_claim '
+      'ON card_evolution_claims (session_id) WHERE status = \'claimed\'',
+    );
+    await customStatement(
+      'CREATE TRIGGER IF NOT EXISTS card_evolution_proposal_runs_no_update '
+      'BEFORE UPDATE ON card_evolution_proposal_runs BEGIN '
+      "SELECT RAISE(ABORT, 'card_evolution_proposal_runs is immutable'); END",
+    );
+  }
+
+  Future<void> _createLorebookUseManifestIntegrityTriggers() async {
+    // Rebuilding v88 records must replace, rather than retain, the old
+    // generation-named index and selection prerequisite trigger.
+    await customStatement(
+      'DROP INDEX IF EXISTS idx_lorebook_use_one_generation_acceptance',
+    );
+    await customStatement(
+      'DROP TRIGGER IF EXISTS lorebook_use_selection_requires_generation',
+    );
+    await customStatement(
+      'CREATE UNIQUE INDEX IF NOT EXISTS '
+      'idx_lorebook_use_one_variation_acceptance '
+      'ON lorebook_use_acceptance_records '
+      '(session_id, message_id, swipe_id, agent_swipe_id) '
+      "WHERE acceptance_kind = 'variation'",
+    );
+    await customStatement('''
+      CREATE TRIGGER IF NOT EXISTS lorebook_use_selection_requires_variation
+      BEFORE INSERT ON lorebook_use_acceptance_records
+      WHEN NEW.acceptance_kind = 'selection' AND NOT EXISTS (
+        SELECT 1 FROM lorebook_use_acceptance_records AS variation
+        WHERE variation.session_id = NEW.session_id
+          AND variation.message_id = NEW.message_id
+          AND variation.swipe_id = NEW.swipe_id
+          AND variation.agent_swipe_id = NEW.agent_swipe_id
+          AND variation.acceptance_kind = 'variation'
+      )
+      BEGIN SELECT RAISE(ABORT, 'selection requires variation acceptance'); END
+    ''');
+    await customStatement('''
+      CREATE TRIGGER IF NOT EXISTS lorebook_use_selection_requires_entry
+      BEFORE INSERT ON lorebook_use_acceptance_records
+      WHEN NEW.acceptance_kind = 'selection' AND NOT EXISTS (
+        SELECT 1 FROM lorebook_use_manifest_entries AS entry
+        WHERE entry.session_id = NEW.session_id
+          AND entry.message_id = NEW.message_id
+          AND entry.swipe_id = NEW.swipe_id
+          AND entry.agent_swipe_id = NEW.agent_swipe_id
+          AND entry.lorebook_id = NEW.selected_lorebook_id
+          AND entry.entry_id = NEW.selected_entry_id
+          AND entry.entry_order = NEW.selected_entry_order
+      )
+      BEGIN SELECT RAISE(ABORT, 'selection requires manifest entry'); END
+    ''');
+  }
 
   Future<void> _ensureLedgerPrompts() async {
     final rows = await customSelect(

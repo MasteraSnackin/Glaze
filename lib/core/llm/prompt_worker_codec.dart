@@ -89,6 +89,11 @@ PromptResult deserializeResult(Map<String, dynamic> json) {
     memoryCoverage: Map<String, dynamic>.from(
       json['memoryCoverage'] as Map? ?? {},
     ),
+    exactLorebookManifest: json['exactLorebookManifest'] is Map
+        ? ExactLorebookManifest.fromJson(
+            Map<String, dynamic>.from(json['exactLorebookManifest'] as Map),
+          )
+        : null,
   );
 }
 
@@ -190,7 +195,8 @@ PromptPayload deserializePayload(Map<String, dynamic> json) {
           ),
     effectiveCanonRevisionNumber: json['effectiveCanonRevisionNumber'] as int?,
     effectiveCanonRevisionHash: json['effectiveCanonRevisionHash'] as String?,
-    effectiveCanonCacheIdentity: json['effectiveCanonCacheIdentity'] as String? ?? '',
+    effectiveCanonCacheIdentity:
+        json['effectiveCanonCacheIdentity'] as String? ?? '',
   );
 }
 
@@ -202,6 +208,7 @@ Map<String, dynamic> serializeResult(PromptResult r) => {
   'triggeredLorebooks': r.triggeredLorebooks.map((t) => t.toJson()).toList(),
   'triggeredMemories': r.triggeredMemories.map((t) => t.toJson()).toList(),
   'memoryCoverage': r.memoryCoverage,
+  'exactLorebookManifest': r.exactLorebookManifest?.toJson(),
 };
 
 Map<String, dynamic>? serializeMemorySelection(MemorySelection? selection) {

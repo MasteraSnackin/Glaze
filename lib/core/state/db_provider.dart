@@ -8,6 +8,7 @@ import '../models/preset.dart';
 import '../db/repositories/api_config_repo.dart';
 import '../db/repositories/persona_repo.dart';
 import '../db/repositories/lorebook_repo.dart';
+import '../db/repositories/lorebook_use_manifest_repo.dart';
 import '../db/repositories/embedding_repo.dart';
 import '../db/repositories/summary_repo.dart';
 import '../db/repositories/memory_book_repo.dart';
@@ -22,6 +23,8 @@ import '../db/repositories/tracker_repo.dart';
 import '../db/repositories/tracker_snapshot_repo.dart';
 import '../db/repositories/ledger_raw_tracker_state_reader.dart';
 import '../db/repositories/ledger_reconciliation_checkpoint_repo.dart';
+import '../db/repositories/ledger_reconciliation_run_repo.dart';
+import '../db/repositories/card_evolution_repo.dart';
 import '../db/repositories/character_knowledge_fact_repo.dart';
 import '../db/repositories/character_session_baseline_repo.dart';
 import '../db/repositories/character_revision_repo.dart';
@@ -114,6 +117,17 @@ final personaRepoProvider = Provider<PersonaRepo>((ref) {
 final lorebookRepoProvider = Provider<LorebookRepo>((ref) {
   return LorebookRepo(ref.watch(appDbProvider));
 });
+
+final lorebookUseManifestRepoProvider = Provider<LorebookUseManifestRepo>((
+  ref,
+) {
+  return LorebookUseManifestRepo(ref.watch(appDbProvider));
+});
+
+final ledgerReconciliationRunRepoProvider =
+    Provider<LedgerReconciliationRunRepo>(
+      (ref) => LedgerReconciliationRunRepo(ref.watch(appDbProvider)),
+    );
 
 final embeddingRepoProvider = Provider<EmbeddingRepo>((ref) {
   return EmbeddingRepo(ref.watch(appDbProvider));
@@ -266,6 +280,24 @@ final manualRewriteJobRepoProvider = Provider<ManualRewriteJobRepo>((ref) {
   return ManualRewriteJobRepo(
     db: ref.watch(appDbProvider),
     rawTrackerStateReader: ref.watch(ledgerRawTrackerStateReaderProvider),
+  );
+});
+
+final cardEvolutionRepoProvider = Provider<CardEvolutionRepo>((ref) {
+  final db = ref.watch(appDbProvider);
+  return CardEvolutionRepo(
+    db: db,
+    canonReader: EffectiveCanonReadRepository(
+      db: db,
+      characterRepo: ref.watch(characterRepoProvider),
+      revisionRepo: ref.watch(characterRevisionRepoProvider),
+      baselineRepo: ref.watch(characterSessionBaselineRepoProvider),
+      factRepo: ref.watch(characterKnowledgeFactRepoProvider),
+      transitionRepo: ref.watch(appliedCanonTransitionRepoProvider),
+      transitionFactRefRepo: ref.watch(canonTransitionFactRefRepoProvider),
+      rawTrackerStateReader: ref.watch(ledgerRawTrackerStateReaderProvider),
+    ),
+    jobRepo: ref.watch(manualRewriteJobRepoProvider),
   );
 });
 

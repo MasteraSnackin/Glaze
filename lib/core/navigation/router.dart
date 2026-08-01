@@ -97,10 +97,8 @@ CustomTransitionPage<void> _fadePage({
     // Drive the incoming page's own fade off `animation`; the parent overlay's
     // fade-out is driven off its `secondaryAnimation` (see `_overlayPage`), and
     // both run over this same duration, producing a symmetric cross-fade.
-    transitionsBuilder: (_, animation, _, child) => FadeTransition(
-      opacity: animation,
-      child: child,
-    ),
+    transitionsBuilder: (_, animation, _, child) =>
+        FadeTransition(opacity: animation, child: child),
   );
 }
 
@@ -153,229 +151,234 @@ GoRouter buildRouter(
     ShellRoute(
       builder: (_, state, child) => DesktopShell(child: child),
       routes: [
-    StatefulShellRoute(
-      builder: (_, _, navigationShell) =>
-          ShellScreen(navigationShell: navigationShell),
-      navigatorContainerBuilder: (_, navigationShell, children) =>
-          FadeBranchContainer(
-            currentIndex: navigationShell.currentIndex,
-            children: children,
-          ),
-      branches: [
-        StatefulShellBranch(
-          routes: [
-            GoRoute(path: '/', builder: (_, _) => const ChatHistoryScreen()),
+        StatefulShellRoute(
+          builder: (_, _, navigationShell) =>
+              ShellScreen(navigationShell: navigationShell),
+          navigatorContainerBuilder: (_, navigationShell, children) =>
+              FadeBranchContainer(
+                currentIndex: navigationShell.currentIndex,
+                children: children,
+              ),
+          branches: [
+            StatefulShellBranch(
+              routes: [
+                GoRoute(
+                  path: '/',
+                  builder: (_, _) => const ChatHistoryScreen(),
+                ),
+              ],
+            ),
+            StatefulShellBranch(
+              routes: [
+                GoRoute(
+                  path: '/characters',
+                  builder: (_, state) => CharacterListScreen(
+                    initialCharacterId: state.uri.queryParameters['open'],
+                  ),
+                ),
+              ],
+            ),
+            StatefulShellBranch(
+              routes: [
+                GoRoute(
+                  path: '/tools',
+                  pageBuilder: (_, state) =>
+                      _overlayPage(state: state, child: const ToolsScreen()),
+                  routes: [
+                    GoRoute(
+                      path: 'api',
+                      pageBuilder: (_, state) => _fadePage(
+                        state: state,
+                        child: const ApiSettingsScreen(startExpanded: true),
+                      ),
+                    ),
+                    GoRoute(
+                      path: 'personas',
+                      pageBuilder: (_, state) => _fadePage(
+                        state: state,
+                        child: const PersonaListScreen(startExpanded: true),
+                      ),
+                    ),
+                    GoRoute(
+                      path: 'presets',
+                      pageBuilder: (_, state) => _fadePage(
+                        state: state,
+                        child: const PresetListScreen(startExpanded: true),
+                      ),
+                    ),
+                    GoRoute(
+                      path: 'regex',
+                      pageBuilder: (_, state) => _fadePage(
+                        state: state,
+                        child: const RegexSheet(startExpanded: true),
+                      ),
+                    ),
+                    GoRoute(
+                      path: 'lorebooks',
+                      pageBuilder: (_, state) => _fadePage(
+                        state: state,
+                        child: const LorebookListScreen(startExpanded: true),
+                      ),
+                      routes: [
+                        // Drill-down inside the lorebook list (not a direct sub-view
+                        // of the tools overlay), so it keeps the platform push
+                        // transition — an opaque cover reads fine here and avoids
+                        // the OverlayPortal layout regression covered in tests.
+                        GoRoute(
+                          path: 'settings',
+                          pageBuilder: (_, state) => _adaptivePage(
+                            state: state,
+                            child: const LorebookGlobalSettingsScreen(),
+                          ),
+                        ),
+                      ],
+                    ),
+                    GoRoute(
+                      path: 'embeddings',
+                      pageBuilder: (_, state) => _fadePage(
+                        state: state,
+                        child: const EmbeddingSettingsScreen(),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            StatefulShellBranch(
+              routes: [
+                GoRoute(
+                  path: '/menu',
+                  pageBuilder: (_, state) =>
+                      _overlayPage(state: state, child: const MenuScreen()),
+                  routes: [
+                    GoRoute(
+                      path: 'settings',
+                      pageBuilder: (_, state) => _fadePage(
+                        state: state,
+                        child: const AppSettingsScreen(),
+                      ),
+                    ),
+                    GoRoute(
+                      path: 'themes',
+                      pageBuilder: (_, state) => _fadePage(
+                        state: state,
+                        child: const ThemePresetScreen(),
+                      ),
+                    ),
+                    GoRoute(
+                      path: 'about',
+                      pageBuilder: (_, state) =>
+                          _fadePage(state: state, child: const AboutScreen()),
+                      routes: [
+                        GoRoute(
+                          path: 'hall-of-fame',
+                          pageBuilder: (_, state) => _noTransitionPage(
+                            state: state,
+                            child: const HallOfFameScreen(),
+                          ),
+                        ),
+                      ],
+                    ),
+                    GoRoute(
+                      path: 'glossary',
+                      pageBuilder: (_, state) => _fadePage(
+                        state: state,
+                        child: const GlossarySheet(startExpanded: true),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ],
         ),
-        StatefulShellBranch(
+        GoRoute(
+          path: '/chat/:charId',
+          pageBuilder: (_, state) {
+            final charId = state.pathParameters['charId']!;
+            final sessionIdx = int.tryParse(
+              state.uri.queryParameters['session'] ?? '',
+            );
+            final isNew = state.uri.queryParameters['new'] == '1';
+            final targetMsgId = state.uri.queryParameters['msg'];
+            return _adaptivePage(
+              state: state,
+              child: ChatScreen(
+                charId: charId,
+                initialSessionIndex: sessionIdx,
+                forceNewSession: isNew,
+                targetMessageId: (targetMsgId != null && targetMsgId.isNotEmpty)
+                    ? targetMsgId
+                    : null,
+              ),
+            );
+          },
+        ),
+        GoRoute(
+          path: '/character/create',
+          pageBuilder: (_, state) => _adaptivePage(
+            state: state,
+            child: CharacterEditorScreen(charId: generateId(), isNew: true),
+          ),
+        ),
+        GoRoute(
+          path: '/character/:charId',
+          pageBuilder: (_, state) => _adaptivePage(
+            state: state,
+            child: CharacterDetailSheetLauncher(
+              charId: state.pathParameters['charId']!,
+            ),
+          ),
+        ),
+        GoRoute(
+          path: '/character/:charId/edit',
+          pageBuilder: (_, state) => _adaptivePage(
+            state: state,
+            child: CharacterEditorScreen(
+              charId: state.pathParameters['charId']!,
+            ),
+          ),
+        ),
+        GoRoute(
+          path: '/character/:charId/gallery',
+          pageBuilder: (_, state) => _adaptivePage(
+            state: state,
+            child: GalleryScreen(charId: state.pathParameters['charId']!),
+          ),
+        ),
+        GoRoute(
+          path: '/character/:charId/rewrite/:jobId',
+          pageBuilder: (_, state) => _adaptivePage(
+            state: state,
+            child: RewriteReviewScreen(
+              charId: state.pathParameters['charId']!,
+              jobId: state.pathParameters['jobId']!,
+            ),
+          ),
+        ),
+        GoRoute(
+          path: '/sync',
+          pageBuilder: (_, state) =>
+              _overlayPage(state: state, child: const SyncSheet()),
+        ),
+        GoRoute(
+          path: '/extensions',
+          pageBuilder: (_, state) =>
+              _overlayPage(state: state, child: const ExtensionsScreen()),
           routes: [
             GoRoute(
-              path: '/characters',
-              builder: (_, state) => CharacterListScreen(
-                initialCharacterId: state.uri.queryParameters['open'],
+              path: 'preset-editor/:presetId',
+              pageBuilder: (_, state) => _adaptivePage(
+                state: state,
+                child: PresetEditorScreen(
+                  presetId: state.pathParameters['presetId']!,
+                ),
               ),
             ),
           ],
         ),
-        StatefulShellBranch(
-          routes: [
-            GoRoute(
-              path: '/tools',
-              pageBuilder: (_, state) =>
-                  _overlayPage(state: state, child: const ToolsScreen()),
-              routes: [
-                GoRoute(
-                  path: 'api',
-                  pageBuilder: (_, state) => _fadePage(
-                    state: state,
-                    child: const ApiSettingsScreen(startExpanded: true),
-                  ),
-                ),
-                GoRoute(
-                  path: 'personas',
-                  pageBuilder: (_, state) => _fadePage(
-                    state: state,
-                    child: const PersonaListScreen(startExpanded: true),
-                  ),
-                ),
-                GoRoute(
-                  path: 'presets',
-                  pageBuilder: (_, state) => _fadePage(
-                    state: state,
-                    child: const PresetListScreen(startExpanded: true),
-                  ),
-                ),
-                GoRoute(
-                  path: 'regex',
-                  pageBuilder: (_, state) => _fadePage(
-                    state: state,
-                    child: const RegexSheet(startExpanded: true),
-                  ),
-                ),
-                GoRoute(
-                  path: 'lorebooks',
-                  pageBuilder: (_, state) => _fadePage(
-                    state: state,
-                    child: const LorebookListScreen(startExpanded: true),
-                  ),
-                  routes: [
-                    // Drill-down inside the lorebook list (not a direct sub-view
-                    // of the tools overlay), so it keeps the platform push
-                    // transition — an opaque cover reads fine here and avoids
-                    // the OverlayPortal layout regression covered in tests.
-                    GoRoute(
-                      path: 'settings',
-                      pageBuilder: (_, state) => _adaptivePage(
-                        state: state,
-                        child: const LorebookGlobalSettingsScreen(),
-                      ),
-                    ),
-                  ],
-                ),
-                GoRoute(
-                  path: 'embeddings',
-                  pageBuilder: (_, state) => _fadePage(
-                    state: state,
-                    child: const EmbeddingSettingsScreen(),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-        StatefulShellBranch(
-          routes: [
-            GoRoute(
-              path: '/menu',
-              pageBuilder: (_, state) =>
-                  _overlayPage(state: state, child: const MenuScreen()),
-              routes: [
-                GoRoute(
-                  path: 'settings',
-                  pageBuilder: (_, state) => _fadePage(
-                    state: state,
-                    child: const AppSettingsScreen(),
-                  ),
-                ),
-                GoRoute(
-                  path: 'themes',
-                  pageBuilder: (_, state) => _fadePage(
-                    state: state,
-                    child: const ThemePresetScreen(),
-                  ),
-                ),
-                GoRoute(
-                  path: 'about',
-                  pageBuilder: (_, state) =>
-                      _fadePage(state: state, child: const AboutScreen()),
-                  routes: [
-                    GoRoute(
-                      path: 'hall-of-fame',
-                      pageBuilder: (_, state) => _noTransitionPage(
-                        state: state,
-                        child: const HallOfFameScreen(),
-                      ),
-                    ),
-                  ],
-                ),
-                GoRoute(
-                  path: 'glossary',
-                  pageBuilder: (_, state) => _fadePage(
-                    state: state,
-                    child: const GlossarySheet(startExpanded: true),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
       ],
     ),
-    GoRoute(
-      path: '/chat/:charId',
-      pageBuilder: (_, state) {
-        final charId = state.pathParameters['charId']!;
-        final sessionIdx = int.tryParse(
-          state.uri.queryParameters['session'] ?? '',
-        );
-        final isNew = state.uri.queryParameters['new'] == '1';
-        final targetMsgId = state.uri.queryParameters['msg'];
-        return _adaptivePage(
-          state: state,
-          child: ChatScreen(
-            charId: charId,
-            initialSessionIndex: sessionIdx,
-            forceNewSession: isNew,
-            targetMessageId:
-                (targetMsgId != null && targetMsgId.isNotEmpty)
-                    ? targetMsgId
-                    : null,
-          ),
-        );
-      },
-    ),
-    GoRoute(
-      path: '/character/create',
-      pageBuilder: (_, state) => _adaptivePage(
-        state: state,
-        child: CharacterEditorScreen(charId: generateId(), isNew: true),
-      ),
-    ),
-    GoRoute(
-      path: '/character/:charId',
-      pageBuilder: (_, state) => _adaptivePage(
-        state: state,
-        child: CharacterDetailSheetLauncher(
-          charId: state.pathParameters['charId']!,
-        ),
-      ),
-    ),
-    GoRoute(
-      path: '/character/:charId/edit',
-      pageBuilder: (_, state) => _adaptivePage(
-        state: state,
-        child: CharacterEditorScreen(charId: state.pathParameters['charId']!),
-      ),
-    ),
-    GoRoute(
-      path: '/character/:charId/gallery',
-      pageBuilder: (_, state) => _adaptivePage(
-        state: state,
-        child: GalleryScreen(charId: state.pathParameters['charId']!),
-      ),
-    ),
-    GoRoute(
-      path: '/character/:charId/rewrite/:jobId',
-      pageBuilder: (_, state) => _adaptivePage(
-        state: state,
-        child: RewriteReviewScreen(
-          charId: state.pathParameters['charId']!,
-          jobId: state.pathParameters['jobId']!,
-        ),
-      ),
-    ),    GoRoute(
-      path: '/sync',
-      pageBuilder: (_, state) =>
-          _overlayPage(state: state, child: const SyncSheet()),
-    ),
-    GoRoute(
-      path: '/extensions',
-      pageBuilder: (_, state) =>
-          _overlayPage(state: state, child: const ExtensionsScreen()),
-      routes: [
-        GoRoute(
-          path: 'preset-editor/:presetId',
-          pageBuilder: (_, state) => _adaptivePage(
-            state: state,
-            child: PresetEditorScreen(
-              presetId: state.pathParameters['presetId']!,
-            ),
-          ),
-        ),
-      ],
-    ),
-    ],
-  ),
   ],
 );
 

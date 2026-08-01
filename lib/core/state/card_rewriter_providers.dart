@@ -2,8 +2,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../features/settings/api_list_provider.dart';
 import '../llm/card_rewrite_slot_resolver.dart';
+import '../llm/aux_llm_client.dart';
 import '../models/api_config.dart';
 import '../services/card_rewriter/manual_rewrite_service.dart';
+import '../services/card_rewriter/automated_card_evolution_service.dart';
 import 'db_provider.dart';
 
 /// Phase-4B writer lane: the manual card-rewrite LLM orchestration service.
@@ -43,3 +45,43 @@ final manualRewriteServiceProvider = Provider<ManualRewriteService>((ref) {
   ref.onDispose(service.dispose);
   return service;
 });
+
+final automatedCardEvolutionServiceProvider =
+    Provider<AutomatedCardEvolutionService>((ref) {
+      Future<AuxApiConfig> resolveModel() async {
+        await ref.read(apiListProvider.future);
+        final apiConfigs =
+            ref.read(apiListProvider).value ?? const <ApiConfig>[];
+        return CardRewriteSlotResolver.resolve(
+          apiConfigs: apiConfigs,
+          apiConfigId: const String.fromEnvironment(
+            'GLAZE_CARD_REWRITE_API_CONFIG_ID',
+          ),
+          modelOverride: const String.fromEnvironment(
+            'GLAZE_CARD_REWRITE_MODEL',
+          ),
+        );
+      }
+
+      final service = AutomatedCardEvolutionService(
+        repo: ref.watch(cardEvolutionRepoProvider),
+        resolveModel: resolveModel,
+        executor: ({
+          required config,
+          required prompt,
+          required maxTokens,
+          required temperature,
+          required timeoutMs,
+          cancelToken,
+        }) => const AuxLlmClient().callOnceWithLog(
+          config: config,
+          prompt: prompt,
+          maxTokens: maxTokens,
+          temperature: temperature,
+          timeoutMs: timeoutMs,
+          cancelToken: cancelToken,
+        ),
+      );
+      ref.onDispose(service.dispose);
+      return service;
+    });

@@ -5,7 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/models/chat_message.dart';
-import '../../../core/db/repositories/chat_repo.dart';
+import '../../../core/llm/prompt/exact_lorebook_manifest.dart';
 import '../../../core/services/generation_notification_service.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../core/utils/time_helpers.dart';
@@ -156,6 +156,8 @@ class GenerationPipeline {
         baseSession: saveSession ?? session,
         generatedSession: result.session!,
         regenTargetId: regenTargetId,
+        manifest:
+            result.mainModelContextSnapshot?.promptResult.exactLorebookManifest,
       );
       if (durableSession == null) {
         await notifService.onGenerationAborted();
@@ -335,55 +337,15 @@ class GenerationPipeline {
     required ChatSession baseSession,
     required ChatSession generatedSession,
     required String? regenTargetId,
+    required ExactLorebookManifest? manifest,
   }) {
     return ctx.ref
         .read(chatRepoProvider)
-        .mutateSession(
-          sessionId: generatedSession.id,
-          updatedAt: generatedSession.updatedAt,
-          mutate: (latest) {
-            final messages = List<ChatMessage>.from(latest.messages);
-            if (regenTargetId != null) {
-              final baseIndex = baseSession.messages.indexWhere(
-                (message) => message.id == regenTargetId,
-              );
-              final generatedIndex = generatedSession.messages.indexWhere(
-                (message) => message.id == regenTargetId,
-              );
-              final latestIndex = messages.indexWhere(
-                (message) => message.id == regenTargetId,
-              );
-              if (baseIndex < 0 || generatedIndex < 0 || latestIndex < 0) {
-                return null;
-              }
-              final base = baseSession.messages[baseIndex];
-              final current = messages[latestIndex];
-              if (!_sameGenerationAnchor(base, current)) return null;
-              messages[latestIndex] = generatedSession.messages[generatedIndex]
-                  .copyWith(
-                    isHidden: current.isHidden,
-                    imageHidden: current.imageHidden,
-                  );
-            } else {
-              if (generatedSession.messages.length !=
-                  baseSession.messages.length + 1) {
-                return null;
-              }
-              final expectedTail = baseSession.messages.lastOrNull?.id;
-              final currentTail = messages.lastOrNull?.id;
-              if (expectedTail != currentTail) return null;
-              messages.add(generatedSession.messages.last);
-            }
-
-            return latest.copyWith(
-              messages: messages,
-              sessionVars: ChatRepo.applySessionVarDelta(
-                latest.sessionVars,
-                baseSession.sessionVars,
-                generatedSession.sessionVars,
-              ),
-            );
-          },
+        .commitGenerationResult(
+          baseSession: baseSession,
+          generatedSession: generatedSession,
+          regenTargetId: regenTargetId,
+          manifest: manifest,
         );
   }
 

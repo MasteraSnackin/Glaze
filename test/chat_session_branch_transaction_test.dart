@@ -8,12 +8,15 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:glaze_flutter/core/db/app_db.dart' hide ChatSummary;
 import 'package:glaze_flutter/core/db/repositories/ledger_reconciliation_checkpoint_repo.dart';
+import 'package:glaze_flutter/core/db/repositories/lorebook_use_manifest_repo.dart';
+import 'package:glaze_flutter/core/llm/prompt/exact_lorebook_manifest.dart';
 import 'package:glaze_flutter/core/db/repositories/character_session_baseline_repo.dart';
 import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/core/models/character_knowledge_fact.dart';
 import 'package:glaze_flutter/core/models/character_session_baseline.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
 import 'package:glaze_flutter/core/models/memory_book.dart';
+import 'package:glaze_flutter/core/models/lorebook.dart';
 import 'package:glaze_flutter/core/models/persona.dart';
 import 'package:glaze_flutter/core/models/preset.dart';
 import 'package:glaze_flutter/core/models/studio_config.dart';
@@ -408,4 +411,109 @@ void main() {
       expect(container.read(presetConnectionsProvider).chat['c1_2'], 'preset');
     },
   );
+
+  test('branch fails closed and retains no lorebook provenance', () async {
+    final current = ChatSession(
+      id: 'c1_0',
+      characterId: 'c1',
+      sessionIndex: 0,
+      messages: [
+        _message('m0'),
+        _message('m1').copyWith(role: 'user', swipes: const ['one', 'two']),
+        _message('m2'),
+      ],
+    );
+    await container.read(chatRepoProvider).put(current);
+    final manifests = container.read(lorebookUseManifestRepoProvider);
+    Future<void> seed(String messageId, int swipeId) {
+      final durable = _durableManifest('$messageId-$swipeId');
+      return manifests.insertGenerationManifest(
+        identity: LorebookUseGenerationIdentity(
+          sessionId: 'c1_0',
+          messageId: messageId,
+          swipeId: swipeId,
+          agentSwipeId: 0,
+        ),
+        manifest: LorebookUseManifestInput(
+          manifestJson: durable.canonicalJson,
+          manifestHash: durable.canonicalHash,
+          manifestSchemaVersion: 1,
+          finalPromptHash: durable.providerMessagesHash,
+          presetSnapshotHash: durable.promptProvenance.presetSnapshotHash,
+        ),
+        createdAt: 10 + swipeId,
+        entries: [
+          LorebookUseManifestEntryInput(
+            lorebookId: durable.entries.single.lorebookId,
+            entryId: durable.entries.single.entryId,
+            entryOrder: 0,
+            evidenceJson: jsonEncode(durable.entries.single.toJson()),
+          ),
+        ],
+      );
+    }
+
+    await seed('m0', 0);
+    await seed('m1', 0);
+    await seed('m1', 1);
+    await seed('m2', 0);
+    await manifests.insertVariationAcceptance(
+      acceptanceId: 'kept',
+      identity: const LorebookUseGenerationIdentity(
+        sessionId: 'c1_0',
+        messageId: 'm0',
+        swipeId: 0,
+        agentSwipeId: 0,
+      ),
+      acceptedByUserMessageId: 'm1',
+      acceptedAt: 20,
+    );
+    await manifests.insertVariationAcceptance(
+      acceptanceId: 'excluded',
+      identity: const LorebookUseGenerationIdentity(
+        sessionId: 'c1_0',
+        messageId: 'm1',
+        swipeId: 0,
+        agentSwipeId: 0,
+      ),
+      acceptedByUserMessageId: 'm2',
+      acceptedAt: 21,
+    );
+
+    await container.read(_serviceProvider).branchSession('c1', current, 1);
+
+    final branchManifests = await (db.select(
+      db.lorebookUseManifests,
+    )..where((row) => row.sessionId.equals('c1_1'))).get();
+    expect(branchManifests, isEmpty);
+    expect(await manifests.getVariationAcceptances('c1_1'), isEmpty);
+    final sourceManifests = await (db.select(
+      db.lorebookUseManifests,
+    )..where((row) => row.sessionId.equals('c1_0'))).get();
+    expect(sourceManifests, hasLength(4));
+    expect(await manifests.getVariationAcceptances('c1_0'), hasLength(2));
+  });
 }
+
+ExactLorebookManifest _durableManifest(String id) => ExactLorebookManifest(
+  entries: [
+    ExactLorebookManifestEntry.fromMergedEntry(
+      entry: LorebookEntry(
+        id: 'entry-$id',
+        lorebookId: 'book-$id',
+        content: 'lore-$id',
+        position: 'worldInfoBefore',
+        order: 0,
+      ),
+      source: 'keyword',
+      classification: 'worldInfoBefore',
+      injectionIndex: 0,
+      renderedContent: 'rendered-$id',
+    ),
+  ],
+  promptProvenance: const ExactLorebookPromptProvenance(
+    characterId: 'character',
+    presetSnapshotHash: 'preset',
+  ),
+  providerMessagesHash: 'prompt',
+);

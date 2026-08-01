@@ -542,7 +542,7 @@ class RewriteJobs extends Table {
   @override
   List<String> get customConstraints => [
     "CHECK (status IN ('generating', 'pending', 'failed', 'cancelled', "
-    "'applied'))",
+        "'applied'))",
   ];
 }
 
@@ -829,6 +829,309 @@ class Lorebooks extends Table {
 
   @override
   Set<Column> get primaryKey => {lorebookId};
+}
+
+/// Immutable successful reconciliation evidence.  The JSON columns are
+/// canonical codec payloads; their hashes are verified by the repository.
+@DataClassName('LedgerReconciliationSuccessfulRunRow')
+@TableIndex(
+  name: 'idx_reconciliation_run_endpoint',
+  columns: {
+    #sessionId,
+    #startMessageId,
+    #startSwipeId,
+    #startAgentSwipeId,
+    #endMessageId,
+    #endSwipeId,
+    #endAgentSwipeId,
+  },
+)
+@TableIndex(
+  name: 'idx_reconciliation_run_content',
+  columns: {#sessionId, #contentHash},
+  unique: true,
+)
+@TableIndex(
+  name: 'idx_reconciliation_run_chain',
+  columns: {#sessionId, #chainHash},
+  unique: true,
+)
+class LedgerReconciliationSuccessfulRuns extends Table {
+  @override
+  String get tableName => 'reconciliation_successful_runs';
+  TextColumn get id => text()();
+  TextColumn get sessionId => text()();
+  IntColumn get ordinal => integer()();
+  TextColumn get startMessageId => text()();
+  IntColumn get startSwipeId => integer()();
+  IntColumn get startAgentSwipeId => integer()();
+  TextColumn get endMessageId => text()();
+  IntColumn get endSwipeId => integer()();
+  IntColumn get endAgentSwipeId => integer()();
+  TextColumn get anchorsJson => text()();
+  TextColumn get rangeHash => text()();
+  TextColumn get acceptedManifestRefsJson => text()();
+  TextColumn get effectiveCanonStamp => text()();
+  IntColumn get effectiveCanonRevision => integer()();
+  TextColumn get effectiveCanonHash => text()();
+  TextColumn get canonicalResultJson => text()();
+  TextColumn get contentHash => text()();
+  TextColumn get predecessorChainHash => text()();
+  TextColumn get chainHash => text()();
+  IntColumn get contractVersion => integer()();
+  TextColumn get opsAppliedJson => text()();
+  IntColumn get createdAt => integer()();
+  @override
+  Set<Column> get primaryKey => {id};
+  @override
+  List<Set<Column>> get uniqueKeys => [
+    {sessionId, ordinal},
+    {sessionId, contentHash},
+    {sessionId, chainHash},
+  ];
+  @override
+  List<String> get customConstraints => [
+    'CHECK (ordinal > 0)',
+    "CHECK (id <> '' AND session_id <> '' AND start_message_id <> '' "
+        "AND end_message_id <> '' AND anchors_json <> '' AND range_hash <> '' "
+        "AND accepted_manifest_refs_json <> '' AND effective_canon_stamp <> '' "
+        "AND effective_canon_hash <> '' AND canonical_result_json <> '' "
+        "AND content_hash <> '' AND chain_hash <> '' AND contract_version > 0)",
+  ];
+}
+
+@DataClassName('LedgerReconciliationRunInvalidationRow')
+class LedgerReconciliationRunInvalidations extends Table {
+  @override
+  String get tableName => 'reconciliation_run_invalidations';
+  IntColumn get id => integer().autoIncrement()();
+  TextColumn get sessionId => text()();
+  TextColumn get runId => text()();
+  TextColumn get causeMessageId => text()();
+  TextColumn get reason => text()();
+  IntColumn get createdAt => integer()();
+  @override
+  List<Set<Column>> get uniqueKeys => [
+    {sessionId, runId, causeMessageId, reason},
+  ];
+  @override
+  List<String> get customConstraints => [
+    "CHECK (session_id <> '' AND run_id <> '' AND cause_message_id <> '' AND reason <> '')",
+  ];
+}
+
+/// Append-only cursor chain recording reconciliation runs consumed by an
+/// automated card-evolution proposal.
+@DataClassName('LedgerReconciliationCursorRow')
+class LedgerReconciliationCursors extends Table {
+  @override
+  String get tableName => 'ledger_reconciliation_cursors';
+  TextColumn get sessionId => text()();
+  IntColumn get sequence => integer()();
+  TextColumn get predecessorHash => text()();
+  TextColumn get throughRunId => text()();
+  IntColumn get throughRunOrdinal => integer()();
+  TextColumn get throughRunChainHash => text()();
+  TextColumn get cursorHash => text()();
+  IntColumn get createdAt => integer()();
+  @override
+  Set<Column> get primaryKey => {sessionId, sequence};
+  @override
+  List<Set<Column>> get uniqueKeys => [
+    {sessionId, cursorHash},
+  ];
+  @override
+  List<String> get customConstraints => [
+    "CHECK (sequence > 0 AND session_id <> '' "
+        "AND ((sequence = 1 AND predecessor_hash = '') "
+        "OR (sequence > 1 AND predecessor_hash <> '')) "
+        "AND through_run_id <> '' AND through_run_ordinal > 0 "
+        "AND through_run_chain_hash <> '' AND cursor_hash <> '')",
+  ];
+}
+
+/// Expiring ownership for one automated evolution proposal attempt. Completed
+/// rows remain as durable idempotency records; executable rows are `claimed`.
+@DataClassName('CardEvolutionClaimRow')
+@TableIndex(name: 'idx_card_evolution_claim_session', columns: {#sessionId})
+@TableIndex(
+  name: 'idx_card_evolution_claim_input',
+  columns: {#sessionId, #inputHash},
+  unique: true,
+)
+class CardEvolutionClaims extends Table {
+  @override
+  String get tableName => 'card_evolution_claims';
+  TextColumn get id => text()();
+  TextColumn get sessionId => text()();
+  TextColumn get characterId => text()();
+  TextColumn get ownerId => text()();
+  TextColumn get status => text()();
+  IntColumn get leaseExpiresAt => integer()();
+  TextColumn get firstRunId => text()();
+  TextColumn get secondRunId => text()();
+  TextColumn get predecessorCursorHash => text()();
+  IntColumn get predecessorRunOrdinal => integer()();
+  TextColumn get inputHash => text()();
+  TextColumn get rewriteJobId => text().nullable()();
+  IntColumn get createdAt => integer()();
+  IntColumn get completedAt => integer().nullable()();
+  @override
+  Set<Column> get primaryKey => {id};
+  @override
+  List<String> get customConstraints => [
+    "CHECK (status IN ('claimed', 'completed'))",
+    "CHECK (id <> '' AND session_id <> '' AND character_id <> '' "
+        "AND owner_id <> '' AND first_run_id <> '' AND second_run_id <> '' "
+        "AND input_hash <> '' AND predecessor_run_ordinal >= 0)",
+  ];
+}
+
+/// Immutable output and exact selected-input provenance for an automated
+/// proposal. The normal rewrite job remains the review/apply aggregate.
+@DataClassName('CardEvolutionProposalRunRow')
+class CardEvolutionProposalRuns extends Table {
+  @override
+  String get tableName => 'card_evolution_proposal_runs';
+  TextColumn get id => text()();
+  TextColumn get claimId => text()();
+  TextColumn get sessionId => text()();
+  TextColumn get characterId => text()();
+  TextColumn get rewriteJobId => text()();
+  TextColumn get firstRunId => text()();
+  TextColumn get secondRunId => text()();
+  TextColumn get selectedInputJson => text()();
+  TextColumn get inputHash => text()();
+  TextColumn get modelOutput => text()();
+  TextColumn get modelOutputHash => text()();
+  TextColumn get operationSnapshotJson => text()();
+  IntColumn get createdAt => integer()();
+  @override
+  Set<Column> get primaryKey => {id};
+  @override
+  List<Set<Column>> get uniqueKeys => [
+    {claimId},
+    {rewriteJobId},
+    {sessionId, inputHash},
+  ];
+  @override
+  List<String> get customConstraints => [
+    "CHECK (id <> '' AND claim_id <> '' AND session_id <> '' "
+        "AND character_id <> '' AND rewrite_job_id <> '' "
+        "AND first_run_id <> '' AND second_run_id <> '' "
+        "AND selected_input_json <> '' AND input_hash <> '' "
+        "AND model_output_hash <> '' AND operation_snapshot_json <> '')",
+  ];
+}
+
+/// Immutable canonical lorebook-use manifest at one message variation anchor.
+@DataClassName('LorebookUseManifestRow')
+@TableIndex(
+  name: 'idx_lorebook_use_manifest_session_anchor',
+  columns: {#sessionId, #messageId, #swipeId, #agentSwipeId},
+)
+class LorebookUseManifests extends Table {
+  @override
+  String get tableName => 'lorebook_use_manifests';
+
+  TextColumn get sessionId => text()();
+  TextColumn get messageId => text()();
+  IntColumn get swipeId => integer()();
+  IntColumn get agentSwipeId => integer()();
+  TextColumn get manifestJson => text().withDefault(const Constant('{}'))();
+  TextColumn get manifestHash => text().withDefault(const Constant(''))();
+  IntColumn get manifestSchemaVersion =>
+      integer().withDefault(const Constant(1))();
+  TextColumn get finalPromptHash => text().withDefault(const Constant(''))();
+  TextColumn get presetSnapshotHash => text().withDefault(const Constant(''))();
+  IntColumn get createdAt => integer()();
+
+  @override
+  Set<Column> get primaryKey => {sessionId, messageId, swipeId, agentSwipeId};
+}
+
+/// Immutable selected-entry evidence, namespaced within its manifest.
+@DataClassName('LorebookUseManifestEntryRow')
+class LorebookUseManifestEntries extends Table {
+  @override
+  String get tableName => 'lorebook_use_manifest_entries';
+
+  TextColumn get sessionId => text()();
+  TextColumn get messageId => text()();
+  IntColumn get swipeId => integer()();
+  IntColumn get agentSwipeId => integer()();
+  TextColumn get lorebookId => text()();
+  TextColumn get entryId => text()();
+  IntColumn get entryOrder => integer()();
+  TextColumn get evidenceJson => text().withDefault(const Constant('{}'))();
+
+  @override
+  Set<Column> get primaryKey => {
+    sessionId,
+    messageId,
+    swipeId,
+    agentSwipeId,
+    lorebookId,
+    entryId,
+    entryOrder,
+  };
+
+  @override
+  List<String> get customConstraints => [
+    'FOREIGN KEY (session_id, message_id, swipe_id, agent_swipe_id) '
+        'REFERENCES lorebook_use_manifests '
+        '(session_id, message_id, swipe_id, agent_swipe_id)',
+  ];
+}
+
+/// Append-only acceptance events for a generated lorebook-use manifest.
+///
+/// A `variation` records the only authoritative acceptance: the next user
+/// message accepted this exact assistant variation. `selection` is reserved
+/// supplemental evidence and is deliberately not an eligibility signal.
+@DataClassName('LorebookUseAcceptanceRecordRow')
+@TableIndex(
+  name: 'idx_lorebook_use_acceptance_session',
+  columns: {#sessionId, #acceptedAt},
+)
+@TableIndex(
+  name: 'idx_lorebook_use_acceptance_generation',
+  columns: {#sessionId, #messageId, #swipeId, #agentSwipeId},
+)
+class LorebookUseAcceptanceRecords extends Table {
+  @override
+  String get tableName => 'lorebook_use_acceptance_records';
+
+  TextColumn get acceptanceId => text()();
+  TextColumn get sessionId => text()();
+  TextColumn get messageId => text()();
+  IntColumn get swipeId => integer()();
+  IntColumn get agentSwipeId => integer()();
+  TextColumn get acceptanceKind => text()();
+  TextColumn get acceptedByUserMessageId => text().nullable()();
+  TextColumn get selectedLorebookId => text().nullable()();
+  TextColumn get selectedEntryId => text().nullable()();
+  IntColumn get selectedEntryOrder => integer().nullable()();
+  TextColumn get evidenceJson => text().withDefault(const Constant('{}'))();
+  IntColumn get acceptedAt => integer()();
+
+  @override
+  Set<Column> get primaryKey => {acceptanceId};
+
+  @override
+  List<String> get customConstraints => [
+    "CHECK (acceptance_kind IN ('variation', 'selection'))",
+    "CHECK ((acceptance_kind = 'variation' "
+        'AND accepted_by_user_message_id IS NOT NULL '
+        'AND selected_lorebook_id IS NULL '
+        'AND selected_entry_id IS NULL AND selected_entry_order IS NULL) OR '
+        "(acceptance_kind = 'selection' AND selected_lorebook_id IS NOT NULL "
+        'AND selected_entry_id IS NOT NULL AND selected_entry_order IS NOT NULL '
+        'AND accepted_by_user_message_id IS NULL))',
+    'FOREIGN KEY (session_id, message_id, swipe_id, agent_swipe_id) '
+        'REFERENCES lorebook_use_manifests '
+        '(session_id, message_id, swipe_id, agent_swipe_id)',
+  ];
 }
 
 @DataClassName('EmbeddingRow')

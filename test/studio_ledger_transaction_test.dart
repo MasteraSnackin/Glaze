@@ -14,6 +14,7 @@ import 'package:glaze_flutter/core/db/repositories/character_revision_repo.dart'
 import 'package:glaze_flutter/core/db/repositories/character_session_baseline_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/chat_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/ledger_reconciliation_checkpoint_repo.dart';
+import 'package:glaze_flutter/core/db/repositories/ledger_reconciliation_run_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/memory_book_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/tracker_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/tracker_snapshot_repo.dart';
@@ -43,7 +44,7 @@ const _response = '''
 
 const _reconciliationResponse = '''
 <glaze_memory_export>
-{"ops":[{"op":"set","key":"world:time","value":"02:00","evidence":"reviewed","eventState":"completed"}],"knowledgeFacts":[]}
+{"ops":[],"knowledgeFacts":[]}
 </glaze_memory_export>
 <studio_ledger>reviewed</studio_ledger>
 <glaze_knowledge_cleanup>{"ops":[]}</glaze_knowledge_cleanup>
@@ -57,6 +58,7 @@ void main() {
   late TrackerSnapshotRepo snapshots;
   late CharacterKnowledgeFactRepo facts;
   late LedgerReconciliationCheckpointRepo checkpoints;
+  late LedgerReconciliationRunRepo reconciliationRuns;
   late AppliedCanonTransitionRepo transitions;
   late StudioLedgerService service;
   late ProviderContainer container;
@@ -82,6 +84,7 @@ void main() {
     snapshots = TrackerSnapshotRepo(db);
     facts = CharacterKnowledgeFactRepo(db);
     checkpoints = LedgerReconciliationCheckpointRepo(db);
+    reconciliationRuns = LedgerReconciliationRunRepo(db);
     transitions = AppliedCanonTransitionRepo(db);
     container = ProviderContainer(
       overrides: [
@@ -130,6 +133,7 @@ void main() {
       snapshotRepo: snapshots,
       knowledgeFactRepo: facts,
       reconciliationCheckpointRepo: checkpoints,
+      reconciliationRunRepo: reconciliationRuns,
       characterRepo: characters,
       chatRepo: chats,
       canonContextLoader: loader,
@@ -206,6 +210,7 @@ void main() {
       );
 
       expect(result.status, 'aborted');
+      expect(await reconciliationRuns.readSession('session'), isEmpty);
       expect(await trackers.get('session', 'world:time'), isNull);
       expect(
         await facts.getBySourceAnchor(
@@ -396,6 +401,7 @@ void main() {
         plan: plan,
       );
       expect(result.status, 'error');
+      expect(await reconciliationRuns.readSession('session'), isEmpty);
       expect(await trackers.get('session', 'world:time'), isNull);
       expect(await checkpoints.get('session'), isNull);
       final snapshot = await snapshots.getByAnchor(
@@ -405,6 +411,79 @@ void main() {
         agentSwipeId: 0,
       );
       expect(snapshot?.trackers, isEmpty);
+    },
+  );
+
+  test(
+    'reconciliation appends once and exact replay does not mutate state',
+    () async {
+      await snapshots.upsert(
+        const TrackerSnapshot(
+          sessionId: 'session',
+          messageId: 'a1',
+          swipeId: 0,
+          agentSwipeId: 0,
+          trackers: [],
+          committed: true,
+        ),
+      );
+      final endpoint = await _serveTwice(_reconciliationResponse);
+      addTearDown(endpoint.close);
+      const plan = LedgerReconciliationPlan(
+        messages: [
+          ChatMessage(id: 'u1', role: 'user', content: 'Start'),
+          assistant,
+        ],
+        endMessage: assistant,
+        rangeHash: 'range',
+      );
+      expect(
+        (await service.reconcile(
+          sessionId: 'session',
+          settings: const PipelineSettings(),
+          config: _config(endpoint.url),
+          plan: plan,
+        )).status,
+        'ok',
+      );
+      final first = (await reconciliationRuns.readSession('session')).single;
+      expect(first.ordinal, 1);
+      final checkpoint = await checkpoints.get('session');
+      expect(
+        (await service.reconcile(
+          sessionId: 'session',
+          settings: const PipelineSettings(),
+          config: _config(endpoint.url),
+          plan: plan,
+        )).opsApplied,
+        0,
+      );
+      expect(
+        (await reconciliationRuns.readSession('session')).single.id,
+        first.id,
+      );
+      expect(
+        (await checkpoints.get('session'))!.rangeHash,
+        checkpoint!.rangeHash,
+      );
+      await trackers.upsertValue(
+        'session',
+        'canon_lock:world:time',
+        'true',
+        scope: 'ledger',
+      );
+      expect(
+        (await service.reconcile(
+          sessionId: 'session',
+          settings: const PipelineSettings(),
+          config: _config(endpoint.url),
+          plan: plan,
+        )).status,
+        'ok',
+      );
+      final runs = await reconciliationRuns.readSession('session');
+      expect(runs.map((run) => run.ordinal), [1, 2]);
+      expect(runs.last.id, isNot(first.id));
     },
   );
 
@@ -470,6 +549,7 @@ void main() {
       expect(result.status, 'aborted');
       expect(await trackers.get('session', 'world:time'), isNull);
       expect(await checkpoints.get('session'), isNull);
+      expect(await reconciliationRuns.readSession('session'), isEmpty);
       final snapshot = await snapshots.getByAnchor(
         sessionId: 'session',
         messageId: 'a1',
@@ -648,6 +728,30 @@ Future<({String url, Future<void> Function() close})> _serve(
       await request.response.close();
     }),
   );
+  return (
+    url: 'http://${server.address.host}:${server.port}',
+    close: () => server.close(force: true),
+  );
+}
+
+Future<({String url, Future<void> Function() close})> _serveTwice(
+  String content,
+) async {
+  final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+  server.listen((request) async {
+    await utf8.decoder.bind(request).join();
+    request.response.headers.contentType = ContentType.json;
+    request.response.write(
+      jsonEncode({
+        'choices': [
+          {
+            'message': {'content': content},
+          },
+        ],
+      }),
+    );
+    await request.response.close();
+  });
   return (
     url: 'http://${server.address.host}:${server.port}',
     close: () => server.close(force: true),

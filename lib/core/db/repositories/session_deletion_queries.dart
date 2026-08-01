@@ -1,6 +1,7 @@
 import 'package:drift/drift.dart';
 
 import '../app_db.dart';
+import 'lorebook_use_manifest_repo.dart';
 
 /// The DB-only session cascade. The caller must provide the surrounding
 /// transaction so this can compose into larger atomic deletion operations.
@@ -59,6 +60,22 @@ class SessionDeletionQueries {
       _db.ledgerReconciliationCleanupJournals,
     )..where((row) => row.sessionId.equals(sessionId))).go();
     await (_db.delete(
+      _db.ledgerReconciliationCursors,
+    )..where((row) => row.sessionId.equals(sessionId))).go();
+    await (_db.delete(_db.cardEvolutionClaims)..where((row) {
+          final session = row.sessionId.equals(sessionId);
+          return preserveMemoryBookSettings
+              ? session & row.status.equals('claimed')
+              : session;
+        }))
+        .go();
+    await (_db.delete(
+      _db.ledgerReconciliationRunInvalidations,
+    )..where((row) => row.sessionId.equals(sessionId))).go();
+    await (_db.delete(
+      _db.ledgerReconciliationSuccessfulRuns,
+    )..where((row) => row.sessionId.equals(sessionId))).go();
+    await (_db.delete(
       _db.characterKnowledgeFactRows,
     )..where((row) => row.chatSessionId.equals(sessionId))).go();
     await (_db.delete(
@@ -98,6 +115,7 @@ class SessionDeletionQueries {
       characterId: session?.characterId,
       preserveMemoryBookSettings: false,
     );
+    await LorebookUseManifestRepo(_db).deleteBySessionId(sessionId);
     // Child-first ordering keeps this safe when foreign keys are enabled.
     await _deleteRewriteProvenance(sessionId);
     await (_db.delete(
@@ -126,6 +144,9 @@ class SessionDeletionQueries {
   }
 
   Future<void> _deleteRewriteProvenance(String sessionId) async {
+    await (_db.delete(
+      _db.cardEvolutionProposalRuns,
+    )..where((row) => row.sessionId.equals(sessionId))).go();
     final rewriteJobs = await (_db.select(
       _db.rewriteJobs,
     )..where((row) => row.chatSessionId.equals(sessionId))).get();

@@ -5,7 +5,10 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/db/repositories/session_deletion_repo.dart';
+import 'package:glaze_flutter/core/db/repositories/lorebook_use_manifest_repo.dart';
+import 'package:glaze_flutter/core/llm/prompt/exact_lorebook_manifest.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
+import 'package:glaze_flutter/core/models/lorebook.dart';
 
 const _sessionTables = <(String, String)>[
   ('chat_sessions', 'session_id'),
@@ -19,6 +22,9 @@ const _sessionTables = <(String, String)>[
   ('tracker_snapshots', 'session_id'),
   ('ledger_reconciliation_checkpoints', 'session_id'),
   ('ledger_reconciliation_cleanup_journals', 'session_id'),
+  ('reconciliation_successful_runs', 'session_id'),
+  ('reconciliation_run_invalidations', 'session_id'),
+  ('ledger_reconciliation_cursors', 'session_id'),
   ('character_knowledge_fact_rows', 'chat_session_id'),
   ('character_session_baseline_rows', 'chat_session_id'),
   ('studio_config_rows', 'session_id'),
@@ -42,11 +48,39 @@ void main() {
     () async {
       await _seedSession(db, 'target');
       await _seedSession(db, 'control');
+      await _seedLorebookUse(db, 'target');
+      await _seedLorebookUse(db, 'control');
 
       await repo.deleteSession('target');
 
       await _expectSessionCount(db, 'target', 0);
       await _expectSessionCount(db, 'control', 1);
+      expect(
+        await _count(db, 'lorebook_use_manifests', 'session_id = ?', 'target'),
+        0,
+      );
+      expect(
+        await _count(
+          db,
+          'lorebook_use_manifest_entries',
+          'session_id = ?',
+          'target',
+        ),
+        0,
+      );
+      expect(
+        await _count(
+          db,
+          'lorebook_use_acceptance_records',
+          'session_id = ?',
+          'target',
+        ),
+        0,
+      );
+      expect(
+        await _count(db, 'lorebook_use_manifests', 'session_id = ?', 'control'),
+        1,
+      );
 
       await repo.deleteSession('target');
       await _expectSessionCount(db, 'target', 0);
@@ -181,6 +215,9 @@ Future<void> _seedSession(AppDatabase db, String sessionId) async {
     "INSERT INTO tracker_snapshots (session_id, message_id) VALUES ('$sessionId', 'message')",
     "INSERT INTO ledger_reconciliation_checkpoints (session_id, start_message_id, end_message_id) VALUES ('$sessionId', 'start', 'end')",
     "INSERT INTO ledger_reconciliation_cleanup_journals (session_id, endpoint_message_id) VALUES ('$sessionId', 'end')",
+    "INSERT INTO reconciliation_successful_runs (id, session_id, ordinal, start_message_id, start_swipe_id, start_agent_swipe_id, end_message_id, end_swipe_id, end_agent_swipe_id, anchors_json, range_hash, accepted_manifest_refs_json, effective_canon_stamp, effective_canon_revision, effective_canon_hash, canonical_result_json, content_hash, predecessor_chain_hash, chain_hash, contract_version, ops_applied_json, created_at) VALUES ('run_$id', '$sessionId', 1, 'message', 0, 0, 'message', 0, 0, '[{\"agentSwipeId\":0,\"contentHash\":\"content\",\"messageId\":\"message\",\"role\":\"assistant\",\"swipeId\":0}]', 'range', '[]', 'stamp', 1, 'canon', '{}', 'content', '', 'chain', 1, '[]', 1)",
+    "INSERT INTO reconciliation_run_invalidations (session_id, run_id, cause_message_id, reason, created_at) VALUES ('$sessionId', 'run_$id', 'message', 'deleted', 1)",
+    "INSERT INTO ledger_reconciliation_cursors (session_id, sequence, predecessor_hash, through_run_id, through_run_ordinal, through_run_chain_hash, cursor_hash, created_at) VALUES ('$sessionId', 1, '', 'run_$id', 1, 'chain', 'cursor', 1)",
     "INSERT INTO character_knowledge_fact_rows (id, chat_session_id, knower_key, subject_key, fact_class, predicate, object, epistemic_state) VALUES ('fact_$id', '$sessionId', 'knower', 'subject', 'fact', 'predicate', 'object', 'known')",
     "INSERT INTO applied_canon_transition_rows (id, chat_session_id, character_id, transition_json) VALUES ('transition_$id', '$sessionId', 'char_$id', '{}')",
     "INSERT INTO canon_transition_fact_refs (applied_canon_transition_id, character_knowledge_fact_id) VALUES ('transition_$id', 'fact_$id')",
@@ -202,6 +239,65 @@ Future<void> _seedSession(AppDatabase db, String sessionId) async {
   }
 }
 
+Future<void> _seedLorebookUse(AppDatabase db, String sessionId) async {
+  final repo = LorebookUseManifestRepo(db);
+  final identity = LorebookUseGenerationIdentity(
+    sessionId: sessionId,
+    messageId: 'message',
+    swipeId: 0,
+    agentSwipeId: 0,
+  );
+  final durable = _durableManifest('session-$sessionId');
+  await repo.insertGenerationManifest(
+    identity: identity,
+    manifest: LorebookUseManifestInput(
+      manifestJson: durable.canonicalJson,
+      manifestHash: durable.canonicalHash,
+      manifestSchemaVersion: 1,
+      finalPromptHash: durable.providerMessagesHash,
+      presetSnapshotHash: durable.promptProvenance.presetSnapshotHash,
+    ),
+    createdAt: 1,
+    entries: [
+      LorebookUseManifestEntryInput(
+        lorebookId: durable.entries.single.lorebookId,
+        entryId: durable.entries.single.entryId,
+        entryOrder: 0,
+        evidenceJson: jsonEncode(durable.entries.single.toJson()),
+      ),
+    ],
+  );
+  await repo.insertVariationAcceptance(
+    acceptanceId: 'acceptance-$sessionId',
+    identity: identity,
+    acceptedByUserMessageId: 'user',
+    acceptedAt: 2,
+  );
+}
+
+ExactLorebookManifest _durableManifest(String id) => ExactLorebookManifest(
+  entries: [
+    ExactLorebookManifestEntry.fromMergedEntry(
+      entry: LorebookEntry(
+        id: 'entry-$id',
+        lorebookId: 'book-$id',
+        content: 'lore-$id',
+        position: 'worldInfoBefore',
+        order: 0,
+      ),
+      source: 'keyword',
+      classification: 'worldInfoBefore',
+      injectionIndex: 0,
+      renderedContent: 'rendered-$id',
+    ),
+  ],
+  promptProvenance: const ExactLorebookPromptProvenance(
+    characterId: 'character',
+    presetSnapshotHash: 'preset',
+  ),
+  providerMessagesHash: 'prompt',
+);
+
 Future<void> _expectClearGroups(AppDatabase db, String sessionId) async {
   const deletedTables = <(String, String)>[
     ('memory_catalog_rows', 'chat_session_id'),
@@ -213,6 +309,10 @@ Future<void> _expectClearGroups(AppDatabase db, String sessionId) async {
     ('tracker_snapshots', 'session_id'),
     ('ledger_reconciliation_checkpoints', 'session_id'),
     ('ledger_reconciliation_cleanup_journals', 'session_id'),
+    ('reconciliation_successful_runs', 'session_id'),
+    ('reconciliation_run_invalidations', 'session_id'),
+    ('ledger_reconciliation_cursors', 'session_id'),
+    ('card_evolution_claims', 'session_id'),
     ('character_knowledge_fact_rows', 'chat_session_id'),
     ('chat_summaries', 'session_id'),
     ('info_blocks', 'session_id'),
@@ -238,9 +338,17 @@ Future<void> _expectClearGroups(AppDatabase db, String sessionId) async {
     ('applied_canon_transition_rows', 'chat_session_id = ?', sessionId),
     ('rewrite_jobs', 'chat_session_id = ?', sessionId),
     ('rewrite_operations', 'chat_session_id = ?', sessionId),
-    ('rewrite_operation_revisions', 'rewrite_operation_id = ?', 'operation_$id'),
+    (
+      'rewrite_operation_revisions',
+      'rewrite_operation_id = ?',
+      'operation_$id',
+    ),
     ('rewrite_evidence_rows', 'rewrite_operation_id = ?', 'operation_$id'),
-    ('canon_transition_fact_refs', 'applied_canon_transition_id = ?', 'transition_$id'),
+    (
+      'canon_transition_fact_refs',
+      'applied_canon_transition_id = ?',
+      'transition_$id',
+    ),
   ]) {
     expect(await _count(db, table, predicate, value), 1, reason: table);
   }
@@ -325,15 +433,19 @@ Future<void> _expectSessionCount(
 
   final id = sessionId.replaceAll('-', '_');
   for (final (table, predicate, value) in [
-    ('rewrite_operation_revisions', 'rewrite_operation_id = ?', 'operation_$id'),
+    (
+      'rewrite_operation_revisions',
+      'rewrite_operation_id = ?',
+      'operation_$id',
+    ),
     ('rewrite_evidence_rows', 'rewrite_operation_id = ?', 'operation_$id'),
-    ('canon_transition_fact_refs', 'applied_canon_transition_id = ?', 'transition_$id'),
+    (
+      'canon_transition_fact_refs',
+      'applied_canon_transition_id = ?',
+      'transition_$id',
+    ),
   ]) {
-    expect(
-      await _count(db, table, predicate, value),
-      expected,
-      reason: table,
-    );
+    expect(await _count(db, table, predicate, value), expected, reason: table);
   }
 
   final lorebookEmbedding = await db

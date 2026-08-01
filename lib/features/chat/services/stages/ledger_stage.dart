@@ -14,6 +14,7 @@ import '../../../../core/models/pipeline_settings.dart';
 import '../../../../core/state/db_provider.dart';
 import '../../../../core/state/memory_agent_providers.dart';
 import '../../../../core/state/character_provider.dart';
+import '../../../../core/state/card_rewriter_providers.dart';
 import '../../../../core/state/studio_turn_config_resolver.dart';
 import '../../../../shared/widgets/glaze_toast.dart';
 import '../../state/agent_operations_log_provider.dart';
@@ -241,6 +242,12 @@ class LedgerStage {
             'ops=${reconciliationResult.opsApplied} '
             'error=${reconciliationResult.error ?? "none"}',
           );
+          if (reconciliationResult.status == 'ok' && isCurrent()) {
+            await ctx.ref
+                .read(automatedCardEvolutionServiceProvider)
+                .runOneBatch(sessionId);
+            if (!isCurrent()) return;
+          }
           if (!isCurrent()) return;
         }
       }

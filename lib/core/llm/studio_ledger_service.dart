@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
@@ -7,6 +8,7 @@ import '../db/repositories/character_knowledge_fact_repo.dart';
 import '../db/repositories/character_repo.dart';
 import '../db/repositories/chat_repo.dart';
 import '../db/repositories/ledger_reconciliation_checkpoint_repo.dart';
+import '../db/repositories/ledger_reconciliation_run_repo.dart';
 import '../db/repositories/memory_book_repo.dart';
 import '../db/repositories/tracker_repo.dart';
 import '../db/repositories/tracker_snapshot_repo.dart';
@@ -15,11 +17,13 @@ import '../models/character_knowledge_fact.dart';
 import '../models/character.dart';
 import '../models/chat_message.dart';
 import '../models/memory_book.dart';
+import '../models/knowledge_cleanup.dart';
 import '../models/pipeline_settings.dart';
 import '../models/studio_config.dart';
 import '../models/studio_ledger_export.dart';
 import '../models/tracker.dart';
 import '../utils/id_generator.dart';
+import '../utils/cast_helpers.dart';
 import '../services/card_rewriter/effective_canon_context_loader.dart';
 import 'aux_llm_client.dart';
 import 'ledger/ledger_op_applier.dart';
@@ -109,6 +113,7 @@ class StudioLedgerService {
   final TrackerSnapshotRepo _snapshotRepo;
   final CharacterKnowledgeFactRepo _knowledgeFactRepo;
   final LedgerReconciliationCheckpointRepo _reconciliationCheckpointRepo;
+  final LedgerReconciliationRunRepo _reconciliationRunRepo;
   final CharacterRepo _characterRepo;
   final ChatRepo _chatRepo;
   final EffectiveCanonContextLoader _canonContextLoader;
@@ -123,15 +128,13 @@ class StudioLedgerService {
     required this._snapshotRepo,
     required this._knowledgeFactRepo,
     required this._reconciliationCheckpointRepo,
-    required CharacterRepo characterRepo,
-    required ChatRepo chatRepo,
-    required EffectiveCanonContextLoader canonContextLoader,
+    required this._reconciliationRunRepo,
+    required this._characterRepo,
+    required this._chatRepo,
+    required this._canonContextLoader,
   }) : _parser = const StudioLedgerExportParser(),
        _promptBuilder = const StudioLedgerPrompt(),
-       _opApplier = const LedgerOpApplier(),
-       _characterRepo = characterRepo,
-       _chatRepo = chatRepo,
-       _canonContextLoader = canonContextLoader;
+       _opApplier = const LedgerOpApplier();
 
   Future<LedgerRunResult> reconcile({
     required String sessionId,
@@ -288,8 +291,28 @@ class StudioLedgerService {
         ...duplicateRetractions.map((op) => op.factId),
         ...staleAnchorRetractions.map((op) => op.factId),
       };
+      final anchors = plan.messages
+          .map(
+            (message) => ReconciliationAnchor(
+              messageId: message.id,
+              swipeId: message.swipeId,
+              agentSwipeId: message.agentSwipeId,
+              role: message.role,
+              contentHash: computeHash(message.content),
+            ),
+          )
+          .toList(growable: false);
+      final canonicalResult = <String, dynamic>{
+        'cleanupOps': cleanupOps.map(_cleanupOpJson).toList(growable: false),
+        'export': jsonDecode(jsonEncode(export.toJson())),
+      };
+      final intendedOps = <String>[
+        ...export.ops.map((op) => 'tracker:${op.op}:${op.key}'),
+        ...cleanupOps.map(_cleanupOpMetadata),
+      ];
 
       var opsApplied = 0;
+      var replayed = false;
       await _trackerRepo.db.transaction(() async {
         await _throwIfLedgerCommitStale(
           sessionId: sessionId,
@@ -299,6 +322,48 @@ class StudioLedgerService {
           target: _LedgerTarget.fromMessage(plan.endMessage),
           requireCommittedSnapshot: true,
         );
+        final manifestRefs = await _reconciliationRunRepo
+            .readAcceptedManifestRefs(sessionId: sessionId, anchors: anchors);
+        final candidate = LedgerReconciliationRun(
+          id: '',
+          sessionId: sessionId,
+          ordinal: 1,
+          anchors: anchors,
+          acceptedManifestRefs: manifestRefs,
+          effectiveCanonStamp: canon.context.stamp.identity,
+          effectiveCanonRevision: canon.context.effectiveRevision.number,
+          effectiveCanonHash: canon.context.effectiveRevision.hash,
+          canonicalResult: canonicalResult,
+          predecessorChainHash: '',
+          contractVersion: 1,
+          opsApplied: intendedOps,
+          createdAt: 0,
+        );
+        // The ID covers immutable candidate content, so a canon change appends
+        // rather than colliding with an earlier identical plan/LLM output.
+        final draft = LedgerReconciliationRun(
+          id: 'reconciliation-${candidate.contentHash}',
+          sessionId: candidate.sessionId,
+          ordinal: candidate.ordinal,
+          anchors: candidate.anchors,
+          acceptedManifestRefs: candidate.acceptedManifestRefs,
+          effectiveCanonStamp: candidate.effectiveCanonStamp,
+          effectiveCanonRevision: candidate.effectiveCanonRevision,
+          effectiveCanonHash: candidate.effectiveCanonHash,
+          canonicalResult: candidate.canonicalResult,
+          predecessorChainHash: candidate.predecessorChainHash,
+          contractVersion: candidate.contractVersion,
+          opsApplied: candidate.opsApplied,
+          createdAt: candidate.createdAt,
+        );
+        final append = await _reconciliationRunRepo.appendCandidate(draft);
+        if (append is ReconciliationRunIdempotent) {
+          replayed = true;
+          return;
+        }
+        if (append is! ReconciliationRunAppended) {
+          throw StateError('Unable to append reconciliation run: $append');
+        }
         await _trackerRepo.replaceLedgerState(
           sessionId,
           _stampedBaseTrackers(canon, promptTrackers),
@@ -386,7 +451,7 @@ class StudioLedgerService {
       return LedgerRunResult(
         status: 'ok',
         visibleLedger: parsed.visibleLedger,
-        opsApplied: opsApplied,
+        opsApplied: replayed ? 0 : opsApplied,
         elapsedMs: sw.elapsedMilliseconds,
         attempts: outcome.attempts,
         model: config.model,
@@ -943,6 +1008,20 @@ Allowed eventState: planned, suggested, threatened, attempted, completed, failed
     ...context.resolution.activeTrackers,
     ...context.manualControls,
   ];
+
+  Map<String, dynamic> _cleanupOpJson(KnowledgeCleanupOp op) => {
+    'type': op.type.name,
+    if (op.factId.isNotEmpty) 'factId': op.factId,
+    if (op.fromKey.isNotEmpty) 'fromKey': op.fromKey,
+    if (op.toKey.isNotEmpty) 'toKey': op.toKey,
+    if (op.canonicalName.isNotEmpty) 'canonicalName': op.canonicalName,
+  };
+
+  String _cleanupOpMetadata(KnowledgeCleanupOp op) => switch (op.type) {
+    KnowledgeCleanupOpType.retract => 'cleanup:retract:${op.factId}',
+    KnowledgeCleanupOpType.renameEntity =>
+      'cleanup:rename:${op.fromKey}:${op.toKey}:${op.canonicalName}',
+  };
 }
 
 class _LedgerCanonContext {
