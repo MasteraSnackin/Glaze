@@ -7,6 +7,7 @@ void main() {
     final files = [
       File('lib/core/llm/prompt_inputs_collector.dart'),
       File('lib/core/llm/prompt_payload_builder.dart'),
+      File('lib/core/llm/generation_context_inputs.dart'),
     ];
     final featureImport = RegExp(r'''import\s+['"][^'"]*features/[^'"]*['"]''');
     final providerDeclaration = RegExp(
@@ -26,5 +27,14 @@ void main() {
         reason: '${file.path} must not own Riverpod provider composition',
       );
     }
+  });
+
+  test('generation context contract excludes ordinary preset types', () {
+    final source = File(
+      'lib/core/llm/generation_context_inputs.dart',
+    ).readAsStringSync();
+
+    expect(source, isNot(matches(RegExp(r'\bPreset\??\s+\w+'))));
+    expect(source, isNot(matches(RegExp(r'List<PresetBlock>'))));
   });
 }
