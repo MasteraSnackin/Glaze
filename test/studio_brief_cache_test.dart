@@ -94,6 +94,37 @@ void main() {
     expect(second, first);
   });
 
+  test('controller identity changes the cache key', () {
+    final original = _cacheKey(cache);
+    final changed = cache.cacheKeyForAgent(
+      config: _config,
+      studioPreset: _preset,
+      sessionId: 'session-a',
+      resolvedConfig: _resolvedConfig,
+      trackerContextSize: 5,
+      maxTokensOverride: null,
+      temperatureOverride: null,
+      agent: _agent.copyWith(controllerId: 'narrative'),
+      policy: 'static',
+      sceneKey: '',
+    );
+
+    expect(changed, isNot(original));
+  });
+
+  test('refresh policy uses only the normalized explicit value', () {
+    expect(
+      cache.effectiveRefreshPolicy(
+        const StudioAgent(
+          id: 'meta-looking',
+          name: 'Meta-Weaver forbidden words director',
+          refreshPolicy: 'invalid',
+        ),
+      ),
+      'turn',
+    );
+  });
+
   test('older turn cannot overwrite a newer cached brief', () {
     final key = _cacheKey(cache);
     cache.persistCacheIfCacheable(
@@ -133,8 +164,8 @@ const _config = StudioConfig(
 
 const _agent = StudioAgent(
   id: 'continuity',
+  controllerId: 'continuity',
   name: 'Continuity',
-  sourceBlockNames: 'continuity_rules',
   refreshPolicy: 'static',
 );
 

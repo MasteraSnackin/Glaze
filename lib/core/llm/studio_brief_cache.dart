@@ -12,7 +12,7 @@ import 'studio_brief_parser.dart';
 import 'studio_stage_brief.dart';
 
 /// Owns the Studio brief cache: probe, persist, key derivation, and
-/// refresh-policy inference. Extracted from [MemoryStudioService] (plan §2):
+/// refresh-policy normalization. Extracted from [MemoryStudioService] (plan §2):
 /// the cache is the single piece of mutable state in the chat-time pipeline,
 /// and the surrounding helpers are pure functions of their parameters.
 ///
@@ -199,7 +199,7 @@ class StudioBriefCache {
         return a.$1.compareTo(b.$1);
       });
     final base = <String, dynamic>{
-      'v': 3,
+      'v': 4,
       'sessionId': sessionId,
       'profileId': config.profileId,
       'studioConfigId': config.sessionId,
@@ -256,6 +256,7 @@ class StudioBriefCache {
       },
       'agent': {
         'id': agent.id,
+        'controllerId': agent.controllerId,
         'name': agent.name,
         'role': agent.role,
         'order': agent.order,
@@ -264,7 +265,6 @@ class StudioBriefCache {
         'timeoutMs': agent.timeoutMs,
         'temperature': agent.temperature,
         'maxTokens': agent.maxTokens,
-        'sourceBlockNames': agent.sourceBlockNames,
         'refreshPolicy': agent.refreshPolicy,
         'invalidationSignals': agent.invalidationSignals,
         'contextSize': agent.contextSize,
@@ -350,37 +350,7 @@ class StudioBriefCache {
   }
 
   String effectiveRefreshPolicy(StudioAgent agent) {
-    final policy = normalizeRefreshPolicy(agent.refreshPolicy);
-    if (policy != 'turn' || agent.invalidationSignals.isNotEmpty) {
-      return policy;
-    }
-
-    final text = [agent.name, agent.sourceBlockNames].join('\n').toLowerCase();
-    if (RegExp(
-      r'ban|banned|forbidden|clich|клиш|запрет|forbidden words',
-      caseSensitive: false,
-    ).hasMatch(text)) {
-      return 'static';
-    }
-    if (RegExp(
-      r'lumia|ghost in the machine|meta-weaver|meta weaver|ooc interface|ooc policy|weaver',
-      caseSensitive: false,
-    ).hasMatch(text)) {
-      return 'scene';
-    }
-    if (RegExp(
-      r'last\s+3|recent chat|last beat|last user|continuity|memory|current scene|anti-loop|anti-echo',
-      caseSensitive: false,
-    ).hasMatch(text)) {
-      return 'turn';
-    }
-    if (RegExp(
-      r'tone|genre|style|romantic|fluff|comfort|lumia|ghost|meta-weaver|meta weaver|director',
-      caseSensitive: false,
-    ).hasMatch(text)) {
-      return 'scene';
-    }
-    return policy;
+    return normalizeRefreshPolicy(agent.refreshPolicy);
   }
 }
 

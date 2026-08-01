@@ -2,73 +2,15 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:glaze_flutter/core/llm/history_assembler.dart';
 import 'package:glaze_flutter/core/llm/macro_engine.dart';
-import 'package:glaze_flutter/core/llm/prompt_builder.dart';
 import 'package:glaze_flutter/core/llm/studio/studio_context.dart';
 import 'package:glaze_flutter/core/llm/studio_brief_deduper.dart';
 import 'package:glaze_flutter/core/llm/studio_brief_parser.dart';
-import 'package:glaze_flutter/core/llm/studio_context_bucketizer.dart';
 import 'package:glaze_flutter/core/llm/post_cleaner_service.dart';
 import 'package:glaze_flutter/core/llm/studio_controller_ontology.dart';
-import 'package:glaze_flutter/core/llm/context_calculator.dart';
 import 'package:glaze_flutter/core/llm/studio_message_builder.dart';
 import 'package:glaze_flutter/core/llm/studio_prompt_text.dart';
 import 'package:glaze_flutter/core/llm/studio_stage_brief.dart';
-import 'package:glaze_flutter/core/models/api_config.dart';
-import 'package:glaze_flutter/core/models/character.dart';
-import 'package:glaze_flutter/core/models/preset.dart';
 import 'package:glaze_flutter/core/models/studio_config.dart';
-
-PresetBlock _block({
-  required String id,
-  required String name,
-  String content = 'content',
-  bool enabled = true,
-}) {
-  return PresetBlock(
-    id: id,
-    name: name,
-    role: 'system',
-    content: content,
-    enabled: enabled,
-  );
-}
-
-PromptMessage _msg({
-  String? blockId,
-  String? blockName,
-  String content = 'content',
-  String role = 'system',
-}) {
-  return PromptMessage(
-    role: role,
-    content: content,
-    blockId: blockId,
-    blockName: blockName,
-  );
-}
-
-PromptResult _result(List<PromptMessage> messages) => PromptResult(
-  messages: messages,
-  breakdown: TokenBreakdown(
-    sourceTokens: const {},
-    staticTotal: 0,
-    historyBudget: 0,
-    historyTokens: 0,
-    totalTokens: 0,
-    cutoffIndex: 0,
-    trimmedHistory: const [],
-  ),
-  sessionVars: const {},
-  globalVars: const {},
-);
-
-PromptPayload _payload({Preset? preset, String? studioState}) => PromptPayload(
-  character: const Character(id: 'c1', name: 'TestChar'),
-  history: const [],
-  apiConfig: const ApiConfig(id: 'a1'),
-  preset: preset,
-  studioSessionStateContent: studioState,
-);
 
 StudioContext _context(List<PromptMessage> history, {String? studioState}) =>
     StudioContext(
@@ -142,7 +84,11 @@ void main() {
     test('final run receives only final-section Studio blocks', () {
       final text = joinedMessages(
         builder.buildAgentMessages(
-          agent: const StudioAgent(id: 'final', name: 'Main Responder'),
+          agent: const StudioAgent(
+            id: 'final',
+            controllerId: 'final',
+            name: 'Main Responder',
+          ),
           context: context,
           config: config,
           studioPreset: preset,
@@ -438,7 +384,11 @@ void main() {
 
     test('per-agent task receives only matching tracker_instruction', () {
       final text = builder.buildPerAgentTaskText(
-        agent: const StudioAgent(id: 'continuity', name: 'Continuity Tracker'),
+        agent: const StudioAgent(
+          id: 'continuity',
+          controllerId: 'continuity',
+          name: 'Continuity Tracker',
+        ),
         config: config,
         studioPreset: preset,
         context: context,
@@ -464,6 +414,64 @@ void main() {
 
       expect(text, isNot(contains('CONTINUITY ONLY')));
       expect(text, isNot(contains('DIALOGUE ONLY')));
+    });
+
+    test('target routing uses only exact controllerId', () {
+      final text = builder.buildPerAgentTaskText(
+        agent: const StudioAgent(
+          id: 'custom-agent',
+          controllerId: 'continuity',
+          name: 'Renamed controller',
+        ),
+        config: config,
+        studioPreset: preset,
+        context: context,
+      );
+
+      expect(text, contains('CONTINUITY ONLY'));
+      expect(text, isNot(contains('DIALOGUE ONLY')));
+    });
+
+    test('hard style contract reads only final-applicable instructions', () {
+      final text = joinedMessages(
+        builder.buildAgentMessages(
+          agent: const StudioAgent(id: 'final', controllerId: 'final'),
+          context: context,
+          config: config,
+          studioPreset: const StudioPreset(
+            id: 'style',
+            blocks: [
+              StudioPresetBlock(
+                id: 'final-style',
+                content: 'Do not use em dashes.',
+                section: 'final',
+              ),
+              StudioPresetBlock(
+                id: 'wrong-target',
+                targetAgentId: 'dialogue',
+                content: 'Wrap dialogue in quotation marks.',
+                section: 'final',
+              ),
+              StudioPresetBlock(
+                id: 'wrong-section',
+                content: 'Wrap dialogue in quotation marks.',
+                section: 'pregen',
+              ),
+              StudioPresetBlock(
+                id: 'disabled',
+                content: 'Wrap dialogue in quotation marks.',
+                enabled: false,
+                section: 'final',
+              ),
+            ],
+          ),
+          priorBriefs: const [],
+          isFinalResponse: true,
+        ),
+      );
+
+      expect(text, contains('Do not use em dashes'));
+      expect(text, isNot(contains('Wrap direct spoken dialogue')));
     });
 
     test('final brief macros expand and suppress previous_agents block', () {
@@ -526,173 +534,6 @@ void main() {
       expect(text, contains('Let Claire speak only if she can plausibly hear'));
       expect('Studio agent brief'.allMatches(text).length, 2);
     });
-  });
-
-  group('StudioContextBucketizer staticContext filter', () {
-    final bucketizer = const StudioContextBucketizer();
-
-    test('non-Studio run: unrouted preset block lands in staticContext', () {
-      // char_card is a static-id block → goes to byKind, not staticContext.
-      // narrative_engine is not a static/dynamic id → goes to staticContext.
-      final preset = Preset(
-        id: 'p1',
-        name: 'P1',
-        blocks: [
-          _block(
-            id: 'narrative_engine',
-            name: 'Narrative Engine',
-            content: 'ne',
-          ),
-          _block(id: 'char_card', name: 'Character Card', content: 'cc'),
-        ],
-      );
-      final result = _result([
-        _msg(
-          blockId: 'narrative_engine',
-          blockName: 'Narrative Engine',
-          content: 'ne',
-        ),
-        _msg(blockId: 'char_card', blockName: 'Character Card', content: 'cc'),
-      ]);
-      final buckets = bucketizer.bucketize(
-        result,
-        promptPayload: _payload(preset: preset),
-      );
-      // Only the unrouted narrative_engine is in staticContext; char_card is
-      // in byKind['char_card'] (consumed via the studio preset's char_card
-      // kind block).
-      expect(buckets.staticContext.length, 1);
-      expect(buckets.staticContext.first.blockName, 'Narrative Engine');
-      expect(buckets.messagesForKind('char_card').length, 1);
-    });
-
-    test('Studio run: CoT block filtered from staticContext', () {
-      final cot = _block(
-        id: 'cot_gemini',
-        name: 'CoT Gemini',
-        content: 'think template',
-      );
-      final preset = Preset(id: 'p1', name: 'P1', blocks: [cot]);
-      final config = const StudioConfig(
-        sessionId: 's1',
-        agents: [StudioAgent(id: 'a1', sourceBlockNames: '')],
-      );
-      final result = _result([
-        _msg(
-          blockId: 'cot_gemini',
-          blockName: 'CoT Gemini',
-          content: 'think template',
-        ),
-      ]);
-      final buckets = bucketizer.bucketize(
-        result,
-        promptPayload: _payload(preset: preset),
-        studioConfig: config,
-      );
-      expect(buckets.staticContext, isEmpty);
-    });
-
-    test('Studio run: routed block filtered from staticContext', () {
-      final preset = Preset(
-        id: 'p1',
-        name: 'P1',
-        blocks: [
-          _block(id: 'narr_engine', name: 'Narrative Engine', content: 'ne'),
-          _block(id: 'other_block', name: 'Other Block', content: 'ob'),
-        ],
-      );
-      final config = const StudioConfig(
-        sessionId: 's1',
-        agents: [StudioAgent(id: 'a1', sourceBlockNames: 'Narrative Engine')],
-      );
-      final result = _result([
-        _msg(
-          blockId: 'narrative_engine',
-          blockName: 'Narrative Engine',
-          content: 'ne',
-        ),
-        _msg(blockId: 'other_block', blockName: 'Other Block', content: 'ob'),
-      ]);
-      final buckets = bucketizer.bucketize(
-        result,
-        promptPayload: _payload(preset: preset),
-        studioConfig: config,
-      );
-      final names = buckets.staticContext.map((m) => m.blockName).toList();
-      expect(names, contains('Other Block'));
-      expect(names, isNot(contains('Narrative Engine')));
-    });
-
-    test(
-      'Studio run: char_card kept in byKind (not affected by staticContext filter)',
-      () {
-        final preset = Preset(
-          id: 'p1',
-          name: 'P1',
-          blocks: [
-            _block(id: 'char_card', name: 'Character Card', content: 'cc'),
-          ],
-        );
-        final config = const StudioConfig(
-          sessionId: 's1',
-          agents: [StudioAgent(id: 'a1')],
-        );
-        final result = _result([
-          _msg(
-            blockId: 'char_card',
-            blockName: 'Character Card',
-            content: 'cc',
-          ),
-        ]);
-        final buckets = bucketizer.bucketize(
-          result,
-          promptPayload: _payload(preset: preset),
-          studioConfig: config,
-        );
-        // char_card is a static-id → goes to byKind, never touched by the
-        // staticContext filter.
-        expect(buckets.messagesForKind('char_card').length, 1);
-        expect(buckets.staticContext, isEmpty);
-      },
-    );
-
-    test(
-      'Studio run: broadcast block in Main Responder shard is filtered from staticContext',
-      () {
-        final preset = Preset(
-          id: 'p1',
-          name: 'P1',
-          blocks: [
-            _block(
-              id: 'lang',
-              name: 'Language Russian',
-              content: 'use russian',
-            ),
-            _block(id: 'other_block', name: 'Other Block', content: 'ob'),
-          ],
-        );
-        final config = const StudioConfig(
-          sessionId: 's1',
-          agents: [StudioAgent(id: 'a1', sourceBlockNames: 'Language Russian')],
-        );
-        final result = _result([
-          _msg(
-            blockId: 'lang',
-            blockName: 'Language Russian',
-            content: 'use russian',
-          ),
-          _msg(blockId: 'other_block', blockName: 'Other Block', content: 'ob'),
-        ]);
-        final buckets = bucketizer.bucketize(
-          result,
-          promptPayload: _payload(preset: preset),
-          studioConfig: config,
-        );
-        final names = buckets.staticContext.map((m) => m.blockName).toList();
-        expect(names, contains('Other Block'));
-        expect(names, isNot(contains('Language Russian')));
-      },
-    );
   });
 
   group('StudioControllerOntology Meta-Weaver spec', () {

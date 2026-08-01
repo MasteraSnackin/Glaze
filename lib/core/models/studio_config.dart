@@ -69,19 +69,6 @@ abstract class StudioConfig with _$StudioConfig {
 }
 
 @freezed
-abstract class PromptShardBlock with _$PromptShardBlock {
-  const factory PromptShardBlock({
-    @Default('system') String role,
-    @Default('') String content,
-    @Default('') String blockName,
-    @Default('') String blockId,
-  }) = _PromptShardBlock;
-
-  factory PromptShardBlock.fromJson(Map<String, dynamic> json) =>
-      _$PromptShardBlockFromJson(json);
-}
-
-@freezed
 abstract class StudioPresetBlock with _$StudioPresetBlock {
   const factory StudioPresetBlock({
     required String id,
@@ -139,6 +126,7 @@ abstract class StudioPreset with _$StudioPreset {
 abstract class StudioAgent with _$StudioAgent {
   const factory StudioAgent({
     required String id,
+    @Default('') String controllerId,
     @Default('') String name,
     @Default('') String role,
     @Default(0) int order,
@@ -147,7 +135,6 @@ abstract class StudioAgent with _$StudioAgent {
     @Default(4000) int timeoutMs,
     @Default(0.3) double temperature,
     @Default(8000) int maxTokens,
-    @Default('') String sourceBlockNames,
 
     /// Controls whether an intermediate agent should be refreshed every turn
     /// or can reuse a previous brief. Supported values: static, scene, turn.

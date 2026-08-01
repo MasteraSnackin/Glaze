@@ -8,6 +8,7 @@ import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/studio_preset_codec.dart';
+import '../models/studio_agent_codec.dart';
 import '../utils/platform_paths.dart';
 import '../utils/time_helpers.dart';
 import 'tables.dart';
@@ -67,7 +68,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 96;
+  int get schemaVersion => 97;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -1879,6 +1880,9 @@ class AppDatabase extends _$AppDatabase {
       if (from < 96) {
         await _migrateStudioPresetBlocksToExplicitSemantics();
       }
+      if (from < 97) {
+        await _canonicalizeStudioAgents();
+      }
     },
   );
 
@@ -1896,6 +1900,27 @@ class AppDatabase extends _$AppDatabase {
           'UPDATE studio_preset_rows SET blocks_json = ?, updated_at = ? '
           'WHERE preset_id = ?',
           [canonical, DateTime.now().millisecondsSinceEpoch, presetId],
+        );
+      } on Object {
+        // Preserve malformed rows for recovery instead of replacing user data.
+      }
+    }
+  }
+
+  Future<void> _canonicalizeStudioAgents() async {
+    final rows = await customSelect(
+      'SELECT session_id, agents_json FROM studio_config_rows',
+    ).get();
+    for (final row in rows) {
+      final sessionId = row.read<String>('session_id');
+      final source = row.read<String>('agents_json');
+      try {
+        final canonical = StudioAgentCodec.canonicalizeAgentsJson(source);
+        if (canonical == source) continue;
+        await customStatement(
+          'UPDATE studio_config_rows SET agents_json = ?, updated_at = ? '
+          'WHERE session_id = ?',
+          [canonical, currentTimestampSeconds(), sessionId],
         );
       } on Object {
         // Preserve malformed rows for recovery instead of replacing user data.

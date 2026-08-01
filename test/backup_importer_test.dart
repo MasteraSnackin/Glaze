@@ -1061,6 +1061,35 @@ void main() {
       expect(restored.last['enabled'], isFalse);
     });
 
+    test('restores Studio agents with canonical controller identity', () async {
+      final archive = buildGlzArchive();
+      archive.addFile(
+        ArchiveFile.bytes(
+          'tables/studio_config_rows.jsonl',
+          utf8.encode(
+            '${jsonEncode({
+              'session_id': 'session-1',
+              'agents_json': jsonEncode([
+                {'id': 'agent_session-1_continuity_123', 'sourceBlockNames': 'legacy'},
+              ]),
+            })}\n',
+          ),
+        ),
+      );
+
+      await writeAndImport(archive, db, imageStorage);
+
+      final row = await db
+          .customSelect(
+            'SELECT agents_json FROM studio_config_rows WHERE session_id = ?',
+            variables: [drift.Variable.withString('session-1')],
+          )
+          .getSingle();
+      final restored = jsonDecode(row.read<String>('agents_json')) as List;
+      expect(restored.single['controllerId'], 'continuity');
+      expect(restored.single, isNot(contains('sourceBlockNames')));
+    });
+
     test('restores info blocks with the reserved order column', () async {
       final archive = buildGlzArchive();
       archive.addFile(

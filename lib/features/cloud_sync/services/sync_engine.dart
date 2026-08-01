@@ -17,7 +17,7 @@ import '../../../core/models/chat_message.dart';
 import '../../../core/models/lorebook.dart';
 import '../../../core/models/api_config.dart';
 import '../../../core/models/preset.dart';
-import '../../../core/models/studio_config.dart';
+import '../../../core/models/studio_agent_codec.dart';
 import '../../../core/models/studio_preset_codec.dart';
 import '../../../core/application/session_deletion_store.dart';
 import '../../../core/application/character_deletion_store.dart';
@@ -886,7 +886,7 @@ class SyncEngine {
           await _applyCloudTrackerValues(id, data);
           break;
         case 'studio_config':
-          await _studioConfigStore.put(StudioConfig.fromJson(data));
+          await _studioConfigStore.put(StudioAgentCodec.decodeConfig(data));
           break;
         case 'studio_preset':
           if (_studioPresetStore != null) {

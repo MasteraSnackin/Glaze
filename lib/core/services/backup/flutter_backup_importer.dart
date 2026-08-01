@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../db/app_db.dart';
+import '../../models/studio_agent_codec.dart';
 import '../../models/studio_preset_codec.dart';
 import '../image_storage_service.dart';
 import 'backup_cancel.dart';
@@ -209,7 +210,7 @@ class FlutterBackupImporter extends BackupHelpers {
           Map<String, dynamic> r;
           try {
             r = jsonDecode(line) as Map<String, dynamic>;
-            r = _canonicalizeStudioPresetRow(tableName, r);
+            r = _canonicalizeStudioRow(tableName, r);
           } catch (_) {
             continue;
           }
@@ -276,7 +277,7 @@ class FlutterBackupImporter extends BackupHelpers {
             var i = 0;
             for (final row in rows) {
               if ((++i % _batchSize) == 0) _cancel.check();
-              final r = _canonicalizeStudioPresetRow(
+              final r = _canonicalizeStudioRow(
                 tableName,
                 Map<String, dynamic>.from(row as Map),
               );
@@ -306,21 +307,31 @@ class FlutterBackupImporter extends BackupHelpers {
     }
   }
 
-  Map<String, dynamic> _canonicalizeStudioPresetRow(
+  Map<String, dynamic> _canonicalizeStudioRow(
     String tableName,
     Map<String, dynamic> row,
   ) {
-    if (tableName != 'studio_preset_rows') return row;
-    final blocks = row['blocks_json'];
     try {
-      final source = blocks is String ? blocks : jsonEncode(blocks);
-      return {
-        ...row,
-        'blocks_json': StudioPresetCodec.canonicalizeBlocksJson(source),
-      };
+      if (tableName == 'studio_preset_rows') {
+        final blocks = row['blocks_json'];
+        final source = blocks is String ? blocks : jsonEncode(blocks);
+        return {
+          ...row,
+          'blocks_json': StudioPresetCodec.canonicalizeBlocksJson(source),
+        };
+      }
+      if (tableName == 'studio_config_rows') {
+        final agents = row['agents_json'];
+        final source = agents is String ? agents : jsonEncode(agents);
+        return {
+          ...row,
+          'agents_json': StudioAgentCodec.canonicalizeAgentsJson(source),
+        };
+      }
     } on Object {
       return row;
     }
+    return row;
   }
 
   Future<void> restoreGalleryImages(Map<String, dynamic>? galleryData) async {

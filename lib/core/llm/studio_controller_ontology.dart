@@ -204,6 +204,7 @@ class StudioControllerOntology {
       agents.add(
         StudioAgent(
           id: 'agent_${sessionId}_${spec.id}_$now',
+          controllerId: spec.id,
           name: spec.name,
           role: 'system',
           order: i,
@@ -221,30 +222,16 @@ class StudioControllerOntology {
     return agents;
   }
 
-  /// Map an existing agent back to its controller spec — by id/name match,
-  /// falling back to pipeline-order position. Used by single-agent regen.
-  static StudioControllerSpec specForAgent(StudioAgent agent) {
-    final text = '${agent.id}\n${agent.name}'.toLowerCase();
-    return specs.firstWhere(
-      (spec) =>
-          text.contains(spec.id) || text.contains(spec.name.toLowerCase()),
-      orElse: () => agent.order >= specs.length - 1
-          ? specs.last
-          : specs[agent.order.clamp(0, specs.length - 1)],
-    );
-  }
-
-  /// Stable controller target for canonical Studio block routing. This accepts
-  /// only a canonical id or the exact generated-agent id shape.
-  static String? targetIdForAgent(StudioAgent agent) {
+  /// Looks up only the persisted canonical controller identity.
+  static StudioControllerSpec? specForAgent(StudioAgent agent) {
     for (final spec in specs) {
-      if (agent.id == spec.id ||
-          RegExp(
-            '^agent_.+_${RegExp.escape(spec.id)}_[0-9]+\$',
-          ).hasMatch(agent.id)) {
-        return spec.id;
-      }
+      if (spec.id == agent.controllerId) return spec;
     }
     return null;
+  }
+
+  /// Stable controller target for canonical Studio block routing.
+  static String? targetIdForAgent(StudioAgent agent) {
+    return specForAgent(agent)?.id;
   }
 }

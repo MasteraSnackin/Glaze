@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:drift/drift.dart';
 
 import '../../models/studio_config.dart';
+import '../../models/studio_agent_codec.dart';
 import '../../llm/studio_controller_ontology.dart';
 import '../../utils/time_helpers.dart';
 import '../app_db.dart';
@@ -150,9 +151,7 @@ class StudioConfigRepo implements SyncStudioConfigStore {
             ),
             profileName: Value(config.profileName),
             enabled: Value(config.enabled),
-            agentsJson: Value(
-              jsonEncode(config.agents.map((a) => a.toJson()).toList()),
-            ),
+            agentsJson: Value(StudioAgentCodec.encodeAgents(config.agents)),
             finalPresetId: Value(config.finalPresetId),
             runApiConfigId: Value(config.runApiConfigId),
             expensiveApiConfigId: Value(config.expensiveApiConfigId),
@@ -196,10 +195,7 @@ class StudioConfigRepo implements SyncStudioConfigStore {
   StudioConfig _rowToModel(StudioConfigRow row) {
     List<StudioAgent> agents;
     try {
-      final list = jsonDecode(row.agentsJson) as List<dynamic>;
-      agents = list
-          .map((e) => StudioAgent.fromJson(e as Map<String, dynamic>))
-          .toList();
+      agents = StudioAgentCodec.decodeAgentsJson(row.agentsJson);
     } catch (_) {
       agents = [];
     }
@@ -313,6 +309,7 @@ class StudioConfigRepo implements SyncStudioConfigStore {
     final insertAt = finalIdx >= 0 ? finalIdx : agents.length;
     final beauty = StudioAgent(
       id: 'agent_${config.sessionId}_beauty_migrated',
+      controllerId: 'beauty',
       name: spec.name,
       role: 'system',
       order: insertAt,
@@ -320,8 +317,6 @@ class StudioConfigRepo implements SyncStudioConfigStore {
       temperature: spec.temperature,
       maxTokens: spec.maxTokens,
       timeoutMs: spec.timeoutMs,
-      sourceBlockNames:
-          'Beauty Shard fallback (rebuild Studio to route preset style blocks)',
       refreshPolicy: spec.refreshPolicy,
       invalidationSignals: spec.invalidationSignals,
       phase: spec.phase,
@@ -338,37 +333,14 @@ class StudioConfigRepo implements SyncStudioConfigStore {
   }
 
   bool _isBeautyShard(StudioAgent agent) {
-    final id = agent.id.toLowerCase();
-    final name = agent.name.toLowerCase();
-    final text = '$id\n$name';
-    return id == 'beauty' ||
-        text.contains('_beauty_') ||
-        text.contains('beauty shard') ||
-        name == 'beauty';
+    return agent.controllerId == 'beauty';
   }
 
   bool _isFinalResponder(StudioAgent agent) {
-    final id = agent.id.toLowerCase();
-    final name = agent.name.toLowerCase();
-    final text = '$id\n$name';
-    return id == 'final' ||
-        text.contains('_final_') ||
-        text.contains('main responder') ||
-        name == 'final';
+    return agent.controllerId == 'final';
   }
 
-  /// True if [agent] is the Meta-Weaver / OOC Policy controller. Matches by
-  /// id/name (the controller spec id is `meta`, name is
-  /// `Meta-Weaver / OOC Policy`). Falls back to substring contains so older
-  /// configs with slightly different names still migrate.
   bool _isMetaWeaver(StudioAgent agent) {
-    final id = agent.id.toLowerCase();
-    final name = agent.name.toLowerCase();
-    return id.contains('_meta_') ||
-        id == 'meta' ||
-        name.contains('meta-weaver') ||
-        name.contains('meta weaver') ||
-        name.contains('ooc policy') ||
-        name.contains('lumia policy');
+    return agent.controllerId == 'meta';
   }
 }

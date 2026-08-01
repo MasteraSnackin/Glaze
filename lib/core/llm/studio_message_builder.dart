@@ -82,7 +82,9 @@ class StudioMessageBuilder {
             ..writeln(_promptText.finalBriefUsageNote());
         }
         if (isFinalResponse) {
-          final styleContract = _promptText.finalHardStyleContract(config);
+          final styleContract = _promptText.finalHardStyleContract(
+            studioPreset,
+          );
           if (styleContract.isNotEmpty) {
             control
               ..writeln()

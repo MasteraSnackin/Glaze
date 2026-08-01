@@ -106,8 +106,8 @@ class StudioBriefDeduper {
     StudioStageBrief brief,
     StudioConfig config,
   ) {
-    if (!_parser.isMetaBriefName(brief.agentName)) {
-      final agent = _agentForBrief(brief, config);
+    final agent = _agentForBrief(brief, config);
+    if (!_parser.isMetaPolicyAgent(agent)) {
       return StudioStageBrief(
         agentId: brief.agentId,
         agentName: brief.agentName,
