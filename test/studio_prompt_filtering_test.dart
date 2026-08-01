@@ -49,31 +49,35 @@ void main() {
         StudioPresetBlock(
           id: 'final_agent_instruction',
           content: 'FINAL ONLY',
-          section: 'final',
+          mode: 'direct',
+          injectionPoint: 'final',
         ),
         StudioPresetBlock(
           id: 'cleaner_system',
           content: 'CLEANER ONLY',
-          section: 'cleaner',
+          mode: 'direct',
+          injectionPoint: 'cleaner',
         ),
         StudioPresetBlock(
           id: 'continuity_task',
           title: 'Continuity Tracker',
-          targetAgentId: 'continuity',
           content: 'CONTINUITY ONLY',
-          section: 'pregen',
+          mode: 'direct',
+          injectionPoint: 'specificAgent',
+          targetAgentId: 'continuity',
         ),
         StudioPresetBlock(
           id: 'dialogue_task',
           title: 'Dialogue Tracker',
-          targetAgentId: 'dialogue',
           content: 'DIALOGUE ONLY',
-          section: 'pregen',
+          mode: 'direct',
+          injectionPoint: 'specificAgent',
+          targetAgentId: 'dialogue',
         ),
         StudioPresetBlock(
           id: 'runtime_envelope',
           content: 'SEEDED RUNTIME ENVELOPE',
-          section: 'pregen',
+          injectionPoint: 'pregen',
         ),
       ],
     );
@@ -135,9 +139,9 @@ void main() {
           id: 'history',
           blocks: [
             StudioPresetBlock(
-              id: 'history',
-              type: StudioBlockType.history,
-              section: 'final',
+              id: 'chat_history',
+              mode: '',
+              injectionPoint: 'final',
             ),
           ],
         ),
@@ -182,9 +186,9 @@ void main() {
           id: 'history',
           blocks: [
             StudioPresetBlock(
-              id: 'history',
-              type: StudioBlockType.history,
-              section: 'final',
+              id: 'chat_history',
+              mode: '',
+              injectionPoint: 'final',
             ),
           ],
         ),
@@ -228,9 +232,9 @@ void main() {
           id: 'history',
           blocks: [
             StudioPresetBlock(
-              id: 'history',
-              type: StudioBlockType.history,
-              section: 'final',
+              id: 'chat_history',
+              mode: '',
+              injectionPoint: 'final',
             ),
           ],
         ),
@@ -273,9 +277,9 @@ void main() {
           id: 'history',
           blocks: [
             StudioPresetBlock(
-              id: 'history',
-              type: StudioBlockType.history,
-              section: 'final',
+              id: 'chat_history',
+              mode: '',
+              injectionPoint: 'final',
             ),
           ],
         ),
@@ -305,7 +309,8 @@ void main() {
               StudioPresetBlock(
                 id: 'state',
                 content: '{{studio_state}}',
-                section: 'final',
+                mode: 'direct',
+                injectionPoint: 'final',
               ),
             ],
           ),
@@ -328,23 +333,28 @@ void main() {
           blocks: [
             StudioPresetBlock(
               id: 'pov_open',
+              groupBoundary: 'open',
+              mode: '',
               role: 'system',
               content: '<loompov>',
-              section: 'final',
+              injectionPoint: 'final',
               order: 1,
             ),
             StudioPresetBlock(
               id: 'pov_content',
               role: 'system',
               content: 'POV instructions',
-              section: 'final',
+              mode: 'direct',
+              injectionPoint: 'final',
               order: 2,
             ),
             StudioPresetBlock(
               id: 'pov_close',
+              groupBoundary: 'close',
+              mode: '',
               role: 'system',
               content: '</loompov>',
-              section: 'final',
+              injectionPoint: 'final',
               order: 3,
             ),
           ],
@@ -367,6 +377,7 @@ void main() {
             id: 'cleaner',
             name: 'Cleaner',
             phase: 'post_processing',
+            specId: 'post_clean',
           ),
           context: context,
           config: config,
@@ -432,6 +443,28 @@ void main() {
       expect(text, isNot(contains('DIALOGUE ONLY')));
     });
 
+    test('pre-gen agent run receives only its own specific-agent block', () {
+      final text = joinedMessages(
+        builder.buildAgentMessages(
+          agent: const StudioAgent(
+            id: 'continuity',
+            controllerId: 'continuity',
+            name: 'Continuity Tracker',
+          ),
+          context: context,
+          config: config,
+          studioPreset: preset,
+          priorBriefs: const [],
+          isFinalResponse: false,
+        ),
+      );
+
+      expect(text, contains('CONTINUITY ONLY'));
+      expect(text, isNot(contains('DIALOGUE ONLY')));
+      expect(text, isNot(contains('FINAL ONLY')));
+      expect(text, isNot(contains('CLEANER ONLY')));
+    });
+
     test('hard style contract reads only final-applicable instructions', () {
       final text = joinedMessages(
         builder.buildAgentMessages(
@@ -444,24 +477,28 @@ void main() {
               StudioPresetBlock(
                 id: 'final-style',
                 content: 'Do not use em dashes.',
-                section: 'final',
+                mode: 'direct',
+                injectionPoint: 'final',
               ),
               StudioPresetBlock(
                 id: 'wrong-target',
                 targetAgentId: 'dialogue',
                 content: 'Wrap dialogue in quotation marks.',
-                section: 'final',
+                mode: 'direct',
+                injectionPoint: 'specificAgent',
               ),
               StudioPresetBlock(
                 id: 'wrong-section',
                 content: 'Wrap dialogue in quotation marks.',
-                section: 'pregen',
+                mode: 'direct',
+                injectionPoint: 'pregen',
               ),
               StudioPresetBlock(
                 id: 'disabled',
                 content: 'Wrap dialogue in quotation marks.',
                 enabled: false,
-                section: 'final',
+                mode: 'direct',
+                injectionPoint: 'final',
               ),
             ],
           ),
@@ -488,17 +525,18 @@ void main() {
         blocks: [
           StudioPresetBlock(
             id: 'previous_agents',
-            type: StudioBlockType.priorBriefs,
+            mode: 'pregenBrief',
             content: '',
-            section: 'final',
+            injectionPoint: 'final',
             order: 0,
           ),
           StudioPresetBlock(
             id: 'brief_macros',
+            mode: 'direct',
             content:
                 '<continuity>{{studio_continuity_brief}}</continuity>\n'
                 '<dialogue>{{studio_dialogue_brief}}</dialogue>',
-            section: 'final',
+            injectionPoint: 'final',
             order: 1,
           ),
         ],

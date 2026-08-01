@@ -57,6 +57,23 @@ const _narrativeStyleAddonTitles = <String>{
 bool isStudioPresetGroupHeader(StudioPresetBlock block) =>
     block.title.trimLeft().startsWith('━');
 
+/// A structural group boundary — detected by the transient `kind` synthesized in
+/// [normalizeStudioGroupBoundaries] or by the persisted `groupBoundary` field
+/// after the §5 migration cleared `kind`.
+bool isStudioGroupOpen(StudioPresetBlock block) =>
+    block.kind == 'group_open' ||
+    block.groupBoundary == 'open' ||
+    block.id.endsWith('_group_open');
+
+bool isStudioGroupClose(StudioPresetBlock block) =>
+    block.kind == 'group_close' ||
+    block.groupBoundary == 'close' ||
+    block.id.endsWith('_group_close') ||
+    block.id.endsWith('_prefix_close');
+
+bool isStudioGroupBoundary(StudioPresetBlock block) =>
+    isStudioGroupOpen(block) || isStudioGroupClose(block);
+
 final _leadingGroupTags = RegExp(
   r'^\s*(?:(</[A-Za-z][\w-]*>)\s*)?(?:(<[A-Za-z][\w-]*>)\s*)?',
 );
@@ -67,7 +84,7 @@ final _standaloneClosingTag = RegExp(r'^\s*</[A-Za-z][\w-]*>\s*$');
 List<StudioPresetBlock> normalizeStudioGroupBoundaries(
   List<StudioPresetBlock> blocks,
 ) {
-  if (blocks.any(_isGroupBoundary)) {
+  if (blocks.any(isStudioGroupBoundary)) {
     return blocks;
   }
 
@@ -166,7 +183,7 @@ List<StudioPresetBlockGroup> groupStudioPresetBlocks(
   final sorted = [...blocks]..sort((a, b) => a.order.compareTo(b.order));
   final boundaries = {
     for (final block in sorted)
-      if (_isGroupBoundary(block)) block.id: block,
+      if (isStudioGroupBoundary(block)) block.id: block,
   };
   final result = <StudioPresetBlockGroup>[];
   StudioPresetBlock? header;
@@ -209,7 +226,7 @@ List<StudioPresetBlockGroup> groupStudioPresetBlocks(
   }
 
   for (final block in sorted) {
-    if (_isGroupBoundary(block)) continue;
+    if (isStudioGroupBoundary(block)) continue;
     final startsTenseSubgroup =
         header != null &&
         _isPointOfViewHeader(header!.title) &&
@@ -235,11 +252,6 @@ List<StudioPresetBlockGroup> groupStudioPresetBlocks(
   flush();
   return result;
 }
-
-bool _isGroupBoundary(StudioPresetBlock block) =>
-    block.id.endsWith('_group_open') ||
-    block.id.endsWith('_group_close') ||
-    block.id.endsWith('_prefix_close');
 
 /// Enables [selectedId] and disables every sibling in an exclusive group.
 List<StudioPresetBlock> selectExclusiveStudioBlock(

@@ -188,8 +188,7 @@ class StudioLedgerService {
             (block) =>
                 block.id == ledgerReconciliationPromptBlockId &&
                 block.enabled &&
-                block.type == StudioBlockType.instruction &&
-                block.section == 'ledger' &&
+                block.injectionPoint == 'ledger' &&
                 block.content.trim().isNotEmpty,
           )
           .firstOrNull;
@@ -811,8 +810,7 @@ class StudioLedgerService {
       (block) =>
           block.id == _ledgerSystemPromptBlockId &&
           block.enabled &&
-          block.type == StudioBlockType.instruction &&
-          block.section == 'ledger' &&
+          block.injectionPoint == 'ledger' &&
           block.content.trim().isNotEmpty,
     );
     if (!hasActiveLedgerBlocks || macroCtx == null) {
@@ -883,7 +881,7 @@ Allowed eventState: planned, suggested, threatened, attempted, completed, failed
 
     return const StudioAuxPromptAssembler().assemble(
       blocks: ledgerBlocks,
-      section: 'ledger',
+      injectionPoint: 'ledger',
       macroCtx: macroCtx,
       runtimeSuffix: runtimeSuffix,
       skipBlockIds: {
