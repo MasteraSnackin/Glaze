@@ -1,9 +1,15 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:glaze_flutter/core/application/sync_repo_interfaces.dart';
 import 'package:glaze_flutter/core/models/studio_config.dart';
 import 'package:glaze_flutter/features/studio/services/studio_preset_workflow_service.dart';
 
 void main() {
+  setUp(() {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    SharedPreferences.setMockInitialValues({});
+  });
+
   group('StudioPresetWorkflowService', () {
     test('creates a copy of the global active preset and selects it', () async {
       final store = _MemoryStudioPresetStore([

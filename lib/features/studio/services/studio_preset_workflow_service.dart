@@ -1,6 +1,7 @@
 import '../../../core/application/sync_repo_interfaces.dart';
 import '../../../core/models/studio_config.dart';
 import '../../../core/models/studio_preset_validation.dart';
+import '../../../core/utils/sync_deletion_tracker.dart';
 
 typedef ActiveStudioPresetReader = Future<String> Function();
 typedef ActiveStudioPresetWriter = Future<void> Function(String presetId);
@@ -84,6 +85,7 @@ class StudioPresetWorkflowService {
 
   Future<List<StudioPreset>> deletePreset(String presetId) async {
     await _store.delete(presetId);
+    await SyncDeletionTracker.record('studio_preset', presetId);
     final presets = await loadPresets();
     if (await _readActivePresetId() == presetId) {
       await _writeActivePresetId('default');

@@ -12,6 +12,7 @@ import 'package:glaze_flutter/core/models/memory_book.dart';
 import 'package:glaze_flutter/core/models/persona.dart';
 import 'package:glaze_flutter/core/models/preset.dart';
 import 'package:glaze_flutter/core/models/studio_config.dart';
+import 'package:glaze_flutter/core/utils/sync_deletion_tracker.dart';
 import 'package:glaze_flutter/core/application/session_deletion_store.dart';
 import 'package:glaze_flutter/core/application/character_deletion_store.dart';
 import 'package:glaze_flutter/features/cloud_sync/sync_repo_interfaces.dart';
@@ -339,6 +340,23 @@ class FakeStudioConfigStore implements SyncStudioConfigStore {
   }
 }
 
+class FakeStudioPresetStore implements SyncStudioPresetStore {
+  final Map<String, StudioPreset> data = {};
+  @override
+  Future<List<StudioPreset>> getAll() async => data.values.toList();
+  @override
+  Future<StudioPreset?> getById(String id) async => data[id];
+  @override
+  Future<void> put(StudioPreset preset) async {
+    data[preset.id] = preset;
+  }
+
+  @override
+  Future<void> delete(String id) async {
+    data.remove(id);
+  }
+}
+
 class FakeImageStore implements SyncImageStore {
   final Map<String, Uint8List> saved = {};
 
@@ -482,24 +500,26 @@ class InMemoryManifestProvider implements SyncManifestProvider {
     SyncTrackerSnapshotStore? trackerSnapshotStore,
     SyncTrackerValueStore? trackerValueStore,
     SyncStudioConfigStore? studioConfigStore,
+    SyncStudioPresetStore? studioPresetStore,
   }) : _builder = SyncManifestBuilder(
-         characterRepo: characterRepo,
-         chatRepo: chatRepo,
-         personaRepo: personaRepo,
-         presetRepo: presetRepo,
-         apiRepo: apiRepo,
-         memoryBookRepo: memoryBookRepo,
-         lorebookRepo: lorebookRepo,
-         themePresetRepo: themePresetRepo,
-         extensionPresetRepo: extensionPresetRepo ?? FakeExtensionPresetStore(),
-         extensionsSettingsStore:
-             extensionsSettingsStore ?? FakeExtensionsSettingsStore(),
-         infoBlockStore: infoBlockStore ?? FakeInfoBlockStore(),
-         trackerSnapshotStore:
-             trackerSnapshotStore ?? FakeTrackerSnapshotStore(),
-         trackerValueStore: trackerValueStore ?? FakeTrackerValueStore(),
-         studioConfigStore: studioConfigStore ?? FakeStudioConfigStore(),
-       );
+          characterRepo: characterRepo,
+          chatRepo: chatRepo,
+          personaRepo: personaRepo,
+          presetRepo: presetRepo,
+          apiRepo: apiRepo,
+          memoryBookRepo: memoryBookRepo,
+          lorebookRepo: lorebookRepo,
+          themePresetRepo: themePresetRepo,
+          extensionPresetRepo: extensionPresetRepo ?? FakeExtensionPresetStore(),
+          extensionsSettingsStore:
+              extensionsSettingsStore ?? FakeExtensionsSettingsStore(),
+          infoBlockStore: infoBlockStore ?? FakeInfoBlockStore(),
+          trackerSnapshotStore:
+              trackerSnapshotStore ?? FakeTrackerSnapshotStore(),
+          trackerValueStore: trackerValueStore ?? FakeTrackerValueStore(),
+          studioConfigStore: studioConfigStore ?? FakeStudioConfigStore(),
+          studioPresetStore: studioPresetStore,
+        );
 
   @override
   Future<SyncManifest> buildLocalManifest({SyncManifest? cloudManifest}) async {
@@ -556,6 +576,8 @@ class SyncWorld {
   late final FakeCloudAdapter cloud;
   late final FakeThemePresetStore uiThemes;
   late final InMemoryManifestProvider manifestProvider;
+  late final FakeStudioConfigStore studioConfigs;
+  late final FakeStudioPresetStore studioPresets;
   late final FakeSessionDeletionStore sessionDeletions;
   late final FakeCharacterDeletionStore characterDeletions;
 
@@ -571,6 +593,8 @@ class SyncWorld {
     images = FakeImageStore();
     cloud = FakeCloudAdapter();
     uiThemes = FakeThemePresetStore();
+    studioConfigs = FakeStudioConfigStore();
+    studioPresets = FakeStudioPresetStore();
     sessionDeletions = FakeSessionDeletionStore(chats);
     characterDeletions = FakeCharacterDeletionStore(characters);
     manifestProvider = InMemoryManifestProvider(
@@ -582,6 +606,8 @@ class SyncWorld {
       memoryBookRepo: memoryBooks,
       lorebookRepo: lorebooks,
       themePresetRepo: uiThemes,
+      studioConfigStore: studioConfigs,
+      studioPresetStore: studioPresets,
     );
   }
 
@@ -603,8 +629,8 @@ class SyncWorld {
     FakeInfoBlockStore(),
     FakeTrackerSnapshotStore(),
     FakeTrackerValueStore(),
-    FakeStudioConfigStore(),
-    null,
+    studioConfigs,
+    studioPresets,
     null,
     null,
     null,
@@ -2684,6 +2710,83 @@ void main() {
         jsonDecode(raw!) as Map<String, dynamic>,
       );
       expect(manifest.apiKeysIncluded, isFalse);
+    },
+  );
+
+  test(
+    'Studio preset deletion tombstone propagates to cloud on next push',
+    () async {
+      SharedPreferences.setMockInitialValues({});
+      final world = SyncWorld();
+      const preset = StudioPreset(
+        id: 'doomed',
+        name: 'Doomed Preset',
+      );
+      await world.studioPresets.put(preset);
+
+      var manifest = await world.manifestProvider.buildLocalManifest();
+      await world.manifestProvider.writeLocalManifest(manifest);
+      await world.engine.pushEntities(onProgress: (_) {});
+
+      expect(
+        world.cloud.files.containsKey(cloudPath('studio_preset', 'doomed')),
+        isTrue,
+      );
+
+      await world.studioPresets.delete('doomed');
+      await SyncDeletionTracker.record('studio_preset', 'doomed');
+
+      manifest = await world.manifestProvider.buildLocalManifest();
+      await world.manifestProvider.writeLocalManifest(manifest);
+      await world.engine.pushEntities(onProgress: (_) {});
+
+      expect(
+        world.cloud.files.containsKey(cloudPath('studio_preset', 'doomed')),
+        isFalse,
+        reason: 'Cloud file should be deleted after tombstone push',
+      );
+
+      final cloudManifest = SyncManifest.fromJson(
+        jsonDecode(
+              world.cloud.files[cloudPath('manifest', 'manifest')]!,
+            ) as
+                Map<String, dynamic>,
+      );
+      expect(
+        cloudManifest.entries.containsKey(entryKey('studio_preset', 'doomed')),
+        isFalse,
+        reason: 'Cloud manifest should no longer list the deleted preset',
+      );
+    },
+  );
+
+  test(
+    'Studio config syncs by session id and does not resurrect on pull',
+    () async {
+      SharedPreferences.setMockInitialValues({});
+      final source = SyncWorld();
+      await source.studioConfigs.put(
+        const StudioConfig(sessionId: 's1', enabled: true),
+      );
+
+      var manifest = await source.manifestProvider.buildLocalManifest();
+      await source.manifestProvider.writeLocalManifest(manifest);
+      await source.engine.pushEntities(onProgress: (_) {});
+
+      expect(
+        source.cloud.files.containsKey(cloudPath('studio_config', 's1')),
+        isTrue,
+      );
+
+      SharedPreferences.setMockInitialValues({});
+      final target = SyncWorld();
+      target.cloud.files.addAll(source.cloud.files);
+      await target.engine.pullEntities(onProgress: (_) {}, onConflict: (_) {});
+
+      final pulled = await target.studioConfigs.getById('s1');
+      expect(pulled, isNotNull);
+      expect(pulled!.sessionId, 's1');
+      expect(pulled.enabled, isTrue);
     },
   );
 }
