@@ -2080,5 +2080,7 @@
   "studio_field_injection_point": "Точка инжекта",
   "studio_field_target_agent": "→ Отправить агенту",
   "export_saved_to": "Экспортировано в {}",
-  "error_export_failed_prefix": "Ошибка экспорта: "
+  "error_export_failed_prefix": "Ошибка экспорта: ",
+  "studio_post_context_label": "Контекст постобработки",
+  "studio_post_context_desc": "Сколько сообщений чата получают агенты постобработки (последний ход + ответ для правки)."
 }

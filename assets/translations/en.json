@@ -2057,5 +2057,7 @@
   "studio_field_injection_point": "Injection point",
   "studio_field_target_agent": "→ Send to agent",
   "export_saved_to": "Exported to {}",
-  "error_export_failed_prefix": "Export failed: "
+  "error_export_failed_prefix": "Export failed: ",
+  "studio_post_context_label": "Post-processing context",
+  "studio_post_context_desc": "How many chat messages the post-processing agents receive (last turn + the response to edit)."
 }
