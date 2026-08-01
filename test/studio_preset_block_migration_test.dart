@@ -4,51 +4,77 @@ import 'package:glaze_flutter/core/models/studio_preset_block_migration.dart';
 
 void main() {
   group('migrateStudioPresetBlocksToV2', () {
-    test('maps previous_agents → pregenBrief and clears legacy fields', () {
+    test('maps priorBriefs type → pregenBrief and clears legacy section', () {
       final out = migrateStudioPresetBlocksToV2(const [
         StudioPresetBlock(
           id: 'previous_agents',
-          kind: 'previous_agents',
+          type: StudioBlockType.priorBriefs,
           section: 'final',
         ),
       ]);
       expect(out, hasLength(1));
       expect(out.single.mode, 'pregenBrief');
       expect(out.single.injectionPoint, 'final');
-      expect(out.single.kind, isEmpty);
       expect(out.single.section, isEmpty);
     });
 
-    test('routes tracker_instruction to its controller via targetAgentId', () {
-      final out = migrateStudioPresetBlocksToV2(const [
-        StudioPresetBlock(
-          id: 'continuity_task',
-          kind: 'tracker_instruction',
-          section: 'pregen',
-        ),
-        StudioPresetBlock(
-          id: 'agency_task',
-          kind: 'tracker_instruction',
-          section: 'pregen',
-        ),
-        StudioPresetBlock(
-          id: 'guard_task',
-          title: 'Anti-Loop & Prose Guard',
-          kind: 'tracker_instruction',
-          section: 'pregen',
-        ),
-      ]);
-      expect(out.map((b) => b.injectionPoint), everyElement('specificAgent'));
-      expect(out.map((b) => b.targetAgentId), ['continuity', 'agency', 'guard']);
-      expect(out.map((b) => b.mode), everyElement('direct'));
-    });
+    test(
+      'routes instruction with targetAgentId to specificAgent injection',
+      () {
+        final out = migrateStudioPresetBlocksToV2(const [
+          StudioPresetBlock(
+            id: 'continuity_task',
+            type: StudioBlockType.instruction,
+            targetAgentId: 'continuity',
+            section: 'pregen',
+          ),
+          StudioPresetBlock(
+            id: 'agency_task',
+            type: StudioBlockType.instruction,
+            targetAgentId: 'agency',
+            section: 'pregen',
+          ),
+          StudioPresetBlock(
+            id: 'guard_task',
+            type: StudioBlockType.instruction,
+            targetAgentId: 'guard',
+            section: 'pregen',
+          ),
+        ]);
+        expect(
+          out.map((b) => b.injectionPoint),
+          everyElement('specificAgent'),
+        );
+        expect(
+          out.map((b) => b.targetAgentId),
+          ['continuity', 'agency', 'guard'],
+        );
+        expect(out.map((b) => b.mode), everyElement('direct'));
+      },
+    );
 
-    test('custom_text keeps its section as the injection point', () {
+    test('instruction without targetAgentId keeps its section as injection', () {
       final out = migrateStudioPresetBlocksToV2(const [
-        StudioPresetBlock(id: 'a', kind: 'custom_text', section: 'pregen'),
-        StudioPresetBlock(id: 'b', kind: 'custom_text', section: 'final'),
-        StudioPresetBlock(id: 'c', kind: 'custom_text', section: 'cleaner'),
-        StudioPresetBlock(id: 'd', kind: 'custom_text', section: 'ledger'),
+        StudioPresetBlock(
+          id: 'a',
+          type: StudioBlockType.instruction,
+          section: 'pregen',
+        ),
+        StudioPresetBlock(
+          id: 'b',
+          type: StudioBlockType.instruction,
+          section: 'final',
+        ),
+        StudioPresetBlock(
+          id: 'c',
+          type: StudioBlockType.instruction,
+          section: 'cleaner',
+        ),
+        StudioPresetBlock(
+          id: 'd',
+          type: StudioBlockType.instruction,
+          section: 'ledger',
+        ),
       ]);
       expect(out.map((b) => b.injectionPoint), [
         'pregen',
@@ -59,37 +85,52 @@ void main() {
       expect(out.map((b) => b.mode), everyElement('direct'));
     });
 
-    test('drops agent_instruction and dead build/brief_parser sections', () {
+    test('drops dead build/brief_parser sections', () {
       final out = migrateStudioPresetBlocksToV2(const [
         StudioPresetBlock(
-          id: 'env',
-          kind: 'agent_instruction',
-          section: 'pregen',
+          id: 'r',
+          type: StudioBlockType.instruction,
+          section: 'build',
         ),
-        StudioPresetBlock(id: 'r', kind: 'custom_text', section: 'build'),
         StudioPresetBlock(
           id: 'p',
-          kind: 'custom_text',
+          type: StudioBlockType.instruction,
           section: 'brief_parser',
         ),
-        StudioPresetBlock(id: 'keep', kind: 'custom_text', section: 'pregen'),
+        StudioPresetBlock(
+          id: 'keep',
+          type: StudioBlockType.instruction,
+          section: 'pregen',
+        ),
       ]);
       expect(out.map((b) => b.id), ['keep']);
     });
 
-    test('group boundaries move to the groupBoundary field with empty mode', () {
+    test('group boundaries by id suffix move to groupBoundary with empty mode', () {
       final out = migrateStudioPresetBlocksToV2(const [
-        StudioPresetBlock(id: 'o', kind: 'group_open', section: 'pregen'),
-        StudioPresetBlock(id: 'c', kind: 'group_close', section: 'pregen'),
+        StudioPresetBlock(
+          id: 'grp_group_open',
+          type: StudioBlockType.instruction,
+          section: 'pregen',
+        ),
+        StudioPresetBlock(
+          id: 'grp_group_close',
+          type: StudioBlockType.instruction,
+          section: 'pregen',
+        ),
       ]);
       expect(out[0].groupBoundary, 'open');
       expect(out[1].groupBoundary, 'close');
       expect(out.map((b) => b.mode), everyElement(''));
     });
 
-    test('context kinds get an empty mode and a canonical id', () {
+    test('context/history types get an empty mode', () {
       final out = migrateStudioPresetBlocksToV2(const [
-        StudioPresetBlock(id: 'hist_block', kind: 'chat_history', section: 'final'),
+        StudioPresetBlock(
+          id: 'chat_history',
+          type: StudioBlockType.history,
+          section: 'final',
+        ),
       ]);
       expect(out.single.id, 'chat_history');
       expect(out.single.mode, isEmpty);
@@ -97,17 +138,17 @@ void main() {
     });
 
     test('is idempotent and leaves editor-created blocks untouched', () {
-      const legacy = [
-        StudioPresetBlock(
+      final legacy = [
+        const StudioPresetBlock(
           id: 'continuity_task',
-          kind: 'tracker_instruction',
+          type: StudioBlockType.instruction,
+          targetAgentId: 'continuity',
           section: 'pregen',
         ),
-        // Editor-created block: kind/section cleared, explicit new fields
+        // Editor-created block: section cleared, explicit new fields
         // (mirrors what StudioPresetEditorBody._addBlock produces).
-        StudioPresetBlock(
+        const StudioPresetBlock(
           id: 'custom',
-          kind: '',
           section: '',
           mode: 'direct',
           injectionPoint: 'final',

@@ -260,7 +260,6 @@ class StudioPresetEditorBodyState
     final draft = StudioPresetBlock(
       id: generateId(),
       title: 'New Block',
-      kind: '',
       section: '',
       role: 'system',
       mode: 'direct',

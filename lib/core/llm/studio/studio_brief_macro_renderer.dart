@@ -57,7 +57,6 @@ class StudioBriefMacroRenderer {
         );
       }
     }
-    }
     // Any macro left over targets a removed agent — resolve it to empty.
     return expanded.replaceAll(studioBriefMacroRegex, '');
   }
@@ -87,12 +86,15 @@ class StudioBriefMacroRenderer {
     List<StudioStageBrief> briefs,
     String specId,
   ) {
-    final specName = StudioControllerOntology.byId(specId).name.toLowerCase();
+    final spec = StudioControllerOntology.specs
+        .where((s) => s.id == specId)
+        .firstOrNull;
+    final specName = spec?.name.toLowerCase() ?? '';
     return briefs.where((brief) {
       final id = brief.agentId.toLowerCase();
       return id.contains('_${specId}_') ||
           id.endsWith('_$specId') ||
-          brief.agentName.toLowerCase() == specName;
+          (specName.isNotEmpty && brief.agentName.toLowerCase() == specName);
     }).toList();
   }
 

@@ -423,17 +423,10 @@ void main() {
     });
 
     test('shared pre-gen blocks go to the batch role, not the tasks', () {
-      final context = const StudioContextBucketizer().bucketize(
-        promptResult,
-        promptPayload: promptPayload,
-        studioConfig: config,
-      );
       final role = builder.batchRoleText(
         config,
         preset,
         context,
-        promptPayload,
-        promptResult,
       );
 
       expect(role, contains('SHARED PREGEN'));

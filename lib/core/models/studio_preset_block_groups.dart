@@ -61,12 +61,10 @@ bool isStudioPresetGroupHeader(StudioPresetBlock block) =>
 /// [normalizeStudioGroupBoundaries] or by the persisted `groupBoundary` field
 /// after the §5 migration cleared `kind`.
 bool isStudioGroupOpen(StudioPresetBlock block) =>
-    block.kind == 'group_open' ||
     block.groupBoundary == 'open' ||
     block.id.endsWith('_group_open');
 
 bool isStudioGroupClose(StudioPresetBlock block) =>
-    block.kind == 'group_close' ||
     block.groupBoundary == 'close' ||
     block.id.endsWith('_group_close') ||
     block.id.endsWith('_prefix_close');

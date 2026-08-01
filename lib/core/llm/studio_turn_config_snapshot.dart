@@ -52,7 +52,7 @@ class StudioTurnConfigSnapshot {
     required String errorLabel,
     bool? useResponsesApi,
   }) {
-    final slotId = config?.ledgerApiConfigId ?? '';
+    final slotId = preset?.ledgerApiConfigId ?? '';
     final model = pipelineSettings.ledger.studioLedgerModel;
     if (slotId.isEmpty && model.isEmpty) {
       return resolveCleanerConfig(
@@ -64,7 +64,7 @@ class StudioTurnConfigSnapshot {
       apiConfigs: apiConfigs,
       apiConfigId: slotId.isNotEmpty
           ? slotId
-          : (config?.cleanerApiConfigId ?? ''),
+          : (preset?.cleanerApiConfigId ?? ''),
       fallback: activeApiConfig,
       errorLabel: errorLabel,
       modelOverride: model.isNotEmpty

@@ -690,6 +690,7 @@ class StudioPresetRows extends Table {
       text().withDefault(const Constant(''))();
   TextColumn get cheapApiConfigId => text().withDefault(const Constant(''))();
   TextColumn get cleanerApiConfigId => text().withDefault(const Constant(''))();
+  TextColumn get ledgerApiConfigId => text().withDefault(const Constant(''))();
   IntColumn get maxFinalHistoryMessages =>
       integer().withDefault(const Constant(30))();
   TextColumn get agentEnabledJson => text().withDefault(const Constant('{}'))();

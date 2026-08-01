@@ -78,6 +78,7 @@ class StudioPresetRepo implements SyncStudioPresetStore {
             expensiveApiConfigId: Value(normalized.expensiveApiConfigId),
             cheapApiConfigId: Value(normalized.cheapApiConfigId),
             cleanerApiConfigId: Value(normalized.cleanerApiConfigId),
+            ledgerApiConfigId: Value(normalized.ledgerApiConfigId),
             maxFinalHistoryMessages: Value(normalized.maxFinalHistoryMessages),
             agentEnabledJson: Value(jsonEncode(normalized.agentEnabled)),
             runtimeSettingsJson: Value(
@@ -146,6 +147,7 @@ class StudioPresetRepo implements SyncStudioPresetStore {
         expensiveApiConfigId: row.expensiveApiConfigId,
         cheapApiConfigId: row.cheapApiConfigId,
         cleanerApiConfigId: row.cleanerApiConfigId,
+        ledgerApiConfigId: row.ledgerApiConfigId,
         maxFinalHistoryMessages: row.maxFinalHistoryMessages,
         agentEnabled: agentEnabled,
         runtime: runtime,

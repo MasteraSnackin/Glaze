@@ -60,8 +60,7 @@ void main() {
       preset: _preset.copyWith(
         blocks: [
           _preset.blocks.single.copyWith(
-            type: StudioBlockType.context,
-            contextSlot: StudioContextSlot.memory,
+            injectionPoint: 'final',
           ),
         ],
       ),

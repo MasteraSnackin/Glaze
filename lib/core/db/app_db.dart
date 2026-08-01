@@ -70,7 +70,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 101;
+  int get schemaVersion => 102;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -1960,6 +1960,19 @@ class AppDatabase extends _$AppDatabase {
       }
       if (from < 101) {
         await _retireStudioConfigProfiles();
+      }
+      if (from < 102) {
+        final presetCols = await customSelect(
+          'PRAGMA table_info("studio_preset_rows")',
+        ).get();
+        if (!presetCols.any(
+          (row) => row.read<String>('name') == 'ledger_api_config_id',
+        )) {
+          await m.addColumn(
+            studioPresetRows,
+            studioPresetRows.ledgerApiConfigId,
+          );
+        }
       }
     },
   );

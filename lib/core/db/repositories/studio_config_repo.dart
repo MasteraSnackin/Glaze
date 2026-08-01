@@ -39,14 +39,13 @@ class StudioConfigRepo implements SyncStudioConfigStore {
   /// settings screen was opened would bind every unbound session to an empty
   /// profile.
   Future<StudioConfig> ensureDefaultProfile() async {
-    final profiles = await getProfiles();
+    final profiles = await getAll();
     if (profiles.isNotEmpty) return profiles.first;
     const id = 'studio_profile_default';
     final now = currentTimestampSeconds();
     const profile = StudioConfig(
       sessionId: id,
-      profileId: id,
-      profileName: 'Default',
+      enabled: true,
     );
     final stamped = profile.copyWith(createdAt: now, updatedAt: now);
     await upsert(stamped);

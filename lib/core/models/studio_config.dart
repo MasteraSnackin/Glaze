@@ -81,6 +81,7 @@ abstract class StudioPreset with _$StudioPreset {
     @Default('') String expensiveApiConfigId,
     @Default('') String cheapApiConfigId,
     @Default('') String cleanerApiConfigId,
+    @Default('') String ledgerApiConfigId,
 
     /// Maximum trailing messages sent to the final generator. Trackers use
     /// their own [StudioAgent.contextSize]. 0 disables the message-count cap.

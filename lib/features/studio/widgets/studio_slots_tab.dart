@@ -6,7 +6,6 @@ import '../../../core/models/api_config.dart';
 import '../../../core/models/pipeline_settings.dart';
 import '../../../core/models/studio_config.dart';
 import '../../../core/state/db_provider.dart';
-import '../../../core/state/studio_default_profile_provider.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/menu_group.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
@@ -28,7 +27,7 @@ class StudioSlotsTab extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final configs = ref.watch(apiListProvider).value ?? const <ApiConfig>[];
-    final profile = ref.watch(studioDefaultProfileProvider).value;
+    final profile = ref.watch(studioPresetProvider).value;
     final pipeline = ref.watch(pipelineSettingsProvider);
 
     return ListView(
@@ -132,20 +131,20 @@ class StudioSlotsTab extends ConsumerWidget {
 
   // ── Persistence ────────────────────────────────────────────────────────────
 
-  /// Slot API bindings live on the Studio profile new sessions inherit; the
-  /// profile row is created on the first edit, never just by opening the tab.
+  /// Slot API bindings live on the default Studio preset new sessions inherit;
+  /// the preset row is seeded on the first edit, never just by opening the tab.
   Future<void> _saveProfile(
     WidgetRef ref,
-    StudioConfig Function(StudioConfig) mutate,
+    StudioPreset Function(StudioPreset) mutate,
   ) async {
-    final repo = ref.read(studioConfigRepoProvider);
-    final profile = await repo.ensureDefaultProfile();
+    final repo = ref.read(studioPresetRepoProvider);
+    final preset = await repo.ensureDefaultSeeded();
     await repo.upsert(
-      mutate(profile).copyWith(
+      mutate(preset).copyWith(
         updatedAt: DateTime.now().millisecondsSinceEpoch ~/ 1000,
       ),
     );
-    ref.invalidate(studioDefaultProfileProvider);
+    ref.invalidate(studioPresetProvider);
   }
 
   /// Model overrides are global app settings, not per-profile.

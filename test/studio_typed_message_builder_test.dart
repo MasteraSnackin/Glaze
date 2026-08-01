@@ -53,30 +53,27 @@ void main() {
         blocks: [
           StudioPresetBlock(
             id: 'memory',
-            type: StudioBlockType.context,
-            contextSlot: StudioContextSlot.memory,
+            mode: '',
+            injectionPoint: 'final',
             content: 'ignored ordinary-shaped fallback',
-            section: 'final',
             order: 3,
           ),
           StudioPresetBlock(
-            id: 'character',
-            type: StudioBlockType.context,
-            contextSlot: StudioContextSlot.characterCard,
-            section: 'final',
+            id: 'char_card',
+            mode: '',
+            injectionPoint: 'final',
             order: 1,
           ),
           StudioPresetBlock(
             id: 'summary',
-            type: StudioBlockType.context,
-            contextSlot: StudioContextSlot.summary,
-            section: 'final',
+            mode: '',
+            injectionPoint: 'final',
             order: 2,
           ),
           StudioPresetBlock(
-            id: 'history',
-            type: StudioBlockType.history,
-            section: 'final',
+            id: 'chat_history',
+            mode: '',
+            injectionPoint: 'final',
             order: 4,
           ),
         ],
@@ -111,7 +108,7 @@ void main() {
             role: 'user',
             content:
                 'Write for {{char}} using {{reasoningPrefix}}thought{{reasoningSuffix}}',
-            section: 'final',
+            injectionPoint: 'final',
           ),
         ],
       ),
@@ -129,30 +126,28 @@ void main() {
 
   test('static and dynamic groups are explicit typed projections', () {
     final messages = builder.buildAgentMessages(
-      agent: const StudioAgent(id: 'tracker', contextSize: 1),
+      agent: const StudioAgent(id: 'tracker'),
       context: context,
       config: config,
       studioPreset: const StudioPreset(
         id: 'studio',
         blocks: [
           StudioPresetBlock(
-            id: 'static',
-            type: StudioBlockType.context,
-            contextSlot: StudioContextSlot.staticContext,
-            section: 'pregen',
+            id: 'static_context',
+            mode: '',
+            injectionPoint: 'pregen',
             order: 1,
           ),
           StudioPresetBlock(
-            id: 'dynamic',
-            type: StudioBlockType.context,
-            contextSlot: StudioContextSlot.dynamicContext,
-            section: 'pregen',
+            id: 'dynamic_context',
+            mode: '',
+            injectionPoint: 'pregen',
             order: 2,
           ),
           StudioPresetBlock(
-            id: 'history',
-            type: StudioBlockType.history,
-            section: 'pregen',
+            id: 'chat_history',
+            mode: '',
+            injectionPoint: 'pregen',
             order: 3,
           ),
         ],
@@ -165,6 +160,7 @@ void main() {
       'Typed character card',
       'Typed summary',
       'Typed memory',
+      'First',
       'Second',
     ]);
   });

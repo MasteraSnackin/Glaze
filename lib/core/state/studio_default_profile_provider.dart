@@ -9,6 +9,6 @@ import 'db_provider.dart';
 /// so it reads and writes this profile. Sessions bound to it pick the change
 /// up on their next turn.
 final studioDefaultProfileProvider = FutureProvider<StudioConfig?>((ref) async {
-  final profiles = await ref.watch(studioConfigRepoProvider).getProfiles();
+  final profiles = await ref.watch(studioConfigRepoProvider).getAll();
   return profiles.isEmpty ? null : profiles.first;
 });

@@ -70,8 +70,8 @@ class StudioBlockRow extends StatelessWidget {
     final tokens = _blockTokens(block);
     final modeLabel = _modeLabel();
     final targetLabel = block.injectionPoint == 'specificAgent' &&
-            block.targetAgentId.isNotEmpty
-        ? '→ ${studioAgentShortName(block.targetAgentId)}'
+            (block.targetAgentId ?? '').isNotEmpty
+        ? '→ ${studioAgentShortName(block.targetAgentId!)}'
         : null;
 
     final Widget trailingWidget;

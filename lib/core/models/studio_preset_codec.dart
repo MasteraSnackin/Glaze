@@ -135,6 +135,7 @@ abstract final class StudioPresetCodec {
         expensiveApiConfigId: _string(json['expensiveApiConfigId']),
         cheapApiConfigId: _string(json['cheapApiConfigId']),
         cleanerApiConfigId: _string(json['cleanerApiConfigId']),
+        ledgerApiConfigId: _string(json['ledgerApiConfigId']),
         maxFinalHistoryMessages: _integer(
           json['maxFinalHistoryMessages'],
           fallback: 30,
@@ -258,6 +259,7 @@ abstract final class StudioPresetCodec {
       'expensiveApiConfigId': preset.expensiveApiConfigId,
       'cheapApiConfigId': preset.cheapApiConfigId,
       'cleanerApiConfigId': preset.cleanerApiConfigId,
+      'ledgerApiConfigId': preset.ledgerApiConfigId,
       'maxFinalHistoryMessages': preset.maxFinalHistoryMessages,
       'agentEnabled': preset.agentEnabled,
       'runtime': encodeRuntime(preset.runtime),

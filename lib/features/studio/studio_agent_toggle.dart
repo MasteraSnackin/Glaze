@@ -12,8 +12,10 @@ StudioPreset applyStudioAgentToggle(
   String specId,
   bool enabled,
 ) {
-  final spec = StudioControllerOntology.byId(specId);
-  if (spec.lockedOn) return preset;
+  final spec = StudioControllerOntology.specs
+      .where((s) => s.id == specId)
+      .firstOrNull;
+  if (spec == null || spec.lockedOn) return preset;
   final updated = Map<String, bool>.from(preset.agentEnabled)
     ..[specId] = enabled;
   final restored = Map<String, bool>.from(
