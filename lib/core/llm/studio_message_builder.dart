@@ -269,8 +269,16 @@ class StudioMessageBuilder {
     return messages;
   }
 
-  /// Per-agent task text: the agent's `promptShard` + the preset's
-  /// `agent_instruction` block content + the runtime envelope.
+  /// Per-agent task text for a batch run: only the blocks addressed to THIS
+  /// agent, plus its runtime envelope.
+  ///
+  /// Shared pre-gen instructions are deliberately absent — they are emitted
+  /// once into the batch's `<role>` element (see [batchRoleText]). Repeating
+  /// them here put every shared block into the prompt once per agent on top of
+  /// the `<role>` copy — seven times over for a six-controller group — and all
+  /// of those copies sat in `<agents>`, the volatile tail that the provider's
+  /// prompt cache never covers. It also made the six `<agent_task>` bodies
+  /// mostly identical, burying the part that actually differs between them.
   String buildPerAgentTaskText({
     required StudioAgent agent,
     required StudioConfig config,
@@ -281,12 +289,11 @@ class StudioMessageBuilder {
     final blocks =
         studioPreset.blocks
             .where((b) => b.enabled)
-            .where((b) {
-              if (b.injectionPoint == 'specificAgent') {
-                return b.targetAgentId == specId;
-              }
-              return b.injectionPoint == 'pregen' && b.mode == 'direct';
-            })
+            .where(
+              (b) =>
+                  b.injectionPoint == 'specificAgent' &&
+                  b.targetAgentId == specId,
+            )
             .where((b) => !_blockExpander.isRuntimeComputedBlock(b))
             .toList()
           ..sort((a, b) => a.order.compareTo(b.order));

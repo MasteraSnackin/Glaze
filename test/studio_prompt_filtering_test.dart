@@ -75,6 +75,13 @@ void main() {
           targetAgentId: 'dialogue',
         ),
         StudioPresetBlock(
+          id: 'shared_pregen',
+          title: 'Shared controller rules',
+          content: 'SHARED PREGEN',
+          mode: 'direct',
+          injectionPoint: 'pregen',
+        ),
+        StudioPresetBlock(
           id: 'runtime_envelope',
           content: 'SEEDED RUNTIME ENVELOPE',
           injectionPoint: 'pregen',
@@ -410,6 +417,30 @@ void main() {
       expect(text, isNot(contains('FINAL ONLY')));
       expect(text, isNot(contains('CLEANER ONLY')));
       expect(text, isNot(contains('SEEDED RUNTIME ENVELOPE')));
+      // Shared pre-gen instructions live in the batch's <role>, once. Copying
+      // them into every task repeated them per agent in the uncached tail.
+      expect(text, isNot(contains('SHARED PREGEN')));
+    });
+
+    test('shared pre-gen blocks go to the batch role, not the tasks', () {
+      final context = const StudioContextBucketizer().bucketize(
+        promptResult,
+        promptPayload: promptPayload,
+        studioConfig: config,
+      );
+      final role = builder.batchRoleText(
+        config,
+        preset,
+        context,
+        promptPayload,
+        promptResult,
+      );
+
+      expect(role, contains('SHARED PREGEN'));
+      // A specific-agent block is one agent's job — it must not leak into the
+      // instruction every controller reads.
+      expect(role, isNot(contains('CONTINUITY ONLY')));
+      expect(role, isNot(contains('DIALOGUE ONLY')));
     });
 
     test('target routing does not use agent name aliases', () {
