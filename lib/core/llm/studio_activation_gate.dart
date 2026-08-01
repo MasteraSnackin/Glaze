@@ -11,33 +11,6 @@ import 'studio_controller_ontology.dart';
 class StudioActivationGate {
   StudioActivationGate._();
 
-  /// True if at least one of [keywords] appears (case-insensitive substring
-  /// match) in the last [scanDepth] entries of [historyContents]. When
-  /// [scanDepth] is 0 or negative, scans the entire list. When [keywords]
-  /// is empty, returns true (always activate).
-  static bool matchesActivationKeywords(
-    List<String> keywords,
-    List<String> historyContents,
-    int scanDepth,
-  ) {
-    if (keywords.isEmpty) return true;
-    if (historyContents.isEmpty) return false;
-    final effectiveDepth = scanDepth <= 0 ? historyContents.length : scanDepth;
-    final start = historyContents.length - effectiveDepth;
-    final window = historyContents.sublist(start < 0 ? 0 : start);
-    final loweredKeywords = keywords
-        .map((k) => k.trim().toLowerCase())
-        .where((k) => k.isNotEmpty)
-        .toList();
-    if (loweredKeywords.isEmpty) return true;
-    for (final content in window) {
-      final lowered = content.toLowerCase();
-      for (final keyword in loweredKeywords) {
-        if (lowered.contains(keyword)) return true;
-      }
-    }
-    return false;
-  }
 
   /// Feature 6 — split a sorted (by `order`) list of enabled agents into the
   /// three pipeline phases.

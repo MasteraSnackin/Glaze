@@ -209,18 +209,20 @@ class StudioControllerOntology {
           role: 'system',
           order: i,
           enabled: spec.id != 'meta',
-          temperature: spec.temperature,
-          maxTokens: spec.maxTokens,
-          timeoutMs: spec.timeoutMs,
           refreshPolicy: spec.refreshPolicy,
           phase: spec.phase,
-          contextSize: spec.contextSize > 0 ? spec.contextSize : 5,
           specId: spec.id,
         ),
       );
     }
     return agents;
   }
+
+  /// Trailing chat messages a controller is handed. Specs that leave it at 0
+  /// fall back to the pipeline default of 5. Accepts a nullable spec for
+  /// convenience with [specForAgent].
+  static int contextSizeOf(StudioControllerSpec? spec) =>
+      spec != null && spec.contextSize > 0 ? spec.contextSize : 5;
 
   /// Map an existing agent back to its controller spec. Prefers the agent's
   /// [StudioAgent.specId], then its [StudioAgent.controllerId]; returns null

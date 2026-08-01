@@ -80,6 +80,8 @@ class StudioAgentExecutor {
     required CancelToken cancelToken,
     String? apiConfigId,
     StudioTurnConfigSnapshot? turnConfig,
+    // 0 = the agent spec's own context size.
+    int trackerContextOverride = 0,
     void Function(String text)? onIntermediateUpdate,
   }) async {
     if (_briefParser.isMetaPolicyAgent(agent)) {
@@ -97,6 +99,7 @@ class StudioAgentExecutor {
         studioPreset: studioPreset,
         priorBriefs: const [],
         isFinalResponse: false,
+        trackerContextOverride: trackerContextOverride,
       );
       final result = await _runner.runAgent(
         agent: agent,
@@ -166,11 +169,9 @@ class StudioAgentExecutor {
             (turnConfig?.pipelineSettings ?? _readPipelineSettings())
                 .studioAgent
                 .studioPostControllerContextSize;
-        final effectiveAgent = override > 0
-            ? agent.copyWith(contextSize: override)
-            : agent;
         final messages = _messageBuilder.buildAgentMessages(
-          agent: effectiveAgent,
+          agent: agent,
+          trackerContextOverride: override,
           context: context,
           config: config,
           studioPreset: studioPreset,
@@ -220,6 +221,7 @@ class StudioAgentExecutor {
     required CancelToken cancelToken,
     String? apiConfigId,
     StudioTurnConfigSnapshot? turnConfig,
+    int trackerContextOverride = 0,
   }) async {
     String? lastError;
     for (var attempt = 1; attempt <= 3; attempt++) {
@@ -241,6 +243,8 @@ class StudioAgentExecutor {
           cancelToken: cancelToken,
           apiConfigId: apiConfigId,
           turnConfig: turnConfig,
+          trackerContextOverride: trackerContextOverride,
+          onIntermediateUpdate: null,
         );
         if (brief.status == 'ok' && brief.brief.trim().isNotEmpty) {
           return ControllerBatchResult(

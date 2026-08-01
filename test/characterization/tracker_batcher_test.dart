@@ -250,15 +250,6 @@ Focus: anti-loop
       batcher = ControllerBatcher();
     });
 
-    test('returns true when agent.runIndividually is set', () {
-      final agent = StudioAgent(
-        id: 'x',
-        name: 'Custom',
-        runIndividually: true,
-      );
-      expect(batcher.shouldRunIndividually(agent), isTrue);
-    });
-
     test('returns true when name matches expression/illustrator/lorebook', () {
       expect(
         batcher.shouldRunIndividually(

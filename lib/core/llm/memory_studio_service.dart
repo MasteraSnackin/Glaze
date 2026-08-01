@@ -149,16 +149,8 @@ class MemoryStudioService {
       if (token.isCancelled) {
         return const StudioPipelineResult(status: 'aborted', response: '');
       }
-      final interval = agent.runInterval <= 0 ? 1 : agent.runInterval;
-      if (phaseResult.turnIndex % interval != 0) continue;
-      if (agent.activationKeywords.isNotEmpty &&
-          !StudioActivationGate.matchesActivationKeywords(
-            agent.activationKeywords,
-            phaseResult.historyForScan,
-            agent.activationScanDepth,
-          )) {
-        continue;
-      }
+      // Post-processing agents run every turn: cadence and keyword gating were
+      // per-agent overrides, and an agent no longer carries any (§4).
       final result = await _executor.runPostProcessingTracker(
         agent: agent,
         mainResponse: mainResponse,
@@ -238,19 +230,6 @@ class MemoryStudioService {
     );
   }
 
-  /// Static delegator — see [StudioActivationGate.matchesActivationKeywords].
-  /// Kept on this class because tests reference
-  /// `MemoryStudioService.matchesActivationKeywords`.
-  @visibleForTesting
-  static bool matchesActivationKeywords(
-    List<String> keywords,
-    List<String> historyContents,
-    int scanDepth,
-  ) => StudioActivationGate.matchesActivationKeywords(
-    keywords,
-    historyContents,
-    scanDepth,
-  );
 
   /// Static delegator — see [StudioActivationGate.splitAgentsByPhase]. Kept on
   /// this class because tests reference `MemoryStudioService.splitAgentsByPhase`.

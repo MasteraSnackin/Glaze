@@ -12,6 +12,7 @@ import 'agent_stream_runner.dart';
 import 'studio/agent_config_resolver.dart';
 import 'studio_turn_config_snapshot.dart';
 import 'transport/transport_factory.dart';
+import 'studio_controller_ontology.dart';
 
 /// Thin LLM orchestrator extracted from `MemoryStudioService` (Phase 5.1,
 /// port of Marinara `agent-executor.ts` single-agent execution path).
@@ -237,7 +238,7 @@ class AgentRunner {
   /// timeout.
   ///
   /// Resolution order:
-  /// 1. [StudioAgent.timeoutMs] (>4000ms, minimum 1000ms) —
+  /// 1. The agent spec's `timeoutMs` (>4000ms, minimum 1000ms) —
   ///    per-agent override set at Studio build time.
   /// 2. [PipelineSettings.studioAgent.studioTimeoutMs] (>0, minimum 1000ms)
   ///    — global user setting from the Post-Building menu.
@@ -257,8 +258,9 @@ class AgentRunner {
     if (slot > 0) {
       return slot < 1000 ? 1000 : slot;
     }
-    if (agent.timeoutMs > 4000) {
-      return agent.timeoutMs < 1000 ? 1000 : agent.timeoutMs;
+    final specTimeout = StudioControllerOntology.specForAgent(agent)?.timeoutMs ?? 4000;
+    if (specTimeout > 4000) {
+      return specTimeout < 1000 ? 1000 : specTimeout;
     }
     final global = pipeline.studioAgent.studioTimeoutMs;
     if (global > 0) {
