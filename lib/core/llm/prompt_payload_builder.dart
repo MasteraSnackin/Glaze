@@ -119,6 +119,14 @@ class PromptPayloadBuilder {
     return PromptPayload.fromGenerationContext(inputs, preset: preset);
   }
 
+  Future<PromptPayload> buildOrdinaryFromGenerationContext(
+    GenerationContextInputs inputs, {
+    bool Function()? shouldAbort,
+  }) async {
+    final preset = await _resolveOrdinaryPreset(shouldAbort: shouldAbort);
+    return PromptPayload.fromGenerationContext(inputs, preset: preset);
+  }
+
   /// Collects all live generation source data without selecting or reading an
   /// ordinary preset. Request compilers attach their own typed configuration.
   Future<GenerationContextInputs> collectGenerationContext({

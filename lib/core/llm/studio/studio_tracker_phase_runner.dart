@@ -14,6 +14,8 @@ import '../studio_brief_cache.dart';
 import '../studio_brief_parser.dart';
 import '../studio_stage_brief.dart';
 import '../studio_turn_config_snapshot.dart';
+import '../generation_context_inputs.dart';
+import 'studio_context.dart';
 import '../tracker_batcher.dart';
 import 'studio_tracker_result_mapper.dart';
 
@@ -325,6 +327,218 @@ class StudioTrackerPhaseRunner {
       }
       _log('tracker cycle error session=$sessionId error=$e');
       return PreGenPhaseResult(status: 'error', error: '$e');
+    }
+  }
+
+  Future<PreGenPhaseResult> runFromContext({
+    required StudioConfig config,
+    required String presetId,
+    required GenerationContextInputs inputs,
+    required StudioContext context,
+    required ApiConfig apiConfig,
+    required String sessionId,
+    required CancelToken token,
+    StudioPreset? studioPreset,
+    StudioTurnConfigSnapshot? turnConfig,
+  }) async {
+    if (token.isCancelled) {
+      return const PreGenPhaseResult(status: 'aborted');
+    }
+    final resolvedPreset = studioPreset == null
+        ? await resolvePreset(presetId)
+        : (preset: studioPreset, error: null);
+    if (resolvedPreset.error != null) {
+      return PreGenPhaseResult(status: 'error', error: resolvedPreset.error);
+    }
+    final effectivePreset = resolvedPreset.preset!;
+    try {
+      final agents = config.agents.where((agent) => agent.enabled).toList()
+        ..sort((a, b) => a.order.compareTo(b.order));
+      if (agents.isEmpty) return const PreGenPhaseResult(status: 'disabled');
+      if (token.isCancelled) return const PreGenPhaseResult(status: 'aborted');
+
+      final split = StudioActivationGate.splitAgentsByPhase(agents);
+      if (split.finalAgent == null) {
+        return const PreGenPhaseResult(status: 'disabled');
+      }
+      final sceneKey = _briefCache.sceneCacheKeyFromInputs(inputs);
+      final turnIndex = _briefCache.assistantTurnCountFromInputs(inputs);
+      final allHistory = context.history
+          .map((message) => message.content)
+          .toList();
+      final historyForScan = allHistory.length > 8
+          ? allHistory.sublist(allHistory.length - 8)
+          : allHistory;
+      final dueTrackers = split.preGenTrackers.where((agent) {
+        final interval = agent.runInterval <= 0 ? 1 : agent.runInterval;
+        if (turnIndex % interval != 0) return false;
+        return agent.activationKeywords.isEmpty ||
+            StudioActivationGate.matchesActivationKeywords(
+              agent.activationKeywords,
+              historyForScan,
+              agent.activationScanDepth,
+            );
+      }).toList();
+
+      final cachedBriefs = <StudioStageBrief>[];
+      final fetchTrackers = <StudioAgent>[];
+      final cacheProbeByAgent = <String, CacheProbe>{};
+      final trackerContextOverride =
+          (turnConfig?.pipelineSettings ?? _readPipelineSettings())
+              .studioAgent
+              .studioTrackerContextSize;
+      for (final agent in dueTrackers) {
+        final resolvedConfig = await _executor.resolveTrackerConfig(
+          agent: agent,
+          apiConfig: apiConfig,
+          sessionId: sessionId,
+          apiConfigId: config.cheapApiConfigId,
+          turnConfig: turnConfig,
+        );
+        if (token.isCancelled) {
+          return const PreGenPhaseResult(status: 'aborted');
+        }
+        final probe = _briefCache.probeCacheFromInputs(
+          agent: agent,
+          config: config,
+          studioPreset: effectivePreset,
+          sessionId: sessionId,
+          resolvedConfig: resolvedConfig,
+          trackerContextSize: trackerContextOverride,
+          maxTokensOverride: _executor.effectiveMaxTokens(agent, turnConfig),
+          temperatureOverride: _executor.effectiveTemperature(
+            agent,
+            turnConfig,
+          ),
+          inputs: inputs,
+          sceneKey: sceneKey,
+          turnIndex: turnIndex,
+        );
+        cacheProbeByAgent[agent.id] = probe;
+        if (probe.hit && probe.brief != null) {
+          cachedBriefs.add(probe.brief!);
+        } else {
+          fetchTrackers.add(agent);
+        }
+      }
+
+      final grouping = await _batcher.groupAgents(
+        agents: fetchTrackers,
+        apiConfig: apiConfig,
+        sessionId: sessionId,
+        apiConfigId: config.cheapApiConfigId,
+        turnConfig: turnConfig,
+      );
+      final fetchedResults = await _batcher.runPhase(
+        batchGroups: grouping.batchGroups,
+        individualAgents: grouping.individualAgents,
+        runBatch: (group) => _batchCoordinator.runBatchGroupFromContext(
+          group: group,
+          config: config,
+          studioPreset: effectivePreset,
+          context: context,
+          apiConfig: apiConfig,
+          sessionId: sessionId,
+          cancelToken: token,
+          apiConfigId: config.cheapApiConfigId,
+          batchContextSize: trackerContextOverride,
+          turnConfig: turnConfig,
+        ),
+        runIndividual: (agent) => _executor.runIndividualTrackerFromContext(
+          agent: agent.copyWith(contextSize: trackerContextOverride),
+          config: config,
+          studioPreset: effectivePreset,
+          context: context,
+          apiConfig: apiConfig,
+          sessionId: sessionId,
+          cancelToken: token,
+          apiConfigId: config.cheapApiConfigId,
+          turnConfig: turnConfig,
+        ),
+      );
+      if (token.isCancelled) return const PreGenPhaseResult(status: 'aborted');
+      final failure = _resultMapper.firstFailedTrackerResult(fetchedResults);
+      if (failure != null) {
+        final failedBriefs = _resultMapper.trackerResultsToBriefs(
+          fetchedResults,
+          dueTrackers,
+          cacheProbeByAgent,
+        );
+        final error = _resultMapper.trackerFailureMessage(failure);
+        _log('tracker cycle failed session=$sessionId error=$error');
+        return PreGenPhaseResult(
+          status: 'error',
+          briefs: failedBriefs,
+          error: error,
+        );
+      }
+
+      final fetchedBriefs = <StudioStageBrief>[];
+      for (final result in fetchedResults) {
+        final probe = cacheProbeByAgent[result.agentId];
+        final agent = dueTrackers.firstWhere(
+          (candidate) => candidate.id == result.agentId,
+        );
+        final brief = StudioStageBrief(
+          agentId: result.agentId,
+          agentName: result.agentName,
+          brief: result.status == 'ok'
+              ? _briefParser.sanitizeIntermediateAgentOutput(agent, result.text)
+              : result.text,
+          status: result.status,
+          error: result.error,
+          refreshPolicy: probe?.policy ?? 'turn',
+          cacheKey: _briefCache.isCacheablePolicy(probe?.policy ?? 'turn')
+              ? probe?.cacheKey
+              : null,
+          cacheHit: false,
+        );
+        _briefCache.persistCacheIfCacheable(
+          agent: agent,
+          brief: brief,
+          cacheKey: probe?.cacheKey ?? '',
+          policy: probe?.policy ?? 'turn',
+          turnIndex: turnIndex,
+          cancelToken: token,
+        );
+        fetchedBriefs.add(brief);
+      }
+      final briefs = <StudioStageBrief>[];
+      for (final agent in dueTrackers) {
+        final cached = cachedBriefs
+            .where((brief) => brief.agentId == agent.id)
+            .firstOrNull;
+        if (cached != null) {
+          briefs.add(cached);
+          continue;
+        }
+        final fetched = fetchedBriefs
+            .where((brief) => brief.agentId == agent.id)
+            .firstOrNull;
+        if (fetched != null) briefs.add(fetched);
+      }
+      return PreGenPhaseResult(
+        status: 'ok',
+        briefs: briefs,
+        split: split,
+        turnIndex: turnIndex,
+        historyForScan: historyForScan,
+        studioPreset: effectivePreset,
+      );
+    } on TimeoutException catch (error) {
+      return PreGenPhaseResult(
+        status: 'timeout',
+        error: error.message?.isNotEmpty == true
+            ? error.message
+            : 'Studio timed out',
+      );
+    } catch (error) {
+      if (token.isCancelled ||
+          (error is DioException && CancelToken.isCancel(error))) {
+        return const PreGenPhaseResult(status: 'aborted');
+      }
+      _log('tracker cycle error session=$sessionId error=$error');
+      return PreGenPhaseResult(status: 'error', error: '$error');
     }
   }
 }

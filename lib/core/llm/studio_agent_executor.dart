@@ -11,6 +11,7 @@ import 'studio_message_builder.dart';
 import 'studio_stage_brief.dart';
 import 'tracker_batcher.dart';
 import 'studio_turn_config_snapshot.dart';
+import 'studio/studio_context.dart';
 
 /// Runs the per-agent LLM calls of the Studio chat-time pipeline: the
 /// pre-gen tracker, the post-processing tracker, the individual (non-batch)
@@ -132,6 +133,61 @@ class StudioAgentExecutor {
     }
   }
 
+  Future<StudioStageBrief> runTrackerFromContext({
+    required StudioAgent agent,
+    required StudioContext context,
+    required ApiConfig apiConfig,
+    required StudioConfig config,
+    required StudioPreset studioPreset,
+    required String sessionId,
+    required CancelToken cancelToken,
+    String? apiConfigId,
+    StudioTurnConfigSnapshot? turnConfig,
+    void Function(String text)? onIntermediateUpdate,
+  }) async {
+    if (_briefParser.isMetaPolicyAgent(agent)) {
+      return StudioStageBrief(
+        agentId: agent.id,
+        agentName: agent.name,
+        brief: _briefParser.metaPolicyBrief(agent),
+      );
+    }
+    try {
+      final messages = _messageBuilder.buildAgentMessagesFromContext(
+        agent: agent,
+        context: context,
+        config: config,
+        studioPreset: studioPreset,
+        priorBriefs: const [],
+        isFinalResponse: false,
+      );
+      final result = await _runner.runAgent(
+        agent: agent,
+        messages: messages,
+        apiConfig: apiConfig,
+        sessionId: sessionId,
+        isFinalResponse: false,
+        cancelToken: cancelToken,
+        apiConfigId: apiConfigId,
+        turnConfig: turnConfig,
+        onIntermediateUpdate: onIntermediateUpdate,
+      );
+      return StudioStageBrief(
+        agentId: agent.id,
+        agentName: agent.name,
+        brief: _briefParser.sanitizeIntermediateAgentOutput(agent, result.text),
+      );
+    } on AgentRunFailedException catch (error) {
+      return StudioStageBrief(
+        agentId: error.agentId,
+        agentName: error.agentName,
+        brief: 'Studio agent failed: ${error.reason}',
+        status: 'error',
+        error: error.reason,
+      );
+    }
+  }
+
   /// Feature 6 — run ONE post-processing tracker. The tracker receives the
   /// generator's [mainResponse] in its context (as an extra
   /// `<assistant_response>` block appended to its `dynamic_context`) and
@@ -224,6 +280,76 @@ class StudioAgentExecutor {
     );
   }
 
+  Future<StudioStageBrief> runPostProcessingTrackerFromContext({
+    required StudioAgent agent,
+    required String mainResponse,
+    required StudioContext context,
+    required ApiConfig apiConfig,
+    required StudioConfig config,
+    required StudioPreset studioPreset,
+    required String sessionId,
+    required CancelToken cancelToken,
+    String? apiConfigId,
+    StudioTurnConfigSnapshot? turnConfig,
+  }) async {
+    String? lastError;
+    for (var attempt = 1; attempt <= 3; attempt++) {
+      if (cancelToken.isCancelled) {
+        return StudioStageBrief(
+          agentId: agent.id,
+          agentName: agent.name,
+          brief: '',
+          status: 'error',
+          error: 'cancelled',
+        );
+      }
+      try {
+        final override =
+            (turnConfig?.pipelineSettings ?? _readPipelineSettings())
+                .studioAgent
+                .studioPostTrackerContextSize;
+        final effectiveAgent = override > 0
+            ? agent.copyWith(contextSize: override)
+            : agent;
+        final messages = _messageBuilder.buildAgentMessagesFromContext(
+          agent: effectiveAgent,
+          context: context,
+          config: config,
+          studioPreset: studioPreset,
+          priorBriefs: const [],
+          isFinalResponse: false,
+          mainResponse: mainResponse,
+        );
+        final result = await _runner.runAgent(
+          agent: agent,
+          messages: messages,
+          apiConfig: apiConfig,
+          sessionId: sessionId,
+          isFinalResponse: false,
+          cancelToken: cancelToken,
+          apiConfigId: apiConfigId,
+          turnConfig: turnConfig,
+        );
+        final text = result.text.trim();
+        return StudioStageBrief(
+          agentId: agent.id,
+          agentName: agent.name,
+          brief: text,
+          status: text.isNotEmpty ? 'ok' : 'skipped',
+        );
+      } on AgentRunFailedException catch (error) {
+        lastError = error.reason;
+      }
+    }
+    return StudioStageBrief(
+      agentId: agent.id,
+      agentName: agent.name,
+      brief: '',
+      status: 'error',
+      error: lastError ?? 'tracker failed after 2 retries',
+    );
+  }
+
   /// Run one individual tracker (not part of any batch group). Reuses the
   /// existing per-agent prompt assembly + AgentRunner.
   Future<TrackerBatchResult> runIndividualTracker({
@@ -282,6 +408,59 @@ class StudioAgentExecutor {
     );
   }
 
+  Future<TrackerBatchResult> runIndividualTrackerFromContext({
+    required StudioAgent agent,
+    required StudioConfig config,
+    required StudioPreset studioPreset,
+    required StudioContext context,
+    required ApiConfig apiConfig,
+    required String sessionId,
+    required CancelToken cancelToken,
+    String? apiConfigId,
+    StudioTurnConfigSnapshot? turnConfig,
+  }) async {
+    String? lastError;
+    for (var attempt = 1; attempt <= 3; attempt++) {
+      if (cancelToken.isCancelled) {
+        return TrackerBatchResult.failed(
+          agentId: agent.id,
+          agentName: agent.name,
+          reason: 'cancelled',
+        );
+      }
+      try {
+        final brief = await runTrackerFromContext(
+          agent: agent,
+          context: context,
+          apiConfig: apiConfig,
+          config: config,
+          studioPreset: studioPreset,
+          sessionId: sessionId,
+          cancelToken: cancelToken,
+          apiConfigId: apiConfigId,
+          turnConfig: turnConfig,
+        );
+        if (brief.status == 'ok' && brief.brief.trim().isNotEmpty) {
+          return TrackerBatchResult(
+            agentId: agent.id,
+            agentName: agent.name,
+            text: brief.brief,
+            status: brief.status,
+            error: brief.error,
+          );
+        }
+        lastError = brief.error ?? 'tracker returned an empty response';
+      } catch (error) {
+        lastError = formatError(error);
+      }
+    }
+    return TrackerBatchResult.failed(
+      agentId: agent.id,
+      agentName: agent.name,
+      reason: lastError ?? 'tracker failed after 2 retries',
+    );
+  }
+
   Future<AgentRunResult> runFinalGenerator({
     required StudioAgent agent,
     required PromptResult promptResult,
@@ -328,5 +507,45 @@ class StudioAgentExecutor {
       onFinalResponseUpdate: onFinalResponseUpdate,
     );
     return result;
+  }
+
+  Future<AgentRunResult> runFinalGeneratorFromContext({
+    required StudioAgent agent,
+    required StudioContext context,
+    required ApiConfig apiConfig,
+    required StudioConfig config,
+    required StudioPreset studioPreset,
+    required List<StudioStageBrief> priorBriefs,
+    required String sessionId,
+    required CancelToken cancelToken,
+    String? apiConfigId,
+    StudioTurnConfigSnapshot? turnConfig,
+    void Function(String text, String? reasoning)? onFinalResponseUpdate,
+    void Function(List<Map<String, dynamic>> messages)? onMessagesBuilt,
+  }) async {
+    final settings = turnConfig?.pipelineSettings ?? _readPipelineSettings();
+    final messages = _messageBuilder.buildAgentMessagesFromContext(
+      agent: agent,
+      context: context,
+      config: config,
+      studioPreset: studioPreset,
+      priorBriefs: priorBriefs,
+      isFinalResponse: true,
+      finalContextOverride: settings.studioAgent.studioFinalContextSize,
+      reasoningHistoryCount:
+          settings.studioAgent.studioFinalReasoningHistoryCount,
+    );
+    onMessagesBuilt?.call(messages);
+    return _runner.runAgent(
+      agent: agent,
+      messages: messages,
+      apiConfig: apiConfig,
+      sessionId: sessionId,
+      isFinalResponse: true,
+      cancelToken: cancelToken,
+      apiConfigId: apiConfigId,
+      turnConfig: turnConfig,
+      onFinalResponseUpdate: onFinalResponseUpdate,
+    );
   }
 }

@@ -10,6 +10,7 @@ import 'studio_context_bucketizer.dart';
 import 'studio_message_builder.dart';
 import 'tracker_batcher.dart';
 import 'studio_turn_config_snapshot.dart';
+import 'studio/studio_context.dart';
 
 /// Runs a batch group of Studio chat-time trackers: builds the batched
 /// system prompt + per-agent task text, fires a single LLM request, parses
@@ -170,6 +171,102 @@ class StudioBatchCoordinator {
       'batch group ${group.key} failed after 2 retries: '
       '${lastError ?? 'unknown tracker error'}',
     );
+    return lastParsed ??
+        group.agents
+            .map(
+              (agent) => TrackerBatchResult.failed(
+                agentId: agent.id,
+                agentName: agent.name,
+                reason: lastError ?? 'tracker batch failed after 2 retries',
+              ),
+            )
+            .toList(growable: false);
+  }
+
+  Future<List<TrackerBatchResult>> runBatchGroupFromContext({
+    required TrackerBatchGroup group,
+    required StudioConfig config,
+    required StudioPreset studioPreset,
+    required StudioContext context,
+    required ApiConfig apiConfig,
+    required String sessionId,
+    required CancelToken cancelToken,
+    required int batchContextSize,
+    String? apiConfigId,
+    StudioTurnConfigSnapshot? turnConfig,
+  }) async {
+    final sharedMessages = _messageBuilder.buildSharedBatchMessagesFromContext(
+      context: context,
+      batchContextSize: batchContextSize,
+    );
+    final perAgentTask = <String, String>{};
+    for (final agent in group.agents) {
+      perAgentTask[agent.id] = _messageBuilder.buildPerAgentTaskTextFromContext(
+        agent: agent,
+        config: config,
+        studioPreset: studioPreset,
+        context: context,
+      );
+    }
+    final roleText = _messageBuilder.batchRoleTextFromContext(
+      config,
+      studioPreset,
+      context,
+    );
+    final systemPrompt = _batcher.buildBatchSystemPrompt(
+      group: group,
+      sharedMessages: sharedMessages,
+      perAgentTaskText: perAgentTask,
+      roleText: roleText,
+    );
+    final batchMessages = <Map<String, dynamic>>[
+      {'role': 'system', 'content': systemPrompt},
+      {
+        'role': 'user',
+        'content':
+            'Produce the required <result> blocks now, one per agent_task '
+            'listed above, in order.',
+      },
+    ];
+    final batchAgent = group.agents.first.copyWith(
+      maxTokens: group.batchMaxTokens,
+      temperature: group.batchTemperature,
+      contextSize: batchContextSize,
+    );
+    List<TrackerBatchResult>? lastParsed;
+    String? lastError;
+    for (var attempt = 1; attempt <= 3; attempt++) {
+      if (cancelToken.isCancelled) {
+        throw const AgentRunFailedException(
+          agentId: 'batch',
+          agentName: 'Studio tracker batch',
+          reason: 'cancelled',
+        );
+      }
+      try {
+        final result = await _runner.runAgent(
+          agent: batchAgent,
+          messages: batchMessages,
+          apiConfig: apiConfig,
+          sessionId: sessionId,
+          isFinalResponse: false,
+          cancelToken: cancelToken,
+          preResolvedConfig: group.resolved,
+          turnConfig: turnConfig,
+        );
+        final parsed = _batcher.parseBatchResponse(result.text, group);
+        if (_allOk(parsed)) return parsed;
+        lastParsed = parsed;
+        final failedCount = parsed
+            .where((result) => result.status != 'ok')
+            .length;
+        lastError = '$failedCount tracker result(s) missing or invalid';
+      } on AgentRunFailedException catch (error) {
+        if (cancelToken.isCancelled) rethrow;
+        lastError = error.reason;
+        _log('batch ${group.key} attempt $attempt failed: $lastError');
+      }
+    }
     return lastParsed ??
         group.agents
             .map(

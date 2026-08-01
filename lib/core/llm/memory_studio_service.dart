@@ -24,6 +24,8 @@ import 'studio_turn_config_snapshot.dart';
 import 'tracker_batcher.dart';
 import 'studio/studio_tracker_phase_runner.dart';
 import 'studio/studio_tracker_result_mapper.dart';
+import 'generation_context_inputs.dart';
+import 'studio/studio_context.dart';
 
 // Re-export so existing importers of `AgentPhaseSplit` via this file (e.g.
 // tests, studio_post_processing) keep their import path after the move to
@@ -235,6 +237,123 @@ class MemoryStudioService {
     );
   }
 
+  Future<StudioPipelineResult> runTrackerCycleFromContext({
+    required StudioConfig config,
+    required GenerationContextInputs inputs,
+    required StudioContext trackerContext,
+    required StudioContext finalContext,
+    required ApiConfig apiConfig,
+    required String sessionId,
+    StudioTurnConfigSnapshot? turnConfig,
+    CancelToken? cancelToken,
+    void Function(String text, String? reasoning)? onFinalResponseUpdate,
+    void Function()? onFinalStart,
+    void Function(List<Map<String, dynamic>> messages)? onFinalMessagesBuilt,
+  }) async {
+    final token = cancelToken ?? CancelToken();
+    if (token.isCancelled) {
+      return const StudioPipelineResult(status: 'aborted', response: '');
+    }
+    final phaseResult = await _phaseRunner.runFromContext(
+      config: config,
+      presetId:
+          turnConfig?.preset?.id ??
+          await _ref.read(activeStudioPresetProvider.future),
+      studioPreset: turnConfig?.preset,
+      inputs: inputs,
+      context: trackerContext,
+      apiConfig: apiConfig,
+      sessionId: sessionId,
+      token: token,
+      turnConfig: turnConfig,
+    );
+    if (phaseResult.status != 'ok') {
+      return StudioPipelineResult(
+        status: phaseResult.status,
+        response: '',
+        stageBriefs: phaseResult.briefs,
+        error: phaseResult.error,
+      );
+    }
+    final briefs = phaseResult.briefs;
+    final split = phaseResult.split!;
+    final studioPreset = phaseResult.studioPreset!;
+    final finalAgent = split.finalAgent!;
+    onFinalStart?.call();
+    final agentResult = await _executor.runFinalGeneratorFromContext(
+      agent: finalAgent,
+      context: finalContext,
+      apiConfig: apiConfig,
+      config: config,
+      studioPreset: studioPreset,
+      priorBriefs: briefs,
+      sessionId: sessionId,
+      cancelToken: token,
+      apiConfigId: config.expensiveApiConfigId,
+      onFinalResponseUpdate: onFinalResponseUpdate,
+      onMessagesBuilt: onFinalMessagesBuilt,
+      turnConfig: turnConfig,
+    );
+    if (token.isCancelled) {
+      return const StudioPipelineResult(status: 'aborted', response: '');
+    }
+    var mainResponse = agentResult.text;
+    var mainReasoning = agentResult.reasoning;
+    final postBriefs = <StudioStageBrief>[];
+    for (final agent in split.postGenTrackers) {
+      if (token.isCancelled) {
+        return const StudioPipelineResult(status: 'aborted', response: '');
+      }
+      final interval = agent.runInterval <= 0 ? 1 : agent.runInterval;
+      if (phaseResult.turnIndex % interval != 0) continue;
+      if (agent.activationKeywords.isNotEmpty &&
+          !StudioActivationGate.matchesActivationKeywords(
+            agent.activationKeywords,
+            phaseResult.historyForScan,
+            agent.activationScanDepth,
+          )) {
+        continue;
+      }
+      final result = await _executor.runPostProcessingTrackerFromContext(
+        agent: agent,
+        mainResponse: mainResponse,
+        context: finalContext,
+        apiConfig: apiConfig,
+        config: config,
+        studioPreset: studioPreset,
+        sessionId: sessionId,
+        cancelToken: token,
+        apiConfigId: config.cleanerApiConfigId,
+        turnConfig: turnConfig,
+      );
+      postBriefs.add(result);
+      if (result.status == 'error') {
+        return StudioPipelineResult(
+          status: 'error',
+          response: '',
+          stageBriefs: [...briefs, ...postBriefs],
+          error:
+              'Studio tracker "${result.agentName}" failed after 2 retries: '
+              '${result.error ?? 'tracker failed'}. Please restart generation.',
+        );
+      }
+      if (result.status == 'ok' && result.brief.trim().isNotEmpty) {
+        mainResponse = result.brief.trim();
+        mainReasoning = '';
+      }
+    }
+    return StudioPipelineResult(
+      status: mainResponse.trim().isEmpty ? 'error' : 'ok',
+      response: mainResponse,
+      reasoning: mainReasoning,
+      rawResponseJson: agentResult.rawResponseJson,
+      stageBriefs: [...briefs, ...postBriefs],
+      error: mainResponse.trim().isEmpty
+          ? 'Final generator returned an empty response'
+          : null,
+    );
+  }
+
   /// Tracker-only cycle: runs the pre-gen tracker phase and returns the
   /// produced briefs WITHOUT firing the final generator or post-gen
   /// trackers. Used by [TrackerMemoryRecoveryService] to restore lost
@@ -264,6 +383,40 @@ class MemoryStudioService {
       token: token,
     );
 
+    return StudioPipelineResult(
+      status: phaseResult.status,
+      response: '',
+      stageBriefs: phaseResult.briefs,
+      error: phaseResult.error,
+    );
+  }
+
+  Future<StudioPipelineResult> runTrackersOnlyFromContext({
+    required StudioConfig config,
+    required GenerationContextInputs inputs,
+    required StudioContext context,
+    required ApiConfig apiConfig,
+    required String sessionId,
+    StudioTurnConfigSnapshot? turnConfig,
+    CancelToken? cancelToken,
+  }) async {
+    final token = cancelToken ?? CancelToken();
+    if (token.isCancelled) {
+      return const StudioPipelineResult(status: 'aborted', response: '');
+    }
+    final phaseResult = await _phaseRunner.runFromContext(
+      config: config,
+      presetId:
+          turnConfig?.preset?.id ??
+          await _ref.read(activeStudioPresetProvider.future),
+      studioPreset: turnConfig?.preset,
+      inputs: inputs,
+      context: context,
+      apiConfig: apiConfig,
+      sessionId: sessionId,
+      token: token,
+      turnConfig: turnConfig,
+    );
     return StudioPipelineResult(
       status: phaseResult.status,
       response: '',

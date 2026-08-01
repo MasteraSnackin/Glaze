@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:glaze_flutter/core/llm/prompt_builder.dart';
+import 'package:glaze_flutter/core/llm/studio/studio_stream_interceptor.dart';
 import 'package:glaze_flutter/core/models/api_config.dart';
 import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
@@ -118,6 +119,15 @@ void main() {
   });
 
   group('studioFinalVisibleMessageIds', () {
+    test('typed Studio window treats zero context size as unlimited', () {
+      final ids = StudioStreamInterceptor.computeStudioVisibleMessageIds(const [
+        ChatMessage(id: 'one', role: 'user', content: 'one'),
+        ChatMessage(id: 'two', role: 'assistant', content: 'two'),
+      ], 0);
+
+      expect(ids, {'one', 'two'});
+    });
+
     test('returns empty set when finalContextSize is 0', () {
       final ids = StreamGenerationService.computeStudioFinalVisibleMessageIds([
         _msg('m1'),

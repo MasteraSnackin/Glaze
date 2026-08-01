@@ -51,6 +51,16 @@ class StudioStreamInterceptor {
     return selected.toSet();
   }
 
+  /// Studio context semantics: a non-positive count means all history, still
+  /// bounded by the same token cap used by the final history limiter.
+  static Set<String> computeStudioVisibleMessageIds(
+    List<ChatMessage> history,
+    int contextSize,
+  ) {
+    final visibleCount = contextSize > 0 ? contextSize : history.length;
+    return computeStudioFinalVisibleMessageIds(history, visibleCount);
+  }
+
   /// Clone a [PromptPayload] with a different `sourceWindowVisibleMessageIds`.
   static PromptPayload payloadWithSourceWindow(
     PromptPayload payload,

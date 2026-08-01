@@ -3,8 +3,10 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 
 import '../models/studio_config.dart';
+import '../models/chat_message.dart';
 import '../utils/cast_helpers.dart';
 import 'agent_runner.dart';
+import 'generation_context_inputs.dart';
 import 'prompt_builder.dart';
 import 'studio_brief_parser.dart';
 import 'studio_stage_brief.dart';
@@ -80,6 +82,60 @@ class StudioBriefCache {
       );
     }
     return CacheProbe(hit: false, policy: policy, cacheKey: cacheKey);
+  }
+
+  CacheProbe probeCacheFromInputs({
+    required StudioAgent agent,
+    required StudioConfig config,
+    required StudioPreset studioPreset,
+    required String sessionId,
+    required ResolvedAgentConfig resolvedConfig,
+    required int trackerContextSize,
+    required int? maxTokensOverride,
+    required double? temperatureOverride,
+    required GenerationContextInputs inputs,
+    required String sceneKey,
+    required int turnIndex,
+  }) {
+    final policy = effectiveRefreshPolicy(agent);
+    final cacheKey = cacheKeyForAgent(
+      config: config,
+      studioPreset: studioPreset,
+      sessionId: sessionId,
+      resolvedConfig: resolvedConfig,
+      trackerContextSize: trackerContextSize,
+      maxTokensOverride: maxTokensOverride,
+      temperatureOverride: temperatureOverride,
+      agent: agent,
+      policy: policy,
+      sceneKey: sceneKey,
+    );
+    final cached = usableCachedBrief(
+      cacheKey: cacheKey,
+      policy: policy,
+      sceneChanged: lastUserMessageSuggestsSceneChangeFromInputs(inputs),
+      turnIndex: turnIndex,
+    );
+    if (cached == null) {
+      return CacheProbe(hit: false, policy: policy, cacheKey: cacheKey);
+    }
+    return CacheProbe(
+      hit: true,
+      policy: policy,
+      cacheKey: cacheKey,
+      brief: StudioStageBrief(
+        agentId: agent.id,
+        agentName: agent.name,
+        brief: _briefParser.sanitizeIntermediateAgentOutput(
+          agent,
+          cached.brief,
+        ),
+        status: 'cached',
+        refreshPolicy: policy,
+        cacheKey: cacheKey,
+        cacheHit: true,
+      ),
+    );
   }
 
   /// Persist a freshly-fetched brief into the cache if its refresh policy is
@@ -244,8 +300,36 @@ class StudioBriefCache {
     return payload.history.where((m) => m.role == 'assistant').length;
   }
 
+  String sceneCacheKeyFromInputs(GenerationContextInputs inputs) {
+    final summary = inputs.summaryContent?.trim() ?? '';
+    final authorsNote = inputs.authorsNote?.content.trim() ?? '';
+    final recentAssistants = inputs.history
+        .where((message) => message.role == 'assistant')
+        .length;
+    return computeHash(
+      jsonEncode({
+        'characterId': inputs.character.id,
+        'personaId': inputs.persona?.id ?? '',
+        'summary': summary,
+        'authorsNote': authorsNote,
+        'assistantBucket': recentAssistants ~/ 4,
+      }),
+    );
+  }
+
+  int assistantTurnCountFromInputs(GenerationContextInputs inputs) =>
+      inputs.history.where((message) => message.role == 'assistant').length;
+
+  bool lastUserMessageSuggestsSceneChangeFromInputs(
+    GenerationContextInputs inputs,
+  ) => _historySuggestsSceneChange(inputs.history);
+
   bool lastUserMessageSuggestsSceneChange(PromptPayload payload) {
-    for (final message in payload.history.reversed) {
+    return _historySuggestsSceneChange(payload.history);
+  }
+
+  bool _historySuggestsSceneChange(List<ChatMessage> history) {
+    for (final message in history.reversed) {
       if (message.role != 'user') continue;
       final text = message.content.toLowerCase();
       return RegExp(

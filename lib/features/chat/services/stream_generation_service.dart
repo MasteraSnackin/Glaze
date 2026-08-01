@@ -10,6 +10,11 @@ import '../../../core/llm/history_assembler.dart';
 import '../../../core/llm/prompt_isolate.dart';
 import '../../../core/llm/prompt/main_model_context_snapshot.dart';
 import '../../../core/llm/studio/studio_stream_interceptor.dart';
+import '../../../core/llm/studio/studio_context.dart';
+import '../../../core/llm/studio/studio_context_preparer.dart';
+import '../../../core/llm/prompt/prompt_payload.dart';
+import '../../../core/llm/prompt/prompt_result.dart';
+import '../../../core/llm/context_calculator.dart';
 import '../../../core/llm/stream_accumulator.dart';
 import '../../../core/llm/beauty_state_parser.dart';
 import '../../../core/llm/idle_timeout_guard.dart';
@@ -96,7 +101,7 @@ class StreamGenerationService {
       }
 
       final builder = _ref.read(promptPayloadBuilderProvider);
-      final payload = await builder.buildFromSession(
+      final inputs = await builder.collectGenerationContext(
         charId: _charId,
         session: session,
         apiConfigOverride: turnConfig.activeApiConfig,
@@ -111,7 +116,7 @@ class StreamGenerationService {
           visibleStartIndex: vsi,
         );
       }
-      final apiConfig = payload.apiConfig;
+      final apiConfig = inputs.apiConfig;
 
       final pipelineSettings = turnConfig.pipelineSettings;
       final studioFinalContextSize = studioConfig == null
@@ -121,18 +126,32 @@ class StreamGenerationService {
           : studioConfig.maxFinalHistoryMessages;
       final studioFinalVisibleMessageIds = studioConfig == null
           ? const <String>{}
-          : StudioStreamInterceptor.computeStudioFinalVisibleMessageIds(
-              payload.history,
+          : StudioStreamInterceptor.computeStudioVisibleMessageIds(
+              inputs.history,
               studioFinalContextSize,
             );
-      final finalPayload = studioConfig != null
-          ? StudioStreamInterceptor.payloadWithSourceWindow(
-              payload,
-              studioFinalVisibleMessageIds,
+      final payload = studioConfig == null
+          ? await builder.buildOrdinaryFromGenerationContext(
+              inputs,
+              shouldAbort: _isAborted,
             )
-          : payload;
-
-      final promptResult = await buildPromptInIsolate(finalPayload);
+          : PromptPayload.fromGenerationContext(inputs, preset: null);
+      final finalPayload = studioConfig == null
+          ? payload
+          : PromptPayload.fromGenerationContext(
+              inputs,
+              preset: null,
+              sourceWindowVisibleMessageIds: studioFinalVisibleMessageIds,
+            );
+      final finalStudioContext = studioConfig == null
+          ? null
+          : const StudioContextPreparer().prepare(
+              inputs: inputs,
+              visibleMessageIds: studioFinalVisibleMessageIds,
+            );
+      final promptResult = studioConfig == null
+          ? await buildPromptInIsolate(finalPayload)
+          : _studioCompatibilityResult(finalStudioContext!);
       if (_isAborted()) {
         return ChatState(
           session: saveSession ?? session,
@@ -203,18 +222,17 @@ class StreamGenerationService {
         final trackerContextSize =
             pipelineSettings.studioAgent.studioTrackerContextSize;
         final trackerVisibleMessageIds =
-            StudioStreamInterceptor.computeStudioFinalVisibleMessageIds(
-              payload.history,
+            StudioStreamInterceptor.computeStudioVisibleMessageIds(
+              inputs.history,
               trackerContextSize,
             );
-        final trackerPayload = StudioStreamInterceptor.payloadWithSourceWindow(
-          payload,
-          trackerVisibleMessageIds,
-        );
-        final trackerPromptResult =
+        final trackerStudioContext =
             setEquals(trackerVisibleMessageIds, studioFinalVisibleMessageIds)
-            ? promptResult
-            : await buildPromptInIsolate(trackerPayload);
+            ? finalStudioContext!
+            : const StudioContextPreparer().prepare(
+                inputs: inputs,
+                visibleMessageIds: trackerVisibleMessageIds,
+              );
         if (_isAborted()) {
           return ChatState(
             session: saveSession ?? session,
@@ -252,12 +270,11 @@ class StreamGenerationService {
           });
         }
 
-        final studioResult = await studioService.runTrackerCycle(
+        final studioResult = await studioService.runTrackerCycleFromContext(
           config: studioConfig,
-          promptResult: trackerPromptResult,
-          promptPayload: trackerPayload,
-          finalPromptResult: promptResult,
-          finalPromptPayload: finalPayload,
+          inputs: inputs,
+          trackerContext: trackerStudioContext,
+          finalContext: finalStudioContext!,
           apiConfig: apiConfig,
           sessionId: session.id,
           turnConfig: turnConfig,
@@ -698,6 +715,33 @@ class StreamGenerationService {
         visibleStartIndex: vsi,
       );
     }
+  }
+
+  PromptResult _studioCompatibilityResult(StudioContext context) {
+    final messages = <PromptMessage>[
+      ...context.staticContext,
+      ...context.dynamicContext,
+      ...context.history,
+    ];
+    return PromptResult(
+      messages: messages,
+      breakdown: TokenBreakdown(
+        sourceTokens: const {},
+        staticTotal: 0,
+        historyBudget: 0,
+        historyTokens: 0,
+        totalTokens: 0,
+        cutoffIndex: 0,
+        trimmedHistory: context.history,
+        vectorLoreTokens: context.diagnostics.vectorLoreTokens,
+        visibleMessageIds: context.diagnostics.visibleMessageIds,
+      ),
+      sessionVars: context.sessionVars,
+      globalVars: context.globalVars,
+      triggeredLorebooks: context.diagnostics.triggeredLorebooks,
+      triggeredMemories: context.diagnostics.triggeredMemories,
+      memoryCoverage: context.diagnostics.memoryCoverage,
+    );
   }
 
   static void _rememberRequest(

@@ -11,6 +11,8 @@ void main() {
       File('lib/core/llm/prompt/recalled_messages_resolver.dart'),
       File('lib/core/llm/prompt/lorebook_context_resolver.dart'),
       File('lib/core/llm/prompt/memory_context_resolver.dart'),
+      File('lib/core/llm/studio/studio_context.dart'),
+      File('lib/core/llm/studio/studio_context_preparer.dart'),
     ];
     final featureImport = RegExp(r'''import\s+['"][^'"]*features/[^'"]*['"]''');
     final providerDeclaration = RegExp(
@@ -46,6 +48,8 @@ void main() {
       'lib/core/llm/prompt/recalled_messages_resolver.dart',
       'lib/core/llm/prompt/lorebook_context_resolver.dart',
       'lib/core/llm/prompt/memory_context_resolver.dart',
+      'lib/core/llm/studio/studio_context.dart',
+      'lib/core/llm/studio/studio_context_preparer.dart',
     ]) {
       final source = File(path).readAsStringSync();
       expect(source, isNot(contains("models/preset.dart")));

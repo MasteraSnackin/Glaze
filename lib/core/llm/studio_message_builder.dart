@@ -8,6 +8,7 @@ import 'studio_stage_brief.dart';
 import 'studio/studio_brief_macro_renderer.dart';
 import 'studio/studio_history_limiter.dart';
 import 'studio/studio_runtime_block_expander.dart';
+import 'studio/studio_context.dart';
 
 /// Builds the per-agent, batch, and final-generator message lists for the
 /// Studio chat-time pipeline. Extracted from `MemoryStudioService` (plan §2.7).
@@ -25,6 +26,173 @@ class StudioMessageBuilder {
       StudioRuntimeBlockExpander(_briefMacroRenderer);
 
   StudioMessageBuilder(this._bucketizer, this._promptText, this._briefDeduper);
+
+  List<Map<String, dynamic>> buildAgentMessagesFromContext({
+    required StudioAgent agent,
+    required StudioContext context,
+    required StudioConfig config,
+    required StudioPreset studioPreset,
+    required List<StudioStageBrief> priorBriefs,
+    required bool isFinalResponse,
+    String mainResponse = '',
+    int finalContextOverride = 0,
+    int reasoningHistoryCount = 0,
+  }) {
+    final section = _blockExpander.sectionForRun(agent, isFinalResponse);
+    final blocks =
+        studioPreset.blocks
+            .where((block) => block.enabled && block.section == section)
+            .where((block) => !_blockExpander.isRuntimeComputedBlock(block))
+            .where(
+              (block) => _blockExpander.blockAppliesToAgent(
+                block,
+                agent,
+                isFinalResponse,
+              ),
+            )
+            .toList()
+          ..sort((a, b) => a.order.compareTo(b.order));
+    final hasExplicitBriefMacros =
+        isFinalResponse &&
+        blocks.any(
+          (block) => _briefMacroRenderer.hasStudioBriefMacro(block.content),
+        );
+    final messages = <Map<String, dynamic>>[];
+
+    for (final block in blocks) {
+      if (block.kind == 'agent_instruction' ||
+          block.kind == 'tracker_instruction') {
+        final control = StringBuffer()
+          ..writeln(
+            _blockExpander
+                .expandStudioContextBlockContent(
+                  block.content,
+                  context: context,
+                  priorBriefs: priorBriefs,
+                  config: config,
+                )
+                .trim(),
+          );
+        if (!isFinalResponse) {
+          control
+            ..writeln()
+            ..writeln(_promptText.intermediateRuntimeEnvelope(agent));
+        }
+        if (isFinalResponse &&
+            (hasExplicitBriefMacros || priorBriefs.isNotEmpty)) {
+          control
+            ..writeln()
+            ..writeln(_promptText.finalBriefUsageNote());
+        }
+        if (isFinalResponse) {
+          final styleContract = _promptText.finalHardStyleContract(config);
+          if (styleContract.isNotEmpty) {
+            control
+              ..writeln()
+              ..writeln(styleContract);
+          }
+        }
+        _addInstructionMessage(messages, block.role, control.toString());
+        continue;
+      }
+      if (block.kind == 'previous_agents') {
+        if (!isFinalResponse || hasExplicitBriefMacros) continue;
+        final sanitized = priorBriefs
+            .where((brief) => brief.brief.trim().isNotEmpty)
+            .map(
+              (brief) =>
+                  _briefDeduper.sanitizePriorBriefForFinal(brief, config),
+            )
+            .toList();
+        final deduped = _briefDeduper.dedupePriorBriefs(sanitized);
+        messages.addAll(
+          deduped
+              .where((brief) => brief.brief.trim().isNotEmpty)
+              .map(
+                (brief) => {
+                  'role': _blockExpander.normalizeInstructionRole(block.role),
+                  'content':
+                      'Studio agent brief: ${brief.agentName}\n${brief.brief}',
+                },
+              ),
+        );
+        continue;
+      }
+      if (block.kind == 'chat_history') {
+        final history = isFinalResponse
+            ? StudioHistoryLimiter.limitFinalHistory(
+                context.history,
+                config,
+                pipelineOverride: finalContextOverride,
+                reasoningHistoryCount: reasoningHistoryCount,
+              )
+            : StudioHistoryLimiter.limitTrackerHistory(
+                context.history,
+                agent.contextSize,
+              );
+        messages.addAll(
+          isFinalResponse &&
+                  (reasoningHistoryCount == -1 || reasoningHistoryCount > 0)
+              ? _historyWithReasoning(history, reasoningHistoryCount)
+              : history.map((message) => message.toApiMap()),
+        );
+        continue;
+      }
+      if (block.kind == 'static_context') {
+        messages.addAll(
+          context.staticContext.map((message) => message.toApiMap()),
+        );
+        continue;
+      }
+      if (block.kind == 'dynamic_context') {
+        messages.addAll(
+          context.dynamicContext.map((message) => message.toApiMap()),
+        );
+        continue;
+      }
+      final slot = studioContextSlotForLegacyKind(block.kind);
+      if (slot != null) {
+        messages.addAll(
+          context.messagesFor(slot).map((message) => message.toApiMap()),
+        );
+        continue;
+      }
+      final content = _blockExpander.expandStudioContextBlockContent(
+        block.content,
+        context: context,
+        priorBriefs: priorBriefs,
+        config: config,
+      );
+      _addInstructionMessage(messages, block.role, content);
+    }
+
+    if (mainResponse.trim().isNotEmpty) {
+      messages.add({
+        'role': 'user',
+        'content':
+            '<assistant_response>\n${mainResponse.trim()}\n</assistant_response>\n\n'
+            'The text above inside <assistant_response> is the generator\'s '
+            'current reply. Edit, rewrite, or fix it according to your '
+            'instructions. Output ONLY the final rewritten reply (no '
+            'explanations, no <assistant_response> wrapper, no markdown '
+            'fences). If no edit is needed, output the text verbatim.',
+      });
+    }
+    return messages;
+  }
+
+  void _addInstructionMessage(
+    List<Map<String, dynamic>> messages,
+    String role,
+    String content,
+  ) {
+    final resolved = content.trim();
+    if (resolved.isEmpty) return;
+    messages.add({
+      'role': _blockExpander.normalizeInstructionRole(role),
+      'content': resolved,
+    });
+  }
 
   /// Build the message list for a single agent run (pre-gen tracker,
   /// post-processing tracker, or final generator). [mainResponse] non-empty
@@ -244,6 +412,22 @@ class StudioMessageBuilder {
     return messages;
   }
 
+  List<Map<String, dynamic>> buildSharedBatchMessagesFromContext({
+    required StudioContext context,
+    required int batchContextSize,
+  }) {
+    final messages = <Map<String, dynamic>>[
+      ...context.staticContext.map((message) => message.toApiMap()),
+      ...context.dynamicContext.map((message) => message.toApiMap()),
+    ];
+    final history = StudioHistoryLimiter.limitTrackerHistory(
+      context.history,
+      batchContextSize,
+    );
+    messages.addAll(history.map((message) => message.toApiMap()));
+    return messages;
+  }
+
   /// Per-agent task text: the agent's `promptShard` + the preset's
   /// `agent_instruction` block content + the runtime envelope.
   String buildPerAgentTaskText({
@@ -288,6 +472,45 @@ class StudioMessageBuilder {
     return buf.toString().trim();
   }
 
+  String buildPerAgentTaskTextFromContext({
+    required StudioAgent agent,
+    required StudioConfig config,
+    required StudioPreset studioPreset,
+    required StudioContext context,
+  }) {
+    final blocks =
+        studioPreset.blocks
+            .where((block) => block.enabled && block.section == 'pregen')
+            .where(
+              (block) =>
+                  block.kind == 'agent_instruction' ||
+                  (block.kind == 'tracker_instruction' &&
+                      _blockExpander.trackerInstructionAppliesToAgent(
+                        block,
+                        agent,
+                      )),
+            )
+            .where((block) => !_blockExpander.isRuntimeComputedBlock(block))
+            .toList()
+          ..sort((a, b) => a.order.compareTo(b.order));
+    final buffer = StringBuffer();
+    for (final block in blocks) {
+      final content = _blockExpander
+          .expandStudioContextBlockContent(
+            block.content,
+            context: context,
+            config: config,
+          )
+          .trim();
+      if (content.isEmpty) continue;
+      buffer
+        ..writeln(content)
+        ..writeln();
+    }
+    buffer.writeln(_promptText.intermediateRuntimeEnvelope(agent));
+    return buffer.toString().trim();
+  }
+
   /// Role text for the `<role>` element: the shared role/instruction text
   /// from the preset's non-`agent_instruction` blocks.
   String batchRoleText(
@@ -330,5 +553,42 @@ class StudioMessageBuilder {
       }
     }
     return buf.toString().trim();
+  }
+
+  String batchRoleTextFromContext(
+    StudioConfig config,
+    StudioPreset studioPreset,
+    StudioContext context,
+  ) {
+    final blocks =
+        studioPreset.blocks
+            .where((block) => block.enabled && block.section == 'pregen')
+            .where((block) => block.kind != 'agent_instruction')
+            .where((block) => block.kind != 'tracker_instruction')
+            .where((block) => !_blockExpander.isRuntimeComputedBlock(block))
+            .where((block) => block.kind != 'static_context')
+            .where((block) => block.kind != 'chat_history')
+            .where((block) => block.kind != 'dynamic_context')
+            .toList()
+          ..sort((a, b) => a.order.compareTo(b.order));
+    final buffer = StringBuffer();
+    for (final block in blocks) {
+      final slot = studioContextSlotForLegacyKind(block.kind);
+      if (slot != null) {
+        for (final message in context.messagesFor(slot)) {
+          if (message.content.isNotEmpty) buffer.writeln(message.content);
+        }
+        continue;
+      }
+      final content = _blockExpander
+          .expandStudioContextBlockContent(
+            block.content,
+            context: context,
+            config: config,
+          )
+          .trim();
+      if (content.isNotEmpty) buffer.writeln(content);
+    }
+    return buffer.toString().trim();
   }
 }

@@ -4,6 +4,7 @@ import '../studio_context_bucketizer.dart';
 import '../studio_stage_brief.dart';
 import '../../models/studio_config.dart';
 import 'studio_brief_macro_renderer.dart';
+import 'studio_context.dart';
 
 /// Chat-time Studio block expansion + block filtering + role normalization.
 /// Extracted from `StudioMessageBuilder` (plan Phase 5b).
@@ -18,6 +19,21 @@ class StudioRuntimeBlockExpander {
   final StudioBriefMacroRenderer _briefMacroRenderer;
 
   StudioRuntimeBlockExpander(this._briefMacroRenderer);
+
+  String expandStudioContextBlockContent(
+    String content, {
+    required StudioContext context,
+    List<StudioStageBrief> priorBriefs = const [],
+    StudioConfig? config,
+  }) {
+    if (!content.contains('{')) return content;
+    final studioExpanded = _briefMacroRenderer.replaceStudioBriefMacros(
+      content,
+      priorBriefs: priorBriefs,
+      config: config,
+    );
+    return replaceMacros(studioExpanded, context.macroContext).text;
+  }
 
   /// Expand all macros in [content]: first `{{studio_*_brief}}` macros, then
   /// the standard `MacroContext` macros (`{{char}}`, `{{user}}`, etc.).
