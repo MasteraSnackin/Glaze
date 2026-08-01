@@ -9,6 +9,7 @@ import '../../core/models/studio_preset_block_reorder.dart';
 import '../../core/state/db_provider.dart';
 import '../../core/utils/id_generator.dart';
 import '../../shared/theme/app_colors.dart';
+import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import '../settings/app_settings_provider.dart';
 import '../studio/studio_agent_toggle.dart';

@@ -124,7 +124,7 @@ class StudioBlockRow extends StatelessWidget {
                   ),
                 )
               else
-                SizedBox(width: 30 + indent, height: 44),
+                SizedBox(width: 30.0 + indent, height: 44),
               Icon(
                 presetBlockRoleIcon(block.role),
                 size: 16,
