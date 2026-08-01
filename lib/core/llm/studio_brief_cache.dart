@@ -9,6 +9,7 @@ import 'agent_runner.dart';
 import 'generation_context_inputs.dart';
 import 'prompt_builder.dart';
 import 'studio_brief_parser.dart';
+import 'studio_controller_ontology.dart';
 import 'studio_stage_brief.dart';
 
 /// Owns the Studio brief cache: probe, persist, key derivation, and
@@ -28,7 +29,7 @@ class StudioBriefCache {
   /// Probe the cache for one tracker. [hit] = true when a usable cached brief
   /// exists for this turn; [brief] carries the sanitized cached brief. Used by
   /// the orchestrator to split trackers into cached (skip LLM) vs.
-  /// batchable/individual before invoking `TrackerBatcher`.
+  /// batchable/individual before invoking `ControllerBatcher`.
   CacheProbe probeCache({
     required StudioAgent agent,
     required StudioConfig config,
@@ -191,6 +192,9 @@ class StudioBriefCache {
     required String policy,
     required String sceneKey,
   }) {
+    // Generation parameters live on the agent's spec, not on the agent (§4),
+    // so the cache key must read them from there or it stops noticing changes.
+    final spec = StudioControllerOntology.specForAgent(agent);
     final agentEnabledKeys = studioPreset.agentEnabled.keys.toList()..sort();
     final blocks = studioPreset.blocks.indexed.toList()
       ..sort((a, b) {
@@ -199,7 +203,7 @@ class StudioBriefCache {
         return a.$1.compareTo(b.$1);
       });
     final base = <String, dynamic>{
-      'v': 6,
+      'v': 7,
       'sessionId': sessionId,
       'studioConfigId': config.sessionId,
       'cheapApiConfigId': studioPreset.cheapApiConfigId,
@@ -232,7 +236,6 @@ class StudioBriefCache {
       },
       'preset': {
         'id': studioPreset.id,
-        'executionMode': studioPreset.executionMode.wireName,
         'agentEnabled': {
           for (final key in agentEnabledKeys)
             key: studioPreset.agentEnabled[key],
@@ -241,10 +244,10 @@ class StudioBriefCache {
           for (final (_, block) in blocks)
             {
               'id': block.id,
-              'section': block.section,
-              'type': block.type.name,
-              'contextSlot': block.contextSlot?.name,
+              'mode': block.mode,
+              'injectionPoint': block.injectionPoint,
               'targetAgentId': block.targetAgentId,
+              'sourceAgentId': block.sourceAgentId,
               'role': block.role,
               'enabled': block.enabled,
               'order': block.order,
@@ -259,17 +262,12 @@ class StudioBriefCache {
         'role': agent.role,
         'order': agent.order,
         'enabled': agent.enabled,
-        'endpoint': agent.endpoint,
-        'timeoutMs': agent.timeoutMs,
-        'temperature': agent.temperature,
-        'maxTokens': agent.maxTokens,
+        'timeoutMs': spec?.timeoutMs ?? 4000,
+        'temperature': spec?.temperature ?? 0.3,
+        'maxTokens': spec?.maxTokens ?? 8000,
         'refreshPolicy': agent.refreshPolicy,
-        'contextSize': agent.contextSize,
-        'runInterval': agent.runInterval,
+        'contextSize': StudioControllerOntology.contextSizeOf(spec),
         'maxParallelJobs': agent.maxParallelJobs,
-        'runIndividually': agent.runIndividually,
-        'activationKeywords': agent.activationKeywords,
-        'activationScanDepth': agent.activationScanDepth,
         'phase': agent.phase,
       },
       'refreshPolicy': policy,

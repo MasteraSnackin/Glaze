@@ -3,7 +3,8 @@ import '../models/studio_config.dart';
 import 'agent_runner.dart';
 import 'studio_turn_config_snapshot.dart';
 import 'concurrency_limiter.dart';
-import 'tracker_batch_protocol.dart';
+import 'controller_batch_protocol.dart';
+import 'studio_controller_ontology.dart';
 
 /// Concurrency limits for the tracker phase (Phase 5.7.2).
 ///
@@ -25,41 +26,41 @@ const _individualNamePatterns = <String>[
   'lorebook',
 ];
 
-/// Result of [TrackerBatcher.groupAgents]: the batchable trackers split into
+/// Result of [ControllerBatcher.groupAgents]: the batchable trackers split into
 /// [batchGroups] (each group → one LLM request) and the isolated trackers
 /// [individualAgents] (each → its own request).
-class TrackerGrouping {
-  final List<TrackerBatchGroup> batchGroups;
+class ControllerGrouping {
+  final List<ControllerBatchGroup> batchGroups;
   final List<StudioAgent> individualAgents;
 
-  const TrackerGrouping({
+  const ControllerGrouping({
     required this.batchGroups,
     required this.individualAgents,
   });
 }
 
-/// A batch group: trackers sharing `(provider, model)` and none flagged
-/// [StudioAgent.runIndividually] (or matched by [shouldRunIndividually]).
+/// A batch group: trackers sharing `(provider, model)` and none matched by
+/// [ControllerBatcher.shouldRunIndividually].
 ///
 /// All agents in a group are sent to the LLM as ONE request —
 /// [buildBatchMessages] packs their per-agent instructions into `<agent_task>`
 /// XML inside a single system prompt; the model returns one `<result>` block
 /// per agent, which [parseBatchResponse] splits back into individual tracker
 /// outputs.
-class TrackerBatchGroup {
+class ControllerBatchGroup {
   /// Batch grouping key: `"$provider|$model"`. Agents with different
   /// providers/models cannot be batched (different endpoints/auth/shape).
   final String key;
   final ResolvedAgentConfig resolved;
   final List<StudioAgent> agents;
 
-  /// Sum of `agent.maxTokens` across the group, capped by
+  /// Sum of the agents' spec `maxTokens` across the group, capped by
   /// `resolved.maxTokens` (the provider's configured cap). See
-  /// [TrackerBatcher._capBatchMaxTokens] — a long batch must not get
+  /// [ControllerBatcher._capBatchMaxTokens] — a long batch must not get
   /// truncated mid-stream and lose half of the `<result>` blocks.
   final int batchMaxTokens;
 
-  /// MIN of `agent.temperature` across the group. Lowest temperature wins
+  /// MIN of the agents' spec temperature across the group. Lowest wins
   /// (trackers should be deterministic; a high-temp agent should not drag
   /// the whole batch into randomness).
   final double batchTemperature;
@@ -71,7 +72,7 @@ class TrackerBatchGroup {
   /// safe — extra context is not harmful for trackers).
   final int batchContextSize;
 
-  const TrackerBatchGroup({
+  const ControllerBatchGroup({
     required this.key,
     required this.resolved,
     required this.agents,
@@ -82,14 +83,14 @@ class TrackerBatchGroup {
 }
 
 /// One tracker's outcome after a batch run + fallback.
-class TrackerBatchResult {
+class ControllerBatchResult {
   final String agentId;
   final String agentName;
   final String text;
   final String status; // 'ok' | 'failed'
   final String? error;
 
-  const TrackerBatchResult({
+  const ControllerBatchResult({
     required this.agentId,
     required this.agentName,
     required this.text,
@@ -97,12 +98,12 @@ class TrackerBatchResult {
     this.error,
   });
 
-  static TrackerBatchResult failed({
+  static ControllerBatchResult failed({
     required String agentId,
     required String agentName,
     required String reason,
   }) {
-    return TrackerBatchResult(
+    return ControllerBatchResult(
       agentId: agentId,
       agentName: agentName,
       text: '',
@@ -120,7 +121,7 @@ class TrackerBatchResult {
 /// - Building the `<agents><agent_task id="...">...</agent_task></agents>`
 ///   batch system prompt (shared `<role>` + `<lore>` + per-agent tasks +
 ///   required `<result agent="...">` output format).
-/// - Parsing the model's batched reply into one [TrackerBatchResult] per
+/// - Parsing the model's batched reply into one [ControllerBatchResult] per
 ///   agent (with legacy `<result_TYPE>` fallback).
 /// - Concurrency-limited settling (Phase 5.7.2) and the in-batch invalid-JSON
 ///   retry + individual-fallback chain (Phase 5.1 layers 1+2).
@@ -128,22 +129,20 @@ class TrackerBatchResult {
 /// Does NOT own: prompt macro expansion (caller passes already-expanded
 /// per-agent task text), caching (caller's `MemoryStudioService`), or the
 /// final-generator run (separate path).
-class TrackerBatcher {
+class ControllerBatcher {
   /// Optional — only required for [groupAgents] / [runPhase] which resolve
   /// per-agent API configs and fire live LLM calls. Pure prompt-building,
   /// parsing, [shouldRunIndividually], [normalizeMaxParallelJobs] and
   /// [splitGroupForParallelJobs] work without a runner (used by unit tests).
   final AgentRunner? _runner;
-  final TrackerBatchProtocol _protocol = const TrackerBatchProtocol();
+  final ControllerBatchProtocol _protocol = const ControllerBatchProtocol();
 
-  TrackerBatcher([this._runner]);
+  ControllerBatcher([this._runner]);
 
   /// Heuristic: should this tracker run as its own individual request,
-  /// never batched? (Phase 5.2). Returns true if [StudioAgent.runIndividually]
-  /// is explicitly set OR the agent's name matches one of
-  /// [_individualNamePatterns].
+  /// never batched? (Phase 5.2). Returns true when the agent's name matches
+  /// one of [_individualNamePatterns].
   bool shouldRunIndividually(StudioAgent agent) {
-    if (agent.runIndividually) return true;
     final lower = agent.name.toLowerCase();
     for (final pattern in _individualNamePatterns) {
       if (lower.contains(pattern)) return true;
@@ -158,8 +157,8 @@ class TrackerBatcher {
   ///
   /// [apiConfigId] — the StudioConfig slot id to use for resolution (e.g.
   /// `cheapApiConfigId` for trackers). When null/empty, falls back to
-  /// the active chat config when the explicit tracker slot is empty.
-  Future<TrackerGrouping> groupAgents({
+  /// the active chat config when the explicit controller slot is empty.
+  Future<ControllerGrouping> groupAgents({
     required List<StudioAgent> agents,
     required ApiConfig apiConfig,
     required String sessionId,
@@ -180,7 +179,7 @@ class TrackerBatcher {
     // Resolve config for each batchable agent, then group by (provider, model).
     if (_runner == null) {
       throw StateError(
-        'TrackerBatcher.groupAgents requires an AgentRunner — construct with '
+        'ControllerBatcher.groupAgents requires an AgentRunner — construct with '
         'a non-null runner.',
       );
     }
@@ -209,12 +208,12 @@ class TrackerBatcher {
       resolvedByKey[key] = resolved;
     }
 
-    final batchGroups = <TrackerBatchGroup>[];
+    final batchGroups = <ControllerBatchGroup>[];
     for (final entry in groups.entries) {
       final resolved = resolvedByKey[entry.key]!;
       final groupAgents = entry.value;
       batchGroups.add(
-        TrackerBatchGroup(
+        ControllerBatchGroup(
           key: entry.key,
           resolved: resolved,
           agents: groupAgents,
@@ -224,7 +223,7 @@ class TrackerBatcher {
         ),
       );
     }
-    return TrackerGrouping(
+    return ControllerGrouping(
       batchGroups: batchGroups,
       individualAgents: individual,
     );
@@ -240,17 +239,21 @@ class TrackerBatcher {
     List<StudioAgent> agents,
     ResolvedAgentConfig resolved,
   ) {
-    final sum = agents.fold<int>(0, (acc, a) => acc + a.maxTokens);
+    final sum = agents.fold<int>(
+      0,
+      (acc, a) => acc + (StudioControllerOntology.specForAgent(a)?.maxTokens ?? 8000),
+    );
     // Glaze has no separate `maxOutputTokens` field on the model;
     // `ApiConfig.maxTokens` is the single output cap. Use it as the ceiling.
     // 0 or negative = uncapped (very large); treat as no cap.
     final cap = resolved.contextSize > 0 ? resolved.contextSize : 1 << 30;
     // The output budget must never exceed what the provider will accept as
     // `max_tokens` in the body — so we also clamp by `ApiConfig.maxTokens`
-    // (carried on `agent.maxTokens` default 8000 but the resolved ApiConfig
+    // (the spec's maxTokens, but the resolved ApiConfig
     // value is the source of truth for the batch request).
-    final apiCap =
-        agents.first.maxTokens; // per-agent cap; the SUM is what we send
+    // Per-agent cap from the spec; the SUM is what we actually send.
+    final apiCap = StudioControllerOntology
+        .specForAgent(agents.first)?.maxTokens ?? 8000;
     // Final ceiling: the smaller of (provider context cap / 2) and (sum).
     // Half the context window is a sane max for output — the rest is input.
     final outputCeiling = cap ~/ 2;
@@ -259,13 +262,19 @@ class TrackerBatcher {
 
   double _minTemperature(List<StudioAgent> agents) {
     if (agents.isEmpty) return 0.3;
-    return agents.map((a) => a.temperature).reduce((a, b) => a < b ? a : b);
+    return agents
+        .map((a) => StudioControllerOntology.specForAgent(a)?.temperature ?? 0.3)
+        .reduce((a, b) => a < b ? a : b);
   }
 
   int _maxContextSize(List<StudioAgent> agents) {
     if (agents.isEmpty) return 5;
     return agents
-        .map((a) => a.contextSize)
+        .map(
+          (a) => StudioControllerOntology.contextSizeOf(
+            StudioControllerOntology.specForAgent(a),
+          ),
+        )
         .reduce((a, b) => a > b ? a : b)
         .clamp(1, 200);
   }
@@ -286,7 +295,7 @@ class TrackerBatcher {
   ///
   /// The caller (`MemoryStudioService`) handles the actual parallel dispatch
   /// — this method only computes the split. Returns one or more groups.
-  List<TrackerBatchGroup> splitGroupForParallelJobs(TrackerBatchGroup group) {
+  List<ControllerBatchGroup> splitGroupForParallelJobs(ControllerBatchGroup group) {
     final maxJobs = normalizeMaxParallelJobs(
       group.agents.first.maxParallelJobs,
     );
@@ -298,7 +307,7 @@ class TrackerBatcher {
     // and context size stay the same (they're aggregate MIN/MAX of the
     // original group, safe to reuse for any sub-group).
     final chunkSize = (group.agents.length / maxJobs).ceil();
-    final subGroups = <TrackerBatchGroup>[];
+    final subGroups = <ControllerBatchGroup>[];
     for (var i = 0; i < group.agents.length; i += chunkSize) {
       final chunk = group.agents.sublist(
         i,
@@ -306,7 +315,7 @@ class TrackerBatcher {
       );
       if (chunk.isEmpty) break;
       subGroups.add(
-        TrackerBatchGroup(
+        ControllerBatchGroup(
           key: '${group.key}#$i',
           resolved: group.resolved,
           agents: chunk,
@@ -350,7 +359,7 @@ class TrackerBatcher {
   /// `agent_instruction` block content + the runtime envelope). XML-escaping
   /// is applied here.
   String buildBatchSystemPrompt({
-    required TrackerBatchGroup group,
+    required ControllerBatchGroup group,
     required List<Map<String, dynamic>> sharedMessages,
     required Map<String, String> perAgentTaskText,
     required String roleText,
@@ -361,7 +370,7 @@ class TrackerBatcher {
     roleText: roleText,
   );
 
-  /// Parse a batched model response into one [TrackerBatchResult] per agent
+  /// Parse a batched model response into one [ControllerBatchResult] per agent
   /// in [group]. (Phase 5.1.)
   ///
   /// Strategy:
@@ -375,9 +384,9 @@ class TrackerBatcher {
   /// 3. Any agent with no parseable block → empty text (will be marked
   ///    `failed` by the caller's invalid-JSON check or fall through to the
   ///    individual retry layer).
-  List<TrackerBatchResult> parseBatchResponse(
+  List<ControllerBatchResult> parseBatchResponse(
     String raw,
-    TrackerBatchGroup group,
+    ControllerBatchGroup group,
   ) => _protocol.parseBatchResponse(raw, group);
 
   /// Run all batch groups + individual agents with a concurrency limit of
@@ -386,17 +395,17 @@ class TrackerBatcher {
   /// of in-flight requests, not per category).
   ///
   /// [runBatch] = caller-provided closure that runs ONE group and returns
-  ///   its parsed [TrackerBatchResult]s. The closure is responsible for the
+  ///   its parsed [ControllerBatchResult]s. The closure is responsible for the
   ///   in-batch invalid-JSON retry (Phase 5.1 layer 1) and the individual
   ///   fallback for failed agents (layer 2). The batcher only enforces the
   ///   concurrency cap.
   /// [runIndividual] = caller-provided closure that runs ONE individual agent.
-  Future<List<TrackerBatchResult>> runPhase({
-    required List<TrackerBatchGroup> batchGroups,
+  Future<List<ControllerBatchResult>> runPhase({
+    required List<ControllerBatchGroup> batchGroups,
     required List<StudioAgent> individualAgents,
-    required Future<List<TrackerBatchResult>> Function(TrackerBatchGroup)
+    required Future<List<ControllerBatchResult>> Function(ControllerBatchGroup)
     runBatch,
-    required Future<TrackerBatchResult> Function(StudioAgent) runIndividual,
+    required Future<ControllerBatchResult> Function(StudioAgent) runIndividual,
   }) async {
     final jobs = <_PhaseJob>[];
     for (final group in batchGroups) {
@@ -418,22 +427,22 @@ class TrackerBatcher {
   /// jobs in flight at once. Port of Marinara `settleAgentJobsWithConcurrencyLimit`.
   ///
   /// Two type parameters: [I] = input item type, [R] = result type. This lets
-  /// the caller map a `List<StudioAgent>` to `List<TrackerBatchResult>` etc.
+  /// the caller map a `List<StudioAgent>` to `List<ControllerBatchResult>` etc.
   Future<List<R>> settleWithConcurrencyLimit<I, R>({
     required List<I> items,
     required int limit,
     required Future<R> Function(I item) run,
   }) => ConcurrencyLimiter.settle(items: items, limit: limit, run: run);
 
-  Future<List<TrackerBatchResult>> _settleWithConcurrencyLimit({
+  Future<List<ControllerBatchResult>> _settleWithConcurrencyLimit({
     required List<_PhaseJob> jobs,
     required int limit,
-    required Future<List<TrackerBatchResult>> Function(TrackerBatchGroup)
+    required Future<List<ControllerBatchResult>> Function(ControllerBatchGroup)
     runBatch,
-    required Future<TrackerBatchResult> Function(StudioAgent) runIndividual,
+    required Future<ControllerBatchResult> Function(StudioAgent) runIndividual,
   }) async {
     final chunkResults =
-        await ConcurrencyLimiter.settle<_PhaseJob, List<TrackerBatchResult>>(
+        await ConcurrencyLimiter.settle<_PhaseJob, List<ControllerBatchResult>>(
           items: jobs,
           limit: limit,
           run: (job) async {
@@ -449,7 +458,7 @@ class TrackerBatcher {
 
 class _PhaseJob {
   final bool isBatch;
-  final TrackerBatchGroup? batch;
+  final ControllerBatchGroup? batch;
   final StudioAgent? agent;
 
   const _PhaseJob({required this.isBatch, this.batch, this.agent})

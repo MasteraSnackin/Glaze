@@ -180,7 +180,7 @@ class PostCleanerService {
       // longer has any, the cleaner stripped formatting it was told to
       // preserve — keep the original. Also protects meta-OOC blocks
       // (e.g. `<lumiaooc>`, `<oocnote>`, any `<*ooc*>` — meta-commentary
-      // emitted by the Main Responder under the Studio meta-weaver
+      // emitted by the Main Writer under the Studio meta-weaver
       // architecture) — if the original had one and the cleaned version
       // dropped it, keep the original. This guards against the common
       // LLM failure mode of flattening formatting when asked to "rewrite for
@@ -530,7 +530,7 @@ class PostCleanerService {
 
     return const StudioAuxPromptAssembler().assemble(
       blocks: cleanerBlocks,
-      section: 'cleaner',
+      injectionPoint: 'cleaner',
       macroCtx: macroCtx,
       customReplacements: customReplacements,
       runtimeSuffix: suffix.toString(),

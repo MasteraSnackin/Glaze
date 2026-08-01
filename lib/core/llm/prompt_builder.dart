@@ -131,7 +131,7 @@ PromptResult buildPrompt(PromptPayload payload) {
   // assembly declaration, not an inference from matching prompt text.
   final blockLoreClassifications = <String, Set<String>>{};
   for (final block in preset.blocks) {
-    if (!block.enabled || block.isStashed) continue;
+    if (!block.enabled) continue;
     final content = block.content.toLowerCase();
     final classifications = <String>{
       if (content.contains('{{lorebooks}}')) 'lorebooksMacro',
@@ -187,7 +187,7 @@ PromptResult buildPrompt(PromptPayload payload) {
 
   for (final rawBlock in preset.blocks) {
     final id = normalizeBlockId(rawBlock.id);
-    if (!rawBlock.enabled || rawBlock.isStashed) continue;
+    if (!rawBlock.enabled) continue;
 
     final resolved = resolveBlockContent(
       id: id,

@@ -9,21 +9,6 @@ import 'studio_agent_settings.dart';
 part 'studio_config.freezed.dart';
 part 'studio_config.g.dart';
 
-enum StudioExecutionMode {
-  legacy,
-  direct,
-  assisted;
-
-  String get wireName => name;
-
-  static StudioExecutionMode fromWireName(String value) {
-    return StudioExecutionMode.values.firstWhere(
-      (mode) => mode.wireName == value,
-      orElse: () => StudioExecutionMode.legacy,
-    );
-  }
-}
-
 enum StudioBlockType { instruction, context, history, priorBriefs }
 
 @freezed
@@ -40,8 +25,11 @@ abstract class StudioRuntimeSettings with _$StudioRuntimeSettings {
       _$StudioRuntimeSettingsFromJson(json);
 }
 
-/// Per-session Studio activation. Reusable pipeline settings live in
-/// [StudioPreset].
+/// Reusable Studio configuration profile.
+///
+/// Created when the user clicks "Build Studio" in the MagicDrawer Studio menu.
+/// Agents are built from [StudioControllerOntology.specs] directly — no LLM
+/// decomposition. Prompt shards come from the DB-backed StudioPreset.
 @freezed
 abstract class StudioConfig with _$StudioConfig {
   const factory StudioConfig({
@@ -69,6 +57,11 @@ abstract class StudioPresetBlock with _$StudioPresetBlock {
     @Default(false) bool locked,
     @Default(0) int order,
     @Default('pregen') String section,
+    @Default('direct') String mode,
+    @Default(false) bool isStatic,
+    @Default('pregen') String injectionPoint,
+    @Default('') String sourceAgentId,
+    @Default('none') String groupBoundary,
   }) = _StudioPresetBlock;
 
   factory StudioPresetBlock.fromJson(Map<String, dynamic> json) =>
@@ -88,6 +81,7 @@ abstract class StudioPreset with _$StudioPreset {
     @Default('') String expensiveApiConfigId,
     @Default('') String cheapApiConfigId,
     @Default('') String cleanerApiConfigId,
+    @Default('') String ledgerApiConfigId,
 
     /// Maximum trailing messages sent to the final generator. Trackers use
     /// their own [StudioAgent.contextSize]. 0 disables the message-count cap.
@@ -99,9 +93,11 @@ abstract class StudioPreset with _$StudioPreset {
     /// Travel with the preset on import/export so agent toggles are portable.
     @Default({}) Map<String, bool> agentEnabled,
 
-    /// Explicit topology prevents stale stored agents from reviving pregen
-    /// calls when a Direct/Assisted preset is selected.
-    @Default(StudioExecutionMode.legacy) StudioExecutionMode executionMode,
+    /// Agent states that were auto-disabled due to a cascade dependency
+    /// (e.g. Continuity was turned off because Ledger was disabled).
+    /// Restored when the required agent is re-enabled.
+    @Default({}) Map<String, bool> agentEnabledBeforeDependencyOff,
+
     @Default(StudioRuntimeSettings()) StudioRuntimeSettings runtime,
     @Default(0) int updatedAt,
   }) = _StudioPreset;
@@ -118,6 +114,13 @@ abstract class StudioPreset with _$StudioPreset {
 /// - Briefs from previous agents in the pipeline
 ///
 /// The [order] field determines pipeline execution order.
+///
+/// Generation parameters (model, temperature, max tokens, timeout, context
+/// size) and cadence (run interval, keyword activation, run-individually) are
+/// deliberately NOT here: an agent's identity is pinned to its
+/// [StudioControllerSpec] (§4), so those come from the spec, from the Studio
+/// slot settings, or from the chat's own connection. A per-agent copy could
+/// only drift from the spec it was built from.
 @freezed
 abstract class StudioAgent with _$StudioAgent {
   const factory StudioAgent({
@@ -127,27 +130,12 @@ abstract class StudioAgent with _$StudioAgent {
     @Default('') String role,
     @Default(0) int order,
     @Default(true) bool enabled,
-    @Default('') String endpoint,
-    @Default(4000) int timeoutMs,
-    @Default(0.3) double temperature,
-    @Default(8000) int maxTokens,
+    @Default('') String specId,
 
     /// Controls whether an intermediate agent should be refreshed every turn
     /// or can reuse a previous brief. Supported values: static, scene, turn.
     /// Final agents always run every turn.
     @Default('turn') String refreshPolicy,
-
-    /// Number of trailing chat messages forwarded to this tracker (intermediate
-    /// agent). Default 5 to keep trackers focused on local turn state; the
-    /// final agent ignores this and uses [StudioPreset.maxFinalHistoryMessages]
-    /// instead. 0 = no limit (not recommended for trackers).
-    @Default(5) int contextSize,
-
-    /// How often this tracker runs, in assistant turns. 1 = every turn
-    /// (default), 3 = every 3rd turn, etc. Useful for "director"-style
-    /// trackers whose guidance changes slowly. The final agent (generator)
-    /// always runs every turn regardless of this field.
-    @Default(1) int runInterval,
 
     /// Maximum number of parallel jobs this agent can be split into inside a
     /// batch group (Marinara `AgentSettings.maxParallelJobs`, clamped to
@@ -155,25 +143,6 @@ abstract class StudioAgent with _$StudioAgent {
     /// group = one LLM request — but the field is kept so the model can grow
     /// later without a migration.
     @Default(1) int maxParallelJobs,
-
-    /// Force this tracker to run as its own individual LLM request, never
-    /// batched with others. Set heuristically for "heavy" trackers whose large
-    /// private extras must not leak into other trackers' batch prompt
-    /// (Marinara `shouldRunAgentIndividually`). Default false.
-    @Default(false) bool runIndividually,
-
-    /// Optional keyword-activation gate for this tracker. When non-empty,
-    /// the tracker activates ONLY on turns where at least one of these
-    /// keywords appears in the last [activationScanDepth] chat messages
-    /// (case-insensitive, whole-word-optional substring match). When empty
-    /// (the default), the tracker always activates (subject to
-    /// [runInterval] and [enabled]).
-    @Default([]) List<String> activationKeywords,
-
-    /// Number of trailing chat messages scanned for [activationKeywords].
-    /// Default 5 (matches `DEFAULT_AGENT_CONTEXT_SIZE`). 0 = scan the
-    /// entire available history (not recommended — expensive and stale).
-    @Default(5) int activationScanDepth,
 
     /// Which phase this agent runs in. `pre_generation` (default) = runs
     /// before the final generator, produces a brief that feeds into the

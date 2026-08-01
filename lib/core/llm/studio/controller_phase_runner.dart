@@ -15,11 +15,11 @@ import '../studio_stage_brief.dart';
 import '../studio_turn_config_snapshot.dart';
 import '../generation_context_inputs.dart';
 import 'studio_context.dart';
-import '../tracker_batcher.dart';
-import 'studio_tracker_result_mapper.dart';
+import '../controller_batcher.dart';
+import 'controller_result_mapper.dart';
 
 /// Result of the shared pre-gen tracker phase. Both [MemoryStudioService.runTrackerCycle]
-/// and [MemoryStudioService.runTrackersOnly] call [StudioTrackerPhaseRunner.run]
+/// and [MemoryStudioService.runTrackersOnly] call [ControllerPhaseRunner.run]
 /// and receive this. `runTrackerCycle` continues with the generator + post-gen
 /// trackers using [split], [turnIndex], [historyForScan], [studioPreset];
 /// `runTrackersOnly` returns immediately with [briefs].
@@ -49,9 +49,9 @@ class PreGenPhaseResult {
 /// of duplication between `runTrackerCycle` and `runTrackersOnly`.
 ///
 /// Deps via constructor (no `Ref` — all repos/batcher are injected).
-class StudioTrackerPhaseRunner {
+class ControllerPhaseRunner {
   final StudioPresetRepo _presetRepo;
-  final TrackerBatcher _batcher;
+  final ControllerBatcher _batcher;
   final StudioBriefCache _briefCache;
   final StudioBriefParser _briefParser;
   final StudioBatchCoordinator _batchCoordinator;
@@ -60,7 +60,7 @@ class StudioTrackerPhaseRunner {
   final PipelineSettings Function() _readPipelineSettings;
   final void Function(String message) _log;
 
-  StudioTrackerPhaseRunner({
+  ControllerPhaseRunner({
     required this._presetRepo,
     required this._batcher,
     required this._briefCache,
@@ -135,16 +135,10 @@ class StudioTrackerPhaseRunner {
       final historyForScan = allHistory.length > 8
           ? allHistory.sublist(allHistory.length - 8)
           : allHistory;
-      final dueTrackers = split.preGenTrackers.where((agent) {
-        final interval = agent.runInterval <= 0 ? 1 : agent.runInterval;
-        if (turnIndex % interval != 0) return false;
-        return agent.activationKeywords.isEmpty ||
-            StudioActivationGate.matchesActivationKeywords(
-              agent.activationKeywords,
-              historyForScan,
-              agent.activationScanDepth,
-            );
-      }).toList();
+      // Every enabled controller runs every turn: the per-agent run interval
+      // and keyword gate were agent-level overrides, which an agent no longer
+      // carries (§4).
+      final dueTrackers = split.preGenTrackers.toList();
 
       final cachedBriefs = <StudioStageBrief>[];
       final fetchTrackers = <StudioAgent>[];
@@ -152,7 +146,7 @@ class StudioTrackerPhaseRunner {
       final trackerContextOverride =
           (turnConfig?.pipelineSettings ?? _readPipelineSettings())
               .studioAgent
-              .studioTrackerContextSize;
+              .studioControllerContextSize;
       for (final agent in dueTrackers) {
         final resolvedConfig = await _executor.resolveTrackerConfig(
           agent: agent,
@@ -211,7 +205,8 @@ class StudioTrackerPhaseRunner {
           turnConfig: turnConfig,
         ),
         runIndividual: (agent) => _executor.runIndividualTracker(
-          agent: agent.copyWith(contextSize: trackerContextOverride),
+          agent: agent,
+          trackerContextOverride: trackerContextOverride,
           config: config,
           studioPreset: effectivePreset,
           context: context,

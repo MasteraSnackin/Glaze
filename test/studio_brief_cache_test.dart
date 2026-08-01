@@ -60,8 +60,7 @@ void main() {
       preset: _preset.copyWith(
         blocks: [
           _preset.blocks.single.copyWith(
-            type: StudioBlockType.context,
-            contextSlot: StudioContextSlot.memory,
+            injectionPoint: 'final',
           ),
         ],
       ),
@@ -167,7 +166,6 @@ const _agent = StudioAgent(
 const _preset = StudioPreset(
   id: 'preset-id',
   cheapApiConfigId: 'tracker-api',
-  executionMode: StudioExecutionMode.assisted,
   agentEnabled: {'continuity': true},
   blocks: [
     StudioPresetBlock(

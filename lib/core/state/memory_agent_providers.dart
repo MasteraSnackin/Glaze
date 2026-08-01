@@ -16,7 +16,7 @@ import '../llm/post_cleaner_service.dart';
 import '../llm/prompt/ledger_tracker_loader.dart';
 import '../llm/studio_ledger_service.dart';
 import '../llm/studio/agent_config_resolver.dart';
-import '../llm/tracker_batcher.dart';
+import '../llm/controller_batcher.dart';
 import '../models/api_config.dart';
 import 'db_provider.dart';
 
@@ -68,15 +68,15 @@ final agentRunnerProvider = Provider<AgentRunner>((ref) {
   );
 });
 
-final trackerBatcherProvider = Provider<TrackerBatcher>((ref) {
-  return TrackerBatcher(ref.read(agentRunnerProvider));
+final controllerBatcherProvider = Provider<ControllerBatcher>((ref) {
+  return ControllerBatcher(ref.read(agentRunnerProvider));
 });
 
 final memoryStudioServiceProvider = Provider<MemoryStudioService>((ref) {
   return MemoryStudioService(
     ref,
     ref.read(agentRunnerProvider),
-    ref.read(trackerBatcherProvider),
+    ref.read(controllerBatcherProvider),
   );
 });
 

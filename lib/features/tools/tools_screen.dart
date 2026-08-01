@@ -6,21 +6,22 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../core/services/featured_presets.dart';
+import '../../core/models/preset.dart';
 import '../../core/state/active_selection_provider.dart';
-import '../../core/state/active_studio_preset_provider.dart';
 import '../../core/utils/platform_paths.dart';
 import '../../core/state/db_provider.dart';
 import '../../shared/shell/nav_height_provider.dart';
 import '../../shared/shell/nav_retap_provider.dart';
 import '../personas/persona_list_provider.dart';
+import '../presets/preset_image.dart';
 import '../presets/preset_list_provider.dart';
 import '../../shared/shell/shell_header_provider.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glass_surface.dart';
 import '../chat/widgets/chat_stats_sheet.dart';
+import '../extensions/providers/extensions_settings_provider.dart';
+import '../extensions/widgets/ext_blocks_settings_sheet.dart';
 import '../image_gen/widgets/image_gen_sheet.dart';
-import '../studio/screens/studio_preset_editor_screen.dart';
 
 class PersonaInfo {
   final String name;
@@ -54,18 +55,20 @@ final _resolvedPersonaAvatarPathProvider = FutureProvider<String?>((ref) async {
   return null;
 });
 
-final _activePresetNameProvider = FutureProvider<String>((ref) async {
+/// The globally active preset. Watches the list (not just the id) so a rename
+/// or a new cover image is reflected on the card without leaving the screen.
+final _activePresetProvider = Provider<Preset?>((ref) {
   final activeId = ref.watch(activePresetIdProvider);
-  if (activeId == null) return 'label_default'.tr();
-  final preset = await ref
-      .read(presetListProvider.notifier)
-      .getPresetById(activeId);
-  return preset?.name ?? 'label_default'.tr();
+  if (activeId == null) return null;
+  final presets = ref.watch(presetListProvider).value ?? const <Preset>[];
+  return presets.where((p) => p.id == activeId).firstOrNull;
 });
 
-/// Cover image asset for the active preset, when it's a bundled featured preset.
-final _activePresetImageProvider = Provider<String?>((ref) {
-  return featuredPresetImageAsset(ref.watch(activePresetIdProvider));
+/// Cover image of the active preset — a user-picked one, or the bundled art of
+/// a featured preset.
+final _activePresetImageProvider = Provider<ImageProvider?>((ref) {
+  final preset = ref.watch(_activePresetProvider);
+  return preset != null ? presetCoverImage(preset) : null;
 });
 
 // SVG paths matching ToolsView.vue
@@ -119,16 +122,38 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
     super.dispose();
   }
 
-  /// Opens the Studio preset editor for the globally active Studio preset.
-  /// Studio presets are app-wide, so this needs no active chat session.
-  Future<void> _openStudio() async {
-    final presetId = await ref.read(activeStudioPresetProvider.future);
-    if (!mounted) return;
-    await Navigator.of(context, rootNavigator: true).push(
-      MaterialPageRoute<void>(
-        builder: (_) => StudioPresetEditorScreen(presetId: presetId),
-      ),
-    );
+  /// Opens the same Ext Blocks sheet as chat Quick Access.
+  Future<void> _openExtBlocks() => showModalBottomSheet<void>(
+    context: context,
+    useRootNavigator: true,
+    backgroundColor: context.cs.surfaceContainerHigh,
+    isScrollControlled: true,
+    builder: (_) => const ExtBlocksSettingsSheet(),
+  );
+
+  /// Lays [tiles] out two per row, 8px apart. IntrinsicHeight + stretch so
+  /// both tiles in a row share the taller one's height and fill the whole
+  /// allocated cell; an odd tile count leaves the trailing cell empty.
+  List<Widget> _gridRows(List<Widget> tiles) {
+    final rows = <Widget>[];
+    for (var i = 0; i < tiles.length; i += 2) {
+      if (rows.isNotEmpty) rows.add(const SizedBox(height: 8));
+      rows.add(
+        IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(child: tiles[i]),
+              const SizedBox(width: 8),
+              Expanded(
+                child: i + 1 < tiles.length ? tiles[i + 1] : const SizedBox(),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+    return rows;
   }
 
   /// Animates the list back to the top (guarded against a detached / multiply
@@ -149,9 +174,11 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
     final personaInfo = ref.watch(_activePersonaInfoProvider);
     final resolvedAvatar = ref.watch(_resolvedPersonaAvatarPathProvider).value;
     final presetName =
-        ref.watch(_activePresetNameProvider).value ?? 'label_default'.tr();
+        ref.watch(_activePresetProvider)?.name ?? 'label_default'.tr();
     final presetImage = ref.watch(_activePresetImageProvider);
-    final studioEnabled = ref.watch(studioFeatureEnabledProvider);
+    final extBlocksEnabled = ref.watch(
+      extensionsSettingsProvider.select((s) => s.enabled),
+    );
     final topPad = MediaQuery.of(context).padding.top + 66.0;
 
     // Re-tap on the active Tools navbar tab → scroll to top (sub-routes are
@@ -181,103 +208,64 @@ class _ToolsScreenState extends ConsumerState<ToolsScreen>
                 iconPath: _kIconPresets,
                 title: 'tab_presets'.tr(),
                 subtitle: presetName,
-                backgroundAsset: presetImage,
+                backgroundImage: presetImage,
                 onTap: () => context.push('/tools/presets'),
               ),
               const SizedBox(height: 10),
-              // IntrinsicHeight + stretch so both tiles in a row share the
-              // taller one's height and fill the whole allocated cell.
-              IntrinsicHeight(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Expanded(
-                      child: _GridTile(
-                        iconPath: _kIconApi,
-                        title: 'tab_api'.tr(),
-                        subtitle: 'tools_api_subtitle'.tr(),
-                        showStatusDot: true,
-                        onTap: () => context.push('/tools/api'),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _GridTile(
-                        iconPath: _kIconLorebook,
-                        title: 'menu_lorebooks'.tr(),
-                        subtitle: 'tools_lorebooks_subtitle'.tr(),
-                        onTap: () => context.push('/tools/lorebooks'),
-                      ),
-                    ),
-                  ],
+              ..._gridRows([
+                _GridTile(
+                  iconPath: _kIconApi,
+                  title: 'tab_api'.tr(),
+                  subtitle: 'tools_api_subtitle'.tr(),
+                  showStatusDot: true,
+                  onTap: () => context.push('/tools/api'),
                 ),
-              ),
-              const SizedBox(height: 8),
-              IntrinsicHeight(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Expanded(
-                      child: _GridTile(
-                        iconPath: _kIconRegex,
-                        title: 'menu_regex'.tr(),
-                        subtitle: 'tools_regex_subtitle'.tr(),
-                        onTap: () => context.push('/tools/regex'),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _GridTile(
-                        iconPath: _kIconStats,
-                        title: 'stats_title'.tr(),
-                        subtitle: 'stats_subtitle'.tr(),
-                        onTap: () => showModalBottomSheet<void>(
-                          context: context,
-                          isScrollControlled: true,
-                          useRootNavigator: true,
-                          backgroundColor: Colors.transparent,
-                          builder: (_) =>
-                              const ChatStatsSheet(initialCharId: ''),
-                        ),
-                      ),
-                    ),
-                  ],
+                _GridTile(
+                  iconPath: _kIconLorebook,
+                  title: 'menu_lorebooks'.tr(),
+                  subtitle: 'tools_lorebooks_subtitle'.tr(),
+                  onTap: () => context.push('/tools/lorebooks'),
                 ),
-              ),
-              const SizedBox(height: 8),
-              IntrinsicHeight(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Expanded(
-                      child: _GridTile(
-                        iconPath: _kIconImageGen,
-                        title: 'imggen_title'.tr(),
-                        subtitle: 'imggen_subtitle'.tr(),
-                        onTap: () => showModalBottomSheet<void>(
-                          context: context,
-                          isScrollControlled: true,
-                          useRootNavigator: true,
-                          backgroundColor: Colors.transparent,
-                          builder: (_) => const ImageGenSheet(),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    // Studio only appears once its experimental master switch is on.
-                    Expanded(
-                      child: studioEnabled
-                          ? _GridTile(
-                              icon: Icons.movie_filter_outlined,
-                              title: 'menu_studio'.tr(),
-                              subtitle: 'tools_studio_subtitle'.tr(),
-                              onTap: _openStudio,
-                            )
-                          : const SizedBox(),
-                    ),
-                  ],
+                _GridTile(
+                  iconPath: _kIconRegex,
+                  title: 'menu_regex'.tr(),
+                  subtitle: 'tools_regex_subtitle'.tr(),
+                  onTap: () => context.push('/tools/regex'),
                 ),
-              ),
+                _GridTile(
+                  iconPath: _kIconStats,
+                  title: 'stats_title'.tr(),
+                  subtitle: 'stats_subtitle'.tr(),
+                  onTap: () => showModalBottomSheet<void>(
+                    context: context,
+                    isScrollControlled: true,
+                    useRootNavigator: true,
+                    backgroundColor: Colors.transparent,
+                    builder: (_) => const ChatStatsSheet(initialCharId: ''),
+                  ),
+                ),
+                _GridTile(
+                  iconPath: _kIconImageGen,
+                  title: 'imggen_title'.tr(),
+                  subtitle: 'imggen_subtitle'.tr(),
+                  onTap: () => showModalBottomSheet<void>(
+                    context: context,
+                    isScrollControlled: true,
+                    useRootNavigator: true,
+                    backgroundColor: Colors.transparent,
+                    builder: (_) => const ImageGenSheet(),
+                  ),
+                ),
+                // Ext Blocks and Studio only appear once their experimental
+                // master switches are on — same gating as chat Quick Access.
+                if (extBlocksEnabled)
+                  _GridTile(
+                    icon: Icons.extension_outlined,
+                    title: 'ext_blocks_title'.tr(),
+                    subtitle: 'tools_ext_blocks_subtitle'.tr(),
+                    onTap: _openExtBlocks,
+                  ),
+              ]),
             ],
           ),
         ],
@@ -293,9 +281,10 @@ class _HeroCard extends StatelessWidget {
   final bool isAvatar;
   final String? avatarPath;
 
-  /// Bundled asset shown as the card background (e.g. a featured preset's cover).
+  /// Image shown as the card background (e.g. a preset's cover — a bundled
+  /// asset for a featured preset, a stored file for a user-picked one).
   /// Applies only to the non-avatar layout and does not change the card size.
-  final String? backgroundAsset;
+  final ImageProvider? backgroundImage;
   final VoidCallback onTap;
 
   const _HeroCard({
@@ -304,7 +293,7 @@ class _HeroCard extends StatelessWidget {
     required this.subtitle,
     this.isAvatar = false,
     this.avatarPath,
-    this.backgroundAsset,
+    this.backgroundImage,
     required this.onTap,
   });
 
@@ -315,12 +304,22 @@ class _HeroCard extends StatelessWidget {
     color: Color(0xE6FFFFFF), // rgba(255,255,255,0.9)
   );
 
+  /// Cards filled with artwork — the persona avatar, a preset cover — get a
+  /// stronger accent outline: the default hairline is invisible against a
+  /// photo, and the frame is what separates the art from the page background.
+  bool get _hasArtwork => isAvatar || backgroundImage != null;
+
   @override
   Widget build(BuildContext context) {
     final card = GlassSurface(
       onTap: onTap,
       borderRadius: BorderRadius.circular(20),
-      border: Border.all(color: context.cs.outlineVariant),
+      border: Border.all(
+        color: _hasArtwork
+            ? context.cs.primary.withValues(alpha: 0.5)
+            : context.cs.outlineVariant,
+        width: _hasArtwork ? 2 : 1,
+      ),
       child: SizedBox(
         height: isAvatar ? null : 140,
         child: Stack(
@@ -351,12 +350,13 @@ class _HeroCard extends StatelessWidget {
                   ),
                 ),
               ),
-            ] else if (backgroundAsset != null) ...[
+            ] else if (backgroundImage != null) ...[
               Positioned.fill(
-                child: Image.asset(
-                  backgroundAsset!,
-                  key: ValueKey(backgroundAsset),
+                child: Image(
+                  image: backgroundImage!,
+                  key: ValueKey(backgroundImage),
                   fit: BoxFit.cover,
+                  errorBuilder: (_, _, _) => const SizedBox.shrink(),
                 ),
               ),
               // Dark scrim so the white label/subtitle stay legible over art.

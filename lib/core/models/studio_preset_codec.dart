@@ -135,14 +135,12 @@ abstract final class StudioPresetCodec {
         expensiveApiConfigId: _string(json['expensiveApiConfigId']),
         cheapApiConfigId: _string(json['cheapApiConfigId']),
         cleanerApiConfigId: _string(json['cleanerApiConfigId']),
+        ledgerApiConfigId: _string(json['ledgerApiConfigId']),
         maxFinalHistoryMessages: _integer(
           json['maxFinalHistoryMessages'],
           fallback: 30,
         ),
         agentEnabled: enabled,
-        executionMode: StudioExecutionMode.fromWireName(
-          _string(json['executionMode'], StudioExecutionMode.legacy.name),
-        ),
         runtime: runtime,
         updatedAt: _integer(json['updatedAt']),
       ),
@@ -261,9 +259,9 @@ abstract final class StudioPresetCodec {
       'expensiveApiConfigId': preset.expensiveApiConfigId,
       'cheapApiConfigId': preset.cheapApiConfigId,
       'cleanerApiConfigId': preset.cleanerApiConfigId,
+      'ledgerApiConfigId': preset.ledgerApiConfigId,
       'maxFinalHistoryMessages': preset.maxFinalHistoryMessages,
       'agentEnabled': preset.agentEnabled,
-      'executionMode': preset.executionMode.name,
       'runtime': encodeRuntime(preset.runtime),
       'updatedAt': preset.updatedAt,
     };

@@ -1,7 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../features/settings/api_list_provider.dart';
-import '../llm/studio_activation_gate.dart';
 import '../llm/studio_controller_ontology.dart';
 import '../llm/studio_turn_config_snapshot.dart';
 import '../models/api_config.dart';
@@ -57,23 +56,16 @@ class StudioTurnConfigResolver {
       preset = (await loadPreset(presetId)) ?? (await loadDefaultPreset());
       if (preset != null) {
         final agentEnabled = preset.agentEnabled;
-        final beautyPipelineEnabled = preset.blocks.any(
-          (block) => block.id == 'beauty_task' && block.enabled,
-        );
         final agents = preset.agents.map((agent) {
-          final specId = StudioControllerOntology.targetIdForAgent(agent);
-          if (specId == null) return agent.copyWith(enabled: false);
-          final disableBeauty = specId == 'beauty' && !beautyPipelineEnabled;
-          return agentEnabled[specId] == false || disableBeauty
+          final spec = StudioControllerOntology.specForAgent(agent);
+          if (spec == null) return agent.copyWith(enabled: false);
+          if (spec.isFinal) return agent.copyWith(enabled: true);
+          return agentEnabled[spec.id] == false
               ? agent.copyWith(enabled: false)
               : agent;
         }).toList();
-        final gated =
-            StudioActivationGate.applyExecutionMode(
-                agents,
-                preset.executionMode,
-              ).where((agent) => agent.enabled).toList()
-              ..sort((a, b) => a.order.compareTo(b.order));
+        final gated = agents.where((agent) => agent.enabled).toList()
+          ..sort((a, b) => a.order.compareTo(b.order));
         if (gated.isNotEmpty) {
           preset = preset.copyWith(agents: gated);
           effectiveConfig = storedConfig;

@@ -3,6 +3,7 @@ import '../../models/pipeline_settings.dart';
 import '../../models/studio_config.dart';
 import '../agent_runner.dart' show ResolvedAgentConfig;
 import '../studio_api_config_resolver.dart';
+import '../studio_controller_ontology.dart';
 import '../studio_turn_config_snapshot.dart';
 import '../transport/extra_request_parameters.dart';
 
@@ -15,7 +16,7 @@ import '../transport/extra_request_parameters.dart';
 ///   for post-processing agents. An empty slot uses the active chat config.
 /// - Model overrides are global PipelineSettings values configured from the
 ///   Studio menu: studioFinalModelOverride for the final generator,
-///   postCleanerModel for post-processing trackers, studioTrackerModelOverride
+///   postCleanerModel for post-processing trackers, studioControllerModelOverride
 ///   for pre-gen trackers. The final generator intentionally does not read
 ///   PipelineSettings.memoryBookApi.generationModel because that field belongs
 ///   to MemoryBook draft generation.
@@ -69,12 +70,20 @@ class AgentConfigResolver {
             ),
           );
     } else if (agent.phase == 'post_processing') {
-      if (pipeline.cleaner.postCleanerModel.isNotEmpty) {
+      // Post Clean and the Ledger share this phase but not their model: the
+      // Ledger prefers its own override and only then the cleaner's.
+      final ledgerModel = pipeline.ledger.studioLedgerModel;
+      final postModel =
+          StudioControllerOntology.specForAgent(agent)?.id == 'ledger' &&
+              ledgerModel.isNotEmpty
+          ? ledgerModel
+          : pipeline.cleaner.postCleanerModel;
+      if (postModel.isNotEmpty) {
         return resolver
             .resolveAgentConfig(
               current,
               selectedApiConfigId,
-              pipeline.cleaner.postCleanerModel,
+              postModel,
             )
             .copyWithSampling(
               topP: pipeline.cleaner.postCleanerTopP,
@@ -109,45 +118,45 @@ class AgentConfigResolver {
               pipeline.cleaner.postCleanerExtraRequestParameters,
             ),
           );
-    } else if (pipeline.studioAgent.studioTrackerModelOverride.isNotEmpty) {
+    } else if (pipeline.studioAgent.studioControllerModelOverride.isNotEmpty) {
       return resolver
           .resolveAgentConfig(
             current,
             selectedApiConfigId,
-            pipeline.studioAgent.studioTrackerModelOverride,
+            pipeline.studioAgent.studioControllerModelOverride,
           )
           .copyWithSampling(
-            topP: pipeline.studioAgent.studioTrackerTopP,
-            topK: pipeline.studioAgent.studioTrackerTopK,
+            topP: pipeline.studioAgent.studioControllerTopP,
+            topK: pipeline.studioAgent.studioControllerTopK,
             frequencyPenalty:
-                pipeline.studioAgent.studioTrackerFrequencyPenalty,
-            presencePenalty: pipeline.studioAgent.studioTrackerPresencePenalty,
-            omitTemperature: pipeline.studioAgent.studioTrackerOmitTemperature,
-            omitTopP: pipeline.studioAgent.studioTrackerOmitTopP,
+                pipeline.studioAgent.studioControllerFrequencyPenalty,
+            presencePenalty: pipeline.studioAgent.studioControllerPresencePenalty,
+            omitTemperature: pipeline.studioAgent.studioControllerOmitTemperature,
+            omitTopP: pipeline.studioAgent.studioControllerOmitTopP,
             extraRequestParameters: mergeExtraRequestParameters(
               resolver
                       .resolveRunConfig(selectedApiConfigId)
                       ?.extraRequestParameters ??
                   const [],
-              pipeline.studioAgent.studioTrackerExtraRequestParameters,
+              pipeline.studioAgent.studioControllerExtraRequestParameters,
             ),
           );
     }
     return resolver
         .resolveAgentConfig(current, selectedApiConfigId, '')
         .copyWithSampling(
-          topP: pipeline.studioAgent.studioTrackerTopP,
-          topK: pipeline.studioAgent.studioTrackerTopK,
-          frequencyPenalty: pipeline.studioAgent.studioTrackerFrequencyPenalty,
-          presencePenalty: pipeline.studioAgent.studioTrackerPresencePenalty,
-          omitTemperature: pipeline.studioAgent.studioTrackerOmitTemperature,
-          omitTopP: pipeline.studioAgent.studioTrackerOmitTopP,
+          topP: pipeline.studioAgent.studioControllerTopP,
+          topK: pipeline.studioAgent.studioControllerTopK,
+          frequencyPenalty: pipeline.studioAgent.studioControllerFrequencyPenalty,
+          presencePenalty: pipeline.studioAgent.studioControllerPresencePenalty,
+          omitTemperature: pipeline.studioAgent.studioControllerOmitTemperature,
+          omitTopP: pipeline.studioAgent.studioControllerOmitTopP,
           extraRequestParameters: mergeExtraRequestParameters(
             resolver
                     .resolveRunConfig(selectedApiConfigId)
                     ?.extraRequestParameters ??
                 const [],
-            pipeline.studioAgent.studioTrackerExtraRequestParameters,
+            pipeline.studioAgent.studioControllerExtraRequestParameters,
           ),
         );
   }

@@ -67,4 +67,6 @@ class StudioFeatureEnabledNotifier extends StateNotifier<bool> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_storageKey, enabled);
   }
+
+  Future<void> enable() async => setEnabled(true);
 }

@@ -19,9 +19,9 @@ import 'studio_message_builder.dart';
 import 'studio_prompt_text.dart';
 import 'studio_stage_brief.dart';
 import 'studio_turn_config_snapshot.dart';
-import 'tracker_batcher.dart';
-import 'studio/studio_tracker_phase_runner.dart';
-import 'studio/studio_tracker_result_mapper.dart';
+import 'controller_batcher.dart';
+import 'studio/controller_phase_runner.dart';
+import 'studio/controller_result_mapper.dart';
 import 'generation_context_inputs.dart';
 import 'studio/studio_context.dart';
 
@@ -29,7 +29,7 @@ import 'studio/studio_context.dart';
 // tests, studio_post_processing) keep their import path after the move to
 // studio_activation_gate.dart.
 export 'studio_activation_gate.dart' show AgentPhaseSplit;
-export 'studio/studio_tracker_phase_runner.dart' show PreGenPhaseResult;
+export 'studio/controller_phase_runner.dart' show PreGenPhaseResult;
 
 /// Session-bound Studio pipeline.
 ///
@@ -39,7 +39,7 @@ export 'studio/studio_tracker_phase_runner.dart' show PreGenPhaseResult;
 class MemoryStudioService {
   final Ref _ref;
   final AgentRunner _runner;
-  final TrackerBatcher _batcher;
+  final ControllerBatcher _batcher;
   final StudioPromptText _promptText = const StudioPromptText();
   late final StudioBriefParser _briefParser = StudioBriefParser(_log);
   late final StudioBriefDeduper _briefDeduper = StudioBriefDeduper(
@@ -64,7 +64,7 @@ class MemoryStudioService {
   );
   late final StudioTrackerResultMapper _resultMapper =
       StudioTrackerResultMapper(_briefParser, _briefCache);
-  late final StudioTrackerPhaseRunner _phaseRunner = StudioTrackerPhaseRunner(
+  late final ControllerPhaseRunner _phaseRunner = ControllerPhaseRunner(
     presetRepo: _ref.read(studioPresetRepoProvider),
     batcher: _batcher,
     briefCache: _briefCache,
@@ -149,16 +149,8 @@ class MemoryStudioService {
       if (token.isCancelled) {
         return const StudioPipelineResult(status: 'aborted', response: '');
       }
-      final interval = agent.runInterval <= 0 ? 1 : agent.runInterval;
-      if (phaseResult.turnIndex % interval != 0) continue;
-      if (agent.activationKeywords.isNotEmpty &&
-          !StudioActivationGate.matchesActivationKeywords(
-            agent.activationKeywords,
-            phaseResult.historyForScan,
-            agent.activationScanDepth,
-          )) {
-        continue;
-      }
+      // Post-processing agents run every turn: cadence and keyword gating were
+      // per-agent overrides, and an agent no longer carries any (§4).
       final result = await _executor.runPostProcessingTracker(
         agent: agent,
         mainResponse: mainResponse,
@@ -201,7 +193,7 @@ class MemoryStudioService {
 
   /// Tracker-only cycle: runs the pre-gen tracker phase and returns the
   /// produced briefs WITHOUT firing the final generator or post-gen
-  /// trackers. Used by [TrackerMemoryRecoveryService] to restore lost
+  /// trackers. Used by [ControllerMemoryRecoveryService] to restore lost
   /// `studioOutputs` without burning the final-generator model on every
   /// historical message.
   Future<StudioPipelineResult> runTrackersOnly({
@@ -238,19 +230,6 @@ class MemoryStudioService {
     );
   }
 
-  /// Static delegator — see [StudioActivationGate.matchesActivationKeywords].
-  /// Kept on this class because tests reference
-  /// `MemoryStudioService.matchesActivationKeywords`.
-  @visibleForTesting
-  static bool matchesActivationKeywords(
-    List<String> keywords,
-    List<String> historyContents,
-    int scanDepth,
-  ) => StudioActivationGate.matchesActivationKeywords(
-    keywords,
-    historyContents,
-    scanDepth,
-  );
 
   /// Static delegator — see [StudioActivationGate.splitAgentsByPhase]. Kept on
   /// this class because tests reference `MemoryStudioService.splitAgentsByPhase`.

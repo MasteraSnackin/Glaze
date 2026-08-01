@@ -4,7 +4,7 @@ import '../models/api_config.dart';
 import '../models/studio_config.dart';
 import 'agent_runner.dart';
 import 'studio_message_builder.dart';
-import 'tracker_batcher.dart';
+import 'controller_batcher.dart';
 import 'studio_turn_config_snapshot.dart';
 import 'studio/studio_context.dart';
 
@@ -14,11 +14,11 @@ import 'studio/studio_context.dart';
 /// tracker failures to the Studio pipeline. Extracted from `MemoryStudioService`
 /// (plan §2.9).
 ///
-/// Deps: the injected [TrackerBatcher], [AgentRunner], and
+/// Deps: the injected [ControllerBatcher], [AgentRunner], and
 /// [StudioMessageBuilder]. `_log` is injected as a callback so this specialist
 /// does not own the host's debug-print sink.
 class StudioBatchCoordinator {
-  final TrackerBatcher _batcher;
+  final ControllerBatcher _batcher;
   final AgentRunner _runner;
   final StudioMessageBuilder _messageBuilder;
   final void Function(String message) _log;
@@ -35,8 +35,8 @@ class StudioBatchCoordinator {
   /// `<result>` blocks, and retry the batch twice for any transport failure or
   /// missing/unparseable tracker result. Exhausted retries return failed
   /// tracker results; the caller turns that into a hard Studio error.
-  Future<List<TrackerBatchResult>> runBatchGroup({
-    required TrackerBatchGroup group,
+  Future<List<ControllerBatchResult>> runBatchGroup({
+    required ControllerBatchGroup group,
     required StudioConfig config,
     required StudioPreset studioPreset,
     required StudioContext context,
@@ -80,12 +80,15 @@ class StudioBatchCoordinator {
             'listed above, in order.',
       },
     ];
-    final batchAgent = group.agents.first.copyWith(
-      maxTokens: group.batchMaxTokens,
-      temperature: group.batchTemperature,
-      contextSize: batchContextSize,
-    );
-    List<TrackerBatchResult>? lastParsed;
+    // The batch runs under the first agent's identity (the API config is
+    // resolved from the group's `resolved` config anyway), but with the
+    // group's own budget: the summed token allowance and the lowest
+    // temperature. Those are passed explicitly rather than copied onto a
+    // synthetic agent — an agent carries no generation parameters of its own
+    // (§4). The shared history is already trimmed to [batchContextSize] by
+    // `buildSharedBatchMessages` above.
+    final batchAgent = group.agents.first;
+    List<ControllerBatchResult>? lastParsed;
     String? lastError;
     for (var attempt = 1; attempt <= 3; attempt++) {
       if (cancelToken.isCancelled) {
@@ -105,6 +108,8 @@ class StudioBatchCoordinator {
           cancelToken: cancelToken,
           preResolvedConfig: group.resolved,
           turnConfig: turnConfig,
+          batchMaxTokens: group.batchMaxTokens,
+          batchTemperature: group.batchTemperature,
         );
         final parsed = _batcher.parseBatchResponse(result.text, group);
         if (_allOk(parsed)) return parsed;
@@ -122,7 +127,7 @@ class StudioBatchCoordinator {
     return lastParsed ??
         group.agents
             .map(
-              (agent) => TrackerBatchResult.failed(
+              (agent) => ControllerBatchResult.failed(
                 agentId: agent.id,
                 agentName: agent.name,
                 reason: lastError ?? 'tracker batch failed after 2 retries',
@@ -131,7 +136,7 @@ class StudioBatchCoordinator {
             .toList(growable: false);
   }
 
-  bool _allOk(List<TrackerBatchResult> results) {
+  bool _allOk(List<ControllerBatchResult> results) {
     return results.every((r) => r.status == 'ok' && r.text.isNotEmpty);
   }
 }

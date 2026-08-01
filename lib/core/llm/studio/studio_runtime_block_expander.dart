@@ -34,11 +34,14 @@ class StudioRuntimeBlockExpander {
     return replaceMacros(studioExpanded, context.macroContext).text;
   }
 
-  /// Returns the pipeline section for this run: `final` for the generator,
-  /// `cleaner` for post-processing trackers, `pregen` for pre-gen trackers.
-  String sectionForRun(StudioAgent agent, bool isFinalResponse) {
+  /// Returns the injection point for this run: `final` for the generator,
+  /// `cleaner` for Post Clean, `ledger` for Трекер, `pregen` for the
+  /// pre-gen controllers. Matches [StudioPresetBlock.injectionPoint].
+  String injectionPointForRun(StudioAgent agent, bool isFinalResponse) {
     if (isFinalResponse) return 'final';
-    if (agent.phase == 'post_processing') return 'cleaner';
+    final specId = StudioControllerOntology.specForAgent(agent)?.id;
+    if (specId == 'post_clean') return 'cleaner';
+    if (specId == 'ledger') return 'ledger';
     return 'pregen';
   }
 
@@ -53,26 +56,6 @@ class StudioRuntimeBlockExpander {
     }.contains(block.id);
   }
 
-  /// Targeted instructions apply only to their exact controller id.
-  bool blockAppliesToAgent(
-    StudioPresetBlock block,
-    StudioAgent agent,
-    bool isFinalResponse,
-  ) {
-    if (block.type != StudioBlockType.instruction ||
-        block.targetAgentId == null) {
-      return true;
-    }
-    return block.targetAgentId ==
-        StudioControllerOntology.targetIdForAgent(agent);
-  }
-
-  bool trackerInstructionAppliesToAgent(
-    StudioPresetBlock block,
-    StudioAgent agent,
-  ) =>
-      block.type == StudioBlockType.instruction &&
-      block.targetAgentId == StudioControllerOntology.targetIdForAgent(agent);
 
   /// Normalize the role of a preset/shard INSTRUCTION block (not a chat
   /// history message). Instruction blocks are always forced to `system` so

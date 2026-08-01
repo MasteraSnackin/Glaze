@@ -1,7 +1,6 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:glaze_flutter/core/llm/studio_activation_gate.dart';
 import 'package:glaze_flutter/core/llm/studio_brief_parser.dart';
 import 'package:glaze_flutter/core/llm/studio_controller_ontology.dart';
 import 'package:glaze_flutter/core/models/studio_agent_codec.dart';
@@ -138,12 +137,6 @@ void main() {
       expect(StudioControllerOntology.specForAgent(unknown), isNull);
       expect(StudioControllerOntology.targetIdForAgent(unknown), isNull);
       expect(StudioControllerOntology.targetIdForAgent(canonical), 'dialogue');
-      expect(
-        StudioActivationGate.applyExecutionMode([
-          unknown,
-        ], StudioExecutionMode.legacy).single.enabled,
-        isFalse,
-      );
     });
 
     test('meta policy detection is exact', () {

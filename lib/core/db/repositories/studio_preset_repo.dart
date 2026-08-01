@@ -5,6 +5,7 @@ import 'package:drift/drift.dart';
 import '../../application/sync_repo_interfaces.dart';
 import '../../models/studio_config.dart';
 import '../../models/studio_agent_codec.dart';
+import '../../models/studio_preset_block_migration.dart';
 import '../../models/studio_preset_codec.dart';
 import '../app_db.dart';
 
@@ -31,6 +32,28 @@ class StudioPresetRepo implements SyncStudioPresetStore {
 
   Future<StudioPreset?> getDefault() => getById('default');
 
+  /// Ensures the built-in `default` Studio preset exists and returns it.
+  ///
+  /// Fresh installs build the schema through `onCreate`, which (unlike the
+  /// `onUpgrade` migration that seeds it) leaves `studio_preset_rows` empty.
+  /// Without a seeded preset there is nothing to clone, so "Add Agentic
+  /// Preset" would silently no-op. Idempotent — a no-op once the row exists.
+  Future<StudioPreset> ensureDefaultSeeded() async {
+    final existing = await getById('default');
+    if (existing != null) return existing;
+    final blocks = defaultStudioPresetSeedBlocks()
+        .map(StudioPresetBlock.fromJson)
+        .toList();
+    final preset = StudioPreset(
+      id: 'default',
+      name: 'Default Studio Preset',
+      blocks: blocks,
+      updatedAt: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+    );
+    await upsert(preset);
+    return preset;
+  }
+
   @override
   Future<List<StudioPreset>> getAll() async {
     final rows = await db.select(db.studioPresetRows).get();
@@ -55,9 +78,9 @@ class StudioPresetRepo implements SyncStudioPresetStore {
             expensiveApiConfigId: Value(normalized.expensiveApiConfigId),
             cheapApiConfigId: Value(normalized.cheapApiConfigId),
             cleanerApiConfigId: Value(normalized.cleanerApiConfigId),
+            ledgerApiConfigId: Value(normalized.ledgerApiConfigId),
             maxFinalHistoryMessages: Value(normalized.maxFinalHistoryMessages),
             agentEnabledJson: Value(jsonEncode(normalized.agentEnabled)),
-            executionMode: Value(normalized.executionMode.wireName),
             runtimeSettingsJson: Value(
               jsonEncode(StudioPresetCodec.encodeRuntime(normalized.runtime)),
             ),
@@ -124,9 +147,9 @@ class StudioPresetRepo implements SyncStudioPresetStore {
         expensiveApiConfigId: row.expensiveApiConfigId,
         cheapApiConfigId: row.cheapApiConfigId,
         cleanerApiConfigId: row.cleanerApiConfigId,
+        ledgerApiConfigId: row.ledgerApiConfigId,
         maxFinalHistoryMessages: row.maxFinalHistoryMessages,
         agentEnabled: agentEnabled,
-        executionMode: StudioExecutionMode.fromWireName(row.executionMode),
         runtime: runtime,
         updatedAt: row.updatedAt,
       ),
@@ -134,12 +157,21 @@ class StudioPresetRepo implements SyncStudioPresetStore {
   }
 
   StudioPreset _normalizePreset(StudioPreset preset) {
-    final blocks = preset.blocks
+    // Migrate legacy kind/section blocks to the mode/injectionPoint model
+    // (STUDIO_UX_ANALYSIS §5) at the single repo choke point — covers reads,
+    // writes, imports and the seeded default. Idempotent once migrated.
+    final migrated = migrateStudioPresetBlocksToV2(preset.blocks);
+    final blocks = migrated
         .where((block) => !_runtimeComputedBlockIds.contains(block.id))
         .toList();
     final agents = StudioAgentCodec.decodeAgentsJson(
       StudioAgentCodec.encodeAgents(preset.agents),
     );
+    if (identical(migrated, preset.blocks) &&
+        blocks.length == preset.blocks.length &&
+        agents.length == preset.agents.length) {
+      return preset;
+    }
     return preset.copyWith(blocks: blocks, agents: agents);
   }
 }

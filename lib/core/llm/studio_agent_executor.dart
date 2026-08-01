@@ -8,7 +8,7 @@ import 'agent_runner.dart';
 import 'studio_brief_parser.dart';
 import 'studio_message_builder.dart';
 import 'studio_stage_brief.dart';
-import 'tracker_batcher.dart';
+import 'controller_batcher.dart';
 import 'studio_turn_config_snapshot.dart';
 import 'studio/studio_context.dart';
 
@@ -19,7 +19,7 @@ import 'studio/studio_context.dart';
 ///
 /// Each adapter assembles the agent's message list via the injected
 /// [StudioMessageBuilder], invokes [AgentRunner.runAgent], and adapts the
-/// result type to the pipeline-internal [StudioStageBrief] / [TrackerBatchResult]
+/// result type to the pipeline-internal [StudioStageBrief] / [ControllerBatchResult]
 /// / [AgentRunResult] shapes. Tracker failures are retried by the
 /// relevant adapter and returned as failed results when retries are exhausted;
 /// the final generator rethrows.
@@ -80,6 +80,8 @@ class StudioAgentExecutor {
     required CancelToken cancelToken,
     String? apiConfigId,
     StudioTurnConfigSnapshot? turnConfig,
+    // 0 = the agent spec's own context size.
+    int trackerContextOverride = 0,
     void Function(String text)? onIntermediateUpdate,
   }) async {
     if (_briefParser.isMetaPolicyAgent(agent)) {
@@ -97,6 +99,7 @@ class StudioAgentExecutor {
         studioPreset: studioPreset,
         priorBriefs: const [],
         isFinalResponse: false,
+        trackerContextOverride: trackerContextOverride,
       );
       final result = await _runner.runAgent(
         agent: agent,
@@ -165,12 +168,10 @@ class StudioAgentExecutor {
         final override =
             (turnConfig?.pipelineSettings ?? _readPipelineSettings())
                 .studioAgent
-                .studioPostTrackerContextSize;
-        final effectiveAgent = override > 0
-            ? agent.copyWith(contextSize: override)
-            : agent;
+                .studioPostControllerContextSize;
         final messages = _messageBuilder.buildAgentMessages(
-          agent: effectiveAgent,
+          agent: agent,
+          trackerContextOverride: override,
           context: context,
           config: config,
           studioPreset: studioPreset,
@@ -210,7 +211,7 @@ class StudioAgentExecutor {
 
   /// Run one individual tracker (not part of any batch group). Reuses the
   /// existing per-agent prompt assembly + AgentRunner.
-  Future<TrackerBatchResult> runIndividualTracker({
+  Future<ControllerBatchResult> runIndividualTracker({
     required StudioAgent agent,
     required StudioConfig config,
     required StudioPreset studioPreset,
@@ -220,11 +221,12 @@ class StudioAgentExecutor {
     required CancelToken cancelToken,
     String? apiConfigId,
     StudioTurnConfigSnapshot? turnConfig,
+    int trackerContextOverride = 0,
   }) async {
     String? lastError;
     for (var attempt = 1; attempt <= 3; attempt++) {
       if (cancelToken.isCancelled) {
-        return TrackerBatchResult.failed(
+        return ControllerBatchResult.failed(
           agentId: agent.id,
           agentName: agent.name,
           reason: 'cancelled',
@@ -241,9 +243,11 @@ class StudioAgentExecutor {
           cancelToken: cancelToken,
           apiConfigId: apiConfigId,
           turnConfig: turnConfig,
+          trackerContextOverride: trackerContextOverride,
+          onIntermediateUpdate: null,
         );
         if (brief.status == 'ok' && brief.brief.trim().isNotEmpty) {
-          return TrackerBatchResult(
+          return ControllerBatchResult(
             agentId: agent.id,
             agentName: agent.name,
             text: brief.brief,
@@ -256,7 +260,7 @@ class StudioAgentExecutor {
         lastError = formatError(error);
       }
     }
-    return TrackerBatchResult.failed(
+    return ControllerBatchResult.failed(
       agentId: agent.id,
       agentName: agent.name,
       reason: lastError ?? 'tracker failed after 2 retries',

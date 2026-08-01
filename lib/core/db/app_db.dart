@@ -70,7 +70,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 101;
+  int get schemaVersion => 102;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -1961,6 +1961,19 @@ class AppDatabase extends _$AppDatabase {
       if (from < 101) {
         await _retireStudioConfigProfiles();
       }
+      if (from < 102) {
+        final presetCols = await customSelect(
+          'PRAGMA table_info("studio_preset_rows")',
+        ).get();
+        if (!presetCols.any(
+          (row) => row.read<String>('name') == 'ledger_api_config_id',
+        )) {
+          await m.addColumn(
+            studioPresetRows,
+            studioPresetRows.ledgerApiConfigId,
+          );
+        }
+      }
     },
   );
 
@@ -2692,6 +2705,13 @@ LazyDatabase _openConnection() {
 /// Each block: `{id, name, kind, role, content, enabled, order, section}`.
 /// The `section` field groups blocks by pipeline stage:
 /// `pregen`, `final`, `cleaner`, `ledger`, `build`, `brief_parser`.
+
+/// Public accessor for the built-in default Studio preset blocks. Fresh
+/// installs create the DB via `onCreate`, which — unlike the `onUpgrade`
+/// migration — never seeds the `default` Studio preset row, so the seed is
+/// needed at runtime to back-fill it (see `StudioPresetRepo.ensureDefaultSeeded`).
+List<Map<String, dynamic>> defaultStudioPresetSeedBlocks() =>
+    _legacyStudioPresetMigrationBlocks();
 
 /// Versioned payload retained only so upgrades from old database schemas can
 /// finish without changing their historical migration behavior.

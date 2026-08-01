@@ -143,7 +143,7 @@ class TrackerMemoryRecoveryService {
               turnConfig
                   ?.pipelineSettings
                   .studioAgent
-                  .studioTrackerContextSize ??
+                  .studioControllerContextSize ??
               0;
           final visibleMessageIds =
               StudioStreamInterceptor.computeStudioVisibleMessageIds(

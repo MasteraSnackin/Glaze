@@ -1,22 +1,22 @@
-import 'tracker_batcher.dart' show TrackerBatchGroup, TrackerBatchResult;
+import 'controller_batcher.dart' show ControllerBatchGroup, ControllerBatchResult;
 
 /// Pure serializer pair for the tracker batch wire format, extracted from
-/// `TrackerBatcher` (plan §4). Builds the `<role>/<lore>/<agents>` batch system
+/// `ControllerBatcher` (plan §4). Builds the `<role>/<lore>/<agents>` batch system
 /// prompt and parses the model's `<result agent="…">` reply back into one
-/// [TrackerBatchResult] per agent.
+/// [ControllerBatchResult] per agent.
 ///
-/// No `Ref`, no state. Behavior is preserved verbatim. `TrackerBatcher` keeps
+/// No `Ref`, no state. Behavior is preserved verbatim. `ControllerBatcher` keeps
 /// instance `buildBatchSystemPrompt` / `parseBatchResponse` delegators because
 /// `test/characterization/tracker_batcher_test.dart` calls them on the
 /// instance.
-class TrackerBatchProtocol {
-  const TrackerBatchProtocol();
+class ControllerBatchProtocol {
+  const ControllerBatchProtocol();
 
   /// Build the batched system prompt for a group. Layout (prompt-cache-friendly
   /// order): stable `<role>` + `<lore>` prefix, then volatile per-agent
   /// `<agent_task>` tail, then the required `<result agent="…">` output format.
   String buildBatchSystemPrompt({
-    required TrackerBatchGroup group,
+    required ControllerBatchGroup group,
     required List<Map<String, dynamic>> sharedMessages,
     required Map<String, String> perAgentTaskText,
     required String roleText,
@@ -91,20 +91,20 @@ class TrackerBatchProtocol {
     return buf.toString().trim();
   }
 
-  /// Parse a batched model response into one [TrackerBatchResult] per agent in
+  /// Parse a batched model response into one [ControllerBatchResult] per agent in
   /// [group]. Tries `<result agent="ID">` first (tolerating a missing closing
   /// tag), then the legacy `<result_ID>` shape.
-  List<TrackerBatchResult> parseBatchResponse(
+  List<ControllerBatchResult> parseBatchResponse(
     String raw,
-    TrackerBatchGroup group,
+    ControllerBatchGroup group,
   ) {
-    final results = <TrackerBatchResult>[];
+    final results = <ControllerBatchResult>[];
     for (final agent in group.agents) {
       final text = _extractResultBlock(raw, agent.id) ??
           _matchLegacyResultTag(raw, agent.id) ??
           '';
       final trimmed = text.trim();
-      results.add(TrackerBatchResult(
+      results.add(ControllerBatchResult(
         agentId: agent.id,
         agentName: agent.name,
         text: trimmed,

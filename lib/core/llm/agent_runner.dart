@@ -12,6 +12,7 @@ import 'agent_stream_runner.dart';
 import 'studio/agent_config_resolver.dart';
 import 'studio_turn_config_snapshot.dart';
 import 'transport/transport_factory.dart';
+import 'studio_controller_ontology.dart';
 
 /// Thin LLM orchestrator extracted from `MemoryStudioService` (Phase 5.1,
 /// port of Marinara `agent-executor.ts` single-agent execution path).
@@ -54,8 +55,8 @@ class AgentRunner {
   /// and the caller-supplied config is used directly. This avoids double
   /// resolution when the caller (e.g. `StudioBatchCoordinator`) has already
   /// resolved the config at grouping time. When provided, global tracker
-  /// maxTokens/temperature overrides are also skipped — the agent's own
-  /// values (which for batch carry the batch budget) are used instead.
+  /// maxTokens/temperature overrides are also skipped — a batched call passes
+  /// its budget explicitly via [batchMaxTokens] / [batchTemperature].
   Future<AgentRunResult> runAgent({
     required StudioAgent agent,
     required List<Map<String, dynamic>> messages,
@@ -66,6 +67,11 @@ class AgentRunner {
     ResolvedAgentConfig? preResolvedConfig,
     String? apiConfigId,
     StudioTurnConfigSnapshot? turnConfig,
+    // Explicit budget for a batched run: the group's summed token budget and
+    // minimum temperature. Non-null wins over both the global override and the
+    // agent spec's own values — an agent carries none of its own (§4).
+    int? batchMaxTokens,
+    double? batchTemperature,
     void Function(String text, String? reasoning)? onFinalResponseUpdate,
     void Function(String text)? onIntermediateUpdate,
   }) async {
@@ -89,6 +95,8 @@ class AgentRunner {
         preResolvedConfig: preResolvedConfig,
         apiConfigId: apiConfigId,
         turnConfig: turnConfig,
+        batchMaxTokens: batchMaxTokens,
+        batchTemperature: batchTemperature,
         onFinalResponseUpdate: onFinalResponseUpdate,
         onIntermediateUpdate: onIntermediateUpdate,
       );
@@ -122,6 +130,8 @@ class AgentRunner {
     ResolvedAgentConfig? preResolvedConfig,
     String? apiConfigId,
     StudioTurnConfigSnapshot? turnConfig,
+    int? batchMaxTokens,
+    double? batchTemperature,
     void Function(String text, String? reasoning)? onFinalResponseUpdate,
     void Function(String text)? onIntermediateUpdate,
   }) async {
@@ -144,12 +154,16 @@ class AgentRunner {
     // all group agents' maxTokens, min temperature). Global overrides are
     // for individual tracker requests; applying them to a batch would
     // overwrite the computed batch budget with a per-agent cap.
-    final maxTokensOverride = preResolvedConfig != null && !isFinalResponse
-        ? null
-        : effectiveMaxTokens(agent, isFinalResponse, turnConfig);
-    final temperatureOverride = preResolvedConfig != null && !isFinalResponse
-        ? null
-        : effectiveTemperature(agent, isFinalResponse, turnConfig);
+    final maxTokensOverride =
+        batchMaxTokens ??
+        (preResolvedConfig != null && !isFinalResponse
+            ? null
+            : effectiveMaxTokens(agent, isFinalResponse, turnConfig));
+    final temperatureOverride =
+        batchTemperature ??
+        (preResolvedConfig != null && !isFinalResponse
+            ? null
+            : effectiveTemperature(agent, isFinalResponse, turnConfig));
     final pipeline = turnConfig?.pipelineSettings ?? _readPipelineSettings();
     final effectiveResolved = isFinalResponse
         ? resolved.copyWithReasoning(
@@ -178,16 +192,16 @@ class AgentRunner {
             reasoningEffort: pipeline.cleaner.postCleanerReasoningEffort,
           )
         : resolved.copyWithReasoning(
-            useResponsesApi: pipeline.studioAgent.studioTrackerUseResponsesApi,
-            requestReasoning: pipeline.studioAgent.studioTrackerDisableReasoning
+            useResponsesApi: pipeline.studioAgent.studioControllerUseResponsesApi,
+            requestReasoning: pipeline.studioAgent.studioControllerDisableReasoning
                 ? false
-                : pipeline.studioAgent.studioTrackerRequestReasoning,
-            omitReasoning: pipeline.studioAgent.studioTrackerDisableReasoning
+                : pipeline.studioAgent.studioControllerRequestReasoning,
+            omitReasoning: pipeline.studioAgent.studioControllerDisableReasoning
                 ? true
-                : pipeline.studioAgent.studioTrackerOmitReasoning,
+                : pipeline.studioAgent.studioControllerOmitReasoning,
             omitReasoningEffort:
-                pipeline.studioAgent.studioTrackerOmitReasoningEffort,
-            reasoningEffort: pipeline.studioAgent.studioTrackerReasoningEffort,
+                pipeline.studioAgent.studioControllerOmitReasoningEffort,
+            reasoningEffort: pipeline.studioAgent.studioControllerReasoningEffort,
           );
     return _streamRunner.run(
       agent: agent,
@@ -209,7 +223,7 @@ class AgentRunner {
   }
 
   /// Resolve which API config an agent uses. Delegates to
-  /// [AgentConfigResolver]. Kept as a facade so callers (TrackerBatcher,
+  /// [AgentConfigResolver]. Kept as a facade so callers (ControllerBatcher,
   /// tests) can call `runner.resolveAgentConfig(...)` without importing the
   /// resolver directly.
   Future<ResolvedAgentConfig> resolveAgentConfig(
@@ -237,7 +251,7 @@ class AgentRunner {
   /// timeout.
   ///
   /// Resolution order:
-  /// 1. [StudioAgent.timeoutMs] (>4000ms, minimum 1000ms) —
+  /// 1. The agent spec's `timeoutMs` (>4000ms, minimum 1000ms) —
   ///    per-agent override set at Studio build time.
   /// 2. [PipelineSettings.studioAgent.studioTimeoutMs] (>0, minimum 1000ms)
   ///    — global user setting from the Post-Building menu.
@@ -253,12 +267,13 @@ class AgentRunner {
         ? pipeline.studioAgent.studioFinalTimeoutMs
         : agent.phase == 'post_processing'
         ? pipeline.cleaner.postCleanerTimeoutMs
-        : pipeline.studioAgent.studioTrackerTimeoutMs;
+        : pipeline.studioAgent.studioControllerTimeoutMs;
     if (slot > 0) {
       return slot < 1000 ? 1000 : slot;
     }
-    if (agent.timeoutMs > 4000) {
-      return agent.timeoutMs < 1000 ? 1000 : agent.timeoutMs;
+    final specTimeout = StudioControllerOntology.specForAgent(agent)?.timeoutMs ?? 4000;
+    if (specTimeout > 4000) {
+      return specTimeout < 1000 ? 1000 : specTimeout;
     }
     final global = pipeline.studioAgent.studioTimeoutMs;
     if (global > 0) {
@@ -270,7 +285,7 @@ class AgentRunner {
   /// Max tokens override. Two tiers:
   /// - Final generator: [PipelineSettings.studioAgent.studioFinalMaxTokens] (>0)
   ///   overrides the per-agent default (8000).
-  /// - Trackers: [PipelineSettings.studioAgent.studioTrackerMaxTokens] (>0) overrides the
+  /// - Trackers: [PipelineSettings.studioAgent.studioControllerMaxTokens] (>0) overrides the
   ///   per-agent default (1600). Lets the user tighten/loosen the compact JSON
   ///   brief budget for all 7 pre-gen agents at once from the Studio menu.
   /// Returns null when the relevant global override is 0 and the caller should
@@ -291,7 +306,7 @@ class AgentRunner {
       if (cleanerGlobal > 0) return cleanerGlobal;
       return null;
     }
-    final trackerGlobal = pipeline.studioAgent.studioTrackerMaxTokens;
+    final trackerGlobal = pipeline.studioAgent.studioControllerMaxTokens;
     if (trackerGlobal > 0) return trackerGlobal;
     return null;
   }
@@ -299,7 +314,7 @@ class AgentRunner {
   /// Temperature override. Two tiers:
   /// - Final generator: [PipelineSettings.studioAgent.studioFinalTemperature] (>= 0)
   ///   overrides the per-agent default (0.8).
-  /// - Trackers: [PipelineSettings.studioAgent.studioTrackerTemperature] (>= 0) overrides
+  /// - Trackers: [PipelineSettings.studioAgent.studioControllerTemperature] (>= 0) overrides
   ///   the per-agent default (0.3). Lets the user tune the creativity of all
   ///   7 pre-gen agents at once from the Studio menu.
   /// Returns null when the relevant global override is negative and the
@@ -318,7 +333,7 @@ class AgentRunner {
     if (agent.phase == 'post_processing') {
       return pipeline.cleaner.postCleanerTemperature;
     }
-    final trackerGlobal = pipeline.studioAgent.studioTrackerTemperature;
+    final trackerGlobal = pipeline.studioAgent.studioControllerTemperature;
     if (trackerGlobal >= 0) return trackerGlobal;
     return null;
   }

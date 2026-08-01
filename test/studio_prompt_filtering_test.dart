@@ -49,31 +49,42 @@ void main() {
         StudioPresetBlock(
           id: 'final_agent_instruction',
           content: 'FINAL ONLY',
-          section: 'final',
+          mode: 'direct',
+          injectionPoint: 'final',
         ),
         StudioPresetBlock(
           id: 'cleaner_system',
           content: 'CLEANER ONLY',
-          section: 'cleaner',
+          mode: 'direct',
+          injectionPoint: 'cleaner',
         ),
         StudioPresetBlock(
           id: 'continuity_task',
           title: 'Continuity Tracker',
-          targetAgentId: 'continuity',
           content: 'CONTINUITY ONLY',
-          section: 'pregen',
+          mode: 'direct',
+          injectionPoint: 'specificAgent',
+          targetAgentId: 'continuity',
         ),
         StudioPresetBlock(
           id: 'dialogue_task',
           title: 'Dialogue Tracker',
-          targetAgentId: 'dialogue',
           content: 'DIALOGUE ONLY',
-          section: 'pregen',
+          mode: 'direct',
+          injectionPoint: 'specificAgent',
+          targetAgentId: 'dialogue',
+        ),
+        StudioPresetBlock(
+          id: 'shared_pregen',
+          title: 'Shared controller rules',
+          content: 'SHARED PREGEN',
+          mode: 'direct',
+          injectionPoint: 'pregen',
         ),
         StudioPresetBlock(
           id: 'runtime_envelope',
           content: 'SEEDED RUNTIME ENVELOPE',
-          section: 'pregen',
+          injectionPoint: 'pregen',
         ),
       ],
     );
@@ -135,9 +146,9 @@ void main() {
           id: 'history',
           blocks: [
             StudioPresetBlock(
-              id: 'history',
-              type: StudioBlockType.history,
-              section: 'final',
+              id: 'chat_history',
+              mode: '',
+              injectionPoint: 'final',
             ),
           ],
         ),
@@ -182,9 +193,9 @@ void main() {
           id: 'history',
           blocks: [
             StudioPresetBlock(
-              id: 'history',
-              type: StudioBlockType.history,
-              section: 'final',
+              id: 'chat_history',
+              mode: '',
+              injectionPoint: 'final',
             ),
           ],
         ),
@@ -228,9 +239,9 @@ void main() {
           id: 'history',
           blocks: [
             StudioPresetBlock(
-              id: 'history',
-              type: StudioBlockType.history,
-              section: 'final',
+              id: 'chat_history',
+              mode: '',
+              injectionPoint: 'final',
             ),
           ],
         ),
@@ -273,9 +284,9 @@ void main() {
           id: 'history',
           blocks: [
             StudioPresetBlock(
-              id: 'history',
-              type: StudioBlockType.history,
-              section: 'final',
+              id: 'chat_history',
+              mode: '',
+              injectionPoint: 'final',
             ),
           ],
         ),
@@ -305,7 +316,8 @@ void main() {
               StudioPresetBlock(
                 id: 'state',
                 content: '{{studio_state}}',
-                section: 'final',
+                mode: 'direct',
+                injectionPoint: 'final',
               ),
             ],
           ),
@@ -328,23 +340,28 @@ void main() {
           blocks: [
             StudioPresetBlock(
               id: 'pov_open',
+              groupBoundary: 'open',
+              mode: '',
               role: 'system',
               content: '<loompov>',
-              section: 'final',
+              injectionPoint: 'final',
               order: 1,
             ),
             StudioPresetBlock(
               id: 'pov_content',
               role: 'system',
               content: 'POV instructions',
-              section: 'final',
+              mode: 'direct',
+              injectionPoint: 'final',
               order: 2,
             ),
             StudioPresetBlock(
               id: 'pov_close',
+              groupBoundary: 'close',
+              mode: '',
               role: 'system',
               content: '</loompov>',
-              section: 'final',
+              injectionPoint: 'final',
               order: 3,
             ),
           ],
@@ -367,6 +384,7 @@ void main() {
             id: 'cleaner',
             name: 'Cleaner',
             phase: 'post_processing',
+            specId: 'post_clean',
           ),
           context: context,
           config: config,
@@ -399,6 +417,23 @@ void main() {
       expect(text, isNot(contains('FINAL ONLY')));
       expect(text, isNot(contains('CLEANER ONLY')));
       expect(text, isNot(contains('SEEDED RUNTIME ENVELOPE')));
+      // Shared pre-gen instructions live in the batch's <role>, once. Copying
+      // them into every task repeated them per agent in the uncached tail.
+      expect(text, isNot(contains('SHARED PREGEN')));
+    });
+
+    test('shared pre-gen blocks go to the batch role, not the tasks', () {
+      final role = builder.batchRoleText(
+        config,
+        preset,
+        context,
+      );
+
+      expect(role, contains('SHARED PREGEN'));
+      // A specific-agent block is one agent's job — it must not leak into the
+      // instruction every controller reads.
+      expect(role, isNot(contains('CONTINUITY ONLY')));
+      expect(role, isNot(contains('DIALOGUE ONLY')));
     });
 
     test('target routing does not use agent name aliases', () {
@@ -432,6 +467,28 @@ void main() {
       expect(text, isNot(contains('DIALOGUE ONLY')));
     });
 
+    test('pre-gen agent run receives only its own specific-agent block', () {
+      final text = joinedMessages(
+        builder.buildAgentMessages(
+          agent: const StudioAgent(
+            id: 'continuity',
+            controllerId: 'continuity',
+            name: 'Continuity Tracker',
+          ),
+          context: context,
+          config: config,
+          studioPreset: preset,
+          priorBriefs: const [],
+          isFinalResponse: false,
+        ),
+      );
+
+      expect(text, contains('CONTINUITY ONLY'));
+      expect(text, isNot(contains('DIALOGUE ONLY')));
+      expect(text, isNot(contains('FINAL ONLY')));
+      expect(text, isNot(contains('CLEANER ONLY')));
+    });
+
     test('hard style contract reads only final-applicable instructions', () {
       final text = joinedMessages(
         builder.buildAgentMessages(
@@ -444,24 +501,28 @@ void main() {
               StudioPresetBlock(
                 id: 'final-style',
                 content: 'Do not use em dashes.',
-                section: 'final',
+                mode: 'direct',
+                injectionPoint: 'final',
               ),
               StudioPresetBlock(
                 id: 'wrong-target',
                 targetAgentId: 'dialogue',
                 content: 'Wrap dialogue in quotation marks.',
-                section: 'final',
+                mode: 'direct',
+                injectionPoint: 'specificAgent',
               ),
               StudioPresetBlock(
                 id: 'wrong-section',
                 content: 'Wrap dialogue in quotation marks.',
-                section: 'pregen',
+                mode: 'direct',
+                injectionPoint: 'pregen',
               ),
               StudioPresetBlock(
                 id: 'disabled',
                 content: 'Wrap dialogue in quotation marks.',
                 enabled: false,
-                section: 'final',
+                mode: 'direct',
+                injectionPoint: 'final',
               ),
             ],
           ),
@@ -488,17 +549,18 @@ void main() {
         blocks: [
           StudioPresetBlock(
             id: 'previous_agents',
-            type: StudioBlockType.priorBriefs,
+            mode: 'pregenBrief',
             content: '',
-            section: 'final',
+            injectionPoint: 'final',
             order: 0,
           ),
           StudioPresetBlock(
             id: 'brief_macros',
+            mode: 'direct',
             content:
                 '<continuity>{{studio_continuity_brief}}</continuity>\n'
                 '<dialogue>{{studio_dialogue_brief}}</dialogue>',
-            section: 'final',
+            injectionPoint: 'final',
             order: 1,
           ),
         ],
@@ -567,25 +629,26 @@ void main() {
     });
   });
 
-  group('Studio Narrative length ownership', () {
-    const narrativeAgent = StudioAgent(
-      id: 'narrative',
-      name: 'Narrative / Pacing / Style Controller',
+  group('Studio agent envelope lane ownership', () {
+    const guardAgent = StudioAgent(
+      id: 'guard',
+      name: 'Anti-Loop & Prose Guard',
     );
 
     test('runtime leaves numeric response budgets to the active preset', () {
-      final envelope = const StudioPromptText().intermediateRuntimeEnvelope(
-        narrativeAgent,
+      final guard = StudioControllerOntology.specs.firstWhere(
+        (spec) => spec.id == 'guard',
       );
-      final narrative = StudioControllerOntology.specs.firstWhere(
-        (spec) => spec.id == 'narrative',
+      final envelope = const StudioPromptText().intermediateRuntimeEnvelope(
+        guard,
+        guardAgent,
       );
 
       expect(envelope.toLowerCase(), isNot(contains('paragraph')));
       expect(envelope.toLowerCase(), isNot(contains('word budget')));
-      expect(narrative.purpose.toLowerCase(), isNot(contains('paragraph')));
+      expect(guard.purpose.toLowerCase(), isNot(contains('paragraph')));
       expect(
-        narrative.outputContract.toLowerCase(),
+        guard.outputContract.toLowerCase(),
         isNot(contains('paragraph')),
       );
     });
@@ -649,11 +712,9 @@ void main() {
         'id': 'agent_s1_meta_123',
         'name': 'Meta-Weaver / Lumia Policy',
         'refreshPolicy': 'static',
-        'contextSize': 5,
         'order': 6,
       });
       expect(oldAgent.refreshPolicy, 'static');
-      expect(oldAgent.contextSize, 5);
 
       // The migration is in StudioConfigRepo._normalizeLoadedConfig which is
       // private. We test the migration logic by reproducing it here — it's a
@@ -661,50 +722,31 @@ void main() {
       // every load. This test documents the expected behavior.
       final migrated = _migrateForTest(oldAgent);
       expect(migrated.refreshPolicy, 'turn');
-      expect(migrated.contextSize, 5);
     });
 
-    test(
-      'new Meta-Weaver with turn policy + custom contextSize is unchanged',
-      () {
-        final newAgent = StudioAgent.fromJson(const {
-          'id': 'agent_s1_meta_123',
-          'name': 'Meta-Weaver / Lumia Policy',
-          'refreshPolicy': 'turn',
-          'contextSize': 8,
-          'order': 6,
-        });
-        final migrated = _migrateForTest(newAgent);
-        expect(migrated.refreshPolicy, 'turn');
-        expect(migrated.contextSize, 8);
-      },
-    );
+    test('new Meta-Weaver with turn policy is unchanged', () {
+      final newAgent = StudioAgent.fromJson(const {
+        'id': 'agent_s1_meta_123',
+        'name': 'Meta-Weaver / Lumia Policy',
+        'refreshPolicy': 'turn',
+        'order': 6,
+      });
+      final migrated = _migrateForTest(newAgent);
+      expect(migrated.refreshPolicy, 'turn');
+    });
 
     test('non-Meta-Weaver agent is unchanged by migration', () {
       final guard = StudioAgent.fromJson(const {
         'id': 'agent_s1_guard_123',
         'name': 'Anti-Loop & Prose Guard',
         'refreshPolicy': 'turn',
-        'contextSize': 5,
         'order': 4,
       });
       final migrated = _migrateForTest(guard);
       expect(migrated.refreshPolicy, 'turn');
-      expect(migrated.contextSize, 5);
     });
 
-    test('Meta-Weaver with large contextSize keeps its larger value', () {
-      final agent = StudioAgent.fromJson(const {
-        'id': 'agent_s1_meta_123',
-        'name': 'Meta-Weaver / Lumia Policy',
-        'refreshPolicy': 'static',
-        'contextSize': 30,
-        'order': 6,
-      });
-      final migrated = _migrateForTest(agent);
-      expect(migrated.refreshPolicy, 'turn');
-      expect(migrated.contextSize, 30);
-    });
+
   });
 
   group('Meta-Weaver auto-disable when no lumia block', () {
