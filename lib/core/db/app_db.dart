@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/studio_preset_codec.dart';
 import '../models/studio_agent_codec.dart';
+import '../models/studio_config.dart';
 import '../llm/studio_controller_ontology.dart';
 import '../utils/platform_paths.dart';
 import '../utils/time_helpers.dart';
@@ -69,7 +70,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 100;
+  int get schemaVersion => 101;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -538,10 +539,16 @@ class AppDatabase extends _$AppDatabase {
         ).get();
         final colNames = cols.map((r) => r.read<String>('name')).toSet();
         if (!colNames.contains('profile_id')) {
-          await m.addColumn(studioConfigRows, studioConfigRows.profileId);
+          await customStatement(
+            "ALTER TABLE studio_config_rows ADD COLUMN profile_id "
+            "TEXT NOT NULL DEFAULT ''",
+          );
         }
         if (!colNames.contains('profile_name')) {
-          await m.addColumn(studioConfigRows, studioConfigRows.profileName);
+          await customStatement(
+            "ALTER TABLE studio_config_rows ADD COLUMN profile_name "
+            "TEXT NOT NULL DEFAULT ''",
+          );
         }
         await customStatement(
           "UPDATE studio_config_rows SET profile_id = session_id "
@@ -613,9 +620,9 @@ class AppDatabase extends _$AppDatabase {
         ).get();
         final colNames = cols.map((r) => r.read<String>('name')).toSet();
         if (!colNames.contains('broadcast_blocks_json')) {
-          await m.addColumn(
-            studioConfigRows,
-            studioConfigRows.broadcastBlocksJson,
+          await customStatement(
+            "ALTER TABLE studio_config_rows ADD COLUMN broadcast_blocks_json "
+            "TEXT NOT NULL DEFAULT '[]'",
           );
         }
       }
@@ -1951,6 +1958,9 @@ class AppDatabase extends _$AppDatabase {
           );
         }
       }
+      if (from < 101) {
+        await _retireStudioConfigProfiles();
+      }
     },
   );
 
@@ -2030,6 +2040,9 @@ class AppDatabase extends _$AppDatabase {
         .map((row) => row.read<String>('name'))
         .toSet();
     for (final definition in const {
+      'profile_id': "TEXT NOT NULL DEFAULT ''",
+      'profile_name': "TEXT NOT NULL DEFAULT ''",
+      'broadcast_blocks_json': "TEXT NOT NULL DEFAULT '[]'",
       'agents_json': "TEXT NOT NULL DEFAULT '[]'",
       'expensive_api_config_id': "TEXT NOT NULL DEFAULT ''",
       'cheap_api_config_id': "TEXT NOT NULL DEFAULT ''",
@@ -2092,6 +2105,98 @@ class AppDatabase extends _$AppDatabase {
     await customStatement('DROP TABLE studio_config_rows');
     await customStatement(
       'ALTER TABLE studio_config_rows_v99 RENAME TO studio_config_rows',
+    );
+    await customStatement(
+      'CREATE INDEX idx_studio_config_session '
+      'ON studio_config_rows (session_id)',
+    );
+  }
+
+  Future<void> _retireStudioConfigProfiles() async {
+    final columns = await customSelect(
+      'PRAGMA table_info("studio_config_rows")',
+    ).get();
+    final columnNames = columns.map((row) => row.read<String>('name')).toSet();
+    if (!columnNames.contains('profile_id')) return;
+
+    if (columnNames.contains('broadcast_blocks_json')) {
+      final rows = await customSelect(
+        'SELECT broadcast_blocks_json FROM studio_config_rows '
+        "WHERE broadcast_blocks_json != '[]' AND broadcast_blocks_json != '' "
+        'ORDER BY updated_at DESC',
+      ).get();
+      List<String>? broadcasts;
+      for (final row in rows) {
+        try {
+          final decoded = jsonDecode(row.read<String>('broadcast_blocks_json'));
+          if (decoded is List) {
+            final values = decoded.whereType<String>().toList(growable: false);
+            if (values.isNotEmpty) {
+              broadcasts = values;
+              break;
+            }
+          }
+        } on Object {
+          // Preserve malformed legacy rows until the table rebuild below.
+        }
+      }
+      if (broadcasts != null) {
+        final presets = await customSelect(
+          'SELECT preset_id, runtime_settings_json FROM studio_preset_rows',
+        ).get();
+        for (final row in presets) {
+          final presetId = row.read<String>('preset_id');
+          try {
+            final decoded = jsonDecode(
+              row.read<String>('runtime_settings_json'),
+            );
+            final runtime = decoded is Map && decoded.isNotEmpty
+                ? StudioRuntimeSettings.fromJson(
+                    Map<String, dynamic>.from(decoded),
+                  )
+                : const StudioRuntimeSettings();
+            if (runtime.broadcastBlocks.isNotEmpty) continue;
+            await customStatement(
+              'UPDATE studio_preset_rows SET runtime_settings_json = ? '
+              'WHERE preset_id = ?',
+              [
+                jsonEncode(
+                  StudioPresetCodec.encodeRuntime(
+                    runtime.copyWith(broadcastBlocks: broadcasts),
+                  ),
+                ),
+                presetId,
+              ],
+            );
+          } on Object {
+            // Do not replace malformed preset runtime data during migration.
+          }
+        }
+      }
+    }
+
+    await customStatement('''
+      CREATE TABLE studio_config_rows_v101 (
+        session_id TEXT NOT NULL PRIMARY KEY,
+        enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1)),
+        created_at INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL DEFAULT 0
+      )
+    ''');
+    await customStatement('''
+      INSERT INTO studio_config_rows_v101
+        (session_id, enabled, created_at, updated_at)
+      SELECT config.session_id, config.enabled, config.created_at,
+             config.updated_at
+      FROM studio_config_rows AS config
+      WHERE EXISTS (
+        SELECT 1 FROM chat_sessions AS chat
+        WHERE chat.session_id = config.session_id
+      )
+    ''');
+    await customStatement('DROP TABLE studio_config_rows');
+    await customStatement(
+      'ALTER TABLE studio_config_rows_v101 RENAME TO studio_config_rows',
     );
     await customStatement(
       'CREATE INDEX idx_studio_config_session '

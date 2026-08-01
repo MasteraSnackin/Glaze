@@ -6,8 +6,11 @@ import 'package:flutter_riverpod/legacy.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/persona.dart';
+import '../models/cleaner_settings.dart';
+import '../models/ledger_settings.dart';
 import '../models/pipeline_settings.dart';
 import '../models/preset.dart';
+import '../models/studio_agent_settings.dart';
 import '../models/studio_config.dart';
 import 'db_provider.dart';
 import 'shared_prefs_provider.dart';
@@ -77,12 +80,10 @@ Future<void> _migrateStudioRuntimeToPresets(
   SharedPreferences prefs,
 ) async {
   final presetRepo = ref.read(studioPresetRepoProvider);
-  final configRepo = ref.read(studioConfigRepoProvider);
   await migrateLegacyStudioPresetRuntime(
     prefs: prefs,
     pipeline: ref.read(pipelineSettingsProvider),
     loadPresets: presetRepo.getAll,
-    loadConfigs: configRepo.getAll,
     savePreset: presetRepo.upsert,
   );
 }
@@ -92,7 +93,6 @@ Future<void> migrateLegacyStudioPresetRuntime({
   required SharedPreferences prefs,
   required PipelineSettings pipeline,
   required Future<List<StudioPreset>> Function() loadPresets,
-  required Future<List<StudioConfig>> Function() loadConfigs,
   required Future<void> Function(StudioPreset preset) savePreset,
 }) async {
   const migrationKey = 'studioPresetRuntimeMigrationV1';
@@ -100,22 +100,21 @@ Future<void> migrateLegacyStudioPresetRuntime({
 
   final presets = await loadPresets();
   if (presets.isEmpty) return;
-  final configs = [...await loadConfigs()];
-  configs.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
-  final migratedBroadcasts = configs
-      .where((config) => config.broadcastBlocks.isNotEmpty)
-      .map((config) => config.broadcastBlocks)
-      .firstOrNull;
 
   for (final preset in presets) {
-    if (preset.runtime != const StudioRuntimeSettings()) continue;
+    final runtime = preset.runtime;
+    if (runtime.agents != const StudioAgentSettings() ||
+        runtime.cleaner != const CleanerSettings() ||
+        runtime.ledger != const LedgerSettings()) {
+      continue;
+    }
     await savePreset(
       preset.copyWith(
         runtime: StudioRuntimeSettings(
           agents: pipeline.studioAgent,
           cleaner: pipeline.cleaner,
           ledger: pipeline.ledger,
-          broadcastBlocks: migratedBroadcasts ?? const [],
+          broadcastBlocks: runtime.broadcastBlocks,
         ),
       ),
     );

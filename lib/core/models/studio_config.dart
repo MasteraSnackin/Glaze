@@ -40,28 +40,13 @@ abstract class StudioRuntimeSettings with _$StudioRuntimeSettings {
       _$StudioRuntimeSettingsFromJson(json);
 }
 
-/// Reusable Studio configuration profile.
-///
-/// Created when the user clicks "Build Studio" in the MagicDrawer Studio menu.
-/// Agents are built from [StudioControllerOntology.specs] directly — no LLM
-/// decomposition. Prompt shards come from the DB-backed StudioPreset.
+/// Per-session Studio activation. Reusable pipeline settings live in
+/// [StudioPreset].
 @freezed
 abstract class StudioConfig with _$StudioConfig {
   const factory StudioConfig({
-    /// Storage id. Older rows used the chat session id; profile rows use a
-    /// stable Studio profile id and can be reused by many sessions.
     required String sessionId,
-    @Default('') String profileId,
-    @Default('') String profileName,
     @Default(false) bool enabled,
-
-    /// Verbatim content of "broadcast" preset blocks — cross-cutting rules
-    /// (output language + prose-quality guards: anti-loop/echo/cliché/slop,
-    /// banlists) that must govern not only their primary agent but also the
-    /// POST-cleaner rewrite. Captured at build time so the POST-cleaner can
-    /// apply the user's own rules verbatim without re-running any LLM. Each
-    /// entry is one block's `[Block: name]\n<content>` text.
-    @Default([]) List<String> broadcastBlocks,
     @Default(0) int createdAt,
     @Default(0) int updatedAt,
   }) = _StudioConfig;

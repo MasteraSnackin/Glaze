@@ -3,7 +3,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:glaze_flutter/core/db/app_db.dart';
-import 'package:glaze_flutter/core/db/repositories/studio_config_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/studio_preset_repo.dart';
 import 'package:glaze_flutter/core/models/cleaner_settings.dart';
 import 'package:glaze_flutter/core/models/ledger_settings.dart';
@@ -22,7 +21,6 @@ void main() {
       final prefs = await SharedPreferences.getInstance();
       final db = AppDatabase.forTesting(NativeDatabase.memory());
       final presetRepo = StudioPresetRepo(db);
-      final configRepo = StudioConfigRepo(db);
       addTearDown(db.close);
 
       await presetRepo.upsert(const StudioPreset(id: 'empty'));
@@ -34,20 +32,6 @@ void main() {
               studioTrackerModelOverride: 'configured-model',
             ),
           ),
-        ),
-      );
-      await configRepo.upsert(
-        const StudioConfig(
-          sessionId: 'older',
-          broadcastBlocks: [],
-          updatedAt: 10,
-        ),
-      );
-      await configRepo.upsert(
-        const StudioConfig(
-          sessionId: 'newer',
-          broadcastBlocks: ['newer broadcast'],
-          updatedAt: 20,
         ),
       );
 
@@ -62,7 +46,6 @@ void main() {
         prefs: prefs,
         pipeline: legacyPipeline,
         loadPresets: presetRepo.getAll,
-        loadConfigs: configRepo.getAll,
         savePreset: presetRepo.upsert,
       );
 
@@ -70,7 +53,7 @@ void main() {
       expect(migrated?.runtime.agents, legacyPipeline.studioAgent);
       expect(migrated?.runtime.cleaner, legacyPipeline.cleaner);
       expect(migrated?.runtime.ledger, legacyPipeline.ledger);
-      expect(migrated?.runtime.broadcastBlocks, ['newer broadcast']);
+      expect(migrated?.runtime.broadcastBlocks, isEmpty);
       expect(
         (await presetRepo.getById(
           'configured',
@@ -86,7 +69,6 @@ void main() {
           ),
         ),
         loadPresets: presetRepo.getAll,
-        loadConfigs: configRepo.getAll,
         savePreset: presetRepo.upsert,
       );
       expect(
@@ -107,7 +89,6 @@ void main() {
       prefs: prefs,
       pipeline: const PipelineSettings(),
       loadPresets: () async => const [],
-      loadConfigs: () async => const [],
       savePreset: (_) async {
         saves++;
       },

@@ -155,11 +155,7 @@ void main() {
   });
 }
 
-const _config = StudioConfig(
-  sessionId: 'profile-storage-id',
-  profileId: 'shared-profile',
-  enabled: true,
-);
+const _config = StudioConfig(sessionId: 'profile-storage-id', enabled: true);
 
 const _agent = StudioAgent(
   id: 'continuity',

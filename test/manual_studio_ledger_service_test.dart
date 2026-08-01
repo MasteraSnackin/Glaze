@@ -78,6 +78,9 @@ void main() {
         id: 'preset',
         cleanerApiConfigId: 'cleaner',
         blocks: [StudioPresetBlock(id: 'ledger', section: 'ledger')],
+        runtime: StudioRuntimeSettings(
+          cleaner: CleanerSettings(postCleanerModel: 'snapshot-model'),
+        ),
       ),
     );
   });

@@ -669,11 +669,7 @@ class StudioConfigRows extends Table {
   String get tableName => 'studio_config_rows';
 
   TextColumn get sessionId => text()();
-  TextColumn get profileId => text().withDefault(const Constant(''))();
-  TextColumn get profileName => text().withDefault(const Constant(''))();
   BoolColumn get enabled => boolean().withDefault(const Constant(false))();
-  TextColumn get broadcastBlocksJson =>
-      text().withDefault(const Constant('[]'))();
   IntColumn get createdAt => integer().withDefault(const Constant(0))();
   IntColumn get updatedAt => integer().withDefault(const Constant(0))();
 

@@ -165,13 +165,7 @@ void main() {
           .setEnabled(true);
       await container
           .read(studioConfigRepoProvider)
-          .upsert(
-            const StudioConfig(
-              sessionId: 'session',
-              enabled: true,
-              broadcastBlocks: ['old broadcast'],
-            ),
-          );
+          .upsert(const StudioConfig(sessionId: 'session', enabled: true));
       await container
           .read(studioPresetRepoProvider)
           .upsert(
@@ -276,9 +270,7 @@ void main() {
           );
       await container
           .read(studioConfigRepoProvider)
-          .upsert(
-            snapshot.config!.copyWith(broadcastBlocks: const ['new broadcast']),
-          );
+          .upsert(snapshot.config!.copyWith(enabled: false));
       await container
           .read(pipelineSettingsProvider.notifier)
           .save(

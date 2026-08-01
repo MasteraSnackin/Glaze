@@ -199,9 +199,8 @@ class StudioBriefCache {
         return a.$1.compareTo(b.$1);
       });
     final base = <String, dynamic>{
-      'v': 5,
+      'v': 6,
       'sessionId': sessionId,
-      'profileId': config.profileId,
       'studioConfigId': config.sessionId,
       'cheapApiConfigId': studioPreset.cheapApiConfigId,
       'resolvedExecution': {

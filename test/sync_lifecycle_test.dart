@@ -330,8 +330,7 @@ class FakeStudioConfigStore implements SyncStudioConfigStore {
   Future<StudioConfig?> getById(String id) async => data[id];
   @override
   Future<void> put(StudioConfig config) async {
-    data[config.profileId.isNotEmpty ? config.profileId : config.sessionId] =
-        config;
+    data[config.sessionId] = config;
   }
 
   @override
