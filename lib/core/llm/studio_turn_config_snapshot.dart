@@ -12,13 +12,19 @@ class StudioTurnConfigSnapshot {
   final List<ApiConfig> apiConfigs;
   final ApiConfig? activeApiConfig;
 
-  const StudioTurnConfigSnapshot({
+  StudioTurnConfigSnapshot({
     required this.config,
     required this.preset,
-    required this.pipelineSettings,
+    required PipelineSettings pipelineSettings,
     required this.apiConfigs,
     required this.activeApiConfig,
-  });
+  }) : pipelineSettings = config?.enabled == true && preset != null
+           ? pipelineSettings.copyWith(
+               studioAgent: preset.runtime.agents,
+               cleaner: preset.runtime.cleaner,
+               ledger: preset.runtime.ledger,
+             )
+           : pipelineSettings;
 
   bool get enabled => config != null && preset != null;
 

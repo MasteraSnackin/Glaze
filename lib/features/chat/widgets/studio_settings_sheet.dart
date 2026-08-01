@@ -128,7 +128,9 @@ class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
     StudioPreset Function(StudioPreset preset) update,
   ) async {
     final selectedId = await ref.read(activeStudioPresetProvider.future);
-    final current = await ref.read(studioPresetRepoProvider).getById(selectedId);
+    final current = await ref
+        .read(studioPresetRepoProvider)
+        .getById(selectedId);
     if (current == null || !mounted) return;
     if (await ref.read(activeStudioPresetProvider.future) != selectedId) return;
     final updated = update(current);
@@ -156,7 +158,14 @@ class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
   Widget _buildBody() {
     final config = _config!;
     final preset = _activeStudioPreset;
-    final pipeline = ref.watch(pipelineSettingsProvider);
+    final globalPipeline = ref.watch(pipelineSettingsProvider);
+    final pipeline = preset == null
+        ? globalPipeline
+        : globalPipeline.copyWith(
+            studioAgent: preset.runtime.agents,
+            cleaner: preset.runtime.cleaner,
+            ledger: preset.runtime.ledger,
+          );
     return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Column(
@@ -301,8 +310,29 @@ class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
   Future<void> _savePipelineModel(
     PipelineSettings Function(PipelineSettings pipeline) mutate,
   ) async {
-    final pipeline = ref.read(pipelineSettingsProvider);
-    await ref.read(pipelineSettingsProvider.notifier).save(mutate(pipeline));
+    await _savePresetRuntime(mutate);
+  }
+
+  Future<void> _savePresetRuntime(
+    PipelineSettings Function(PipelineSettings pipeline) mutate,
+  ) async {
+    await _saveActivePreset((preset) {
+      final global = ref.read(pipelineSettingsProvider);
+      final current = global.copyWith(
+        studioAgent: preset.runtime.agents,
+        cleaner: preset.runtime.cleaner,
+        ledger: preset.runtime.ledger,
+      );
+      final updated = mutate(current);
+      return preset.copyWith(
+        runtime: preset.runtime.copyWith(
+          agents: updated.studioAgent,
+          cleaner: updated.cleaner,
+          ledger: updated.ledger,
+        ),
+        updatedAt: DateTime.now().millisecondsSinceEpoch,
+      );
+    });
   }
 
   StudioPreset? get _activeStudioPreset {
@@ -917,8 +947,7 @@ class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
   Future<void> _savePipeline(
     PipelineSettings Function(PipelineSettings) mutate,
   ) async {
-    final pipeline = ref.read(pipelineSettingsProvider);
-    await ref.read(pipelineSettingsProvider.notifier).save(mutate(pipeline));
+    await _savePresetRuntime(mutate);
   }
 
   Widget _buildRecoverySection() {
@@ -1014,14 +1043,23 @@ class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
       backgroundColor: Colors.transparent,
       builder: (c) => StudioSlotSettingsDialog(
         slot: slot,
-        pipeline: ref.read(pipelineSettingsProvider),
+        pipeline: ref
+            .read(pipelineSettingsProvider)
+            .copyWith(
+              studioAgent:
+                  _activeStudioPreset?.runtime.agents ??
+                  ref.read(pipelineSettingsProvider).studioAgent,
+              cleaner:
+                  _activeStudioPreset?.runtime.cleaner ??
+                  ref.read(pipelineSettingsProvider).cleaner,
+              ledger:
+                  _activeStudioPreset?.runtime.ledger ??
+                  ref.read(pipelineSettingsProvider).ledger,
+            ),
       ),
     );
     if (!mounted || updated == null) return;
-    final pipeline = ref.read(pipelineSettingsProvider);
-    await ref
-        .read(pipelineSettingsProvider.notifier)
-        .save(updated.applyTo(pipeline, slot));
+    await _savePresetRuntime((pipeline) => updated.applyTo(pipeline, slot));
   }
 
   Future<void> _startRecovery() async {

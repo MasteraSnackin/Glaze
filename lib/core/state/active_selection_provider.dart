@@ -1,13 +1,17 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/persona.dart';
+import '../models/pipeline_settings.dart';
 import '../models/preset.dart';
+import '../models/studio_config.dart';
+import 'db_provider.dart';
 import 'shared_prefs_provider.dart';
 import 'memory_settings_provider.dart';
-import 'pipeline_settings_provider.dart';
 
 export 'active_regex_provider.dart';
 export 'persona_resolution.dart';
@@ -65,6 +69,58 @@ Future<void> loadActiveSelections(WidgetRef ref) async {
   }
   await ref.read(memoryGlobalSettingsProvider.notifier).load();
   await ref.read(pipelineSettingsProvider.notifier).load();
+  await _migrateStudioRuntimeToPresets(ref, prefs);
+}
+
+Future<void> _migrateStudioRuntimeToPresets(
+  WidgetRef ref,
+  SharedPreferences prefs,
+) async {
+  final presetRepo = ref.read(studioPresetRepoProvider);
+  final configRepo = ref.read(studioConfigRepoProvider);
+  await migrateLegacyStudioPresetRuntime(
+    prefs: prefs,
+    pipeline: ref.read(pipelineSettingsProvider),
+    loadPresets: presetRepo.getAll,
+    loadConfigs: configRepo.getAll,
+    savePreset: presetRepo.upsert,
+  );
+}
+
+@visibleForTesting
+Future<void> migrateLegacyStudioPresetRuntime({
+  required SharedPreferences prefs,
+  required PipelineSettings pipeline,
+  required Future<List<StudioPreset>> Function() loadPresets,
+  required Future<List<StudioConfig>> Function() loadConfigs,
+  required Future<void> Function(StudioPreset preset) savePreset,
+}) async {
+  const migrationKey = 'studioPresetRuntimeMigrationV1';
+  if (prefs.getBool(migrationKey) == true) return;
+
+  final presets = await loadPresets();
+  if (presets.isEmpty) return;
+  final configs = [...await loadConfigs()];
+  configs.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+  final migratedBroadcasts = configs
+      .where((config) => config.broadcastBlocks.isNotEmpty)
+      .map((config) => config.broadcastBlocks)
+      .firstOrNull;
+
+  for (final preset in presets) {
+    if (preset.runtime != const StudioRuntimeSettings()) continue;
+    await savePreset(
+      preset.copyWith(
+        runtime: StudioRuntimeSettings(
+          agents: pipeline.studioAgent,
+          cleaner: pipeline.cleaner,
+          ledger: pipeline.ledger,
+          broadcastBlocks: migratedBroadcasts ?? const [],
+        ),
+      ),
+    );
+  }
+  await prefs.setBool(migrationKey, true);
 }
 
 Future<void> setActivePreset(WidgetRef ref, String? id) async {
