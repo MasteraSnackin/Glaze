@@ -1,15 +1,22 @@
 import '../../core/llm/studio_controller_ontology.dart';
+import '../../core/llm/tokenizer.dart';
 import '../../core/models/studio_config.dart';
 
 /// Shared, presentation-only estimates for an agentic (Studio) preset. Used by
 /// both the preset list card and the Studio preset editor so their stat plaques
 /// never drift apart.
 
-/// Rough token estimate for all of the preset's block content (~4 chars/token).
+/// Token estimate for what the preset actually contributes to a prompt.
+///
+/// Counts only enabled blocks, through the app's own [estimateTokens] — the
+/// same rule and the same tokenizer a plain preset's badge uses, so the two
+/// kinds of preset report comparable numbers. A disabled block is not injected,
+/// so it does not count.
 int studioPresetTokenEstimate(StudioPreset preset) {
   var total = 0;
   for (final block in preset.blocks) {
-    total += block.content.length ~/ 4;
+    if (!block.enabled || block.content.isEmpty) continue;
+    total += estimateTokens(block.content);
   }
   return total;
 }
