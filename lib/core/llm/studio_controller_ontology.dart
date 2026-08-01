@@ -84,9 +84,9 @@ class StudioControllerOntology {
       id: 'narrative',
       name: 'Narrative / Pacing / Style Controller',
       purpose:
-          'Convert the active preset\'s narrative mode, style, POV, pacing, sensory budget, tone, and genre rules into a compact response-shape contract for the final writer.',
+          'Convert the active Studio preset\'s narrative mode, style, POV, pacing, sensory budget, tone, and genre rules into a compact response-shape contract for the final writer.',
       outputContract:
-          'At chat time, output a compact operational brief that applies the active Studio preset\'s response-shape rules to the current turn. Include only the dimensions the active preset requests, such as beat, pacing, POV/camera, sensory budget, opening constraint, dialogue/action balance, and stopping point. No scene prose, drafted actions, or dialogue.',
+          'At chat time, output a compact operational brief that applies the active Studio preset\'s response-shape rules to the current turn. Include only the dimensions the active Studio preset requests, such as beat, pacing, POV/camera, sensory budget, opening constraint, dialogue/action balance, and stopping point. No scene prose, drafted actions, or dialogue.',
       refreshPolicy: 'turn',
       invalidationSignals: ['scene_changed', 'tone_changed', 'pacing_changed'],
       temperature: 0.3,
