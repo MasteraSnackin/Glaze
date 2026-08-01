@@ -2000,5 +2000,6 @@
   "studio_slot_use_chat_api": "Use the chat's connection",
   "studio_slot_model_auto": "Automatic",
   "studio_slot_model_hint": "Model id, e.g. gpt-4o-mini",
-  "studio_agent_always_on": "Always on"
+  "studio_agent_always_on": "Always on",
+  "studio_blocks_title": "Prompt Blocks"
 }

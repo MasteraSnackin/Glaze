@@ -2023,5 +2023,6 @@
   "studio_slot_use_chat_api": "Использовать подключение чата",
   "studio_slot_model_auto": "Автоматически",
   "studio_slot_model_hint": "Идентификатор модели, напр. gpt-4o-mini",
-  "studio_agent_always_on": "Всегда включён"
+  "studio_agent_always_on": "Всегда включён",
+  "studio_blocks_title": "Промпт-блоки"
 }
