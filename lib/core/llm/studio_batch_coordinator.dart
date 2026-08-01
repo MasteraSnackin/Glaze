@@ -80,11 +80,14 @@ class StudioBatchCoordinator {
             'listed above, in order.',
       },
     ];
-    final batchAgent = group.agents.first.copyWith(
-      maxTokens: group.batchMaxTokens,
-      temperature: group.batchTemperature,
-      contextSize: batchContextSize,
-    );
+    // The batch runs under the first agent's identity (the API config is
+    // resolved from the group's `resolved` config anyway), but with the
+    // group's own budget: the summed token allowance and the lowest
+    // temperature. Those are passed explicitly rather than copied onto a
+    // synthetic agent — an agent carries no generation parameters of its own
+    // (§4). The shared history is already trimmed to [batchContextSize] by
+    // `buildSharedBatchMessages` above.
+    final batchAgent = group.agents.first;
     List<ControllerBatchResult>? lastParsed;
     String? lastError;
     for (var attempt = 1; attempt <= 3; attempt++) {
@@ -105,6 +108,8 @@ class StudioBatchCoordinator {
           cancelToken: cancelToken,
           preResolvedConfig: group.resolved,
           turnConfig: turnConfig,
+          batchMaxTokens: group.batchMaxTokens,
+          batchTemperature: group.batchTemperature,
         );
         final parsed = _batcher.parseBatchResponse(result.text, group);
         if (_allOk(parsed)) return parsed;

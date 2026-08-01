@@ -169,7 +169,7 @@ class PresetDashboardCard extends StatelessWidget {
             children: [...utilsLeading, const Spacer(), ...utilsTrailing],
           ),
         ),
-        if (belowUtils != null) belowUtils!,
+        ?belowUtils,
         if (blockList == null && onAddBlock == null)
           // Identity-only card (the agentic editor keeps its blocks in a box of
           // their own): the utils row still needs a bottom margin.
@@ -182,7 +182,7 @@ class PresetDashboardCard extends StatelessWidget {
               atTop: true,
               label: addBlockLabel,
             ),
-          if (blockList != null) blockList!,
+          ?blockList,
           if (!addBlockAtTop && onAddBlock != null)
             PresetAddBlockRow(onTap: onAddBlock!, label: addBlockLabel),
         ],

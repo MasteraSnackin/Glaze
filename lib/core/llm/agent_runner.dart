@@ -55,8 +55,8 @@ class AgentRunner {
   /// and the caller-supplied config is used directly. This avoids double
   /// resolution when the caller (e.g. `StudioBatchCoordinator`) has already
   /// resolved the config at grouping time. When provided, global tracker
-  /// maxTokens/temperature overrides are also skipped — the agent's own
-  /// values (which for batch carry the batch budget) are used instead.
+  /// maxTokens/temperature overrides are also skipped — a batched call passes
+  /// its budget explicitly via [batchMaxTokens] / [batchTemperature].
   Future<AgentRunResult> runAgent({
     required StudioAgent agent,
     required List<Map<String, dynamic>> messages,
@@ -67,6 +67,11 @@ class AgentRunner {
     ResolvedAgentConfig? preResolvedConfig,
     String? apiConfigId,
     StudioTurnConfigSnapshot? turnConfig,
+    // Explicit budget for a batched run: the group's summed token budget and
+    // minimum temperature. Non-null wins over both the global override and the
+    // agent spec's own values — an agent carries none of its own (§4).
+    int? batchMaxTokens,
+    double? batchTemperature,
     void Function(String text, String? reasoning)? onFinalResponseUpdate,
     void Function(String text)? onIntermediateUpdate,
   }) async {
@@ -90,6 +95,8 @@ class AgentRunner {
         preResolvedConfig: preResolvedConfig,
         apiConfigId: apiConfigId,
         turnConfig: turnConfig,
+        batchMaxTokens: batchMaxTokens,
+        batchTemperature: batchTemperature,
         onFinalResponseUpdate: onFinalResponseUpdate,
         onIntermediateUpdate: onIntermediateUpdate,
       );
@@ -123,6 +130,8 @@ class AgentRunner {
     ResolvedAgentConfig? preResolvedConfig,
     String? apiConfigId,
     StudioTurnConfigSnapshot? turnConfig,
+    int? batchMaxTokens,
+    double? batchTemperature,
     void Function(String text, String? reasoning)? onFinalResponseUpdate,
     void Function(String text)? onIntermediateUpdate,
   }) async {
@@ -145,12 +154,16 @@ class AgentRunner {
     // all group agents' maxTokens, min temperature). Global overrides are
     // for individual tracker requests; applying them to a batch would
     // overwrite the computed batch budget with a per-agent cap.
-    final maxTokensOverride = preResolvedConfig != null && !isFinalResponse
-        ? null
-        : effectiveMaxTokens(agent, isFinalResponse, turnConfig);
-    final temperatureOverride = preResolvedConfig != null && !isFinalResponse
-        ? null
-        : effectiveTemperature(agent, isFinalResponse, turnConfig);
+    final maxTokensOverride =
+        batchMaxTokens ??
+        (preResolvedConfig != null && !isFinalResponse
+            ? null
+            : effectiveMaxTokens(agent, isFinalResponse, turnConfig));
+    final temperatureOverride =
+        batchTemperature ??
+        (preResolvedConfig != null && !isFinalResponse
+            ? null
+            : effectiveTemperature(agent, isFinalResponse, turnConfig));
     final pipeline = turnConfig?.pipelineSettings ?? _readPipelineSettings();
     final effectiveResolved = isFinalResponse
         ? resolved.copyWithReasoning(

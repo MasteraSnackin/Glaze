@@ -731,19 +731,16 @@ void main() {
       expect(migrated.refreshPolicy, 'turn');
     });
 
-    test(
-      'new Meta-Weaver with turn policy + custom contextSize is unchanged',
-      () {
-        final newAgent = StudioAgent.fromJson(const {
-          'id': 'agent_s1_meta_123',
-          'name': 'Meta-Weaver / Lumia Policy',
-          'refreshPolicy': 'turn',
-          'order': 6,
-        });
-        final migrated = _migrateForTest(newAgent);
-        expect(migrated.refreshPolicy, 'turn');
-      },
-    );
+    test('new Meta-Weaver with turn policy is unchanged', () {
+      final newAgent = StudioAgent.fromJson(const {
+        'id': 'agent_s1_meta_123',
+        'name': 'Meta-Weaver / Lumia Policy',
+        'refreshPolicy': 'turn',
+        'order': 6,
+      });
+      final migrated = _migrateForTest(newAgent);
+      expect(migrated.refreshPolicy, 'turn');
+    });
 
     test('non-Meta-Weaver agent is unchanged by migration', () {
       final guard = StudioAgent.fromJson(const {
@@ -756,16 +753,7 @@ void main() {
       expect(migrated.refreshPolicy, 'turn');
     });
 
-    test('Meta-Weaver with large contextSize keeps its larger value', () {
-      final agent = StudioAgent.fromJson(const {
-        'id': 'agent_s1_meta_123',
-        'name': 'Meta-Weaver / Lumia Policy',
-        'refreshPolicy': 'static',
-        'order': 6,
-      });
-      final migrated = _migrateForTest(agent);
-      expect(migrated.refreshPolicy, 'turn');
-    });
+
   });
 
   group('Meta-Weaver auto-disable when no lumia block', () {
