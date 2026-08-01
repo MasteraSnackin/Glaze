@@ -14,7 +14,7 @@ part 'studio_agent_settings.g.dart';
 ///
 /// Field groups:
 /// - Global idle timeout ([studioTimeoutMs]) — applies to all Studio agents.
-/// - Final generator overrides ([studioFinal*]) — Main Responder.
+/// - Final generator overrides ([studioFinal*]) — Main Writer.
 /// - Tracker overrides ([studioTracker*]) — 7 pre-gen controllers + batch.
 /// - Post-processing context ([studioPostTrackerContextSize]).
 @freezed
@@ -27,7 +27,7 @@ abstract class StudioAgentSettings with _$StudioAgentSettings {
     // per-agent fallback (final generator: 90s, trackers: 60s).
     @Default(0) int studioTimeoutMs,
 
-    // ── Final generator (Main Responder) ──────────────────────────────────
+    // ── Final generator (Main Writer) ──────────────────────────────────
     // Final-generator idle timeout (ms). 0 = use agent/global fallback.
     @Default(0) int studioFinalTimeoutMs,
     // Max tokens for the Studio final generator. When > 0, overrides the

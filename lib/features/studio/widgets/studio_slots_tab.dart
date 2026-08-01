@@ -8,7 +8,7 @@ import '../../../core/models/studio_config.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../core/state/studio_default_profile_provider.dart';
 import '../../../shared/theme/app_colors.dart';
-import '../../../shared/widgets/glass_surface.dart';
+import '../../../shared/widgets/menu_group.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../settings/api_list_provider.dart';
 import '../studio_injection_points.dart';
@@ -22,13 +22,8 @@ import '../studio_injection_points.dart';
 /// untouched install already has.
 class StudioSlotsTab extends ConsumerWidget {
   final ScrollController controller;
-  final EdgeInsets padding;
 
-  const StudioSlotsTab({
-    super.key,
-    required this.controller,
-    this.padding = const EdgeInsets.fromLTRB(16, 8, 16, 40),
-  });
+  const StudioSlotsTab({super.key, required this.controller});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -38,10 +33,16 @@ class StudioSlotsTab extends ConsumerWidget {
 
     return ListView(
       controller: controller,
-      padding: padding,
+      // The sheet injects the header height into padding.top and the nav bar's
+      // into padding.bottom, so the list clears both — same as the other tabs.
+      // Horizontal insets come from MenuGroup itself.
+      padding: EdgeInsets.only(
+        top: MediaQuery.paddingOf(context).top + 12,
+        bottom: MediaQuery.paddingOf(context).bottom + 16,
+      ),
       children: [
         Padding(
-          padding: const EdgeInsets.only(bottom: 12),
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
           child: Text(
             'studio_slots_hint'.tr(),
             style: TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant),
@@ -158,6 +159,8 @@ class StudioSlotsTab extends ConsumerWidget {
 
   // ── Rows ───────────────────────────────────────────────────────────────────
 
+  /// One stage = one settings group: the stage name as its header, its blurb
+  /// as the description, and a row per thing you can point at a provider.
   Widget _slot(
     BuildContext context, {
     required List<ApiConfig> configs,
@@ -172,141 +175,45 @@ class StudioSlotsTab extends ConsumerWidget {
     String? extraValue,
     ValueChanged<String>? onExtraChanged,
   }) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: GlassSurface(
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: context.cs.outline),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 12, 14, 6),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                title,
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                  color: context.cs.onSurface,
-                ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                description,
-                style: TextStyle(
-                  fontSize: 12,
-                  color: context.cs.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(height: 10),
-              _valueRow(
-                context,
-                label: 'studio_slot_api'.tr(),
-                value: _apiName(configs, apiConfigId),
-                muted: apiConfigId.isEmpty,
-                onTap: () => _pickApiConfig(
-                  context,
-                  configs: configs,
-                  selectedId: apiConfigId,
-                  onSelected: onApiConfigChanged,
-                ),
-              ),
-              _valueRow(
-                context,
-                label: 'studio_slot_model'.tr(),
-                value: model.isEmpty ? 'studio_slot_model_auto'.tr() : model,
-                muted: model.isEmpty,
-                onTap: () => _editModel(
-                  context,
-                  title: 'studio_slot_model'.tr(),
-                  value: model,
-                  onChanged: onModelChanged,
-                ),
-              ),
-              if (extraLabel != null && onExtraChanged != null) ...[
-                _valueRow(
-                  context,
-                  label: extraLabel,
-                  value: (extraValue ?? '').isEmpty
-                      ? 'studio_slot_model_auto'.tr()
-                      : extraValue!,
-                  muted: (extraValue ?? '').isEmpty,
-                  onTap: () => _editModel(
-                    context,
-                    title: extraLabel,
-                    value: extraValue ?? '',
-                    onChanged: onExtraChanged,
-                  ),
-                ),
-                if (extraDescription != null)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: Text(
-                      extraDescription,
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: context.cs.onSurfaceVariant.withValues(
-                          alpha: 0.8,
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
-            ],
+    return MenuGroup(
+      header: title,
+      description: description,
+      items: [
+        MenuItem(
+          label: 'studio_slot_api'.tr(),
+          value: _apiName(configs, apiConfigId),
+          onTap: () => _pickApiConfig(
+            context,
+            configs: configs,
+            selectedId: apiConfigId,
+            onSelected: onApiConfigChanged,
           ),
         ),
-      ),
-    );
-  }
-
-  Widget _valueRow(
-    BuildContext context, {
-    required String label,
-    required String value,
-    required bool muted,
-    required VoidCallback onTap,
-  }) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(8),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          child: Row(
-            children: [
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 13,
-                  color: context.cs.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  value,
-                  textAlign: TextAlign.right,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: muted
-                        ? context.cs.onSurfaceVariant
-                        : context.cs.primary,
-                  ),
-                ),
-              ),
-              Icon(
-                Icons.keyboard_arrow_right_rounded,
-                size: 18,
-                color: context.cs.onSurfaceVariant,
-              ),
-            ],
+        MenuItem(
+          label: 'studio_slot_model'.tr(),
+          value: model.isEmpty ? 'studio_slot_model_auto'.tr() : model,
+          onTap: () => _editModel(
+            context,
+            title: 'studio_slot_model'.tr(),
+            value: model,
+            onChanged: onModelChanged,
           ),
         ),
-      ),
+        if (extraLabel != null && onExtraChanged != null)
+          MenuItem(
+            label: extraLabel,
+            subtitle: extraDescription,
+            value: (extraValue ?? '').isEmpty
+                ? 'studio_slot_model_auto'.tr()
+                : extraValue!,
+            onTap: () => _editModel(
+              context,
+              title: extraLabel,
+              value: extraValue ?? '',
+              onChanged: onExtraChanged,
+            ),
+          ),
+      ],
     );
   }
 

@@ -1999,5 +1999,6 @@
   "studio_slot_audit_model_desc": "Used for the audit pass before the rewrite. Empty = the same model as the rewrite.",
   "studio_slot_use_chat_api": "Use the chat's connection",
   "studio_slot_model_auto": "Automatic",
-  "studio_slot_model_hint": "Model id, e.g. gpt-4o-mini"
+  "studio_slot_model_hint": "Model id, e.g. gpt-4o-mini",
+  "studio_agent_always_on": "Always on"
 }
