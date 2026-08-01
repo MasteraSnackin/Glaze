@@ -3,17 +3,49 @@ import 'package:flutter/material.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glass_surface.dart';
 
-/// The preset editor's dashboard: one glass card holding the preset identity
-/// (leading art/icon, name, subtitle, overflow menu), a row of utility buttons
-/// and stat badges, and the preset's block list with an "Add Block" row.
+/// The glass box every preset-editor section lives in. One shell so the
+/// dashboard, the agent list and the block list read as the same material.
+class PresetCard extends StatelessWidget {
+  final Widget child;
+  final EdgeInsets margin;
+
+  const PresetCard({
+    super.key,
+    required this.child,
+    this.margin = const EdgeInsets.fromLTRB(16, 16, 16, 0),
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: margin,
+      child: GlassSurface(
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: context.cs.outline),
+        child: child,
+      ),
+    );
+  }
+}
+
+/// The preset editor's dashboard: the preset identity (cover art, name,
+/// subtitle, overflow menu), a row of utility buttons and stat badges, and
+/// optionally the preset's block list with an "Add Block" row.
 ///
-/// Shared by the plain preset editor and the agentic (Studio) preset editor so
-/// both screens render the same frame — they differ only in what they hand to
-/// the slots.
+/// Shared by the plain preset editor and the agentic (Studio) preset editor.
+/// The agentic one keeps its blocks in a card of their own, so [blockList] and
+/// [onAddBlock] are optional.
 class PresetDashboardCard extends StatelessWidget {
-  /// Cover thumbnail or circular icon shown left of the title. Null renders the
-  /// title flush against the card edge.
+  /// Cover art. Rendered as a full-width band anchored to the top of the card
+  /// that fades out into the glass — the legacy Vue editor's treatment — rather
+  /// than as a thumbnail beside the title.
+  final ImageProvider? coverImage;
+  final VoidCallback? onCoverTap;
+
+  /// Shown left of the title when there is no cover (the agentic editor's
+  /// robot glyph).
   final Widget? leading;
+
   final String title;
 
   /// Second line under the title (e.g. `by <author>`). Null hides the line.
@@ -27,13 +59,14 @@ class PresetDashboardCard extends StatelessWidget {
   /// Stat badges pinned to the right of the utils row.
   final List<Widget> utilsTrailing;
 
-  /// Optional strip between the utils row and the block list (the Studio
-  /// editor puts its agent list and injection-point filter here). Supplies its
-  /// own padding.
+  /// Optional strip between the utils row and the block list.
+  /// Supplies its own padding.
   final Widget? belowUtils;
 
   final Widget? blockList;
-  final VoidCallback onAddBlock;
+
+  /// Null hides the "Add Block" row entirely.
+  final VoidCallback? onAddBlock;
 
   /// Mirrors the `addBlockAtTop` app setting: puts the add row above the list.
   final bool addBlockAtTop;
@@ -41,6 +74,8 @@ class PresetDashboardCard extends StatelessWidget {
 
   const PresetDashboardCard({
     super.key,
+    this.coverImage,
+    this.onCoverTap,
     this.leading,
     required this.title,
     this.subtitle,
@@ -50,86 +85,174 @@ class PresetDashboardCard extends StatelessWidget {
     this.utilsTrailing = const [],
     this.belowUtils,
     this.blockList,
-    required this.onAddBlock,
+    this.onAddBlock,
     this.addBlockAtTop = false,
     this.addBlockLabel = 'Add Block',
   });
 
+  /// Height of the cover band. The header and the utils row both sit inside it,
+  /// and the art has faded out by the time the block list starts.
+  static const double _coverHeight = 200;
+
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-      child: GlassSurface(
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: context.cs.outline),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // Header: leading art + name/subtitle + three-dot menu
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 12, 12, 0),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (leading != null) ...[leading!, const SizedBox(width: 12)],
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: onTitleTap,
-                      child: Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              title,
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w700,
-                                color: context.cs.onSurface,
-                              ),
-                            ),
-                            if (subtitle != null)
-                              Text(
-                                subtitle!,
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w500,
-                                  color: context.cs.primary.withValues(
-                                    alpha: 0.8,
-                                  ),
-                                ),
-                              ),
-                          ],
+    final cover = coverImage;
+    final onCover = cover != null;
+
+    final content = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Header: leading art + name/subtitle + three-dot menu
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 12, 0),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (!onCover && leading != null) ...[
+                leading!,
+                const SizedBox(width: 12),
+              ],
+              Expanded(
+                child: GestureDetector(
+                  onTap: onTitleTap,
+                  child: Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w700,
+                            color: onCover
+                                ? Colors.white
+                                : context.cs.onSurface,
+                            shadows: onCover
+                                ? const [
+                                    Shadow(
+                                      color: Color(0x80000000),
+                                      blurRadius: 4,
+                                      offset: Offset(0, 1),
+                                    ),
+                                  ]
+                                : null,
+                          ),
                         ),
-                      ),
+                        if (subtitle != null)
+                          Text(
+                            subtitle!,
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                              color: onCover
+                                  ? Colors.white.withValues(alpha: 0.7)
+                                  : context.cs.primary.withValues(alpha: 0.8),
+                            ),
+                          ),
+                      ],
                     ),
                   ),
-                  PresetDotsButton(onTap: onMenuTap),
-                ],
+                ),
+              ),
+              PresetDotsButton(onTap: onMenuTap, onCover: onCover),
+            ],
+          ),
+        ),
+        // Utils row: buttons | spacer | stat badges
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
+          child: Row(
+            children: [...utilsLeading, const Spacer(), ...utilsTrailing],
+          ),
+        ),
+        if (belowUtils != null) belowUtils!,
+        if (blockList == null && onAddBlock == null)
+          // Identity-only card (the agentic editor keeps its blocks in a box of
+          // their own): the utils row still needs a bottom margin.
+          const SizedBox(height: 16)
+        else ...[
+          const SizedBox(height: 12),
+          if (addBlockAtTop && onAddBlock != null)
+            PresetAddBlockRow(
+              onTap: onAddBlock!,
+              atTop: true,
+              label: addBlockLabel,
+            ),
+          if (blockList != null) blockList!,
+          if (!addBlockAtTop && onAddBlock != null)
+            PresetAddBlockRow(onTap: onAddBlock!, label: addBlockLabel),
+        ],
+      ],
+    );
+
+    return PresetCard(
+      child: Stack(
+        children: [
+          if (cover != null)
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              height: _coverHeight,
+              child: GestureDetector(
+                onTap: onCoverTap,
+                child: _CoverBand(image: cover),
               ),
             ),
-            // Utils row: buttons | spacer | stat badges
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 24, 16, 0),
-              child: Row(
-                children: [
-                  ...utilsLeading,
-                  const Spacer(),
-                  ...utilsTrailing,
-                ],
+          content,
+        ],
+      ),
+    );
+  }
+}
+
+// ─── _CoverBand ───────────────────────────────────────────────────────────────
+
+/// Full-width cover art anchored to the top of the dashboard, darkened for
+/// legibility and faded out at the bottom so it dissolves into the card instead
+/// of ending on a hard edge.
+class _CoverBand extends StatelessWidget {
+  final ImageProvider image;
+
+  const _CoverBand({required this.image});
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRect(
+      child: ShaderMask(
+        blendMode: BlendMode.dstIn,
+        shaderCallback: (rect) => const LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Colors.white, Colors.white, Colors.transparent],
+          stops: [0.0, 0.55, 1.0],
+        ).createShader(rect),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Image(
+              image: image,
+              fit: BoxFit.cover,
+              alignment: Alignment.topCenter,
+              // A missing/corrupt file falls back to the plain glass rather
+              // than Flutter's error box.
+              errorBuilder: (_, _, _) => const SizedBox.shrink(),
+            ),
+            const DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Color(0xD9000000),
+                    Color(0x8C000000),
+                    Color(0x00000000),
+                  ],
+                  stops: [0.0, 0.4, 1.0],
+                ),
               ),
             ),
-            if (belowUtils != null) belowUtils!,
-            const SizedBox(height: 12),
-            if (addBlockAtTop)
-              PresetAddBlockRow(
-                onTap: onAddBlock,
-                atTop: true,
-                label: addBlockLabel,
-              ),
-            if (blockList != null) blockList!,
-            if (!addBlockAtTop)
-              PresetAddBlockRow(onTap: onAddBlock, label: addBlockLabel),
           ],
         ),
       ),
@@ -205,13 +328,28 @@ class PresetAddBlockRow extends StatelessWidget {
 
 class PresetDotsButton extends StatelessWidget {
   final VoidCallback onTap;
-  const PresetDotsButton({super.key, required this.onTap});
+
+  /// Over cover art the accent-tinted circle disappears, so it switches to the
+  /// frosted white treatment the legacy editor used.
+  final bool onCover;
+
+  const PresetDotsButton({
+    super.key,
+    required this.onTap,
+    this.onCover = false,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: context.cs.primary.withValues(alpha: 0.1),
-      shape: const CircleBorder(),
+      color: onCover
+          ? Colors.white.withValues(alpha: 0.2)
+          : context.cs.primary.withValues(alpha: 0.1),
+      shape: onCover
+          ? CircleBorder(
+              side: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
+            )
+          : const CircleBorder(),
       child: InkWell(
         onTap: onTap,
         customBorder: const CircleBorder(),
@@ -221,7 +359,9 @@ class PresetDotsButton extends StatelessWidget {
           child: Icon(
             Icons.more_vert,
             size: 20,
-            color: context.cs.primary.withValues(alpha: 0.8),
+            color: onCover
+                ? Colors.white.withValues(alpha: 0.9)
+                : context.cs.primary.withValues(alpha: 0.8),
           ),
         ),
       ),
@@ -238,11 +378,14 @@ class PresetUtilButton extends StatelessWidget {
   final IconData icon;
   final int count;
   final VoidCallback onTap;
+  final bool onCover;
+
   const PresetUtilButton({
     super.key,
     required this.icon,
     required this.count,
     required this.onTap,
+    this.onCover = false,
   });
 
   @override
@@ -255,13 +398,20 @@ class PresetUtilButton extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(6),
             decoration: BoxDecoration(
-              color: context.cs.primary.withValues(alpha: 0.1),
+              color: onCover
+                  ? Colors.white.withValues(alpha: 0.2)
+                  : context.cs.primary.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(20),
+              border: onCover
+                  ? Border.all(color: Colors.white.withValues(alpha: 0.1))
+                  : null,
             ),
             child: Icon(
               icon,
               size: 14,
-              color: context.cs.primary.withValues(alpha: 0.7),
+              color: onCover
+                  ? Colors.white.withValues(alpha: 0.9)
+                  : context.cs.primary.withValues(alpha: 0.7),
             ),
           ),
           if (count > 0)
@@ -298,27 +448,42 @@ class PresetUtilButton extends StatelessWidget {
 class PresetStatBadge extends StatelessWidget {
   final IconData icon;
   final String label;
-  const PresetStatBadge({super.key, required this.icon, required this.label});
+  final bool onCover;
+
+  const PresetStatBadge({
+    super.key,
+    required this.icon,
+    required this.label,
+    this.onCover = false,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final foreground = onCover
+        ? Colors.white.withValues(alpha: 0.9)
+        : context.cs.onSurfaceVariant;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.05),
+        color: onCover
+            ? Colors.white.withValues(alpha: 0.2)
+            : Colors.black.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(20),
+        border: onCover
+            ? Border.all(color: Colors.white.withValues(alpha: 0.1))
+            : null,
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 14, color: context.cs.onSurfaceVariant),
+          Icon(icon, size: 14, color: foreground),
           const SizedBox(width: 4),
           Text(
             label,
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w600,
-              color: context.cs.onSurfaceVariant,
+              color: foreground,
             ),
           ),
         ],

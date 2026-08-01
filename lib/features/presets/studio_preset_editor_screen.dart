@@ -24,16 +24,15 @@ import 'widgets/preset_dashboard_card.dart';
 /// Full editor for a single agentic (Studio) preset, rendered inline inside the
 /// [PresetListScreen] SheetView.
 ///
-/// Same shape as the plain [PresetEditorBody]: one dashboard card holding the
-/// identity + overflow menu, the stat badges, and the reorderable block list
-/// with its "Add Block" row. Editing a block replaces the body with the shared
+/// Built from the plain [PresetEditorBody]'s parts, in three boxes: the
+/// identity dashboard (name, overflow menu, stat badges), the collapsible agent
+/// list, and the blocks. Editing a block replaces the body with the shared
 /// [GenericEditor], and back returns to the dashboard.
 ///
-/// Agentic-only: the collapsible agent list sits between the badges and the
-/// blocks (it decides which stages run at all), and the block list itself is
-/// the whole preset at once, split into one section per injection point (§5)
-/// in pipeline order. Dragging a row under another section header re-targets
-/// the block to that stage.
+/// The agents come before the blocks because they decide which stages run at
+/// all. The block box holds the whole preset at once, split into one section
+/// per injection point (§5) in pipeline order; dragging a row under another
+/// section header re-targets the block to that stage.
 class StudioPresetEditorBody extends ConsumerStatefulWidget {
   final String presetId;
   final VoidCallback onClose;
@@ -408,16 +407,23 @@ class StudioPresetEditorBodyState
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _buildDashboard(preset),
+          StudioAgentsPanel(
+            preset: preset,
+            expanded: _agentsExpanded,
+            onToggleExpanded: () =>
+                setState(() => _agentsExpanded = !_agentsExpanded),
+            onToggle: _toggleAgent,
+          ),
+          _buildBlocksCard(preset),
           const SizedBox(height: 60),
         ],
       ),
     );
   }
 
+  /// Identity box: name, overflow menu and the preset-wide stats. The agents
+  /// and the blocks each get a box of their own below it.
   Widget _buildDashboard(StudioPreset preset) {
-    final addBlockAtTop =
-        ref.watch(appSettingsProvider).value?.addBlockAtTop ?? false;
-
     return PresetDashboardCard(
       leading: Container(
         width: 52,
@@ -454,26 +460,35 @@ class StudioPresetEditorBodyState
           label: '${studioPresetTokenLabel(preset)}t',
         ),
       ],
-      // Agents come before the block list: they decide which stages run, and
-      // every block below is addressed to one of those stages.
-      belowUtils: StudioAgentsPanel(
-        preset: preset,
-        expanded: _agentsExpanded,
-        onToggleExpanded: () =>
-            setState(() => _agentsExpanded = !_agentsExpanded),
-        onToggle: _toggleAgent,
+    );
+  }
+
+  /// Blocks box: every injection point rendered at once, plus the add row.
+  Widget _buildBlocksCard(StudioPreset preset) {
+    final addBlockAtTop =
+        ref.watch(appSettingsProvider).value?.addBlockAtTop ?? false;
+    final list = StudioBlockSectionList(
+      blocks: preset.blocks,
+      sections: _sections,
+      onReorder: _onReorder,
+      onEdit: _openBlock,
+      onToggle: _toggleBlock,
+      onSelectExclusive: _selectExclusive,
+      onDelete: _deleteBlock,
+    );
+    return PresetCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (addBlockAtTop) ...[
+            PresetAddBlockRow(onTap: _addBlock, atTop: true),
+            list,
+          ] else ...[
+            list,
+            PresetAddBlockRow(onTap: _addBlock),
+          ],
+        ],
       ),
-      blockList: StudioBlockSectionList(
-        blocks: preset.blocks,
-        sections: _sections,
-        onReorder: _onReorder,
-        onEdit: _openBlock,
-        onToggle: _toggleBlock,
-        onSelectExclusive: _selectExclusive,
-        onDelete: _deleteBlock,
-      ),
-      addBlockAtTop: addBlockAtTop,
-      onAddBlock: _addBlock,
     );
   }
 }
