@@ -5,14 +5,12 @@ import 'package:glaze_flutter/core/llm/macro_engine.dart';
 import 'package:glaze_flutter/core/llm/studio/studio_context.dart';
 import 'package:glaze_flutter/core/llm/studio_brief_deduper.dart';
 import 'package:glaze_flutter/core/llm/studio_brief_parser.dart';
-import 'package:glaze_flutter/core/llm/studio_context_bucketizer.dart';
 import 'package:glaze_flutter/core/llm/studio_message_builder.dart';
 import 'package:glaze_flutter/core/llm/studio_prompt_text.dart';
 import 'package:glaze_flutter/core/models/studio_config.dart';
 
 void main() {
   final builder = StudioMessageBuilder(
-    const StudioContextBucketizer(),
     const StudioPromptText(),
     StudioBriefDeduper(StudioBriefParser((_) {})),
   );
@@ -46,7 +44,7 @@ void main() {
   const config = StudioConfig(sessionId: 'session');
 
   test('routes known block kinds through typed slots in Studio order', () {
-    final messages = builder.buildAgentMessagesFromContext(
+    final messages = builder.buildAgentMessages(
       agent: const StudioAgent(id: 'final'),
       context: context,
       config: config,
@@ -98,7 +96,7 @@ void main() {
   });
 
   test('unknown kinds remain Studio-owned instructions', () {
-    final messages = builder.buildAgentMessagesFromContext(
+    final messages = builder.buildAgentMessages(
       agent: const StudioAgent(id: 'final'),
       context: context,
       config: config,
@@ -128,7 +126,7 @@ void main() {
   });
 
   test('static and dynamic groups are explicit typed projections', () {
-    final messages = builder.buildAgentMessagesFromContext(
+    final messages = builder.buildAgentMessages(
       agent: const StudioAgent(id: 'tracker', contextSize: 1),
       context: context,
       config: config,

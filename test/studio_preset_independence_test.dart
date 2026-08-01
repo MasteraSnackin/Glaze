@@ -6,7 +6,6 @@ import 'package:glaze_flutter/core/llm/generation_context_inputs.dart';
 import 'package:glaze_flutter/core/llm/studio/studio_context_preparer.dart';
 import 'package:glaze_flutter/core/llm/studio_brief_deduper.dart';
 import 'package:glaze_flutter/core/llm/studio_brief_parser.dart';
-import 'package:glaze_flutter/core/llm/studio_context_bucketizer.dart';
 import 'package:glaze_flutter/core/llm/studio_message_builder.dart';
 import 'package:glaze_flutter/core/llm/studio_prompt_text.dart';
 import 'package:glaze_flutter/core/models/api_config.dart';
@@ -57,7 +56,6 @@ void main() {
       null,
     ];
     final builder = StudioMessageBuilder(
-      const StudioContextBucketizer(),
       const StudioPromptText(),
       StudioBriefDeduper(StudioBriefParser((_) {})),
     );
@@ -93,7 +91,7 @@ void main() {
         inputs: inputs,
         visibleMessageIds: const {'user'},
       );
-      return builder.buildAgentMessagesFromContext(
+      return builder.buildAgentMessages(
         agent: const StudioAgent(id: 'final'),
         context: context,
         config: const StudioConfig(sessionId: 'session'),
@@ -119,10 +117,21 @@ void main() {
     ).readAsStringSync();
 
     expect(stream, contains('collectGenerationContext('));
-    expect(stream, contains('runTrackerCycleFromContext('));
-    expect(stream, isNot(contains('.runTrackerCycle(')));
+    expect(stream, contains('studioService.runTrackerCycle('));
+    expect(stream, isNot(contains('buildFromSession(')));
+    expect(
+      stream,
+      matches(
+        RegExp(
+          r'final promptResult = studioConfig == null\s*'
+          r'\? await buildPromptInIsolate\(finalPayload\)\s*'
+          r': _studioCompatibilityResult\(finalStudioContext!\);',
+        ),
+      ),
+    );
     expect(recovery, contains('collectGenerationContext('));
-    expect(recovery, contains('runTrackersOnlyFromContext('));
-    expect(recovery, isNot(contains('.runTrackersOnly(')));
+    expect(recovery, contains('.runTrackersOnly('));
+    expect(recovery, isNot(contains('buildFromSession(')));
+    expect(recovery, isNot(contains('buildPromptInIsolate(')));
   });
 }

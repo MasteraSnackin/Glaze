@@ -270,7 +270,7 @@ class StreamGenerationService {
           });
         }
 
-        final studioResult = await studioService.runTrackerCycleFromContext(
+        final studioResult = await studioService.runTrackerCycle(
           config: studioConfig,
           inputs: inputs,
           trackerContext: trackerStudioContext,

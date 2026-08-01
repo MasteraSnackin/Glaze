@@ -1,7 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:glaze_flutter/core/llm/history_assembler.dart';
+import 'package:glaze_flutter/core/llm/macro_engine.dart';
 import 'package:glaze_flutter/core/llm/prompt_builder.dart';
+import 'package:glaze_flutter/core/llm/studio/studio_context.dart';
 import 'package:glaze_flutter/core/llm/studio_brief_deduper.dart';
 import 'package:glaze_flutter/core/llm/studio_brief_parser.dart';
 import 'package:glaze_flutter/core/llm/studio_context_bucketizer.dart';
@@ -68,18 +70,37 @@ PromptPayload _payload({Preset? preset, String? studioState}) => PromptPayload(
   studioSessionStateContent: studioState,
 );
 
+StudioContext _context(List<PromptMessage> history, {String? studioState}) =>
+    StudioContext(
+      slots: studioState == null
+          ? const {}
+          : {
+              StudioContextSlot.studioSessionState: [
+                PromptMessage(role: 'system', content: studioState),
+              ],
+            },
+      history: history,
+      sessionVars: const {},
+      globalVars: const {},
+      macroContext: MacroContext(
+        charName: 'TestChar',
+        charId: 'c1',
+        sessionId: 's1',
+        studioSessionState: studioState,
+      ),
+      diagnostics: const StudioContextDiagnostics(),
+    );
+
 void main() {
   group('StudioMessageBuilder preset block routing', () {
     final builder = StudioMessageBuilder(
-      const StudioContextBucketizer(),
       const StudioPromptText(),
       StudioBriefDeduper(StudioBriefParser((_) {})),
     );
     const config = StudioConfig(sessionId: 's1');
-    final promptResult = _result([
+    final context = _context([
       const PromptMessage(role: 'user', content: 'hello', isHistory: true),
     ]);
-    final promptPayload = _payload();
     const preset = StudioPreset(
       id: 'studio',
       blocks: [
@@ -125,8 +146,7 @@ void main() {
       final text = joinedMessages(
         builder.buildAgentMessages(
           agent: const StudioAgent(id: 'final', name: 'Main Responder'),
-          promptResult: promptResult,
-          promptPayload: promptPayload,
+          context: context,
           config: config,
           studioPreset: preset,
           priorBriefs: const [],
@@ -145,7 +165,7 @@ void main() {
     test('final run includes reasoning from the nearest assistant only', () {
       final messages = builder.buildAgentMessages(
         agent: const StudioAgent(id: 'final', name: 'Main Responder'),
-        promptResult: _result([
+        context: _context([
           const PromptMessage(
             role: 'assistant',
             content: 'first',
@@ -167,7 +187,6 @@ void main() {
           ),
           const PromptMessage(role: 'user', content: 'latest', isHistory: true),
         ]),
-        promptPayload: promptPayload,
         config: config,
         studioPreset: const StudioPreset(
           id: 'history',
@@ -201,7 +220,7 @@ void main() {
     test('final run counts non-empty reasoning blocks', () {
       final messages = builder.buildAgentMessages(
         agent: const StudioAgent(id: 'final', name: 'Main Responder'),
-        promptResult: _result([
+        context: _context([
           const PromptMessage(
             role: 'assistant',
             content: 'older',
@@ -215,7 +234,6 @@ void main() {
           ),
           const PromptMessage(role: 'user', content: 'latest', isHistory: true),
         ]),
-        promptPayload: promptPayload,
         config: config,
         studioPreset: const StudioPreset(
           id: 'history',
@@ -247,7 +265,7 @@ void main() {
     test('final run includes all reasoning blocks for minus one', () {
       final messages = builder.buildAgentMessages(
         agent: const StudioAgent(id: 'final', name: 'Main Responder'),
-        promptResult: _result([
+        context: _context([
           const PromptMessage(
             role: 'assistant',
             content: 'older',
@@ -262,7 +280,6 @@ void main() {
             isHistory: true,
           ),
         ]),
-        promptPayload: promptPayload,
         config: config,
         studioPreset: const StudioPreset(
           id: 'history',
@@ -300,7 +317,7 @@ void main() {
     test('final run omits historical reasoning by default', () {
       final messages = builder.buildAgentMessages(
         agent: const StudioAgent(id: 'final', name: 'Main Responder'),
-        promptResult: _result([
+        context: _context([
           const PromptMessage(
             role: 'assistant',
             content: 'reply',
@@ -308,7 +325,6 @@ void main() {
             isHistory: true,
           ),
         ]),
-        promptPayload: promptPayload,
         config: config,
         studioPreset: const StudioPreset(
           id: 'history',
@@ -334,8 +350,8 @@ void main() {
       final text = joinedMessages(
         builder.buildAgentMessages(
           agent: const StudioAgent(id: 'final', name: 'Main Responder'),
-          promptResult: promptResult,
-          promptPayload: _payload(
+          context: _context(
+            context.history,
             studioState:
                 '<studio_session_state>Lucy present</studio_session_state>',
           ),
@@ -362,8 +378,7 @@ void main() {
     test('group boundaries remain separate ordered system messages', () {
       final messages = builder.buildAgentMessages(
         agent: const StudioAgent(id: 'final', name: 'Main Responder'),
-        promptResult: promptResult,
-        promptPayload: promptPayload,
+        context: context,
         config: config,
         studioPreset: const StudioPreset(
           id: 'boundaries',
@@ -412,8 +427,7 @@ void main() {
             name: 'Cleaner',
             phase: 'post_processing',
           ),
-          promptResult: promptResult,
-          promptPayload: promptPayload,
+          context: context,
           config: config,
           studioPreset: preset,
           priorBriefs: const [],
@@ -428,17 +442,10 @@ void main() {
     });
 
     test('per-agent task receives only matching tracker_instruction', () {
-      final context = const StudioContextBucketizer().bucketize(
-        promptResult,
-        promptPayload: promptPayload,
-        studioConfig: config,
-      );
       final text = builder.buildPerAgentTaskText(
         agent: const StudioAgent(id: 'continuity', name: 'Continuity Tracker'),
         config: config,
         studioPreset: preset,
-        promptResult: promptResult,
-        promptPayload: promptPayload,
         context: context,
       );
 
@@ -483,8 +490,7 @@ void main() {
       );
       final messages = builder.buildAgentMessages(
         agent: const StudioAgent(id: 'final', name: 'Main Responder'),
-        promptResult: promptResult,
-        promptPayload: promptPayload,
+        context: context,
         config: macroConfig,
         studioPreset: macroPreset,
         priorBriefs: const [

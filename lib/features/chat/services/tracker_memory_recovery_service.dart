@@ -156,7 +156,7 @@ class TrackerMemoryRecoveryService {
           );
           final result = await _ref
               .read(memoryStudioServiceProvider)
-              .runTrackersOnlyFromContext(
+              .runTrackersOnly(
                 config: studioConfig,
                 inputs: inputs,
                 context: context,

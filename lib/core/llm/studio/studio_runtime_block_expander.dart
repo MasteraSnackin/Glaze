@@ -1,6 +1,4 @@
 import '../macro_engine.dart';
-import '../prompt_builder.dart';
-import '../studio_context_bucketizer.dart';
 import '../studio_stage_brief.dart';
 import '../../models/studio_config.dart';
 import 'studio_brief_macro_renderer.dart';
@@ -20,7 +18,7 @@ class StudioRuntimeBlockExpander {
 
   StudioRuntimeBlockExpander(this._briefMacroRenderer);
 
-  String expandStudioContextBlockContent(
+  String expandStudioBlockContent(
     String content, {
     required StudioContext context,
     List<StudioStageBrief> priorBriefs = const [],
@@ -33,61 +31,6 @@ class StudioRuntimeBlockExpander {
       config: config,
     );
     return replaceMacros(studioExpanded, context.macroContext).text;
-  }
-
-  /// Expand all macros in [content]: first `{{studio_*_brief}}` macros, then
-  /// the standard `MacroContext` macros (`{{char}}`, `{{user}}`, etc.).
-  String expandStudioBlockContent(
-    String content, {
-    required PromptPayload promptPayload,
-    required PromptResult promptResult,
-    required StudioContextBuckets context,
-    List<StudioStageBrief> priorBriefs = const [],
-    StudioConfig? config,
-  }) {
-    if (!content.contains('{')) return content;
-    final studioExpanded = _briefMacroRenderer.replaceStudioBriefMacros(
-      content,
-      priorBriefs: priorBriefs,
-      config: config,
-    );
-    final macroCtx = MacroContext(
-      charName: promptPayload.character.name,
-      charDescription: promptPayload.character.description,
-      charScenario: promptPayload.character.scenario,
-      charPersonality: promptPayload.character.personality,
-      charMesExample: promptPayload.character.mesExample,
-      userName: promptPayload.persona?.name ?? 'User',
-      personaPrompt: promptPayload.persona?.prompt,
-      reasoningStart: promptPayload.preset?.reasoningStart,
-      reasoningEnd: promptPayload.preset?.reasoningEnd,
-      sessionVars: promptResult.sessionVars,
-      globalVars: promptResult.globalVars,
-      charId: promptPayload.character.id,
-      sessionId: promptPayload.sessionId ?? '',
-      summaryContent:
-          promptPayload.summaryContent ?? context.joinKind('summary'),
-      memoryContent:
-          promptPayload.memoryMacroContent ??
-          promptPayload.memoryContent ??
-          context
-              .joinKind('memory')
-              .ifBlank(context.taggedDynamicContent('summary')),
-      lorebooksContent:
-          [
-                context.joinKind('worldInfoBefore'),
-                context.joinKind('worldInfoAfter'),
-              ]
-              .where((value) => value.trim().isNotEmpty)
-              .join('\n\n')
-              .ifBlank(context.taggedDynamicContent('lorebooks')),
-      guidanceText: promptPayload.guidanceText,
-      macroName: promptPayload.character.macroName,
-      arcContent: promptPayload.arcContent,
-      entitiesContent: promptPayload.entitiesContent,
-      studioSessionState: promptPayload.studioSessionStateContent,
-    );
-    return replaceMacros(studioExpanded, macroCtx).text;
   }
 
   /// Returns the pipeline section for this run: `final` for the generator,
@@ -152,8 +95,4 @@ class StudioRuntimeBlockExpander {
   String normalizeInstructionRole(String role) {
     return 'system';
   }
-}
-
-extension _BlankStringFallback on String {
-  String ifBlank(String fallback) => trim().isEmpty ? fallback : this;
 }

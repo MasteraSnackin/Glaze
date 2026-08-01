@@ -5,7 +5,6 @@ import '../models/pipeline_settings.dart';
 import '../models/studio_config.dart';
 import '../utils/error_format.dart';
 import 'agent_runner.dart';
-import 'prompt_builder.dart';
 import 'studio_brief_parser.dart';
 import 'studio_message_builder.dart';
 import 'studio_stage_brief.dart';
@@ -73,68 +72,6 @@ class StudioAgentExecutor {
   /// generator rethrows.
   Future<StudioStageBrief> runTracker({
     required StudioAgent agent,
-    required PromptResult promptResult,
-    required PromptPayload promptPayload,
-    required ApiConfig apiConfig,
-    required StudioConfig config,
-    required StudioPreset studioPreset,
-    required String sessionId,
-    required CancelToken cancelToken,
-    String? apiConfigId,
-    StudioTurnConfigSnapshot? turnConfig,
-    void Function(String text)? onIntermediateUpdate,
-  }) async {
-    if (_briefParser.isMetaPolicyAgent(agent)) {
-      return StudioStageBrief(
-        agentId: agent.id,
-        agentName: agent.name,
-        brief: _briefParser.metaPolicyBrief(agent),
-      );
-    }
-    try {
-      final messages = _messageBuilder.buildAgentMessages(
-        agent: agent,
-        promptResult: promptResult,
-        promptPayload: promptPayload,
-        config: config,
-        studioPreset: studioPreset,
-        priorBriefs: const [],
-        isFinalResponse: false,
-      );
-      final runner = _runner;
-      final result = await runner.runAgent(
-        agent: agent,
-        messages: messages,
-        apiConfig: apiConfig,
-        sessionId: sessionId,
-        isFinalResponse: false,
-        cancelToken: cancelToken,
-        apiConfigId: apiConfigId,
-        turnConfig: turnConfig,
-        onIntermediateUpdate: onIntermediateUpdate,
-      );
-      final sanitized = _briefParser.sanitizeIntermediateAgentOutput(
-        agent,
-        result.text,
-      );
-      return StudioStageBrief(
-        agentId: agent.id,
-        agentName: agent.name,
-        brief: sanitized,
-      );
-    } on AgentRunFailedException catch (e) {
-      return StudioStageBrief(
-        agentId: e.agentId,
-        agentName: e.agentName,
-        brief: 'Studio agent failed: ${e.reason}',
-        status: 'error',
-        error: e.reason,
-      );
-    }
-  }
-
-  Future<StudioStageBrief> runTrackerFromContext({
-    required StudioAgent agent,
     required StudioContext context,
     required ApiConfig apiConfig,
     required StudioConfig config,
@@ -153,7 +90,7 @@ class StudioAgentExecutor {
       );
     }
     try {
-      final messages = _messageBuilder.buildAgentMessagesFromContext(
+      final messages = _messageBuilder.buildAgentMessages(
         agent: agent,
         context: context,
         config: config,
@@ -204,85 +141,6 @@ class StudioAgentExecutor {
   Future<StudioStageBrief> runPostProcessingTracker({
     required StudioAgent agent,
     required String mainResponse,
-    required PromptResult promptResult,
-    required PromptPayload promptPayload,
-    required ApiConfig apiConfig,
-    required StudioConfig config,
-    required StudioPreset studioPreset,
-    required String sessionId,
-    required CancelToken cancelToken,
-    String? apiConfigId,
-    StudioTurnConfigSnapshot? turnConfig,
-  }) async {
-    String? lastError;
-    for (var attempt = 1; attempt <= 3; attempt++) {
-      if (cancelToken.isCancelled) {
-        return StudioStageBrief(
-          agentId: agent.id,
-          agentName: agent.name,
-          brief: '',
-          status: 'error',
-          error: 'cancelled',
-        );
-      }
-      try {
-        final override =
-            (turnConfig?.pipelineSettings ?? _readPipelineSettings())
-                .studioAgent
-                .studioPostTrackerContextSize;
-        final effectiveAgent = override > 0
-            ? agent.copyWith(contextSize: override)
-            : agent;
-        final messages = _messageBuilder.buildAgentMessages(
-          agent: effectiveAgent,
-          promptResult: promptResult,
-          promptPayload: promptPayload,
-          config: config,
-          studioPreset: studioPreset,
-          priorBriefs: const [],
-          isFinalResponse: false,
-          mainResponse: mainResponse,
-        );
-        final runner = _runner;
-        final result = await runner.runAgent(
-          agent: agent,
-          messages: messages,
-          apiConfig: apiConfig,
-          sessionId: sessionId,
-          isFinalResponse: false,
-          cancelToken: cancelToken,
-          apiConfigId: apiConfigId,
-          turnConfig: turnConfig,
-          onIntermediateUpdate: null,
-        );
-        // Post-gen trackers produce prose (a rewrite), NOT a brief — skip the
-        // brief-shape sanitization that pre-gen trackers go through. Empty
-        // output means "no edit needed" → caller keeps `mainResponse`. This is
-        // the intentional happy-path no-op, so it is reported as 'skipped'
-        // (NOT 'error') to avoid surfacing a false failure in the stage briefs.
-        final text = result.text.trim();
-        return StudioStageBrief(
-          agentId: agent.id,
-          agentName: agent.name,
-          brief: text,
-          status: text.isNotEmpty ? 'ok' : 'skipped',
-        );
-      } on AgentRunFailedException catch (e) {
-        lastError = e.reason;
-      }
-    }
-    return StudioStageBrief(
-      agentId: agent.id,
-      agentName: agent.name,
-      brief: '',
-      status: 'error',
-      error: lastError ?? 'tracker failed after 2 retries',
-    );
-  }
-
-  Future<StudioStageBrief> runPostProcessingTrackerFromContext({
-    required StudioAgent agent,
-    required String mainResponse,
     required StudioContext context,
     required ApiConfig apiConfig,
     required StudioConfig config,
@@ -311,7 +169,7 @@ class StudioAgentExecutor {
         final effectiveAgent = override > 0
             ? agent.copyWith(contextSize: override)
             : agent;
-        final messages = _messageBuilder.buildAgentMessagesFromContext(
+        final messages = _messageBuilder.buildAgentMessages(
           agent: effectiveAgent,
           context: context,
           config: config,
@@ -356,62 +214,6 @@ class StudioAgentExecutor {
     required StudioAgent agent,
     required StudioConfig config,
     required StudioPreset studioPreset,
-    required PromptResult promptResult,
-    required PromptPayload promptPayload,
-    required ApiConfig apiConfig,
-    required String sessionId,
-    required CancelToken cancelToken,
-    String? apiConfigId,
-    StudioTurnConfigSnapshot? turnConfig,
-  }) async {
-    String? lastError;
-    for (var attempt = 1; attempt <= 3; attempt++) {
-      if (cancelToken.isCancelled) {
-        return TrackerBatchResult.failed(
-          agentId: agent.id,
-          agentName: agent.name,
-          reason: 'cancelled',
-        );
-      }
-      try {
-        final brief = await runTracker(
-          agent: agent,
-          promptResult: promptResult,
-          promptPayload: promptPayload,
-          apiConfig: apiConfig,
-          config: config,
-          studioPreset: studioPreset,
-          sessionId: sessionId,
-          cancelToken: cancelToken,
-          apiConfigId: apiConfigId,
-          turnConfig: turnConfig,
-          onIntermediateUpdate: null,
-        );
-        if (brief.status == 'ok' && brief.brief.trim().isNotEmpty) {
-          return TrackerBatchResult(
-            agentId: agent.id,
-            agentName: agent.name,
-            text: brief.brief,
-            status: brief.status,
-            error: brief.error,
-          );
-        }
-        lastError = brief.error ?? 'tracker returned an empty response';
-      } catch (e) {
-        lastError = formatError(e);
-      }
-    }
-    return TrackerBatchResult.failed(
-      agentId: agent.id,
-      agentName: agent.name,
-      reason: lastError ?? 'tracker failed after 2 retries',
-    );
-  }
-
-  Future<TrackerBatchResult> runIndividualTrackerFromContext({
-    required StudioAgent agent,
-    required StudioConfig config,
-    required StudioPreset studioPreset,
     required StudioContext context,
     required ApiConfig apiConfig,
     required String sessionId,
@@ -429,7 +231,7 @@ class StudioAgentExecutor {
         );
       }
       try {
-        final brief = await runTrackerFromContext(
+        final brief = await runTracker(
           agent: agent,
           context: context,
           apiConfig: apiConfig,
@@ -463,54 +265,6 @@ class StudioAgentExecutor {
 
   Future<AgentRunResult> runFinalGenerator({
     required StudioAgent agent,
-    required PromptResult promptResult,
-    required PromptPayload promptPayload,
-    required ApiConfig apiConfig,
-    required StudioConfig config,
-    required StudioPreset studioPreset,
-    required List<StudioStageBrief> priorBriefs,
-    required String sessionId,
-    required CancelToken cancelToken,
-    String? apiConfigId,
-    StudioTurnConfigSnapshot? turnConfig,
-    void Function(String text, String? reasoning)? onFinalResponseUpdate,
-    void Function(List<Map<String, dynamic>> messages)? onMessagesBuilt,
-  }) async {
-    final messages = _messageBuilder.buildAgentMessages(
-      agent: agent,
-      promptResult: promptResult,
-      promptPayload: promptPayload,
-      config: config,
-      studioPreset: studioPreset,
-      priorBriefs: priorBriefs,
-      isFinalResponse: true,
-      finalContextOverride:
-          (turnConfig?.pipelineSettings ?? _readPipelineSettings())
-              .studioAgent
-              .studioFinalContextSize,
-      reasoningHistoryCount:
-          (turnConfig?.pipelineSettings ?? _readPipelineSettings())
-              .studioAgent
-              .studioFinalReasoningHistoryCount,
-    );
-    onMessagesBuilt?.call(messages);
-    final runner = _runner;
-    final result = await runner.runAgent(
-      agent: agent,
-      messages: messages,
-      apiConfig: apiConfig,
-      sessionId: sessionId,
-      isFinalResponse: true,
-      cancelToken: cancelToken,
-      apiConfigId: apiConfigId,
-      turnConfig: turnConfig,
-      onFinalResponseUpdate: onFinalResponseUpdate,
-    );
-    return result;
-  }
-
-  Future<AgentRunResult> runFinalGeneratorFromContext({
-    required StudioAgent agent,
     required StudioContext context,
     required ApiConfig apiConfig,
     required StudioConfig config,
@@ -524,7 +278,7 @@ class StudioAgentExecutor {
     void Function(List<Map<String, dynamic>> messages)? onMessagesBuilt,
   }) async {
     final settings = turnConfig?.pipelineSettings ?? _readPipelineSettings();
-    final messages = _messageBuilder.buildAgentMessagesFromContext(
+    final messages = _messageBuilder.buildAgentMessages(
       agent: agent,
       context: context,
       config: config,
