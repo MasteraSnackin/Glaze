@@ -179,7 +179,7 @@ class ManualStudioLedgerService {
     final turnConfig = await turnConfigFuture;
     final AuxApiConfig ledgerConfig;
     try {
-      ledgerConfig = turnConfig.resolveCleanerConfig(
+      ledgerConfig = turnConfig.resolveLedgerConfig(
         errorLabel: 'ledger-rerun',
       );
     } catch (e) {
@@ -253,7 +253,7 @@ class ManualStudioLedgerService {
     }
 
     final turnConfig = await _resolveTurnConfig(sessionId);
-    final ledgerConfig = turnConfig.resolveCleanerConfig(
+    final ledgerConfig = turnConfig.resolveLedgerConfig(
       errorLabel: 'ledger-reconciliation-manual',
     );
     final macroCtx = await _macroContext(sessionId, session.characterId);

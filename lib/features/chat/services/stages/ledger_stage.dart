@@ -126,7 +126,7 @@ class LedgerStage {
         ledgerConfig = resolvedConfig;
       } else {
         try {
-          ledgerConfig = turnConfig.resolveCleanerConfig(
+          ledgerConfig = turnConfig.resolveLedgerConfig(
             errorLabel: 'studio-ledger',
           );
         } catch (e) {

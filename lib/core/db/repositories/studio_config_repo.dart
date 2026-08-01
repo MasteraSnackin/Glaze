@@ -93,6 +93,27 @@ class StudioConfigRepo implements SyncStudioConfigStore {
     return profiles;
   }
 
+  /// The profile new sessions inherit — the newest one, created on demand.
+  ///
+  /// Used by the global Studio slot settings, which have no session to scope
+  /// to. Deliberately not called on read: creating a row just because a
+  /// settings screen was opened would bind every unbound session to an empty
+  /// profile.
+  Future<StudioConfig> ensureDefaultProfile() async {
+    final profiles = await getProfiles();
+    if (profiles.isNotEmpty) return profiles.first;
+    const id = 'studio_profile_default';
+    final now = currentTimestampSeconds();
+    const profile = StudioConfig(
+      sessionId: id,
+      profileId: id,
+      profileName: 'Default',
+    );
+    final stamped = profile.copyWith(createdAt: now, updatedAt: now);
+    await upsert(stamped);
+    return stamped;
+  }
+
   @override
   Future<List<StudioConfig>> getAll() => getProfiles();
 

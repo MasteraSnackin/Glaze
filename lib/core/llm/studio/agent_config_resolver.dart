@@ -3,6 +3,7 @@ import '../../models/pipeline_settings.dart';
 import '../../models/studio_config.dart';
 import '../agent_runner.dart' show ResolvedAgentConfig;
 import '../studio_api_config_resolver.dart';
+import '../studio_controller_ontology.dart';
 import '../studio_turn_config_snapshot.dart';
 import '../transport/extra_request_parameters.dart';
 
@@ -75,13 +76,17 @@ class AgentConfigResolver {
             ),
           );
     } else if (agent.phase == 'post_processing') {
-      if (pipeline.cleaner.postCleanerModel.isNotEmpty) {
+      // Post Clean and the Ledger share this phase but not their model: the
+      // Ledger prefers its own override and only then the cleaner's.
+      final ledgerModel = pipeline.ledger.studioLedgerModel;
+      final postModel =
+          StudioControllerOntology.specForAgent(agent).id == 'ledger' &&
+              ledgerModel.isNotEmpty
+          ? ledgerModel
+          : pipeline.cleaner.postCleanerModel;
+      if (postModel.isNotEmpty) {
         return resolver
-            .resolveAgentConfig(
-              current,
-              runApiConfigId,
-              pipeline.cleaner.postCleanerModel,
-            )
+            .resolveAgentConfig(current, runApiConfigId, postModel)
             .copyWithSampling(
               topP: pipeline.cleaner.postCleanerTopP,
               topK: pipeline.cleaner.postCleanerTopK,
