@@ -85,7 +85,7 @@ void main() {
       expect(prompt, isNot(contains('<foo>')));
     });
 
-    test('Phase 6.1 — cache-friendly order: <role> ? <lore> ? <agents>', () {
+    test('Phase 6.1 â€” cache-friendly order: <role> ? <lore> ? <agents>', () {
       // The shared stable prefix must come FIRST (cache hit window), the
       // per-agent volatile tail LAST. Otherwise the prompt cache cannot
       // find a stable prefix across turns.
@@ -114,7 +114,7 @@ void main() {
       final agentsIdx = prompt.indexOf('<agents>');
       expect(roleIdx, lessThan(loreIdx), reason: '<role> must precede <lore>');
       expect(loreIdx, lessThan(agentsIdx), reason: '<lore> must precede <agents>');
-      // Output-format block comes AFTER <agents> (tail) — never inside the
+      // Output-format block comes AFTER <agents> (tail) â€” never inside the
       // cached prefix.
       final formatIdx = prompt.indexOf('REQUIRED OUTPUT FORMAT');
       expect(agentsIdx, lessThan(formatIdx));
@@ -171,7 +171,7 @@ Focus: anti-loop
       expect(results[2].text, contains('Focus: anti-loop'));
     });
 
-    test('tolerates missing closing tag — takes up to next <result', () {
+    test('tolerates missing closing tag â€” takes up to next <result', () {
       final group = ControllerBatchGroup(
         key: 'openai|gpt-4',
         resolved: _stubResolved(),
@@ -183,14 +183,14 @@ Focus: anti-loop
         batchTemperature: 0.3,
         batchContextSize: 5,
       );
-      // a1 has NO closing tag — parser should take up to <result agent="a2">.
+      // a1 has NO closing tag â€” parser should take up to <result agent="a2">.
       const raw =
           '<result agent="a1">first output\n<result agent="a2">second</result>';
 
       final results = batcher.parseBatchResponse(raw, group);
 
       expect(results[0].agentId, 'a1');
-      // a1 body is trimmed before return — `first output\n` ? `first output`.
+      // a1 body is trimmed before return â€” `first output\n` ? `first output`.
       // The next `<result` opening acted as the implicit boundary since a1
       // had no closing tag.
       expect(results[0].text, 'first output');
@@ -363,6 +363,6 @@ ResolvedAgentConfig _stubResolved({String model = 'gpt-4'}) {
 }
 
 /// Pure prompt-building / parsing tests construct the batcher WITHOUT a
-/// runner — `ControllerBatcher()` is a no-arg constructor. Only `groupAgents` /
+/// runner â€” `ControllerBatcher()` is a no-arg constructor. Only `groupAgents` /
 /// `runPhase` require a runner; we don't touch them here.
 
