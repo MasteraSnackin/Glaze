@@ -477,6 +477,20 @@ class StudioPresetEditorBodyState
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // Card title: the sections below are all one thing — the preset's
+          // prompt blocks — and their own headers are stage names, not a name
+          // for the whole list.
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+            child: Text(
+              'studio_blocks_title'.tr(),
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                color: context.cs.onSurface,
+              ),
+            ),
+          ),
           if (addBlockAtTop) ...[
             PresetAddBlockRow(onTap: _addBlock, atTop: true),
             list,
