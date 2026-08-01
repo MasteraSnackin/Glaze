@@ -241,6 +241,12 @@ class ChatSessionService {
             toSessionId: branch.id,
           );
       await _ref
+          .read(sessionLorebookEvolutionRepoProvider)
+          .copyForSessionBranch(
+            fromSessionId: current.id,
+            toSessionId: branch.id,
+          );
+      await _ref
           .read(memoryBookRepoProvider)
           .copyForSessionBranch(
             fromSessionId: current.id,

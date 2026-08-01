@@ -4,6 +4,7 @@ import 'package:drift/native.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/db/app_db.dart';
+import 'package:glaze_flutter/core/models/card_rewriter_settings.dart';
 import 'package:glaze_flutter/core/models/cleaner_settings.dart';
 import 'package:glaze_flutter/core/models/memory_book.dart';
 import 'package:glaze_flutter/core/models/memory_book_api_settings.dart';
@@ -62,6 +63,13 @@ void main() {
                 postCleanerBannedWords: 'suddenly, palpable',
               ),
               memoryPipeline: MemoryPipelineSettings(auxTimeoutMs: 30000),
+              cardRewriter: CardRewriterSettings(
+                enabled: true,
+                lorebookEvolutionEnabled: false,
+                timeoutMs: 180000,
+                apiConfigId: 'rewrite-api',
+                modelOverride: 'rewrite-model',
+              ),
             ),
           );
       container1.dispose();
@@ -82,6 +90,11 @@ void main() {
       final loaded = container2.read(pipelineSettingsProvider);
       expect(loaded.cleaner.postCleanerBannedWords, 'suddenly, palpable');
       expect(loaded.memoryPipeline.auxTimeoutMs, 30000);
+      expect(loaded.cardRewriter.enabled, isTrue);
+      expect(loaded.cardRewriter.lorebookEvolutionEnabled, isFalse);
+      expect(loaded.cardRewriter.timeoutMs, 180000);
+      expect(loaded.cardRewriter.apiConfigId, 'rewrite-api');
+      expect(loaded.cardRewriter.modelOverride, 'rewrite-model');
     },
   );
 

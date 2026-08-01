@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/legacy.dart';
 import '../../core/llm/tokenizer.dart';
 import '../../core/models/chat_message.dart';
 import '../../core/db/repositories/chat_repo.dart';
+import '../../core/db/repositories/lorebook_use_manifest_repo.dart';
 import '../../core/services/generation_notification_service.dart';
 import '../../core/utils/id_generator.dart';
 import '../../core/utils/time_helpers.dart';
@@ -354,6 +355,14 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     final acceptedAssistant = current.messages.reversed
         .where((message) => message.role == 'assistant')
         .firstOrNull;
+    final expectedAcceptedVariation = acceptedAssistant == null
+        ? null
+        : LorebookUseGenerationIdentity(
+            sessionId: current.session!.id,
+            messageId: acceptedAssistant.id,
+            swipeId: acceptedAssistant.swipeId,
+            agentSwipeId: acceptedAssistant.agentSwipeId,
+          );
 
     // Show the user bubble and the typing indicator on the same frame as the
     // tap. Persisting the session re-encodes the whole message list on the UI
@@ -376,13 +385,20 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     await _yieldToFrame();
     if (!ref.mounted) return;
 
-    final updatedSession = await ref
-        .read(chatRepoProvider)
-        .appendUserMessageAndClearDraft(
-          sessionId: current.session!.id,
-          message: userMsg,
-          updatedAt: currentTimestampSeconds(),
-        );
+    final updatedSession = expectedAcceptedVariation == null
+        ? await ref.read(chatRepoProvider).appendUserMessageAndClearDraft(
+            sessionId: current.session!.id,
+            message: userMsg,
+            updatedAt: currentTimestampSeconds(),
+          )
+        : await ref
+              .read(chatRepoProvider)
+              .appendUserMessageAndAcceptCurrentVariation(
+                sessionId: current.session!.id,
+                message: userMsg,
+                expectedPrecedingAssistant: expectedAcceptedVariation,
+                updatedAt: currentTimestampSeconds(),
+              );
     if (!ref.mounted) return;
     if (updatedSession == null) {
       // The session row is gone — roll the optimistic append back.

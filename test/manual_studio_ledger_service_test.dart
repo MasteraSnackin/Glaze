@@ -229,6 +229,68 @@ void main() {
     expect(targetDiagnostic?.value, contains('manual=1'));
     expect(otherDiagnostic?.value, 'other diagnostic');
   });
+
+  test(
+    'rerun writes nothing when its target changes while execution awaits',
+    () async {
+      await putSession('session');
+      final gate = Completer<void>();
+      ledger.beforeRunComplete = () => gate.future;
+      final result = createService().rerun(
+        sessionId: 'session',
+        target: assistant2,
+      );
+      await ledger.runStarted.future;
+      await putSession(
+        'session',
+        messages: const [
+          user1,
+          assistant1,
+          user2,
+          ChatMessage(id: 'a2', role: 'assistant', content: 'Changed'),
+        ],
+      );
+      gate.complete();
+
+      expect((await result).result.status, 'aborted');
+      expect(
+        await trackerRepo.get('session', '_ledger_diag:studio_ledger'),
+        isNull,
+      );
+    },
+  );
+
+  test(
+    'reconciliation writes nothing when its endpoint changes while awaiting',
+    () async {
+      await putSession('session');
+      await commit('session', assistant1, 1);
+      await commit('session', assistant2, 2);
+      final gate = Completer<void>();
+      ledger.beforeReconcileComplete = () => gate.future;
+      final result = createService().reconcile('session');
+      await ledger.reconcileStarted.future;
+      await putSession(
+        'session',
+        messages: const [
+          user1,
+          assistant1,
+          user2,
+          ChatMessage(id: 'a2', role: 'assistant', content: 'Changed'),
+        ],
+      );
+      gate.complete();
+
+      expect((await result).result.status, 'aborted');
+      expect(
+        await trackerRepo.get(
+          'session',
+          '_ledger_diag:studio_ledger_reconciliation',
+        ),
+        isNull,
+      );
+    },
+  );
 }
 
 class _FakeLedgerExecutor implements StudioLedgerExecutor {
@@ -239,6 +301,10 @@ class _FakeLedgerExecutor implements StudioLedgerExecutor {
   String? lastRecentHistory;
   MacroContext? lastMacroContext;
   LedgerReconciliationPlan? lastPlan;
+  Future<void> Function()? beforeRunComplete;
+  Future<void> Function()? beforeReconcileComplete;
+  final runStarted = Completer<void>();
+  final reconcileStarted = Completer<void>();
 
   @override
   Future<LedgerRunResult> run({
@@ -249,12 +315,16 @@ class _FakeLedgerExecutor implements StudioLedgerExecutor {
     required String recentHistoryText,
     required ChatMessage target,
     required MacroContext macroCtx,
+    required FutureOr<bool> Function() isStillCurrent,
   }) async {
     runCalls++;
     lastTurnConfig = turnConfig;
     lastConfig = config;
     lastRecentHistory = recentHistoryText;
     lastMacroContext = macroCtx;
+    if (!runStarted.isCompleted) runStarted.complete();
+    await beforeRunComplete?.call();
+    if (!await isStillCurrent()) return LedgerRunResult.aborted;
     return const LedgerRunResult(status: 'ok', opsApplied: 2);
   }
 
@@ -265,12 +335,16 @@ class _FakeLedgerExecutor implements StudioLedgerExecutor {
     required AuxApiConfig config,
     required LedgerReconciliationPlan plan,
     required MacroContext macroCtx,
+    required FutureOr<bool> Function() isStillCurrent,
   }) async {
     reconcileCalls++;
     lastTurnConfig = turnConfig;
     lastConfig = config;
     lastMacroContext = macroCtx;
     lastPlan = plan;
+    if (!reconcileStarted.isCompleted) reconcileStarted.complete();
+    await beforeReconcileComplete?.call();
+    if (!await isStillCurrent()) return LedgerRunResult.aborted;
     return const LedgerRunResult(
       status: 'ok',
       opsApplied: 3,

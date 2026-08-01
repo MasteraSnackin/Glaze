@@ -12,6 +12,7 @@ import '../memory_excerpt_selector.dart'
     show defaultMemoryExcerptTokensPerEntry, defaultMemoryExcerptChunksPerEntry;
 import 'runtime_prompt_block.dart';
 import 'recalled_message_chunk.dart';
+import 'effective_canon_prompt_formatter.dart';
 
 class PromptPayload {
   final Character character;
@@ -107,6 +108,10 @@ class PromptPayload {
   /// The fingerprint detects "memory changed since last turn" for prompt-cache
   /// invalidation (Marinara chatSummaryFingerprint / djb2 analog).
   final String memoryInjectionFingerprint;
+  final EffectiveCanonPromptProjection? effectiveCanonProjection;
+  final int? effectiveCanonRevisionNumber;
+  final String? effectiveCanonRevisionHash;
+  final String effectiveCanonCacheIdentity;
 
   const PromptPayload({
     required this.character,
@@ -152,5 +157,9 @@ class PromptPayload {
     this.disableSourceWindowExclusion = false,
     this.sourceWindowVisibleMessageIds = const {},
     this.memoryInjectionFingerprint = '',
+    this.effectiveCanonProjection,
+    this.effectiveCanonRevisionNumber,
+    this.effectiveCanonRevisionHash,
+    this.effectiveCanonCacheIdentity = '',
   });
 }

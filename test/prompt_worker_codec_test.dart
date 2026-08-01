@@ -19,6 +19,9 @@ void main() {
     apiConfig: ApiConfig(id: 'api'),
     studioSessionStateContent: sessionState,
     characterKnowledgeContent: characterState,
+    effectiveCanonRevisionNumber: 7,
+    effectiveCanonRevisionHash: 'revision-hash',
+    effectiveCanonCacheIdentity: 'canon-cache-identity',
   );
 
   test('prompt isolate codec preserves both current-canon layers', () {
@@ -26,6 +29,9 @@ void main() {
 
     expect(restored.studioSessionStateContent, sessionState);
     expect(restored.characterKnowledgeContent, characterState);
+    expect(restored.effectiveCanonRevisionNumber, 7);
+    expect(restored.effectiveCanonRevisionHash, 'revision-hash');
+    expect(restored.effectiveCanonCacheIdentity, 'canon-cache-identity');
   });
 
   test('Studio source-window clone preserves both current-canon layers', () {
@@ -36,6 +42,7 @@ void main() {
 
     expect(cloned.studioSessionStateContent, sessionState);
     expect(cloned.characterKnowledgeContent, characterState);
+    expect(cloned.effectiveCanonCacheIdentity, 'canon-cache-identity');
   });
 
   test('prompt orders canon above memory and card', () {

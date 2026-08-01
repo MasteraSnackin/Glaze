@@ -100,6 +100,10 @@ class StudioStreamInterceptor {
       disableSourceWindowExclusion: payload.disableSourceWindowExclusion,
       sourceWindowVisibleMessageIds: sourceWindowVisibleMessageIds,
       memoryInjectionFingerprint: payload.memoryInjectionFingerprint,
+      effectiveCanonProjection: payload.effectiveCanonProjection,
+      effectiveCanonRevisionNumber: payload.effectiveCanonRevisionNumber,
+      effectiveCanonRevisionHash: payload.effectiveCanonRevisionHash,
+      effectiveCanonCacheIdentity: payload.effectiveCanonCacheIdentity,
     );
   }
 

@@ -275,6 +275,7 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
   /// Lightweight refresh: only stats, no layout re-read from disk.
   /// Called by the debounce timer when messages change.
   Future<void> _refreshStats() async {
+    if (!mounted) return;
     TokenBreakdownCache.invalidate();
     try {
       await _loadStats();
@@ -287,6 +288,7 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
   }
 
   void _scheduleRefresh() {
+    if (!mounted) return;
     _debounceTimer?.cancel();
     _debounceTimer = Timer(const Duration(milliseconds: 500), _refreshStats);
   }
@@ -561,11 +563,13 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
   Future<void> _showStudioMenu() async {
     final session = ref.read(chatProvider(widget.charId)).value?.session;
     if (session == null) return;
-    await StudioSettingsSheet.show(
+    final route = await StudioSettingsSheet.show(
       context,
       charId: widget.charId,
       sessionId: session.id,
     );
+    if (!mounted || route == null) return;
+    context.go(route);
   }
 
   Future<void> _showAgentOpsLog() async {

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/models/chat_message.dart';
 import '../../core/services/generation_notification_service.dart';
+import '../../core/state/card_rewriter_providers.dart';
 import '../../core/utils/id_generator.dart';
 import '../extensions/services/extension_post_gen_service.dart';
 import 'chat_provider.dart' show streamingStateProvider;
@@ -117,6 +118,10 @@ class AbortHandler {
     }
     _ref.read(cleanerCancelTokenProvider.notifier).state = null;
     _ref.read(extensionPostGenServiceProvider).cancelBlocks();
+    final sessionId = _getState().value?.session?.id;
+    if (sessionId != null) {
+      _ref.read(automatedCardEvolutionServiceProvider).cancelSession(sessionId);
+    }
     _ref.read(postCleanerStateProvider.notifier).state =
         const PostCleanerState.idle();
     clearStreaming();

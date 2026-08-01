@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:dio/dio.dart';
 
@@ -25,10 +24,11 @@ import 'prompt_builder.dart';
 import 'prompt/arc_state_builder.dart';
 import 'prompt/ledger_tracker_loader.dart';
 import 'prompt/lorebook_vector_searcher.dart';
-import 'prompt/studio_session_state_compiler.dart';
-import 'knowledge/character_knowledge_projection.dart';
 import 'prompt_inputs.dart';
 import 'prompt_inputs_collector.dart';
+import 'prompt/effective_canon_prompt_formatter.dart';
+import '../services/card_rewriter/effective_canon_context_loader.dart';
+import 'prompt/prompt_build_stale_exception.dart';
 
 // Re-export for backward compat — tests import this from here.
 export 'prompt/studio_session_state_compiler.dart'
@@ -36,8 +36,6 @@ export 'prompt/studio_session_state_compiler.dart'
 
 class PromptPayloadBuilder {
   final Ref _ref;
-  final Future<List<Tracker>> Function(String sessionId)
-  _loadEffectiveLedgerTrackers;
   final PromptInputsCollector _inputsCollector;
   final ApiConfigInitializer _initializeApiConfigs;
   final ActiveApiConfigReader _readActiveApiConfig;
@@ -81,7 +79,7 @@ class PromptPayloadBuilder {
     this._readActiveApiConfig,
     this._injectHistory,
     this._readRuntimePromptBlocks,
-    this._loadEffectiveLedgerTrackers,
+    Future<List<Tracker>> Function(String sessionId) _,
     this.onLorebookVectorSearchDiagnostic,
   );
 
@@ -119,9 +117,19 @@ class PromptPayloadBuilder {
     final personaRepo = _ref.read(personaRepoProvider);
     final lorebookRepo = _ref.read(lorebookRepoProvider);
 
-    final character = await charRepo.getById(charId);
+    final sourceCharacter = await charRepo.getById(charId);
     throwIfAborted();
-    if (character == null) throw StateError('Character not found: $charId');
+    if (sourceCharacter == null) throw StateError('Character not found: $charId');
+    final effectiveContext = session == null
+        ? null
+        : await _ref.read(effectiveCanonContextLoaderProvider).load(
+            sessionId: session.id,
+            sourceCharacter: sourceCharacter,
+          );
+    final character = effectiveContext?.character ?? sourceCharacter;
+    final effectiveProjection = effectiveContext == null
+        ? null
+        : EffectiveCanonPromptProjection.fromContext(effectiveContext);
 
     await _initializeApiConfigs();
     throwIfAborted();
@@ -151,7 +159,15 @@ class PromptPayloadBuilder {
       connections,
     );
 
-    final lorebooks = await lorebookRepo.getAll();
+    final sourceLorebooks = await lorebookRepo.getAll();
+    final lorebooks = session == null
+        ? sourceLorebooks
+        : await _ref
+              .read(sessionLorebookEvolutionRepoProvider)
+              .applyOverlays(
+                sessionId: session.id,
+                lorebooks: sourceLorebooks,
+              );
     throwIfAborted();
     final lorebookSettings = _ref.read(lorebookSettingsProvider);
     final lorebookActivations = _ref.read(lorebookActivationsProvider);
@@ -363,41 +379,16 @@ class PromptPayloadBuilder {
     String? studioSessionStateContent;
     String? characterKnowledgeContent;
     List<Tracker>? ledgerTrackers;
-    if (memoryGraphEnabled && sessionId != null) {
-      try {
-        final facts = await _ref
-            .read(characterKnowledgeFactRepoProvider)
-            .getActiveForSession(sessionId);
-        characterKnowledgeContent = compileCharacterKnowledgeProjection(
-          facts,
-          latestUserText: latestUserTextFromHistory(history),
-          latestAssistantText: latestAssistantTextFromHistory(history),
-        );
-      } catch (e) {
-        debugPrint('[PromptBuilder] character knowledge load failed: $e');
-      }
-    }
-    if (memoryGraphEnabled && sessionId != null) {
-      try {
-        ledgerTrackers = List.unmodifiable(
-          await _loadEffectiveLedgerTrackers(sessionId),
-        );
-      } catch (e) {
-        debugPrint('[PromptBuilder] studio_session_state load failed: $e');
-      }
-      try {
-        if (ledgerTrackers case final ledgerTrackers?
-            when ledgerTrackers.isNotEmpty) {
-          studioSessionStateContent = compileStudioSessionState(
-            ledgerTrackers,
-            sessionId,
-            latestUserText: latestUserTextFromHistory(history),
-            latestAssistantText: latestAssistantTextFromHistory(history),
-          );
-        }
-      } catch (e) {
-        debugPrint('[PromptBuilder] studio_session_state load failed: $e');
-      }
+    if (effectiveProjection != null && sessionId != null) {
+      final canon = EffectiveCanonPromptFormatter.format(
+        effectiveProjection,
+        sessionId: sessionId,
+        latestUserText: latestUserTextFromHistory(history),
+        latestAssistantText: latestAssistantTextFromHistory(history),
+      );
+      characterKnowledgeContent = canon.characterKnowledge;
+      studioSessionStateContent = canon.sessionState;
+      ledgerTrackers = effectiveProjection.trackers;
     }
 
     // Load {{arc}} macro content from Studio Canon arc:* tracker rows.
@@ -440,6 +431,11 @@ class PromptPayloadBuilder {
       } catch (_) {}
     }
 
+    await _ensureEffectiveCanonCurrent(
+      charId: charId,
+      session: session,
+      context: effectiveContext,
+    );
     return PromptPayload(
       character: character,
       persona: persona,
@@ -479,6 +475,10 @@ class PromptPayloadBuilder {
       characterKnowledgeContent: characterKnowledgeContent,
       recalledMessagesContent: recalledMessagesContent,
       recalledMessageChunks: recalledMessageChunks,
+      effectiveCanonProjection: effectiveProjection,
+      effectiveCanonRevisionNumber: effectiveProjection?.revisionNumber,
+      effectiveCanonRevisionHash: effectiveProjection?.revisionHash,
+      effectiveCanonCacheIdentity: effectiveProjection?.cacheIdentity ?? '',
     );
   }
 
@@ -486,6 +486,7 @@ class PromptPayloadBuilder {
     required String charId,
     required ChatSession? session,
     required Character character,
+    EffectiveCanonContext? effectiveCanonContext,
     required ApiConfig chatApi,
     required Preset? preset,
     required Persona? persona,
@@ -501,8 +502,24 @@ class PromptPayloadBuilder {
     List<RuntimePromptBlock> runtimePromptBlocks = const [],
     String? recalledMessagesContent,
   }) async {
+    final resolvedContext = effectiveCanonContext ?? (session != null
+        ? await _ref.read(effectiveCanonContextLoaderProvider).load(
+            sessionId: session.id,
+            sourceCharacter: character,
+          )
+        : null);
+    final projection = resolvedContext == null
+        ? null
+        : EffectiveCanonPromptProjection.fromContext(resolvedContext);
+    // Never trust the caller's raw character for a session-scoped prompt.
+    final effectiveCharacter = resolvedContext?.character ?? character;
     final lorebookSettings = _ref.read(lorebookSettingsProvider);
     final lorebookActivations = _ref.read(lorebookActivationsProvider);
+    final effectiveLorebooks = session == null
+        ? lorebooks
+        : await _ref
+              .read(sessionLorebookEvolutionRepoProvider)
+              .applyOverlays(sessionId: session.id, lorebooks: lorebooks);
 
     List<LorebookEntry> vectorEntries = [];
     List<ChatMessage> history = session?.messages ?? [];
@@ -513,8 +530,8 @@ class PromptPayloadBuilder {
       vectorEntries = await _vectorSearcher.search(
         history,
         history.lastOrNull?.content ?? '',
-        character.world,
-        character,
+        effectiveCharacter.world,
+        effectiveCharacter,
         chatId: session.id,
       );
     }
@@ -528,30 +545,16 @@ class PromptPayloadBuilder {
           .getBySessionId(session.id);
       memoryGraphEnabled = memoryBook?.settings.enabled ?? true;
     }
-    String? studioSessionStateContent;
-    List<Tracker>? ledgerTrackers;
-    if (memoryGraphEnabled && session != null) {
-      try {
-        ledgerTrackers = List.unmodifiable(
-          await _loadEffectiveLedgerTrackers(session.id),
-        );
-      } catch (e) {
-        debugPrint('[PromptBuilder] studio_session_state load failed: $e');
-      }
-      try {
-        if (ledgerTrackers case final ledgerTrackers?
-            when ledgerTrackers.isNotEmpty) {
-          studioSessionStateContent = compileStudioSessionState(
-            ledgerTrackers,
-            session.id,
+    final canon = projection == null || session == null
+        ? null
+        : EffectiveCanonPromptFormatter.format(
+            projection,
+            sessionId: session.id,
             latestUserText: latestUserTextFromHistory(history),
             latestAssistantText: latestAssistantTextFromHistory(history),
           );
-        }
-      } catch (e) {
-        debugPrint('[PromptBuilder] studio_session_state load failed: $e');
-      }
-    }
+    final ledgerTrackers = projection?.trackers;
+    final studioSessionStateContent = canon?.sessionState;
     String? arcContent;
     String? entitiesContent;
     if (memoryGraphEnabled &&
@@ -583,8 +586,13 @@ class PromptPayloadBuilder {
       } catch (_) {}
     }
 
+    await _ensureEffectiveCanonCurrent(
+      charId: charId,
+      session: session,
+      context: resolvedContext,
+    );
     return PromptPayload(
-      character: character,
+      character: effectiveCharacter,
       persona: persona,
       preset: preset,
       history: history,
@@ -592,7 +600,7 @@ class PromptPayloadBuilder {
       apiConfig: chatApi,
       sessionVars: session?.sessionVars ?? {},
       globalVars: _ref.read(globalVarsProvider),
-      lorebooks: lorebooks,
+      lorebooks: effectiveLorebooks,
       lorebookSettings: lorebookSettings,
       lorebookActivations: lorebookActivations,
       vectorEntries: vectorEntries,
@@ -603,9 +611,9 @@ class PromptPayloadBuilder {
       memoryCoverage: memoryCoverage,
       guidanceText: guidanceText,
       authorsNote: session?.authorsNote,
-      characterDepthPrompt: character.depthPrompt,
-      characterDepthPromptDepth: character.depthPromptDepth,
-      characterDepthPromptRole: character.depthPromptRole,
+      characterDepthPrompt: effectiveCharacter.depthPrompt,
+      characterDepthPromptDepth: effectiveCharacter.depthPromptDepth,
+      characterDepthPromptRole: effectiveCharacter.depthPromptRole,
       globalRegexes: _ref.read(globalRegexProvider).value ?? [],
       triggeredMemories: triggeredMemories,
       runtimePromptBlocks: runtimePromptBlocks,
@@ -618,9 +626,34 @@ class PromptPayloadBuilder {
       arcContent: arcContent,
       entitiesContent: entitiesContent,
       studioSessionStateContent: studioSessionStateContent,
+      characterKnowledgeContent: canon?.characterKnowledge,
       recalledMessagesContent: recalledMessagesContent,
       recalledMessageChunks: const [],
+      effectiveCanonProjection: projection,
+      effectiveCanonRevisionNumber: projection?.revisionNumber,
+      effectiveCanonRevisionHash: projection?.revisionHash,
+      effectiveCanonCacheIdentity: projection?.cacheIdentity ?? '',
     );
+  }
+
+  Future<void> _ensureEffectiveCanonCurrent({
+    required String charId,
+    required ChatSession? session,
+    required EffectiveCanonContext? context,
+  }) async {
+    if (session == null || context == null) return;
+    final current = await _ref.read(characterRepoProvider).getById(charId);
+    final isCurrent = current != null &&
+        await _ref.read(effectiveCanonContextLoaderProvider).isStillCurrentReadOnly(
+          sessionId: session.id,
+          sourceCharacter: current,
+          stamp: context.stamp,
+        );
+    if (!isCurrent) {
+      throw const PromptBuildStaleException(
+        'Effective canon changed while building the prompt payload.',
+      );
+    }
   }
 }
 

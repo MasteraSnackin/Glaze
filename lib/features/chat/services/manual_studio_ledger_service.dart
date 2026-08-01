@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/db/repositories/character_repo.dart';
@@ -76,6 +78,7 @@ abstract interface class StudioLedgerExecutor {
     required String recentHistoryText,
     required ChatMessage target,
     required MacroContext macroCtx,
+    required FutureOr<bool> Function() isStillCurrent,
   });
 
   Future<LedgerRunResult> reconcile({
@@ -84,6 +87,7 @@ abstract interface class StudioLedgerExecutor {
     required AuxApiConfig config,
     required LedgerReconciliationPlan plan,
     required MacroContext macroCtx,
+    required FutureOr<bool> Function() isStillCurrent,
   });
 }
 
@@ -101,6 +105,7 @@ class DefaultStudioLedgerExecutor implements StudioLedgerExecutor {
     required String recentHistoryText,
     required ChatMessage target,
     required MacroContext macroCtx,
+    required FutureOr<bool> Function() isStillCurrent,
   }) {
     return _service.run(
       sessionId: sessionId,
@@ -114,6 +119,7 @@ class DefaultStudioLedgerExecutor implements StudioLedgerExecutor {
       forceEnabled: true,
       ledgerBlocks: turnConfig.preset?.blocks ?? const [],
       macroCtx: macroCtx,
+      isStillCurrent: isStillCurrent,
       commitSnapshot: true,
     );
   }
@@ -125,6 +131,7 @@ class DefaultStudioLedgerExecutor implements StudioLedgerExecutor {
     required AuxApiConfig config,
     required LedgerReconciliationPlan plan,
     required MacroContext macroCtx,
+    required FutureOr<bool> Function() isStillCurrent,
   }) {
     return _service.reconcile(
       sessionId: sessionId,
@@ -133,6 +140,7 @@ class DefaultStudioLedgerExecutor implements StudioLedgerExecutor {
       plan: plan,
       ledgerBlocks: turnConfig.preset?.blocks ?? const [],
       macroCtx: macroCtx,
+      isStillCurrent: isStillCurrent,
     );
   }
 }
@@ -176,6 +184,7 @@ class ManualStudioLedgerService {
     final session = await chatRepo.getById(sessionId);
     if (session == null) throw StateError('Session not found');
     final startedAt = DateTime.now().millisecondsSinceEpoch;
+    final isTargetCurrent = _targetOwnershipGuard(sessionId, target);
     final turnConfig = await turnConfigFuture;
     final AuxApiConfig ledgerConfig;
     try {
@@ -186,6 +195,9 @@ class ManualStudioLedgerService {
       throw ManualStudioLedgerConfigException(e);
     }
     final macroCtx = await _macroContext(sessionId, session.characterId);
+    if (!await isTargetCurrent()) {
+      return _abortedManualResult(target, startedAt);
+    }
     final result = await _runForeground(
       () => ledger.run(
         sessionId: sessionId,
@@ -199,8 +211,12 @@ class ManualStudioLedgerService {
         ),
         target: target,
         macroCtx: macroCtx,
+        isStillCurrent: isTargetCurrent,
       ),
     );
+    if (!await isTargetCurrent()) {
+      return _abortedManualResult(target, startedAt);
+    }
     await trackerRepo.upsertValue(
       sessionId,
       '_ledger_diag:studio_ledger',
@@ -258,12 +274,10 @@ class ManualStudioLedgerService {
     );
     final macroCtx = await _macroContext(sessionId, session.characterId);
     final startedAt = DateTime.now().millisecondsSinceEpoch;
-    await _writeReconciliationDiagnostic(
-      sessionId: sessionId,
-      trigger: endpoint,
-      plan: plan,
-      result: LedgerRunResult(status: 'running', model: ledgerConfig.model),
-    );
+    final isTargetCurrent = _targetOwnershipGuard(sessionId, endpoint);
+    if (!await isTargetCurrent()) {
+      return _abortedManualResult(endpoint, startedAt);
+    }
     final result = await _runForeground(
       () => ledger.reconcile(
         sessionId: sessionId,
@@ -271,8 +285,12 @@ class ManualStudioLedgerService {
         config: ledgerConfig,
         plan: plan,
         macroCtx: macroCtx,
+        isStillCurrent: isTargetCurrent,
       ),
     );
+    if (!await isTargetCurrent()) {
+      return _abortedManualResult(endpoint, startedAt);
+    }
     await _writeReconciliationDiagnostic(
       sessionId: sessionId,
       trigger: endpoint,
@@ -328,6 +346,29 @@ class ManualStudioLedgerService {
       onFinished: onForegroundFinished,
     );
   }
+
+  FutureOr<bool> Function() _targetOwnershipGuard(
+    String sessionId,
+    ChatMessage target,
+  ) => () async {
+    final current = await chatRepo.getById(sessionId);
+    final message = current?.messages
+        .where((item) => item.id == target.id)
+        .firstOrNull;
+    return message != null &&
+        message.swipeId == target.swipeId &&
+        message.agentSwipeId == target.agentSwipeId &&
+        message.content == target.content;
+  };
+
+  ManualStudioLedgerResult _abortedManualResult(
+    ChatMessage target,
+    int startedAt,
+  ) => ManualStudioLedgerResult(
+    target: target,
+    result: LedgerRunResult.aborted,
+    startedAtMs: startedAt,
+  );
 
   Future<void> _writeReconciliationDiagnostic({
     required String sessionId,

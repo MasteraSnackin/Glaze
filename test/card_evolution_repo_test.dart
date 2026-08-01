@@ -1,0 +1,324 @@
+import 'dart:convert';
+
+import 'package:drift/native.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:glaze_flutter/core/db/app_db.dart';
+import 'package:glaze_flutter/core/db/repositories/applied_canon_transition_repo.dart';
+import 'package:glaze_flutter/core/db/repositories/canon_transition_fact_ref_repo.dart';
+import 'package:glaze_flutter/core/db/repositories/card_evolution_repo.dart';
+import 'package:glaze_flutter/core/db/repositories/character_knowledge_fact_repo.dart';
+import 'package:glaze_flutter/core/db/repositories/character_repo.dart';
+import 'package:glaze_flutter/core/db/repositories/character_revision_repo.dart';
+import 'package:glaze_flutter/core/db/repositories/character_session_baseline_repo.dart';
+import 'package:glaze_flutter/core/db/repositories/ledger_raw_tracker_state_reader.dart';
+import 'package:glaze_flutter/core/db/repositories/manual_rewrite_job_repo.dart';
+import 'package:glaze_flutter/core/models/character.dart';
+import 'package:glaze_flutter/core/services/card_rewriter/card_rewriter_contracts.dart';
+import 'package:glaze_flutter/core/services/card_rewriter/effective_canon_read_repository.dart';
+
+void main() {
+  late AppDatabase db;
+  late CardEvolutionRepo evolution;
+
+  setUp(() async {
+    db = AppDatabase.forTesting(NativeDatabase.memory());
+    final characters = CharacterRepo(db);
+    final revisions = CharacterRevisionRepo(db);
+    const character = Character(
+      id: 'character',
+      name: 'Card',
+      description: 'Alice is cautious.',
+      personality: 'Reserved and observant.',
+      scenario: 'A quiet city after midnight.',
+    );
+    await characters.put(character);
+    final hash = CardCanonicalizer.sha256(character);
+    await revisions.insert(
+      CharacterRevisionRecord(
+        characterId: character.id,
+        revision: 1,
+        revisionHash: hash,
+        parentRevisionHash: '',
+        snapshotJson: jsonEncode(character.toJson()),
+        createdAt: 1,
+      ),
+    );
+    await db.customStatement(
+      'INSERT INTO chat_sessions (session_id, character_id, session_index, messages_json) VALUES (?, ?, 0, ?)',
+      ['session', 'character', jsonEncode(_messages)],
+    );
+    final reader = EffectiveCanonReadRepository(
+      db: db,
+      characterRepo: characters,
+      revisionRepo: revisions,
+      baselineRepo: CharacterSessionBaselineRepo(db),
+      factRepo: CharacterKnowledgeFactRepo(db),
+      transitionRepo: AppliedCanonTransitionRepo(db),
+      transitionFactRefRepo: CanonTransitionFactRefRepo(db),
+    );
+    evolution = CardEvolutionRepo(
+      db: db,
+      canonReader: reader,
+      jobRepo: ManualRewriteJobRepo(
+        db: db,
+        rawTrackerStateReader: LedgerRawTrackerStateReader(db),
+      ),
+    );
+  });
+
+  tearDown(() => db.close());
+
+  test('uses chat history without reconciliation runs', () async {
+    expect(await evolution.isEligible('session'), isTrue);
+
+    final claim = await evolution.claim(
+      sessionId: 'session',
+      ownerId: 'owner',
+      now: 10,
+      leaseSeconds: 30,
+    );
+
+    expect(claim.kind, 'claimed');
+    expect(claim.claim!.selectedInputJson, contains('assistant development'));
+    expect(claim.claim!.selectedInputJson, contains('user response'));
+    expect(claim.claim!.selectedInputJson, contains('"effectiveCanon"'));
+    expect(await db.select(db.ledgerReconciliationSuccessfulRuns).get(), isEmpty);
+  });
+
+
+  test('a changed chat snapshot makes a claimed lease stale', () async {
+    final claim = (await evolution.claim(
+      sessionId: 'session',
+      ownerId: 'owner',
+      now: 10,
+      leaseSeconds: 30,
+    )).claim!;
+    await db.customStatement(
+      'UPDATE chat_sessions SET messages_json = ? WHERE session_id = ?',
+      [jsonEncode([..._messages, _nextAssistant, _nextUser]), 'session'],
+    );
+
+    expect(
+      await evolution.readPromptSnapshot(
+        claimId: claim.row.id,
+        ownerId: 'owner',
+        now: 11,
+      ),
+      isNull,
+    );
+  });
+
+  test('expired claim is replaced using a fresh chat snapshot', () async {
+    final first = (await evolution.claim(
+      sessionId: 'session',
+      ownerId: 'closed-app-owner',
+      now: 10,
+      leaseSeconds: 30,
+    )).claim!;
+    await db.customStatement(
+      'UPDATE chat_sessions SET messages_json = ? WHERE session_id = ?',
+      [jsonEncode([..._messages, _nextAssistant, _nextUser]), 'session'],
+    );
+
+    final recovered = await evolution.claim(
+      sessionId: 'session',
+      ownerId: 'new-app-owner',
+      now: 41,
+      leaseSeconds: 30,
+    );
+
+    expect(recovered.kind, 'claimed');
+    expect(recovered.claim!.row.id, isNot(first.row.id));
+    expect(recovered.claim!.row.ownerId, 'new-app-owner');
+    expect(recovered.claim!.selectedInputJson, contains('new assistant development'));
+    expect(
+      await (db.select(db.cardEvolutionClaims)
+            ..where((row) => row.id.equals(first.row.id)))
+          .getSingleOrNull(),
+      isNull,
+    );
+  });
+
+  test('excludes a trailing mutable user-assistant turn from evidence', () async {
+    await db.customStatement(
+      'UPDATE chat_sessions SET messages_json = ? WHERE session_id = ?',
+      [jsonEncode([..._messages, _nextAssistant]), 'session'],
+    );
+
+    final claim = await evolution.claim(
+      sessionId: 'session',
+      ownerId: 'owner',
+      now: 10,
+      leaseSeconds: 30,
+    );
+
+    expect(claim.kind, 'claimed');
+    expect(claim.claim!.selectedInputJson, isNot(contains('new assistant development')));
+    expect(claim.claim!.selectedInputJson, isNot(contains('user response')));
+    expect(claim.claim!.selectedInputJson, contains('assistant development'));
+  });
+
+  test('finalize atomically writes a three-field review proposal', () async {
+    final claim = (await evolution.claim(
+      sessionId: 'session',
+      ownerId: 'owner',
+      now: 10,
+      leaseSeconds: 30,
+    )).claim!;
+
+    final result = await evolution.finalize(
+      claimId: claim.row.id,
+      ownerId: 'owner',
+      now: 11,
+      modelOutput: '["raw"]',
+      operations: _operations(),
+    );
+
+    expect(result.kind, 'persisted');
+    expect(result.job!.status, 'pending');
+    expect(await db.select(db.rewriteOperations).get(), hasLength(3));
+    expect(await db.select(db.rewriteOperationRevisions).get(), hasLength(3));
+    expect(await db.select(db.rewriteEvidenceRows).get(), hasLength(1));
+    expect(await db.select(db.cardEvolutionProposalRuns).get(), hasLength(1));
+    expect(await db.select(db.ledgerReconciliationCursors).get(), isEmpty);
+  });
+
+  test('finalize reports the exact rejected card patch validation', () async {
+    final claim = (await evolution.claim(
+      sessionId: 'session',
+      ownerId: 'owner',
+      now: 10,
+      leaseSeconds: 30,
+    )).claim!;
+    final invalid = _operation(
+      CardRewriteField.description,
+      'text from chat history',
+      'replacement',
+    );
+
+    final result = await evolution.finalize(
+      claimId: claim.row.id,
+      ownerId: 'owner',
+      now: 11,
+      modelOutput: 'raw',
+      operations: [invalid],
+    );
+
+    expect(result.kind, 'invalidOperation');
+    expect(result.detail, 'description: staleAnchor');
+    expect(await db.select(db.rewriteJobs).get(), isEmpty);
+  });
+
+  test('finalize rejects a tiny automated anchor', () async {
+    final claim = (await evolution.claim(
+      sessionId: 'session',
+      ownerId: 'owner',
+      now: 10,
+      leaseSeconds: 30,
+    )).claim!;
+
+    final result = await evolution.finalize(
+      claimId: claim.row.id,
+      ownerId: 'owner',
+      now: 11,
+      modelOutput: 'raw',
+      operations: [
+        _operation(CardRewriteField.scenario, '8', 'Afterlife with Danvi'),
+      ],
+    );
+
+    expect(result.kind, 'invalidOperation');
+    expect(result.detail, 'scenario: anchorTooShort');
+    expect(await db.select(db.rewriteJobs).get(), isEmpty);
+  });
+
+  test('finalization rollback keeps no partial proposal', () async {
+    final reader = evolution.canonReader;
+    evolution = CardEvolutionRepo(
+      db: db,
+      canonReader: reader,
+      jobRepo: evolution.jobRepo,
+      beforeCursorInsert: () async => throw StateError('injected'),
+    );
+    final claim = (await evolution.claim(
+      sessionId: 'session',
+      ownerId: 'owner',
+      now: 10,
+      leaseSeconds: 30,
+    )).claim!;
+
+    await expectLater(
+      evolution.finalize(
+        claimId: claim.row.id,
+        ownerId: 'owner',
+        now: 11,
+        modelOutput: '["raw"]',
+        operations: _operations(),
+      ),
+      throwsStateError,
+    );
+    expect(await db.select(db.rewriteJobs).get(), isEmpty);
+    expect(await db.select(db.cardEvolutionProposalRuns).get(), isEmpty);
+  });
+}
+
+const _messages = [
+  {'id': 'u1', 'role': 'user', 'content': 'user setup'},
+  {'id': 'a1', 'role': 'assistant', 'content': 'assistant development'},
+  {'id': 'u2', 'role': 'user', 'content': 'user response'},
+];
+
+const _nextAssistant = {
+  'id': 'a2',
+  'role': 'assistant',
+  'content': 'new assistant development',
+};
+
+const _nextUser = {
+  'id': 'u3',
+  'role': 'user',
+  'content': 'next user response',
+};
+
+List<CardRewriteOperationSnapshot> _operations() => [
+  _operation(
+    CardRewriteField.description,
+    'Alice is cautious.',
+    'Alice is cautious but increasingly trusting.',
+  ),
+  _operation(
+    CardRewriteField.personality,
+    'Reserved and observant.',
+    'Reserved, observant, and increasingly open.',
+  ),
+  _operation(
+    CardRewriteField.scenario,
+    'A quiet city after midnight.',
+    'A quiet city after midnight where trust is cautiously growing.',
+  ),
+];
+
+CardRewriteOperationSnapshot _operation(
+  CardRewriteField field,
+  String anchor,
+  String value,
+) => CardRewriteOperationSnapshot(
+  field: field,
+  patches: [
+    AnchoredScalarPatch(
+      scopeKey: 'npc:alice',
+      field: field,
+      anchor: anchor,
+      anchorSha256: CardCanonicalizer.scalarSha256(anchor),
+      value: value,
+    ),
+  ],
+  transition: CardRewriteTransitionSnapshot(
+    id: 'transition-${field.wireName}',
+    scopeKey: 'npc:alice',
+    canonicalClaim: 'Alice is increasingly trusting.',
+    promotionDestination: 'card',
+    affectedTrackerKeys: const [],
+    factIds: const [],
+  ),
+);

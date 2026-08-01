@@ -11,6 +11,7 @@ import 'lorebook_scanner.dart';
 import 'memory_excerpt_selector.dart';
 import 'memory_selector.dart';
 import 'prompt_builder.dart';
+import 'prompt/effective_canon_prompt_formatter.dart';
 
 /// Serialization codec for the prompt isolate boundary. Converts
 /// [PromptPayload] / [PromptResult] / [MemorySelection] to and from plain JSON
@@ -63,6 +64,10 @@ Map<String, dynamic> serializePayload(PromptPayload p) => {
   'disableSourceWindowExclusion': p.disableSourceWindowExclusion,
   'sourceWindowVisibleMessageIds': p.sourceWindowVisibleMessageIds.toList(),
   'memoryInjectionFingerprint': p.memoryInjectionFingerprint,
+  'effectiveCanonProjection': p.effectiveCanonProjection?.toJson(),
+  'effectiveCanonRevisionNumber': p.effectiveCanonRevisionNumber,
+  'effectiveCanonRevisionHash': p.effectiveCanonRevisionHash,
+  'effectiveCanonCacheIdentity': p.effectiveCanonCacheIdentity,
 };
 
 PromptResult deserializeResult(Map<String, dynamic> json) {
@@ -84,6 +89,11 @@ PromptResult deserializeResult(Map<String, dynamic> json) {
     memoryCoverage: Map<String, dynamic>.from(
       json['memoryCoverage'] as Map? ?? {},
     ),
+    exactLorebookManifest: json['exactLorebookManifest'] is Map
+        ? ExactLorebookManifest.fromJson(
+            Map<String, dynamic>.from(json['exactLorebookManifest'] as Map),
+          )
+        : null,
   );
 }
 
@@ -178,6 +188,15 @@ PromptPayload deserializePayload(Map<String, dynamic> json) {
             .toSet(),
     memoryInjectionFingerprint:
         json['memoryInjectionFingerprint'] as String? ?? '',
+    effectiveCanonProjection: json['effectiveCanonProjection'] == null
+        ? null
+        : EffectiveCanonPromptProjection.fromJson(
+            json['effectiveCanonProjection'] as Map<String, dynamic>,
+          ),
+    effectiveCanonRevisionNumber: json['effectiveCanonRevisionNumber'] as int?,
+    effectiveCanonRevisionHash: json['effectiveCanonRevisionHash'] as String?,
+    effectiveCanonCacheIdentity:
+        json['effectiveCanonCacheIdentity'] as String? ?? '',
   );
 }
 
@@ -189,6 +208,7 @@ Map<String, dynamic> serializeResult(PromptResult r) => {
   'triggeredLorebooks': r.triggeredLorebooks.map((t) => t.toJson()).toList(),
   'triggeredMemories': r.triggeredMemories.map((t) => t.toJson()).toList(),
   'memoryCoverage': r.memoryCoverage,
+  'exactLorebookManifest': r.exactLorebookManifest?.toJson(),
 };
 
 Map<String, dynamic>? serializeMemorySelection(MemorySelection? selection) {

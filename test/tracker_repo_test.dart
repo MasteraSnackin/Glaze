@@ -38,7 +38,9 @@ void main() {
 
   group('TrackerRepo.upsert', () {
     test('creates a new tracker', () async {
-      await repo.upsert(_tracker(sessionId: 's1', name: 'mood', value: 'happy'));
+      await repo.upsert(
+        _tracker(sessionId: 's1', name: 'mood', value: 'happy'),
+      );
 
       final got = await repo.get('s1', 'mood');
       expect(got, isNotNull);
@@ -46,16 +48,35 @@ void main() {
       expect(got.scope, 'chat');
     });
 
+    test('round-trips basis revision metadata', () async {
+      await repo.upsert(
+        _tracker(
+          sessionId: 's1',
+          name: 'mood',
+        ).copyWith(basisRevisionNumber: 12, basisRevisionHash: 'card-hash'),
+      );
+
+      final got = await repo.get('s1', 'mood');
+      expect(got!.basisRevisionNumber, 12);
+      expect(got.basisRevisionHash, 'card-hash');
+    });
+
     test('overwrites existing tracker with same name', () async {
-      await repo.upsert(_tracker(sessionId: 's1', name: 'mood', value: 'happy'));
-      await repo.upsert(_tracker(sessionId: 's1', name: 'mood', value: 'angry'));
+      await repo.upsert(
+        _tracker(sessionId: 's1', name: 'mood', value: 'happy'),
+      );
+      await repo.upsert(
+        _tracker(sessionId: 's1', name: 'mood', value: 'angry'),
+      );
 
       final got = await repo.get('s1', 'mood');
       expect(got!.value, 'angry');
     });
 
     test('preserves different trackers with different names', () async {
-      await repo.upsert(_tracker(sessionId: 's1', name: 'mood', value: 'happy'));
+      await repo.upsert(
+        _tracker(sessionId: 's1', name: 'mood', value: 'happy'),
+      );
       await repo.upsert(
         _tracker(sessionId: 's1', name: 'location', value: 'tavern'),
       );
@@ -203,5 +224,12 @@ void main() {
       final second = await stream.first;
       expect(second.map((t) => t.name).toList(), ['a', 'b']);
     });
+  });
+
+  test('legacy tracker JSON defaults basis revision metadata', () {
+    final tracker = Tracker.fromJson(const {'sessionId': 's1', 'name': 'mood'});
+
+    expect(tracker.basisRevisionNumber, 0);
+    expect(tracker.basisRevisionHash, isEmpty);
   });
 }

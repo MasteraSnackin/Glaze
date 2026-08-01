@@ -37,24 +37,33 @@ class MagicDrawerStatsService {
     final personaRepo = _ref.read(personaRepoProvider);
     final lorebookRepo = _ref.read(lorebookRepoProvider);
     final memoryRepo = _ref.read(memoryBookRepoProvider);
+    final chatRepo = _ref.read(chatRepoProvider);
+    final summaryService = _ref.read(summaryServiceProvider);
+    final apiListFuture = _ref.read(apiListProvider.future);
+    final activeRegexesFuture = _ref.read(activeRegexesProvider.future);
+    final activePresetId = _ref.read(activePresetIdProvider);
+    final activePersonaId = _ref.read(activePersonaIdProvider);
+    final chatApi = _ref.read(activeApiConfigProvider);
+    final imageGenEnabled =
+        _ref.read(imageGenSettingsProvider).value?.enabled == true;
+    final extSettings = _ref.read(extensionsSettingsProvider);
+    final extPresets = _ref.read(extensionPresetsProvider);
+    final cached = _ref.read(cachedTokenBreakdownProvider(charId));
 
     final character = await charRepo.getById(charId);
     final presets = await presetRepo.getAll();
     final personas = await personaRepo.getAll();
-    await _ref.read(apiListProvider.future);
+    await apiListFuture;
     final lorebooks = await lorebookRepo.getAll();
-    final activePresetId = _ref.read(activePresetIdProvider);
-    final activePersonaId = _ref.read(activePersonaIdProvider);
     final activePreset = activePresetId != null
         ? presets.where((p) => p.id == activePresetId).firstOrNull
         : presets.firstOrNull;
     final activePersona = activePersonaId != null
         ? personas.where((p) => p.id == activePersonaId).firstOrNull
         : personas.firstOrNull;
-    final chatApi = _ref.read(activeApiConfigProvider);
     List<PresetRegex> regexes;
     try {
-      regexes = await _ref.read(activeRegexesProvider.future);
+      regexes = await activeRegexesFuture;
     } catch (e) {
       debugPrint('[MagicDrawer] activeRegexesProvider error: $e');
       regexes = [];
@@ -68,9 +77,7 @@ class MagicDrawerStatsService {
 
     if (session != null) {
       try {
-        final summary = await _ref
-            .read(summaryServiceProvider)
-            .getSummary(session.id);
+        final summary = await summaryService.getSummary(session.id);
         summaryContent = summary;
         summaryChars = summary?.length ?? 0;
       } catch (e) {
@@ -81,29 +88,19 @@ class MagicDrawerStatsService {
         final memoryBook = await memoryRepo.getBySessionId(session.id);
         memoryEntries = memoryBook?.entries.length ?? 0;
         sessionCount =
-            (await _ref.read(chatRepoProvider).getByCharacterId(charId)).length;
+            (await chatRepo.getByCharacterId(charId)).length;
         messageCount = session.messages.length;
       } catch (e) {
         debugPrint('[MagicDrawer] session stats error: $e');
       }
     }
 
-    bool imageGenEnabled = false;
-    try {
-      imageGenEnabled =
-          _ref.read(imageGenSettingsProvider).value?.enabled == true;
-    } catch (_) {}
-
-    final extSettings = _ref.read(extensionsSettingsProvider);
-    final extPresets = _ref.read(extensionPresetsProvider);
     final extActivePresetName = extSettings.activePresetId == null
         ? null
         : extPresets
               .where((p) => p.id == extSettings.activePresetId)
               .firstOrNull
               ?.name;
-
-    final cached = _ref.read(cachedTokenBreakdownProvider(charId));
 
     final approxHistoryTokens = session != null
         ? session.messages

@@ -6,6 +6,7 @@ import '../../core/models/chat_message.dart';
 import '../../core/models/tracker_snapshot.dart';
 import '../../core/utils/time_helpers.dart';
 import '../../core/state/db_provider.dart';
+import '../../core/db/repositories/lorebook_use_manifest_repo.dart';
 import '../extensions/providers/info_blocks_provider.dart';
 import 'chat_session_service.dart';
 
@@ -203,6 +204,10 @@ class ChatMessageService {
       await knowledgeRepo.retractForMessages(session.id, invalidatedMessageIds);
       await memoryBookRepo.deleteForMessages(session.id, invalidatedMessageIds);
       await snapshotRepo.deleteForMessages(session.id, invalidatedMessageIds);
+      await _deleteManifestProvenanceForMessages(
+        sessionId: session.id,
+        messageIds: invalidatedMessageIds,
+      );
       await checkpointRepo.deleteBySessionId(session.id);
       await trackerRepo.replaceLedgerState(
         session.id,
@@ -488,6 +493,7 @@ class ChatMessageService {
     final facts = _ref.read(characterKnowledgeFactRepoProvider);
     final memory = _ref.read(memoryBookRepoProvider);
     final blocks = _ref.read(infoBlocksRepoProvider);
+    final manifests = _ref.read(lorebookUseManifestRepoProvider);
     late ChatSession updatedSession;
     late ChatMessage updatedMessage;
 
@@ -517,6 +523,13 @@ class ChatMessageService {
       );
 
       if (!removeAgentSwipe) {
+        // Manifest anchors are immutable. Green-index compaction would make
+        // later anchors identify different variations, so fail closed.
+        await _deleteManifestVariations(
+          manifests,
+          sessionId: session.id,
+          message: original,
+        );
         await snapshots.deleteSwipe(
           sessionId: session.id,
           messageId: messageId,
@@ -543,6 +556,14 @@ class ChatMessageService {
           removedSwipeId: removedSwipeId,
         );
       } else {
+        // Blue-index compaction has the same identity problem, scoped to this
+        // green variation. Drop its immutable provenance before shifting.
+        await _deleteManifestVariations(
+          manifests,
+          sessionId: session.id,
+          message: original,
+          swipeIds: {removedSwipeId},
+        );
         await snapshots.deleteAnchor(
           sessionId: session.id,
           messageId: messageId,
@@ -603,6 +624,66 @@ class ChatMessageService {
     _ref.invalidate(memoryBookProvider(session.id));
     await _ref.read(infoBlocksProvider(session.id).notifier).refresh();
     return updatedSession;
+  }
+
+  /// Removes every immutable manifest anchor represented by [message].
+  /// An absent nested list is the legacy/default agent variation zero.
+  Future<void> _deleteManifestVariations(
+    LorebookUseManifestRepo manifests, {
+    required String sessionId,
+    required ChatMessage message,
+    Set<int>? swipeIds,
+  }) async {
+    final greenCount = message.swipes.isEmpty ? 1 : message.swipes.length;
+    for (var swipeId = 0; swipeId < greenCount; swipeId++) {
+      if (swipeIds != null && !swipeIds.contains(swipeId)) continue;
+      final meta = swipeId < message.swipesMeta.length
+          ? message.swipesMeta[swipeId]
+          : const <String, dynamic>{};
+      final nested = meta['agentSwipes'];
+      final agentCount = nested is List && nested.isNotEmpty
+          ? nested.length
+          : 1;
+      for (var agentSwipeId = 0; agentSwipeId < agentCount; agentSwipeId++) {
+        await manifests.deleteByVariation(
+          sessionId: sessionId,
+          messageId: message.id,
+          swipeId: swipeId,
+          agentSwipeId: agentSwipeId,
+        );
+      }
+    }
+  }
+
+  /// Ordinary message deletion invalidates the causal suffix, including every
+  /// immutable provenance anchor on those messages. Query exact stored anchors
+  /// first, then use the manifest repository's child-first deletion API.
+  Future<void> _deleteManifestProvenanceForMessages({
+    required String sessionId,
+    required Set<String> messageIds,
+  }) async {
+    if (messageIds.isEmpty) return;
+    final db = _ref.read(appDbProvider);
+    // An acceptance is also invalid once its accepting user turn is removed,
+    // even when the referenced assistant variation remains in the prefix.
+    await (db.delete(db.lorebookUseAcceptanceRecords)
+          ..where((row) => row.sessionId.equals(sessionId))
+          ..where((row) => row.acceptedByUserMessageId.isIn(messageIds)))
+        .go();
+    final rows =
+        await (db.select(db.lorebookUseManifests)
+              ..where((row) => row.sessionId.equals(sessionId))
+              ..where((row) => row.messageId.isIn(messageIds)))
+            .get();
+    final manifests = _ref.read(lorebookUseManifestRepoProvider);
+    for (final row in rows) {
+      await manifests.deleteByVariation(
+        sessionId: sessionId,
+        messageId: row.messageId,
+        swipeId: row.swipeId,
+        agentSwipeId: row.agentSwipeId,
+      );
+    }
   }
 
   @visibleForTesting

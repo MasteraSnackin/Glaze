@@ -57,6 +57,10 @@ class CharacterDeletionRepo implements CharacterDeletionStore {
       for (final sessionId in sessionIds) {
         await sessionDeletion.deleteSessionRows(sessionId);
       }
+      // Character-global transitions have a NULL chat_session_id and therefore
+      // intentionally survive individual session deletion. Remove every
+      // character-owned rewrite/transition here, children before parents.
+      await _deleteCharacterRewriteProvenance(ids);
 
       if (lorebookIds.isNotEmpty) {
         await (_db.delete(_db.embeddings)..where(
@@ -69,6 +73,9 @@ class CharacterDeletionRepo implements CharacterDeletionStore {
           _db.lorebooks,
         )..where((row) => row.lorebookId.isIn(lorebookIds))).go();
       }
+      await (_db.delete(
+        _db.characterRevisionRows,
+      )..where((row) => row.characterId.isIn(ids))).go();
       await (_db.delete(
         _db.characterFolderMembers,
       )..where((row) => row.charId.isIn(ids))).go();
@@ -102,5 +109,45 @@ class CharacterDeletionRepo implements CharacterDeletionStore {
         lorebookIds: lorebookIds,
       );
     });
+  }
+
+  Future<void> _deleteCharacterRewriteProvenance(List<String> characterIds) async {
+    final jobs = await (_db.select(
+      _db.rewriteJobs,
+    )..where((row) => row.characterId.isIn(characterIds))).get();
+    final jobIds = jobs.map((row) => row.id).toSet();
+    final operations = jobIds.isEmpty
+        ? const <RewriteOperationRow>[]
+        : await (_db.select(
+            _db.rewriteOperations,
+          )..where((row) => row.rewriteJobId.isIn(jobIds))).get();
+    final operationIds = operations.map((row) => row.id).toSet();
+    if (operationIds.isNotEmpty) {
+      await (_db.delete(
+        _db.rewriteOperationRevisions,
+      )..where((row) => row.rewriteOperationId.isIn(operationIds))).go();
+      await (_db.delete(
+        _db.rewriteEvidenceRows,
+      )..where((row) => row.rewriteOperationId.isIn(operationIds))).go();
+      await (_db.delete(
+        _db.rewriteOperations,
+      )..where((row) => row.id.isIn(operationIds))).go();
+    }
+    if (jobIds.isNotEmpty) {
+      await (_db.delete(_db.rewriteJobs)..where((row) => row.id.isIn(jobIds)))
+          .go();
+    }
+    final transitions = await (_db.select(
+      _db.appliedCanonTransitionRows,
+    )..where((row) => row.characterId.isIn(characterIds))).get();
+    final transitionIds = transitions.map((row) => row.id).toSet();
+    if (transitionIds.isNotEmpty) {
+      await (_db.delete(
+        _db.canonTransitionFactRefs,
+      )..where((row) => row.appliedCanonTransitionId.isIn(transitionIds))).go();
+      await (_db.delete(
+        _db.appliedCanonTransitionRows,
+      )..where((row) => row.id.isIn(transitionIds))).go();
+    }
   }
 }

@@ -1,26 +1,34 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
 import '../db/repositories/character_knowledge_fact_repo.dart';
+import '../db/repositories/character_repo.dart';
+import '../db/repositories/chat_repo.dart';
 import '../db/repositories/ledger_reconciliation_checkpoint_repo.dart';
+import '../db/repositories/ledger_reconciliation_run_repo.dart';
 import '../db/repositories/memory_book_repo.dart';
 import '../db/repositories/tracker_repo.dart';
 import '../db/repositories/tracker_snapshot_repo.dart';
 import '../models/agent_operation_record.dart';
 import '../models/character_knowledge_fact.dart';
+import '../models/character.dart';
+import '../models/chat_message.dart';
 import '../models/memory_book.dart';
+import '../models/knowledge_cleanup.dart';
 import '../models/pipeline_settings.dart';
 import '../models/studio_config.dart';
 import '../models/studio_ledger_export.dart';
 import '../models/tracker.dart';
 import '../utils/id_generator.dart';
+import '../utils/cast_helpers.dart';
+import '../services/card_rewriter/effective_canon_context_loader.dart';
 import 'aux_llm_client.dart';
 import 'ledger/ledger_op_applier.dart';
 import 'knowledge_cleanup_parser.dart';
 import 'macro_engine.dart';
-import 'prompt/ledger_tracker_loader.dart';
 import 'studio/studio_aux_prompt_assembler.dart';
 import 'studio_ledger_export_parser.dart';
 import 'studio_ledger_prompt.dart';
@@ -105,7 +113,10 @@ class StudioLedgerService {
   final TrackerSnapshotRepo _snapshotRepo;
   final CharacterKnowledgeFactRepo _knowledgeFactRepo;
   final LedgerReconciliationCheckpointRepo _reconciliationCheckpointRepo;
-  final LedgerTrackerLoader _ledgerTrackerLoader;
+  final LedgerReconciliationRunRepo _reconciliationRunRepo;
+  final CharacterRepo _characterRepo;
+  final ChatRepo _chatRepo;
+  final EffectiveCanonContextLoader _canonContextLoader;
   final StudioLedgerExportParser _parser;
   final StudioLedgerPrompt _promptBuilder;
   final LedgerOpApplier _opApplier;
@@ -117,7 +128,10 @@ class StudioLedgerService {
     required this._snapshotRepo,
     required this._knowledgeFactRepo,
     required this._reconciliationCheckpointRepo,
-    required this._ledgerTrackerLoader,
+    required this._reconciliationRunRepo,
+    required this._characterRepo,
+    required this._chatRepo,
+    required this._canonContextLoader,
   }) : _parser = const StudioLedgerExportParser(),
        _promptBuilder = const StudioLedgerPrompt(),
        _opApplier = const LedgerOpApplier();
@@ -129,22 +143,24 @@ class StudioLedgerService {
     required LedgerReconciliationPlan plan,
     List<StudioPresetBlock> ledgerBlocks = const [],
     MacroContext? macroCtx,
-    bool Function()? isStillCurrent,
+    FutureOr<bool> Function()? isStillCurrent,
     CancelToken? cancelToken,
   }) async {
     final token = cancelToken ?? CancelToken();
-    if (token.isCancelled || isStillCurrent?.call() == false) {
+    if (token.isCancelled || await _isStillCurrent(isStillCurrent) == false) {
       return LedgerRunResult.aborted;
     }
     final sw = Stopwatch()..start();
     try {
+      final canon = await _loadCanonContext(sessionId);
+      await _throwIfReconciliationAborted(token, isStillCurrent);
       final endpointSnapshot = await _snapshotRepo.getByAnchor(
         sessionId: sessionId,
         messageId: plan.endMessage.id,
         swipeId: plan.endMessage.swipeId,
         agentSwipeId: plan.endMessage.agentSwipeId,
       );
-      _throwIfReconciliationAborted(token, isStillCurrent);
+      await _throwIfReconciliationAborted(token, isStillCurrent);
       if (endpointSnapshot == null || !endpointSnapshot.committed) {
         return LedgerRunResult(
           status: 'skipped',
@@ -153,13 +169,9 @@ class StudioLedgerService {
         );
       }
 
-      final promptTrackers = await _ledgerTrackerLoader
-          .loadEffectiveLedgerTrackers(sessionId);
-      _throwIfReconciliationAborted(token, isStillCurrent);
+      final promptTrackers = _promptTrackers(canon.context);
       final reviewMessageIds = plan.messageIds.toSet();
-      final reviewableFacts = await _knowledgeFactRepo.getReviewableForSession(
-        sessionId,
-      );
+      final reviewableFacts = canon.context.resolution.activeFacts;
       final promptFacts = reviewableFacts
           .where((fact) => reviewMessageIds.contains(fact.sourceMessageId))
           .toList();
@@ -170,7 +182,7 @@ class StudioLedgerService {
         reviewableFacts,
         plan.messages,
       );
-      _throwIfReconciliationAborted(token, isStillCurrent);
+      await _throwIfReconciliationAborted(token, isStillCurrent);
       final promptBlock = ledgerBlocks
           .where(
             (block) =>
@@ -199,7 +211,7 @@ class StudioLedgerService {
         trackers: promptTrackers,
         knowledgeFacts: offeredFacts,
       );
-      _throwIfReconciliationAborted(token, isStillCurrent);
+      await _throwIfReconciliationAborted(token, isStillCurrent);
       final outcome = await _llm.callOnceWithLog(
         config: config,
         prompt: prompt,
@@ -213,7 +225,10 @@ class StudioLedgerService {
         cancelToken: token,
         omitReasoning: true,
       );
-      if (token.isCancelled || isStillCurrent?.call() == false) {
+      if (token.isCancelled || await _isStillCurrent(isStillCurrent) == false) {
+        return LedgerRunResult.aborted;
+      }
+      if (!await _isCanonStillCurrent(sessionId, canon)) {
         return LedgerRunResult.aborted;
       }
       if (!outcome.isOk || outcome.text == null || outcome.text!.isEmpty) {
@@ -250,7 +265,7 @@ class StudioLedgerService {
           model: config.model,
         );
       }
-      if (token.isCancelled || isStillCurrent?.call() == false) {
+      if (token.isCancelled || await _isStillCurrent(isStillCurrent) == false) {
         return LedgerRunResult.aborted;
       }
       const cleanupParser = KnowledgeCleanupParser();
@@ -276,13 +291,91 @@ class StudioLedgerService {
         ...duplicateRetractions.map((op) => op.factId),
         ...staleAnchorRetractions.map((op) => op.factId),
       };
+      final anchors = plan.messages
+          .map(
+            (message) => ReconciliationAnchor(
+              messageId: message.id,
+              swipeId: message.swipeId,
+              agentSwipeId: message.agentSwipeId,
+              role: message.role,
+              contentHash: computeHash(message.content),
+            ),
+          )
+          .toList(growable: false);
+      final canonicalResult = <String, dynamic>{
+        'cleanupOps': cleanupOps.map(_cleanupOpJson).toList(growable: false),
+        'export': jsonDecode(jsonEncode(export.toJson())),
+      };
+      final intendedOps = <String>[
+        ...export.ops.map((op) => 'tracker:${op.op}:${op.key}'),
+        ...cleanupOps.map(_cleanupOpMetadata),
+      ];
 
       var opsApplied = 0;
+      var replayed = false;
       await _trackerRepo.db.transaction(() async {
-        await _trackerRepo.replaceLedgerState(sessionId, promptTrackers);
-        _throwIfReconciliationAborted(token, isStillCurrent);
+        await _throwIfLedgerCommitStale(
+          sessionId: sessionId,
+          canon: canon,
+          token: token,
+          isStillCurrent: isStillCurrent,
+          target: _LedgerTarget.fromMessage(plan.endMessage),
+          requireCommittedSnapshot: true,
+        );
+        final manifestRefs = await _reconciliationRunRepo
+            .readAcceptedManifestRefs(sessionId: sessionId, anchors: anchors);
+        final candidate = LedgerReconciliationRun(
+          id: '',
+          sessionId: sessionId,
+          ordinal: 1,
+          anchors: anchors,
+          acceptedManifestRefs: manifestRefs,
+          effectiveCanonStamp: canon.context.stamp.identity,
+          effectiveCanonRevision: canon.context.effectiveRevision.number,
+          effectiveCanonHash: canon.context.effectiveRevision.hash,
+          canonicalResult: canonicalResult,
+          predecessorChainHash: '',
+          contractVersion: 1,
+          opsApplied: intendedOps,
+          createdAt: 0,
+        );
+        // The ID covers immutable candidate content, so a canon change appends
+        // rather than colliding with an earlier identical plan/LLM output.
+        final draft = LedgerReconciliationRun(
+          id: 'reconciliation-${candidate.contentHash}',
+          sessionId: candidate.sessionId,
+          ordinal: candidate.ordinal,
+          anchors: candidate.anchors,
+          acceptedManifestRefs: candidate.acceptedManifestRefs,
+          effectiveCanonStamp: candidate.effectiveCanonStamp,
+          effectiveCanonRevision: candidate.effectiveCanonRevision,
+          effectiveCanonHash: candidate.effectiveCanonHash,
+          canonicalResult: candidate.canonicalResult,
+          predecessorChainHash: candidate.predecessorChainHash,
+          contractVersion: candidate.contractVersion,
+          opsApplied: candidate.opsApplied,
+          createdAt: candidate.createdAt,
+        );
+        final append = await _reconciliationRunRepo.appendCandidate(draft);
+        if (append is ReconciliationRunIdempotent) {
+          replayed = true;
+          return;
+        }
+        if (append is! ReconciliationRunAppended) {
+          throw StateError('Unable to append reconciliation run: $append');
+        }
+        await _trackerRepo.replaceLedgerState(
+          sessionId,
+          _stampedBaseTrackers(canon, promptTrackers),
+        );
         for (final op in export.ops) {
-          _throwIfReconciliationAborted(token, isStillCurrent);
+          await _throwIfLedgerCommitStale(
+            sessionId: sessionId,
+            canon: canon,
+            token: token,
+            isStillCurrent: isStillCurrent,
+            target: _LedgerTarget.fromMessage(plan.endMessage),
+          );
           await _opApplier.applyOp(
             op: op,
             sessionId: sessionId,
@@ -290,10 +383,18 @@ class StudioLedgerService {
             swipeId: plan.endMessage.swipeId,
             agentSwipeId: plan.endMessage.agentSwipeId,
             trackerRepo: _trackerRepo,
+            basisRevisionNumber: canon.context.effectiveRevision.number,
+            basisRevisionHash: canon.context.effectiveRevision.hash,
           );
           opsApplied++;
         }
-        _throwIfReconciliationAborted(token, isStillCurrent);
+        await _throwIfLedgerCommitStale(
+          sessionId: sessionId,
+          canon: canon,
+          token: token,
+          isStillCurrent: isStillCurrent,
+          target: _LedgerTarget.fromMessage(plan.endMessage),
+        );
         opsApplied += await _knowledgeFactRepo.applyReconciliationCleanup(
           sessionId: sessionId,
           ops: cleanupOps,
@@ -301,9 +402,23 @@ class StudioLedgerService {
           endpointMessageId: plan.endMessage.id,
           messageIds: plan.messageIds,
         );
-        _throwIfReconciliationAborted(token, isStillCurrent);
+        await _throwIfLedgerCommitStale(
+          sessionId: sessionId,
+          canon: canon,
+          token: token,
+          isStillCurrent: isStillCurrent,
+          target: _LedgerTarget.fromMessage(plan.endMessage),
+          checkCanon: false,
+        );
         final updated = await _trackerRepo.getBySessionId(sessionId);
-        _throwIfReconciliationAborted(token, isStillCurrent);
+        await _throwIfLedgerCommitStale(
+          sessionId: sessionId,
+          canon: canon,
+          token: token,
+          isStillCurrent: isStillCurrent,
+          target: _LedgerTarget.fromMessage(plan.endMessage),
+          checkCanon: false,
+        );
         await _snapshotRepo.upsertTrackers(
           sessionId: sessionId,
           messageId: plan.endMessage.id,
@@ -312,7 +427,7 @@ class StudioLedgerService {
           trackers: updated,
           committed: true,
         );
-        _throwIfReconciliationAborted(token, isStillCurrent);
+        await _throwIfReconciliationAborted(token, isStillCurrent);
         await _reconciliationCheckpointRepo.upsert(
           LedgerReconciliationCheckpoint(
             sessionId: sessionId,
@@ -324,17 +439,24 @@ class StudioLedgerService {
             rangeHash: plan.rangeHash,
           ),
         );
-        _throwIfReconciliationAborted(token, isStillCurrent);
+        await _throwIfLedgerCommitStale(
+          sessionId: sessionId,
+          canon: canon,
+          token: token,
+          isStillCurrent: isStillCurrent,
+          target: _LedgerTarget.fromMessage(plan.endMessage),
+          checkCanon: false,
+        );
       });
       return LedgerRunResult(
         status: 'ok',
         visibleLedger: parsed.visibleLedger,
-        opsApplied: opsApplied,
+        opsApplied: replayed ? 0 : opsApplied,
         elapsedMs: sw.elapsedMilliseconds,
         attempts: outcome.attempts,
         model: config.model,
       );
-    } on _LedgerReconciliationAborted {
+    } on _LedgerCommitStale {
       return LedgerRunResult.aborted;
     } catch (e) {
       if (token.isCancelled || (e is DioException && CancelToken.isCancel(e))) {
@@ -349,11 +471,11 @@ class StudioLedgerService {
     }
   }
 
-  void _throwIfReconciliationAborted(
+  Future<void> _throwIfReconciliationAborted(
     CancelToken token,
-    bool Function()? isStillCurrent,
-  ) {
-    if (token.isCancelled || isStillCurrent?.call() == false) {
+    FutureOr<bool> Function()? isStillCurrent,
+  ) async {
+    if (token.isCancelled || await _isStillCurrent(isStillCurrent) == false) {
       throw const _LedgerReconciliationAborted();
     }
   }
@@ -377,7 +499,7 @@ class StudioLedgerService {
     required int swipeId,
     required int agentSwipeId,
     bool forceEnabled = false,
-    bool Function()? isStillCurrent,
+    FutureOr<bool> Function()? isStillCurrent,
     CancelToken? cancelToken,
     List<StudioPresetBlock> ledgerBlocks = const [],
     MacroContext? macroCtx,
@@ -398,19 +520,22 @@ class StudioLedgerService {
 
     try {
       // ── 1. LLM config is resolved by the caller via StudioSlotResolver ──
-      if (token.isCancelled || isStillCurrent?.call() == false) {
+      if (token.isCancelled || await _isStillCurrent(isStillCurrent) == false) {
         return LedgerRunResult.aborted;
       }
 
       // ── 2. Load prompt base (committed canon + live manual overrides) ────
-      final promptTrackers = await _ledgerTrackerLoader
-          .loadEffectiveLedgerTrackers(sessionId);
+      final canon = await _loadCanonContext(sessionId);
+      final promptTrackers = _promptTrackers(canon.context);
       final book = await _bookRepo.getBySessionId(sessionId);
       final recentEntries =
           book?.entries.where((e) => e.status == 'active').take(20).toList() ??
           const <MemoryEntry>[];
 
-      if (token.isCancelled || isStillCurrent?.call() == false) {
+      if (token.isCancelled || await _isStillCurrent(isStillCurrent) == false) {
+        return LedgerRunResult.aborted;
+      }
+      if (!await _isCanonStillCurrent(sessionId, canon)) {
         return LedgerRunResult.aborted;
       }
 
@@ -457,7 +582,7 @@ class StudioLedgerService {
         omitReasoning: true,
       );
 
-      if (token.isCancelled || isStillCurrent?.call() == false) {
+      if (token.isCancelled || await _isStillCurrent(isStillCurrent) == false) {
         return LedgerRunResult.aborted;
       }
 
@@ -509,22 +634,71 @@ class StudioLedgerService {
         );
       }
 
-      if (token.isCancelled || isStillCurrent?.call() == false) {
+      if (token.isCancelled || await _isStillCurrent(isStillCurrent) == false) {
         return LedgerRunResult.aborted;
       }
 
       // ── 6. Apply ops to tracker namespace ───────────────────────────────
       final export = parseResult.export ?? const StudioLedgerExport();
       var opsApplied = 0;
-
-      // A rejected regeneration may have left different tentative values in
-      // tracker_rows. Always rebuild model-owned state from committed canon
-      // before applying this anchor's patch.
-      await _trackerRepo.replaceLedgerState(sessionId, promptTrackers);
-
-      for (final op in export.ops) {
-        if (token.isCancelled || isStillCurrent?.call() == false) break;
-        try {
+      final target = _LedgerTarget(
+        messageId: messageId,
+        swipeId: swipeId,
+        agentSwipeId: agentSwipeId,
+        content: finalAssistantText,
+      );
+      final facts = export.knowledgeFacts
+          .map(
+            (fact) => CharacterKnowledgeFact(
+              id: generateId(),
+              chatSessionId: sessionId,
+              knowerKey: fact.knowerKey,
+              knowerName: fact.knowerName,
+              subjectKey: fact.subjectKey,
+              subjectName: fact.subjectName,
+              factClass: CharacterKnowledgeFactClass.fromWireName(
+                fact.factClass,
+              ),
+              scopeKey: fact.scopeKey,
+              predicate: fact.predicate,
+              object: fact.object,
+              epistemicState: CharacterKnowledgeEpistemicState.fromWireName(
+                fact.epistemicState,
+              ),
+              confidence: fact.confidence,
+              importance: fact.importance,
+              entities: fact.entities,
+              topics: fact.topics,
+              sourceMessageId: messageId,
+              sourceSwipeId: swipeId,
+              sourceAgentSwipeId: agentSwipeId,
+              supersedesId: fact.supersedesId,
+              basisRevisionNumber: canon.context.effectiveRevision.number,
+              basisRevisionHash: canon.context.effectiveRevision.hash,
+            ),
+          )
+          .toList(growable: false);
+      await _trackerRepo.db.transaction(() async {
+        await _throwIfLedgerCommitStale(
+          sessionId: sessionId,
+          canon: canon,
+          token: token,
+          isStillCurrent: isStillCurrent,
+          target: target,
+        );
+        // Rebuild model-owned state from committed canon before this patch.
+        await _trackerRepo.replaceLedgerState(
+          sessionId,
+          _stampedBaseTrackers(canon, promptTrackers),
+        );
+        for (final op in export.ops) {
+          await _throwIfLedgerCommitStale(
+            sessionId: sessionId,
+            canon: canon,
+            token: token,
+            isStillCurrent: isStillCurrent,
+            target: target,
+          );
           await _opApplier.applyOp(
             op: op,
             sessionId: sessionId,
@@ -532,83 +706,55 @@ class StudioLedgerService {
             swipeId: swipeId,
             agentSwipeId: agentSwipeId,
             trackerRepo: _trackerRepo,
+            basisRevisionNumber: canon.context.effectiveRevision.number,
+            basisRevisionHash: canon.context.effectiveRevision.hash,
           );
           opsApplied++;
-        } catch (e) {
-          debugPrint('[StudioLedger] op failed key=${op.key} error=$e');
         }
-      }
+        await _throwIfLedgerCommitStale(
+          sessionId: sessionId,
+          canon: canon,
+          token: token,
+          isStillCurrent: isStillCurrent,
+          target: target,
+        );
+        await _knowledgeFactRepo.replaceTentativeAnchor(
+          sessionId: sessionId,
+          messageId: messageId,
+          swipeId: swipeId,
+          agentSwipeId: agentSwipeId,
+          facts: facts,
+        );
+        await _throwIfLedgerCommitStale(
+          sessionId: sessionId,
+          canon: canon,
+          token: token,
+          isStillCurrent: isStillCurrent,
+          target: target,
+          checkCanon: false,
+        );
+        final updatedTrackers = await _trackerRepo.getBySessionId(sessionId);
+        await _snapshotRepo.upsertTrackers(
+          sessionId: sessionId,
+          messageId: messageId,
+          swipeId: swipeId,
+          agentSwipeId: agentSwipeId,
+          trackers: updatedTrackers,
+          committed: commitSnapshot,
+        );
+        await _throwIfLedgerCommitStale(
+          sessionId: sessionId,
+          canon: canon,
+          token: token,
+          isStillCurrent: isStillCurrent,
+          target: target,
+          checkCanon: false,
+        );
+      });
 
       debugPrint(
-        '[StudioLedger] applied $opsApplied/${export.ops.length} ops '
-        'session=$sessionId',
+        '[StudioLedger] applied $opsApplied/${export.ops.length} ops session=$sessionId',
       );
-
-      // Atomic facts use the same tentative assistant-swipe anchor as the
-      // tracker snapshot. They become visible only when the next user turn
-      // commits that anchor.
-      if (token.isCancelled == false && isStillCurrent?.call() != false) {
-        try {
-          final facts = export.knowledgeFacts
-              .map(
-                (fact) => CharacterKnowledgeFact(
-                  id: generateId(),
-                  chatSessionId: sessionId,
-                  knowerKey: fact.knowerKey,
-                  knowerName: fact.knowerName,
-                  subjectKey: fact.subjectKey,
-                  subjectName: fact.subjectName,
-                  factClass: CharacterKnowledgeFactClass.fromWireName(
-                    fact.factClass,
-                  ),
-                  scopeKey: fact.scopeKey,
-                  predicate: fact.predicate,
-                  object: fact.object,
-                  epistemicState: CharacterKnowledgeEpistemicState.fromWireName(
-                    fact.epistemicState,
-                  ),
-                  confidence: fact.confidence,
-                  importance: fact.importance,
-                  entities: fact.entities,
-                  topics: fact.topics,
-                  sourceMessageId: messageId,
-                  sourceSwipeId: swipeId,
-                  sourceAgentSwipeId: agentSwipeId,
-                  supersedesId: fact.supersedesId,
-                ),
-              )
-              .toList(growable: false);
-          await _knowledgeFactRepo.replaceTentativeAnchor(
-            sessionId: sessionId,
-            messageId: messageId,
-            swipeId: swipeId,
-            agentSwipeId: agentSwipeId,
-            facts: facts,
-          );
-        } catch (e) {
-          debugPrint('[StudioLedger] knowledge fact write failed: $e');
-        }
-      }
-
-      // ── 7. Snapshot post-ledger tracker state for rollback/swipe safety ──
-      // The mutable tracker_rows table is only the live working store. Prompt
-      // reads use committed tracker_snapshots, so every ledger write must also
-      // capture an immutable snapshot at the assistant output anchor.
-      if (token.isCancelled == false && isStillCurrent?.call() != false) {
-        try {
-          final updatedTrackers = await _trackerRepo.getBySessionId(sessionId);
-          await _snapshotRepo.upsertTrackers(
-            sessionId: sessionId,
-            messageId: messageId,
-            swipeId: swipeId,
-            agentSwipeId: agentSwipeId,
-            trackers: updatedTrackers,
-            committed: commitSnapshot,
-          );
-        } catch (e) {
-          debugPrint('[StudioLedger] snapshot write failed: $e');
-        }
-      }
 
       sw.stop();
       debugPrint(
@@ -625,6 +771,8 @@ class StudioLedgerService {
         attempts: outcome.attempts,
         model: config.model,
       );
+    } on _LedgerCommitStale {
+      return LedgerRunResult.aborted;
     } on TimeoutException {
       sw.stop();
       debugPrint('[StudioLedger] timeout session=$sessionId');
@@ -763,8 +911,150 @@ Allowed eventState: planned, suggested, threatened, attempted, completed, failed
     }
     return false;
   }
+
+  Future<_LedgerCanonContext> _loadCanonContext(String sessionId) async {
+    final session = await _chatRepo.getById(sessionId);
+    if (session == null) {
+      throw StateError('Ledger session not found: $sessionId');
+    }
+    final source = await _characterRepo.getById(session.characterId);
+    if (source == null) {
+      throw StateError(
+        'Ledger source character not found: ${session.characterId}',
+      );
+    }
+    final context = await _canonContextLoader.load(
+      sessionId: sessionId,
+      sourceCharacter: source,
+    );
+    return _LedgerCanonContext(source, context);
+  }
+
+  Future<bool> _isCanonStillCurrent(
+    String sessionId,
+    _LedgerCanonContext canon,
+  ) async {
+    final currentSource = await _characterRepo.getById(canon.source.id);
+    if (currentSource == null) return false;
+    return _canonContextLoader.isStillCurrentReadOnly(
+      sessionId: sessionId,
+      sourceCharacter: currentSource,
+      stamp: canon.context.stamp,
+    );
+  }
+
+  Future<bool> _isStillCurrent(FutureOr<bool> Function()? guard) async =>
+      await guard?.call() ?? true;
+
+  /// Transactional commit fence. It deliberately uses the loader's read-only
+  /// comparison so a stale check can never append a character revision.
+  Future<void> _throwIfLedgerCommitStale({
+    required String sessionId,
+    required _LedgerCanonContext canon,
+    required CancelToken token,
+    required FutureOr<bool> Function()? isStillCurrent,
+    required _LedgerTarget target,
+    bool requireCommittedSnapshot = false,
+    bool checkCanon = true,
+  }) async {
+    if (token.isCancelled || await _isStillCurrent(isStillCurrent) == false) {
+      throw const _LedgerCommitStale();
+    }
+    if (checkCanon && !await _isCanonStillCurrent(sessionId, canon)) {
+      throw const _LedgerCommitStale();
+    }
+    final session = await _chatRepo.getById(sessionId);
+    final message = session?.messages
+        .where((item) => item.id == target.messageId)
+        .firstOrNull;
+    if (message == null ||
+        message.swipeId != target.swipeId ||
+        message.agentSwipeId != target.agentSwipeId ||
+        message.content != target.content) {
+      throw const _LedgerCommitStale();
+    }
+    if (requireCommittedSnapshot) {
+      final snapshot = await _snapshotRepo.getByAnchor(
+        sessionId: sessionId,
+        messageId: target.messageId,
+        swipeId: target.swipeId,
+        agentSwipeId: target.agentSwipeId,
+      );
+      if (snapshot == null || !snapshot.committed) {
+        throw const _LedgerCommitStale();
+      }
+    }
+  }
+
+  List<Tracker> _stampedBaseTrackers(
+    _LedgerCanonContext canon,
+    List<Tracker> trackers,
+  ) => trackers
+      .map(
+        (tracker) => Tracker(
+          sessionId: tracker.sessionId,
+          name: tracker.name,
+          value: tracker.value,
+          scope: tracker.scope,
+          provenance: tracker.provenance,
+          basisRevisionNumber: canon.context.effectiveRevision.number,
+          basisRevisionHash: canon.context.effectiveRevision.hash,
+          updatedAt: tracker.updatedAt,
+        ),
+      )
+      .toList(growable: false);
+
+  List<Tracker> _promptTrackers(EffectiveCanonContext context) => [
+    ...context.resolution.activeTrackers,
+    ...context.manualControls,
+  ];
+
+  Map<String, dynamic> _cleanupOpJson(KnowledgeCleanupOp op) => {
+    'type': op.type.name,
+    if (op.factId.isNotEmpty) 'factId': op.factId,
+    if (op.fromKey.isNotEmpty) 'fromKey': op.fromKey,
+    if (op.toKey.isNotEmpty) 'toKey': op.toKey,
+    if (op.canonicalName.isNotEmpty) 'canonicalName': op.canonicalName,
+  };
+
+  String _cleanupOpMetadata(KnowledgeCleanupOp op) => switch (op.type) {
+    KnowledgeCleanupOpType.retract => 'cleanup:retract:${op.factId}',
+    KnowledgeCleanupOpType.renameEntity =>
+      'cleanup:rename:${op.fromKey}:${op.toKey}:${op.canonicalName}',
+  };
+}
+
+class _LedgerCanonContext {
+  const _LedgerCanonContext(this.source, this.context);
+  final Character source;
+  final EffectiveCanonContext context;
 }
 
 class _LedgerReconciliationAborted implements Exception {
   const _LedgerReconciliationAborted();
+}
+
+class _LedgerCommitStale implements Exception {
+  const _LedgerCommitStale();
+}
+
+class _LedgerTarget {
+  const _LedgerTarget({
+    required this.messageId,
+    required this.swipeId,
+    required this.agentSwipeId,
+    required this.content,
+  });
+
+  factory _LedgerTarget.fromMessage(ChatMessage message) => _LedgerTarget(
+    messageId: message.id,
+    swipeId: message.swipeId,
+    agentSwipeId: message.agentSwipeId,
+    content: message.content,
+  );
+
+  final String messageId;
+  final int swipeId;
+  final int agentSwipeId;
+  final String content;
 }

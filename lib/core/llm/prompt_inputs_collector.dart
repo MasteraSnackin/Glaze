@@ -10,6 +10,8 @@ import '../state/memory_settings_provider.dart';
 import '../state/summary_providers.dart';
 import 'prompt_builder.dart';
 import 'prompt_inputs.dart';
+import 'prompt/effective_canon_prompt_formatter.dart';
+import 'prompt/prompt_build_stale_exception.dart';
 
 typedef ApiConfigInitializer = Future<void> Function();
 typedef ActiveApiConfigReader = ApiConfig? Function();
@@ -62,8 +64,15 @@ class PromptInputsCollector {
     final personaRepo = _ref.read(personaRepoProvider);
     final lorebookRepo = _ref.read(lorebookRepoProvider);
 
-    final character = await charRepo.getById(charId);
-    if (character == null) throw StateError('Character not found: $charId');
+    final sourceCharacter = await charRepo.getById(charId);
+    if (sourceCharacter == null) throw StateError('Character not found: $charId');
+    final effectiveContext = session == null
+        ? null
+        : await _ref.read(effectiveCanonContextLoaderProvider).load(
+            sessionId: session.id,
+            sourceCharacter: sourceCharacter,
+          );
+    final character = effectiveContext?.character ?? sourceCharacter;
 
     await _initializeApiConfigs();
     final chatApi = _readActiveApiConfig();
@@ -95,7 +104,15 @@ class PromptInputsCollector {
       connections,
     );
 
-    final lorebooks = await lorebookRepo.getAll();
+    final sourceLorebooks = await lorebookRepo.getAll();
+    final lorebooks = session == null
+        ? sourceLorebooks
+        : await _ref
+              .read(sessionLorebookEvolutionRepoProvider)
+              .applyOverlays(
+                sessionId: session.id,
+                lorebooks: sourceLorebooks,
+              );
     final lorebookSettings = _ref.read(lorebookSettingsProvider);
     final lorebookActivations = _ref.read(lorebookActivationsProvider);
 
@@ -119,6 +136,19 @@ class PromptInputsCollector {
       runtimePromptBlocks = _readRuntimePromptBlocks(session.id);
     }
 
+    if (effectiveContext != null) {
+      final current = await charRepo.getById(charId);
+      if (current == null || !await _ref.read(effectiveCanonContextLoaderProvider)
+          .isStillCurrentReadOnly(
+            sessionId: session!.id,
+            sourceCharacter: current,
+            stamp: effectiveContext.stamp,
+          )) {
+        throw const PromptBuildStaleException(
+          'Effective canon changed while collecting prompt inputs.',
+        );
+      }
+    }
     return PromptInputs(
       character: character,
       persona: persona,
@@ -179,6 +209,9 @@ class PromptInputsCollector {
       memoryQueryMaxChars: memoryBook?.settings.queryMaxChars ?? 1500,
       memoryContextBudgetTokens: chatApi.contextSize,
       runtimePromptBlocks: runtimePromptBlocks,
+      effectiveCanonProjection: effectiveContext == null
+          ? null
+          : EffectiveCanonPromptProjection.fromContext(effectiveContext),
     );
   }
 }

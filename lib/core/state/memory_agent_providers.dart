@@ -116,7 +116,10 @@ final studioLedgerServiceProvider = Provider<StudioLedgerService>((ref) {
     reconciliationCheckpointRepo: ref.read(
       ledgerReconciliationCheckpointRepoProvider,
     ),
-    ledgerTrackerLoader: ref.read(ledgerTrackerLoaderProvider),
+    reconciliationRunRepo: ref.read(ledgerReconciliationRunRepoProvider),
+    characterRepo: ref.read(characterRepoProvider),
+    chatRepo: ref.read(chatRepoProvider),
+    canonContextLoader: ref.read(effectiveCanonContextLoaderProvider),
   );
 });
 

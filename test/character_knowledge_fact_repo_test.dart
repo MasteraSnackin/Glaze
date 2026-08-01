@@ -57,6 +57,23 @@ void main() {
     expect((await repo.getActiveForSession('session-1')).single.id, 'fact-1');
   });
 
+  test('round-trips basis revision metadata', () async {
+    await repo.insertTentative(
+      fact().copyWith(basisRevisionNumber: 12, basisRevisionHash: 'card-hash'),
+    );
+
+    final stored = await repo.getById('fact-1');
+    expect(stored!.basisRevisionNumber, 12);
+    expect(stored.basisRevisionHash, 'card-hash');
+  });
+
+  test('legacy facts default basis revision metadata', () {
+    final legacy = fact();
+
+    expect(legacy.basisRevisionNumber, 0);
+    expect(legacy.basisRevisionHash, isEmpty);
+  });
+
   test('activating an anchor retracts rejected sibling swipe facts', () async {
     await repo.insertTentative(fact(id: 'rejected', swipeId: 0));
     await repo.insertTentative(fact(id: 'accepted', swipeId: 1));
