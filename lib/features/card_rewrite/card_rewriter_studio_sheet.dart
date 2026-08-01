@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/db/app_db.dart' show RewriteJobRow;
+import '../../core/db/repositories/card_evolution_repo.dart'
+    show CardEvolutionFinalizeOutcome;
 import '../../core/llm/model_fetcher.dart';
 import '../../core/models/api_config.dart';
 import '../../core/models/card_rewriter_settings.dart';
@@ -112,21 +114,44 @@ class _CardRewriterStudioSheetState
         .runOneBatch(widget.sessionId);
     if (!mounted) return;
     setState(() => _running = false);
-    if (outcome?.isPersisted == true && outcome?.job != null) {
+    if (outcome.isPersisted && outcome.job != null) {
       Navigator.of(
         context,
         rootNavigator: true,
-      ).pop('/character/${widget.charId}/rewrite/${outcome!.job!.id}');
+      ).pop('/character/${widget.charId}/rewrite/${outcome.job!.id}');
       return;
     }
     GlazeToast.show(
       context,
-      outcome == null
-            ? 'At least one user and one assistant message are required.'
-          : 'Card Rewriter skipped: ${outcome.kind}',
+      _runMessage(outcome),
       position: ToastPosition.top,
     );
   }
+
+  String _runMessage(CardEvolutionFinalizeOutcome outcome) => switch (outcome.kind) {
+    'notEligible' => 'At least one user and one assistant message are required.',
+    'busy' => 'Card Rewriter is already running for this session.',
+    'activeJob' => 'Review or close the current Card Rewriter proposal first.',
+    'modelNotConfigured' => 'Choose a valid dedicated API preset and model.',
+    'cardModelFailed' =>
+      'Card model failed: ${outcome.detail ?? 'unknown transport error'}',
+    'lorebookModelFailed' =>
+      'Lorebook model failed: ${outcome.detail ?? 'unknown transport error'}',
+    'invalidCardOutput' =>
+      'Invalid card patch: ${outcome.detail ?? 'unknown response format'}',
+    'invalidOperation' =>
+      'Card patch no longer matches the current card: ${outcome.detail ?? 'validation failed'}',
+    'invalidLorebookOperation' =>
+      'Lorebook patch no longer matches the injected entry.',
+    'invalidLorebookOutput' => 'The lorebook model returned an invalid patch response.',
+    'emptyModelProposal' =>
+      'The model returned no patches despite the supplied evidence. Check the saved debug response.',
+    'snapshotUnavailable' || 'stale' || 'staleEvidence' =>
+      'The chat or Ledger changed while the snapshot was being prepared. Try again.',
+    'disabled' => 'Enable Card Rewriter first.',
+    'cancelled' => 'Card Rewriter was cancelled.',
+    _ => 'Card Rewriter skipped: ${outcome.kind}',
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -161,7 +186,39 @@ class _CardRewriterStudioSheetState
             onChanged: (enabled) =>
                 _save((value) => value.copyWith(enabled: enabled)),
           ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Rewrite injected lorebook entries'),
+            subtitle: const Text(
+              'Uses a separate model call only for lorebook entries injected into this session. Turn this off when you do not use lorebooks.',
+            ),
+            value: settings.lorebookEvolutionEnabled,
+            onChanged: settings.enabled
+                ? (enabled) => _save(
+                    (value) => value.copyWith(lorebookEvolutionEnabled: enabled),
+                  )
+                : null,
+          ),
           const SizedBox(height: 8),
+          TextFormField(
+            key: ValueKey('timeout-${settings.timeoutMs}'),
+            initialValue: '${settings.timeoutMs ~/ 1000}',
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+              border: OutlineInputBorder(),
+              labelText: 'Writer timeout (seconds)',
+              helperText: 'Idle timeout for each card or lorebook model call. Default: 180 seconds.',
+              isDense: true,
+            ),
+            onChanged: (raw) {
+              final seconds = int.tryParse(raw);
+              if (seconds == null || seconds <= 0) return;
+              final timeoutMs = seconds * 1000;
+              if (timeoutMs == settings.timeoutMs) return;
+              unawaited(_save((value) => value.copyWith(timeoutMs: timeoutMs)));
+            },
+          ),
+          const SizedBox(height: 16),
           Text('Model', style: Theme.of(context).textTheme.titleSmall),
           const SizedBox(height: 4),
           Text(

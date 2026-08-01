@@ -145,47 +145,71 @@ abstract final class CardRewriteOperationParser {
   /// Parses the one-call automated evolution response. The outer batch may
   /// omit unchanged fields, but each supplied operation is screened by the
   /// same single-field contract used by manual rewrites.
-  static List<CardRewriteOperationSnapshot>? parseEvolutionBatch(String output) {
+  static List<CardRewriteOperationSnapshot>? parseEvolutionBatch(
+    String output, {
+    Set<CardRewriteField> allowedFields = CardRewritePolicy.evolutionFields,
+  }) {
+    return _parseEvolutionBatch(output, allowedFields: allowedFields).operations;
+  }
+
+  /// Describes why a one-call card evolution response could not be screened.
+  /// The text is deliberately bounded for UI diagnostics and is never persisted.
+  static String? explainEvolutionBatchFailure(
+    String output, {
+    Set<CardRewriteField> allowedFields = CardRewritePolicy.evolutionFields,
+  }) => _parseEvolutionBatch(output, allowedFields: allowedFields).detail;
+
+  static _EvolutionBatchParse _parseEvolutionBatch(
+    String output, {
+    required Set<CardRewriteField> allowedFields,
+  }) {
     final raw = extractJsonObject(output);
-    if (raw == null) return null;
+    if (raw == null) {
+      return const _EvolutionBatchParse.failure('no JSON object was found');
+    }
     Object? decoded;
     try {
       decoded = jsonDecode(repairJson(raw));
     } catch (_) {
-      return null;
+      return const _EvolutionBatchParse.failure('JSON could not be decoded');
     }
     if (decoded is! Map ||
         decoded.length != 1 ||
         !decoded.containsKey('operations') ||
         decoded['operations'] is! List) {
-      return null;
+      return const _EvolutionBatchParse.failure(
+        'expected exactly {"operations": [...]}',
+      );
     }
     final operations = decoded['operations'] as List;
     final result = <CardRewriteOperationSnapshot>[];
     final fields = <CardRewriteField>{};
     for (final rawOperation in operations) {
       if (rawOperation is! Map || rawOperation['field'] is! String) {
-        return null;
+        return const _EvolutionBatchParse.failure(
+          'each operation requires a string field',
+        );
       }
       final field = _fieldFromWireName(rawOperation['field'] as String);
-      if (field == null ||
-          !const {
-            CardRewriteField.description,
-            CardRewriteField.personality,
-            CardRewriteField.scenario,
-          }.contains(field) ||
-          !fields.add(field)) {
-        return null;
+      if (field == null || !allowedFields.contains(field) || !fields.add(field)) {
+        return const _EvolutionBatchParse.failure(
+          'field is unsupported or repeated',
+        );
       }
       final parsed = parse(
         jsonEncode(rawOperation),
         expectedField: field,
-        allowEmptyAnchor: true,
+          allowEmptyAnchor: false,
       );
-      if (parsed.snapshot == null) return null;
+      if (parsed.snapshot == null) {
+        final reason = parsed.rejection?.name ?? 'unknown rejection';
+        return _EvolutionBatchParse.failure(
+          '${field.wireName}: $reason${parsed.detail == null ? '' : ' (${parsed.detail})'}',
+        );
+      }
       result.add(parsed.snapshot!);
     }
-    return List.unmodifiable(result);
+    return _EvolutionBatchParse.success(List.unmodifiable(result));
   }
 
   /// Parses the separate writer lane for session-local lorebook patches.
@@ -319,7 +343,8 @@ abstract final class CardRewriteOperationParser {
           'patch members scopeKey, anchor, anchorSha256, value must be strings',
         );
       }
-      if (CardRewriteScope.tryParse(scopeKey) == null) {
+      final canonicalScopeKey = _canonicalScopeKey(scopeKey);
+      if (canonicalScopeKey == null) {
         return CardRewriteOperationParseResult.failure(
           CardRewriteOperationParseRejection.invalidScope,
           'unparsable patch scopeKey "$scopeKey"',
@@ -350,7 +375,7 @@ abstract final class CardRewriteOperationParser {
       }
       patches.add(
         AnchoredScalarPatch(
-          scopeKey: scopeKey,
+          scopeKey: canonicalScopeKey,
           field: field,
           anchor: anchor,
           anchorSha256: anchorSha256,
@@ -429,7 +454,8 @@ abstract final class CardRewriteOperationParser {
         ),
       );
     }
-    if (CardRewriteScope.tryParse(scopeKey) == null) {
+    final canonicalScopeKey = _canonicalScopeKey(scopeKey);
+    if (canonicalScopeKey == null) {
       return (
         value: null,
         failure: fail(
@@ -499,7 +525,7 @@ abstract final class CardRewriteOperationParser {
     return (
       value: CardRewriteTransitionSnapshot(
         id: id,
-        scopeKey: scopeKey,
+        scopeKey: canonicalScopeKey,
         canonicalClaim: canonicalClaim,
         promotionDestination: promotionDestination,
         affectedTrackerKeys: List<String>.unmodifiable(affectedTrackerKeys),
@@ -538,4 +564,20 @@ abstract final class CardRewriteOperationParser {
     }
     return null;
   }
+
+  /// Model-facing subjects are often title-cased display names. Persist scope
+  /// identities canonically so `relationship:Danvi` and
+  /// `relationship:danvi` address the same permitted tracker family.
+  static String? _canonicalScopeKey(String value) {
+    final canonical = value.toLowerCase();
+    return CardRewriteScope.tryParse(canonical)?.key;
+  }
+}
+
+final class _EvolutionBatchParse {
+  const _EvolutionBatchParse.success(this.operations) : detail = null;
+  const _EvolutionBatchParse.failure(this.detail) : operations = null;
+
+  final List<CardRewriteOperationSnapshot>? operations;
+  final String? detail;
 }

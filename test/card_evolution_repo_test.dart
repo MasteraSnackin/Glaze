@@ -95,7 +95,7 @@ void main() {
     )).claim!;
     await db.customStatement(
       'UPDATE chat_sessions SET messages_json = ? WHERE session_id = ?',
-      [jsonEncode([..._messages, _nextAssistant]), 'session'],
+      [jsonEncode([..._messages, _nextAssistant, _nextUser]), 'session'],
     );
 
     expect(
@@ -106,6 +106,56 @@ void main() {
       ),
       isNull,
     );
+  });
+
+  test('expired claim is replaced using a fresh chat snapshot', () async {
+    final first = (await evolution.claim(
+      sessionId: 'session',
+      ownerId: 'closed-app-owner',
+      now: 10,
+      leaseSeconds: 30,
+    )).claim!;
+    await db.customStatement(
+      'UPDATE chat_sessions SET messages_json = ? WHERE session_id = ?',
+      [jsonEncode([..._messages, _nextAssistant, _nextUser]), 'session'],
+    );
+
+    final recovered = await evolution.claim(
+      sessionId: 'session',
+      ownerId: 'new-app-owner',
+      now: 41,
+      leaseSeconds: 30,
+    );
+
+    expect(recovered.kind, 'claimed');
+    expect(recovered.claim!.row.id, isNot(first.row.id));
+    expect(recovered.claim!.row.ownerId, 'new-app-owner');
+    expect(recovered.claim!.selectedInputJson, contains('new assistant development'));
+    expect(
+      await (db.select(db.cardEvolutionClaims)
+            ..where((row) => row.id.equals(first.row.id)))
+          .getSingleOrNull(),
+      isNull,
+    );
+  });
+
+  test('excludes a trailing mutable user-assistant turn from evidence', () async {
+    await db.customStatement(
+      'UPDATE chat_sessions SET messages_json = ? WHERE session_id = ?',
+      [jsonEncode([..._messages, _nextAssistant]), 'session'],
+    );
+
+    final claim = await evolution.claim(
+      sessionId: 'session',
+      ownerId: 'owner',
+      now: 10,
+      leaseSeconds: 30,
+    );
+
+    expect(claim.kind, 'claimed');
+    expect(claim.claim!.selectedInputJson, isNot(contains('new assistant development')));
+    expect(claim.claim!.selectedInputJson, isNot(contains('user response')));
+    expect(claim.claim!.selectedInputJson, contains('assistant development'));
   });
 
   test('finalize atomically writes a three-field review proposal', () async {
@@ -131,6 +181,32 @@ void main() {
     expect(await db.select(db.rewriteEvidenceRows).get(), hasLength(1));
     expect(await db.select(db.cardEvolutionProposalRuns).get(), hasLength(1));
     expect(await db.select(db.ledgerReconciliationCursors).get(), isEmpty);
+  });
+
+  test('finalize reports the exact rejected card patch validation', () async {
+    final claim = (await evolution.claim(
+      sessionId: 'session',
+      ownerId: 'owner',
+      now: 10,
+      leaseSeconds: 30,
+    )).claim!;
+    final invalid = _operation(
+      CardRewriteField.description,
+      'text from chat history',
+      'replacement',
+    );
+
+    final result = await evolution.finalize(
+      claimId: claim.row.id,
+      ownerId: 'owner',
+      now: 11,
+      modelOutput: 'raw',
+      operations: [invalid],
+    );
+
+    expect(result.kind, 'invalidOperation');
+    expect(result.detail, 'description: staleAnchor');
+    expect(await db.select(db.rewriteJobs).get(), isEmpty);
   });
 
   test('finalization rollback keeps no partial proposal', () async {
@@ -173,6 +249,12 @@ const _nextAssistant = {
   'id': 'a2',
   'role': 'assistant',
   'content': 'new assistant development',
+};
+
+const _nextUser = {
+  'id': 'u3',
+  'role': 'user',
+  'content': 'next user response',
 };
 
 List<CardRewriteOperationSnapshot> _operations() => [

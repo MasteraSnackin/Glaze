@@ -46,6 +46,7 @@ part 'app_db.g.dart';
     LedgerReconciliationCursors,
     CardEvolutionClaims,
     CardEvolutionProposalRuns,
+    CardEvolutionDebugRuns,
     CharacterKnowledgeFactRows,
     CharacterSessionBaselineRows,
     CharacterRevisionRows,
@@ -65,7 +66,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 93;
+  int get schemaVersion => 95;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -1865,6 +1866,14 @@ class AppDatabase extends _$AppDatabase {
       }
       if (from < 93) {
         await m.createTable(sessionLorebookEvolutionRows);
+      }
+      if (from < 94) {
+        await m.createTable(cardEvolutionDebugRuns);
+      }
+      if (from < 95) {
+        // v94 retained only one writer stage per session. Rebuild the table
+        // with the stage in its key so card and lorebook diagnostics coexist.
+        await m.alterTable(TableMigration(cardEvolutionDebugRuns));
       }
     },
   );

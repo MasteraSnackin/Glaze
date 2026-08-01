@@ -44,7 +44,7 @@ void main() {
           return _ok(fixture.cardBatchOutput);
         })
         .runOneBatch('session');
-    expect(result, isNull);
+    expect(result.kind, 'notEligible');
     expect(calls, 0);
     await fixture.expectNoProposalOrCanonWrites();
   });
@@ -69,7 +69,7 @@ void main() {
           },
     );
 
-    expect(await service.runOneBatch('session'), isNull);
+    expect((await service.runOneBatch('session')).kind, 'disabled');
     expect(calls, 0);
     expect(
       await fixture.db.select(fixture.db.cardEvolutionClaims).get(),
@@ -87,7 +87,7 @@ void main() {
           return _ok(fixture.cardBatchOutput);
         })
         .runOneBatch('session');
-    expect(result?.kind, 'persisted');
+    expect(result.kind, 'persisted');
     expect(calls, 1);
     expect(
       (await fixture.db.select(fixture.db.rewriteJobs).getSingle()).status,
@@ -115,19 +115,46 @@ void main() {
     final result = await fixture
         .service(
           (_, _) async =>
-              const AuxCallOutcome(status: AgentOperationStatus.error),
+              const AuxCallOutcome(
+                status: AgentOperationStatus.httpError,
+                attempts: [
+                  AgentOperationAttempt(
+                    attempt: 1,
+                    statusCode: 503,
+                    status: 'http_5xx',
+                    error: 'upstream unavailable',
+                    startedAtMs: 1,
+                    elapsedMs: 2,
+                  ),
+                ],
+              ),
         )
         .runOneBatch('session');
-    expect(result, isNull);
+    expect(result.kind, 'cardModelFailed');
+    expect(result.detail, '1 attempt(s), http_5xx HTTP 503: upstream unavailable');
+    final debug = await fixture.db
+        .select(fixture.db.cardEvolutionDebugRuns)
+        .getSingle();
+    expect(debug.stage, 'card');
+    expect(debug.status, 'httpError');
+    expect(debug.output, isNull);
+    expect(debug.attemptsJson, contains('upstream unavailable'));
     await fixture.expectNoProposalOrCanonWrites();
+    expect(await fixture.db.select(fixture.db.cardEvolutionClaims).get(), isEmpty);
   });
 
   test('malformed parser output leaves no proposal or cursor', () async {
     final result = await fixture
         .service((_, _) async => _ok('not json'))
         .runOneBatch('session');
-    expect(result, isNull);
+    expect(result.kind, 'invalidCardOutput');
+    expect(
+      (await fixture.db.select(fixture.db.cardEvolutionDebugRuns).getSingle())
+          .output,
+      'not json',
+    );
     await fixture.expectNoProposalOrCanonWrites();
+    expect(await fixture.db.select(fixture.db.cardEvolutionClaims).get(), isEmpty);
   });
 
   test(
@@ -146,8 +173,9 @@ void main() {
       release.complete(
         const AuxCallOutcome(status: AgentOperationStatus.aborted),
       );
-      expect(await future, isNull);
+      expect((await future).kind, 'cancelled');
       await fixture.expectNoProposalOrCanonWrites();
+      expect(await fixture.db.select(fixture.db.cardEvolutionClaims).get(), isEmpty);
     },
   );
 
@@ -166,7 +194,7 @@ void main() {
             return _ok(fixture.cardBatchOutput);
           })
           .runOneBatch('session');
-      expect(result?.kind, 'staleEvidence');
+      expect(result.kind, 'staleEvidence');
       await fixture.expectNoProposalOrCanonWrites();
     },
   );
@@ -174,10 +202,12 @@ void main() {
   test('injected lorebook entries use a separate second call', () async {
     await _seedManifest(fixture.db, 'a1', 'entry one');
     var calls = 0;
+    String? lorebookPrompt;
     final result = await fixture
         .service((_, prompt) async {
           calls++;
           if (prompt.contains('Glaze lorebook rewriter')) {
+            lorebookPrompt = prompt;
             return _ok(fixture.lorebookBatchOutput);
           }
           return _ok(fixture.cardBatchOutput);
@@ -185,13 +215,72 @@ void main() {
         .runOneBatch('session');
 
     expect(calls, 2);
-    expect(result?.kind, 'persisted');
+    expect(result.kind, 'persisted');
+    expect(lorebookPrompt, contains('"description":"Alice is cautious."'));
+    expect(lorebookPrompt, contains('# Proposed card operations (read-only)'));
+    expect(lorebookPrompt, contains('increasingly trusting'));
     final operations = await fixture.db.select(fixture.db.rewriteOperations).get();
     expect(operations, hasLength(2));
     expect(
       operations.map((operation) => jsonDecode(operation.operationJson)['target']),
       contains('lorebook'),
     );
+    final debug = await fixture.db
+        .select(fixture.db.cardEvolutionDebugRuns)
+        .get();
+    expect(debug.map((row) => row.stage), containsAll(['card', 'lorebook']));
+  });
+
+  test('uses the configured writer idle timeout', () async {
+    int? receivedTimeout;
+    final result = await fixture
+        .service(
+          (_, _) async => _ok(fixture.cardBatchOutput),
+          timeoutMs: 180000,
+          onTimeout: (timeoutMs) => receivedTimeout = timeoutMs,
+        )
+        .runOneBatch('session');
+
+    expect(result.kind, 'persisted');
+    expect(receivedTimeout, 180000);
+  });
+
+  test('disabled lorebook evolution skips its second model call', () async {
+    await _seedManifest(fixture.db, 'a1', 'entry one');
+    var calls = 0;
+    final result = await fixture
+        .service(
+          (_, _) async {
+            calls++;
+            return _ok(fixture.cardBatchOutput);
+          },
+          isLorebookEvolutionEnabled: () => false,
+        )
+        .runOneBatch('session');
+
+    expect(result.kind, 'persisted');
+    expect(calls, 1);
+    final operations = await fixture.db.select(fixture.db.rewriteOperations).get();
+    expect(operations, hasLength(1));
+    final debug = await fixture.db
+        .select(fixture.db.cardEvolutionDebugRuns)
+        .get();
+    expect(debug.map((row) => row.stage), ['card']);
+  });
+
+  test('empty card field is excluded from evolution operations', () async {
+    await fixture.db.customStatement(
+      "UPDATE characters SET description = '' WHERE char_id = 'character'",
+    );
+    var calls = 0;
+    final result = await fixture.service((_, _) async {
+      calls++;
+      return _ok(fixture.cardBatchOutput);
+    }).runOneBatch('session');
+
+    expect(result.kind, 'emptyModelProposal');
+    expect(calls, 0);
+    await fixture.expectNoProposalOrCanonWrites();
   });
 }
 
@@ -290,7 +379,12 @@ final class _Fixture {
     ],
   });
 
-  AutomatedCardEvolutionService service(_Executor executor) =>
+  AutomatedCardEvolutionService service(
+    _Executor executor, {
+    bool Function()? isLorebookEvolutionEnabled,
+    int timeoutMs = 180000,
+    void Function(int timeoutMs)? onTimeout,
+  }) =>
       AutomatedCardEvolutionService(
         repo: repo,
         resolveModel: () async => const AuxApiConfig(
@@ -307,7 +401,12 @@ final class _Fixture {
               required temperature,
               required timeoutMs,
               cancelToken,
-            }) => executor(cancelToken, prompt),
+            }) {
+              onTimeout?.call(timeoutMs);
+              return executor(cancelToken, prompt);
+            },
+        isLorebookEvolutionEnabled: isLorebookEvolutionEnabled,
+        timeoutMs: timeoutMs,
       );
 
   Future<void> expectNoProposalOrCanonWrites() async {

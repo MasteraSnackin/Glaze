@@ -78,7 +78,7 @@ void main() {
 
       // user_version matches the Drift schema version (app_db.dart schemaVersion).
       // Update this constant whenever a new migration step is added.
-       expect(version, 93);
+        expect(version, 95);
     });
 
     test(
@@ -115,7 +115,7 @@ void main() {
         final version = await upgraded
             .customSelect('PRAGMA user_version')
             .get();
-         expect(version.first.read<int>('user_version'), 93);
+          expect(version.first.read<int>('user_version'), 95);
         expect(names, contains('variant_group_id'));
         expect(names, contains('hidden'));
       },
@@ -145,12 +145,12 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-       expect(version.read<int>('user_version'), 93);
+        expect(version.read<int>('user_version'), 95);
     });
 
     test('current schema includes atomic character fact tables', () async {
       final version = await db.customSelect('PRAGMA user_version').getSingle();
-       expect(version.read<int>('user_version'), 93);
+        expect(version.read<int>('user_version'), 95);
 
       final factColumns = await db
           .customSelect("PRAGMA table_info('character_knowledge_fact_rows')")
@@ -262,7 +262,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-       expect(version.read<int>('user_version'), 93);
+        expect(version.read<int>('user_version'), 95);
     });
 
     test(
@@ -372,7 +372,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-       expect(version.read<int>('user_version'), 93);
+        expect(version.read<int>('user_version'), 95);
     });
 
     test('v80 adds Responses API toggle defaulting to off', () async {
@@ -412,7 +412,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-       expect(version.read<int>('user_version'), 93);
+        expect(version.read<int>('user_version'), 95);
     });
 
     test('v81 adds composite embedding source index', () async {
@@ -446,7 +446,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-       expect(version.read<int>('user_version'), 93);
+        expect(version.read<int>('user_version'), 95);
     });
 
     test('v82 creates rewrite persistence schema and provenance columns', () async {
@@ -520,7 +520,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-       expect(version.read<int>('user_version'), 93);
+        expect(version.read<int>('user_version'), 95);
     });
 
     test('v83 rebuilds interim text revision columns without losing rows', () async {
@@ -957,7 +957,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-       expect(version.read<int>('user_version'), 93);
+        expect(version.read<int>('user_version'), 95);
 
       // Rows and payloads survive; legacy statuses pass through or are
       // normalized fail-closed, and new columns carry neutral defaults.
@@ -1162,7 +1162,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-       expect(version.read<int>('user_version'), 93);
+        expect(version.read<int>('user_version'), 95);
       final row = await upgraded
           .customSelect(
             'SELECT blocks_json FROM studio_preset_rows WHERE preset_id = ?',
@@ -1278,7 +1278,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-       expect(version.read<int>('user_version'), 93);
+        expect(version.read<int>('user_version'), 95);
       final check = await upgraded.customSelect('PRAGMA integrity_check').get();
       expect(check.single.read<String>('integrity_check'), 'ok');
     });
@@ -1683,6 +1683,28 @@ void main() {
           'content_hash',
         ]),
       );
+    });
+
+    test('v95 retains the latest Card Rewriter debug result per writer stage', () async {
+      final columns = await db.customSelect(
+        "PRAGMA table_info('card_evolution_debug_runs')",
+      ).get();
+      expect(
+        columns.map((row) => row.read<String>('name')),
+        containsAll([
+          'session_id',
+          'stage',
+          'status',
+          'model',
+          'output',
+          'attempts_json',
+          'updated_at',
+        ]),
+      );
+      final primaryKey = columns
+          .where((row) => row.read<int>('pk') > 0)
+          .map((row) => row.read<String>('name'));
+      expect(primaryKey, containsAll(['session_id', 'stage']));
     });
   });
 }

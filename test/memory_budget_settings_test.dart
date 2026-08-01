@@ -65,6 +65,8 @@ void main() {
               memoryPipeline: MemoryPipelineSettings(auxTimeoutMs: 30000),
               cardRewriter: CardRewriterSettings(
                 enabled: true,
+                lorebookEvolutionEnabled: false,
+                timeoutMs: 180000,
                 apiConfigId: 'rewrite-api',
                 modelOverride: 'rewrite-model',
               ),
@@ -89,6 +91,8 @@ void main() {
       expect(loaded.cleaner.postCleanerBannedWords, 'suddenly, palpable');
       expect(loaded.memoryPipeline.auxTimeoutMs, 30000);
       expect(loaded.cardRewriter.enabled, isTrue);
+      expect(loaded.cardRewriter.lorebookEvolutionEnabled, isFalse);
+      expect(loaded.cardRewriter.timeoutMs, 180000);
       expect(loaded.cardRewriter.apiConfigId, 'rewrite-api');
       expect(loaded.cardRewriter.modelOverride, 'rewrite-model');
     },

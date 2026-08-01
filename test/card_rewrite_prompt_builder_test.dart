@@ -150,4 +150,40 @@ void main() {
       contains('Fold the backstory near {{user}} references.\nLine two.'),
     );
   });
+
+  test('evolution prompt omits empty writable fields and forbids empty anchors', () {
+    final prompt = CardRewriterPromptBuilder.buildEvolution(
+      character: character().copyWith(description: '', scenario: null),
+      instruction: 'Update durable facts.',
+    );
+
+    expect(prompt, contains('Only these non-empty fields are writable: personality.'));
+    expect(prompt, contains('Empty fields are omitted and MUST NOT appear'));
+    expect(prompt, contains('Empty anchors are forbidden.'));
+    expect(prompt, isNot(contains('"description":""')));
+    expect(prompt, isNot(contains('"scenario":""')));
+  });
+
+  test('evolution prompts use history and Ledger as evidence, not deduplication', () {
+    final cardPrompt = CardRewriterPromptBuilder.buildEvolution(
+      character: character(),
+      instruction: 'Update durable facts.',
+    );
+    final lorePrompt = CardRewriterPromptBuilder.buildLorebookEvolution(
+      instruction: 'Update injected setting facts.',
+    );
+
+    expect(cardPrompt, contains('not against chat history or Ledger'));
+    expect(
+      cardPrompt,
+      contains('Ledger fact is accepted evidence, not a reason to omit a card patch'),
+    );
+    expect(lorePrompt, contains('Avoid only card-lorebook duplication'));
+    expect(lorePrompt, contains('proposed card operations'));
+    expect(lorePrompt, contains('not alternate durable targets'));
+    expect(
+      lorePrompt,
+      contains('Ledger fact is accepted evidence, not a reason to omit an eligible lorebook patch'),
+    );
+  });
 }

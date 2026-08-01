@@ -99,6 +99,11 @@ enum CardRewriteField {
 /// Explicit per-field limits, measured in Unicode code units.
 abstract final class CardRewritePolicy {
   static const int totalCardBudget = 64000;
+  static const Set<CardRewriteField> evolutionFields = {
+    CardRewriteField.description,
+    CardRewriteField.personality,
+    CardRewriteField.scenario,
+  };
   static const Map<CardRewriteField, int> budgets = {
     CardRewriteField.description: 12000,
     CardRewriteField.personality: 12000,
@@ -109,6 +114,12 @@ abstract final class CardRewritePolicy {
   };
 
   static bool isWritable(CardRewriteField field) => budgets.containsKey(field);
+
+  static Set<CardRewriteField> nonEmptyEvolutionFields(Character character) => {
+    if (character.description?.isNotEmpty == true) CardRewriteField.description,
+    if (character.personality?.isNotEmpty == true) CardRewriteField.personality,
+    if (character.scenario?.isNotEmpty == true) CardRewriteField.scenario,
+  };
 }
 
 /// The semantic family addressed by a rewrite request.

@@ -3,22 +3,25 @@ import 'dart:convert';
 import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/core/services/card_rewriter/card_rewriter_contracts.dart';
 
-/// Builds the deterministic writer-lane prompt for exactly ONE rewrite target
-/// field. Pure: no DB, no UI, no network, no lorebook input — the model sees
-/// only the canonical card snapshot, the target field, and the user
-/// instruction, and its untrusted answer is screened separately by
+/// Builds deterministic writer-lane prompts. Pure: no DB, UI, network, or
+/// lorebook reads; untrusted output is screened separately by
 /// `CardRewriteOperationParser`.
 ///
-/// Determinism: identical `(character, field, instruction)` triples always
-/// produce a byte-identical prompt. Every dynamic input is serialized through
-/// [CardCanonicalizer] (stable key order, null text normalized) and there are
-/// no timestamps, randomness, or environment lookups.
+/// Determinism: identical inputs always produce byte-identical prompts. Every
+/// dynamic input is serialized through [CardCanonicalizer] (stable key order,
+/// null text normalized) and there are no timestamps, randomness, or
+/// environment lookups.
 abstract final class CardRewriterPromptBuilder {
   static String buildEvolution({
     required Character character,
     required String instruction,
   }) {
-    final snapshot = CardCanonicalizer.snapshot(character);
+    final writableFields = CardRewritePolicy.nonEmptyEvolutionFields(character);
+    final snapshot = Map<String, Object?>.from(CardCanonicalizer.snapshot(character));
+    for (final field in CardRewritePolicy.evolutionFields) {
+      if (!writableFields.contains(field)) snapshot.remove(field.wireName);
+    }
+    final writableFieldNames = writableFields.map((field) => field.wireName).join(', ');
     final buffer = StringBuffer()
       ..writeln(
         'You are the Glaze card rewriter. Propose small anchored scalar patches '
@@ -27,9 +30,12 @@ abstract final class CardRewriterPromptBuilder {
       ..writeln()
       ..writeln('# Writable fields')
       ..writeln(
-        'Only description, personality, and scenario are writable. They are '
-        'all provided as read-only context. Omit a field when its current text '
-        'does not need a durable change.',
+        writableFields.isEmpty
+            ? 'No card field is writable: description, personality, and scenario '
+                  'are all empty and are intentionally omitted from this request.'
+            : 'Only these non-empty fields are writable: $writableFieldNames. '
+                  'Empty fields are omitted and MUST NOT appear in operations. '
+                  'Omit a field when its current text does not need a durable change.',
       )
       ..writeln()
       ..writeln('# Response format')
@@ -43,23 +49,35 @@ abstract final class CardRewriterPromptBuilder {
         '"factIds":[],"chatSessionId":null}}]}.',
       )
       ..writeln(
-        '"operations" may be empty. Each field may occur at most once. Use '
-        'one or more exact anchors per changed field, never a full-field rewrite.',
+        'Each field may occur at most once. Return an empty "operations" list '
+        'ONLY when the chat and Ledger contain no supported durable change for '
+        'any writable field. A Ledger fact is accepted evidence, not a reason '
+        'to omit a card patch. Use one or more exact anchors per changed field, '
+        'never a full-field rewrite.',
       )
       ..writeln()
       ..writeln('# Patch rules')
       ..writeln(
         '- scopeKey supports npc:<subject>, relationship:<subject>, '
         'arc:<subject>, world:<subject>, or scene.<subject>. Every patch and '
-        'its transition must use the same scopeKey.',
+        'its transition must use the same scopeKey. Use ASCII lowercase IDs '
+        'only: for example relationship:danvi, never relationship:Danvi.',
       )
       ..writeln(
         '- Each anchor must occur exactly once in its current field and its '
         'anchorSha256 must be the lowercase SHA-256 of the anchor UTF-8 bytes. '
-        'For an empty field only, use an empty anchor to initialize it.',
+        'Empty anchors are forbidden. Never '
+        'use chat-history text as an anchor: anchors are copied only from the '
+        'canonical card field you are patching.',
       )
       ..writeln(
         '- Preserve every {{...}} macro token byte-for-byte in a replacement.',
+      )
+      ..writeln(
+        '- Treat the immutable chat history and Ledger facts as evidence for '
+        'card evolution. A supported change remains eligible even when Ledger '
+        'already records it. Avoid duplication only against the supplied '
+        'injected lorebook entries, not against chat history or Ledger.',
       )
       ..writeln('- Emit no keys beyond those shown above.')
       ..writeln()
@@ -75,12 +93,12 @@ abstract final class CardRewriterPromptBuilder {
     return '''You are the Glaze lorebook rewriter. The shared read-only context below contains the character card, recent chat, Ledger facts, and exact lorebook entries actually injected into that chat.
 
 # Writable targets
-Only the supplied lorebookId/entryId pairs are writable. Do not create, delete, move, rename, or change keys/settings. Do not output card patches. Update an entry only when the durable chat evidence requires information that belongs in that entry and is not already represented sufficiently elsewhere in the shared context.
+Only the supplied lorebookId/entryId pairs are writable. Do not create, delete, move, rename, or change keys/settings. Do not output card patches. The shared context includes the current card and the card writer's proposed operations. Avoid only card-lorebook duplication: do not patch an entry with a fact already represented in the current card or proposed card operations. Chat history and Ledger are evidence, not alternate durable targets; do not omit a supported lorebook patch merely because Ledger already records the fact.
 
 # Response format
 Respond with exactly one JSON object and nothing else:
 {"operations":[{"lorebookId":"...","entryId":"...","baseContent":"...","expectedContentHash":"...","patches":[{"anchor":"...","anchorSha256":"...","value":"..."}]}]}
-"operations" may be empty. Each target may occur at most once. baseContent and expectedContentHash must exactly echo the supplied target. Each anchor must occur exactly once in its supplied current content; anchorSha256 is its lowercase SHA-256 UTF-8 hash. Use smallest exact fragment replacements, never rewrite an entire entry. Preserve every {{...}} macro token byte-for-byte.
+Each target may occur at most once. Return an empty "operations" list ONLY when no supported durable update belongs in any supplied target. A Ledger fact is accepted evidence, not a reason to omit an eligible lorebook patch. baseContent and expectedContentHash must exactly echo the supplied target. Each anchor must occur exactly once in its supplied current content; anchorSha256 is its lowercase SHA-256 UTF-8 hash. Use smallest exact fragment replacements, never rewrite an entire entry. Preserve every {{...}} macro token byte-for-byte.
 
 # Instruction
 $instruction''';

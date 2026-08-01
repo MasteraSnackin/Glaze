@@ -1058,6 +1058,30 @@ class CardEvolutionProposalRuns extends Table {
   ];
 }
 
+/// Latest raw writer result retained per session and writer stage for Card
+/// Rewriter debugging. This is intentionally replaceable diagnostic state,
+/// unlike reviewable proposal provenance which remains immutable once
+/// persisted.
+@DataClassName('CardEvolutionDebugRunRow')
+class CardEvolutionDebugRuns extends Table {
+  @override
+  String get tableName => 'card_evolution_debug_runs';
+  TextColumn get sessionId => text()();
+  TextColumn get stage => text()();
+  TextColumn get status => text()();
+  TextColumn get model => text()();
+  TextColumn get output => text().nullable()();
+  TextColumn get attemptsJson => text()();
+  IntColumn get updatedAt => integer()();
+  @override
+  Set<Column> get primaryKey => {sessionId, stage};
+  @override
+  List<String> get customConstraints => [
+    "CHECK (session_id <> '' AND stage IN ('card', 'lorebook') "
+        "AND status <> '' AND model <> '' AND attempts_json <> '')",
+  ];
+}
+
 /// Immutable canonical lorebook-use manifest at one message variation anchor.
 @DataClassName('LorebookUseManifestRow')
 @TableIndex(

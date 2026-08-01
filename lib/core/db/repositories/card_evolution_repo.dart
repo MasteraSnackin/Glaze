@@ -45,9 +45,10 @@ final class CardEvolutionPromptSnapshot {
 }
 
 final class CardEvolutionFinalizeOutcome {
-  const CardEvolutionFinalizeOutcome(this.kind, [this.job]);
+  const CardEvolutionFinalizeOutcome(this.kind, [this.job, this.detail]);
   final String kind;
   final RewriteJobRow? job;
+  final String? detail;
   bool get isPersisted => kind == 'persisted' || kind == 'alreadyCompleted';
 }
 
@@ -100,31 +101,17 @@ class CardEvolutionRepo {
             );
     }
     if (existing != null) {
-      final selected = await _selectedInputForClaim(existing);
-      if (selected == null) {
-        return const CardEvolutionClaimOutcome('stale');
-      }
-      final changed =
-          await (db.update(db.cardEvolutionClaims)
-                ..where((row) => row.id.equals(existing.id))
-                ..where((row) => row.status.equals('claimed'))
-                ..where((row) => row.leaseExpiresAt.isSmallerOrEqualValue(now)))
-              .write(
-                CardEvolutionClaimsCompanion(
-                  ownerId: Value(ownerId),
-                  leaseExpiresAt: Value(now + leaseSeconds),
-                ),
-              );
-      if (changed != 1) {
+      // An expired owner cannot finalize (finalize checks the same lease). Do
+      // not reuse its snapshot: chat/canon may have advanced while the app was
+      // closed, so drop the stale lease and create a fresh claim below.
+      final deleted = await (db.delete(db.cardEvolutionClaims)
+            ..where((row) => row.id.equals(existing.id))
+            ..where((row) => row.status.equals('claimed'))
+            ..where((row) => row.leaseExpiresAt.isSmallerOrEqualValue(now)))
+          .go();
+      if (deleted != 1) {
         return const CardEvolutionClaimOutcome('busy');
       }
-      final recovered = await (db.select(
-        db.cardEvolutionClaims,
-      )..where((row) => row.id.equals(existing.id))).getSingle();
-      return CardEvolutionClaimOutcome(
-        'claimed',
-        CardEvolutionClaim(row: recovered, selectedInputJson: selected),
-      );
     }
     final selected = await _selectInput(sessionId);
     if (selected == null) {
@@ -229,9 +216,6 @@ class CardEvolutionRepo {
     if (claim.ownerId != ownerId || claim.leaseExpiresAt <= now) {
       return const CardEvolutionFinalizeOutcome('leaseLost');
     }
-    if (!_hasEvolutionOperations(operations)) {
-      return const CardEvolutionFinalizeOutcome('fieldMismatch');
-    }
     final selected = await _selectedInputForClaim(claim);
     if (selected == null || computeHash(selected) != claim.inputHash) {
       return const CardEvolutionFinalizeOutcome('staleEvidence');
@@ -242,6 +226,15 @@ class CardEvolutionRepo {
     }
     final input = assembled.$1;
     final assembly = assembled.$2;
+    final allowedCardFields = CardRewritePolicy.nonEmptyEvolutionFields(
+      assembly.character,
+    );
+    if (!_hasEvolutionOperations(
+      operations,
+      allowedCardFields: allowedCardFields,
+    )) {
+      return const CardEvolutionFinalizeOutcome('fieldMismatch');
+    }
     if (await _activeJob(claim.sessionId, claim.characterId) != null) {
       return const CardEvolutionFinalizeOutcome('activeJob');
     }
@@ -274,7 +267,12 @@ class CardEvolutionRepo {
         requiredFields: [operation.field],
       );
       if (!validation.isValid) {
-        return const CardEvolutionFinalizeOutcome('invalidOperation');
+        return CardEvolutionFinalizeOutcome(
+          'invalidOperation',
+          null,
+          '${operation.field.wireName}: '
+          '${validation.violations.map((violation) => violation.name).join(', ')}',
+        );
       }
     }
     final controls = input.manualControls;
@@ -376,6 +374,42 @@ class CardEvolutionRepo {
     return CardEvolutionFinalizeOutcome('persisted', job);
   });
 
+  /// Releases an uncompleted lease after work outside the transaction fails.
+  /// Claims are otherwise retained only for successful idempotency records.
+  Future<void> abandonClaim({
+    required String claimId,
+    required String ownerId,
+  }) => db.transaction(() async {
+    await (db.delete(db.cardEvolutionClaims)
+          ..where((row) => row.id.equals(claimId))
+          ..where((row) => row.ownerId.equals(ownerId))
+          ..where((row) => row.status.equals('claimed')))
+         .go();
+  });
+
+  /// Replaces the session's diagnostic record after every writer call. It is
+  /// deliberately separate from the proposal transaction so rejected outputs
+  /// and transport failures remain inspectable.
+  Future<void> saveDebugRun({
+    required String sessionId,
+    required String stage,
+    required String status,
+    required String model,
+    required String? output,
+    required String attemptsJson,
+    required int updatedAt,
+  }) => db.into(db.cardEvolutionDebugRuns).insertOnConflictUpdate(
+    CardEvolutionDebugRunsCompanion.insert(
+      sessionId: sessionId,
+      stage: stage,
+      status: status,
+      model: model,
+      output: Value(output),
+      attemptsJson: attemptsJson,
+      updatedAt: updatedAt,
+    ),
+  );
+
   Future<String?> _selectedInputForClaim(CardEvolutionClaimRow claim) async {
     final selected = await _selectInput(claim.sessionId);
     if (selected == null || computeHash(selected) != claim.inputHash) {
@@ -421,19 +455,22 @@ class CardEvolutionRepo {
       if (lorebookEntries == null) return null;
       final historyJson = _canonicalJson(history);
       final canonEvidence = _canonEvidence(assembled.$1, assembled.$2);
+      final writableFields = CardRewritePolicy.nonEmptyEvolutionFields(
+        assembled.$2.character,
+      );
       return _canonicalJson({
-        'contractVersion': 6,
+        'contractVersion': 7,
         'fields': [
-          CardRewriteField.description.wireName,
-          CardRewriteField.personality.wireName,
-          CardRewriteField.scenario.wireName,
+          for (final field in writableFields) field.wireName,
         ],
         'chatHistoryHash': computeHash(historyJson),
         'effectiveCanonIdentity': assembled.$2.identity,
         'limits': {
           'maxChatHistoryMessages': _maxChatHistoryMessages,
+          'excludesTrailingUserAssistantPair': true,
         },
         'chatHistory': history,
+        'card': _evolutionCardSnapshot(assembled.$2.character),
         'effectiveCanon': jsonDecode(canonEvidence),
         'injectedLorebookEntries': lorebookEntries,
       });
@@ -544,10 +581,19 @@ class CardEvolutionRepo {
         'contentHash': computeHash(content),
       });
     }
-    final start = candidates.length > _maxChatHistoryMessages
-        ? candidates.length - _maxChatHistoryMessages
+    // The final assistant response remains mutable until the user follows up.
+    // Its user prompt is omitted with it, so both chat evidence and the Ledger
+    // snapshot describe only accepted turns.
+    final stableCandidates = List<Map<String, Object?>>.from(candidates);
+    if (stableCandidates.length >= 2 &&
+        stableCandidates[stableCandidates.length - 2]['role'] == 'user' &&
+        stableCandidates.last['role'] == 'assistant') {
+      stableCandidates.removeRange(stableCandidates.length - 2, stableCandidates.length);
+    }
+    final start = stableCandidates.length > _maxChatHistoryMessages
+        ? stableCandidates.length - _maxChatHistoryMessages
         : 0;
-    final result = candidates.sublist(start, candidates.length);
+    final result = stableCandidates.sublist(start, stableCandidates.length);
     return result.isEmpty ? null : result;
   }
 
@@ -591,13 +637,10 @@ class CardEvolutionRepo {
   });
 }
 
-const _evolutionFields = {
-  CardRewriteField.description,
-  CardRewriteField.personality,
-  CardRewriteField.scenario,
-};
-
-bool _hasEvolutionOperations(List<RewriteOperationSnapshot> operations) {
+bool _hasEvolutionOperations(
+  List<RewriteOperationSnapshot> operations, {
+  required Set<CardRewriteField> allowedCardFields,
+}) {
   final cards = operations.whereType<CardRewriteOperationSnapshot>().toList();
   final lores = operations
       .whereType<LorebookRewriteOperationSnapshot>()
@@ -609,7 +652,7 @@ bool _hasEvolutionOperations(List<RewriteOperationSnapshot> operations) {
   return operations.isNotEmpty &&
       fields.length == cards.length &&
       targets.length == lores.length &&
-      _evolutionFields.containsAll(fields);
+      allowedCardFields.containsAll(fields);
 }
 
 Map<String, (String, String)>? _loreTargetsFromInput(
@@ -676,6 +719,17 @@ String? _fieldValue(Character character, CardRewriteField field) =>
         character.postHistoryInstructions,
       CardRewriteField.creatorNotes => character.creatorNotes,
     };
+
+Map<String, Object?> _evolutionCardSnapshot(Character character) {
+  final snapshot = Map<String, Object?>.from(
+    CardCanonicalizer.snapshot(character),
+  );
+  final writableFields = CardRewritePolicy.nonEmptyEvolutionFields(character);
+  for (final field in CardRewritePolicy.evolutionFields) {
+    if (!writableFields.contains(field)) snapshot.remove(field.wireName);
+  }
+  return snapshot;
+}
 
 String _canonicalJson(Object? value) {
   Object? canonical(Object? item) {

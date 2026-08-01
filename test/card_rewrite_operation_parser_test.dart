@@ -70,6 +70,19 @@ void main() {
     expect(snapshot.transition.chatSessionId, isNull);
   });
 
+  test('canonicalizes title-cased scope subjects from model output', () {
+    final payload = validPayload();
+    (payload['patches'] as List).single['scopeKey'] = 'relationship:Danvi';
+    (payload['transition'] as Map<String, Object?>)['scopeKey'] =
+        'relationship:Danvi';
+
+    final result = parsePayload(payload);
+
+    expect(result.isSuccess, isTrue, reason: result.detail);
+    expect(result.snapshot!.patches.single.scopeKey, 'relationship:danvi');
+    expect(result.snapshot!.transition.scopeKey, 'relationship:danvi');
+  });
+
   test('tolerates markdown fences and surrounding prose', () {
     final fenced =
         'Here is the rewrite you asked for:\n'
@@ -108,6 +121,19 @@ void main() {
     );
     expect(result.isSuccess, isFalse);
     expect(result.rejection, CardRewriteOperationParseRejection.noJsonPayload);
+  });
+
+  test('explains a rejected card evolution batch', () {
+    expect(
+      CardRewriteOperationParser.explainEvolutionBatchFailure('not json'),
+      'no JSON object was found',
+    );
+    expect(
+      CardRewriteOperationParser.explainEvolutionBatchFailure(
+        '{"operations": [{"field": "unknown"}]}',
+      ),
+      'field is unsupported or repeated',
+    );
   });
 
   test('rejects multiple concatenated JSON payloads', () {
@@ -280,7 +306,7 @@ void main() {
     );
     final badTransitionScope = validPayload();
     (badTransitionScope['transition']! as Map<String, Object?>)['scopeKey'] =
-        'world:Bad';
+        'world:Bad!';
     expect(
       rejectionOf(badTransitionScope),
       CardRewriteOperationParseRejection.invalidScope,
