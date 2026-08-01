@@ -55,11 +55,12 @@ class StudioPresetRepo implements SyncStudioPresetStore {
             expensiveApiConfigId: Value(normalized.expensiveApiConfigId),
             cheapApiConfigId: Value(normalized.cheapApiConfigId),
             cleanerApiConfigId: Value(normalized.cleanerApiConfigId),
-            maxFinalHistoryMessages: Value(
-              normalized.maxFinalHistoryMessages,
-            ),
+            maxFinalHistoryMessages: Value(normalized.maxFinalHistoryMessages),
             agentEnabledJson: Value(jsonEncode(normalized.agentEnabled)),
             executionMode: Value(normalized.executionMode.wireName),
+            runtimeSettingsJson: Value(
+              jsonEncode(StudioPresetCodec.encodeRuntime(normalized.runtime)),
+            ),
             updatedAt: Value(normalized.updatedAt),
           ),
         );
@@ -101,6 +102,19 @@ class StudioPresetRepo implements SyncStudioPresetStore {
     } catch (_) {
       agents = const [];
     }
+    var runtime = const StudioRuntimeSettings();
+    try {
+      final decoded = jsonDecode(row.runtimeSettingsJson);
+      if (decoded is Map && decoded.isNotEmpty) {
+        runtime = StudioPresetCodec.decodePreset({
+          'id': row.presetId,
+          'agents': const <dynamic>[],
+          'runtime': decoded,
+        }).preset.runtime;
+      }
+    } catch (_) {
+      // Runtime settings are independent of the preset's blocks and agents.
+    }
     return _normalizePreset(
       StudioPreset(
         id: row.presetId,
@@ -113,6 +127,7 @@ class StudioPresetRepo implements SyncStudioPresetStore {
         maxFinalHistoryMessages: row.maxFinalHistoryMessages,
         agentEnabled: agentEnabled,
         executionMode: StudioExecutionMode.fromWireName(row.executionMode),
+        runtime: runtime,
         updatedAt: row.updatedAt,
       ),
     );

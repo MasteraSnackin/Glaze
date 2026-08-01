@@ -4,21 +4,51 @@ import 'package:glaze_flutter/core/models/studio_config.dart';
 
 void main() {
   final staleAgents = <StudioAgent>[
-    const StudioAgent(id: 'agent_s_continuity', name: 'Continuity Controller'),
+    const StudioAgent(
+      id: 'agent_s_continuity',
+      controllerId: 'continuity',
+      name: 'Continuity Controller',
+    ),
     const StudioAgent(
       id: 'agent_s_agency',
+      controllerId: 'agency',
       name: 'Agency & Character Controller',
     ),
     const StudioAgent(
       id: 'agent_s_narrative',
+      controllerId: 'narrative',
       name: 'Narrative / Pacing / Style Controller',
     ),
-    const StudioAgent(id: 'agent_s_dialogue', name: 'Dialogue Controller'),
-    const StudioAgent(id: 'agent_s_guard', name: 'Anti-Loop & Prose Guard'),
-    const StudioAgent(id: 'agent_s_world', name: 'World / NPC Controller'),
-    const StudioAgent(id: 'agent_s_meta', name: 'Meta-Weaver / OOC Policy'),
-    const StudioAgent(id: 'agent_s_beauty', name: 'Beauty Shard'),
-    const StudioAgent(id: 'agent_s_final', name: 'Main Responder'),
+    const StudioAgent(
+      id: 'agent_s_dialogue',
+      controllerId: 'dialogue',
+      name: 'Dialogue Controller',
+    ),
+    const StudioAgent(
+      id: 'agent_s_guard',
+      controllerId: 'guard',
+      name: 'Anti-Loop & Prose Guard',
+    ),
+    const StudioAgent(
+      id: 'agent_s_world',
+      controllerId: 'world',
+      name: 'World / NPC Controller',
+    ),
+    const StudioAgent(
+      id: 'agent_s_meta',
+      controllerId: 'meta',
+      name: 'Meta-Weaver / OOC Policy',
+    ),
+    const StudioAgent(
+      id: 'agent_s_beauty',
+      controllerId: 'beauty',
+      name: 'Beauty Shard',
+    ),
+    const StudioAgent(
+      id: 'agent_s_final',
+      controllerId: 'final',
+      name: 'Main Responder',
+    ),
   ];
 
   test('direct mode blocks every stale pregen controller except final', () {

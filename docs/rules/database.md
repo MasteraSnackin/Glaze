@@ -79,7 +79,7 @@ All schema changes go in `AppDatabase.migration` in `app_db.dart`.
 Bump the schema version and add a `from → to` migration step.
 Never modify existing column types without a migration.
 
-Current version: **99**
+Current version: **100**
 
 Migration history:
 - v18: added `characters.picksHash`
@@ -153,6 +153,8 @@ Migration history:
   `studio_config_rows` to dedicated `studio_preset_rows` columns. Distinct
   canonical profile payloads are retained as deterministic migrated presets;
   config rows now retain activation, identity, broadcast blocks, and timestamps.
+- v100: added `studio_preset_rows.runtime_settings_json` TEXT NOT NULL DEFAULT
+  `'{}'` for canonical nested Studio runtime settings storage.
 
 ---
 

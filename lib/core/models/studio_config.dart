@@ -2,6 +2,9 @@ import 'package:flutter/foundation.dart';
 import 'package:freezed_annotation/freezed_annotation.dart';
 
 import '../llm/studio/studio_context.dart';
+import 'cleaner_settings.dart';
+import 'ledger_settings.dart';
+import 'studio_agent_settings.dart';
 
 part 'studio_config.freezed.dart';
 part 'studio_config.g.dart';
@@ -23,6 +26,20 @@ enum StudioExecutionMode {
 
 enum StudioBlockType { instruction, context, history, priorBriefs }
 
+@freezed
+abstract class StudioRuntimeSettings with _$StudioRuntimeSettings {
+  const factory StudioRuntimeSettings({
+    @Default(1) int version,
+    @Default(StudioAgentSettings()) StudioAgentSettings agents,
+    @Default(CleanerSettings()) CleanerSettings cleaner,
+    @Default(LedgerSettings()) LedgerSettings ledger,
+    @Default([]) List<String> broadcastBlocks,
+  }) = _StudioRuntimeSettings;
+
+  factory StudioRuntimeSettings.fromJson(Map<String, dynamic> json) =>
+      _$StudioRuntimeSettingsFromJson(json);
+}
+
 /// Reusable Studio configuration profile.
 ///
 /// Created when the user clicks "Build Studio" in the MagicDrawer Studio menu.
@@ -37,6 +54,7 @@ abstract class StudioConfig with _$StudioConfig {
     @Default('') String profileId,
     @Default('') String profileName,
     @Default(false) bool enabled,
+
     /// Verbatim content of "broadcast" preset blocks — cross-cutting rules
     /// (output language + prose-quality guards: anti-loop/echo/cliché/slop,
     /// banlists) that must govern not only their primary agent but also the
@@ -99,6 +117,7 @@ abstract class StudioPreset with _$StudioPreset {
     /// Explicit topology prevents stale stored agents from reviving pregen
     /// calls when a Direct/Assisted preset is selected.
     @Default(StudioExecutionMode.legacy) StudioExecutionMode executionMode,
+    @Default(StudioRuntimeSettings()) StudioRuntimeSettings runtime,
     @Default(0) int updatedAt,
   }) = _StudioPreset;
 

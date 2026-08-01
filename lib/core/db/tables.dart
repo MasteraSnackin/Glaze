@@ -699,6 +699,8 @@ class StudioPresetRows extends Table {
   TextColumn get agentEnabledJson => text().withDefault(const Constant('{}'))();
   TextColumn get executionMode =>
       text().withDefault(const Constant('legacy'))();
+  TextColumn get runtimeSettingsJson =>
+      text().withDefault(const Constant('{}'))();
   IntColumn get updatedAt => integer().withDefault(const Constant(0))();
 
   @override
@@ -995,8 +997,10 @@ class CardEvolutionClaims extends Table {
   TextColumn get ownerId => text()();
   TextColumn get status => text()();
   IntColumn get leaseExpiresAt => integer()();
+
   /// Legacy physical column name retained for v92 database compatibility.
   TextColumn get chatHistoryHash => text().named('first_run_id')();
+
   /// Legacy physical column name retained for v92 database compatibility.
   TextColumn get effectiveCanonIdentity => text().named('second_run_id')();
   TextColumn get predecessorCursorHash => text()();
@@ -1027,8 +1031,10 @@ class CardEvolutionProposalRuns extends Table {
   TextColumn get sessionId => text()();
   TextColumn get characterId => text()();
   TextColumn get rewriteJobId => text()();
+
   /// Legacy physical column name retained for v92 database compatibility.
   TextColumn get chatHistoryHash => text().named('first_run_id')();
+
   /// Legacy physical column name retained for v92 database compatibility.
   TextColumn get effectiveCanonIdentity => text().named('second_run_id')();
   TextColumn get selectedInputJson => text()();

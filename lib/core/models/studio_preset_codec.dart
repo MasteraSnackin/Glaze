@@ -107,6 +107,25 @@ abstract final class StudioPresetCodec {
       agents = const [];
       warnings.add('Malformed Studio agents were disabled.');
     }
+    var runtime = const StudioRuntimeSettings();
+    if (json.containsKey('runtime')) {
+      final rawRuntime = json['runtime'];
+      if (rawRuntime is Map) {
+        try {
+          runtime = StudioRuntimeSettings.fromJson(
+            _jsonMap(rawRuntime),
+          ).copyWith(version: 1);
+        } on Object {
+          warnings.add(
+            'Malformed Studio runtime settings were reset to defaults.',
+          );
+        }
+      } else {
+        warnings.add(
+          'Malformed Studio runtime settings were reset to defaults.',
+        );
+      }
+    }
     return StudioPresetDecodeResult(
       StudioPreset(
         id: presetId,
@@ -124,6 +143,7 @@ abstract final class StudioPresetCodec {
         executionMode: StudioExecutionMode.fromWireName(
           _string(json['executionMode'], StudioExecutionMode.legacy.name),
         ),
+        runtime: runtime,
         updatedAt: _integer(json['updatedAt']),
       ),
       warnings: warnings,
@@ -244,6 +264,7 @@ abstract final class StudioPresetCodec {
       'maxFinalHistoryMessages': preset.maxFinalHistoryMessages,
       'agentEnabled': preset.agentEnabled,
       'executionMode': preset.executionMode.name,
+      'runtime': encodeRuntime(preset.runtime),
       'updatedAt': preset.updatedAt,
     };
   }
@@ -262,6 +283,12 @@ abstract final class StudioPresetCodec {
         canonicalizeBlockJson(Map<String, dynamic>.from(value as Map)),
     ]);
   }
+
+  static Map<String, dynamic> encodeRuntime(StudioRuntimeSettings runtime) =>
+      _jsonMap(runtime.toJson());
+
+  static Map<String, dynamic> _jsonMap(Object value) =>
+      Map<String, dynamic>.from(jsonDecode(jsonEncode(value)) as Map);
 
   static StudioPresetBlock _block(
     Map<String, dynamic> json, {

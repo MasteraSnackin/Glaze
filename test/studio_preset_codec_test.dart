@@ -2,7 +2,11 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/llm/studio/studio_context.dart';
+import 'package:glaze_flutter/core/models/cleaner_settings.dart';
+import 'package:glaze_flutter/core/models/extra_request_parameter.dart';
+import 'package:glaze_flutter/core/models/ledger_settings.dart';
 import 'package:glaze_flutter/core/models/studio_config.dart';
+import 'package:glaze_flutter/core/models/studio_agent_settings.dart';
 import 'package:glaze_flutter/core/models/studio_preset_codec.dart';
 
 void main() {
@@ -138,18 +142,87 @@ void main() {
     expect((canonical['agents'] as List).single['controllerId'], 'continuity');
   });
 
-  test('missing agents gets preset-scoped defaults but explicit empty stays empty', () {
-    final missing = StudioPresetCodec.decodePreset({
-      'id': 'legacy-preset',
-      'updatedAt': 42,
-    }).preset;
-    final explicit = StudioPresetCodec.decodePreset({
-      'id': 'explicit-empty',
-      'agents': <dynamic>[],
-    }).preset;
+  test(
+    'missing agents gets preset-scoped defaults but explicit empty stays empty',
+    () {
+      final missing = StudioPresetCodec.decodePreset({
+        'id': 'legacy-preset',
+        'updatedAt': 42,
+      }).preset;
+      final explicit = StudioPresetCodec.decodePreset({
+        'id': 'explicit-empty',
+        'agents': <dynamic>[],
+      }).preset;
 
-    expect(missing.agents, isNotEmpty);
-    expect(missing.agents.every((agent) => agent.id.contains('legacy-preset')), isTrue);
-    expect(explicit.agents, isEmpty);
-  });
+      expect(missing.agents, isNotEmpty);
+      expect(
+        missing.agents.every((agent) => agent.id.contains('legacy-preset')),
+        isTrue,
+      );
+      expect(explicit.agents, isEmpty);
+    },
+  );
+
+  test(
+    'canonical runtime round-trips all nested settings and broadcast bytes',
+    () {
+      const runtime = StudioRuntimeSettings(
+        agents: StudioAgentSettings(
+          studioFinalMaxTokens: 4321,
+          studioFinalExtraRequestParameters: [
+            ExtraRequestParameter(key: 'final_option', value: '{"x":1}'),
+          ],
+          studioTrackerExtraRequestParameters: [
+            ExtraRequestParameter(key: 'tracker_option', value: 'alpha'),
+          ],
+        ),
+        cleaner: CleanerSettings(
+          postCleanerMaxTokens: 987,
+          postCleanerExtraRequestParameters: [
+            ExtraRequestParameter(key: 'cleaner_option', value: 'beta'),
+          ],
+        ),
+        ledger: LedgerSettings(studioLedgerRunMode: 'every_n'),
+        broadcastBlocks: ['\uFEFFfirst\r\nline', 'second\nline', 'последний'],
+      );
+
+      final canonical = StudioPresetCodec.canonicalizePresetJson({
+        'id': 'runtime',
+        'runtime': runtime.toJson(),
+      });
+      final restored = StudioPresetCodec.decodePreset(canonical).preset.runtime;
+
+      expect(restored, runtime);
+      expect(restored.version, 1);
+      expect(restored.broadcastBlocks, runtime.broadcastBlocks);
+    },
+  );
+
+  test(
+    'absent and malformed runtime default without affecting other fields',
+    () {
+      final absent = StudioPresetCodec.decodePreset({'id': 'absent'});
+      final malformed = StudioPresetCodec.decodePreset({
+        'id': 'malformed',
+        'blocks': [
+          {'id': 'history', 'kind': 'chat_history'},
+        ],
+        'agents': [
+          {'id': 'agent_session_continuity_123'},
+        ],
+        'runtime': {'agents': 'not-an-object'},
+      });
+
+      expect(absent.preset.runtime, const StudioRuntimeSettings());
+      expect(absent.warnings, isEmpty);
+      expect(malformed.preset.runtime, const StudioRuntimeSettings());
+      expect(malformed.warnings, hasLength(1));
+      expect(malformed.preset.blocks.single.type, StudioBlockType.history);
+      expect(malformed.preset.agents.single.controllerId, 'continuity');
+      expect(
+        StudioPresetCodec.canonicalizePresetJson({'id': 'absent'})['runtime'],
+        jsonDecode(jsonEncode(const StudioRuntimeSettings())),
+      );
+    },
+  );
 }
