@@ -264,7 +264,6 @@ class StudioBriefCache {
         'temperature': agent.temperature,
         'maxTokens': agent.maxTokens,
         'refreshPolicy': agent.refreshPolicy,
-        'invalidationSignals': agent.invalidationSignals,
         'contextSize': agent.contextSize,
         'runInterval': agent.runInterval,
         'maxParallelJobs': agent.maxParallelJobs,

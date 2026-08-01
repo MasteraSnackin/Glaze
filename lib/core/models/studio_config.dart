@@ -136,7 +136,6 @@ abstract class StudioAgent with _$StudioAgent {
     /// or can reuse a previous brief. Supported values: static, scene, turn.
     /// Final agents always run every turn.
     @Default('turn') String refreshPolicy,
-    @Default([]) List<String> invalidationSignals,
 
     /// Number of trailing chat messages forwarded to this tracker (intermediate
     /// agent). Default 5 to keep trackers focused on local turn state; the
