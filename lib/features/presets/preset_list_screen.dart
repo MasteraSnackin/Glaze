@@ -13,9 +13,10 @@ import '../../core/models/preset.dart';
 import '../../core/models/studio_config.dart';
 import '../../core/state/active_selection_provider.dart';
 import '../../core/state/db_provider.dart';
-import '../../core/state/studio_feature_provider.dart';
 import '../../core/state/active_studio_preset_provider.dart';
+import '../studio/studio_preset_stats.dart';
 import '../studio/studio_preset_workflow_provider.dart';
+import 'studio_preset_editor_screen.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glass_surface.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
@@ -46,9 +47,13 @@ class PresetListScreen extends ConsumerStatefulWidget {
 class _PresetListScreenState extends ConsumerState<PresetListScreen> {
   Preset? _editingPreset;
   bool _isCreating = false;
+  String? _editingStudioId;
   GlobalKey<PresetEditorBodyState> _editorKey = GlobalKey<PresetEditorBodyState>();
+  GlobalKey<StudioPresetEditorBodyState> _studioEditorKey =
+      GlobalKey<StudioPresetEditorBodyState>();
 
   bool get _inEditor => _isCreating || _editingPreset != null;
+  bool get _inStudioEditor => _editingStudioId != null;
 
   void _openEditor(Preset? preset) {
     setState(() {
@@ -60,15 +65,27 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
     });
   }
 
+  void _openStudioEditor(String presetId) {
+    setState(() {
+      _editingStudioId = presetId;
+      // Fresh key so the editor's state re-initialises for the new preset.
+      _studioEditorKey = GlobalKey<StudioPresetEditorBodyState>();
+    });
+  }
+
   void _closeEditor() {
     setState(() {
       _editingPreset = null;
       _isCreating = false;
+      _editingStudioId = null;
     });
   }
 
   void _handleBack() {
-    if (_inEditor) {
+    if (_inStudioEditor) {
+      final handled = _studioEditorKey.currentState?.handleBack() ?? false;
+      if (!handled) _closeEditor();
+    } else if (_inEditor) {
       final handled = _editorKey.currentState?.handleBack() ?? false;
       if (!handled) {
         _closeEditor();
@@ -88,16 +105,29 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
     final activeId = ref.watch(activePresetIdProvider);
     final studioPresets = ref.watch(studioPresetListProvider);
     final activeStudioId = ref.watch(activeStudioPresetProvider).value ?? 'default';
+    // The Studio master switch is the single "which kind is in effect" flag:
+    // ON → an agentic preset is active, OFF → a plain preset is active. Using
+    // it as the discriminator keeps the two lists mutually exclusive so exactly
+    // one card is ever highlighted.
+    final studioEnabled = ref.watch(studioFeatureEnabledProvider);
 
     return SheetView(
       startExpanded: widget.startExpanded,
       showRouteBackground: false,
-      title: _inEditor
+      title: _inStudioEditor
+          ? 'Edit Agentic Preset'
+          : _inEditor
           ? (_editingPreset != null ? 'Edit Preset' : 'New Preset')
           : 'Presets',
       showBack: true,
       onBack: _handleBack,
-      body: _inEditor
+      body: _inStudioEditor
+          ? StudioPresetEditorBody(
+              key: _studioEditorKey,
+              presetId: _editingStudioId!,
+              onClose: _closeEditor,
+            )
+          : _inEditor
           ? PresetEditorBody(
               key: _editorKey,
               preset: _editingPreset,
@@ -109,7 +139,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
               error: (e, _) => Center(child: Text('${'title_error'.tr()}: $e')),
               data: (list) => _buildBody(
                 context, ref, list, activeId,
-                studioPresets.value ?? [], activeStudioId,
+                studioPresets.value ?? [], activeStudioId, studioEnabled,
               ),
             ),
     );
@@ -122,6 +152,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
     String? activeId,
     List<StudioPreset> studioList,
     String activeStudioId,
+    bool studioEnabled,
   ) {
     final items = <_PresetItem>[
       for (final p in list) _PresetItem(preset: p),
@@ -142,9 +173,11 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
         itemBuilder: (_, i) {
           if (i == items.length) return _buildAddButton(context, ref);
           final item = items[i];
+          // Studio ON ⇒ only an agentic preset can be active; Studio OFF ⇒ only
+          // a plain preset can be active. So the two lists never both highlight.
           final isActive = item.isAgentic
-              ? item.studioPreset!.id == activeStudioId
-              : activeId == item.preset!.id;
+              ? (studioEnabled && item.studioPreset!.id == activeStudioId)
+              : (!studioEnabled && activeId == item.preset!.id);
           return Padding(
             padding: const EdgeInsets.only(bottom: 10),
             child: _PsCard(
@@ -158,6 +191,10 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
                     ref.read(studioFeatureEnabledProvider.notifier).enable();
                   } else {
                     setActivePreset(ref, item.preset!.id);
+                    // Switching to a plain preset turns Studio off so the
+                    // agentic pipeline stops overriding it.
+                    ref.read(studioFeatureEnabledProvider.notifier)
+                        .setEnabled(false);
                   }
                 }
               },
@@ -165,7 +202,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
                   ? null
                   : () => showPresetConnections(context, item.preset!.id),
               onEdit: item.isAgentic
-                  ? null
+                  ? () => _openStudioEditor(item.studioPreset!.id)
                   : () => _openEditor(item.preset),
             ),
           );
@@ -241,14 +278,30 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
   }
 
   Future<void> _createAgenticPreset(WidgetRef ref) async {
-    final service = ref.read(studioPresetWorkflowServiceProvider);
-    final presets = await ref.read(studioPresetRepoProvider).getAll();
-    final result = await service.createPreset(
-      name: 'New Agentic Preset',
-      availablePresets: presets,
-    );
-    if (result != null && mounted) {
-      GlazeToast.show(context, 'Created "${result.preset.name}"');
+    final ctx = context;
+    try {
+      final repo = ref.read(studioPresetRepoProvider);
+      // Fresh installs never seed the built-in default preset (it only ships
+      // via the DB upgrade migration), so back-fill it here — otherwise there
+      // is nothing for createPreset to clone and the tap silently no-ops.
+      await repo.ensureDefaultSeeded();
+      final service = ref.read(studioPresetWorkflowServiceProvider);
+      final presets = await repo.getAll();
+      final result = await service.createPreset(
+        name: 'New Agentic Preset',
+        availablePresets: presets,
+      );
+      if (!ctx.mounted) return;
+      if (result != null) {
+        ref.invalidate(studioPresetListProvider);
+        GlazeToast.show(ctx, 'Created "${result.preset.name}"');
+      } else {
+        GlazeToast.show(ctx, 'Failed to create agentic preset');
+      }
+    } catch (_) {
+      if (ctx.mounted) {
+        GlazeToast.show(ctx, 'Failed to create agentic preset');
+      }
     }
   }
 
@@ -367,12 +420,18 @@ class _PsCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    if (item.isAgentic) return _buildAgenticCard(context, ref);
-    final preset = item.preset!;
-    final connections = ref.watch(presetConnectionsProvider);
-    final hasCharBinding = connections.character.values.contains(preset.id);
-    final hasChatBinding = connections.chat.values.contains(preset.id);
-    final cover = presetCoverImage(preset);
+    // Agentic presets share the plain preset's frame, active cross-fade and row
+    // layout — they only differ in the leading icon and the badges they carry,
+    // and never have a cover, connections or an inline editor.
+    final cover = item.isAgentic ? null : presetCoverImage(item.preset!);
+
+    var hasCharBinding = false;
+    var hasChatBinding = false;
+    if (!item.isAgentic) {
+      final connections = ref.watch(presetConnectionsProvider);
+      hasCharBinding = connections.character.values.contains(item.preset!.id);
+      hasChatBinding = connections.chat.values.contains(item.preset!.id);
+    }
 
     // A card filled with artwork needs a real frame even when idle — a hairline
     // disappears against the cover (same treatment as the Tools hero card).
@@ -394,22 +453,30 @@ class _PsCard extends ConsumerWidget {
       baseTint,
     );
 
-    final content = cover == null
-        ? Padding(
-            padding: const EdgeInsets.all(10),
-            child: _buildRow(
-              context,
-              hasChatBinding: hasChatBinding,
-              hasCharBinding: hasCharBinding,
-              onCover: false,
-            ),
-          )
-        : _buildCover(
-            context,
-            cover,
-            hasChatBinding: hasChatBinding,
-            hasCharBinding: hasCharBinding,
-          );
+    final Widget content;
+    if (item.isAgentic) {
+      content = Padding(
+        padding: const EdgeInsets.all(10),
+        child: _buildAgenticRow(context),
+      );
+    } else if (cover == null) {
+      content = Padding(
+        padding: const EdgeInsets.all(10),
+        child: _buildRow(
+          context,
+          hasChatBinding: hasChatBinding,
+          hasCharBinding: hasCharBinding,
+          onCover: false,
+        ),
+      );
+    } else {
+      content = _buildCover(
+        context,
+        cover,
+        hasChatBinding: hasChatBinding,
+        hasCharBinding: hasCharBinding,
+      );
+    }
 
     // `begin` only applies on the first build, so a card that is already active
     // when the list opens starts highlighted instead of animating in; later
@@ -587,73 +654,86 @@ class _PsCard extends ConsumerWidget {
     );
   }
 
-  Widget _buildAgenticCard(BuildContext context, WidgetRef ref) {
+  /// Agentic counterpart of [_buildRow]: same circular icon + name + badge-row
+  /// layout as a plain preset, so both kinds render identically. Differs only
+  /// in the leading glyph and the badges (token estimate + requests-per-turn),
+  /// and has no connection badge or inline editor.
+  Widget _buildAgenticRow(BuildContext context) {
     final sp = item.studioPreset!;
-    final tokens = _estimateTokens(sp);
-    final requests = _estimateRequests(sp);
-    return GlassSurface(
-      enableRipple: true,
-      borderRadius: BorderRadius.circular(12),
-      border: Border.all(
-        color: isActive
-            ? context.cs.primary.withValues(alpha: 0.5)
-            : context.cs.outline,
-        width: isActive ? 2.0 : 1.0,
-      ),
-      onTap: onActivate,
-      child: Padding(
-        padding: const EdgeInsets.all(10),
-        child: Row(
-          children: [
-            Icon(Icons.smart_toy_outlined, size: 20, color: context.cs.primary),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: context.cs.primary.withValues(alpha: 0.1),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(
+            Icons.smart_toy_outlined,
+            size: 20,
+            color: context.cs.primary,
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                sp.name.isNotEmpty ? sp.name : 'Agentic Preset',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: context.cs.onSurface,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 4),
+              Row(
                 children: [
-                  Text(
-                    sp.name.isNotEmpty ? sp.name : 'Agentic Preset',
-                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w500),
-                    overflow: TextOverflow.ellipsis,
+                  _SmallBadge(
+                    icon: Icons.memory,
+                    label: studioPresetTokenLabel(sp),
+                    foreground: context.cs.onSurfaceVariant,
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '${sp.blocks.length} blocks',
-                    style: TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant),
+                  const SizedBox(width: 8),
+                  _SmallBadge(
+                    icon: Icons.bolt,
+                    label: '${studioPresetRequestCount(sp)}/ход',
+                    foreground: context.cs.onSurfaceVariant,
                   ),
                 ],
               ),
-            ),
-            _SmallBadge(icon: Icons.memory, label: tokens),
-            const SizedBox(width: 6),
-            _SmallBadge(icon: Icons.bolt, label: requests),
-          ],
+            ],
+          ),
         ),
-      ),
+        const SizedBox(width: 8),
+        // Edit button — opens the Studio agents sheet for this preset. Agentic
+        // presets are global, so there is no per-chat/character connection
+        // badge like a plain preset has.
+        SizedBox(
+          width: 34,
+          height: 34,
+          child: Material(
+            color: Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+            child: InkWell(
+              onTap: onEdit,
+              borderRadius: BorderRadius.circular(8),
+              child: Icon(
+                Icons.edit_outlined,
+                size: 18,
+                color: context.cs.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
-  static String _estimateTokens(StudioPreset sp) {
-    var total = 0;
-    for (final b in sp.blocks) {
-      total += b.content.length ~/ 4;
-    }
-    if (total >= 1000) return '${total ~/ 1000}K';
-    return '$total';
-  }
-
-  static String _estimateRequests(StudioPreset sp) {
-    int count = 1;
-    final enabled = sp.agentEnabled;
-    for (final block in sp.blocks) {
-      if (block.kind == 'tracker_instruction' && block.enabled) count++;
-      if (block.kind == 'agent_instruction' && block.enabled) count++;
-    }
-    if (enabled['post_clean'] == true || (!enabled.containsKey('post_clean'))) count += 2;
-    if (enabled['ledger'] == true || (!enabled.containsKey('ledger'))) count += 1;
-    return '$count/ход';
-  }
 }
 
 // ─── shared small widgets ─────────────────────────────────────────────────────

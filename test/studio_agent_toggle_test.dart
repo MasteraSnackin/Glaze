@@ -1,9 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/models/studio_config.dart';
-import 'package:glaze_flutter/features/chat/widgets/studio_agents_sheet.dart';
+import 'package:glaze_flutter/features/studio/studio_agent_toggle.dart';
 
 void main() {
-  group('StudioAgentsSheet agent toggle', () {
+  group('applyStudioAgentToggle', () {
     const preset = StudioPreset(
       id: 'p1',
       blocks: [

@@ -186,8 +186,10 @@ class StudioBriefCache {
           for (final (_, block) in blocks)
             {
               'id': block.id,
-              'section': block.section,
-              'kind': block.kind,
+              'mode': block.mode,
+              'injectionPoint': block.injectionPoint,
+              'targetAgentId': block.targetAgentId,
+              'sourceAgentId': block.sourceAgentId,
               'role': block.role,
               'enabled': block.enabled,
               'order': block.order,

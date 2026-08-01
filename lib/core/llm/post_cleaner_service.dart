@@ -530,7 +530,7 @@ class PostCleanerService {
 
     return const StudioAuxPromptAssembler().assemble(
       blocks: cleanerBlocks,
-      section: 'cleaner',
+      injectionPoint: 'cleaner',
       macroCtx: macroCtx,
       customReplacements: customReplacements,
       runtimeSuffix: suffix.toString(),

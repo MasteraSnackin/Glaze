@@ -80,40 +80,45 @@ void main() {
       const PromptMessage(role: 'user', content: 'hello', isHistory: true),
     ]);
     final promptPayload = _payload();
+    // Blocks use the post-§5 model (mode + injectionPoint); the repo migrator
+    // is what maps legacy kind/section onto these fields before the builder
+    // sees a preset.
     const preset = StudioPreset(
       id: 'studio',
       blocks: [
         StudioPresetBlock(
           id: 'final_agent_instruction',
-          kind: 'agent_instruction',
           content: 'FINAL ONLY',
-          section: 'final',
+          mode: 'direct',
+          injectionPoint: 'final',
         ),
         StudioPresetBlock(
           id: 'cleaner_system',
-          kind: 'agent_instruction',
           content: 'CLEANER ONLY',
-          section: 'cleaner',
+          mode: 'direct',
+          injectionPoint: 'cleaner',
         ),
         StudioPresetBlock(
           id: 'continuity_task',
           title: 'Continuity Tracker',
-          kind: 'tracker_instruction',
           content: 'CONTINUITY ONLY',
-          section: 'pregen',
+          mode: 'direct',
+          injectionPoint: 'specificAgent',
+          targetAgentId: 'continuity',
         ),
         StudioPresetBlock(
           id: 'dialogue_task',
           title: 'Dialogue Tracker',
-          kind: 'tracker_instruction',
           content: 'DIALOGUE ONLY',
-          section: 'pregen',
+          mode: 'direct',
+          injectionPoint: 'specificAgent',
+          targetAgentId: 'dialogue',
         ),
         StudioPresetBlock(
           id: 'runtime_envelope',
           kind: 'runtime_envelope',
           content: 'SEEDED RUNTIME ENVELOPE',
-          section: 'pregen',
+          injectionPoint: 'pregen',
         ),
       ],
     );
@@ -173,9 +178,9 @@ void main() {
           id: 'history',
           blocks: [
             StudioPresetBlock(
-              id: 'history',
-              kind: 'chat_history',
-              section: 'final',
+              id: 'chat_history',
+              mode: '',
+              injectionPoint: 'final',
             ),
           ],
         ),
@@ -221,9 +226,9 @@ void main() {
           id: 'history',
           blocks: [
             StudioPresetBlock(
-              id: 'history',
-              kind: 'chat_history',
-              section: 'final',
+              id: 'chat_history',
+              mode: '',
+              injectionPoint: 'final',
             ),
           ],
         ),
@@ -268,9 +273,9 @@ void main() {
           id: 'history',
           blocks: [
             StudioPresetBlock(
-              id: 'history',
-              kind: 'chat_history',
-              section: 'final',
+              id: 'chat_history',
+              mode: '',
+              injectionPoint: 'final',
             ),
           ],
         ),
@@ -314,9 +319,9 @@ void main() {
           id: 'history',
           blocks: [
             StudioPresetBlock(
-              id: 'history',
-              kind: 'chat_history',
-              section: 'final',
+              id: 'chat_history',
+              mode: '',
+              injectionPoint: 'final',
             ),
           ],
         ),
@@ -346,7 +351,8 @@ void main() {
               StudioPresetBlock(
                 id: 'state',
                 content: '{{studio_state}}',
-                section: 'final',
+                mode: 'direct',
+                injectionPoint: 'final',
               ),
             ],
           ),
@@ -370,25 +376,28 @@ void main() {
           blocks: [
             StudioPresetBlock(
               id: 'pov_open',
-              kind: 'group_open',
+              groupBoundary: 'open',
+              mode: '',
               role: 'system',
               content: '<loompov>',
-              section: 'final',
+              injectionPoint: 'final',
               order: 1,
             ),
             StudioPresetBlock(
               id: 'pov_content',
               role: 'system',
               content: 'POV instructions',
-              section: 'final',
+              mode: 'direct',
+              injectionPoint: 'final',
               order: 2,
             ),
             StudioPresetBlock(
               id: 'pov_close',
-              kind: 'group_close',
+              groupBoundary: 'close',
+              mode: '',
               role: 'system',
               content: '</loompov>',
-              section: 'final',
+              injectionPoint: 'final',
               order: 3,
             ),
           ],
@@ -411,6 +420,7 @@ void main() {
             id: 'cleaner',
             name: 'Cleaner',
             phase: 'post_processing',
+            specId: 'post_clean',
           ),
           promptResult: promptResult,
           promptPayload: promptPayload,
@@ -449,6 +459,25 @@ void main() {
       expect(text, isNot(contains('SEEDED RUNTIME ENVELOPE')));
     });
 
+    test('pre-gen agent run receives only its own specific-agent block', () {
+      final text = joinedMessages(
+        builder.buildAgentMessages(
+          agent: const StudioAgent(id: 'continuity', name: 'Continuity Tracker'),
+          promptResult: promptResult,
+          promptPayload: promptPayload,
+          config: config,
+          studioPreset: preset,
+          priorBriefs: const [],
+          isFinalResponse: false,
+        ),
+      );
+
+      expect(text, contains('CONTINUITY ONLY'));
+      expect(text, isNot(contains('DIALOGUE ONLY')));
+      expect(text, isNot(contains('FINAL ONLY')));
+      expect(text, isNot(contains('CLEANER ONLY')));
+    });
+
     test('final brief macros expand and suppress previous_agents block', () {
       const macroConfig = StudioConfig(
         sessionId: 's1',
@@ -465,18 +494,18 @@ void main() {
         blocks: [
           StudioPresetBlock(
             id: 'previous_agents',
-            kind: 'previous_agents',
+            mode: 'pregenBrief',
             content: '',
-            section: 'final',
+            injectionPoint: 'final',
             order: 0,
           ),
           StudioPresetBlock(
             id: 'brief_macros',
-            kind: 'custom_text',
+            mode: 'direct',
             content:
                 '<continuity>{{studio_continuity_brief}}</continuity>\n'
                 '<dialogue>{{studio_dialogue_brief}}</dialogue>',
-            section: 'final',
+            injectionPoint: 'final',
             order: 1,
           ),
         ],

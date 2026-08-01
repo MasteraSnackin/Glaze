@@ -75,10 +75,10 @@ class StudioRuntimeBlockExpander {
     return replaceMacros(studioExpanded, macroCtx).text;
   }
 
-  /// Returns the pipeline injection point for this run: `final` for the
-  /// generator, `cleaner` for Post Clean, `ledger` for Трекер,
-  /// `pregen` for pre-gen trackers.
-  String sectionForRun(StudioAgent agent, bool isFinalResponse) {
+  /// Returns the injection point for this run: `final` for the generator,
+  /// `cleaner` for Post Clean, `ledger` for Трекер, `pregen` for the
+  /// pre-gen controllers. Matches [StudioPresetBlock.injectionPoint].
+  String injectionPointForRun(StudioAgent agent, bool isFinalResponse) {
     if (isFinalResponse) return 'final';
     final specId = StudioControllerOntology.specForAgent(agent).id;
     if (specId == 'post_clean') return 'cleaner';
@@ -95,41 +95,6 @@ class StudioRuntimeBlockExpander {
       'hard_style_contract',
       'beauty_shard_contract',
     }.contains(block.id);
-  }
-
-  /// True if [block] applies to [agent] in this run context. Only
-  /// `tracker_instruction` blocks are filtered; other kinds always apply.
-  bool blockAppliesToAgent(
-    StudioPresetBlock block,
-    StudioAgent agent,
-    bool isFinalResponse,
-  ) {
-    if (block.kind != 'tracker_instruction') return true;
-    if (isFinalResponse || agent.phase == 'post_processing') return false;
-    return trackerInstructionAppliesToAgent(block, agent);
-  }
-
-  /// True if a `tracker_instruction` block's controller alias matches the
-  /// agent's ID/name. Uses the same alias map as the brief-macro renderer.
-  bool trackerInstructionAppliesToAgent(
-    StudioPresetBlock block,
-    StudioAgent agent,
-  ) {
-    final agentText = '${agent.id}\n${agent.name}'.toLowerCase();
-    final blockText = '${block.id}\n${block.title}'.toLowerCase();
-    const aliases = <String, List<String>>{
-      'continuity': ['continuity'],
-      'agency': ['agency', 'character'],
-      'dialogue': ['dialogue'],
-      'guard': ['guard', 'loop', 'prose'],
-      'world': ['world', 'npc'],
-      'meta': ['meta', 'ooc', 'lumia'],
-    };
-    for (final entry in aliases.entries) {
-      if (!entry.value.any(agentText.contains)) continue;
-      return entry.value.any(blockText.contains);
-    }
-    return false;
   }
 
   /// Normalize the role of a preset/shard INSTRUCTION block (not a chat

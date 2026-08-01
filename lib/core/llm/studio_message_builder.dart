@@ -49,15 +49,23 @@ class StudioMessageBuilder {
       promptPayload: promptPayload,
       studioConfig: config,
     );
-    final section = _blockExpander.sectionForRun(agent, isFinalResponse);
+    final point = _blockExpander.injectionPointForRun(agent, isFinalResponse);
+    final specId = StudioControllerOntology.specForAgent(agent).id;
+    final isPostProc = agent.phase == 'post_processing';
     final blocks =
         studioPreset.blocks
-            .where((b) => b.enabled && b.section == section)
+            .where((b) => b.enabled)
             .where((b) => !_blockExpander.isRuntimeComputedBlock(b))
-            .where(
-              (b) =>
-                  _blockExpander.blockAppliesToAgent(b, agent, isFinalResponse),
-            )
+            .where((b) {
+              // Specific-agent blocks reach only their targeted pre-gen agent;
+              // everything else is matched by the run's injection point.
+              if (b.injectionPoint == 'specificAgent') {
+                return !isFinalResponse &&
+                    !isPostProc &&
+                    b.targetAgentId == specId;
+              }
+              return b.injectionPoint == point;
+            })
             .toList()
           ..sort((a, b) => a.order.compareTo(b.order));
     final hasExplicitBriefMacros =
@@ -66,8 +74,59 @@ class StudioMessageBuilder {
     final messages = <Map<String, dynamic>>[];
 
     for (final block in blocks) {
-      final blockMode = block.mode.isNotEmpty ? block.mode : _modeForKind(block.kind);
-      switch (blockMode) {
+      // Empty mode marks a context slot — resolved by its canonical id.
+      if (block.mode.isEmpty) {
+        final blockId = block.id;
+        if (blockId == 'static_context') {
+          messages.addAll(context.staticContext.map((m) => m.toApiMap()));
+        } else if (blockId == 'chat_history') {
+          final history = isFinalResponse
+              ? StudioHistoryLimiter.limitFinalHistory(
+                  context.history,
+                  config,
+                  pipelineOverride: finalContextOverride,
+                  reasoningHistoryCount: reasoningHistoryCount,
+                )
+              : StudioHistoryLimiter.limitTrackerHistory(
+                  context.history,
+                  agent.contextSize,
+                );
+          if (isFinalResponse &&
+              (reasoningHistoryCount == -1 || reasoningHistoryCount > 0)) {
+            messages.addAll(
+              _historyWithReasoning(history, reasoningHistoryCount),
+            );
+          } else {
+            messages.addAll(history.map((m) => m.toApiMap()));
+          }
+        } else if (blockId == 'dynamic_context') {
+          messages.addAll(context.dynamicContext.map((m) => m.toApiMap()));
+        } else {
+          final promptMessages = context.messagesForBlockId(blockId);
+          if (promptMessages.isNotEmpty) {
+            messages.addAll(promptMessages.map((m) => m.toApiMap()));
+          } else {
+            final content = _blockExpander
+                .expandStudioBlockContent(
+                  block.content,
+                  promptPayload: promptPayload,
+                  promptResult: promptResult,
+                  context: context,
+                  priorBriefs: priorBriefs,
+                  config: config,
+                )
+                .trim();
+            if (content.isNotEmpty) {
+              messages.add({
+                'role': _blockExpander.normalizeInstructionRole(block.role),
+                'content': content,
+              });
+            }
+          }
+        }
+        continue;
+      }
+      switch (block.mode) {
         case 'direct':
           final control = StringBuffer();
           control.writeln(
@@ -132,56 +191,6 @@ class StudioMessageBuilder {
           break;
         case 'agentResponse':
           break;
-        default:
-          final kind = block.kind;
-          final blockId = block.id;
-          if (kind == 'static_context') {
-            messages.addAll(context.staticContext.map((m) => m.toApiMap()));
-          } else if (kind == 'chat_history') {
-            final history = isFinalResponse
-                ? StudioHistoryLimiter.limitFinalHistory(
-                    context.history,
-                    config,
-                    pipelineOverride: finalContextOverride,
-                    reasoningHistoryCount: reasoningHistoryCount,
-                  )
-                : StudioHistoryLimiter.limitTrackerHistory(
-                    context.history,
-                    agent.contextSize,
-                  );
-            if (isFinalResponse &&
-                (reasoningHistoryCount == -1 || reasoningHistoryCount > 0)) {
-              messages.addAll(
-                _historyWithReasoning(history, reasoningHistoryCount),
-              );
-            } else {
-              messages.addAll(history.map((m) => m.toApiMap()));
-            }
-          } else if (kind == 'dynamic_context') {
-            messages.addAll(context.dynamicContext.map((m) => m.toApiMap()));
-          } else {
-            final promptMessages = context.messagesForBlockId(blockId);
-            if (promptMessages.isNotEmpty) {
-              messages.addAll(promptMessages.map((m) => m.toApiMap()));
-            } else {
-              final content = _blockExpander
-                  .expandStudioBlockContent(
-                    block.content,
-                    promptPayload: promptPayload,
-                    promptResult: promptResult,
-                    context: context,
-                    priorBriefs: priorBriefs,
-                    config: config,
-                  )
-                  .trim();
-              if (content.isNotEmpty) {
-                messages.add({
-                  'role': _blockExpander.normalizeInstructionRole(block.role),
-                  'content': content,
-                });
-              }
-            }
-          }
       }
     }
 
@@ -202,34 +211,6 @@ class StudioMessageBuilder {
     }
 
     return messages;
-  }
-
-  String _modeForKind(String kind) {
-    switch (kind) {
-      case 'custom_text':
-      case 'slot':
-      case 'instruction':
-      case 'agent_instruction':
-      case 'tracker_instruction':
-        return 'direct';
-      case 'previous_agents':
-        return 'pregenBrief';
-      case 'static_context':
-      case 'chat_history':
-      case 'dynamic_context':
-      case 'char_card':
-      case 'scenario':
-      case 'user_persona':
-      case 'char_personality':
-      case 'example_dialogue':
-      case 'authors_note':
-      case 'memory':
-      case 'group_open':
-      case 'group_close':
-        return 'context';
-      default:
-        return 'direct';
-    }
   }
 
   List<Map<String, dynamic>> _historyWithReasoning(
@@ -291,8 +272,14 @@ class StudioMessageBuilder {
     final blocks =
         studioPreset.blocks
             .where((b) => b.enabled)
-            .where((b) => b.section == 'pregen' || (b.injectionPoint == 'specificAgent' && b.targetAgentId == specId))
-            .where((b) => _blockAppliesToPregen(b, agent))
+            .where((b) {
+              // Broadcast pre-gen instructions reach every controller; a
+              // specific-agent block reaches only its target.
+              if (b.injectionPoint == 'specificAgent') {
+                return b.targetAgentId == specId;
+              }
+              return b.injectionPoint == 'pregen' && b.mode == 'direct';
+            })
             .where((b) => !_blockExpander.isRuntimeComputedBlock(b))
             .toList()
           ..sort((a, b) => a.order.compareTo(b.order));
@@ -315,19 +302,8 @@ class StudioMessageBuilder {
     return buf.toString().trim();
   }
 
-  bool _blockAppliesToPregen(StudioPresetBlock block, StudioAgent agent) {
-    if (block.mode == 'direct' || block.mode.isEmpty) {
-      final kind = block.kind;
-      return kind == 'agent_instruction' || kind == 'custom_text' ||
-          kind == 'instruction' || kind == 'direct' ||
-          (kind == 'tracker_instruction' &&
-              _blockExpander.trackerInstructionAppliesToAgent(block, agent));
-    }
-    return false;
-  }
-
-  /// Role text for the `<role>` element: the shared role/instruction text
-  /// from the preset's non-`agent_instruction` blocks.
+  /// Role text for the `<role>` element: the shared pre-gen instruction text
+  /// broadcast to every controller (specific-agent and context blocks excluded).
   String batchRoleText(
     StudioConfig config,
     StudioPreset studioPreset,
@@ -337,14 +313,9 @@ class StudioMessageBuilder {
   ) {
     final blocks =
         studioPreset.blocks
-            .where((b) => b.enabled && b.section == 'pregen')
-            .where((b) => b.mode.isEmpty || b.mode == 'direct')
-            .where((b) => b.kind != 'agent_instruction')
-            .where((b) => b.kind != 'tracker_instruction')
+            .where((b) => b.enabled && b.injectionPoint == 'pregen')
+            .where((b) => b.mode == 'direct')
             .where((b) => !_blockExpander.isRuntimeComputedBlock(b))
-            .where((b) => b.kind != 'static_context')
-            .where((b) => b.kind != 'chat_history')
-            .where((b) => b.kind != 'dynamic_context')
             .toList()
           ..sort((a, b) => a.order.compareTo(b.order));
     final buf = StringBuffer();

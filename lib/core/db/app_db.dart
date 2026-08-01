@@ -1567,6 +1567,13 @@ LazyDatabase _openConnection() {
 /// The `section` field groups blocks by pipeline stage:
 /// `pregen`, `final`, `cleaner`, `ledger`, `build`, `brief_parser`.
 
+/// Public accessor for the built-in default Studio preset blocks. Fresh
+/// installs create the DB via `onCreate`, which — unlike the `onUpgrade`
+/// migration — never seeds the `default` Studio preset row, so the seed is
+/// needed at runtime to back-fill it (see `StudioPresetRepo.ensureDefaultSeeded`).
+List<Map<String, dynamic>> defaultStudioPresetSeedBlocks() =>
+    _legacyStudioPresetMigrationBlocks();
+
 /// Versioned payload retained only so upgrades from old database schemas can
 /// finish without changing their historical migration behavior.
 List<Map<String, dynamic>> _legacyStudioPresetMigrationBlocks() {

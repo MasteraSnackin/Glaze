@@ -24,8 +24,8 @@ class StudioAuxPromptAssembler {
 
   /// Build the full aux-stage prompt from preset blocks.
   ///
-  /// [blocks] — all blocks from the StudioPreset (will be filtered by section).
-  /// [section] — the preset section to use ('cleaner' or 'ledger').
+  /// [blocks] — all blocks from the StudioPreset (filtered by injection point).
+  /// [injectionPoint] — the target injection point ('cleaner' or 'ledger').
   /// [macroCtx] — macro context for resolving `{{char}}`, `{{user}}`,
   ///   `{{getvar::...}}`, etc.
   /// [customReplacements] — stage-specific placeholder replacements applied
@@ -38,7 +38,7 @@ class StudioAuxPromptAssembler {
   ///   runtime condition makes a block irrelevant).
   String assemble({
     required List<StudioPresetBlock> blocks,
-    required String section,
+    required String injectionPoint,
     required MacroContext macroCtx,
     Map<String, String> customReplacements = const {},
     String runtimeSuffix = '',
@@ -46,7 +46,7 @@ class StudioAuxPromptAssembler {
   }) {
     final sectionBlocks =
         blocks
-            .where((b) => b.enabled && b.section == section)
+            .where((b) => b.enabled && b.injectionPoint == injectionPoint)
             .where((b) => !skipBlockIds.contains(b.id))
             .toList()
           ..sort((a, b) => a.order.compareTo(b.order));
