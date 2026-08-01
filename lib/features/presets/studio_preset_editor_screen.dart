@@ -15,7 +15,7 @@ import '../studio/studio_agent_toggle.dart';
 import '../studio/studio_preset_stats.dart';
 import '../studio/widgets/studio_agents_panel.dart';
 import '../studio/widgets/studio_block_editor_inline.dart';
-import '../studio/widgets/studio_block_row.dart';
+import '../studio/widgets/studio_block_section_list.dart';
 import '../studio/widgets/studio_preset_options_sheet.dart';
 import 'studio_preset_export.dart';
 import 'widgets/preset_dashboard_card.dart';
@@ -31,7 +31,8 @@ import 'widgets/preset_dashboard_card.dart';
 /// Agentic-only: the collapsible agent list sits between the badges and the
 /// blocks (it decides which stages run at all), and the block list itself is
 /// the whole preset at once, split into one section per injection point (§5)
-/// in pipeline order. Rows drag only within their own section.
+/// in pipeline order. Dragging a row under another section header re-targets
+/// the block to that stage.
 class StudioPresetEditorBody extends ConsumerStatefulWidget {
   final String presetId;
   final VoidCallback onClose;
@@ -189,12 +190,6 @@ class StudioPresetEditorBodyState
 
   // ── Block ops ──────────────────────────────────────────────────────────────
 
-  List<StudioPresetBlock> _blocksAt(String injectionPoint) =>
-      (_preset?.blocks ?? const <StudioPresetBlock>[])
-          .where((b) => b.injectionPoint == injectionPoint)
-          .toList()
-        ..sort((a, b) => a.order.compareTo(b.order));
-
   Future<void> _toggleBlock(StudioPresetBlock block, bool enabled) async {
     final preset = _preset;
     if (preset == null) return;
@@ -301,20 +296,15 @@ class StudioPresetEditorBodyState
 
   // ── Reordering ─────────────────────────────────────────────────────────────
 
-  /// Rows only move inside their own section — an injection point is what a
-  /// block is addressed to, not a position, so dragging across sections would
-  /// silently re-target it. Changing the stage is the editor's job.
-  void _onReorder(String injectionPoint, int oldIndex, int newIndex) {
+  /// Applies a drag. Dropping a row under a different section header re-targets
+  /// its injection point — the section list resolves which stage each row
+  /// landed in and reports the placements.
+  void _onReorder(List<StudioPresetRowPlacement> placements) {
     final preset = _preset;
     if (preset == null) return;
-    final entries = groupStudioPresetBlocks(_blocksAt(injectionPoint));
-    if (oldIndex < 0 || oldIndex >= entries.length) return;
-    if (newIndex > oldIndex) newIndex -= 1;
-    final reordered = [...entries];
-    reordered.insert(newIndex, reordered.removeAt(oldIndex));
     final blocks = reorderStudioPresetBlocks(
       all: preset.blocks,
-      entries: reordered,
+      rows: placements,
     );
     if (identical(blocks, preset.blocks)) return;
     unawaited(_persistNow(preset.copyWith(blocks: blocks)));
@@ -472,95 +462,17 @@ class StudioPresetEditorBodyState
             setState(() => _agentsExpanded = !_agentsExpanded),
         onToggle: _toggleAgent,
       ),
-      blockList: _buildSections(),
+      blockList: StudioBlockSectionList(
+        blocks: preset.blocks,
+        sections: _sections,
+        onReorder: _onReorder,
+        onEdit: _openBlock,
+        onToggle: _toggleBlock,
+        onSelectExclusive: _selectExclusive,
+        onDelete: _deleteBlock,
+      ),
       addBlockAtTop: addBlockAtTop,
       onAddBlock: _addBlock,
-    );
-  }
-
-  /// The whole preset at once, split by injection point in pipeline order.
-  /// Every stage keeps its header even when empty, so the pipeline reads the
-  /// same whatever the preset happens to contain.
-  Widget _buildSections() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        for (var i = 0; i < _sections.length; i++)
-          ..._buildSection(_sections[i], isFirst: i == 0),
-      ],
-    );
-  }
-
-  List<Widget> _buildSection((String, String) section, {required bool isFirst}) {
-    final (point, label) = section;
-    final blocks = _blocksAt(point);
-    final entries = groupStudioPresetBlocks(blocks);
-    return [
-      StudioBlockSectionHeader(
-        key: ValueKey('studio_section_$point'),
-        label: label,
-        count: blocks.length,
-        isFirst: isFirst,
-      ),
-      if (entries.isEmpty)
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-          child: Text(
-            'No blocks',
-            style: TextStyle(
-              fontSize: 13,
-              color: context.cs.onSurfaceVariant.withValues(alpha: 0.7),
-            ),
-          ),
-        )
-      else
-        _buildSectionList(point, entries),
-    ];
-  }
-
-  Widget _buildSectionList(
-    String point,
-    List<StudioPresetBlockGroup> entries,
-  ) {
-    return ReorderableListView.builder(
-      key: ValueKey('studio_section_list_$point'),
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      padding: EdgeInsets.zero,
-      buildDefaultDragHandles: false,
-      itemCount: entries.length,
-      // TODO: migrate to onReorderItem (newIndex semantics differ — see Flutter changelog).
-      // ignore: deprecated_member_use
-      onReorder: (oldIndex, newIndex) =>
-          _onReorder(point, oldIndex, newIndex),
-      itemBuilder: (_, i) {
-        final entry = entries[i];
-        // The last row keeps no bottom rule — the next section header draws
-        // its own, and the "Add Block" row draws the closing one.
-        final isLast = i == entries.length - 1;
-        if (entry.header != null) {
-          return StudioBlockGroupRow(
-            key: ValueKey('studio_group_${entry.header!.id}'),
-            group: entry,
-            dragIndex: i,
-            isLast: isLast,
-            onSelectExclusive: (id) => _selectExclusive(entry, id),
-            onToggle: _toggleBlock,
-            onEdit: _openBlock,
-            onDelete: _deleteBlock,
-          );
-        }
-        final block = entry.standalone!;
-        return StudioBlockRow(
-          key: ValueKey('studio_block_${block.id}'),
-          block: block,
-          dragIndex: i,
-          isLast: isLast,
-          onEdit: () => _openBlock(block),
-          onToggle: (v) => _toggleBlock(block, v),
-          onLongPress: () => _deleteBlock(block),
-        );
-      },
     );
   }
 }
