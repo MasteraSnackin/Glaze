@@ -1,7 +1,8 @@
 import '../models/studio_config.dart';
 
-/// One hard-coded Studio controller slot. The decomposition engine assigns
-/// preset blocks to these stable slots and synthesizes one agent per slot.
+/// One hard-coded Studio controller lane. Studio preset blocks are routed to
+/// these lanes by `targetAgentId`; `buildDefaultAgents` creates one agent per
+/// lane.
 class StudioControllerSpec {
   final String id;
   final String name;
@@ -32,7 +33,7 @@ class StudioControllerSpec {
     // `post_processing` = runs after the generator, receives its response.
     // No built-in post-processing specs exist yet (the user's preset blocks
     // route to pre-gen trackers; post-processing is a future expansion), but
-    // the field is here so the decomposition engine CAN produce
+    // the field is here so future specs CAN produce
     // post-processing agents when such specs are added without touching the
     // spec class again. See docs/PLAN_AGENTIC_STUDIO.md §5.7.1 + Feature 6.
     // ignore: unused_element_parameter
@@ -43,13 +44,14 @@ class StudioControllerSpec {
   });
 }
 
-/// The fixed set of Studio controller slots + lookup helpers. Pure data
-/// extracted from `StudioDecompositionService` (plan §3).
+/// The fixed set of Studio controller lanes + lookup helpers. Each lane is a
+/// stable tracker target; agents are created by `buildDefaultAgents` and
+/// blocks are routed by `targetAgentId`.
 class StudioControllerOntology {
   StudioControllerOntology._();
 
-  /// All controller slots, in pipeline order (the last one is the final
-  /// generator). The decomposition engine builds one agent per spec.
+  /// All controller lanes, in pipeline order (the last one is the final
+  /// generator). `buildDefaultAgents` creates one agent per spec.
   static const List<StudioControllerSpec> specs = <StudioControllerSpec>[
     StudioControllerSpec(
       id: 'continuity',
@@ -84,9 +86,9 @@ class StudioControllerOntology {
       id: 'narrative',
       name: 'Narrative / Pacing / Style Controller',
       purpose:
-          'Convert the active Studio preset\'s narrative mode, style, POV, pacing, sensory budget, tone, and genre rules into a compact response-shape contract for the final writer.',
+          'Classify the current scene beat and produce operational narrative constraints — beat type, tempo, scene pressure, sensory budget, dialogue/action balance, and stop point — as a compact brief for the final writer.',
       outputContract:
-          'At chat time, output a compact operational brief that applies the active Studio preset\'s response-shape rules to the current turn. Include only the dimensions the active Studio preset requests, such as beat, pacing, POV/camera, sensory budget, opening constraint, dialogue/action balance, and stopping point. No scene prose, drafted actions, or dialogue.',
+          'At chat time, output a compact operational brief only: beat type, tempo, scene pressure, target length band, sensory budget, dialogue/action balance, and stop point. No scene prose, drafted actions, or dialogue.',
       refreshPolicy: 'turn',
       invalidationSignals: ['scene_changed', 'tone_changed', 'pacing_changed'],
       temperature: 0.3,
