@@ -14,13 +14,6 @@ int studioPresetTokenEstimate(StudioPreset preset) {
   return total;
 }
 
-/// Compact label for [studioPresetTokenEstimate] (e.g. `12K`).
-String studioPresetTokenLabel(StudioPreset preset) {
-  final total = studioPresetTokenEstimate(preset);
-  if (total >= 1000) return '${total ~/ 1000}K';
-  return '$total';
-}
-
 /// Estimated LLM requests per turn (upper bound): the enabled pre-gen
 /// controllers batch into one request, the final responder is one, Post Clean
 /// is two passes (audit + rewrite) and the Ledger/Трекер is one — each counted

@@ -463,7 +463,7 @@ class StudioPresetEditorBodyState
         const SizedBox(width: 8),
         PresetStatBadge(
           icon: Icons.description,
-          label: '${studioPresetTokenLabel(preset)}t',
+          label: '${studioPresetTokenEstimate(preset)}t',
         ),
       ],
     );
