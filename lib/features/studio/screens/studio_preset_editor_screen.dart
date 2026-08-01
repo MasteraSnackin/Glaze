@@ -151,7 +151,7 @@ class _StudioPresetEditorScreenState
             : const TextStyle(decoration: TextDecoration.lineThrough),
       ),
       subtitle: Text(
-        '${block.kind} · ${block.role} · order=${block.order}',
+        '${block.type.name} · ${block.role} · order=${block.order}',
         style: const TextStyle(fontSize: 12),
       ),
       trailing: Switch(

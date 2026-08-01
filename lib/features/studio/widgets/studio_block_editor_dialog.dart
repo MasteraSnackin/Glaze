@@ -8,7 +8,7 @@ import '../../../shared/widgets/sheet_view.dart';
 /// Dialog for editing a single [StudioPresetBlock].
 ///
 /// Shows editable fields for: title, role, content, enabled, order, section,
-/// and kind. Returns the updated block (or null if cancelled).
+/// and type. Returns the updated block (or null if cancelled).
 class StudioBlockEditorDialog extends StatefulWidget {
   final StudioPresetBlock block;
   final bool isNew;
@@ -29,7 +29,7 @@ class _StudioBlockEditorDialogState extends State<StudioBlockEditorDialog> {
   late final TextEditingController _contentCtrl;
   late String _role;
   late String _section;
-  late String _kind;
+  late StudioBlockType _type;
   late bool _enabled;
 
   static const _roles = ['system', 'user', 'assistant'];
@@ -41,24 +41,6 @@ class _StudioBlockEditorDialogState extends State<StudioBlockEditorDialog> {
     'build',
     'brief_parser',
   ];
-  static const _kinds = [
-    'custom_text',
-    'slot',
-    'instruction',
-    'agent_instruction',
-    'tracker_instruction',
-    'previous_agents',
-    'user_persona',
-    'char_card',
-    'scenario',
-    'char_personality',
-    'example_dialogue',
-    'authors_note',
-    'static_context',
-    'chat_history',
-    'memory',
-    'dynamic_context',
-  ];
 
   @override
   void initState() {
@@ -67,7 +49,7 @@ class _StudioBlockEditorDialogState extends State<StudioBlockEditorDialog> {
     _contentCtrl = TextEditingController(text: widget.block.content);
     _role = widget.block.role;
     _section = widget.block.section;
-    _kind = widget.block.kind;
+    _type = widget.block.type;
     _enabled = widget.block.enabled;
   }
 
@@ -109,15 +91,18 @@ class _StudioBlockEditorDialogState extends State<StudioBlockEditorDialog> {
               onChanged: (v) => setState(() => _section = v ?? _section),
             ),
             const SizedBox(height: 16),
-            _FieldLabel('Kind'),
+            _FieldLabel('Type'),
             const SizedBox(height: 6),
-            DropdownButtonFormField<String>(
-              initialValue: _kind,
+            DropdownButtonFormField<StudioBlockType>(
+              initialValue: _type,
               isExpanded: true,
-              items: _kinds
-                  .map((k) => DropdownMenuItem(value: k, child: Text(k)))
+              items: StudioBlockType.values
+                  .map(
+                    (type) =>
+                        DropdownMenuItem(value: type, child: Text(type.name)),
+                  )
                   .toList(),
-              onChanged: (v) => setState(() => _kind = v ?? _kind),
+              onChanged: (value) => setState(() => _type = value ?? _type),
             ),
             const SizedBox(height: 16),
             _FieldLabel('Role'),
@@ -182,7 +167,7 @@ class _StudioBlockEditorDialogState extends State<StudioBlockEditorDialog> {
       content: _contentCtrl.text,
       role: _role,
       section: _section,
-      kind: _kind,
+      type: _type,
       enabled: _enabled,
     );
     Navigator.of(context).pop(updated);

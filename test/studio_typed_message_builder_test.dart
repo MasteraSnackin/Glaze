@@ -53,26 +53,29 @@ void main() {
         blocks: [
           StudioPresetBlock(
             id: 'memory',
-            kind: 'memory',
+            type: StudioBlockType.context,
+            contextSlot: StudioContextSlot.memory,
             content: 'ignored ordinary-shaped fallback',
             section: 'final',
             order: 3,
           ),
           StudioPresetBlock(
             id: 'character',
-            kind: 'char_card',
+            type: StudioBlockType.context,
+            contextSlot: StudioContextSlot.characterCard,
             section: 'final',
             order: 1,
           ),
           StudioPresetBlock(
             id: 'summary',
-            kind: 'summary',
+            type: StudioBlockType.context,
+            contextSlot: StudioContextSlot.summary,
             section: 'final',
             order: 2,
           ),
           StudioPresetBlock(
             id: 'history',
-            kind: 'chat_history',
+            type: StudioBlockType.history,
             section: 'final',
             order: 4,
           ),
@@ -95,7 +98,7 @@ void main() {
     );
   });
 
-  test('unknown kinds remain Studio-owned instructions', () {
+  test('instructions expand Studio macros', () {
     final messages = builder.buildAgentMessages(
       agent: const StudioAgent(id: 'final'),
       context: context,
@@ -105,7 +108,6 @@ void main() {
         blocks: [
           StudioPresetBlock(
             id: 'custom',
-            kind: 'renamed_without_ordinary_match',
             role: 'user',
             content:
                 'Write for {{char}} using {{reasoningPrefix}}thought{{reasoningSuffix}}',
@@ -135,19 +137,21 @@ void main() {
         blocks: [
           StudioPresetBlock(
             id: 'static',
-            kind: 'static_context',
+            type: StudioBlockType.context,
+            contextSlot: StudioContextSlot.staticContext,
             section: 'pregen',
             order: 1,
           ),
           StudioPresetBlock(
             id: 'dynamic',
-            kind: 'dynamic_context',
+            type: StudioBlockType.context,
+            contextSlot: StudioContextSlot.dynamicContext,
             section: 'pregen',
             order: 2,
           ),
           StudioPresetBlock(
             id: 'history',
-            kind: 'chat_history',
+            type: StudioBlockType.history,
             section: 'pregen',
             order: 3,
           ),

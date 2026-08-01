@@ -1,6 +1,7 @@
 import '../models/studio_config.dart';
 import 'history_assembler.dart';
 import 'studio_brief_deduper.dart';
+import 'studio_controller_ontology.dart';
 import 'studio_prompt_text.dart';
 import 'studio_stage_brief.dart';
 import 'studio/studio_brief_macro_renderer.dart';
@@ -57,8 +58,7 @@ class StudioMessageBuilder {
     final messages = <Map<String, dynamic>>[];
 
     for (final block in blocks) {
-      if (block.kind == 'agent_instruction' ||
-          block.kind == 'tracker_instruction') {
+      if (block.type == StudioBlockType.instruction) {
         final control = StringBuffer()
           ..writeln(
             _blockExpander
@@ -92,7 +92,7 @@ class StudioMessageBuilder {
         _addInstructionMessage(messages, block.role, control.toString());
         continue;
       }
-      if (block.kind == 'previous_agents') {
+      if (block.type == StudioBlockType.priorBriefs) {
         if (!isFinalResponse || hasExplicitBriefMacros) continue;
         final sanitized = priorBriefs
             .where((brief) => brief.brief.trim().isNotEmpty)
@@ -115,7 +115,7 @@ class StudioMessageBuilder {
         );
         continue;
       }
-      if (block.kind == 'chat_history') {
+      if (block.type == StudioBlockType.history) {
         final history = isFinalResponse
             ? StudioHistoryLimiter.limitFinalHistory(
                 context.history,
@@ -135,32 +135,14 @@ class StudioMessageBuilder {
         );
         continue;
       }
-      if (block.kind == 'static_context') {
-        messages.addAll(
-          context.staticContext.map((message) => message.toApiMap()),
-        );
-        continue;
-      }
-      if (block.kind == 'dynamic_context') {
-        messages.addAll(
-          context.dynamicContext.map((message) => message.toApiMap()),
-        );
-        continue;
-      }
-      final slot = studioContextSlotForLegacyKind(block.kind);
-      if (slot != null) {
+      if (block.type == StudioBlockType.context) {
+        final slot = block.contextSlot;
+        if (slot == null) continue;
         messages.addAll(
           context.messagesFor(slot).map((message) => message.toApiMap()),
         );
         continue;
       }
-      final content = _blockExpander.expandStudioBlockContent(
-        block.content,
-        context: context,
-        priorBriefs: priorBriefs,
-        config: config,
-      );
-      _addInstructionMessage(messages, block.role, content);
     }
 
     if (mainResponse.trim().isNotEmpty) {
@@ -247,12 +229,10 @@ class StudioMessageBuilder {
             .where((block) => block.enabled && block.section == 'pregen')
             .where(
               (block) =>
-                  block.kind == 'agent_instruction' ||
-                  (block.kind == 'tracker_instruction' &&
-                      _blockExpander.trackerInstructionAppliesToAgent(
-                        block,
-                        agent,
-                      )),
+                  block.type == StudioBlockType.instruction &&
+                  (block.targetAgentId == null ||
+                      block.targetAgentId ==
+                          StudioControllerOntology.targetIdForAgent(agent)),
             )
             .where((block) => !_blockExpander.isRuntimeComputedBlock(block))
             .toList()
@@ -285,23 +265,13 @@ class StudioMessageBuilder {
     final blocks =
         studioPreset.blocks
             .where((block) => block.enabled && block.section == 'pregen')
-            .where((block) => block.kind != 'agent_instruction')
-            .where((block) => block.kind != 'tracker_instruction')
+            .where((block) => block.type == StudioBlockType.instruction)
+            .where((block) => block.targetAgentId == null)
             .where((block) => !_blockExpander.isRuntimeComputedBlock(block))
-            .where((block) => block.kind != 'static_context')
-            .where((block) => block.kind != 'chat_history')
-            .where((block) => block.kind != 'dynamic_context')
             .toList()
           ..sort((a, b) => a.order.compareTo(b.order));
     final buffer = StringBuffer();
     for (final block in blocks) {
-      final slot = studioContextSlotForLegacyKind(block.kind);
-      if (slot != null) {
-        for (final message in context.messagesFor(slot)) {
-          if (message.content.isNotEmpty) buffer.writeln(message.content);
-        }
-        continue;
-      }
       final content = _blockExpander
           .expandStudioBlockContent(
             block.content,

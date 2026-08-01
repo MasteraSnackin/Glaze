@@ -1,4 +1,7 @@
+import 'dart:convert';
+
 import 'package:drift/native.dart';
+import 'package:drift/drift.dart' show Value;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/db/repositories/studio_preset_repo.dart';
@@ -34,5 +37,37 @@ void main() {
       StudioExecutionMode.fromWireName('future-topology'),
       StudioExecutionMode.legacy,
     );
+  });
+
+  test('reads legacy block rows and upserts canonical JSON', () async {
+    await db
+        .into(db.studioPresetRows)
+        .insert(
+          StudioPresetRowsCompanion.insert(
+            presetId: 'legacy',
+            name: 'Legacy',
+            blocksJson: Value(
+              jsonEncode([
+                {
+                  'id': 'continuity_task',
+                  'kind': 'tracker_instruction',
+                  'content': 'Track it',
+                  'section': 'pregen',
+                },
+              ]),
+            ),
+          ),
+        );
+
+    final preset = await repo.getById('legacy');
+    expect(preset?.blocks.single.targetAgentId, 'continuity');
+
+    await repo.upsert(preset!);
+    final row = await (db.select(
+      db.studioPresetRows,
+    )..where((table) => table.presetId.equals('legacy'))).getSingle();
+    final block = (jsonDecode(row.blocksJson) as List).single as Map;
+    expect(block['type'], 'instruction');
+    expect(block.containsKey('kind'), isFalse);
   });
 }

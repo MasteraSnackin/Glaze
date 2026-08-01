@@ -1,5 +1,6 @@
 import '../macro_engine.dart';
 import '../studio_stage_brief.dart';
+import '../studio_controller_ontology.dart';
 import '../../models/studio_config.dart';
 import 'studio_brief_macro_renderer.dart';
 import 'studio_context.dart';
@@ -52,42 +53,26 @@ class StudioRuntimeBlockExpander {
     }.contains(block.id);
   }
 
-  /// True if [block] applies to [agent] in this run context. Only
-  /// `tracker_instruction` blocks are filtered; other kinds always apply.
+  /// Targeted instructions apply only to their exact controller id.
   bool blockAppliesToAgent(
     StudioPresetBlock block,
     StudioAgent agent,
     bool isFinalResponse,
   ) {
-    if (block.kind != 'tracker_instruction') return true;
-    if (isFinalResponse || agent.phase == 'post_processing') return false;
-    return trackerInstructionAppliesToAgent(block, agent);
+    if (block.type != StudioBlockType.instruction ||
+        block.targetAgentId == null) {
+      return true;
+    }
+    return block.targetAgentId ==
+        StudioControllerOntology.targetIdForAgent(agent);
   }
 
-  /// True if a `tracker_instruction` block's controller alias matches the
-  /// agent's ID/name. Uses the same alias map as the brief-macro renderer.
   bool trackerInstructionAppliesToAgent(
     StudioPresetBlock block,
     StudioAgent agent,
-  ) {
-    final agentText = '${agent.id}\n${agent.name}'.toLowerCase();
-    final blockText = '${block.id}\n${block.title}'.toLowerCase();
-    const aliases = <String, List<String>>{
-      'continuity': ['continuity'],
-      'agency': ['agency', 'character'],
-      'narrative': ['narrative', 'pacing', 'style'],
-      'dialogue': ['dialogue'],
-      'guard': ['guard', 'loop', 'prose'],
-      'world': ['world', 'npc'],
-      'meta': ['meta', 'ooc', 'lumia'],
-      'beauty': ['beauty'],
-    };
-    for (final entry in aliases.entries) {
-      if (!entry.value.any(agentText.contains)) continue;
-      return entry.value.any(blockText.contains);
-    }
-    return false;
-  }
+  ) =>
+      block.type == StudioBlockType.instruction &&
+      block.targetAgentId == StudioControllerOntology.targetIdForAgent(agent);
 
   /// Normalize the role of a preset/shard INSTRUCTION block (not a chat
   /// history message). Instruction blocks are always forced to `system` so

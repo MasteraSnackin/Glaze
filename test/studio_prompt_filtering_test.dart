@@ -106,33 +106,30 @@ void main() {
       blocks: [
         StudioPresetBlock(
           id: 'final_agent_instruction',
-          kind: 'agent_instruction',
           content: 'FINAL ONLY',
           section: 'final',
         ),
         StudioPresetBlock(
           id: 'cleaner_system',
-          kind: 'agent_instruction',
           content: 'CLEANER ONLY',
           section: 'cleaner',
         ),
         StudioPresetBlock(
           id: 'continuity_task',
           title: 'Continuity Tracker',
-          kind: 'tracker_instruction',
+          targetAgentId: 'continuity',
           content: 'CONTINUITY ONLY',
           section: 'pregen',
         ),
         StudioPresetBlock(
           id: 'dialogue_task',
           title: 'Dialogue Tracker',
-          kind: 'tracker_instruction',
+          targetAgentId: 'dialogue',
           content: 'DIALOGUE ONLY',
           section: 'pregen',
         ),
         StudioPresetBlock(
           id: 'runtime_envelope',
-          kind: 'runtime_envelope',
           content: 'SEEDED RUNTIME ENVELOPE',
           section: 'pregen',
         ),
@@ -193,7 +190,7 @@ void main() {
           blocks: [
             StudioPresetBlock(
               id: 'history',
-              kind: 'chat_history',
+              type: StudioBlockType.history,
               section: 'final',
             ),
           ],
@@ -240,7 +237,7 @@ void main() {
           blocks: [
             StudioPresetBlock(
               id: 'history',
-              kind: 'chat_history',
+              type: StudioBlockType.history,
               section: 'final',
             ),
           ],
@@ -286,7 +283,7 @@ void main() {
           blocks: [
             StudioPresetBlock(
               id: 'history',
-              kind: 'chat_history',
+              type: StudioBlockType.history,
               section: 'final',
             ),
           ],
@@ -331,7 +328,7 @@ void main() {
           blocks: [
             StudioPresetBlock(
               id: 'history',
-              kind: 'chat_history',
+              type: StudioBlockType.history,
               section: 'final',
             ),
           ],
@@ -385,7 +382,6 @@ void main() {
           blocks: [
             StudioPresetBlock(
               id: 'pov_open',
-              kind: 'group_open',
               role: 'system',
               content: '<loompov>',
               section: 'final',
@@ -400,7 +396,6 @@ void main() {
             ),
             StudioPresetBlock(
               id: 'pov_close',
-              kind: 'group_close',
               role: 'system',
               content: '</loompov>',
               section: 'final',
@@ -456,6 +451,21 @@ void main() {
       expect(text, isNot(contains('SEEDED RUNTIME ENVELOPE')));
     });
 
+    test('target routing does not use agent name aliases', () {
+      final text = builder.buildPerAgentTaskText(
+        agent: const StudioAgent(
+          id: 'custom-agent',
+          name: 'Continuity Controller',
+        ),
+        config: config,
+        studioPreset: preset,
+        context: context,
+      );
+
+      expect(text, isNot(contains('CONTINUITY ONLY')));
+      expect(text, isNot(contains('DIALOGUE ONLY')));
+    });
+
     test('final brief macros expand and suppress previous_agents block', () {
       const macroConfig = StudioConfig(
         sessionId: 's1',
@@ -472,14 +482,13 @@ void main() {
         blocks: [
           StudioPresetBlock(
             id: 'previous_agents',
-            kind: 'previous_agents',
+            type: StudioBlockType.priorBriefs,
             content: '',
             section: 'final',
             order: 0,
           ),
           StudioPresetBlock(
             id: 'brief_macros',
-            kind: 'custom_text',
             content:
                 '<continuity>{{studio_continuity_brief}}</continuity>\n'
                 '<dialogue>{{studio_dialogue_brief}}</dialogue>',

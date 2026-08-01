@@ -244,7 +244,9 @@ class StudioBriefCache {
             {
               'id': block.id,
               'section': block.section,
-              'kind': block.kind,
+              'type': block.type.name,
+              'contextSlot': block.contextSlot?.name,
+              'targetAgentId': block.targetAgentId,
               'role': block.role,
               'enabled': block.enabled,
               'order': block.order,

@@ -12,11 +12,7 @@ StudioPreset prepareStudioPresetForMode(
   required StudioExecutionMode mode,
   required int updatedAt,
 }) {
-  const assistedTaskIds = {
-    'continuity_task_universal',
-    'narrative_task_universal',
-    'beauty_task',
-  };
+  const assistedTargets = {'continuity', 'narrative', 'beauty'};
   final allowedAgents = switch (mode) {
     StudioExecutionMode.legacy => null,
     StudioExecutionMode.direct => const {'final'},
@@ -56,10 +52,11 @@ StudioPreset prepareStudioPresetForMode(
       if (content.trim().isEmpty) continue;
       candidate = block.copyWith(content: content);
     }
-    if (candidate.kind == 'tracker_instruction') {
+    if (candidate.type == StudioBlockType.instruction &&
+        candidate.targetAgentId != null) {
       if (mode == StudioExecutionMode.direct) continue;
       if (mode == StudioExecutionMode.assisted &&
-          !assistedTaskIds.contains(block.id)) {
+          !assistedTargets.contains(candidate.targetAgentId)) {
         continue;
       }
       if (mode == StudioExecutionMode.assisted) {

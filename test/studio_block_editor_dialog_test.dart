@@ -54,7 +54,6 @@ void main() {
       final block = StudioPresetBlock(
         id: 'test_block',
         title: 'Original Title',
-        kind: 'custom_text',
         role: 'system',
         content: 'Original content',
         enabled: true,
@@ -152,7 +151,7 @@ void main() {
 
       expect(find.text('Edit Block'), findsOneWidget);
       expect(find.text('pregen'), findsOneWidget);
-      expect(find.text('custom_text'), findsOneWidget);
+      expect(find.text('instruction'), findsOneWidget);
       // Role is now a SegmentedButton; 'system' is one of its segments.
       expect(find.text('system'), findsOneWidget);
       expect(find.text('Enabled'), findsOneWidget);

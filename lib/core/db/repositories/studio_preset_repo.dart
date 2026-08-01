@@ -4,6 +4,7 @@ import 'package:drift/drift.dart';
 
 import '../../application/sync_repo_interfaces.dart';
 import '../../models/studio_config.dart';
+import '../../models/studio_preset_codec.dart';
 import '../app_db.dart';
 
 class StudioPresetRepo implements SyncStudioPresetStore {
@@ -70,7 +71,11 @@ class StudioPresetRepo implements SyncStudioPresetStore {
     try {
       final list = jsonDecode(row.blocksJson) as List<dynamic>;
       blocks = list
-          .map((e) => StudioPresetBlock.fromJson(e as Map<String, dynamic>))
+          .map(
+            (e) => StudioPresetCodec.canonicalizeBlock(
+              Map<String, dynamic>.from(e as Map),
+            ).block,
+          )
           .toList();
     } catch (_) {
       blocks = [];

@@ -309,15 +309,15 @@ void main() {
       'human_header',
       'human_header_group_close',
     ]);
-    expect(normalized[0].kind, 'group_close');
+    expect(normalized[0].type, StudioBlockType.instruction);
     expect(normalized[0].content, '</lumiapers>');
-    expect(normalized[1].kind, 'group_open');
+    expect(normalized[1].type, StudioBlockType.instruction);
     expect(normalized[1].content, '<loompov>');
     expect(normalized[2].content, 'POV instructions');
-    expect(normalized[4].kind, 'group_close');
+    expect(normalized[4].type, StudioBlockType.instruction);
     expect(normalized[4].content, '</loompov>');
     expect(normalized[5].content, '<loomhuman>');
     expect(normalized[6].content, 'Human instructions');
-    expect(normalized.last.kind, 'group_close');
+    expect(normalized.last.type, StudioBlockType.instruction);
   });
 }

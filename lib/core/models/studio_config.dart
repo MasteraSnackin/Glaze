@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:freezed_annotation/freezed_annotation.dart';
 
+import '../llm/studio/studio_context.dart';
+
 part 'studio_config.freezed.dart';
 part 'studio_config.g.dart';
 
@@ -18,6 +20,8 @@ enum StudioExecutionMode {
     );
   }
 }
+
+enum StudioBlockType { instruction, context, history, priorBriefs }
 
 /// Reusable Studio configuration profile.
 ///
@@ -82,7 +86,9 @@ abstract class StudioPresetBlock with _$StudioPresetBlock {
   const factory StudioPresetBlock({
     required String id,
     @Default('') String title,
-    @Default('custom_text') String kind,
+    @Default(StudioBlockType.instruction) StudioBlockType type,
+    StudioContextSlot? contextSlot,
+    String? targetAgentId,
     @Default('system') String role,
     @Default('') String content,
     @Default(true) bool enabled,

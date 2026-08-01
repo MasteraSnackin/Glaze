@@ -67,9 +67,7 @@ final _standaloneClosingTag = RegExp(r'^\s*</[A-Za-z][\w-]*>\s*$');
 List<StudioPresetBlock> normalizeStudioGroupBoundaries(
   List<StudioPresetBlock> blocks,
 ) {
-  if (blocks.any(
-    (block) => block.kind == 'group_open' || block.kind == 'group_close',
-  )) {
+  if (blocks.any(_isGroupBoundary)) {
     return blocks;
   }
 
@@ -97,7 +95,6 @@ List<StudioPresetBlock> normalizeStudioGroupBoundaries(
         StudioPresetBlock(
           id: '${block.id}_prefix_close',
           title: 'Previous section closing tag',
-          kind: 'group_close',
           role: 'system',
           content: previousClose,
           section: block.section,
@@ -108,7 +105,6 @@ List<StudioPresetBlock> normalizeStudioGroupBoundaries(
         StudioPresetBlock(
           id: '${previousHeaderId}_group_close',
           title: 'Closing tag',
-          kind: 'group_close',
           role: 'system',
           content: pendingClose ?? previousClose,
           section: previousHeaderSection ?? block.section,
@@ -120,7 +116,6 @@ List<StudioPresetBlock> normalizeStudioGroupBoundaries(
         StudioPresetBlock(
           id: '${block.id}_group_open',
           title: 'Opening tag',
-          kind: 'group_open',
           role: 'system',
           content: ownOpen,
           section: block.section,
@@ -141,7 +136,6 @@ List<StudioPresetBlock> normalizeStudioGroupBoundaries(
       output[output.length - 1] = existingClose.copyWith(
         id: '${previousHeaderId}_group_close',
         title: 'Closing tag',
-        kind: 'group_close',
         role: 'system',
         content: pendingClose,
       );
@@ -150,7 +144,6 @@ List<StudioPresetBlock> normalizeStudioGroupBoundaries(
         StudioPresetBlock(
           id: '${previousHeaderId}_group_close',
           title: 'Closing tag',
-          kind: 'group_close',
           role: 'system',
           content: pendingClose,
           section: output.last.section,
@@ -173,8 +166,7 @@ List<StudioPresetBlockGroup> groupStudioPresetBlocks(
   final sorted = [...blocks]..sort((a, b) => a.order.compareTo(b.order));
   final boundaries = {
     for (final block in sorted)
-      if (block.kind == 'group_open' || block.kind == 'group_close')
-        block.id: block,
+      if (_isGroupBoundary(block)) block.id: block,
   };
   final result = <StudioPresetBlockGroup>[];
   StudioPresetBlock? header;
@@ -217,7 +209,7 @@ List<StudioPresetBlockGroup> groupStudioPresetBlocks(
   }
 
   for (final block in sorted) {
-    if (block.kind == 'group_open' || block.kind == 'group_close') continue;
+    if (_isGroupBoundary(block)) continue;
     final startsTenseSubgroup =
         header != null &&
         _isPointOfViewHeader(header!.title) &&
@@ -243,6 +235,11 @@ List<StudioPresetBlockGroup> groupStudioPresetBlocks(
   flush();
   return result;
 }
+
+bool _isGroupBoundary(StudioPresetBlock block) =>
+    block.id.endsWith('_group_open') ||
+    block.id.endsWith('_group_close') ||
+    block.id.endsWith('_prefix_close');
 
 /// Enables [selectedId] and disables every sibling in an exclusive group.
 List<StudioPresetBlock> selectExclusiveStudioBlock(

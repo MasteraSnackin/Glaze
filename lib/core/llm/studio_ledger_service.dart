@@ -188,6 +188,7 @@ class StudioLedgerService {
             (block) =>
                 block.id == ledgerReconciliationPromptBlockId &&
                 block.enabled &&
+                block.type == StudioBlockType.instruction &&
                 block.section == 'ledger' &&
                 block.content.trim().isNotEmpty,
           )
@@ -810,6 +811,7 @@ class StudioLedgerService {
       (block) =>
           block.id == _ledgerSystemPromptBlockId &&
           block.enabled &&
+          block.type == StudioBlockType.instruction &&
           block.section == 'ledger' &&
           block.content.trim().isNotEmpty,
     );

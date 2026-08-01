@@ -18,27 +18,9 @@ enum StudioContextSlot {
   characterKnowledge,
   studioSessionState,
   runtimeDynamic,
+  staticContext,
+  dynamicContext,
 }
-
-StudioContextSlot? studioContextSlotForLegacyKind(String kind) =>
-    switch (kind) {
-      'char_card' => StudioContextSlot.characterCard,
-      'char_personality' => StudioContextSlot.characterPersonality,
-      'user_persona' => StudioContextSlot.userPersona,
-      'scenario' => StudioContextSlot.scenario,
-      'example_dialogue' => StudioContextSlot.exampleDialogue,
-      'authors_note' => StudioContextSlot.authorsNote,
-      'summary' => StudioContextSlot.summary,
-      'memory' => StudioContextSlot.memory,
-      'worldInfoBefore' => StudioContextSlot.loreBefore,
-      'worldInfoAfter' => StudioContextSlot.loreAfter,
-      'lorebooks' => StudioContextSlot.loreMacro,
-      'recalled_messages' => StudioContextSlot.recalledMessages,
-      'character_knowledge' => StudioContextSlot.characterKnowledge,
-      'studio_session_state' => StudioContextSlot.studioSessionState,
-      'guided_generation' => StudioContextSlot.runtimeDynamic,
-      _ => null,
-    };
 
 final class StudioContextDiagnostics {
   final List<TriggeredEntry> triggeredLorebooks;
@@ -74,8 +56,11 @@ final class StudioContext {
     required this.diagnostics,
   });
 
-  List<PromptMessage> messagesFor(StudioContextSlot slot) =>
-      slots[slot] ?? const <PromptMessage>[];
+  List<PromptMessage> messagesFor(StudioContextSlot slot) => switch (slot) {
+    StudioContextSlot.staticContext => staticContext,
+    StudioContextSlot.dynamicContext => dynamicContext,
+    _ => slots[slot] ?? const <PromptMessage>[],
+  };
 
   String join(StudioContextSlot slot) =>
       messagesFor(slot).map((message) => message.content).join('\n\n');

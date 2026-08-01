@@ -63,7 +63,7 @@ class StudioPresetGroupTile extends StatelessWidget {
             dense: true,
             contentPadding: const EdgeInsets.only(left: 32, right: 16),
             title: Text(block.title.isEmpty ? block.id : block.title),
-            subtitle: Text('${block.kind} · ${block.role}'),
+            subtitle: Text('${block.type.name} · ${block.role}'),
             trailing: group.exclusive
                 ? Icon(
                     block.enabled

@@ -233,4 +233,18 @@ class StudioControllerOntology {
           : specs[agent.order.clamp(0, specs.length - 1)],
     );
   }
+
+  /// Stable controller target for canonical Studio block routing. This accepts
+  /// only a canonical id or the exact generated-agent id shape.
+  static String? targetIdForAgent(StudioAgent agent) {
+    for (final spec in specs) {
+      if (agent.id == spec.id ||
+          RegExp(
+            '^agent_.+_${RegExp.escape(spec.id)}_[0-9]+\$',
+          ).hasMatch(agent.id)) {
+        return spec.id;
+      }
+    }
+    return null;
+  }
 }

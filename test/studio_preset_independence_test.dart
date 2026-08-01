@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:glaze_flutter/core/llm/generation_context_inputs.dart';
 import 'package:glaze_flutter/core/llm/studio/studio_context_preparer.dart';
+import 'package:glaze_flutter/core/llm/studio/studio_context.dart';
 import 'package:glaze_flutter/core/llm/studio_brief_deduper.dart';
 import 'package:glaze_flutter/core/llm/studio_brief_parser.dart';
 import 'package:glaze_flutter/core/llm/studio_message_builder.dart';
@@ -64,7 +65,6 @@ void main() {
       blocks: [
         StudioPresetBlock(
           id: 'instruction',
-          kind: 'agent_instruction',
           content:
               'Write {{char}} {{reasoningPrefix}}carefully{{reasoningSuffix}}',
           section: 'final',
@@ -72,13 +72,14 @@ void main() {
         ),
         StudioPresetBlock(
           id: 'summary',
-          kind: 'summary',
+          type: StudioBlockType.context,
+          contextSlot: StudioContextSlot.summary,
           section: 'final',
           order: 2,
         ),
         StudioPresetBlock(
           id: 'history',
-          kind: 'chat_history',
+          type: StudioBlockType.history,
           section: 'final',
           order: 3,
         ),

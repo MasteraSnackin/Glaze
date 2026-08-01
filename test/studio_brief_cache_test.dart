@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/llm/agent_runner.dart';
+import 'package:glaze_flutter/core/llm/studio/studio_context.dart';
 import 'package:glaze_flutter/core/llm/studio_brief_cache.dart';
 import 'package:glaze_flutter/core/llm/studio_brief_parser.dart';
 import 'package:glaze_flutter/core/llm/studio_stage_brief.dart';
@@ -50,6 +51,30 @@ void main() {
     );
 
     expect(edited, isNot(original));
+  });
+
+  test('typed block routing changes the cache key', () {
+    final original = _cacheKey(cache);
+    final context = _cacheKey(
+      cache,
+      preset: _preset.copyWith(
+        blocks: [
+          _preset.blocks.single.copyWith(
+            type: StudioBlockType.context,
+            contextSlot: StudioContextSlot.memory,
+          ),
+        ],
+      ),
+    );
+    final targeted = _cacheKey(
+      cache,
+      preset: _preset.copyWith(
+        blocks: [_preset.blocks.single.copyWith(targetAgentId: 'continuity')],
+      ),
+    );
+
+    expect(context, isNot(original));
+    expect(targeted, isNot(original));
   });
 
   test('agentEnabled map insertion order does not change the cache key', () {
@@ -121,7 +146,6 @@ const _preset = StudioPreset(
     StudioPresetBlock(
       id: 'continuity-rules',
       section: 'pregen',
-      kind: 'agent_instruction',
       role: 'system',
       order: 2,
       content: 'Original instructions',

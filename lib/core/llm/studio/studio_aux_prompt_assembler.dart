@@ -47,6 +47,7 @@ class StudioAuxPromptAssembler {
     final sectionBlocks =
         blocks
             .where((b) => b.enabled && b.section == section)
+            .where((b) => b.type == StudioBlockType.instruction)
             .where((b) => !skipBlockIds.contains(b.id))
             .toList()
           ..sort((a, b) => a.order.compareTo(b.order));
