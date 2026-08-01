@@ -42,6 +42,10 @@ class StudioMessageBuilder {
     required bool isFinalResponse,
     String mainResponse = '',
     int finalContextOverride = 0,
+    // Trailing chat messages for an intermediate agent. 0 = the agent spec's
+    // own size. Passed explicitly because an agent carries no context size of
+    // its own (§4).
+    int trackerContextOverride = 0,
     int reasoningHistoryCount = 0,
   }) {
     final context = _bucketizer.bucketize(
@@ -89,7 +93,11 @@ class StudioMessageBuilder {
                 )
               : StudioHistoryLimiter.limitTrackerHistory(
                   context.history,
-                  agent.contextSize,
+                  trackerContextOverride > 0
+                      ? trackerContextOverride
+                      : StudioControllerOntology.contextSizeOf(
+                          StudioControllerOntology.specForAgent(agent),
+                        ),
                 );
           if (isFinalResponse &&
               (reasoningHistoryCount == -1 || reasoningHistoryCount > 0)) {

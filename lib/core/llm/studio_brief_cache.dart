@@ -7,6 +7,7 @@ import '../utils/cast_helpers.dart';
 import 'agent_runner.dart';
 import 'prompt_builder.dart';
 import 'studio_brief_parser.dart';
+import 'studio_controller_ontology.dart';
 import 'studio_stage_brief.dart';
 
 /// Owns the Studio brief cache: probe, persist, key derivation, and
@@ -135,6 +136,9 @@ class StudioBriefCache {
     required String policy,
     required String sceneKey,
   }) {
+    // Generation parameters live on the agent's spec, not on the agent (§4),
+    // so the cache key must read them from there or it stops noticing changes.
+    final spec = StudioControllerOntology.specForAgent(agent);
     final agentEnabledKeys = studioPreset.agentEnabled.keys.toList()..sort();
     final blocks = studioPreset.blocks.indexed.toList()
       ..sort((a, b) {
@@ -143,7 +147,7 @@ class StudioBriefCache {
         return a.$1.compareTo(b.$1);
       });
     final base = <String, dynamic>{
-      'v': 3,
+      'v': 4,
       'sessionId': sessionId,
       'profileId': config.profileId,
       'studioConfigId': config.sessionId,
@@ -203,19 +207,14 @@ class StudioBriefCache {
         'role': agent.role,
         'order': agent.order,
         'enabled': agent.enabled,
-        'endpoint': agent.endpoint,
-        'timeoutMs': agent.timeoutMs,
-        'temperature': agent.temperature,
-        'maxTokens': agent.maxTokens,
+        'timeoutMs': spec.timeoutMs,
+        'temperature': spec.temperature,
+        'maxTokens': spec.maxTokens,
         'sourceBlockNames': agent.sourceBlockNames,
         'refreshPolicy': agent.refreshPolicy,
         'invalidationSignals': agent.invalidationSignals,
-        'contextSize': agent.contextSize,
-        'runInterval': agent.runInterval,
+        'contextSize': StudioControllerOntology.contextSizeOf(spec),
         'maxParallelJobs': agent.maxParallelJobs,
-        'runIndividually': agent.runIndividually,
-        'activationKeywords': agent.activationKeywords,
-        'activationScanDepth': agent.activationScanDepth,
         'phase': agent.phase,
       },
       'refreshPolicy': policy,

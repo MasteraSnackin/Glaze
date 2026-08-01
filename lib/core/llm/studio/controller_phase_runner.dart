@@ -144,16 +144,10 @@ class ControllerPhaseRunner {
       final historyForScan = allHistory.length > 8
           ? allHistory.sublist(allHistory.length - 8)
           : allHistory;
-      final dueTrackers = preGenTrackers.where((a) {
-        final interval = a.runInterval <= 0 ? 1 : a.runInterval;
-        if (turnIndex % interval != 0) return false;
-        if (a.activationKeywords.isEmpty) return true;
-        return StudioActivationGate.matchesActivationKeywords(
-          a.activationKeywords,
-          historyForScan,
-          a.activationScanDepth,
-        );
-      }).toList();
+      // Every enabled controller runs every turn: the per-agent run interval
+      // and keyword gate were agent-level overrides, which an agent no longer
+      // carries (§4).
+      final dueTrackers = preGenTrackers.toList();
 
       final cachedBriefs = <StudioStageBrief>[];
       final fetchTrackers = <StudioAgent>[];
@@ -223,7 +217,8 @@ class ControllerPhaseRunner {
           turnConfig: turnConfig,
         ),
         runIndividual: (agent) => _executor.runIndividualTracker(
-          agent: agent.copyWith(contextSize: trackerContextOverride),
+          agent: agent,
+          trackerContextOverride: trackerContextOverride,
           config: config,
           studioPreset: effectivePreset,
           promptResult: promptResult,

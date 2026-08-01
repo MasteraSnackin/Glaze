@@ -9,6 +9,7 @@ import 'reasoning_stripper.dart';
 import 'stream_accumulator.dart';
 import 'transport/chat_transport.dart';
 import 'transport/chat_transport_request.dart';
+import 'studio_controller_ontology.dart';
 
 /// The streaming state machine for a single Studio agent run, extracted
 /// from `AgentRunner._runAgentInner` (plan §7.1). Given an already-resolved
@@ -66,6 +67,10 @@ class AgentStreamRunner {
     final hasInlineTags =
         effectiveTagStart.isNotEmpty && effectiveTagEnd.isNotEmpty;
 
+    // Sampling defaults come from the agent's fixed spec (§4) — an agent
+    // carries no generation parameters of its own.
+    final spec = StudioControllerOntology.specForAgent(agent);
+
     final accumulator = StreamAccumulator(
       tagStart: effectiveTagStart,
       tagEnd: effectiveTagEnd,
@@ -79,8 +84,8 @@ class AgentStreamRunner {
       apiKey: resolved.apiKey,
       model: resolved.model,
       messages: requestMessages,
-      maxTokens: maxTokensOverride ?? agent.maxTokens,
-      temperature: temperatureOverride ?? agent.temperature,
+      maxTokens: maxTokensOverride ?? spec.maxTokens,
+      temperature: temperatureOverride ?? spec.temperature,
       topP: resolved.topP,
       topK: resolved.topK,
       frequencyPenalty: resolved.frequencyPenalty,

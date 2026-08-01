@@ -232,19 +232,20 @@ class StudioControllerOntology {
           role: 'system',
           order: i,
           enabled: spec.id != 'meta',
-          temperature: spec.temperature,
-          maxTokens: spec.maxTokens,
-          timeoutMs: spec.timeoutMs,
           refreshPolicy: spec.refreshPolicy,
           invalidationSignals: spec.invalidationSignals,
           phase: spec.phase,
-          contextSize: spec.contextSize > 0 ? spec.contextSize : 5,
           specId: spec.id,
         ),
       );
     }
     return agents;
   }
+
+  /// Trailing chat messages a controller is handed. Specs that leave it at 0
+  /// fall back to the pipeline default of 5.
+  static int contextSizeOf(StudioControllerSpec spec) =>
+      spec.contextSize > 0 ? spec.contextSize : 5;
 
   static StudioControllerSpec byId(String specId) {
     return specs.firstWhere(

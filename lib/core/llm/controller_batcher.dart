@@ -4,6 +4,7 @@ import 'agent_runner.dart';
 import 'studio_turn_config_snapshot.dart';
 import 'concurrency_limiter.dart';
 import 'controller_batch_protocol.dart';
+import 'studio_controller_ontology.dart';
 
 /// Concurrency limits for the tracker phase (Phase 5.7.2).
 ///
@@ -38,8 +39,8 @@ class ControllerGrouping {
   });
 }
 
-/// A batch group: trackers sharing `(provider, model)` and none flagged
-/// [StudioAgent.runIndividually] (or matched by [shouldRunIndividually]).
+/// A batch group: trackers sharing `(provider, model)` and none matched by
+/// [ControllerBatcher.shouldRunIndividually].
 ///
 /// All agents in a group are sent to the LLM as ONE request —
 /// [buildBatchMessages] packs their per-agent instructions into `<agent_task>`
@@ -53,13 +54,13 @@ class ControllerBatchGroup {
   final ResolvedAgentConfig resolved;
   final List<StudioAgent> agents;
 
-  /// Sum of `agent.maxTokens` across the group, capped by
+  /// Sum of the agents' spec `maxTokens` across the group, capped by
   /// `resolved.maxTokens` (the provider's configured cap). See
   /// [ControllerBatcher._capBatchMaxTokens] — a long batch must not get
   /// truncated mid-stream and lose half of the `<result>` blocks.
   final int batchMaxTokens;
 
-  /// MIN of `agent.temperature` across the group. Lowest temperature wins
+  /// MIN of the agents' spec temperature across the group. Lowest wins
   /// (trackers should be deterministic; a high-temp agent should not drag
   /// the whole batch into randomness).
   final double batchTemperature;
@@ -139,11 +140,9 @@ class ControllerBatcher {
   ControllerBatcher([this._runner]);
 
   /// Heuristic: should this tracker run as its own individual request,
-  /// never batched? (Phase 5.2). Returns true if [StudioAgent.runIndividually]
-  /// is explicitly set OR the agent's name matches one of
-  /// [_individualNamePatterns].
+  /// never batched? (Phase 5.2). Returns true when the agent's name matches
+  /// one of [_individualNamePatterns].
   bool shouldRunIndividually(StudioAgent agent) {
-    if (agent.runIndividually) return true;
     final lower = agent.name.toLowerCase();
     for (final pattern in _individualNamePatterns) {
       if (lower.contains(pattern)) return true;
@@ -240,17 +239,22 @@ class ControllerBatcher {
     List<StudioAgent> agents,
     ResolvedAgentConfig resolved,
   ) {
-    final sum = agents.fold<int>(0, (acc, a) => acc + a.maxTokens);
+    final sum = agents.fold<int>(
+      0,
+      (acc, a) => acc + StudioControllerOntology.specForAgent(a).maxTokens,
+    );
     // Glaze has no separate `maxOutputTokens` field on the model;
     // `ApiConfig.maxTokens` is the single output cap. Use it as the ceiling.
     // 0 or negative = uncapped (very large); treat as no cap.
     final cap = resolved.contextSize > 0 ? resolved.contextSize : 1 << 30;
     // The output budget must never exceed what the provider will accept as
     // `max_tokens` in the body — so we also clamp by `ApiConfig.maxTokens`
-    // (carried on `agent.maxTokens` default 8000 but the resolved ApiConfig
+    // (the spec's maxTokens, but the resolved ApiConfig
     // value is the source of truth for the batch request).
-    final apiCap =
-        agents.first.maxTokens; // per-agent cap; the SUM is what we send
+    // Per-agent cap from the spec; the SUM is what we actually send.
+    final apiCap = StudioControllerOntology
+        .specForAgent(agents.first)
+        .maxTokens;
     // Final ceiling: the smaller of (provider context cap / 2) and (sum).
     // Half the context window is a sane max for output — the rest is input.
     final outputCeiling = cap ~/ 2;
@@ -259,13 +263,19 @@ class ControllerBatcher {
 
   double _minTemperature(List<StudioAgent> agents) {
     if (agents.isEmpty) return 0.3;
-    return agents.map((a) => a.temperature).reduce((a, b) => a < b ? a : b);
+    return agents
+        .map((a) => StudioControllerOntology.specForAgent(a).temperature)
+        .reduce((a, b) => a < b ? a : b);
   }
 
   int _maxContextSize(List<StudioAgent> agents) {
     if (agents.isEmpty) return 5;
     return agents
-        .map((a) => a.contextSize)
+        .map(
+          (a) => StudioControllerOntology.contextSizeOf(
+            StudioControllerOntology.specForAgent(a),
+          ),
+        )
         .reduce((a, b) => a > b ? a : b)
         .clamp(1, 200);
   }
