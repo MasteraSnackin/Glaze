@@ -78,7 +78,7 @@ void main() {
 
       // user_version matches the Drift schema version (app_db.dart schemaVersion).
       // Update this constant whenever a new migration step is added.
-        expect(version, 95);
+      expect(version, 96);
     });
 
     test(
@@ -115,7 +115,7 @@ void main() {
         final version = await upgraded
             .customSelect('PRAGMA user_version')
             .get();
-          expect(version.first.read<int>('user_version'), 95);
+        expect(version.first.read<int>('user_version'), 96);
         expect(names, contains('variant_group_id'));
         expect(names, contains('hidden'));
       },
@@ -145,12 +145,12 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-        expect(version.read<int>('user_version'), 95);
+      expect(version.read<int>('user_version'), 96);
     });
 
     test('current schema includes atomic character fact tables', () async {
       final version = await db.customSelect('PRAGMA user_version').getSingle();
-        expect(version.read<int>('user_version'), 95);
+      expect(version.read<int>('user_version'), 96);
 
       final factColumns = await db
           .customSelect("PRAGMA table_info('character_knowledge_fact_rows')")
@@ -262,7 +262,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-        expect(version.read<int>('user_version'), 95);
+      expect(version.read<int>('user_version'), 96);
     });
 
     test(
@@ -372,7 +372,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-        expect(version.read<int>('user_version'), 95);
+      expect(version.read<int>('user_version'), 96);
     });
 
     test('v80 adds Responses API toggle defaulting to off', () async {
@@ -412,7 +412,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-        expect(version.read<int>('user_version'), 95);
+      expect(version.read<int>('user_version'), 96);
     });
 
     test('v81 adds composite embedding source index', () async {
@@ -446,7 +446,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-        expect(version.read<int>('user_version'), 95);
+      expect(version.read<int>('user_version'), 96);
     });
 
     test('v82 creates rewrite persistence schema and provenance columns', () async {
@@ -520,7 +520,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-        expect(version.read<int>('user_version'), 95);
+      expect(version.read<int>('user_version'), 96);
     });
 
     test('v83 rebuilds interim text revision columns without losing rows', () async {
@@ -957,7 +957,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-        expect(version.read<int>('user_version'), 95);
+      expect(version.read<int>('user_version'), 96);
 
       // Rows and payloads survive; legacy statuses pass through or are
       // normalized fail-closed, and new columns carry neutral defaults.
@@ -1162,7 +1162,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-        expect(version.read<int>('user_version'), 95);
+      expect(version.read<int>('user_version'), 96);
       final row = await upgraded
           .customSelect(
             'SELECT blocks_json FROM studio_preset_rows WHERE preset_id = ?',
@@ -1278,7 +1278,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-        expect(version.read<int>('user_version'), 95);
+      expect(version.read<int>('user_version'), 96);
       final check = await upgraded.customSelect('PRAGMA integrity_check').get();
       expect(check.single.read<String>('integrity_check'), 'ok');
     });
@@ -1651,61 +1651,159 @@ void main() {
       },
     );
 
-    test('v92 evolution schema has exclusive claims and immutable output', () async {
-      for (final table in ['card_evolution_claims', 'card_evolution_proposal_runs']) {
-        expect(await db.customSelect("PRAGMA table_info('$table')").get(), isNotEmpty);
-      }
-      final indexes = await db.customSelect(
-        "PRAGMA index_list('card_evolution_claims')",
-      ).get();
-      expect(indexes.map((row) => row.read<String>('name')), containsAll([
-        'idx_card_evolution_claim_input',
-        'idx_card_evolution_active_claim',
-      ]));
-      final trigger = await db.customSelect(
-        "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name = 'card_evolution_proposal_runs_no_update'",
-      ).getSingleOrNull();
-      expect(trigger, isNotNull);
+    test(
+      'v92 evolution schema has exclusive claims and immutable output',
+      () async {
+        for (final table in [
+          'card_evolution_claims',
+          'card_evolution_proposal_runs',
+        ]) {
+          expect(
+            await db.customSelect("PRAGMA table_info('$table')").get(),
+            isNotEmpty,
+          );
+        }
+        final indexes = await db
+            .customSelect("PRAGMA index_list('card_evolution_claims')")
+            .get();
+        expect(
+          indexes.map((row) => row.read<String>('name')),
+          containsAll([
+            'idx_card_evolution_claim_input',
+            'idx_card_evolution_active_claim',
+          ]),
+        );
+        final trigger = await db
+            .customSelect(
+              "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name = 'card_evolution_proposal_runs_no_update'",
+            )
+            .getSingleOrNull();
+        expect(trigger, isNotNull);
+      },
+    );
+
+    test(
+      'v93 session lorebook evolution overlay has the session key',
+      () async {
+        final columns = await db
+            .customSelect(
+              "PRAGMA table_info('session_lorebook_evolution_rows')",
+            )
+            .get();
+        expect(
+          columns.map((row) => row.read<String>('name')),
+          containsAll([
+            'chat_session_id',
+            'lorebook_id',
+            'entry_id',
+            'base_content',
+            'content',
+            'content_hash',
+          ]),
+        );
+      },
+    );
+
+    test('v96 canonicalizes every Studio preset block row', () async {
+      final file = File(
+        '${Directory.systemTemp.path}/glaze_mig_studio_v96_${DateTime.now().microsecondsSinceEpoch}.db',
+      );
+      addTearDown(() async {
+        if (file.existsSync()) await file.delete();
+      });
+
+      final seeded = AppDatabase.forTesting(
+        NativeDatabase.createInBackground(file),
+      );
+      await seeded.customSelect('SELECT 1').get();
+      await seeded.customStatement(
+        '''INSERT INTO studio_preset_rows
+           (preset_id, name, blocks_json, agent_enabled_json,
+            execution_mode, updated_at)
+           VALUES (?, ?, ?, '{}', 'legacy', 1),
+                  (?, ?, ?, '{}', 'legacy', 2),
+                  (?, ?, ?, '{}', 'legacy', 3)''',
+        [
+          'legacy-context',
+          'Legacy context',
+          jsonEncode([
+            {
+              'id': 'memory-slot',
+              'name': 'Memory source',
+              'kind': 'memory',
+              'content': 'ignored',
+            },
+          ]),
+          'legacy-tracker',
+          'Legacy tracker',
+          jsonEncode([
+            {
+              'id': 'continuity_task',
+              'kind': 'tracker_instruction',
+              'content': 'Track continuity.',
+            },
+          ]),
+          'malformed',
+          'Malformed',
+          '{not-json',
+        ],
+      );
+      await seeded.customStatement('PRAGMA user_version = 95');
+      await seeded.close();
+
+      final upgraded = AppDatabase.forTesting(
+        NativeDatabase.createInBackground(file),
+      );
+      addTearDown(() async => upgraded.close());
+      await upgraded.customSelect('SELECT 1').get();
+
+      final rows = await upgraded
+          .customSelect('SELECT preset_id, blocks_json FROM studio_preset_rows')
+          .get();
+      final byId = {
+        for (final row in rows)
+          row.read<String>('preset_id'): row.read<String>('blocks_json'),
+      };
+      final context = jsonDecode(byId['legacy-context']!) as List;
+      expect(context.single['title'], 'Memory source');
+      expect(context.single['type'], 'context');
+      expect(context.single['contextSlot'], 'memory');
+      expect(context.single, isNot(contains('kind')));
+      final tracker = jsonDecode(byId['legacy-tracker']!) as List;
+      expect(tracker.single['type'], 'instruction');
+      expect(tracker.single['targetAgentId'], 'continuity');
+      expect(byId['malformed'], '{not-json');
+
+      final version = await upgraded
+          .customSelect('PRAGMA user_version')
+          .getSingle();
+      expect(version.read<int>('user_version'), 96);
     });
 
-    test('v93 session lorebook evolution overlay has the session key', () async {
-      final columns = await db.customSelect(
-        "PRAGMA table_info('session_lorebook_evolution_rows')",
-      ).get();
-      expect(
-        columns.map((row) => row.read<String>('name')),
-        containsAll([
-          'chat_session_id',
-          'lorebook_id',
-          'entry_id',
-          'base_content',
-          'content',
-          'content_hash',
-        ]),
-      );
-    });
-
-    test('v95 retains the latest Card Rewriter debug result per writer stage', () async {
-      final columns = await db.customSelect(
-        "PRAGMA table_info('card_evolution_debug_runs')",
-      ).get();
-      expect(
-        columns.map((row) => row.read<String>('name')),
-        containsAll([
-          'session_id',
-          'stage',
-          'status',
-          'model',
-          'output',
-          'attempts_json',
-          'updated_at',
-        ]),
-      );
-      final primaryKey = columns
-          .where((row) => row.read<int>('pk') > 0)
-          .map((row) => row.read<String>('name'));
-      expect(primaryKey, containsAll(['session_id', 'stage']));
-    });
+    test(
+      'v95 retains the latest Card Rewriter debug result per writer stage',
+      () async {
+        final columns = await db
+            .customSelect("PRAGMA table_info('card_evolution_debug_runs')")
+            .get();
+        expect(
+          columns.map((row) => row.read<String>('name')),
+          containsAll([
+            'session_id',
+            'stage',
+            'status',
+            'model',
+            'output',
+            'attempts_json',
+            'updated_at',
+          ]),
+        );
+        final primaryKey = columns
+            .where((row) => row.read<int>('pk') > 0)
+            .map((row) => row.read<String>('name'));
+        expect(primaryKey, containsAll(['session_id', 'stage']));
+      },
+    );
   });
 }
 

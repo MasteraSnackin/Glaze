@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import '../llm/studio/studio_context.dart';
 import 'studio_config.dart';
 
@@ -215,6 +217,17 @@ abstract final class StudioPresetCodec {
   static Map<String, dynamic> canonicalizeBlockJson(
     Map<String, dynamic> json,
   ) => canonicalizeBlock(json).block.toJson();
+
+  static String canonicalizeBlocksJson(String source) {
+    final decoded = jsonDecode(source);
+    if (decoded is! List) {
+      throw const FormatException('Studio blocks JSON must be a list.');
+    }
+    return jsonEncode([
+      for (final value in decoded)
+        canonicalizeBlockJson(Map<String, dynamic>.from(value as Map)),
+    ]);
+  }
 
   static StudioPresetBlock _block(
     Map<String, dynamic> json, {

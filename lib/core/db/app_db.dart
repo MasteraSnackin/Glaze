@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../models/studio_preset_codec.dart';
 import '../utils/platform_paths.dart';
 import '../utils/time_helpers.dart';
 import 'tables.dart';
@@ -66,7 +67,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 95;
+  int get schemaVersion => 96;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -1875,8 +1876,32 @@ class AppDatabase extends _$AppDatabase {
         // with the stage in its key so card and lorebook diagnostics coexist.
         await m.alterTable(TableMigration(cardEvolutionDebugRuns));
       }
+      if (from < 96) {
+        await _migrateStudioPresetBlocksToExplicitSemantics();
+      }
     },
   );
+
+  Future<void> _migrateStudioPresetBlocksToExplicitSemantics() async {
+    final rows = await customSelect(
+      'SELECT preset_id, blocks_json FROM studio_preset_rows',
+    ).get();
+    for (final row in rows) {
+      final presetId = row.read<String>('preset_id');
+      final source = row.read<String>('blocks_json');
+      try {
+        final canonical = StudioPresetCodec.canonicalizeBlocksJson(source);
+        if (canonical == source) continue;
+        await customStatement(
+          'UPDATE studio_preset_rows SET blocks_json = ?, updated_at = ? '
+          'WHERE preset_id = ?',
+          [canonical, DateTime.now().millisecondsSinceEpoch, presetId],
+        );
+      } on Object {
+        // Preserve malformed rows for recovery instead of replacing user data.
+      }
+    }
+  }
 
   Future<void> _createLorebookUseManifestImmutabilityTriggers() async {
     for (final table in const [

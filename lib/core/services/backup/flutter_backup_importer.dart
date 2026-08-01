@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../db/app_db.dart';
+import '../../models/studio_preset_codec.dart';
 import '../image_storage_service.dart';
 import 'backup_cancel.dart';
 import 'backup_helpers.dart';
@@ -48,8 +49,7 @@ class FlutterBackupImporter extends BackupHelpers {
   Future<void> import(
     Map<String, dynamic> data, {
     void Function(String stage)? onProgress,
-  }) =>
-      importFromLegacyJson(data, onProgress: onProgress);
+  }) => importFromLegacyJson(data, onProgress: onProgress);
 
   Future<void> _importFromZip(
     Archive archive, {
@@ -58,24 +58,29 @@ class FlutterBackupImporter extends BackupHelpers {
     final manifestEntry = archive.files.firstWhere(
       (f) => f.isFile && f.name == 'manifest.json',
       orElse: () => throw const FormatException(
-          'Glaze backup is missing manifest.json — not a v2 backup'),
+        'Glaze backup is missing manifest.json — not a v2 backup',
+      ),
     );
     final manifestJson =
-        jsonDecode(utf8.decode(manifestEntry.readBytes()!)) as Map<String, dynamic>;
+        jsonDecode(utf8.decode(manifestEntry.readBytes()!))
+            as Map<String, dynamic>;
     final schemaVersion = manifestJson['schemaVersion'] as int? ?? 0;
     // Minimum supported schemaVersion is 2 (initial ZIP format).
     // v3 added extension_presets and info_blocks — older backups simply won't
     // have those JSONL files, leaving the tables empty after import (fine).
     if (schemaVersion < 2) {
       throw const FormatException(
-          'Glaze backup schema is too old. Please re-export from the source app.');
+        'Glaze backup schema is too old. Please re-export from the source app.',
+      );
     }
 
     final tableFiles = archive.files
-        .where((f) =>
-            f.isFile &&
-            f.name.startsWith('tables/') &&
-            f.name.endsWith('.jsonl'))
+        .where(
+          (f) =>
+              f.isFile &&
+              f.name.startsWith('tables/') &&
+              f.name.endsWith('.jsonl'),
+        )
         .toList();
     final avatarFiles = archive.files
         .where((f) => f.isFile && f.name.startsWith('avatars/'))
@@ -95,8 +100,7 @@ class FlutterBackupImporter extends BackupHelpers {
     for (final t in allTableNames) {
       final tName = t.read<String>('name');
       final cols = await db.customSelect("PRAGMA table_info('$tName')").get();
-      existingColumns[tName] =
-          cols.map((c) => c.read<String>('name')).toSet();
+      existingColumns[tName] = cols.map((c) => c.read<String>('name')).toSet();
     }
 
     // Sort by name to make order deterministic. tables/characters.jsonl
@@ -205,6 +209,7 @@ class FlutterBackupImporter extends BackupHelpers {
           Map<String, dynamic> r;
           try {
             r = jsonDecode(line) as Map<String, dynamic>;
+            r = _canonicalizeStudioPresetRow(tableName, r);
           } catch (_) {
             continue;
           }
@@ -246,8 +251,7 @@ class FlutterBackupImporter extends BackupHelpers {
     for (final t in allTableNames) {
       final tName = t.read<String>('name');
       final cols = await db.customSelect("PRAGMA table_info('$tName')").get();
-      existingColumns[tName] =
-          cols.map((c) => c.read<String>('name')).toSet();
+      existingColumns[tName] = cols.map((c) => c.read<String>('name')).toSet();
     }
 
     await db.customStatement('PRAGMA foreign_keys = OFF');
@@ -272,7 +276,10 @@ class FlutterBackupImporter extends BackupHelpers {
             var i = 0;
             for (final row in rows) {
               if ((++i % _batchSize) == 0) _cancel.check();
-              final r = row as Map<String, dynamic>;
+              final r = _canonicalizeStudioPresetRow(
+                tableName,
+                Map<String, dynamic>.from(row as Map),
+              );
               final columns = r.keys.where(knownCols.contains).toList();
               if (columns.isEmpty) continue;
               final placeholders = columns.map((_) => '?').join(', ');
@@ -299,6 +306,23 @@ class FlutterBackupImporter extends BackupHelpers {
     }
   }
 
+  Map<String, dynamic> _canonicalizeStudioPresetRow(
+    String tableName,
+    Map<String, dynamic> row,
+  ) {
+    if (tableName != 'studio_preset_rows') return row;
+    final blocks = row['blocks_json'];
+    try {
+      final source = blocks is String ? blocks : jsonEncode(blocks);
+      return {
+        ...row,
+        'blocks_json': StudioPresetCodec.canonicalizeBlocksJson(source),
+      };
+    } on Object {
+      return row;
+    }
+  }
+
   Future<void> restoreGalleryImages(Map<String, dynamic>? galleryData) async {
     if (galleryData == null) return;
 
@@ -316,7 +340,8 @@ class FlutterBackupImporter extends BackupHelpers {
         if (base64Data == null) continue;
 
         final ext = extFromEntry(entryData);
-        final id = entryData?['id'] as String? ??
+        final id =
+            entryData?['id'] as String? ??
             'gal_${DateTime.now().millisecondsSinceEpoch}';
 
         try {
@@ -353,8 +378,10 @@ class FlutterBackupImporter extends BackupHelpers {
         if (e.value is! String) continue;
         try {
           final bytes = base64Decode(e.value as String);
-          final savedPath =
-              await imageStorage.saveAvatar(e.key, Uint8List.fromList(bytes));
+          final savedPath = await imageStorage.saveAvatar(
+            e.key,
+            Uint8List.fromList(bytes),
+          );
           await db.customStatement(
             'UPDATE characters SET avatar_path = ? WHERE char_id = ?',
             [savedPath, e.key],
@@ -370,8 +397,10 @@ class FlutterBackupImporter extends BackupHelpers {
         if (e.value is! String) continue;
         try {
           final bytes = base64Decode(e.value as String);
-          final savedPath =
-              await imageStorage.saveAvatar(e.key, Uint8List.fromList(bytes));
+          final savedPath = await imageStorage.saveAvatar(
+            e.key,
+            Uint8List.fromList(bytes),
+          );
           await db.customStatement(
             'UPDATE personas SET avatar_path = ? WHERE persona_id = ?',
             [savedPath, e.key],
@@ -391,8 +420,7 @@ class FlutterBackupImporter extends BackupHelpers {
         final bytes = f.readBytes();
         if (bytes == null) continue;
         final savedPath = await imageStorage.saveAvatar(base, bytes);
-        if (f.name.startsWith('avatars/characters/') ||
-            !f.name.contains('/')) {
+        if (f.name.startsWith('avatars/characters/') || !f.name.contains('/')) {
           await db.customStatement(
             'UPDATE characters SET avatar_path = ? WHERE char_id = ?',
             [savedPath, base],
@@ -428,13 +456,11 @@ class FlutterBackupImporter extends BackupHelpers {
           id,
           ext.isEmpty ? 'png' : ext,
         );
-        grouped
-            .putIfAbsent(charId, () => [])
-            .add({
-              'id': id,
-              'characterId': charId,
-              'imagePath': savedPath,
-            });
+        grouped.putIfAbsent(charId, () => []).add({
+          'id': id,
+          'characterId': charId,
+          'imagePath': savedPath,
+        });
       } catch (_) {}
     }
     for (final e in grouped.entries) {

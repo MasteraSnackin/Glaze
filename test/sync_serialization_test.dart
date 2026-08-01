@@ -44,10 +44,10 @@ void main() {
     );
 
     final wireJson = jsonDecode(jsonEncode(preset.toJson()));
-    expect(
-      StudioPreset.fromJson(wireJson as Map<String, dynamic>),
-      preset,
-    );
+    final blocks = wireJson['blocks'] as List<dynamic>;
+    expect(blocks.first, containsPair('type', 'instruction'));
+    expect(blocks.first, isNot(contains('kind')));
+    expect(StudioPreset.fromJson(wireJson as Map<String, dynamic>), preset);
   });
 
   test('computeMemoryBookHash ignores device-local fields', () {

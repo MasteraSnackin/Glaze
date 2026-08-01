@@ -18,6 +18,7 @@ import '../../../core/models/lorebook.dart';
 import '../../../core/models/api_config.dart';
 import '../../../core/models/preset.dart';
 import '../../../core/models/studio_config.dart';
+import '../../../core/models/studio_preset_codec.dart';
 import '../../../core/application/session_deletion_store.dart';
 import '../../../core/application/character_deletion_store.dart';
 import '../../../shared/theme/theme_preset.dart';
@@ -889,7 +890,9 @@ class SyncEngine {
           break;
         case 'studio_preset':
           if (_studioPresetStore != null) {
-            await _studioPresetStore.put(StudioPreset.fromJson(data));
+            await _studioPresetStore.put(
+              StudioPresetCodec.decodePreset(data).preset,
+            );
           }
           break;
         case 'chat_summary':

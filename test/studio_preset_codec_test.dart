@@ -1,9 +1,26 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/llm/studio/studio_context.dart';
 import 'package:glaze_flutter/core/models/studio_config.dart';
 import 'package:glaze_flutter/core/models/studio_preset_codec.dart';
 
 void main() {
+  test('canonicalizes persisted block arrays and rejects malformed shapes', () {
+    final encoded = StudioPresetCodec.canonicalizeBlocksJson(
+      jsonEncode([
+        {'id': 'history', 'kind': 'chat_history'},
+      ]),
+    );
+    final decoded = jsonDecode(encoded) as List;
+    expect(decoded.single['type'], 'history');
+    expect(decoded.single, isNot(contains('kind')));
+    expect(
+      () => StudioPresetCodec.canonicalizeBlocksJson('{}'),
+      throwsFormatException,
+    );
+  });
+
   test('canonicalizes legacy blocks and writes no kind', () {
     final result = StudioPresetCodec.decodePreset({
       'id': 'legacy',

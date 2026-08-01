@@ -11,6 +11,7 @@ import '../../../core/llm/model_fetcher.dart';
 import '../../../core/llm/studio_controller_ontology.dart';
 import '../../../core/models/pipeline_settings.dart';
 import '../../../core/models/studio_config.dart';
+import '../../../core/models/studio_preset_codec.dart';
 import '../../../core/services/file_export_service.dart';
 import '../../../core/state/active_studio_preset_provider.dart';
 import '../../../core/state/db_provider.dart';
@@ -511,7 +512,7 @@ class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
         return;
       }
       final decoded = jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>;
-      final imported = StudioPreset.fromJson(decoded);
+      final imported = StudioPresetCodec.decodePreset(decoded).preset;
       if (!mounted) return;
 
       final nameCtrl = TextEditingController(
