@@ -669,21 +669,7 @@ class StudioConfigRows extends Table {
   String get tableName => 'studio_config_rows';
 
   TextColumn get sessionId => text()();
-  TextColumn get profileId => text().withDefault(const Constant(''))();
-  TextColumn get profileName => text().withDefault(const Constant(''))();
   BoolColumn get enabled => boolean().withDefault(const Constant(false))();
-  TextColumn get agentsJson => text().withDefault(const Constant('[]'))();
-  TextColumn get finalPresetId => text().withDefault(const Constant(''))();
-  TextColumn get runApiConfigId => text().withDefault(const Constant(''))();
-  TextColumn get expensiveApiConfigId =>
-      text().withDefault(const Constant(''))();
-  TextColumn get cheapApiConfigId => text().withDefault(const Constant(''))();
-  TextColumn get cleanerApiConfigId => text().withDefault(const Constant(''))();
-  TextColumn get runModelOverride => text().withDefault(const Constant(''))();
-  IntColumn get maxFinalHistoryMessages =>
-      integer().withDefault(const Constant(30))();
-  TextColumn get broadcastBlocksJson =>
-      text().withDefault(const Constant('[]'))();
   IntColumn get createdAt => integer().withDefault(const Constant(0))();
   IntColumn get updatedAt => integer().withDefault(const Constant(0))();
 
@@ -699,9 +685,18 @@ class StudioPresetRows extends Table {
   TextColumn get presetId => text()();
   TextColumn get name => text()();
   TextColumn get blocksJson => text().withDefault(const Constant('[]'))();
+  TextColumn get agentsJson => text().withDefault(const Constant('[]'))();
+  TextColumn get expensiveApiConfigId =>
+      text().withDefault(const Constant(''))();
+  TextColumn get cheapApiConfigId => text().withDefault(const Constant(''))();
+  TextColumn get cleanerApiConfigId => text().withDefault(const Constant(''))();
+  IntColumn get maxFinalHistoryMessages =>
+      integer().withDefault(const Constant(30))();
   TextColumn get agentEnabledJson => text().withDefault(const Constant('{}'))();
   TextColumn get executionMode =>
       text().withDefault(const Constant('legacy'))();
+  TextColumn get runtimeSettingsJson =>
+      text().withDefault(const Constant('{}'))();
   IntColumn get updatedAt => integer().withDefault(const Constant(0))();
 
   @override
@@ -998,8 +993,10 @@ class CardEvolutionClaims extends Table {
   TextColumn get ownerId => text()();
   TextColumn get status => text()();
   IntColumn get leaseExpiresAt => integer()();
+
   /// Legacy physical column name retained for v92 database compatibility.
   TextColumn get chatHistoryHash => text().named('first_run_id')();
+
   /// Legacy physical column name retained for v92 database compatibility.
   TextColumn get effectiveCanonIdentity => text().named('second_run_id')();
   TextColumn get predecessorCursorHash => text()();
@@ -1030,8 +1027,10 @@ class CardEvolutionProposalRuns extends Table {
   TextColumn get sessionId => text()();
   TextColumn get characterId => text()();
   TextColumn get rewriteJobId => text()();
+
   /// Legacy physical column name retained for v92 database compatibility.
   TextColumn get chatHistoryHash => text().named('first_run_id')();
+
   /// Legacy physical column name retained for v92 database compatibility.
   TextColumn get effectiveCanonIdentity => text().named('second_run_id')();
   TextColumn get selectedInputJson => text()();

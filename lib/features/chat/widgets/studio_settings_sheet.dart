@@ -8,9 +8,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/models/api_config.dart';
 import '../../../core/llm/model_fetcher.dart';
-import '../../../core/llm/studio_controller_ontology.dart';
 import '../../../core/models/pipeline_settings.dart';
 import '../../../core/models/studio_config.dart';
+import '../../../core/models/studio_preset_codec.dart';
 import '../../../core/services/file_export_service.dart';
 import '../../../core/state/active_studio_preset_provider.dart';
 import '../../../core/state/db_provider.dart';
@@ -90,10 +90,6 @@ class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
       config = StudioConfig(
         sessionId: widget.sessionId,
         enabled: true,
-        agents: StudioControllerOntology.buildDefaultAgents(
-          sessionId: widget.sessionId,
-          now: now,
-        ),
         createdAt: now,
         updatedAt: now,
       );
@@ -122,7 +118,30 @@ class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
   Future<void> _changeStudioPreset(String presetId) async {
     // Global: one SharedPreferences key, applies to every session instantly.
     await _presetWorkflows.selectPreset(presetId);
+    final presets = await _presetWorkflows.loadPresets();
+    if (!mounted) return;
+    _studioPresets = presets;
     setState(() {});
+  }
+
+  Future<void> _saveActivePreset(
+    StudioPreset Function(StudioPreset preset) update,
+  ) async {
+    final selectedId = await ref.read(activeStudioPresetProvider.future);
+    final current = await ref
+        .read(studioPresetRepoProvider)
+        .getById(selectedId);
+    if (current == null || !mounted) return;
+    if (await ref.read(activeStudioPresetProvider.future) != selectedId) return;
+    final updated = update(current);
+    await ref.read(studioPresetRepoProvider).upsert(updated);
+    if (!mounted) return;
+    setState(() {
+      _studioPresets = [
+        for (final preset in _studioPresets)
+          if (preset.id == updated.id) updated else preset,
+      ];
+    });
   }
 
   @override
@@ -138,7 +157,15 @@ class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
 
   Widget _buildBody() {
     final config = _config!;
-    final pipeline = ref.watch(pipelineSettingsProvider);
+    final preset = _activeStudioPreset;
+    final globalPipeline = ref.watch(pipelineSettingsProvider);
+    final pipeline = preset == null
+        ? globalPipeline
+        : globalPipeline.copyWith(
+            studioAgent: preset.runtime.agents,
+            cleaner: preset.runtime.cleaner,
+            ledger: preset.runtime.ledger,
+          );
     return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Column(
@@ -164,7 +191,7 @@ class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
             description: 'Expensive — high-quality prose generation',
             emptyLabel: 'Use active chat model',
             value: pipeline.studioAgent.studioFinalModelOverride,
-            apiConfigId: config.expensiveApiConfigId,
+            apiConfigId: preset?.expensiveApiConfigId ?? '',
             onChanged: (model) => _savePipelineModel(
               (p) => p.copyWith(
                 studioAgent: p.studioAgent.copyWith(
@@ -172,8 +199,9 @@ class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
                 ),
               ),
             ),
-            onApiConfigChanged: (apiConfigId) =>
-                _save(config.copyWith(expensiveApiConfigId: apiConfigId)),
+            onApiConfigChanged: (apiConfigId) => _saveActivePreset(
+              (preset) => preset.copyWith(expensiveApiConfigId: apiConfigId),
+            ),
             onSettings: () =>
                 _openSlotSettings(slot: StudioSlot.finalGenerator),
           ),
@@ -184,7 +212,7 @@ class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
             description: 'Cheap — compact JSON briefs, fast',
             emptyLabel: 'Use active chat model',
             value: pipeline.studioAgent.studioTrackerModelOverride,
-            apiConfigId: config.cheapApiConfigId,
+            apiConfigId: preset?.cheapApiConfigId ?? '',
             onChanged: (model) => _savePipelineModel(
               (p) => p.copyWith(
                 studioAgent: p.studioAgent.copyWith(
@@ -192,8 +220,9 @@ class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
                 ),
               ),
             ),
-            onApiConfigChanged: (apiConfigId) =>
-                _save(config.copyWith(cheapApiConfigId: apiConfigId)),
+            onApiConfigChanged: (apiConfigId) => _saveActivePreset(
+              (preset) => preset.copyWith(cheapApiConfigId: apiConfigId),
+            ),
             onSettings: () => _openSlotSettings(slot: StudioSlot.tracker),
           ),
           const SizedBox(height: 12),
@@ -203,14 +232,15 @@ class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
             description: 'Semi-expensive — prose rewrite + continuity audit',
             emptyLabel: 'Use tracker/chat model',
             value: pipeline.cleaner.postCleanerModel,
-            apiConfigId: config.cleanerApiConfigId,
+            apiConfigId: preset?.cleanerApiConfigId ?? '',
             onChanged: (model) => _savePipelineModel(
               (p) => p.copyWith(
                 cleaner: p.cleaner.copyWith(postCleanerModel: model),
               ),
             ),
-            onApiConfigChanged: (apiConfigId) =>
-                _save(config.copyWith(cleanerApiConfigId: apiConfigId)),
+            onApiConfigChanged: (apiConfigId) => _saveActivePreset(
+              (preset) => preset.copyWith(cleanerApiConfigId: apiConfigId),
+            ),
             onSettings: () => _openSlotSettings(slot: StudioSlot.cleaner),
           ),
           const Divider(),
@@ -280,8 +310,29 @@ class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
   Future<void> _savePipelineModel(
     PipelineSettings Function(PipelineSettings pipeline) mutate,
   ) async {
-    final pipeline = ref.read(pipelineSettingsProvider);
-    await ref.read(pipelineSettingsProvider.notifier).save(mutate(pipeline));
+    await _savePresetRuntime(mutate);
+  }
+
+  Future<void> _savePresetRuntime(
+    PipelineSettings Function(PipelineSettings pipeline) mutate,
+  ) async {
+    await _saveActivePreset((preset) {
+      final global = ref.read(pipelineSettingsProvider);
+      final current = global.copyWith(
+        studioAgent: preset.runtime.agents,
+        cleaner: preset.runtime.cleaner,
+        ledger: preset.runtime.ledger,
+      );
+      final updated = mutate(current);
+      return preset.copyWith(
+        runtime: preset.runtime.copyWith(
+          agents: updated.studioAgent,
+          cleaner: updated.cleaner,
+          ledger: updated.ledger,
+        ),
+        updatedAt: DateTime.now().millisecondsSinceEpoch,
+      );
+    });
   }
 
   StudioPreset? get _activeStudioPreset {
@@ -511,7 +562,8 @@ class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
         return;
       }
       final decoded = jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>;
-      final imported = StudioPreset.fromJson(decoded);
+      final decodedPreset = StudioPresetCodec.decodePreset(decoded);
+      final imported = decodedPreset.preset;
       if (!mounted) return;
 
       final nameCtrl = TextEditingController(
@@ -554,7 +606,15 @@ class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
       if (!mounted) return;
       if (importResult == null) return;
       setState(() => _studioPresets = importResult.presets);
-      if (mounted) GlazeToast.show(context, 'Preset "$trimmedName" imported.');
+      if (mounted) {
+        final warningSuffix = decodedPreset.warnings.isEmpty
+            ? ''
+            : ' ${decodedPreset.warnings.length} block warning(s).';
+        GlazeToast.show(
+          context,
+          'Preset "$trimmedName" imported.$warningSuffix',
+        );
+      }
     } catch (e) {
       if (mounted) GlazeToast.show(context, 'Failed to import preset: $e');
     }
@@ -887,8 +947,7 @@ class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
   Future<void> _savePipeline(
     PipelineSettings Function(PipelineSettings) mutate,
   ) async {
-    final pipeline = ref.read(pipelineSettingsProvider);
-    await ref.read(pipelineSettingsProvider.notifier).save(mutate(pipeline));
+    await _savePresetRuntime(mutate);
   }
 
   Widget _buildRecoverySection() {
@@ -984,14 +1043,23 @@ class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
       backgroundColor: Colors.transparent,
       builder: (c) => StudioSlotSettingsDialog(
         slot: slot,
-        pipeline: ref.read(pipelineSettingsProvider),
+        pipeline: ref
+            .read(pipelineSettingsProvider)
+            .copyWith(
+              studioAgent:
+                  _activeStudioPreset?.runtime.agents ??
+                  ref.read(pipelineSettingsProvider).studioAgent,
+              cleaner:
+                  _activeStudioPreset?.runtime.cleaner ??
+                  ref.read(pipelineSettingsProvider).cleaner,
+              ledger:
+                  _activeStudioPreset?.runtime.ledger ??
+                  ref.read(pipelineSettingsProvider).ledger,
+            ),
       ),
     );
     if (!mounted || updated == null) return;
-    final pipeline = ref.read(pipelineSettingsProvider);
-    await ref
-        .read(pipelineSettingsProvider.notifier)
-        .save(updated.applyTo(pipeline, slot));
+    await _savePresetRuntime((pipeline) => updated.applyTo(pipeline, slot));
   }
 
   Future<void> _startRecovery() async {

@@ -154,14 +154,7 @@ void main() {
           );
       await container
           .read(studioConfigRepoProvider)
-          .upsert(
-            const StudioConfig(
-              sessionId: 'c1_0',
-              profileId: 'c1_0',
-              enabled: true,
-              finalPresetId: 'studio-preset',
-            ),
-          );
+          .upsert(const StudioConfig(sessionId: 'c1_0', enabled: true));
       await container
           .read(memoryBookRepoProvider)
           .put(
@@ -342,7 +335,7 @@ void main() {
           .read(studioConfigRepoProvider)
           .getBySessionId('c1_2');
       expect(studio?.enabled, isTrue);
-      expect(studio?.finalPresetId, 'studio-preset');
+      expect(studio?.sessionId, 'c1_2');
 
       final memory = await container
           .read(memoryBookRepoProvider)

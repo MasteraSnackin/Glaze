@@ -4,6 +4,8 @@ import 'package:drift/drift.dart';
 
 import '../../application/sync_repo_interfaces.dart';
 import '../../models/studio_config.dart';
+import '../../models/studio_agent_codec.dart';
+import '../../models/studio_preset_codec.dart';
 import '../app_db.dart';
 
 class StudioPresetRepo implements SyncStudioPresetStore {
@@ -49,8 +51,16 @@ class StudioPresetRepo implements SyncStudioPresetStore {
             blocksJson: Value(
               jsonEncode(normalized.blocks.map((b) => b.toJson()).toList()),
             ),
+            agentsJson: Value(StudioAgentCodec.encodeAgents(normalized.agents)),
+            expensiveApiConfigId: Value(normalized.expensiveApiConfigId),
+            cheapApiConfigId: Value(normalized.cheapApiConfigId),
+            cleanerApiConfigId: Value(normalized.cleanerApiConfigId),
+            maxFinalHistoryMessages: Value(normalized.maxFinalHistoryMessages),
             agentEnabledJson: Value(jsonEncode(normalized.agentEnabled)),
             executionMode: Value(normalized.executionMode.wireName),
+            runtimeSettingsJson: Value(
+              jsonEncode(StudioPresetCodec.encodeRuntime(normalized.runtime)),
+            ),
             updatedAt: Value(normalized.updatedAt),
           ),
         );
@@ -70,7 +80,11 @@ class StudioPresetRepo implements SyncStudioPresetStore {
     try {
       final list = jsonDecode(row.blocksJson) as List<dynamic>;
       blocks = list
-          .map((e) => StudioPresetBlock.fromJson(e as Map<String, dynamic>))
+          .map(
+            (e) => StudioPresetCodec.canonicalizeBlock(
+              Map<String, dynamic>.from(e as Map),
+            ).block,
+          )
           .toList();
     } catch (_) {
       blocks = [];
@@ -82,13 +96,38 @@ class StudioPresetRepo implements SyncStudioPresetStore {
     } catch (_) {
       agentEnabled = const {};
     }
+    List<StudioAgent> agents;
+    try {
+      agents = StudioAgentCodec.decodeAgentsJson(row.agentsJson);
+    } catch (_) {
+      agents = const [];
+    }
+    var runtime = const StudioRuntimeSettings();
+    try {
+      final decoded = jsonDecode(row.runtimeSettingsJson);
+      if (decoded is Map && decoded.isNotEmpty) {
+        runtime = StudioPresetCodec.decodePreset({
+          'id': row.presetId,
+          'agents': const <dynamic>[],
+          'runtime': decoded,
+        }).preset.runtime;
+      }
+    } catch (_) {
+      // Runtime settings are independent of the preset's blocks and agents.
+    }
     return _normalizePreset(
       StudioPreset(
         id: row.presetId,
         name: row.name,
         blocks: blocks,
+        agents: agents,
+        expensiveApiConfigId: row.expensiveApiConfigId,
+        cheapApiConfigId: row.cheapApiConfigId,
+        cleanerApiConfigId: row.cleanerApiConfigId,
+        maxFinalHistoryMessages: row.maxFinalHistoryMessages,
         agentEnabled: agentEnabled,
         executionMode: StudioExecutionMode.fromWireName(row.executionMode),
+        runtime: runtime,
         updatedAt: row.updatedAt,
       ),
     );
@@ -98,7 +137,9 @@ class StudioPresetRepo implements SyncStudioPresetStore {
     final blocks = preset.blocks
         .where((block) => !_runtimeComputedBlockIds.contains(block.id))
         .toList();
-    if (blocks.length == preset.blocks.length) return preset;
-    return preset.copyWith(blocks: blocks);
+    final agents = StudioAgentCodec.decodeAgentsJson(
+      StudioAgentCodec.encodeAgents(preset.agents),
+    );
+    return preset.copyWith(blocks: blocks, agents: agents);
   }
 }

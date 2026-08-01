@@ -9,14 +9,12 @@ import '../models/studio_config.dart';
 import '../state/active_studio_preset_provider.dart';
 import '../state/db_provider.dart';
 import 'agent_runner.dart';
-import 'prompt_builder.dart';
 import 'studio_activation_gate.dart';
 import 'studio_agent_executor.dart';
 import 'studio_batch_coordinator.dart';
 import 'studio_brief_cache.dart';
 import 'studio_brief_deduper.dart';
 import 'studio_brief_parser.dart';
-import 'studio_context_bucketizer.dart';
 import 'studio_message_builder.dart';
 import 'studio_prompt_text.dart';
 import 'studio_stage_brief.dart';
@@ -24,6 +22,8 @@ import 'studio_turn_config_snapshot.dart';
 import 'tracker_batcher.dart';
 import 'studio/studio_tracker_phase_runner.dart';
 import 'studio/studio_tracker_result_mapper.dart';
+import 'generation_context_inputs.dart';
+import 'studio/studio_context.dart';
 
 // Re-export so existing importers of `AgentPhaseSplit` via this file (e.g.
 // tests, studio_post_processing) keep their import path after the move to
@@ -41,14 +41,12 @@ class MemoryStudioService {
   final AgentRunner _runner;
   final TrackerBatcher _batcher;
   final StudioPromptText _promptText = const StudioPromptText();
-  final StudioContextBucketizer _bucketizer = const StudioContextBucketizer();
   late final StudioBriefParser _briefParser = StudioBriefParser(_log);
   late final StudioBriefDeduper _briefDeduper = StudioBriefDeduper(
     _briefParser,
   );
   late final StudioBriefCache _briefCache = StudioBriefCache(_briefParser);
   late final StudioMessageBuilder _messageBuilder = StudioMessageBuilder(
-    _bucketizer,
     _promptText,
     _briefDeduper,
   );
@@ -61,9 +59,7 @@ class MemoryStudioService {
   late final StudioBatchCoordinator _batchCoordinator = StudioBatchCoordinator(
     _batcher,
     _runner,
-    _bucketizer,
     _messageBuilder,
-    _executor,
     _log,
   );
   late final StudioTrackerResultMapper _resultMapper =
@@ -88,10 +84,9 @@ class MemoryStudioService {
   /// plus the tracker briefs. See docs/PLAN_AGENTIC_STUDIO.md.
   Future<StudioPipelineResult> runTrackerCycle({
     required StudioConfig config,
-    required PromptResult promptResult,
-    required PromptPayload promptPayload,
-    PromptResult? finalPromptResult,
-    PromptPayload? finalPromptPayload,
+    required GenerationContextInputs inputs,
+    required StudioContext trackerContext,
+    required StudioContext finalContext,
     required ApiConfig apiConfig,
     required String sessionId,
     StudioTurnConfigSnapshot? turnConfig,
@@ -104,21 +99,19 @@ class MemoryStudioService {
     if (token.isCancelled) {
       return const StudioPipelineResult(status: 'aborted', response: '');
     }
-
     final phaseResult = await _phaseRunner.run(
       config: config,
       presetId:
           turnConfig?.preset?.id ??
           await _ref.read(activeStudioPresetProvider.future),
       studioPreset: turnConfig?.preset,
-      promptResult: promptResult,
-      promptPayload: promptPayload,
+      inputs: inputs,
+      context: trackerContext,
       apiConfig: apiConfig,
       sessionId: sessionId,
       token: token,
       turnConfig: turnConfig,
     );
-
     if (phaseResult.status != 'ok') {
       return StudioPipelineResult(
         status: phaseResult.status,
@@ -127,33 +120,21 @@ class MemoryStudioService {
         error: phaseResult.error,
       );
     }
-
     final briefs = phaseResult.briefs;
     final split = phaseResult.split!;
-    final turnIndex = phaseResult.turnIndex;
-    final historyForScan = phaseResult.historyForScan;
     final studioPreset = phaseResult.studioPreset!;
     final finalAgent = split.finalAgent!;
-    final postGenTrackers = split.postGenTrackers;
-
-    final generatorPromptResult = finalPromptResult ?? promptResult;
-    final generatorPromptPayload = finalPromptPayload ?? promptPayload;
-    // Notify the caller that the final generator is about to start — before
-    // the first token arrives. Lets the UI switch from "trackers running" to
-    // "main responder generating" immediately, so a long first-byte latency
-    // does not leave the user staring at a stale tracker-phase indicator.
     onFinalStart?.call();
     final agentResult = await _executor.runFinalGenerator(
       agent: finalAgent,
-      promptResult: generatorPromptResult,
-      promptPayload: generatorPromptPayload,
+      context: finalContext,
       apiConfig: apiConfig,
       config: config,
       studioPreset: studioPreset,
       priorBriefs: briefs,
       sessionId: sessionId,
       cancelToken: token,
-      apiConfigId: config.expensiveApiConfigId,
+      apiConfigId: studioPreset.expensiveApiConfigId,
       onFinalResponseUpdate: onFinalResponseUpdate,
       onMessagesBuilt: onFinalMessagesBuilt,
       turnConfig: turnConfig,
@@ -161,28 +142,19 @@ class MemoryStudioService {
     if (token.isCancelled) {
       return const StudioPipelineResult(status: 'aborted', response: '');
     }
-
     var mainResponse = agentResult.text;
     var mainReasoning = agentResult.reasoning;
-    final rawResponseJson = agentResult.rawResponseJson;
-
-    // Feature 6 — post-processing phase. Post-gen trackers run AFTER the
-    // generator, receive `mainResponse` in their context, and can produce
-    // an edited/rewritten version. They run sequentially in `order`, each
-    // receiving the current `mainResponse`. The final post-gen tracker's
-    // non-empty output replaces `mainResponse`. Post-gen trackers do NOT
-    // stream to the UI.
     final postBriefs = <StudioStageBrief>[];
-    for (final agent in postGenTrackers) {
+    for (final agent in split.postGenTrackers) {
       if (token.isCancelled) {
         return const StudioPipelineResult(status: 'aborted', response: '');
       }
       final interval = agent.runInterval <= 0 ? 1 : agent.runInterval;
-      if (turnIndex % interval != 0) continue;
+      if (phaseResult.turnIndex % interval != 0) continue;
       if (agent.activationKeywords.isNotEmpty &&
           !StudioActivationGate.matchesActivationKeywords(
             agent.activationKeywords,
-            historyForScan,
+            phaseResult.historyForScan,
             agent.activationScanDepth,
           )) {
         continue;
@@ -190,31 +162,24 @@ class MemoryStudioService {
       final result = await _executor.runPostProcessingTracker(
         agent: agent,
         mainResponse: mainResponse,
-        promptResult: generatorPromptResult,
-        promptPayload: generatorPromptPayload,
+        context: finalContext,
         apiConfig: apiConfig,
         config: config,
         studioPreset: studioPreset,
         sessionId: sessionId,
         cancelToken: token,
-        apiConfigId: config.cleanerApiConfigId,
+        apiConfigId: studioPreset.cleanerApiConfigId,
         turnConfig: turnConfig,
       );
       postBriefs.add(result);
-      if (token.isCancelled) {
-        return const StudioPipelineResult(status: 'aborted', response: '');
-      }
       if (result.status == 'error') {
-        final error =
-            'Studio tracker "${result.agentName}" failed after '
-            '2 retries: ${result.error ?? 'tracker failed'}. Please '
-            'restart generation.';
-        _log('post tracker cycle failed session=$sessionId error=$error');
         return StudioPipelineResult(
           status: 'error',
           response: '',
           stageBriefs: [...briefs, ...postBriefs],
-          error: error,
+          error:
+              'Studio tracker "${result.agentName}" failed after 2 retries: '
+              '${result.error ?? 'tracker failed'}. Please restart generation.',
         );
       }
       if (result.status == 'ok' && result.brief.trim().isNotEmpty) {
@@ -222,12 +187,11 @@ class MemoryStudioService {
         mainReasoning = '';
       }
     }
-
     return StudioPipelineResult(
       status: mainResponse.trim().isEmpty ? 'error' : 'ok',
       response: mainResponse,
       reasoning: mainReasoning,
-      rawResponseJson: rawResponseJson,
+      rawResponseJson: agentResult.rawResponseJson,
       stageBriefs: [...briefs, ...postBriefs],
       error: mainResponse.trim().isEmpty
           ? 'Final generator returned an empty response'
@@ -242,28 +206,30 @@ class MemoryStudioService {
   /// historical message.
   Future<StudioPipelineResult> runTrackersOnly({
     required StudioConfig config,
-    required PromptResult promptResult,
-    required PromptPayload promptPayload,
+    required GenerationContextInputs inputs,
+    required StudioContext context,
     required ApiConfig apiConfig,
     required String sessionId,
+    StudioTurnConfigSnapshot? turnConfig,
     CancelToken? cancelToken,
   }) async {
     final token = cancelToken ?? CancelToken();
     if (token.isCancelled) {
       return const StudioPipelineResult(status: 'aborted', response: '');
     }
-
-    final presetId = await _ref.read(activeStudioPresetProvider.future);
     final phaseResult = await _phaseRunner.run(
       config: config,
-      presetId: presetId,
-      promptResult: promptResult,
-      promptPayload: promptPayload,
+      presetId:
+          turnConfig?.preset?.id ??
+          await _ref.read(activeStudioPresetProvider.future),
+      studioPreset: turnConfig?.preset,
+      inputs: inputs,
+      context: context,
       apiConfig: apiConfig,
       sessionId: sessionId,
       token: token,
+      turnConfig: turnConfig,
     );
-
     return StudioPipelineResult(
       status: phaseResult.status,
       response: '',

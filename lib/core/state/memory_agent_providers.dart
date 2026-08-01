@@ -63,12 +63,6 @@ final agentRunnerProvider = Provider<AgentRunner>((ref) {
       },
       readActiveApiConfig: () => ref.read(activeApiConfigProvider),
       readPipelineSettings: () => ref.read(pipelineSettingsProvider),
-      readRunApiConfigId: (sessionId) async {
-        final config = await ref
-            .read(studioConfigRepoProvider)
-            .getBySessionId(sessionId);
-        return config?.runApiConfigId ?? '';
-      },
     ),
     readPipelineSettings: () => ref.read(pipelineSettingsProvider),
   );

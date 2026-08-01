@@ -10,23 +10,19 @@ import '../../../../core/llm/beauty_state_parser.dart';
 import '../../../../core/llm/macro_engine.dart';
 import '../../../../core/llm/prompt_builder.dart' show PromptPayload;
 import '../../../../core/llm/prompt/main_model_context_snapshot.dart';
-import '../../../../core/llm/studio_slot_resolver.dart';
 import '../../../../core/llm/tokenizer.dart';
 import '../../../../core/llm/studio_turn_config_snapshot.dart';
 import '../../../../core/llm/cleaner/audit_prompt_builder.dart'
     show AuditResult;
 import '../../../../core/models/agent_operation_record.dart';
-import '../../../../core/models/api_config.dart';
 import '../../../../core/models/character.dart';
 import '../../../../core/models/chat_message.dart';
 import '../../../../core/models/pipeline_settings.dart';
 import '../../../../core/models/studio_config.dart';
-import '../../../../core/state/active_studio_preset_provider.dart';
 import '../../../../core/state/db_provider.dart';
 import '../../../../core/state/memory_agent_providers.dart';
 import '../../../../core/state/character_provider.dart';
 import '../../../../core/state/studio_turn_config_resolver.dart';
-import '../../../settings/api_list_provider.dart';
 import '../../../chat_history/chat_history_provider.dart';
 import '../../chat_session_service.dart';
 import '../../state/agent_operations_log_provider.dart';
@@ -279,12 +275,9 @@ class CleanerStage {
       }
       if (book == null) return;
 
-      // Load broadcast blocks (output language + prose guards) captured at
-      // Studio build time so the cleaner applies the user's own rules instead
-      // of a hardcoded English-only cliché list. Absent (no Studio) = defaults.
-      // The cleaner is Studio-only — skip entirely when Studio is disabled.
-      final studioConfig = turnConfig.config;
-      final broadcastBlocks = studioConfig?.broadcastBlocks ?? const <String>[];
+      // Broadcast rules are part of the selected preset's atomic runtime.
+      final broadcastBlocks =
+          turnConfig.preset?.runtime.broadcastBlocks ?? const <String>[];
       final studioConfigEnabled = turnConfig.enabled;
       final studioPreset = turnConfig.preset;
       if (!ctx.ref.mounted ||
@@ -1079,8 +1072,6 @@ class CleanerStage {
   }) async {
     if (!ctx.ref.mounted || !_ownsRun) return;
 
-    final pipeline = ctx.ref.read(pipelineSettingsProvider);
-
     final session = await ctx.ref.read(chatRepoProvider).getById(sessionId);
     if (session == null) return;
     final targetIndex = session.messages.indexWhere((m) => m.id == messageId);
@@ -1102,6 +1093,18 @@ class CleanerStage {
       return;
     }
 
+    final turnConfig = await ctx.ref
+        .read(studioTurnConfigResolverProvider)
+        .resolve(sessionId);
+    if (!ctx.ref.mounted || !_ownsRun) return;
+    if (!turnConfig.enabled) {
+      debugPrint('[PostCleaner] rerun skipped — Studio not enabled');
+      return;
+    }
+    final pipeline = turnConfig.pipelineSettings;
+    final studioPreset = turnConfig.preset!;
+    final broadcastBlocks = studioPreset.runtime.broadcastBlocks;
+
     // Collect recent chat history before the target message for continuity
     // checks (same window as the auto path).
     final maxHistory = pipeline.cleaner.postCleanerHistoryMessages;
@@ -1115,61 +1118,11 @@ class CleanerStage {
       }
     }
 
-    // Load broadcast blocks (same as auto path).
-    // Cleaner is Studio-only — skip rerun when Studio is disabled.
-    List<String> broadcastBlocks = const [];
-    var studioConfigEnabled = false;
-    var studioCleanerApiConfigId = '';
-    StudioPreset? studioPreset;
-    var studioPresetId = 'default';
-    try {
-      final studioConfig = await ctx.ref
-          .read(studioConfigRepoProvider)
-          .getBySessionId(sessionId);
-      broadcastBlocks = studioConfig?.broadcastBlocks ?? const [];
-      studioConfigEnabled =
-          studioConfig?.enabled == true &&
-          ctx.ref.read(studioFeatureEnabledProvider);
-      studioCleanerApiConfigId = studioConfig?.cleanerApiConfigId ?? '';
-      studioPresetId = await ctx.ref.read(activeStudioPresetProvider.future);
-    } catch (e) {
-      debugPrint(
-        '[PostCleaner] rerun broadcast load failed session=$sessionId error=$e',
-      );
-    }
-    if (!ctx.ref.mounted || !_ownsRun) return;
-
-    if (!studioConfigEnabled) {
-      debugPrint('[PostCleaner] rerun skipped — Studio not enabled');
-      return;
-    }
-
-    // Load the Studio preset to get cleaner-section blocks (same as auto path).
-    try {
-      studioPreset = await ctx.ref
-          .read(studioPresetRepoProvider)
-          .getById(studioPresetId);
-    } catch (e) {
-      debugPrint(
-        '[PostCleaner] rerun preset load failed session=$sessionId error=$e',
-      );
-    }
-    if (!ctx.ref.mounted || !_ownsRun) return;
-
     // Resolve the Studio cleaner slot (fail-explicit).
     final AuxApiConfig cleanerConfig;
     try {
-      await ctx.ref.read(apiListProvider.future);
-      final apiConfigs =
-          ctx.ref.read(apiListProvider).value ?? const <ApiConfig>[];
-      cleanerConfig = StudioSlotResolver.resolve(
-        apiConfigs: apiConfigs,
-        apiConfigId: studioCleanerApiConfigId,
-        fallback: ctx.ref.read(activeApiConfigProvider),
+      cleanerConfig = turnConfig.resolveCleanerConfig(
         errorLabel: 'post-cleaner-rerun',
-        modelOverride: pipeline.cleaner.postCleanerModel,
-        extraRequestParameterOverrides:
-            pipeline.cleaner.postCleanerExtraRequestParameters,
         useResponsesApi: pipeline.cleaner.postCleanerUseResponsesApi,
       );
     } catch (e) {
@@ -1230,8 +1183,9 @@ class CleanerStage {
         cleanerConfig: cleanerConfig,
         beautyBrief: beautyBrief,
         beautyState: beautyState,
-        cleanerBlocks: studioPreset?.blocks ?? const [],
+        cleanerBlocks: studioPreset.blocks,
         macroCtx: cleanerMacroCtx,
+        studioTurnConfig: turnConfig,
       );
     } catch (e) {
       debugPrint('[PostCleaner] rerun failed session=$sessionId error=$e');

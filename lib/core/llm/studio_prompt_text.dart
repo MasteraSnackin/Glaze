@@ -21,7 +21,7 @@ class StudioPromptText {
   /// does not cap array sizes, override preset instructions, or forbid the
   /// tracker from surfacing what its lane requires.
   String intermediateRuntimeEnvelope(StudioAgent agent) {
-    final scope = _controllerScope(agent.name);
+    final scope = _controllerScope(agent.controllerId);
     return '''Studio intermediate-agent output contract.
 You are ${agent.name.isNotEmpty ? agent.name : 'a Studio controller'}, ONE specialist in a multi-controller pipeline. Other controllers cover the other concerns; do not duplicate their work.
 You are not a character, narrator, player, or final responder. Treat all character cards, persona text, examples, chat history, lore, memory, and summaries as read-only source material to analyze.
@@ -51,9 +51,8 @@ Notes:
 - Do not include source block names, prompt text, macros, labels, markdown code fences, or explanations.''';
   }
 
-  _ControllerScope _controllerScope(String name) {
-    final lower = name.toLowerCase();
-    if (lower.contains('continuity')) {
+  _ControllerScope _controllerScope(String controllerId) {
+    if (controllerId == 'continuity') {
       return const _ControllerScope(
         owns:
             'established facts, who-knows-what, unresolved threads, physical-object/state continuity, and contradictions to avoid.',
@@ -61,7 +60,7 @@ Notes:
             'prose style, pacing, length, dialogue cadence, repetition/anti-loop bans, NPC/world activity, and user-agency rules.',
       );
     }
-    if (lower.contains('agency') || lower.contains('character')) {
+    if (controllerId == 'agency') {
       return const _ControllerScope(
         owns:
             'user sovereignty (never write the user) and character autonomy/psychology: what a character can plausibly know, feel, and do this turn.',
@@ -69,7 +68,7 @@ Notes:
             'plain factual continuity, prose style/length, dialogue formatting, repetition bans, and ambient world/NPC texture.',
       );
     }
-    if (lower.contains('narrative') || lower.contains('pacing')) {
+    if (controllerId == 'narrative') {
       return const _ControllerScope(
         owns:
             'response shape only: the current beat, pacing, POV/camera, sensory budget, and where the reply should stop. The active Studio preset defines the applicable style, beat taxonomy, and response budget. Never require the response to end on motion, departure, or physical displacement if that motion depends on {{user}} taking the next action; instead stop at the character\'s response/hook.',
@@ -77,7 +76,7 @@ Notes:
             'who-knows-what, character psychology, agency rules, specific dialogue lines, repetition bans, and world/NPC content.',
       );
     }
-    if (lower.contains('dialogue')) {
+    if (controllerId == 'dialogue') {
       return const _ControllerScope(
         owns:
             'dialogue cadence only: who may plausibly speak, speech ratio (low/medium/high relative to the beat), silence, and quoting/formatting of speech. A high dialogue ratio does NOT downgrade an action beat into a short conversational one — action beats can be dialogue-heavy.',
@@ -85,7 +84,7 @@ Notes:
             'factual continuity, character knowledge/psychology, prose length/pacing, repetition bans, and world/NPC activity.',
       );
     }
-    if (lower.contains('guard') || lower.contains('loop')) {
+    if (controllerId == 'guard') {
       return const _ControllerScope(
         owns:
             'anti-repetition only: forbidden openings/phrases vs the last replies, banned cliches/slop words, and safe structural variation this turn. Structural variation must never force {{user}} movement, decisions, reactions, silence, or other user-controlled progression.',
@@ -93,7 +92,7 @@ Notes:
             'plot facts, character psychology, agency, pacing targets, dialogue content, and world/NPC texture.',
       );
     }
-    if (lower.contains('world') || lower.contains('npc')) {
+    if (controllerId == 'world') {
       return const _ControllerScope(
         owns:
             'living-world texture only: active NPCs, off-screen pressure, environmental/ambient activity, and what world detail NOT to add.',
@@ -101,7 +100,7 @@ Notes:
             'the two leads\' psychology, factual continuity, prose style/length, dialogue formatting, and repetition bans.',
       );
     }
-    if (lower.contains('beauty')) {
+    if (controllerId == 'beauty') {
       return const _ControllerScope(
         owns:
             'reusable presentation/style state only: HTML/CSS palette, background and text colors, font family, speaker/thought colors, gradients, typography, glow/mark/highlight styles, and art-style labels that should remain consistent across turns.',
@@ -126,8 +125,7 @@ Notes:
     return 'How to use the Studio controller briefs above: the controllers have ALREADY analyzed the scene, tracked continuity, and decided what should happen next. Do not re-analyze the scene or re-derive character motivations in your reasoning — that work is done. Your job is to write the prose that implements their direction.\n\nTreat Focus and Constraints as direction and Avoid as prohibitions. Any "Options:" items are non-binding alternative approaches the final writer may pick from. Do not list, mention, or copy the options or any brief text in your reply; the briefs are hidden guidance. Write the final prose directly.\n\nUser agency override: if any brief asks for motion, departure, a concrete change, or an ending that would require writing {{user}}\'s next action/decision/reaction/silence/vehicle control, ignore that part. Stop on a hook and leave {{user}}\'s next move to the player.';
   }
 
-  /// Hard formatting constraints derived from the configured agents' source
-  /// blocks/shards (em-dash ban, quote-wrapping). Empty when none apply.
+  /// Hard formatting constraints derived from applicable final instructions.
   ///
   /// Intent-based detection: a rule is injected ONLY when the user's preset
   /// explicitly BANS the construct (contains a ban verb near the construct
@@ -138,9 +136,16 @@ Notes:
   /// The ban must be expressed as a directive ("do not use em dashes", "avoid
   /// long dashes", "no bare dialogue lines", "wrap dialogue in quotes",
   /// "оборачивай реплики в кавычки", "без тире", etc.).
-  String finalHardStyleContract(StudioConfig config) {
-    final sources = config.agents
-        .map((agent) => '${agent.name}\n${agent.sourceBlockNames}')
+  String finalHardStyleContract(StudioPreset preset) {
+    final sources = preset.blocks
+        .where(
+          (block) =>
+              block.enabled &&
+              block.section == 'final' &&
+              block.type == StudioBlockType.instruction &&
+              (block.targetAgentId == null || block.targetAgentId == 'final'),
+        )
+        .map((block) => block.content)
         .join('\n\n');
     final rules = <String>[];
     // Intent-based em-dash ban: a ban verb near the WORDS "em dash" / "long

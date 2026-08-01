@@ -71,13 +71,16 @@ void main() {
       const StudioConfig(
         sessionId: 'session',
         enabled: true,
-        cleanerApiConfigId: 'cleaner',
       ),
     );
     await presetRepo.put(
       const StudioPreset(
         id: 'preset',
+        cleanerApiConfigId: 'cleaner',
         blocks: [StudioPresetBlock(id: 'ledger', section: 'ledger')],
+        runtime: StudioRuntimeSettings(
+          cleaner: CleanerSettings(postCleanerModel: 'snapshot-model'),
+        ),
       ),
     );
   });
@@ -204,7 +207,6 @@ void main() {
       const StudioConfig(
         sessionId: 'other',
         enabled: true,
-        cleanerApiConfigId: 'cleaner',
       ),
     );
     await commit('session', assistant2, 1);

@@ -8,6 +8,8 @@ import 'package:glaze_flutter/core/llm/agent_runner.dart';
 import 'package:glaze_flutter/core/llm/studio/agent_config_resolver.dart';
 import 'package:glaze_flutter/core/llm/studio_turn_config_snapshot.dart';
 import 'package:glaze_flutter/core/models/api_config.dart';
+import 'package:glaze_flutter/core/models/cleaner_settings.dart';
+import 'package:glaze_flutter/core/models/ledger_settings.dart';
 import 'package:glaze_flutter/core/models/pipeline_settings.dart';
 import 'package:glaze_flutter/core/models/studio_agent_settings.dart';
 import 'package:glaze_flutter/core/models/studio_config.dart';
@@ -88,17 +90,8 @@ void main() {
           return sourceApis;
         },
         readActiveApiConfig: () => api,
-        loadStudioConfig: (_) async => const StudioConfig(
-          sessionId: 'session',
-          enabled: true,
-          agents: [
-            StudioAgent(id: 'final', order: 5),
-            StudioAgent(id: 'agency', order: 1),
-            StudioAgent(id: 'continuity', order: 3),
-            StudioAgent(id: 'narrative', order: 2),
-            StudioAgent(id: 'beauty', order: 4),
-          ],
-        ),
+        loadStudioConfig: (_) async =>
+            const StudioConfig(sessionId: 'session', enabled: true),
         loadActivePresetId: () async => 'missing',
         loadPreset: (_) async => null,
         loadDefaultPreset: () async {
@@ -106,7 +99,25 @@ void main() {
           return const StudioPreset(
             id: 'default',
             executionMode: StudioExecutionMode.assisted,
+            runtime: StudioRuntimeSettings(
+              agents: StudioAgentSettings(
+                studioTrackerModelOverride: 'preset-tracker-model',
+              ),
+              cleaner: CleanerSettings(postCleanerModel: 'preset-cleaner'),
+              ledger: LedgerSettings(studioLedgerMaxTokens: 321),
+            ),
             agentEnabled: {'narrative': false},
+            agents: [
+              StudioAgent(id: 'final', controllerId: 'final', order: 5),
+              StudioAgent(id: 'agency', controllerId: 'agency', order: 1),
+              StudioAgent(
+                id: 'continuity',
+                controllerId: 'continuity',
+                order: 3,
+              ),
+              StudioAgent(id: 'narrative', controllerId: 'narrative', order: 2),
+              StudioAgent(id: 'beauty', controllerId: 'beauty', order: 4),
+            ],
           );
         },
       );
@@ -116,11 +127,20 @@ void main() {
 
       expect(snapshot.preset?.id, 'default');
       expect(defaultLoads, 1);
-      expect(snapshot.config?.agents.map((agent) => agent.id), [
+      expect(snapshot.preset?.agents.map((agent) => agent.id), [
         'continuity',
         'final',
       ]);
       expect(snapshot.apiConfigs, [api]);
+      expect(
+        snapshot.pipelineSettings.studioAgent.studioTrackerModelOverride,
+        'preset-tracker-model',
+      );
+      expect(
+        snapshot.pipelineSettings.cleaner.postCleanerModel,
+        'preset-cleaner',
+      );
+      expect(snapshot.pipelineSettings.ledger.studioLedgerMaxTokens, 321);
       expect(
         () => snapshot.apiConfigs.add(api),
         throwsUnsupportedError,
@@ -145,25 +165,35 @@ void main() {
           .setEnabled(true);
       await container
           .read(studioConfigRepoProvider)
-          .upsert(
-            const StudioConfig(
-              sessionId: 'session',
-              enabled: true,
-              agents: [
-                StudioAgent(id: 'continuity', name: 'Continuity', order: 0),
-                StudioAgent(id: 'final', name: 'Final', order: 1),
-              ],
-              cheapApiConfigId: 'old-api',
-              cleanerApiConfigId: 'old-api',
-              broadcastBlocks: ['old broadcast'],
-            ),
-          );
+          .upsert(const StudioConfig(sessionId: 'session', enabled: true));
       await container
           .read(studioPresetRepoProvider)
           .upsert(
             const StudioPreset(
               id: 'old-preset',
+              cheapApiConfigId: 'old-api',
+              cleanerApiConfigId: 'old-api',
+              agents: [
+                StudioAgent(
+                  id: 'continuity',
+                  controllerId: 'continuity',
+                  name: 'Continuity',
+                  order: 0,
+                ),
+                StudioAgent(
+                  id: 'final',
+                  controllerId: 'final',
+                  name: 'Final',
+                  order: 1,
+                ),
+              ],
               executionMode: StudioExecutionMode.assisted,
+              runtime: StudioRuntimeSettings(
+                agents: StudioAgentSettings(
+                  studioTrackerModelOverride: 'preset-override',
+                ),
+                broadcastBlocks: ['preset broadcast'],
+              ),
               blocks: [
                 StudioPresetBlock(
                   id: 'old-ledger',
@@ -178,6 +208,8 @@ void main() {
           .upsert(
             const StudioPreset(
               id: 'new-preset',
+              cheapApiConfigId: 'new-api',
+              cleanerApiConfigId: 'new-api',
               executionMode: StudioExecutionMode.direct,
               blocks: [
                 StudioPresetBlock(
@@ -229,14 +261,16 @@ void main() {
           .read(activeStudioPresetProvider.notifier)
           .set('new-preset');
       await container
-          .read(studioConfigRepoProvider)
+          .read(studioPresetRepoProvider)
           .upsert(
-            snapshot.config!.copyWith(
+            snapshot.preset!.copyWith(
               cheapApiConfigId: 'new-api',
               cleanerApiConfigId: 'new-api',
-              broadcastBlocks: const ['new broadcast'],
             ),
           );
+      await container
+          .read(studioConfigRepoProvider)
+          .upsert(snapshot.config!.copyWith(enabled: false));
       await container
           .read(pipelineSettingsProvider.notifier)
           .save(
@@ -249,11 +283,11 @@ void main() {
 
       expect(snapshot.preset!.id, 'old-preset');
       expect(snapshot.preset!.blocks.single.content, 'old ledger instructions');
-      expect(snapshot.config!.cheapApiConfigId, 'old-api');
-      expect(snapshot.config!.broadcastBlocks, ['old broadcast']);
+      expect(snapshot.preset!.cheapApiConfigId, 'old-api');
+      expect(snapshot.preset!.runtime.broadcastBlocks, ['preset broadcast']);
       expect(
         snapshot.pipelineSettings.studioAgent.studioTrackerModelOverride,
-        'old-override',
+        'preset-override',
       );
       final cleanerConfig = snapshot.resolveCleanerConfig(
         errorLabel: 'test-cleaner',
@@ -281,17 +315,20 @@ void main() {
         loadApiConfigs: () async => currentApis,
         readActiveApiConfig: () => newApi,
         readPipelineSettings: () => currentSettings,
-        readRunApiConfigId: (_) async => 'new-api',
       ),
       readPipelineSettings: () => currentSettings,
     );
-    const snapshot = StudioTurnConfigSnapshot(
-      config: StudioConfig(
-        sessionId: 'session',
-        enabled: true,
+    final snapshot = StudioTurnConfigSnapshot(
+      config: StudioConfig(sessionId: 'session', enabled: true),
+      preset: const StudioPreset(
+        id: 'old-preset',
         cheapApiConfigId: 'old-api',
+        runtime: StudioRuntimeSettings(
+          agents: StudioAgentSettings(
+            studioTrackerModelOverride: 'snapshot-model',
+          ),
+        ),
       ),
-      preset: StudioPreset(id: 'old-preset'),
       pipelineSettings: PipelineSettings(
         studioAgent: StudioAgentSettings(
           studioTrackerModelOverride: 'snapshot-model',
@@ -311,7 +348,7 @@ void main() {
       const StudioAgent(id: 'tracker', name: 'Tracker'),
       newApi,
       'session',
-      apiConfigId: snapshot.config!.cheapApiConfigId,
+      apiConfigId: snapshot.preset!.cheapApiConfigId,
       turnConfig: snapshot,
     );
 

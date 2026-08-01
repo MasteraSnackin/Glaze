@@ -3,14 +3,16 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 
 import '../models/studio_config.dart';
+import '../models/chat_message.dart';
 import '../utils/cast_helpers.dart';
 import 'agent_runner.dart';
+import 'generation_context_inputs.dart';
 import 'prompt_builder.dart';
 import 'studio_brief_parser.dart';
 import 'studio_stage_brief.dart';
 
 /// Owns the Studio brief cache: probe, persist, key derivation, and
-/// refresh-policy inference. Extracted from [MemoryStudioService] (plan §2):
+/// refresh-policy normalization. Extracted from [MemoryStudioService] (plan §2):
 /// the cache is the single piece of mutable state in the chat-time pipeline,
 /// and the surrounding helpers are pure functions of their parameters.
 ///
@@ -82,6 +84,60 @@ class StudioBriefCache {
     return CacheProbe(hit: false, policy: policy, cacheKey: cacheKey);
   }
 
+  CacheProbe probeCacheFromInputs({
+    required StudioAgent agent,
+    required StudioConfig config,
+    required StudioPreset studioPreset,
+    required String sessionId,
+    required ResolvedAgentConfig resolvedConfig,
+    required int trackerContextSize,
+    required int? maxTokensOverride,
+    required double? temperatureOverride,
+    required GenerationContextInputs inputs,
+    required String sceneKey,
+    required int turnIndex,
+  }) {
+    final policy = effectiveRefreshPolicy(agent);
+    final cacheKey = cacheKeyForAgent(
+      config: config,
+      studioPreset: studioPreset,
+      sessionId: sessionId,
+      resolvedConfig: resolvedConfig,
+      trackerContextSize: trackerContextSize,
+      maxTokensOverride: maxTokensOverride,
+      temperatureOverride: temperatureOverride,
+      agent: agent,
+      policy: policy,
+      sceneKey: sceneKey,
+    );
+    final cached = usableCachedBrief(
+      cacheKey: cacheKey,
+      policy: policy,
+      sceneChanged: lastUserMessageSuggestsSceneChangeFromInputs(inputs),
+      turnIndex: turnIndex,
+    );
+    if (cached == null) {
+      return CacheProbe(hit: false, policy: policy, cacheKey: cacheKey);
+    }
+    return CacheProbe(
+      hit: true,
+      policy: policy,
+      cacheKey: cacheKey,
+      brief: StudioStageBrief(
+        agentId: agent.id,
+        agentName: agent.name,
+        brief: _briefParser.sanitizeIntermediateAgentOutput(
+          agent,
+          cached.brief,
+        ),
+        status: 'cached',
+        refreshPolicy: policy,
+        cacheKey: cacheKey,
+        cacheHit: true,
+      ),
+    );
+  }
+
   /// Persist a freshly-fetched brief into the cache if its refresh policy is
   /// cacheable and the run was successful.
   void persistCacheIfCacheable({
@@ -143,12 +199,10 @@ class StudioBriefCache {
         return a.$1.compareTo(b.$1);
       });
     final base = <String, dynamic>{
-      'v': 3,
+      'v': 6,
       'sessionId': sessionId,
-      'profileId': config.profileId,
       'studioConfigId': config.sessionId,
-      'runApiConfigId': config.runApiConfigId,
-      'cheapApiConfigId': config.cheapApiConfigId,
+      'cheapApiConfigId': studioPreset.cheapApiConfigId,
       'resolvedExecution': {
         'endpoint': resolvedConfig.endpoint,
         'model': resolvedConfig.model,
@@ -188,7 +242,9 @@ class StudioBriefCache {
             {
               'id': block.id,
               'section': block.section,
-              'kind': block.kind,
+              'type': block.type.name,
+              'contextSlot': block.contextSlot?.name,
+              'targetAgentId': block.targetAgentId,
               'role': block.role,
               'enabled': block.enabled,
               'order': block.order,
@@ -198,6 +254,7 @@ class StudioBriefCache {
       },
       'agent': {
         'id': agent.id,
+        'controllerId': agent.controllerId,
         'name': agent.name,
         'role': agent.role,
         'order': agent.order,
@@ -206,9 +263,7 @@ class StudioBriefCache {
         'timeoutMs': agent.timeoutMs,
         'temperature': agent.temperature,
         'maxTokens': agent.maxTokens,
-        'sourceBlockNames': agent.sourceBlockNames,
         'refreshPolicy': agent.refreshPolicy,
-        'invalidationSignals': agent.invalidationSignals,
         'contextSize': agent.contextSize,
         'runInterval': agent.runInterval,
         'maxParallelJobs': agent.maxParallelJobs,
@@ -244,8 +299,36 @@ class StudioBriefCache {
     return payload.history.where((m) => m.role == 'assistant').length;
   }
 
+  String sceneCacheKeyFromInputs(GenerationContextInputs inputs) {
+    final summary = inputs.summaryContent?.trim() ?? '';
+    final authorsNote = inputs.authorsNote?.content.trim() ?? '';
+    final recentAssistants = inputs.history
+        .where((message) => message.role == 'assistant')
+        .length;
+    return computeHash(
+      jsonEncode({
+        'characterId': inputs.character.id,
+        'personaId': inputs.persona?.id ?? '',
+        'summary': summary,
+        'authorsNote': authorsNote,
+        'assistantBucket': recentAssistants ~/ 4,
+      }),
+    );
+  }
+
+  int assistantTurnCountFromInputs(GenerationContextInputs inputs) =>
+      inputs.history.where((message) => message.role == 'assistant').length;
+
+  bool lastUserMessageSuggestsSceneChangeFromInputs(
+    GenerationContextInputs inputs,
+  ) => _historySuggestsSceneChange(inputs.history);
+
   bool lastUserMessageSuggestsSceneChange(PromptPayload payload) {
-    for (final message in payload.history.reversed) {
+    return _historySuggestsSceneChange(payload.history);
+  }
+
+  bool _historySuggestsSceneChange(List<ChatMessage> history) {
+    for (final message in history.reversed) {
       if (message.role != 'user') continue;
       final text = message.content.toLowerCase();
       return RegExp(
@@ -264,37 +347,7 @@ class StudioBriefCache {
   }
 
   String effectiveRefreshPolicy(StudioAgent agent) {
-    final policy = normalizeRefreshPolicy(agent.refreshPolicy);
-    if (policy != 'turn' || agent.invalidationSignals.isNotEmpty) {
-      return policy;
-    }
-
-    final text = [agent.name, agent.sourceBlockNames].join('\n').toLowerCase();
-    if (RegExp(
-      r'ban|banned|forbidden|clich|клиш|запрет|forbidden words',
-      caseSensitive: false,
-    ).hasMatch(text)) {
-      return 'static';
-    }
-    if (RegExp(
-      r'lumia|ghost in the machine|meta-weaver|meta weaver|ooc interface|ooc policy|weaver',
-      caseSensitive: false,
-    ).hasMatch(text)) {
-      return 'scene';
-    }
-    if (RegExp(
-      r'last\s+3|recent chat|last beat|last user|continuity|memory|current scene|anti-loop|anti-echo',
-      caseSensitive: false,
-    ).hasMatch(text)) {
-      return 'turn';
-    }
-    if (RegExp(
-      r'tone|genre|style|romantic|fluff|comfort|lumia|ghost|meta-weaver|meta weaver|director',
-      caseSensitive: false,
-    ).hasMatch(text)) {
-      return 'scene';
-    }
-    return policy;
+    return normalizeRefreshPolicy(agent.refreshPolicy);
   }
 }
 

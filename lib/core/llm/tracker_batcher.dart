@@ -158,7 +158,7 @@ class TrackerBatcher {
   ///
   /// [apiConfigId] — the StudioConfig slot id to use for resolution (e.g.
   /// `cheapApiConfigId` for trackers). When null/empty, falls back to
-  /// `runApiConfigId` from StudioConfig, then to the active chat config.
+  /// the active chat config when the explicit tracker slot is empty.
   Future<TrackerGrouping> groupAgents({
     required List<StudioAgent> agents,
     required ApiConfig apiConfig,

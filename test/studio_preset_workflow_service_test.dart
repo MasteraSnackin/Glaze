@@ -1,9 +1,15 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:glaze_flutter/core/application/sync_repo_interfaces.dart';
 import 'package:glaze_flutter/core/models/studio_config.dart';
 import 'package:glaze_flutter/features/studio/services/studio_preset_workflow_service.dart';
 
 void main() {
+  setUp(() {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    SharedPreferences.setMockInitialValues({});
+  });
+
   group('StudioPresetWorkflowService', () {
     test('creates a copy of the global active preset and selects it', () async {
       final store = _MemoryStudioPresetStore([
@@ -60,7 +66,7 @@ void main() {
         const first = StudioPreset(
           id: 'exported-id',
           name: 'Exported',
-          blocks: [StudioPresetBlock(id: 'first')],
+          blocks: [StudioPresetBlock(id: 'first', content: 'First')],
           agentEnabled: {'final': false},
           executionMode: StudioExecutionMode.direct,
           updatedAt: 1,
@@ -68,7 +74,7 @@ void main() {
         const second = StudioPreset(
           id: 'other-exported-id',
           name: 'Other',
-          blocks: [StudioPresetBlock(id: 'second')],
+          blocks: [StudioPresetBlock(id: 'second', content: 'Second')],
           executionMode: StudioExecutionMode.assisted,
           updatedAt: 2,
         );
@@ -130,12 +136,12 @@ void main() {
           readActive: () async => globalActiveId,
           writeActive: (id) async => globalActiveId = id,
         );
-        const firstConfig = StudioConfig(
-          sessionId: 'session-a',
+        const firstConfig = StudioPreset(
+          id: 'session-a',
           expensiveApiConfigId: 'api-a',
         );
-        const secondConfig = StudioConfig(
-          sessionId: 'session-b',
+        const secondConfig = StudioPreset(
+          id: 'session-b',
           expensiveApiConfigId: 'api-b',
         );
 
@@ -148,6 +154,32 @@ void main() {
         expect(secondConfig.expensiveApiConfigId, 'api-b');
       },
     );
+
+    test('rejects invalid typed blocks before persistence', () async {
+      final store = _MemoryStudioPresetStore();
+      var activeId = 'default';
+      final service = _service(
+        store: store,
+        readActive: () async => activeId,
+        writeActive: (id) async => activeId = id,
+      );
+
+      await expectLater(
+        service.importPreset(
+          imported: const StudioPreset(
+            id: 'invalid',
+            blocks: [
+              StudioPresetBlock(id: 'context', type: StudioBlockType.context),
+            ],
+          ),
+          name: 'Invalid',
+        ),
+        throwsA(isA<FormatException>()),
+      );
+
+      expect(await store.getAll(), isEmpty);
+      expect(activeId, 'default');
+    });
   });
 }
 

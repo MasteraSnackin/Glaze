@@ -155,7 +155,7 @@ void main() {
 
     final finalHistory = StudioHistoryLimiter.limitFinalHistory(const [
       original,
-    ], const StudioConfig(sessionId: 's1'));
+    ], const StudioPreset(id: 's1'));
     final trackerHistory = StudioHistoryLimiter.limitTrackerHistory(const [
       original,
     ], 10);

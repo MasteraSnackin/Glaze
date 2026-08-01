@@ -9,16 +9,16 @@ void main() {
     blocks: [
       StudioPresetBlock(
         id: 'continuity_task_universal',
-        kind: 'tracker_instruction',
+        targetAgentId: 'continuity',
         content: 'Authored continuity task.',
       ),
-      StudioPresetBlock(id: 'agency_task', kind: 'tracker_instruction'),
+      StudioPresetBlock(id: 'agency_task', targetAgentId: 'agency'),
       StudioPresetBlock(
         id: 'narrative_task_universal',
-        kind: 'tracker_instruction',
+        targetAgentId: 'narrative',
         content: 'Authored narrative task.',
       ),
-      StudioPresetBlock(id: 'beauty_task', kind: 'tracker_instruction'),
+      StudioPresetBlock(id: 'beauty_task', targetAgentId: 'beauty'),
       StudioPresetBlock(id: 'beauty_extractor', section: 'build'),
       StudioPresetBlock(
         id: 'cleaner_beauty',
@@ -60,10 +60,7 @@ void main() {
       updatedAt: 1,
     );
 
-    expect(
-      preset.blocks.where((b) => b.kind == 'tracker_instruction'),
-      isEmpty,
-    );
+    expect(preset.blocks.where((b) => b.targetAgentId != null), isEmpty);
     expect(
       preset.blocks.any(
         (b) => b.content.toLowerCase().contains(
@@ -110,9 +107,9 @@ void main() {
 
     expect(
       preset.blocks
-          .where((b) => b.kind == 'tracker_instruction')
-          .map((b) => b.id),
-      ['continuity_task_universal', 'narrative_task_universal', 'beauty_task'],
+          .where((b) => b.targetAgentId != null)
+          .map((b) => b.targetAgentId),
+      ['continuity', 'narrative', 'beauty'],
     );
     expect(preset.agentEnabled['continuity'], isTrue);
     expect(preset.agentEnabled['narrative'], isTrue);

@@ -425,7 +425,7 @@ class PostCleanerService {
         suffix
           ..writeln()
           ..writeln(
-            'AUTHORITATIVE RULES (from the active preset — follow these exactly; '
+            'AUTHORITATIVE RULES (from the active Studio preset — follow these exactly; '
             'they OVERRIDE the generic guidance above, especially for output '
             'language and formatting):',
           )

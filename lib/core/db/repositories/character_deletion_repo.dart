@@ -37,10 +37,7 @@ class CharacterDeletionRepo implements CharacterDeletionStore {
           _db.studioConfigRows,
         )..where((row) => row.sessionId.isIn(sessionIds))).get();
         for (final config in configs) {
-          if (config.profileId.isEmpty ||
-              config.profileId == config.sessionId) {
-            studioConfigSessionIds.add(config.sessionId);
-          }
+          studioConfigSessionIds.add(config.sessionId);
         }
       }
 
@@ -111,7 +108,9 @@ class CharacterDeletionRepo implements CharacterDeletionStore {
     });
   }
 
-  Future<void> _deleteCharacterRewriteProvenance(List<String> characterIds) async {
+  Future<void> _deleteCharacterRewriteProvenance(
+    List<String> characterIds,
+  ) async {
     final jobs = await (_db.select(
       _db.rewriteJobs,
     )..where((row) => row.characterId.isIn(characterIds))).get();
@@ -134,8 +133,9 @@ class CharacterDeletionRepo implements CharacterDeletionStore {
       )..where((row) => row.id.isIn(operationIds))).go();
     }
     if (jobIds.isNotEmpty) {
-      await (_db.delete(_db.rewriteJobs)..where((row) => row.id.isIn(jobIds)))
-          .go();
+      await (_db.delete(
+        _db.rewriteJobs,
+      )..where((row) => row.id.isIn(jobIds))).go();
     }
     final transitions = await (_db.select(
       _db.appliedCanonTransitionRows,

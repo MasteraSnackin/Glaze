@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../../../core/models/studio_config.dart';
+import '../../../core/models/studio_preset_validation.dart';
+import '../../../core/llm/studio/studio_context.dart';
+import '../../../core/llm/studio_controller_ontology.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_text_field.dart';
 import '../../../shared/widgets/sheet_view.dart';
@@ -8,7 +11,7 @@ import '../../../shared/widgets/sheet_view.dart';
 /// Dialog for editing a single [StudioPresetBlock].
 ///
 /// Shows editable fields for: title, role, content, enabled, order, section,
-/// and kind. Returns the updated block (or null if cancelled).
+/// and type. Returns the updated block (or null if cancelled).
 class StudioBlockEditorDialog extends StatefulWidget {
   final StudioPresetBlock block;
   final bool isNew;
@@ -29,7 +32,9 @@ class _StudioBlockEditorDialogState extends State<StudioBlockEditorDialog> {
   late final TextEditingController _contentCtrl;
   late String _role;
   late String _section;
-  late String _kind;
+  late StudioBlockType _type;
+  late StudioContextSlot? _contextSlot;
+  late String? _targetAgentId;
   late bool _enabled;
 
   static const _roles = ['system', 'user', 'assistant'];
@@ -41,24 +46,6 @@ class _StudioBlockEditorDialogState extends State<StudioBlockEditorDialog> {
     'build',
     'brief_parser',
   ];
-  static const _kinds = [
-    'custom_text',
-    'slot',
-    'instruction',
-    'agent_instruction',
-    'tracker_instruction',
-    'previous_agents',
-    'user_persona',
-    'char_card',
-    'scenario',
-    'char_personality',
-    'example_dialogue',
-    'authors_note',
-    'static_context',
-    'chat_history',
-    'memory',
-    'dynamic_context',
-  ];
 
   @override
   void initState() {
@@ -67,7 +54,13 @@ class _StudioBlockEditorDialogState extends State<StudioBlockEditorDialog> {
     _contentCtrl = TextEditingController(text: widget.block.content);
     _role = widget.block.role;
     _section = widget.block.section;
-    _kind = widget.block.kind;
+    _type = widget.block.type;
+    _contextSlot =
+        widget.block.contextSlot ??
+        (widget.block.type == StudioBlockType.context
+            ? StudioContextSlot.characterCard
+            : null);
+    _targetAgentId = widget.block.targetAgentId;
     _enabled = widget.block.enabled;
   }
 
@@ -109,31 +102,94 @@ class _StudioBlockEditorDialogState extends State<StudioBlockEditorDialog> {
               onChanged: (v) => setState(() => _section = v ?? _section),
             ),
             const SizedBox(height: 16),
-            _FieldLabel('Kind'),
+            _FieldLabel('Type'),
             const SizedBox(height: 6),
-            DropdownButtonFormField<String>(
-              initialValue: _kind,
+            DropdownButtonFormField<StudioBlockType>(
+              initialValue: _type,
               isExpanded: true,
-              items: _kinds
-                  .map((k) => DropdownMenuItem(value: k, child: Text(k)))
+              items: StudioBlockType.values
+                  .map(
+                    (type) =>
+                        DropdownMenuItem(value: type, child: Text(type.name)),
+                  )
                   .toList(),
-              onChanged: (v) => setState(() => _kind = v ?? _kind),
+              onChanged: (value) {
+                if (value == null) return;
+                setState(() {
+                  _type = value;
+                  if (value == StudioBlockType.context) {
+                    _contextSlot ??= StudioContextSlot.characterCard;
+                    _targetAgentId = null;
+                  } else {
+                    _contextSlot = null;
+                    if (value != StudioBlockType.instruction) {
+                      _targetAgentId = null;
+                    }
+                  }
+                });
+              },
             ),
-            const SizedBox(height: 16),
-            _FieldLabel('Role'),
-            const SizedBox(height: 6),
-            SizedBox(
-              width: double.infinity,
-              child: SegmentedButton<String>(
-                segments: _roles
-                    .map((r) => ButtonSegment(value: r, label: Text(r)))
+            if (_type == StudioBlockType.context) ...[
+              const SizedBox(height: 16),
+              _FieldLabel('Context Source'),
+              const SizedBox(height: 6),
+              DropdownButtonFormField<StudioContextSlot>(
+                key: const ValueKey('studio_context_source'),
+                initialValue: _contextSlot,
+                isExpanded: true,
+                items: StudioContextSlot.values
+                    .map(
+                      (slot) =>
+                          DropdownMenuItem(value: slot, child: Text(slot.name)),
+                    )
                     .toList(),
-                selected: {_role},
-                showSelectedIcon: false,
-                onSelectionChanged: (s) => setState(() => _role = s.first),
-                style: const ButtonStyle(visualDensity: VisualDensity.compact),
+                onChanged: (value) => setState(() => _contextSlot = value),
               ),
-            ),
+            ],
+            if (_type == StudioBlockType.instruction) ...[
+              const SizedBox(height: 16),
+              _FieldLabel('Target Agent'),
+              const SizedBox(height: 6),
+              DropdownButtonFormField<String>(
+                key: const ValueKey('studio_target_agent'),
+                initialValue: _targetAgentId ?? '',
+                isExpanded: true,
+                items: [
+                  const DropdownMenuItem<String>(
+                    value: '',
+                    child: Text('All agents'),
+                  ),
+                  ...StudioControllerOntology.specs.map(
+                    (spec) => DropdownMenuItem<String>(
+                      value: spec.id,
+                      child: Text(spec.name),
+                    ),
+                  ),
+                ],
+                onChanged: (value) => setState(
+                  () => _targetAgentId = value == null || value.isEmpty
+                      ? null
+                      : value,
+                ),
+              ),
+              const SizedBox(height: 16),
+              _FieldLabel('Role'),
+              const SizedBox(height: 6),
+              SizedBox(
+                width: double.infinity,
+                child: SegmentedButton<String>(
+                  segments: _roles
+                      .map((r) => ButtonSegment(value: r, label: Text(r)))
+                      .toList(),
+                  selected: {_role},
+                  showSelectedIcon: false,
+                  onSelectionChanged: (s) => setState(() => _role = s.first),
+                  style: const ButtonStyle(
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ),
+              ),
+            ],
             const SizedBox(height: 8),
             SwitchListTile(
               title: Text(
@@ -146,12 +202,23 @@ class _StudioBlockEditorDialogState extends State<StudioBlockEditorDialog> {
               contentPadding: EdgeInsets.zero,
             ),
             const SizedBox(height: 8),
-            GlazeTextField(
-              controller: _contentCtrl,
-              maxLines: 12,
-              label: 'Content (macro templates supported)',
-              hint: 'Use {{description}}, {{persona}}, {{memory}}, etc.',
-            ),
+            if (_type == StudioBlockType.instruction)
+              GlazeTextField(
+                controller: _contentCtrl,
+                maxLines: 12,
+                label: 'Content (macro templates supported)',
+                hint: 'Use {{description}}, {{persona}}, {{memory}}, etc.',
+              )
+            else
+              Text(switch (_type) {
+                StudioBlockType.context =>
+                  'Studio inserts the selected context source and preserves its message roles.',
+                StudioBlockType.history =>
+                  'Studio inserts the source-window chat history.',
+                StudioBlockType.priorBriefs =>
+                  'Studio inserts briefs produced by earlier agents.',
+                StudioBlockType.instruction => '',
+              }, style: TextStyle(color: context.cs.onSurfaceVariant)),
             const SizedBox(height: 12),
             Text(
               'Studio final-agent briefs: either enable the '
@@ -182,9 +249,27 @@ class _StudioBlockEditorDialogState extends State<StudioBlockEditorDialog> {
       content: _contentCtrl.text,
       role: _role,
       section: _section,
-      kind: _kind,
+      type: _type,
+      contextSlot: _type == StudioBlockType.context ? _contextSlot : null,
+      targetAgentId: _type == StudioBlockType.instruction
+          ? _targetAgentId
+          : null,
       enabled: _enabled,
     );
+    final error =
+        StudioPresetValidator.validate(
+              StudioPreset(id: 'editor', blocks: [updated]),
+            )
+            .where(
+              (issue) => issue.severity == StudioPresetValidationSeverity.error,
+            )
+            .firstOrNull;
+    if (error != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.message)));
+      return;
+    }
     Navigator.of(context).pop(updated);
   }
 }

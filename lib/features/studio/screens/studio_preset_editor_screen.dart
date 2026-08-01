@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/models/studio_config.dart';
 import '../../../core/models/studio_preset_block_groups.dart';
+import '../../../core/models/studio_preset_validation.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../widgets/studio_block_editor_dialog.dart';
@@ -11,7 +12,7 @@ import '../widgets/studio_preset_group_tile.dart';
 /// Screen for editing a [StudioPreset] — its blocks grouped by section.
 ///
 /// Shows all blocks in a section-tabbed view. Each block row shows title,
-/// kind, role, order, enabled toggle. Tap to edit; long-press to delete.
+/// source semantics, order, enabled toggle. Tap to edit; long-press to delete.
 /// Add new blocks via FAB. Changes are persisted to DB on every edit.
 class StudioPresetEditorScreen extends ConsumerStatefulWidget {
   final String presetId;
@@ -55,6 +56,18 @@ class _StudioPresetEditorScreenState
   }
 
   Future<void> _save(StudioPreset preset) async {
+    final issues = StudioPresetValidator.validate(preset);
+    final error = issues
+        .where(
+          (issue) => issue.severity == StudioPresetValidationSeverity.error,
+        )
+        .firstOrNull;
+    if (error != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.message)));
+      return;
+    }
     final repo = ref.read(studioPresetRepoProvider);
     await repo.upsert(preset);
     setState(() => _preset = preset);
@@ -151,7 +164,7 @@ class _StudioPresetEditorScreenState
             : const TextStyle(decoration: TextDecoration.lineThrough),
       ),
       subtitle: Text(
-        '${block.kind} · ${block.role} · order=${block.order}',
+        '${describeStudioPresetBlock(block)} · order=${block.order}',
         style: const TextStyle(fontSize: 12),
       ),
       trailing: Switch(

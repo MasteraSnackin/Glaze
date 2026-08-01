@@ -18,7 +18,7 @@ import 'transport/extra_request_parameters.dart';
 /// final apiConfigs = ref.read(apiListProvider).value ?? const <ApiConfig>[];
 /// final config = StudioSlotResolver.resolve(
 ///   apiConfigs: apiConfigs,
-///   apiConfigId: studioConfig.cleanerApiConfigId,
+///   apiConfigId: studioPreset.cleanerApiConfigId,
 ///   errorLabel: 'post-cleaner',
 ///   modelOverride: pipeline.cleaner.postCleanerModel,
 /// );

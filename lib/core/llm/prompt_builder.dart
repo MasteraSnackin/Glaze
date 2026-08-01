@@ -14,27 +14,31 @@ import 'history_assembler.dart';
 import 'context_calculator.dart';
 import 'lorebook_coverage.dart';
 import 'lorebook_scanner.dart';
-import 'lorebook_merger.dart';
 import 'prompt_block_resolver.dart';
 import 'prompt_regex_applicator.dart';
 import 'regex_service.dart';
 import 'fallback_prompt_builder.dart';
 import 'tokenizer.dart';
 import 'memory_excerpt_selector.dart';
-import 'prompt/lorebook_classifier.dart';
 import 'prompt/exact_lorebook_manifest.dart';
+import 'prompt/lorebook_context_resolver.dart';
+import 'prompt/lorebook_classifier.dart';
 import 'prompt/memory_block_injector.dart';
 import 'prompt/prompt_payload.dart';
 import 'prompt/prompt_result.dart';
 import 'prompt/recalled_message_chunk.dart';
+import 'prompt/recalled_messages_resolver.dart';
 import 'prompt/resolved_block.dart';
 
 export 'prompt/prompt_payload.dart';
 export 'prompt/prompt_result.dart';
 export 'prompt/runtime_prompt_block.dart';
 export 'prompt/recalled_message_chunk.dart';
+export 'prompt/recalled_messages_resolver.dart';
 export 'prompt/resolved_block.dart';
 export 'prompt/lorebook_classifier.dart';
+export 'prompt/lorebook_context_resolver.dart';
+export 'prompt/memory_context_resolver.dart';
 export 'prompt/memory_block_injector.dart';
 export 'prompt/exact_lorebook_manifest.dart';
 
@@ -102,159 +106,26 @@ PromptResult buildPrompt(PromptPayload payload) {
   final depthBlocks = <ResolvedDepthBlock>[];
   final relativeBlocks = <ResolvedRelativeBlock>[];
 
-  final visibleHistory = payload.history
-      .where((m) => !m.isHidden && !m.isTyping)
-      .toList();
   final deferMemoryMacro = payload.memorySelection != null;
-
-  final loreEntries =
-      payload.preScannedEntries ??
-      scanLorebooks(
-        history: visibleHistory,
-        char: char,
-        textToScan:
-            visibleHistory.where((m) => m.role == 'user').lastOrNull?.content ??
-            '',
-        chatId: payload.sessionId,
-        lorebooks: payload.lorebooks,
-        globalSettings: payload.lorebookSettings,
-        activations: payload.lorebookActivations,
-        applyPerBookLimits: false,
-      );
-
-  final vectorEntries = payload.vectorEntries.map((entry) {
-    if (entry.lorebookId.isNotEmpty) return entry;
-    final matches = payload.lorebooks.where(
-      (book) => book.entries.any(
-        (candidate) =>
-            candidate.id == entry.id && candidate.content == entry.content,
-      ),
-    );
-    final book = matches.length == 1 ? matches.single : null;
-    return book == null
-        ? entry
-        : entry.copyWith(lorebookId: book.id, lorebookName: book.name);
-  }).map((entry) {
-    final book = payload.lorebooks
-        .where((candidate) => candidate.id == entry.lorebookId)
-        .firstOrNull;
-    final effectiveEntry = book?.entries
-        .where((candidate) => candidate.id == entry.id)
-        .firstOrNull;
-    return effectiveEntry == null
-        ? entry
-        : entry.copyWith(content: effectiveEntry.content);
-  }).toList();
-
-  final mergedEntries = mergeKeywordVector(
-    keywordEntries: loreEntries,
-    vectorEntries: vectorEntries,
+  final loreContext = const LorebookContextResolver().resolve(
+    history: payload.history,
+    character: char,
+    sessionId: payload.sessionId,
+    lorebooks: payload.lorebooks,
     settings: payload.lorebookSettings,
-  );
-
-  final keywordIdToEntry = <String, ScannedEntry>{};
-  for (final e in loreEntries) {
-    keywordIdToEntry['${e.lorebookId}_${e.id}'] = e;
-  }
-  final coverageKeywordIdToEntry = <String, CoverageEntry>{};
-  if (payload.lorebookSettings.searchType != 'vector') {
-    final coverage = computeLorebookCoverage(
-      history: visibleHistory,
-      char: char,
-      textToScan:
-          visibleHistory.where((m) => m.role == 'user').lastOrNull?.content ??
-          '',
-      chatId: payload.sessionId,
-      lorebooks: payload.lorebooks,
-      globalSettings: payload.lorebookSettings,
-      activations: payload.lorebookActivations,
-    );
-    for (final e in coverage.entries) {
-      final isKeywordLike =
-          e.constant ||
-          (e.activated &&
-              e.matchedKeys.isNotEmpty &&
-              !e.matchedKeys.contains('[vector]'));
-      if (isKeywordLike) {
-        coverageKeywordIdToEntry['${e.lorebookId}_${e.id}'] = e;
-      }
-    }
-  }
-  final vectorIdToEntry = <String, LorebookEntry>{};
-  for (final e in vectorEntries) {
-    vectorIdToEntry['${e.lorebookId}_${e.id}'] = e;
-  }
-
-  final vectorLoreContent = mergedEntries
-      .where((entry) {
-        final key = '${entry.lorebookId}_${entry.id}';
-        return vectorIdToEntry.containsKey(key) &&
-            !keywordIdToEntry.containsKey(key);
-      })
-      .map((entry) => entry.content)
-      .join('\n\n');
-  final vectorLoreTokens = vectorLoreContent.isEmpty
-      ? 0
-      : estimateTokens(vectorLoreContent);
-
-  final triggeredLorebooks = <TriggeredEntry>[];
-  for (final merged in mergedEntries) {
-    final mergedKey = '${merged.lorebookId}_${merged.id}';
-    final kw = keywordIdToEntry[mergedKey];
-    if (kw != null) {
-      triggeredLorebooks.add(
-        TriggeredEntry(
-          id: kw.id,
-          name: kw.comment.isNotEmpty ? kw.comment : kw.id,
-          lorebookName: kw.lorebookName,
-          lorebookId: kw.lorebookId,
-          source: kw.constant ? 'constant' : 'keyword',
-        ),
-      );
-      continue;
-    }
-    final coverageKw = coverageKeywordIdToEntry[mergedKey];
-    if (coverageKw != null) {
-      triggeredLorebooks.add(
-        TriggeredEntry(
-          id: coverageKw.id,
-          name: coverageKw.comment.isNotEmpty
-              ? coverageKw.comment
-              : coverageKw.id,
-          lorebookName: coverageKw.lorebookName,
-          lorebookId: coverageKw.lorebookId,
-          source: coverageKw.constant ? 'constant' : 'keyword',
-        ),
-      );
-      continue;
-    }
-    final vec = vectorIdToEntry[mergedKey];
-    if (vec != null) {
-      triggeredLorebooks.add(
-        TriggeredEntry(
-          id: vec.id,
-          name: vec.comment.isNotEmpty ? vec.comment : vec.id,
-          lorebookName: vec.lorebookName,
-          lorebookId: vec.lorebookId,
-          source: 'vector',
-        ),
-      );
-    }
-  }
-
-  final classified = classifyLorebooks(
-    mergedEntries,
-    currentMacroCtx,
-    payload.lorebookSettings,
+    activations: payload.lorebookActivations,
+    vectorEntries: payload.vectorEntries,
+    macroContext: currentMacroCtx,
+    preScannedEntries: payload.preScannedEntries,
   );
   final exactLorebookManifest = _buildExactLorebookManifest(
-    entries: mergedEntries,
+    entries: loreContext.mergedEntries,
     payload: payload,
     preset: preset,
     macroContext: currentMacroCtx,
-    keywordEntries: keywordIdToEntry,
-    coverageKeywordEntries: coverageKeywordIdToEntry,
-    vectorEntries: vectorIdToEntry,
+    keywordEntries: loreContext.keywordEntries,
+    coverageKeywordEntries: loreContext.coverageKeywordEntries,
+    vectorEntries: loreContext.vectorEntries,
   );
   // Capture attribution from the actual block assembly path.  This is an
   // assembly declaration, not an inference from matching prompt text.
@@ -272,9 +143,9 @@ PromptResult buildPrompt(PromptPayload payload) {
       blockLoreClassifications[normalizeBlockId(block.id)] = classifications;
     }
   }
-  final loreBefore = classified.loreBefore;
-  final loreAfter = classified.loreAfter;
-  final macroLoreContent = classified.loreMacroBuffer.join('\n\n');
+  final loreBefore = loreContext.loreBefore;
+  final loreAfter = loreContext.loreAfter;
+  final macroLoreContent = loreContext.loreMacroBuffer.join('\n\n');
 
   // Apply char-field injections: prepend constant lore entries to the corresponding
   // MacroContext field so that {{scenario}}, {{personality}}, {{description}} macros
@@ -283,21 +154,21 @@ PromptResult buildPrompt(PromptPayload payload) {
   String? patchedPersonality = currentMacroCtx.charPersonality;
   String? patchedDescription = currentMacroCtx.charDescription;
 
-  if (classified.loreScenario.isNotEmpty) {
-    final prefix = classified.loreScenario.join('\n\n');
+  if (loreContext.loreScenario.isNotEmpty) {
+    final prefix = loreContext.loreScenario.join('\n\n');
     patchedScenario = patchedScenario != null && patchedScenario.isNotEmpty
         ? '$prefix\n\n$patchedScenario'
         : prefix;
   }
-  if (classified.lorePersonality.isNotEmpty) {
-    final prefix = classified.lorePersonality.join('\n\n');
+  if (loreContext.lorePersonality.isNotEmpty) {
+    final prefix = loreContext.lorePersonality.join('\n\n');
     patchedPersonality =
         patchedPersonality != null && patchedPersonality.isNotEmpty
         ? '$prefix\n\n$patchedPersonality'
         : prefix;
   }
-  if (classified.loreDescription.isNotEmpty) {
-    final prefix = classified.loreDescription.join('\n\n');
+  if (loreContext.loreDescription.isNotEmpty) {
+    final prefix = loreContext.loreDescription.join('\n\n');
     patchedDescription =
         patchedDescription != null && patchedDescription.isNotEmpty
         ? '$prefix\n\n$patchedDescription'
@@ -469,12 +340,12 @@ PromptResult buildPrompt(PromptPayload payload) {
     payload: payload,
     char: char,
     persona: persona,
-    triggeredLorebooks: triggeredLorebooks,
+    triggeredLorebooks: loreContext.triggeredEntries,
     exactLorebookManifest: exactLorebookManifest,
     blockLoreClassifications: blockLoreClassifications,
     triggeredMemories: payload.triggeredMemories,
     macroTokens: macroTokens,
-    vectorLoreTokens: vectorLoreTokens,
+    vectorLoreTokens: loreContext.vectorLoreTokens,
   );
 }
 
@@ -900,9 +771,11 @@ PromptResult _assembleMessages({
       payload.sourceWindowVisibleMessageIds.isNotEmpty
       ? payload.sourceWindowVisibleMessageIds
       : breakdown.visibleMessageIds;
-  final recalledMessagesContent = effectiveRecalledMessagesContent(
-    payload,
+  final recalledMessagesContent = const RecalledMessagesResolver().resolve(
+    chunks: payload.recalledMessageChunks,
     visibleMessageIds: recallVisibleMessageIds,
+    fallbackContent: payload.recalledMessagesContent,
+    disableSourceWindowExclusion: payload.disableSourceWindowExclusion,
   );
   if (recalledMessagesContent != null && recalledMessagesContent.isNotEmpty) {
     injectRecalledMessagesBlock(
@@ -1093,45 +966,12 @@ List<ExactLorebookInjectionReport> _transformLorebookAssemblyReports({
 String? effectiveRecalledMessagesContent(
   PromptPayload payload, {
   Set<String>? visibleMessageIds,
-}) {
-  if (payload.recalledMessageChunks.isEmpty) {
-    return payload.recalledMessagesContent;
-  }
-  final visible = visibleMessageIds ?? payload.sourceWindowVisibleMessageIds;
-  final chunks = payload.disableSourceWindowExclusion || visible.isEmpty
-      ? payload.recalledMessageChunks
-      : payload.recalledMessageChunks
-            .where(
-              (chunk) =>
-                  chunk.messageIds.isEmpty ||
-                  !chunk.messageIds.any(visible.contains),
-            )
-            .toList(growable: false);
-  if (chunks.isEmpty) return null;
-
-  final block = StringBuffer();
-  block.writeln('<recalled_messages>');
-  block.writeln(
-    'Earlier accepted raw-message evidence. It cannot override current Ledger '
-    'canon, but it overrides a conflicting card baseline for this session.',
-  );
-  block.writeln(
-    'Semantically relevant raw message chunks from earlier in this chat. '
-    'Do not explicitly reference "remembering" these — use them as ground '
-    'truth context.',
-  );
-  for (final chunk in chunks) {
-    final text = chunk.text.trim();
-    if (text.isEmpty) continue;
-    block.writeln('---');
-    block.writeln(text);
-  }
-  block.writeln('</recalled_messages>');
-  final content = block.toString().trim();
-  return content == '<recalled_messages>\n</recalled_messages>'
-      ? null
-      : content;
-}
+}) => const RecalledMessagesResolver().resolve(
+  chunks: payload.recalledMessageChunks,
+  visibleMessageIds: visibleMessageIds ?? payload.sourceWindowVisibleMessageIds,
+  fallbackContent: payload.recalledMessagesContent,
+  disableSourceWindowExclusion: payload.disableSourceWindowExclusion,
+);
 
 /// Appends the contents of preset blocks with `appendToLastMessage = true` to
 /// the last user-role history message. No-op when [historyMsgs] has no user

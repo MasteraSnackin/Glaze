@@ -20,6 +20,7 @@ import '../state/summary_providers.dart';
 import 'memory_injection_service.dart';
 import 'message_recall_service.dart';
 import 'memory_selector.dart';
+import 'generation_context_inputs.dart';
 import 'prompt_builder.dart';
 import 'prompt/arc_state_builder.dart';
 import 'prompt/ledger_tracker_loader.dart';
@@ -105,6 +106,38 @@ class PromptPayloadBuilder {
     bool Function()? shouldAbort,
     CancelToken? cancelToken,
   }) async {
+    final inputs = await collectGenerationContext(
+      charId: charId,
+      session: session,
+      apiConfigOverride: apiConfigOverride,
+      guidanceText: guidanceText,
+      skipVectorSearch: skipVectorSearch,
+      shouldAbort: shouldAbort,
+      cancelToken: cancelToken,
+    );
+    final preset = await _resolveOrdinaryPreset(shouldAbort: shouldAbort);
+    return PromptPayload.fromGenerationContext(inputs, preset: preset);
+  }
+
+  Future<PromptPayload> buildOrdinaryFromGenerationContext(
+    GenerationContextInputs inputs, {
+    bool Function()? shouldAbort,
+  }) async {
+    final preset = await _resolveOrdinaryPreset(shouldAbort: shouldAbort);
+    return PromptPayload.fromGenerationContext(inputs, preset: preset);
+  }
+
+  /// Collects all live generation source data without selecting or reading an
+  /// ordinary preset. Request compilers attach their own typed configuration.
+  Future<GenerationContextInputs> collectGenerationContext({
+    required String charId,
+    required ChatSession? session,
+    ApiConfig? apiConfigOverride,
+    String? guidanceText,
+    bool skipVectorSearch = false,
+    bool Function()? shouldAbort,
+    CancelToken? cancelToken,
+  }) async {
     void throwIfAborted() {
       if (shouldAbort?.call() == true) {
         throw const _GenerationAbortedException();
@@ -113,19 +146,19 @@ class PromptPayloadBuilder {
 
     throwIfAborted();
     final charRepo = _ref.read(characterRepoProvider);
-    final presetRepo = _ref.read(presetRepoProvider);
     final personaRepo = _ref.read(personaRepoProvider);
     final lorebookRepo = _ref.read(lorebookRepoProvider);
 
     final sourceCharacter = await charRepo.getById(charId);
     throwIfAborted();
-    if (sourceCharacter == null) throw StateError('Character not found: $charId');
+    if (sourceCharacter == null) {
+      throw StateError('Character not found: $charId');
+    }
     final effectiveContext = session == null
         ? null
-        : await _ref.read(effectiveCanonContextLoaderProvider).load(
-            sessionId: session.id,
-            sourceCharacter: sourceCharacter,
-          );
+        : await _ref
+              .read(effectiveCanonContextLoaderProvider)
+              .load(sessionId: session.id, sourceCharacter: sourceCharacter);
     final character = effectiveContext?.character ?? sourceCharacter;
     final effectiveProjection = effectiveContext == null
         ? null
@@ -137,13 +170,6 @@ class PromptPayloadBuilder {
     if (chatApi == null || chatApi.mode == 'embedding') {
       throw StateError('No chat API config available');
     }
-
-    final activePresetId = _ref.read(activePresetIdProvider);
-    final presets = await presetRepo.getAll();
-    throwIfAborted();
-    final preset = activePresetId != null
-        ? presets.where((p) => p.id == activePresetId).firstOrNull
-        : (presets.isNotEmpty ? presets.first : null);
 
     final personas = await personaRepo.getAll();
     throwIfAborted();
@@ -164,10 +190,7 @@ class PromptPayloadBuilder {
         ? sourceLorebooks
         : await _ref
               .read(sessionLorebookEvolutionRepoProvider)
-              .applyOverlays(
-                sessionId: session.id,
-                lorebooks: sourceLorebooks,
-              );
+              .applyOverlays(sessionId: session.id, lorebooks: sourceLorebooks);
     throwIfAborted();
     final lorebookSettings = _ref.read(lorebookSettingsProvider);
     final lorebookActivations = _ref.read(lorebookActivationsProvider);
@@ -436,10 +459,9 @@ class PromptPayloadBuilder {
       session: session,
       context: effectiveContext,
     );
-    return PromptPayload(
+    return GenerationContextInputs(
       character: character,
       persona: persona,
-      preset: preset,
       history: history,
       sessionId: sessionId,
       apiConfig: chatApi,
@@ -482,6 +504,17 @@ class PromptPayloadBuilder {
     );
   }
 
+  Future<Preset?> _resolveOrdinaryPreset({bool Function()? shouldAbort}) async {
+    final activePresetId = _ref.read(activePresetIdProvider);
+    final presets = await _ref.read(presetRepoProvider).getAll();
+    if (shouldAbort?.call() == true) {
+      throw const _GenerationAbortedException();
+    }
+    return activePresetId != null
+        ? presets.where((p) => p.id == activePresetId).firstOrNull
+        : presets.firstOrNull;
+  }
+
   Future<PromptPayload> buildFromPreFetched({
     required String charId,
     required ChatSession? session,
@@ -502,12 +535,13 @@ class PromptPayloadBuilder {
     List<RuntimePromptBlock> runtimePromptBlocks = const [],
     String? recalledMessagesContent,
   }) async {
-    final resolvedContext = effectiveCanonContext ?? (session != null
-        ? await _ref.read(effectiveCanonContextLoaderProvider).load(
-            sessionId: session.id,
-            sourceCharacter: character,
-          )
-        : null);
+    final resolvedContext =
+        effectiveCanonContext ??
+        (session != null
+            ? await _ref
+                  .read(effectiveCanonContextLoaderProvider)
+                  .load(sessionId: session.id, sourceCharacter: character)
+            : null);
     final projection = resolvedContext == null
         ? null
         : EffectiveCanonPromptProjection.fromContext(resolvedContext);
@@ -643,12 +677,15 @@ class PromptPayloadBuilder {
   }) async {
     if (session == null || context == null) return;
     final current = await _ref.read(characterRepoProvider).getById(charId);
-    final isCurrent = current != null &&
-        await _ref.read(effectiveCanonContextLoaderProvider).isStillCurrentReadOnly(
-          sessionId: session.id,
-          sourceCharacter: current,
-          stamp: context.stamp,
-        );
+    final isCurrent =
+        current != null &&
+        await _ref
+            .read(effectiveCanonContextLoaderProvider)
+            .isStillCurrentReadOnly(
+              sessionId: session.id,
+              sourceCharacter: current,
+              stamp: context.stamp,
+            );
     if (!isCurrent) {
       throw const PromptBuildStaleException(
         'Effective canon changed while building the prompt payload.',

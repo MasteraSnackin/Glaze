@@ -1,6 +1,11 @@
 import 'package:flutter/foundation.dart';
 import 'package:freezed_annotation/freezed_annotation.dart';
 
+import '../llm/studio/studio_context.dart';
+import 'cleaner_settings.dart';
+import 'ledger_settings.dart';
+import 'studio_agent_settings.dart';
+
 part 'studio_config.freezed.dart';
 part 'studio_config.g.dart';
 
@@ -19,43 +24,29 @@ enum StudioExecutionMode {
   }
 }
 
-/// Reusable Studio configuration profile.
-///
-/// Created when the user clicks "Build Studio" in the MagicDrawer Studio menu.
-/// Agents are built from [StudioControllerOntology.specs] directly — no LLM
-/// decomposition. Prompt shards come from the DB-backed StudioPreset.
+enum StudioBlockType { instruction, context, history, priorBriefs }
+
+@freezed
+abstract class StudioRuntimeSettings with _$StudioRuntimeSettings {
+  const factory StudioRuntimeSettings({
+    @Default(1) int version,
+    @Default(StudioAgentSettings()) StudioAgentSettings agents,
+    @Default(CleanerSettings()) CleanerSettings cleaner,
+    @Default(LedgerSettings()) LedgerSettings ledger,
+    @Default([]) List<String> broadcastBlocks,
+  }) = _StudioRuntimeSettings;
+
+  factory StudioRuntimeSettings.fromJson(Map<String, dynamic> json) =>
+      _$StudioRuntimeSettingsFromJson(json);
+}
+
+/// Per-session Studio activation. Reusable pipeline settings live in
+/// [StudioPreset].
 @freezed
 abstract class StudioConfig with _$StudioConfig {
   const factory StudioConfig({
-    /// Storage id. Older rows used the chat session id; profile rows use a
-    /// stable Studio profile id and can be reused by many sessions.
     required String sessionId,
-    @Default('') String profileId,
-    @Default('') String profileName,
     @Default(false) bool enabled,
-    @Default([]) List<StudioAgent> agents,
-    @Default('') String finalPresetId,
-    @Default('') String runApiConfigId,
-    @Default('') String expensiveApiConfigId,
-    @Default('') String cheapApiConfigId,
-    @Default('') String cleanerApiConfigId,
-    @Default('') String runModelOverride,
-
-    /// Maximum number of trailing user/assistant chat messages forwarded to the
-    /// FINAL Studio agent (the generator). Trackers (intermediate agents) are
-    /// trimmed per their own [StudioAgent.contextSize]. The final writer leans
-    /// on the tracker briefs instead of re-reading the whole transcript.
-    /// 0 = no message-count limit (a 60K token budget still applies).
-    /// See [StudioHistoryLimiter.finalHistoryTokenBudget].
-    @Default(30) int maxFinalHistoryMessages,
-
-    /// Verbatim content of "broadcast" preset blocks — cross-cutting rules
-    /// (output language + prose-quality guards: anti-loop/echo/cliché/slop,
-    /// banlists) that must govern not only their primary agent but also the
-    /// POST-cleaner rewrite. Captured at build time so the POST-cleaner can
-    /// apply the user's own rules verbatim without re-running any LLM. Each
-    /// entry is one block's `[Block: name]\n<content>` text.
-    @Default([]) List<String> broadcastBlocks,
     @Default(0) int createdAt,
     @Default(0) int updatedAt,
   }) = _StudioConfig;
@@ -65,24 +56,13 @@ abstract class StudioConfig with _$StudioConfig {
 }
 
 @freezed
-abstract class PromptShardBlock with _$PromptShardBlock {
-  const factory PromptShardBlock({
-    @Default('system') String role,
-    @Default('') String content,
-    @Default('') String blockName,
-    @Default('') String blockId,
-  }) = _PromptShardBlock;
-
-  factory PromptShardBlock.fromJson(Map<String, dynamic> json) =>
-      _$PromptShardBlockFromJson(json);
-}
-
-@freezed
 abstract class StudioPresetBlock with _$StudioPresetBlock {
   const factory StudioPresetBlock({
     required String id,
     @Default('') String title,
-    @Default('custom_text') String kind,
+    @Default(StudioBlockType.instruction) StudioBlockType type,
+    StudioContextSlot? contextSlot,
+    String? targetAgentId,
     @Default('system') String role,
     @Default('') String content,
     @Default(true) bool enabled,
@@ -104,6 +84,14 @@ abstract class StudioPreset with _$StudioPreset {
     required String id,
     @Default('') String name,
     @Default([]) List<StudioPresetBlock> blocks,
+    @Default([]) List<StudioAgent> agents,
+    @Default('') String expensiveApiConfigId,
+    @Default('') String cheapApiConfigId,
+    @Default('') String cleanerApiConfigId,
+
+    /// Maximum trailing messages sent to the final generator. Trackers use
+    /// their own [StudioAgent.contextSize]. 0 disables the message-count cap.
+    @Default(30) int maxFinalHistoryMessages,
 
     /// Per-agent on/off overrides keyed by controller spec id
     /// (e.g. `'continuity'`, `'narrative'`, `'final'`).
@@ -114,6 +102,7 @@ abstract class StudioPreset with _$StudioPreset {
     /// Explicit topology prevents stale stored agents from reviving pregen
     /// calls when a Direct/Assisted preset is selected.
     @Default(StudioExecutionMode.legacy) StudioExecutionMode executionMode,
+    @Default(StudioRuntimeSettings()) StudioRuntimeSettings runtime,
     @Default(0) int updatedAt,
   }) = _StudioPreset;
 
@@ -133,6 +122,7 @@ abstract class StudioPreset with _$StudioPreset {
 abstract class StudioAgent with _$StudioAgent {
   const factory StudioAgent({
     required String id,
+    @Default('') String controllerId,
     @Default('') String name,
     @Default('') String role,
     @Default(0) int order,
@@ -141,17 +131,15 @@ abstract class StudioAgent with _$StudioAgent {
     @Default(4000) int timeoutMs,
     @Default(0.3) double temperature,
     @Default(8000) int maxTokens,
-    @Default('') String sourceBlockNames,
 
     /// Controls whether an intermediate agent should be refreshed every turn
     /// or can reuse a previous brief. Supported values: static, scene, turn.
     /// Final agents always run every turn.
     @Default('turn') String refreshPolicy,
-    @Default([]) List<String> invalidationSignals,
 
     /// Number of trailing chat messages forwarded to this tracker (intermediate
     /// agent). Default 5 to keep trackers focused on local turn state; the
-    /// final agent ignores this and uses [StudioConfig.maxFinalHistoryMessages]
+    /// final agent ignores this and uses [StudioPreset.maxFinalHistoryMessages]
     /// instead. 0 = no limit (not recommended for trackers).
     @Default(5) int contextSize,
 

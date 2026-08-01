@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/llm/agent_runner.dart';
+import 'package:glaze_flutter/core/llm/studio/studio_context.dart';
 import 'package:glaze_flutter/core/llm/studio_brief_cache.dart';
 import 'package:glaze_flutter/core/llm/studio_brief_parser.dart';
 import 'package:glaze_flutter/core/llm/studio_stage_brief.dart';
@@ -52,6 +53,30 @@ void main() {
     expect(edited, isNot(original));
   });
 
+  test('typed block routing changes the cache key', () {
+    final original = _cacheKey(cache);
+    final context = _cacheKey(
+      cache,
+      preset: _preset.copyWith(
+        blocks: [
+          _preset.blocks.single.copyWith(
+            type: StudioBlockType.context,
+            contextSlot: StudioContextSlot.memory,
+          ),
+        ],
+      ),
+    );
+    final targeted = _cacheKey(
+      cache,
+      preset: _preset.copyWith(
+        blocks: [_preset.blocks.single.copyWith(targetAgentId: 'continuity')],
+      ),
+    );
+
+    expect(context, isNot(original));
+    expect(targeted, isNot(original));
+  });
+
   test('agentEnabled map insertion order does not change the cache key', () {
     final first = _cacheKey(
       cache,
@@ -67,6 +92,37 @@ void main() {
     );
 
     expect(second, first);
+  });
+
+  test('controller identity changes the cache key', () {
+    final original = _cacheKey(cache);
+    final changed = cache.cacheKeyForAgent(
+      config: _config,
+      studioPreset: _preset,
+      sessionId: 'session-a',
+      resolvedConfig: _resolvedConfig,
+      trackerContextSize: 5,
+      maxTokensOverride: null,
+      temperatureOverride: null,
+      agent: _agent.copyWith(controllerId: 'narrative'),
+      policy: 'static',
+      sceneKey: '',
+    );
+
+    expect(changed, isNot(original));
+  });
+
+  test('refresh policy uses only the normalized explicit value', () {
+    expect(
+      cache.effectiveRefreshPolicy(
+        const StudioAgent(
+          id: 'meta-looking',
+          name: 'Meta-Weaver forbidden words director',
+          refreshPolicy: 'invalid',
+        ),
+      ),
+      'turn',
+    );
   });
 
   test('older turn cannot overwrite a newer cached brief', () {
@@ -99,29 +155,24 @@ void main() {
   });
 }
 
-const _config = StudioConfig(
-  sessionId: 'profile-storage-id',
-  profileId: 'shared-profile',
-  enabled: true,
-  cheapApiConfigId: 'tracker-api',
-);
+const _config = StudioConfig(sessionId: 'profile-storage-id', enabled: true);
 
 const _agent = StudioAgent(
   id: 'continuity',
+  controllerId: 'continuity',
   name: 'Continuity',
-  sourceBlockNames: 'continuity_rules',
   refreshPolicy: 'static',
 );
 
 const _preset = StudioPreset(
   id: 'preset-id',
+  cheapApiConfigId: 'tracker-api',
   executionMode: StudioExecutionMode.assisted,
   agentEnabled: {'continuity': true},
   blocks: [
     StudioPresetBlock(
       id: 'continuity-rules',
       section: 'pregen',
-      kind: 'agent_instruction',
       role: 'system',
       order: 2,
       content: 'Original instructions',

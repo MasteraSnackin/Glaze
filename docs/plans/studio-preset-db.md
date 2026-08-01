@@ -6,6 +6,14 @@
 > automatic canonical tracker writer. References below are retained as history,
 > not current architecture.
 
+> **Update (2026-08):** `studio_block_classifier.dart` and
+> `studio_context_bucketizer.dart` (referenced below) have since been deleted
+> as dead code. Studio agents are now defined directly in `StudioPreset.agents`
+> with explicit `controllerId` routing — no decomposition or bucketing step.
+> The old `StudioConfig` profile system (`profileId`, `profileName`,
+> `broadcastBlocks`) has been retired; `studio_config_rows` is now
+> session-only activation.
+
 > Extracted from opencode session DB (`ses_0e4610f29ffeS9YaIGKnmkeArR`), updated through commit `4b4ad0e5`.
 
 ## Goal

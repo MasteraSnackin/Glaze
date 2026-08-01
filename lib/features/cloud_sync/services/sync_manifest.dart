@@ -275,9 +275,7 @@ class SyncManifestBuilder implements SyncManifestProvider {
 
     final studioConfigs = await _studioConfigStore.getAll();
     for (final config in studioConfigs) {
-      final id = config.profileId.isNotEmpty
-          ? config.profileId
-          : config.sessionId;
+      final id = config.sessionId;
       final json = config.toJson();
       final hash = SyncSerialization.computeSyncHash(json);
       final key = entryKey('studio_config', id);

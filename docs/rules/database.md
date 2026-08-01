@@ -79,7 +79,7 @@ All schema changes go in `AppDatabase.migration` in `app_db.dart`.
 Bump the schema version and add a `from → to` migration step.
 Never modify existing column types without a migration.
 
-Current version: **84**
+Current version: **101**
 
 Migration history:
 - v18: added `characters.picksHash`
@@ -106,16 +106,16 @@ Migration history:
 - v39: added Studio `finalPresetId`
 - v40: added Studio request preset ids
 - v41: added Studio preset overrides JSON
-- v42: added Studio `profileId` / `profileName` for reusable session-bound profiles
+- v42: added Studio `profileId` / `profileName` for reusable session-bound profiles (removed in v101 — profiles retired, `studio_config_rows` is now session-only activation)
 - v43: added Studio `builderPromptTemplate` override for editable Studio rebuild prompts
 - v44: added Studio `maxFinalHistoryMessages` INTEGER DEFAULT 15 (raised to 30 in v64) — caps trailing chat messages sent to the final Studio generator (0 = unlimited); a 60K token budget is also enforced (whichever limit is hit first); Studio trackers receive their own `StudioAgent.contextSize` (default 5, hard-cap 200) instead — see INV-ST1/INV-ST2 in `docs/INVARIANTS.md`
 - v45: added `tracker_rows` table — lightweight key-value session state. Composite PK `{sessionId, name}`; indexed on `{sessionId, scope}`. Studio Ledger is the sole automatic model writer for canonical tracker state; manual canon overrides/locks use the same infrastructure. Rows are deleted in `chatRepo.deleteByCharacterId` and `characterRepo.delete` cascades and are shown in the Agentic Ops “Tracker values” tab.
-- v46: added `studio_config_rows.routing_mode` TEXT DEFAULT `'verbatim'` — controls how preset blocks become agent instructions (`verbatim` = blocks concatenated дословно, no LLM call; `compiled` = legacy LLM digest). The decomposition service (`studio_decomposition_service.dart`) was restored after Phase 2: `decompose()` produces `StudioAgent`s (trackers + one final generator) that slot into `runTrackerCycle`; `routing_mode = 'compiled'` triggers the LLM builder, `'verbatim'` concatenates blocks directly.
+- v46: added `studio_config_rows.routing_mode` TEXT DEFAULT `'verbatim'` — controls how preset blocks become agent instructions (`verbatim` = blocks concatenated дословно, no LLM call; `compiled` = legacy LLM digest). The decomposition service (`studio_decomposition_service.dart`) was later deleted during the user-preset unbind; agents are now defined directly in `StudioPreset.agents` with explicit `controllerId` routing. `routing_mode` itself was dropped in v55.
 - v50: added `tracker_snapshots` table — per-agent-swipe immutable snapshots of all trackers (mirrors Marinara-Engine's `game_state_snapshots`). Composite PK `{sessionId, messageId, swipeId, agentSwipeId}`; columns `trackersJson` (JSON array of `Tracker.toJson`), `committed` (0/1), `createdAt` (epoch seconds). Three indexes on `(sessionId, committed, createdAt)` support fast `getLatestCommitted` reads. `TrackerSnapshotRepo` owns all access; snapshots preserve Ledger state for deletion, regeneration, swipe, and branch rollback.
 - v51: data migration — aggregates `tracker_rows` per session into a baseline snapshot at the sentinel anchor `(messageId='', committed=1)`. Legacy sessions that had `tracker_rows` but no snapshots get a one-time baseline so the snapshot-first read path (Phase 3) finds data immediately. The sentinel anchor is never dropped by `deleteForMessage` (only by `deleteBySessionId` / `deleteByCharacterId`).
 - v52: dropped `pipeline_settings_rows` — pipeline settings moved to a singleton in SharedPreferences (key `pipelineSettings`), per-session overrides abandoned. SharedPreferences payload unaffected.
 - v53: added `info_blocks.agentSwipeId` INTEGER DEFAULT -1 — binds ext blocks to the blue cleaned sub-swipe so blocks launched after the POST-cleaner target the cleaned text. -1 = "no agent swipe" (legacy blocks, match by `(messageId, swipeId)` only).
-- v54: added `studio_preset_rows` table — Studio prompts (controller ontology, runtime envelope, final brief, cleaner and Ledger prompts, beauty shard, extractors, block router, brief parser, shard synthesizers) migrated to a DB table so the user can edit them without code changes. Seeded with the then-current hardcoded values via a single INSERT. See `docs/PLAN_STUDIO_PRESET_DB.md`.
+- v54: added `studio_preset_rows` table — Studio prompts (controller ontology, runtime envelope, final brief, cleaner and Ledger prompts, beauty shard, extractors, block router, brief parser, shard synthesizers) migrated to   a DB table so the user can edit them without code changes. Seeded with the then-current hardcoded values via a single INSERT. See `docs/plans/studio-preset-db.md`.
 - v55: Studio config overhaul — added `studio_preset_id`, `expensive_api_config_id`, `cheap_api_config_id`, `cleaner_api_config_id`; dropped `source_preset_id`, `source_preset_hash`, `routing_mode`, `agent_studio_preset_id`, `final_studio_preset_id`, `studio_preset_overrides_json`, `builder_prompt_template`, `selected_block_ids_json`, `selected_block_ids_initialized`, `build_api_config_id`, `build_model_override`. Unbinds Studio from user presets, switches to 3 API config slots + `studioPresetId`.
 - v56: historical data migration — originally added `cleaner_beauty` and refreshed the then-active `writeloop_system` block. The generic write-loop is retired; current migration code adds current missing seed blocks but preserves existing user `writeloop` JSON as inert data.
 - v57: data migration — moves `cleaner_beauty` to the end of the cleaner section (`order` 99) so the LLM sees styling instructions last among preset blocks (recency effect).
@@ -149,6 +149,20 @@ Migration history:
   with the four v85 CHECKs and the apply-CAS index retained). Out-of-domain
   legacy statuses are normalized fail-closed before the rebuild (jobs →
   'cancelled', operations → 'pending'); rows are preserved.
+- v99: moved Studio agents, the three API slots, and final-history limit from
+  `studio_config_rows` to dedicated `studio_preset_rows` columns. Distinct
+  canonical profile payloads are retained as deterministic migrated presets;
+  config rows now retain only activation, identity, and timestamps.
+- v100: added `studio_preset_rows.runtime_settings_json` TEXT NOT NULL DEFAULT
+  `'{}'` for canonical nested Studio runtime settings storage.
+- v101: retired the old Studio profile system. `studio_config_rows` rebuilt to
+  session-only columns (`session_id`, `enabled`, `created_at`, `updated_at`);
+  `profile_id`, `profile_name`, `broadcast_blocks_json`, and all other profile
+  columns dropped. Legacy `broadcast_blocks_json` is merged into each preset's
+  `runtime_settings_json.broadcastBlocks` during migration. Only rows whose
+  `session_id` exists in `chat_sessions` are retained; canonical profile-only
+  rows are dropped (their runtime payloads were already preserved as migrated
+  presets in v99).
 
 ---
 

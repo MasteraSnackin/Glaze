@@ -39,9 +39,11 @@ class StudioActivationGate {
   ) {
     return agents
         .map((agent) {
-          final specId = StudioControllerOntology.specForAgent(agent).id;
+          final specId = StudioControllerOntology.targetIdForAgent(agent);
           final isPreGen = agent.phase == 'pre_generation';
-          final disabled = isPreGen && !isControllerAllowed(specId, mode);
+          final disabled =
+              specId == null ||
+              (isPreGen && !isControllerAllowed(specId, mode));
           return disabled ? agent.copyWith(enabled: false) : agent;
         })
         .toList(growable: false);

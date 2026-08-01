@@ -172,8 +172,7 @@ class ChatHistoryNotifier extends AsyncNotifier<List<ChatSessionInfo>> {
           variantGroupId: variantGroupId,
           variantName: (variant != null && variant.isNotEmpty) ? variant : null,
           avatarPath: char?.avatarPath,
-          groupAvatarPath:
-              groupAvatars[variantGroupId] ?? char?.avatarPath,
+          groupAvatarPath: groupAvatars[variantGroupId] ?? char?.avatarPath,
           lastMessage: lastMessage,
           lastMessageTime: lastMessageTime,
           messageCount: m.messageCount,
@@ -230,9 +229,7 @@ class ChatHistoryNotifier extends AsyncNotifier<List<ChatSessionInfo>> {
     await SyncDeletionTracker.record('memory_book', sessionId);
     await SyncDeletionTracker.record('tracker_value', sessionId);
     await SyncDeletionTracker.record('tracker_snapshot', sessionId);
-    final studioProfileId = studioConfig?.profileId ?? '';
-    if (studioConfig != null &&
-        (studioProfileId.isEmpty || studioProfileId == sessionId)) {
+    if (studioConfig != null) {
       await SyncDeletionTracker.record('studio_config', sessionId);
     }
   }

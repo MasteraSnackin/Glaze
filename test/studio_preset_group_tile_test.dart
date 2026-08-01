@@ -12,7 +12,6 @@ void main() {
       StudioPresetBlock(
         id: 'pov_header_group_open',
         title: 'Opening tag',
-        kind: 'group_open',
         content: '<loompov>',
         order: 0,
       ),
@@ -32,7 +31,6 @@ void main() {
       StudioPresetBlock(
         id: 'pov_header_group_close',
         title: 'Closing tag',
-        kind: 'group_close',
         content: '</loompov>',
         order: 4,
       ),

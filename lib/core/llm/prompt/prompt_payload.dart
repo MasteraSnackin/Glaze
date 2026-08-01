@@ -13,6 +13,7 @@ import '../memory_excerpt_selector.dart'
 import 'runtime_prompt_block.dart';
 import 'recalled_message_chunk.dart';
 import 'effective_canon_prompt_formatter.dart';
+import '../generation_context_inputs.dart';
 
 class PromptPayload {
   final Character character;
@@ -162,4 +163,59 @@ class PromptPayload {
     this.effectiveCanonRevisionHash,
     this.effectiveCanonCacheIdentity = '',
   });
+
+  factory PromptPayload.fromGenerationContext(
+    GenerationContextInputs inputs, {
+    required Preset? preset,
+    bool disableSourceWindowExclusion = false,
+    Set<String> sourceWindowVisibleMessageIds = const {},
+  }) => PromptPayload(
+    character: inputs.character,
+    persona: inputs.persona,
+    preset: preset,
+    history: inputs.history,
+    sessionId: inputs.sessionId,
+    apiConfig: inputs.apiConfig,
+    sessionVars: inputs.sessionVars,
+    globalVars: inputs.globalVars,
+    summaryContent: inputs.summaryContent,
+    summaryPrefix: inputs.summaryPrefix,
+    memoryContent: inputs.memoryContent,
+    memoryMacroContent: inputs.memoryMacroContent,
+    memoryInjectionTarget: inputs.memoryInjectionTarget,
+    guidanceText: inputs.guidanceText,
+    lorebooks: inputs.lorebooks,
+    lorebookSettings: inputs.lorebookSettings,
+    lorebookActivations: inputs.lorebookActivations,
+    vectorEntries: inputs.vectorEntries,
+    authorsNote: inputs.authorsNote,
+    characterDepthPrompt: inputs.characterDepthPrompt,
+    characterDepthPromptDepth: inputs.characterDepthPromptDepth,
+    characterDepthPromptRole: inputs.characterDepthPromptRole,
+    memoryCoverage: inputs.memoryCoverage,
+    globalRegexes: inputs.globalRegexes,
+    preScannedEntries: inputs.preScannedEntries,
+    triggeredMemories: inputs.triggeredMemories,
+    runtimePromptBlocks: inputs.runtimePromptBlocks,
+    memorySelection: inputs.memorySelection,
+    memoryExcerptingEnabled: inputs.memoryExcerptingEnabled,
+    memoryPackingMode: inputs.memoryPackingMode,
+    memoryExcerptTokensPerChunk: inputs.memoryExcerptTokensPerChunk,
+    memoryExcerptChunksPerEntry: inputs.memoryExcerptChunksPerEntry,
+    chunkFirstTopEntries: inputs.chunkFirstTopEntries,
+    chunkFirstTopChunks: inputs.chunkFirstTopChunks,
+    arcContent: inputs.arcContent,
+    entitiesContent: inputs.entitiesContent,
+    studioSessionStateContent: inputs.studioSessionStateContent,
+    characterKnowledgeContent: inputs.characterKnowledgeContent,
+    recalledMessagesContent: inputs.recalledMessagesContent,
+    recalledMessageChunks: inputs.recalledMessageChunks,
+    disableSourceWindowExclusion: disableSourceWindowExclusion,
+    sourceWindowVisibleMessageIds: sourceWindowVisibleMessageIds,
+    memoryInjectionFingerprint: inputs.memoryInjectionFingerprint,
+    effectiveCanonProjection: inputs.effectiveCanonProjection,
+    effectiveCanonRevisionNumber: inputs.effectiveCanonRevisionNumber,
+    effectiveCanonRevisionHash: inputs.effectiveCanonRevisionHash,
+    effectiveCanonCacheIdentity: inputs.effectiveCanonCacheIdentity,
+  );
 }
