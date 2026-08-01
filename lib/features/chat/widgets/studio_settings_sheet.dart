@@ -512,7 +512,8 @@ class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
         return;
       }
       final decoded = jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>;
-      final imported = StudioPresetCodec.decodePreset(decoded).preset;
+      final decodedPreset = StudioPresetCodec.decodePreset(decoded);
+      final imported = decodedPreset.preset;
       if (!mounted) return;
 
       final nameCtrl = TextEditingController(
@@ -555,7 +556,15 @@ class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
       if (!mounted) return;
       if (importResult == null) return;
       setState(() => _studioPresets = importResult.presets);
-      if (mounted) GlazeToast.show(context, 'Preset "$trimmedName" imported.');
+      if (mounted) {
+        final warningSuffix = decodedPreset.warnings.isEmpty
+            ? ''
+            : ' ${decodedPreset.warnings.length} block warning(s).';
+        GlazeToast.show(
+          context,
+          'Preset "$trimmedName" imported.$warningSuffix',
+        );
+      }
     } catch (e) {
       if (mounted) GlazeToast.show(context, 'Failed to import preset: $e');
     }

@@ -60,7 +60,7 @@ void main() {
         const first = StudioPreset(
           id: 'exported-id',
           name: 'Exported',
-          blocks: [StudioPresetBlock(id: 'first')],
+          blocks: [StudioPresetBlock(id: 'first', content: 'First')],
           agentEnabled: {'final': false},
           executionMode: StudioExecutionMode.direct,
           updatedAt: 1,
@@ -68,7 +68,7 @@ void main() {
         const second = StudioPreset(
           id: 'other-exported-id',
           name: 'Other',
-          blocks: [StudioPresetBlock(id: 'second')],
+          blocks: [StudioPresetBlock(id: 'second', content: 'Second')],
           executionMode: StudioExecutionMode.assisted,
           updatedAt: 2,
         );
@@ -148,6 +148,32 @@ void main() {
         expect(secondConfig.expensiveApiConfigId, 'api-b');
       },
     );
+
+    test('rejects invalid typed blocks before persistence', () async {
+      final store = _MemoryStudioPresetStore();
+      var activeId = 'default';
+      final service = _service(
+        store: store,
+        readActive: () async => activeId,
+        writeActive: (id) async => activeId = id,
+      );
+
+      await expectLater(
+        service.importPreset(
+          imported: const StudioPreset(
+            id: 'invalid',
+            blocks: [
+              StudioPresetBlock(id: 'context', type: StudioBlockType.context),
+            ],
+          ),
+          name: 'Invalid',
+        ),
+        throwsA(isA<FormatException>()),
+      );
+
+      expect(await store.getAll(), isEmpty);
+      expect(activeId, 'default');
+    });
   });
 }
 

@@ -1,5 +1,6 @@
 import '../../../core/application/sync_repo_interfaces.dart';
 import '../../../core/models/studio_config.dart';
+import '../../../core/models/studio_preset_validation.dart';
 
 typedef ActiveStudioPresetReader = Future<String> Function();
 typedef ActiveStudioPresetWriter = Future<void> Function(String presetId);
@@ -8,10 +9,12 @@ typedef StudioPresetClock = int Function();
 class StudioPresetMutationResult {
   final StudioPreset preset;
   final List<StudioPreset> presets;
+  final List<StudioPresetValidationIssue> validationIssues;
 
   const StudioPresetMutationResult({
     required this.preset,
     required this.presets,
+    this.validationIssues = const [],
   });
 }
 
@@ -91,9 +94,23 @@ class StudioPresetWorkflowService {
   Future<StudioPresetMutationResult> _persistAndSelect(
     StudioPreset preset,
   ) async {
+    final validationIssues = StudioPresetValidator.validate(preset);
+    if (StudioPresetValidator.hasErrors(validationIssues)) {
+      final messages = validationIssues
+          .where(
+            (issue) => issue.severity == StudioPresetValidationSeverity.error,
+          )
+          .map((issue) => issue.message)
+          .join(' ');
+      throw FormatException('Invalid Studio preset: $messages');
+    }
     await _store.put(preset);
     final presets = await loadPresets();
     await _writeActivePresetId(preset.id);
-    return StudioPresetMutationResult(preset: preset, presets: presets);
+    return StudioPresetMutationResult(
+      preset: preset,
+      presets: presets,
+      validationIssues: validationIssues,
+    );
   }
 }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../core/models/studio_config.dart';
 import '../../../core/models/studio_preset_block_groups.dart';
+import '../../../core/models/studio_preset_validation.dart';
 
 class StudioPresetGroupTile extends StatelessWidget {
   final StudioPresetBlockGroup group;
@@ -63,7 +64,7 @@ class StudioPresetGroupTile extends StatelessWidget {
             dense: true,
             contentPadding: const EdgeInsets.only(left: 32, right: 16),
             title: Text(block.title.isEmpty ? block.id : block.title),
-            subtitle: Text('${block.type.name} · ${block.role}'),
+            subtitle: Text(describeStudioPresetBlock(block)),
             trailing: group.exclusive
                 ? Icon(
                     block.enabled

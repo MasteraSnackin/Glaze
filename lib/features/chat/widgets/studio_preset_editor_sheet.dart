@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/models/studio_config.dart';
 import '../../../core/models/studio_preset_block_groups.dart';
+import '../../../core/models/studio_preset_validation.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../studio/widgets/studio_block_editor_dialog.dart';
@@ -62,6 +63,18 @@ class _StudioPresetEditorSheetState
   }
 
   Future<void> _save(StudioPreset preset) async {
+    final issues = StudioPresetValidator.validate(preset);
+    final error = issues
+        .where(
+          (issue) => issue.severity == StudioPresetValidationSeverity.error,
+        )
+        .firstOrNull;
+    if (error != null) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.message)));
+      return;
+    }
     final repo = ref.read(studioPresetRepoProvider);
     await repo.upsert(preset);
     setState(() => _preset = preset);
@@ -248,7 +261,7 @@ class _StudioPresetEditorSheetState
             : const TextStyle(decoration: TextDecoration.lineThrough),
       ),
       subtitle: Text(
-        '${block.type.name} · ${block.role} · order=${block.order}',
+        '${describeStudioPresetBlock(block)} · order=${block.order}',
         style: const TextStyle(fontSize: 12),
       ),
       trailing: Switch(

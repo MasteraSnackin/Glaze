@@ -1,0 +1,156 @@
+import 'studio_config.dart';
+
+enum StudioPresetValidationSeverity { warning, error }
+
+final class StudioPresetValidationIssue {
+  final StudioPresetValidationSeverity severity;
+  final String message;
+  final String? blockId;
+
+  const StudioPresetValidationIssue({
+    required this.severity,
+    required this.message,
+    this.blockId,
+  });
+}
+
+abstract final class StudioPresetValidator {
+  static const supportedSections = <String>{
+    'pregen',
+    'final',
+    'cleaner',
+    'ledger',
+    'build',
+    'brief_parser',
+  };
+
+  static const supportedRoles = <String>{'system', 'user', 'assistant'};
+
+  static const targetAgentIds = <String>{
+    'continuity',
+    'agency',
+    'narrative',
+    'dialogue',
+    'guard',
+    'world',
+    'meta',
+    'beauty',
+    'final',
+  };
+
+  static List<StudioPresetValidationIssue> validate(StudioPreset preset) {
+    final issues = <StudioPresetValidationIssue>[];
+    final ids = <String>{};
+    for (final block in preset.blocks) {
+      final id = block.id.trim();
+      if (id.isEmpty) {
+        issues.add(_error(block, 'Block id must not be empty.'));
+      } else if (!ids.add(id)) {
+        issues.add(_error(block, 'Block id "$id" is duplicated.'));
+      }
+      if (!supportedSections.contains(block.section)) {
+        issues.add(
+          _error(block, 'Unsupported Studio section "${block.section}".'),
+        );
+      }
+
+      switch (block.type) {
+        case StudioBlockType.instruction:
+          if (!supportedRoles.contains(block.role)) {
+            issues.add(_error(block, 'Unsupported instruction role.'));
+          }
+          if (block.contextSlot != null) {
+            issues.add(
+              _error(block, 'Instruction blocks cannot select context.'),
+            );
+          }
+          final target = block.targetAgentId;
+          if (target != null && !targetAgentIds.contains(target)) {
+            issues.add(_error(block, 'Unknown target agent "$target".'));
+          }
+          if (block.enabled &&
+              block.content.trim().isEmpty &&
+              !_isGroupBoundary(block.id)) {
+            issues.add(_error(block, 'Instruction content must not be empty.'));
+          }
+        case StudioBlockType.context:
+          if (block.contextSlot == null) {
+            issues.add(_error(block, 'Context source is required.'));
+          }
+          if (block.targetAgentId != null) {
+            issues.add(_error(block, 'Context blocks cannot target an agent.'));
+          }
+          _warnIgnoredContent(block, issues);
+        case StudioBlockType.history:
+          _validateSourceFreeBlock(block, issues);
+          _warnIgnoredContent(block, issues);
+        case StudioBlockType.priorBriefs:
+          _validateSourceFreeBlock(block, issues);
+          _warnIgnoredContent(block, issues);
+          if (block.section != 'final') {
+            issues.add(
+              StudioPresetValidationIssue(
+                severity: StudioPresetValidationSeverity.warning,
+                blockId: block.id,
+                message: 'Prior briefs are normally used in the final section.',
+              ),
+            );
+          }
+      }
+    }
+    return issues;
+  }
+
+  static bool hasErrors(Iterable<StudioPresetValidationIssue> issues) => issues
+      .any((issue) => issue.severity == StudioPresetValidationSeverity.error);
+
+  static void _validateSourceFreeBlock(
+    StudioPresetBlock block,
+    List<StudioPresetValidationIssue> issues,
+  ) {
+    if (block.contextSlot != null) {
+      issues.add(_error(block, '${block.type.name} cannot select context.'));
+    }
+    if (block.targetAgentId != null) {
+      issues.add(_error(block, '${block.type.name} cannot target an agent.'));
+    }
+  }
+
+  static void _warnIgnoredContent(
+    StudioPresetBlock block,
+    List<StudioPresetValidationIssue> issues,
+  ) {
+    if (block.content.trim().isEmpty) return;
+    issues.add(
+      StudioPresetValidationIssue(
+        severity: StudioPresetValidationSeverity.warning,
+        blockId: block.id,
+        message: '${block.type.name} block content is ignored.',
+      ),
+    );
+  }
+
+  static StudioPresetValidationIssue _error(
+    StudioPresetBlock block,
+    String message,
+  ) => StudioPresetValidationIssue(
+    severity: StudioPresetValidationSeverity.error,
+    blockId: block.id,
+    message: message,
+  );
+
+  static bool _isGroupBoundary(String id) =>
+      id.endsWith('_group_open') ||
+      id.endsWith('_group_close') ||
+      id.endsWith('_prefix_close');
+}
+
+String describeStudioPresetBlock(StudioPresetBlock block) =>
+    switch (block.type) {
+      StudioBlockType.instruction =>
+        'Instruction · ${block.targetAgentId ?? 'all agents'} · ${block.role}',
+      StudioBlockType.context =>
+        'Context · ${block.contextSlot?.name ?? 'source missing'}',
+      StudioBlockType.history => 'History',
+      StudioBlockType.priorBriefs => 'Previous agent briefs',
+    };
