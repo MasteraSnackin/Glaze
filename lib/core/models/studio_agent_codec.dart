@@ -26,7 +26,44 @@ abstract final class StudioAgentCodec {
         canonicalizeAgentsJson(jsonEncode(agents)),
       );
     }
+    _migrateRunApiConfigId(canonical);
     return StudioConfig.fromJson(canonical);
+  }
+
+  /// Moves the pre-3-slot API selection into each still-empty explicit slot.
+  static Map<String, dynamic> canonicalizeConfigRow(
+    Map<String, dynamic> source,
+  ) {
+    final canonical = Map<String, dynamic>.from(source);
+    _migrateRunApiConfigId(canonical, snakeCase: true);
+    canonical
+      ..remove('final_preset_id')
+      ..remove('run_api_config_id')
+      ..remove('run_model_override');
+    return canonical;
+  }
+
+  static void _migrateRunApiConfigId(
+    Map<String, dynamic> target, {
+    bool snakeCase = false,
+  }) {
+    String key(String camel, String snake) => snakeCase ? snake : camel;
+    final legacyKey = key('runApiConfigId', 'run_api_config_id');
+    final legacy = target[legacyKey];
+    if (legacy is String && legacy.isNotEmpty) {
+      for (final slot in [
+        key('expensiveApiConfigId', 'expensive_api_config_id'),
+        key('cheapApiConfigId', 'cheap_api_config_id'),
+        key('cleanerApiConfigId', 'cleaner_api_config_id'),
+      ]) {
+        final current = target[slot];
+        if (current is! String || current.isEmpty) target[slot] = legacy;
+      }
+    }
+    target
+      ..remove(key('finalPresetId', 'final_preset_id'))
+      ..remove(legacyKey)
+      ..remove(key('runModelOverride', 'run_model_override'));
   }
 
   /// Canonicalizes once without discarding fields unknown to this app version.

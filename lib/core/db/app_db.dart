@@ -68,7 +68,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 97;
+  int get schemaVersion => 98;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -454,7 +454,9 @@ class AppDatabase extends _$AppDatabase {
           );
         }
         if (!colNames.contains('run_api_config_id')) {
-          await m.addColumn(studioConfigRows, studioConfigRows.runApiConfigId);
+          await customStatement(
+            'ALTER TABLE studio_config_rows ADD COLUMN run_api_config_id TEXT NOT NULL DEFAULT ""',
+          );
         }
       }
       if (from < 38) {
@@ -479,7 +481,9 @@ class AppDatabase extends _$AppDatabase {
         ).get();
         final colNames = cols.map((r) => r.read<String>('name')).toSet();
         if (!colNames.contains('final_preset_id')) {
-          await m.addColumn(studioConfigRows, studioConfigRows.finalPresetId);
+          await customStatement(
+            'ALTER TABLE studio_config_rows ADD COLUMN final_preset_id TEXT NOT NULL DEFAULT ""',
+          );
         }
       }
       if (from < 40) {
@@ -722,9 +726,8 @@ class AppDatabase extends _$AppDatabase {
           );
         }
         if (!colNames.contains('run_model_override')) {
-          await m.addColumn(
-            studioConfigRows,
-            studioConfigRows.runModelOverride,
+          await customStatement(
+            'ALTER TABLE studio_config_rows ADD COLUMN run_model_override TEXT NOT NULL DEFAULT ""',
           );
         }
       }
@@ -1882,6 +1885,26 @@ class AppDatabase extends _$AppDatabase {
       }
       if (from < 97) {
         await _canonicalizeStudioAgents();
+      }
+      if (from < 98) {
+        final columns = await customSelect(
+          'PRAGMA table_info("studio_config_rows")',
+        ).get();
+        final columnNames = columns
+            .map((row) => row.read<String>('name'))
+            .toSet();
+        if (columnNames.contains('run_api_config_id')) {
+          await customStatement(
+            'UPDATE studio_config_rows SET '
+            "expensive_api_config_id = CASE WHEN expensive_api_config_id = '' "
+            'THEN run_api_config_id ELSE expensive_api_config_id END, '
+            "cheap_api_config_id = CASE WHEN cheap_api_config_id = '' "
+            'THEN run_api_config_id ELSE cheap_api_config_id END, '
+            "cleaner_api_config_id = CASE WHEN cleaner_api_config_id = '' "
+            'THEN run_api_config_id ELSE cleaner_api_config_id END',
+          );
+        }
+        await m.alterTable(TableMigration(studioConfigRows));
       }
     },
   );

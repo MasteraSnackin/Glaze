@@ -78,7 +78,7 @@ void main() {
 
       // user_version matches the Drift schema version (app_db.dart schemaVersion).
       // Update this constant whenever a new migration step is added.
-      expect(version, 97);
+      expect(version, 98);
     });
 
     test(
@@ -115,7 +115,7 @@ void main() {
         final version = await upgraded
             .customSelect('PRAGMA user_version')
             .get();
-        expect(version.first.read<int>('user_version'), 97);
+        expect(version.first.read<int>('user_version'), 98);
         expect(names, contains('variant_group_id'));
         expect(names, contains('hidden'));
       },
@@ -145,7 +145,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 97);
+      expect(version.read<int>('user_version'), 98);
     });
 
     test(
@@ -208,9 +208,70 @@ void main() {
       },
     );
 
+    test(
+      'v98 migrates the legacy Studio API fallback and drops dead columns',
+      () async {
+        final file = File(
+          '${Directory.systemTemp.path}/glaze_mig_studio_api_slots_${DateTime.now().microsecondsSinceEpoch}.db',
+        );
+        addTearDown(() async {
+          if (file.existsSync()) await file.delete();
+        });
+        final seeded = AppDatabase.forTesting(
+          NativeDatabase.createInBackground(file),
+        );
+        await seeded.customSelect('SELECT 1').get();
+        await seeded.customStatement(
+          'ALTER TABLE studio_config_rows ADD COLUMN final_preset_id '
+          "TEXT NOT NULL DEFAULT ''",
+        );
+        await seeded.customStatement(
+          'ALTER TABLE studio_config_rows ADD COLUMN run_api_config_id '
+          "TEXT NOT NULL DEFAULT ''",
+        );
+        await seeded.customStatement(
+          'ALTER TABLE studio_config_rows ADD COLUMN run_model_override '
+          "TEXT NOT NULL DEFAULT ''",
+        );
+        await seeded.customStatement(
+          'INSERT INTO studio_config_rows '
+          '(session_id, run_api_config_id, expensive_api_config_id, '
+          'cheap_api_config_id, cleaner_api_config_id) VALUES (?, ?, ?, ?, ?)',
+          ['legacy', 'fallback', 'explicit', '', ''],
+        );
+        await seeded.customStatement('PRAGMA user_version = 97');
+        await seeded.close();
+
+        final upgraded = AppDatabase.forTesting(
+          NativeDatabase.createInBackground(file),
+        );
+        addTearDown(() async => upgraded.close());
+        final row = await upgraded
+            .customSelect(
+              'SELECT expensive_api_config_id, cheap_api_config_id, '
+              'cleaner_api_config_id FROM studio_config_rows WHERE session_id = ?',
+              variables: [const Variable<String>('legacy')],
+            )
+            .getSingle();
+        final columns = await upgraded
+            .customSelect("PRAGMA table_info('studio_config_rows')")
+            .get();
+        final names = columns
+            .map((column) => column.read<String>('name'))
+            .toSet();
+
+        expect(row.read<String>('expensive_api_config_id'), 'explicit');
+        expect(row.read<String>('cheap_api_config_id'), 'fallback');
+        expect(row.read<String>('cleaner_api_config_id'), 'fallback');
+        expect(names, isNot(contains('final_preset_id')));
+        expect(names, isNot(contains('run_api_config_id')));
+        expect(names, isNot(contains('run_model_override')));
+      },
+    );
+
     test('current schema includes atomic character fact tables', () async {
       final version = await db.customSelect('PRAGMA user_version').getSingle();
-      expect(version.read<int>('user_version'), 97);
+      expect(version.read<int>('user_version'), 98);
 
       final factColumns = await db
           .customSelect("PRAGMA table_info('character_knowledge_fact_rows')")
@@ -322,7 +383,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 97);
+      expect(version.read<int>('user_version'), 98);
     });
 
     test(
@@ -432,7 +493,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 97);
+      expect(version.read<int>('user_version'), 98);
     });
 
     test('v80 adds Responses API toggle defaulting to off', () async {
@@ -472,7 +533,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 97);
+      expect(version.read<int>('user_version'), 98);
     });
 
     test('v81 adds composite embedding source index', () async {
@@ -506,7 +567,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 97);
+      expect(version.read<int>('user_version'), 98);
     });
 
     test('v82 creates rewrite persistence schema and provenance columns', () async {
@@ -580,7 +641,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 97);
+      expect(version.read<int>('user_version'), 98);
     });
 
     test('v83 rebuilds interim text revision columns without losing rows', () async {
@@ -1017,7 +1078,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 97);
+      expect(version.read<int>('user_version'), 98);
 
       // Rows and payloads survive; legacy statuses pass through or are
       // normalized fail-closed, and new columns carry neutral defaults.
@@ -1222,7 +1283,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 97);
+      expect(version.read<int>('user_version'), 98);
       final row = await upgraded
           .customSelect(
             'SELECT blocks_json FROM studio_preset_rows WHERE preset_id = ?',
@@ -1338,7 +1399,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 97);
+      expect(version.read<int>('user_version'), 98);
       final check = await upgraded.customSelect('PRAGMA integrity_check').get();
       expect(check.single.read<String>('integrity_check'), 'ok');
     });
@@ -1837,7 +1898,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 97);
+      expect(version.read<int>('user_version'), 98);
     });
 
     test(

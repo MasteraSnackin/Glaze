@@ -1069,6 +1069,8 @@ void main() {
           utf8.encode(
             '${jsonEncode({
               'session_id': 'session-1',
+              'run_api_config_id': 'legacy-api',
+              'expensive_api_config_id': 'explicit-api',
               'agents_json': jsonEncode([
                 {'id': 'agent_session-1_continuity_123', 'sourceBlockNames': 'legacy'},
               ]),
@@ -1081,13 +1083,18 @@ void main() {
 
       final row = await db
           .customSelect(
-            'SELECT agents_json FROM studio_config_rows WHERE session_id = ?',
+            'SELECT agents_json, expensive_api_config_id, '
+            'cheap_api_config_id, cleaner_api_config_id '
+            'FROM studio_config_rows WHERE session_id = ?',
             variables: [drift.Variable.withString('session-1')],
           )
           .getSingle();
       final restored = jsonDecode(row.read<String>('agents_json')) as List;
       expect(restored.single['controllerId'], 'continuity');
       expect(restored.single, isNot(contains('sourceBlockNames')));
+      expect(row.read<String>('expensive_api_config_id'), 'explicit-api');
+      expect(row.read<String>('cheap_api_config_id'), 'legacy-api');
+      expect(row.read<String>('cleaner_api_config_id'), 'legacy-api');
     });
 
     test('restores info blocks with the reserved order column', () async {

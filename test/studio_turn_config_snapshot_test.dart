@@ -291,7 +291,6 @@ void main() {
         loadApiConfigs: () async => currentApis,
         readActiveApiConfig: () => newApi,
         readPipelineSettings: () => currentSettings,
-        readRunApiConfigId: (_) async => 'new-api',
       ),
       readPipelineSettings: () => currentSettings,
     );

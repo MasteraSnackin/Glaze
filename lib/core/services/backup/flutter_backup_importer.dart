@@ -323,10 +323,10 @@ class FlutterBackupImporter extends BackupHelpers {
       if (tableName == 'studio_config_rows') {
         final agents = row['agents_json'];
         final source = agents is String ? agents : jsonEncode(agents);
-        return {
+        return StudioAgentCodec.canonicalizeConfigRow({
           ...row,
           'agents_json': StudioAgentCodec.canonicalizeAgentsJson(source),
-        };
+        });
       }
     } on Object {
       return row;

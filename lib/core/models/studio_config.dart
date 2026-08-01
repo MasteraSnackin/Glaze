@@ -38,12 +38,9 @@ abstract class StudioConfig with _$StudioConfig {
     @Default('') String profileName,
     @Default(false) bool enabled,
     @Default([]) List<StudioAgent> agents,
-    @Default('') String finalPresetId,
-    @Default('') String runApiConfigId,
     @Default('') String expensiveApiConfigId,
     @Default('') String cheapApiConfigId,
     @Default('') String cleanerApiConfigId,
-    @Default('') String runModelOverride,
 
     /// Maximum number of trailing user/assistant chat messages forwarded to the
     /// FINAL Studio agent (the generator). Trackers (intermediate agents) are

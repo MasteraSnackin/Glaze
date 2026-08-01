@@ -78,6 +78,8 @@ void main() {
     test('cloud config decoding canonicalizes legacy agent identities', () {
       final config = StudioAgentCodec.decodeConfig({
         'sessionId': 'session',
+        'runApiConfigId': 'legacy-api',
+        'expensiveApiConfigId': 'explicit-api',
         'agents': [
           {'id': 'agent_session_continuity_123', 'sourceBlockNames': 'legacy'},
         ],
@@ -88,6 +90,29 @@ void main() {
         config.agents.single.toJson(),
         isNot(contains('sourceBlockNames')),
       );
+      expect(config.expensiveApiConfigId, 'explicit-api');
+      expect(config.cheapApiConfigId, 'legacy-api');
+      expect(config.cleanerApiConfigId, 'legacy-api');
+      expect(config.toJson(), isNot(contains('runApiConfigId')));
+    });
+
+    test('backup row canonicalization migrates API slots and dead columns', () {
+      final row = StudioAgentCodec.canonicalizeConfigRow({
+        'session_id': 'session',
+        'run_api_config_id': 'legacy-api',
+        'expensive_api_config_id': '',
+        'cheap_api_config_id': 'cheap-api',
+        'cleaner_api_config_id': '',
+        'final_preset_id': 'dead',
+        'run_model_override': 'dead-model',
+      });
+
+      expect(row['expensive_api_config_id'], 'legacy-api');
+      expect(row['cheap_api_config_id'], 'cheap-api');
+      expect(row['cleaner_api_config_id'], 'legacy-api');
+      expect(row, isNot(contains('final_preset_id')));
+      expect(row, isNot(contains('run_api_config_id')));
+      expect(row, isNot(contains('run_model_override')));
     });
   });
 

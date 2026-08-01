@@ -9,11 +9,10 @@ import '../transport/extra_request_parameters.dart';
 /// Resolves which API config an agent uses.
 ///
 /// With the 3-slot model (v55):
-/// - [apiConfigId] — if non-empty, overrides `runApiConfigId` from the
-///   StudioConfig. Callers pass `cheapApiConfigId` for trackers,
+/// - [apiConfigId] — the explicit Studio API slot. Callers pass
+///   `cheapApiConfigId` for trackers,
 ///   `expensiveApiConfigId` for the final generator, `cleanerApiConfigId`
-///   for post-processing agents. When empty, falls back to `runApiConfigId`
-///   then to the active chat config.
+///   for post-processing agents. An empty slot uses the active chat config.
 /// - Model overrides are global PipelineSettings values configured from the
 ///   Studio menu: studioFinalModelOverride for the final generator,
 ///   postCleanerModel for post-processing trackers, studioTrackerModelOverride
@@ -25,13 +24,11 @@ class AgentConfigResolver {
   final Future<List<ApiConfig>> Function() _loadApiConfigs;
   final ApiConfig? Function() _readActiveApiConfig;
   final PipelineSettings Function() _readPipelineSettings;
-  final Future<String> Function(String sessionId) _readRunApiConfigId;
 
   AgentConfigResolver({
     required this._loadApiConfigs,
     required this._readActiveApiConfig,
     required this._readPipelineSettings,
-    required this._readRunApiConfigId,
   });
 
   Future<ResolvedAgentConfig> resolveAgentConfig(
@@ -43,10 +40,7 @@ class AgentConfigResolver {
     StudioTurnConfigSnapshot? turnConfig,
   }) async {
     final apiConfigs = turnConfig?.apiConfigs ?? await _loadApiConfigs();
-    final runApiConfigId = (apiConfigId != null && apiConfigId.isNotEmpty)
-        ? apiConfigId
-        : turnConfig?.config?.runApiConfigId ??
-              await _readRunApiConfigId(sessionId);
+    final selectedApiConfigId = apiConfigId ?? '';
     final resolver = StudioApiConfigResolver(
       apiConfigs: apiConfigs,
       activeConfig: turnConfig?.activeApiConfig ?? _readActiveApiConfig(),
@@ -56,7 +50,7 @@ class AgentConfigResolver {
       return resolver
           .resolveAgentConfig(
             current,
-            runApiConfigId,
+            selectedApiConfigId,
             pipeline.studioAgent.studioFinalModelOverride,
           )
           .copyWithSampling(
@@ -68,7 +62,7 @@ class AgentConfigResolver {
             omitTopP: pipeline.studioAgent.studioFinalOmitTopP,
             extraRequestParameters: mergeExtraRequestParameters(
               resolver
-                      .resolveRunConfig(runApiConfigId)
+                      .resolveRunConfig(selectedApiConfigId)
                       ?.extraRequestParameters ??
                   const [],
               pipeline.studioAgent.studioFinalExtraRequestParameters,
@@ -79,7 +73,7 @@ class AgentConfigResolver {
         return resolver
             .resolveAgentConfig(
               current,
-              runApiConfigId,
+              selectedApiConfigId,
               pipeline.cleaner.postCleanerModel,
             )
             .copyWithSampling(
@@ -91,7 +85,7 @@ class AgentConfigResolver {
               omitTopP: pipeline.cleaner.postCleanerOmitTopP,
               extraRequestParameters: mergeExtraRequestParameters(
                 resolver
-                        .resolveRunConfig(runApiConfigId)
+                        .resolveRunConfig(selectedApiConfigId)
                         ?.extraRequestParameters ??
                     const [],
                 pipeline.cleaner.postCleanerExtraRequestParameters,
@@ -99,7 +93,7 @@ class AgentConfigResolver {
             );
       }
       return resolver
-          .resolveAgentConfig(current, runApiConfigId, '')
+          .resolveAgentConfig(current, selectedApiConfigId, '')
           .copyWithSampling(
             topP: pipeline.cleaner.postCleanerTopP,
             topK: pipeline.cleaner.postCleanerTopK,
@@ -109,7 +103,7 @@ class AgentConfigResolver {
             omitTopP: pipeline.cleaner.postCleanerOmitTopP,
             extraRequestParameters: mergeExtraRequestParameters(
               resolver
-                      .resolveRunConfig(runApiConfigId)
+                      .resolveRunConfig(selectedApiConfigId)
                       ?.extraRequestParameters ??
                   const [],
               pipeline.cleaner.postCleanerExtraRequestParameters,
@@ -119,7 +113,7 @@ class AgentConfigResolver {
       return resolver
           .resolveAgentConfig(
             current,
-            runApiConfigId,
+            selectedApiConfigId,
             pipeline.studioAgent.studioTrackerModelOverride,
           )
           .copyWithSampling(
@@ -132,7 +126,7 @@ class AgentConfigResolver {
             omitTopP: pipeline.studioAgent.studioTrackerOmitTopP,
             extraRequestParameters: mergeExtraRequestParameters(
               resolver
-                      .resolveRunConfig(runApiConfigId)
+                      .resolveRunConfig(selectedApiConfigId)
                       ?.extraRequestParameters ??
                   const [],
               pipeline.studioAgent.studioTrackerExtraRequestParameters,
@@ -140,7 +134,7 @@ class AgentConfigResolver {
           );
     }
     return resolver
-        .resolveAgentConfig(current, runApiConfigId, '')
+        .resolveAgentConfig(current, selectedApiConfigId, '')
         .copyWithSampling(
           topP: pipeline.studioAgent.studioTrackerTopP,
           topK: pipeline.studioAgent.studioTrackerTopK,
@@ -149,7 +143,9 @@ class AgentConfigResolver {
           omitTemperature: pipeline.studioAgent.studioTrackerOmitTemperature,
           omitTopP: pipeline.studioAgent.studioTrackerOmitTopP,
           extraRequestParameters: mergeExtraRequestParameters(
-            resolver.resolveRunConfig(runApiConfigId)?.extraRequestParameters ??
+            resolver
+                    .resolveRunConfig(selectedApiConfigId)
+                    ?.extraRequestParameters ??
                 const [],
             pipeline.studioAgent.studioTrackerExtraRequestParameters,
           ),

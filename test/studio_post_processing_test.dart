@@ -23,7 +23,6 @@ class _FakeAgentRunner extends AgentRunner {
             loadApiConfigs: () async => const [],
             readActiveApiConfig: () => null,
             readPipelineSettings: () => const PipelineSettings(),
-            readRunApiConfigId: (_) async => '',
           ),
           readPipelineSettings: () => const PipelineSettings(),
         );
