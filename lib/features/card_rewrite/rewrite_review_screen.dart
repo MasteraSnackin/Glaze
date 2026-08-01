@@ -14,6 +14,7 @@ import '../../shared/widgets/glaze_scaffold.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import 'rewrite_review_provider.dart';
 import 'widgets/rewrite_operation_card.dart';
+import 'widgets/rewrite_anchored_diff_pane.dart';
 
 /// Durable review route. It deliberately reads the job aggregate again instead
 /// of receiving editor state, so a link/restart always shows the saved review.
@@ -161,7 +162,18 @@ class _OperationItem extends ConsumerWidget {
   final VoidCallback onSelect;
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final snapshot = decodeOperationSnapshot(view.currentSnapshotJson);
+    final decoded = decodeRewriteOperationSnapshot(view.currentSnapshotJson);
+    if (decoded case LorebookRewriteOperationSnapshot lore) {
+      return _LorebookOperationItem(
+        index: index,
+        view: view,
+        snapshot: lore,
+        selected: selected,
+        enabled: enabled,
+        onSelect: onSelect,
+      );
+    }
+    final snapshot = decoded is CardRewriteOperationSnapshot ? decoded : null;
     final locked = snapshot == null
         ? <String>{}
         : lockOverlap(snapshot, controls);
@@ -222,6 +234,108 @@ class _OperationItem extends ConsumerWidget {
   }
 }
 
+class _LorebookOperationItem extends ConsumerWidget {
+  const _LorebookOperationItem({
+    required this.index,
+    required this.view,
+    required this.snapshot,
+    required this.selected,
+    required this.enabled,
+    required this.onSelect,
+  });
+
+  final int index;
+  final ManualRewriteOperationView view;
+  final LorebookRewriteOperationSnapshot snapshot;
+  final bool selected;
+  final bool enabled;
+  final VoidCallback onSelect;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final operation = view.operation;
+    final controller = ref.read(
+      rewriteReviewUiProvider(operation.rewriteJobId).notifier,
+    );
+    final reviewable = operation.status == 'reviewable';
+    final canApprove = enabled &&
+        reviewable &&
+        operation.validationStatus == 'valid';
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: InkWell(
+        onTap: onSelect,
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: selected ? context.cs.primary : context.cs.outlineVariant,
+            ),
+            color: context.cs.surfaceContainerHigh.withValues(alpha: 0.35),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Text('#${index + 1}', style: const TextStyle(fontWeight: FontWeight.w800)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Lorebook ${snapshot.lorebookId} / ${snapshot.entryId}',
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+                    ),
+                  ),
+                  if (reviewable && enabled) ...[
+                    TextButton(
+                      onPressed: canApprove
+                          ? () async {
+                              final result = await controller.decide(
+                                view,
+                                'approved',
+                              );
+                              if (context.mounted) _showOutcome(context, result);
+                            }
+                          : null,
+                      child: Text('rewrite_btn_approve'.tr()),
+                    ),
+                    TextButton(
+                      onPressed: () async {
+                        final result = await controller.decide(view, 'rejected');
+                        if (context.mounted) _showOutcome(context, result);
+                      },
+                      child: Text('rewrite_btn_reject'.tr()),
+                    ),
+                  ],
+                ],
+              ),
+              if (operation.validationStatus == 'invalid')
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    'rewrite_btn_approve_disabled_invalid'.tr(),
+                    style: TextStyle(color: context.cs.error, fontSize: 12),
+                  ),
+                ),
+              const SizedBox(height: 10),
+              for (final patch in snapshot.patches) ...[
+                RewriteAnchoredDiffPane.lorebook(
+                  patch: patch,
+                  fieldValue: snapshot.baseContent,
+                ),
+                const SizedBox(height: 8),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _ApplyFooter extends ConsumerWidget {
   const _ApplyFooter({
     required this.snapshot,
@@ -243,14 +357,15 @@ class _ApplyFooter extends ConsumerWidget {
         enabled &&
         snapshot.operations.any((view) {
           final op = view.operation;
-          final operationSnapshot = decodeOperationSnapshot(
+          final operationSnapshot = decodeRewriteOperationSnapshot(
             view.currentSnapshotJson,
           );
           return op.status == 'reviewable' &&
               op.decision == 'pending' &&
               op.validationStatus == 'valid' &&
               operationSnapshot != null &&
-              lockOverlap(operationSnapshot, manualControlNames).isEmpty;
+              (operationSnapshot is! CardRewriteOperationSnapshot ||
+                  lockOverlap(operationSnapshot, manualControlNames).isEmpty);
         });
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 6, 16, 16),

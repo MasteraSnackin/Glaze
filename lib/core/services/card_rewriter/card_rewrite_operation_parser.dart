@@ -142,9 +142,89 @@ abstract final class CardRewriteOperationParser {
     'chatSessionId',
   };
 
+  /// Parses the one-call automated evolution response. The outer batch may
+  /// omit unchanged fields, but each supplied operation is screened by the
+  /// same single-field contract used by manual rewrites.
+  static List<CardRewriteOperationSnapshot>? parseEvolutionBatch(String output) {
+    final raw = extractJsonObject(output);
+    if (raw == null) return null;
+    Object? decoded;
+    try {
+      decoded = jsonDecode(repairJson(raw));
+    } catch (_) {
+      return null;
+    }
+    if (decoded is! Map ||
+        decoded.length != 1 ||
+        !decoded.containsKey('operations') ||
+        decoded['operations'] is! List) {
+      return null;
+    }
+    final operations = decoded['operations'] as List;
+    final result = <CardRewriteOperationSnapshot>[];
+    final fields = <CardRewriteField>{};
+    for (final rawOperation in operations) {
+      if (rawOperation is! Map || rawOperation['field'] is! String) {
+        return null;
+      }
+      final field = _fieldFromWireName(rawOperation['field'] as String);
+      if (field == null ||
+          !const {
+            CardRewriteField.description,
+            CardRewriteField.personality,
+            CardRewriteField.scenario,
+          }.contains(field) ||
+          !fields.add(field)) {
+        return null;
+      }
+      final parsed = parse(
+        jsonEncode(rawOperation),
+        expectedField: field,
+        allowEmptyAnchor: true,
+      );
+      if (parsed.snapshot == null) return null;
+      result.add(parsed.snapshot!);
+    }
+    return List.unmodifiable(result);
+  }
+
+  /// Parses the separate writer lane for session-local lorebook patches.
+  static List<LorebookRewriteOperationSnapshot>? parseLorebookEvolutionBatch(
+    String output,
+  ) {
+    final raw = extractJsonObject(output);
+    if (raw == null) return null;
+    try {
+      final decoded = jsonDecode(repairJson(raw));
+      if (decoded is! Map ||
+          decoded.length != 1 ||
+          decoded['operations'] is! List) {
+        return null;
+      }
+      final result = <LorebookRewriteOperationSnapshot>[];
+      final targets = <String>{};
+      for (final rawOperation in decoded['operations'] as List) {
+        if (rawOperation is! Map) return null;
+        final snapshot = RewriteOperationSnapshotCodec.tryDecode({
+          'target': 'lorebook',
+          ...Map<String, Object?>.from(rawOperation),
+        });
+        if (snapshot is! LorebookRewriteOperationSnapshot ||
+            !targets.add('${snapshot.lorebookId}\u0000${snapshot.entryId}')) {
+          return null;
+        }
+        result.add(snapshot);
+      }
+      return List.unmodifiable(result);
+    } catch (_) {
+      return null;
+    }
+  }
+
   static CardRewriteOperationParseResult parse(
     String output, {
     required CardRewriteField expectedField,
+    bool allowEmptyAnchor = false,
   }) {
     final raw = extractJsonObject(output);
     if (raw == null) {
@@ -245,7 +325,7 @@ abstract final class CardRewriteOperationParser {
           'unparsable patch scopeKey "$scopeKey"',
         );
       }
-      if (anchor.isEmpty) {
+      if (anchor.isEmpty && !allowEmptyAnchor) {
         return const CardRewriteOperationParseResult.failure(
           CardRewriteOperationParseRejection.emptyAnchor,
         );
@@ -448,6 +528,13 @@ abstract final class CardRewriteOperationParser {
   ) {
     for (final key in json.keys) {
       if (key is! String || !allowed.contains(key)) return '$key';
+    }
+    return null;
+  }
+
+  static CardRewriteField? _fieldFromWireName(String value) {
+    for (final field in CardRewriteField.values) {
+      if (field.wireName == value) return field;
     }
     return null;
   }

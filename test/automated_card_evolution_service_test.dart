@@ -13,7 +13,6 @@ import 'package:glaze_flutter/core/db/repositories/character_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/character_revision_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/character_session_baseline_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/ledger_raw_tracker_state_reader.dart';
-import 'package:glaze_flutter/core/db/repositories/ledger_reconciliation_run_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/lorebook_use_manifest_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/manual_rewrite_job_repo.dart';
 import 'package:glaze_flutter/core/llm/aux_llm_client.dart';
@@ -24,9 +23,7 @@ import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/core/models/lorebook.dart';
 import 'package:glaze_flutter/core/services/card_rewriter/automated_card_evolution_service.dart';
 import 'package:glaze_flutter/core/services/card_rewriter/card_rewriter_contracts.dart';
-import 'package:glaze_flutter/core/services/card_rewriter/effective_canon_assembler.dart';
 import 'package:glaze_flutter/core/services/card_rewriter/effective_canon_read_repository.dart';
-import 'package:glaze_flutter/core/utils/cast_helpers.dart';
 
 void main() {
   late _Fixture fixture;
@@ -36,95 +33,176 @@ void main() {
   });
   tearDown(() => fixture.db.close());
 
-  test('not eligible makes zero executor calls', () async {
+  test('empty chat history makes zero executor calls', () async {
+    await fixture.db.customStatement(
+      "UPDATE chat_sessions SET messages_json = '[]' WHERE session_id = 'session'",
+    );
     var calls = 0;
-    final result = await fixture.service((_) async {
-      calls++;
-      return _ok(fixture.validOutput);
-    }).runOneBatch('session');
+    final result = await fixture
+        .service((_, _) async {
+          calls++;
+          return _ok(fixture.cardBatchOutput);
+        })
+        .runOneBatch('session');
     expect(result, isNull);
     expect(calls, 0);
     await fixture.expectNoProposalOrCanonWrites();
   });
 
-  test('successful output persists a pending proposal and cursor', () async {
-    await fixture.makeEligible();
+  test('disabled automation makes zero claim or executor calls', () async {
     var calls = 0;
-    final result = await fixture.service((token) async {
-      calls++;
-      expect(token, isNotNull);
-      return _ok(fixture.validOutput);
-    }).runOneBatch('session');
-    expect(result?.kind, 'persisted');
-    expect(calls, 1);
-    expect((await fixture.db.select(fixture.db.rewriteJobs).getSingle()).status,
-        'pending');
-    expect(await fixture.db.select(fixture.db.cardEvolutionProposalRuns).get(),
-        hasLength(1));
-    expect(await fixture.db.select(fixture.db.ledgerReconciliationCursors).get(),
-        hasLength(1));
-    await fixture.expectCanonRowsUnchanged();
-  });
+    final service = AutomatedCardEvolutionService(
+      repo: fixture.repo,
+      resolveModel: () async => throw StateError('must not resolve'),
+      isEnabled: () => false,
+      executor:
+          ({
+            required config,
+            required prompt,
+            required maxTokens,
+            required temperature,
+            required timeoutMs,
+            cancelToken,
+          }) async {
+            calls++;
+            return _ok(fixture.cardBatchOutput);
+          },
+    );
 
-  test('model failure leaves no proposal or cursor', () async {
-    await fixture.makeEligible();
-    final result = await fixture.service((_) async => const AuxCallOutcome(
-      status: AgentOperationStatus.error,
-    )).runOneBatch('session');
-    expect(result, isNull);
+    expect(await service.runOneBatch('session'), isNull);
+    expect(calls, 0);
+    expect(
+      await fixture.db.select(fixture.db.cardEvolutionClaims).get(),
+      isEmpty,
+    );
     await fixture.expectNoProposalOrCanonWrites();
   });
 
-  test('malformed parser output leaves no proposal or cursor', () async {
-    await fixture.makeEligible();
-    final result = await fixture.service((_) async => _ok('not json'))
+  test('successful output persists a pending proposal', () async {
+    var calls = 0;
+    final result = await fixture
+        .service((token, prompt) async {
+          calls++;
+          expect(token, isNotNull);
+          return _ok(fixture.cardBatchOutput);
+        })
+        .runOneBatch('session');
+    expect(result?.kind, 'persisted');
+    expect(calls, 1);
+    expect(
+      (await fixture.db.select(fixture.db.rewriteJobs).getSingle()).status,
+      'pending',
+    );
+    expect(
+      await fixture.db.select(fixture.db.cardEvolutionProposalRuns).get(),
+      hasLength(1),
+    );
+    final operations = await fixture.db.select(fixture.db.rewriteOperations).get();
+    expect(operations, hasLength(1));
+    expect(
+      operations
+          .map(
+            (operation) =>
+                jsonDecode(operation.operationJson)['field'] as String,
+          )
+          .toSet(),
+      {CardRewriteField.description.wireName},
+    );
+    await fixture.expectCanonRowsUnchanged();
+  });
+
+  test('model failure leaves no proposal', () async {
+    final result = await fixture
+        .service(
+          (_, _) async =>
+              const AuxCallOutcome(status: AgentOperationStatus.error),
+        )
         .runOneBatch('session');
     expect(result, isNull);
     await fixture.expectNoProposalOrCanonWrites();
   });
 
-  test('cancellation reaches dedicated token and leaves no proposal or cursor',
-      () async {
-    await fixture.makeEligible();
-    final started = Completer<CancelToken>();
-    final release = Completer<AuxCallOutcome>();
-    final service = fixture.service((token) {
-      started.complete(token!);
-      return release.future;
-    });
-    final future = service.runOneBatch('session');
-    final token = await started.future;
-    service.cancelSession('session');
-    expect(token.isCancelled, isTrue);
-    release.complete(const AuxCallOutcome(
-      status: AgentOperationStatus.aborted,
-    ));
-    expect(await future, isNull);
+  test('malformed parser output leaves no proposal or cursor', () async {
+    final result = await fixture
+        .service((_, _) async => _ok('not json'))
+        .runOneBatch('session');
+    expect(result, isNull);
     await fixture.expectNoProposalOrCanonWrites();
   });
 
-  test('canon change after generation returns stale with no proposal or cursor',
-      () async {
-    await fixture.makeEligible();
-    final result = await fixture.service((_) async {
-      await fixture.db.customStatement(
-        "INSERT INTO tracker_rows (session_id, name, value, scope, provenance, updated_at) VALUES ('session', 'canon_lock:npc:alice', 'locked', 'ledger', 'manual', 2)",
+  test(
+    'cancellation reaches dedicated token and leaves no proposal',
+    () async {
+      final started = Completer<CancelToken>();
+      final release = Completer<AuxCallOutcome>();
+      final service = fixture.service((token, _) {
+        started.complete(token!);
+        return release.future;
+      });
+      final future = service.runOneBatch('session');
+      final token = await started.future;
+      service.cancelSession('session');
+      expect(token.isCancelled, isTrue);
+      release.complete(
+        const AuxCallOutcome(status: AgentOperationStatus.aborted),
       );
-      return _ok(fixture.validOutput);
-    }).runOneBatch('session');
-    expect(result?.kind, 'staleCanon');
-    await fixture.expectNoProposalOrCanonWrites();
+      expect(await future, isNull);
+      await fixture.expectNoProposalOrCanonWrites();
+    },
+  );
+
+  test(
+    'canon changes after generation block proposal',
+    () async {
+      var changedCanon = false;
+      final result = await fixture
+          .service((_, prompt) async {
+            if (!changedCanon) {
+              changedCanon = true;
+              await fixture.db.customStatement(
+                "INSERT INTO tracker_rows (session_id, name, value, scope, provenance, updated_at) VALUES ('session', 'canon_lock:npc:alice', 'locked', 'ledger', 'manual', 2)",
+              );
+            }
+            return _ok(fixture.cardBatchOutput);
+          })
+          .runOneBatch('session');
+      expect(result?.kind, 'staleEvidence');
+      await fixture.expectNoProposalOrCanonWrites();
+    },
+  );
+
+  test('injected lorebook entries use a separate second call', () async {
+    await _seedManifest(fixture.db, 'a1', 'entry one');
+    var calls = 0;
+    final result = await fixture
+        .service((_, prompt) async {
+          calls++;
+          if (prompt.contains('Glaze lorebook rewriter')) {
+            return _ok(fixture.lorebookBatchOutput);
+          }
+          return _ok(fixture.cardBatchOutput);
+        })
+        .runOneBatch('session');
+
+    expect(calls, 2);
+    expect(result?.kind, 'persisted');
+    final operations = await fixture.db.select(fixture.db.rewriteOperations).get();
+    expect(operations, hasLength(2));
+    expect(
+      operations.map((operation) => jsonDecode(operation.operationJson)['target']),
+      contains('lorebook'),
+    );
   });
 }
 
-typedef _Executor = Future<AuxCallOutcome> Function(CancelToken? token);
+typedef _Executor =
+    Future<AuxCallOutcome> Function(CancelToken? token, String prompt);
 
 final class _Fixture {
-  _Fixture(this.db, this.repo, this.runs, this.revisionCount);
+  _Fixture(this.db, this.repo, this.revisionCount);
 
   final AppDatabase db;
   final CardEvolutionRepo repo;
-  final LedgerReconciliationRunRepo runs;
   final int revisionCount;
 
   static Future<_Fixture> create() async {
@@ -138,14 +216,16 @@ final class _Fixture {
     );
     await characters.put(character);
     final hash = CardCanonicalizer.sha256(character);
-    await revisions.insert(CharacterRevisionRecord(
-      characterId: 'character',
-      revision: 1,
-      revisionHash: hash,
-      parentRevisionHash: '',
-      snapshotJson: jsonEncode(character.toJson()),
-      createdAt: 1,
-    ));
+    await revisions.insert(
+      CharacterRevisionRecord(
+        characterId: 'character',
+        revision: 1,
+        revisionHash: hash,
+        parentRevisionHash: '',
+        snapshotJson: jsonEncode(character.toJson()),
+        createdAt: 1,
+      ),
+    );
     await db.customStatement(
       'INSERT INTO chat_sessions (session_id, character_id, session_index, messages_json) VALUES (?, ?, 0, ?)',
       ['session', 'character', jsonEncode(_messages)],
@@ -164,28 +244,50 @@ final class _Fixture {
       rawTrackerStateReader: LedgerRawTrackerStateReader(db),
     );
     final repo = CardEvolutionRepo(db: db, canonReader: reader, jobRepo: jobs);
-    return _Fixture(db, repo, LedgerReconciliationRunRepo(db), 1);
+    return _Fixture(db, repo, 1);
   }
 
-  String get validOutput => jsonEncode({
-    'field': 'description',
-    'patches': [
+  String get cardBatchOutput => jsonEncode({
+    'operations': [
       {
-        'scopeKey': 'npc:alice',
-        'anchor': 'cautious',
-        'anchorSha256': CardCanonicalizer.scalarSha256('cautious'),
-        'value': 'cautious but increasingly trusting',
+        'field': CardRewriteField.description.wireName,
+        'patches': [
+          {
+            'scopeKey': 'npc:alice',
+            'anchor': 'cautious',
+            'anchorSha256': CardCanonicalizer.scalarSha256('cautious'),
+            'value': 'increasingly trusting',
+          },
+        ],
+        'transition': {
+          'id': 'transition',
+          'scopeKey': 'npc:alice',
+          'canonicalClaim': 'Alice is increasingly trusting.',
+          'promotionDestination': 'card',
+          'affectedTrackerKeys': <String>[],
+          'factIds': <String>[],
+          'chatSessionId': null,
+        },
       },
     ],
-    'transition': {
-      'id': 'transition',
-      'scopeKey': 'npc:alice',
-      'canonicalClaim': 'Alice is increasingly trusting.',
-      'promotionDestination': 'card',
-      'affectedTrackerKeys': <String>[],
-      'factIds': <String>[],
-      'chatSessionId': null,
-    },
+  });
+
+  String get lorebookBatchOutput => jsonEncode({
+    'operations': [
+      {
+        'lorebookId': 'book-a1',
+        'entryId': 'entry-a1',
+        'baseContent': 'entry one',
+        'expectedContentHash': CardCanonicalizer.scalarSha256('entry one'),
+        'patches': [
+          {
+            'anchor': 'entry one',
+            'anchorSha256': CardCanonicalizer.scalarSha256('entry one'),
+            'value': 'entry one updated',
+          },
+        ],
+      },
+    ],
   });
 
   AutomatedCardEvolutionService service(_Executor executor) =>
@@ -197,75 +299,28 @@ final class _Fixture {
           model: 'model',
           protocol: 'openai',
         ),
-        executor: ({
-          required config,
-          required prompt,
-          required maxTokens,
-          required temperature,
-          required timeoutMs,
-          cancelToken,
-        }) => executor(cancelToken),
+        executor:
+            ({
+              required config,
+              required prompt,
+              required maxTokens,
+              required temperature,
+              required timeoutMs,
+              cancelToken,
+            }) => executor(cancelToken, prompt),
       );
-
-  Future<void> makeEligible() async {
-    await _seedManifest(db, 'a1', 'u1', 'entry one');
-    await _seedManifest(db, 'a2', 'u2', 'entry two');
-    final reader = repo.canonReader;
-    final assembly = const EffectiveCanonAssembler().assemble(
-      await reader.read(sessionId: 'session', characterId: 'character'),
-    );
-    var predecessor = '';
-    for (var ordinal = 1; ordinal <= 2; ordinal++) {
-      final manifest = await (db.select(db.lorebookUseManifests)
-            ..where((row) => row.messageId.equals('a$ordinal')))
-          .getSingle();
-      final acceptance = await (db.select(db.lorebookUseAcceptanceRecords)
-            ..where((row) => row.messageId.equals('a$ordinal')))
-          .getSingle();
-      final run = LedgerReconciliationRun(
-        id: 'run-$ordinal',
-        sessionId: 'session',
-        ordinal: ordinal,
-        anchors: [ReconciliationAnchor(
-          messageId: 'a$ordinal',
-          swipeId: 0,
-          agentSwipeId: 0,
-          role: 'assistant',
-          contentHash: computeHash('assistant $ordinal'),
-        )],
-        acceptedManifestRefs: [AcceptedManifestRef(
-          acceptanceId: acceptance.acceptanceId,
-          sessionId: 'session',
-          messageId: 'a$ordinal',
-          swipeId: 0,
-          agentSwipeId: 0,
-          manifestHash: manifest.manifestHash,
-          acceptedByUserMessageId: 'u$ordinal',
-        )],
-        effectiveCanonStamp: assembly.identity,
-        effectiveCanonRevision: 1,
-        effectiveCanonHash: assembly.effectiveRevision.hash,
-        canonicalResult: {'ordinal': ordinal},
-        predecessorChainHash: predecessor,
-        contractVersion: 1,
-        opsApplied: const [],
-        createdAt: ordinal,
-      );
-      expect(await runs.append(run), isA<ReconciliationRunAppended>());
-      predecessor = run.chainHash;
-    }
-  }
 
   Future<void> expectNoProposalOrCanonWrites() async {
     expect(await db.select(db.rewriteJobs).get(), isEmpty);
     expect(await db.select(db.cardEvolutionProposalRuns).get(), isEmpty);
-    expect(await db.select(db.ledgerReconciliationCursors).get(), isEmpty);
     await expectCanonRowsUnchanged();
   }
 
   Future<void> expectCanonRowsUnchanged() async {
-    expect(await db.select(db.characterRevisionRows).get(),
-        hasLength(revisionCount));
+    expect(
+      await db.select(db.characterRevisionRows).get(),
+      hasLength(revisionCount),
+    );
     expect(await db.select(db.characterSessionBaselineRows).get(), isEmpty);
   }
 }
@@ -280,7 +335,6 @@ const _messages = [
 Future<void> _seedManifest(
   AppDatabase db,
   String messageId,
-  String userId,
   String content,
 ) async {
   final entry = ExactLorebookManifestEntry.fromMergedEntry(
@@ -321,22 +375,16 @@ Future<void> _seedManifest(
       presetSnapshotHash: manifest.promptProvenance.presetSnapshotHash,
     ),
     createdAt: 1,
-    entries: [LorebookUseManifestEntryInput(
-      lorebookId: entry.lorebookId,
-      entryId: entry.entryId,
-      entryOrder: 0,
-      evidenceJson: jsonEncode(entry.toJson()),
-    )],
-  );
-  await repo.insertVariationAcceptance(
-    acceptanceId: 'accept-$messageId',
-    identity: identity,
-    acceptedByUserMessageId: userId,
-    acceptedAt: 2,
+    entries: [
+      LorebookUseManifestEntryInput(
+        lorebookId: entry.lorebookId,
+        entryId: entry.entryId,
+        entryOrder: 0,
+        evidenceJson: jsonEncode(entry.toJson()),
+      ),
+    ],
   );
 }
 
-AuxCallOutcome _ok(String text) => AuxCallOutcome(
-  status: AgentOperationStatus.ok,
-  text: text,
-);
+AuxCallOutcome _ok(String text) =>
+    AuxCallOutcome(status: AgentOperationStatus.ok, text: text);

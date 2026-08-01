@@ -540,6 +540,62 @@ void main() {
     });
   });
 
+  group('Lorebook evolution operations', () {
+    test('round-trips a tagged lorebook operation', () {
+      const content = 'The district is dangerous.';
+      final snapshot = LorebookRewriteOperationSnapshot(
+        lorebookId: 'book',
+        entryId: 'district',
+        baseContent: content,
+        expectedContentHash: CardCanonicalizer.scalarSha256(content),
+        patches: [
+          LorebookAnchoredPatch(
+            anchor: 'dangerous',
+            anchorSha256: CardCanonicalizer.scalarSha256('dangerous'),
+            value: 'dangerous but lively',
+          ),
+        ],
+      );
+
+      final encoded = RewriteOperationSnapshotCodec.encode(snapshot);
+      final decoded = RewriteOperationSnapshotCodec.tryDecode(jsonDecode(encoded));
+
+      expect(decoded, isA<LorebookRewriteOperationSnapshot>());
+      final lore = decoded! as LorebookRewriteOperationSnapshot;
+      expect(lore.lorebookId, 'book');
+      expect(lore.entryId, 'district');
+      expect(lore.patches.single.value, 'dangerous but lively');
+    });
+
+    test('parses only unique, well-formed lorebook targets', () {
+      const content = 'The district is dangerous.';
+      final output = jsonEncode({
+        'operations': [
+          {
+            'lorebookId': 'book',
+            'entryId': 'district',
+            'baseContent': content,
+            'expectedContentHash': CardCanonicalizer.scalarSha256(content),
+            'patches': [
+              {
+                'anchor': 'dangerous',
+                'anchorSha256': CardCanonicalizer.scalarSha256('dangerous'),
+                'value': 'dangerous but lively',
+              },
+            ],
+          },
+        ],
+      });
+
+      final result = CardRewriteOperationParser.parseLorebookEvolutionBatch(
+        output,
+      );
+
+      expect(result, hasLength(1));
+      expect(result!.single.entryId, 'district');
+    });
+  });
+
   group('macro preservation round-trip', () {
     test(
       'macros flow through prompt build, mocked output, parse, and encode unchanged',

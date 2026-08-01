@@ -20,6 +20,7 @@ import '../../../shared/widgets/glaze_toast.dart';
 import '../../settings/api_list_provider.dart';
 import '../../studio/services/studio_preset_workflow_service.dart';
 import '../../studio/studio_preset_workflow_provider.dart';
+import '../../card_rewrite/card_rewriter_studio_sheet.dart';
 import '../state/recovery_state_provider.dart';
 import '../services/tracker_memory_recovery_service.dart';
 import 'studio_preset_editor_sheet.dart';
@@ -45,12 +46,12 @@ class StudioSettingsSheet extends ConsumerStatefulWidget {
   });
 
   /// Convenience launcher.
-  static Future<void> show(
+  static Future<String?> show(
     BuildContext context, {
     required String charId,
     required String sessionId,
   }) {
-    return GlazeBottomSheet.show<void>(
+    return GlazeBottomSheet.show<String>(
       context,
       title: 'Studio',
       child: StudioSettingsSheet(charId: charId, sessionId: sessionId),
@@ -231,6 +232,23 @@ class _StudioSettingsSheetState extends ConsumerState<StudioSettingsSheet> {
                 title: 'Agents',
                 child: StudioAgentsSheet(presetId: presetId),
               );
+            },
+          ),
+          ListTile(
+            leading: const Icon(Icons.auto_fix_high_outlined),
+            title: const Text('Card Rewriter'),
+            subtitle: const Text(
+              'Automated review proposals, model, and history',
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () async {
+              final route = await CardRewriterStudioSheet.show(
+                context,
+                charId: widget.charId,
+                sessionId: widget.sessionId,
+              );
+              if (!mounted || route == null) return;
+              Navigator.of(context, rootNavigator: true).pop(route);
             },
           ),
           ListTile(

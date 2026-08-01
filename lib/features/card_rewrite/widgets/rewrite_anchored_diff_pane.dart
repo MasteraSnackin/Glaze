@@ -24,6 +24,18 @@ class RewriteAnchoredDiffPane extends StatelessWidget {
   /// Current value of the operation's target field; null while loading.
   final String? fieldValue;
 
+  RewriteAnchoredDiffPane.lorebook({
+    super.key,
+    required LorebookAnchoredPatch patch,
+    required this.fieldValue,
+  }) : patch = AnchoredScalarPatch(
+         scopeKey: 'world:lorebook',
+         field: CardRewriteField.description,
+         anchor: patch.anchor,
+         anchorSha256: patch.anchorSha256,
+         value: patch.value,
+       );
+
   @override
   Widget build(BuildContext context) {
     final cs = context.cs;

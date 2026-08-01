@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:dio/dio.dart';
 
@@ -13,24 +14,27 @@ import 'card_rewriter_contracts.dart';
 import 'manual_rewrite_service.dart';
 
 /// Dedicated review-only automation lane. Claim and final commit are repository
-/// operations; the only work between them is effective-card prompt assembly and
-/// one cancellable model call.
+/// operations; the only work between them is shared-context prompt assembly and
+/// two bounded, cancellable writer calls.
 class AutomatedCardEvolutionService {
   AutomatedCardEvolutionService({
     required this.repo,
     required this.resolveModel,
     required this._executor,
+    this.isEnabled,
     this.leaseSeconds = 300,
   });
 
   final CardEvolutionRepo repo;
   final CardRewriteModelResolver resolveModel;
   final CardRewriteLlmExecutor _executor;
+  final bool Function()? isEnabled;
   final int leaseSeconds;
   final Map<String, CancelToken> _tokens = {};
   final Map<String, Future<CardEvolutionFinalizeOutcome?>> _inFlight = {};
 
   Future<CardEvolutionFinalizeOutcome?> runOneBatch(String sessionId) {
+    if (isEnabled?.call() == false) return Future.value(null);
     final active = _inFlight[sessionId];
     if (active != null) return active;
     final future = _run(sessionId);
@@ -57,41 +61,65 @@ class AutomatedCardEvolutionService {
         now: currentTimestampSeconds(),
       );
       if (snapshot == null) return null;
-      final prompt = '${CardRewriterPromptBuilder.build(
-        character: snapshot.character,
-        field: CardRewriteField.description,
-        instruction: 'Evolve the description only when the exact accepted evidence below supports a durable development. Consolidate rather than append. Do not invent unsupported canon.',
-      )}\n\n# Exact accepted immutable evidence\n${snapshot.selectedInputJson}';
       final config = await resolveModel();
       token = CancelToken();
       _tokens[sessionId] = token;
-      final outcome = await _executor(
+      final sharedContext = snapshot.selectedInputJson;
+      final cardPrompt =
+          '${CardRewriterPromptBuilder.buildEvolution(character: snapshot.character, instruction: 'Use all three card fields, the 20 latest immutable chat messages, and the current Ledger-backed factual context below to infer durable character evolution. Ledger supports the chat evidence; it does not replace it. Return patches only for fields with a durable, supported change. Change the smallest exact fragments possible; do not rewrite a whole field or card. Do not invent canon.')}\n\n# Immutable chat history and effective canon\n${snapshot.selectedInputJson}';
+      final cardOutcome = await _executor(
         config: config,
-        prompt: prompt,
+        prompt: cardPrompt,
         maxTokens: 4096,
         temperature: 0.2,
         timeoutMs: 60000,
         cancelToken: token,
       );
       if (token.isCancelled ||
-          outcome.status == AgentOperationStatus.aborted ||
-          !outcome.isOk ||
-          outcome.text == null) {
+          cardOutcome.status == AgentOperationStatus.aborted ||
+          !cardOutcome.isOk ||
+          cardOutcome.text == null) {
         return null;
       }
-      final parsed = CardRewriteOperationParser.parse(
-        outcome.text!,
-        expectedField: CardRewriteField.description,
+      final cardOperations = CardRewriteOperationParser.parseEvolutionBatch(
+        cardOutcome.text!,
       );
-      if (parsed.snapshot == null) {
-        return null;
+      if (cardOperations == null) return null;
+      final operations = <RewriteOperationSnapshot>[...cardOperations];
+      String? lorebookOutput;
+      if (_hasInjectedLoreTargets(sharedContext)) {
+        final lorebookOutcome = await _executor(
+          config: config,
+          prompt:
+              '${CardRewriterPromptBuilder.buildLorebookEvolution(instruction: 'Use the shared card, chat, and Ledger context to keep only the supplied injected lorebook entries current. Return patches only when an entry needs a durable update.')}\n\n# Shared immutable context\n$sharedContext',
+          maxTokens: 4096,
+          temperature: 0.2,
+          timeoutMs: 60000,
+          cancelToken: token,
+        );
+        if (token.isCancelled ||
+            lorebookOutcome.status == AgentOperationStatus.aborted ||
+            !lorebookOutcome.isOk ||
+            lorebookOutcome.text == null) {
+          return null;
+        }
+        final lorebookOperations =
+            CardRewriteOperationParser.parseLorebookEvolutionBatch(
+              lorebookOutcome.text!,
+            );
+        if (lorebookOperations == null) return null;
+        operations.addAll(lorebookOperations);
+        lorebookOutput = lorebookOutcome.text;
       }
+      if (operations.isEmpty) return null;
+      final modelOutputs = <String, String>{'card': cardOutcome.text!};
+      if (lorebookOutput != null) modelOutputs['lorebook'] = lorebookOutput;
       return repo.finalize(
         claimId: claim.row.id,
         ownerId: owner,
         now: currentTimestampSeconds(),
-        modelOutput: outcome.text!,
-        operation: parsed.snapshot!,
+        modelOutput: jsonEncode(modelOutputs),
+        operations: operations,
       );
     } on CardRewriteModelNotConfigured {
       return null;
@@ -113,5 +141,15 @@ class AutomatedCardEvolutionService {
       token.cancel('serviceDisposed');
     }
     _tokens.clear();
+  }
+
+  static bool _hasInjectedLoreTargets(String selectedInputJson) {
+    try {
+      final input = jsonDecode(selectedInputJson) as Map;
+      final entries = input['injectedLorebookEntries'];
+      return entries is List && entries.isNotEmpty;
+    } catch (_) {
+      return false;
+    }
   }
 }

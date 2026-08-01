@@ -9,6 +9,7 @@ import '../../llm/character_tokens.dart';
 import '../../models/character.dart';
 import '../../utils/time_helpers.dart';
 import '../app_db.dart';
+import 'session_lorebook_evolution_repo.dart';
 
 /// The only durable request shape accepted by manual apply.  It is stored in
 /// the immutable operation-revision snapshot; callers never provide it.
@@ -40,12 +41,15 @@ class ManualRewriteApplyRepo {
   ManualRewriteApplyRepo({
     required this._db,
     required this._canonReader,
+    SessionLorebookEvolutionRepo? lorebookEvolutionRepo,
     this.failureHook,
     this.beforeScalarUpdateHook,
-  });
+  }) : _lorebookEvolutionRepo = lorebookEvolutionRepo ??
+           SessionLorebookEvolutionRepo(_db);
 
   final AppDatabase _db;
   final EffectiveCanonReadRepository _canonReader;
+  final SessionLorebookEvolutionRepo _lorebookEvolutionRepo;
   final void Function(ManualRewriteApplyFailurePoint point)? failureHook;
   final Future<void> Function()? beforeScalarUpdateHook;
   static const _assembler = EffectiveCanonAssembler();
@@ -54,7 +58,9 @@ class ManualRewriteApplyRepo {
     required String jobId,
     required String expectedCanonStamp,
     required int expectedJobVersion,
-  }) => _db.transaction(() async {
+  }) async {
+    try {
+      return await _db.transaction(() async {
     final job = await (_db.select(
       _db.rewriteJobs,
     )..where((t) => t.id.equals(jobId))).getSingleOrNull();
@@ -141,29 +147,33 @@ class ManualRewriteApplyRepo {
       }
       parsed.add(value);
     }
-    final field = parsed.first.field;
-    if (parsed.any((item) => item.field != field)) {
-      return const ManualRewriteApplyOutcome.blocked('multipleFields');
-    }
-    final patches = parsed
+    final cardOperations = parsed
+        .where((item) => item.snapshot is CardRewriteOperationSnapshot)
+        .toList(growable: false);
+    final lorebookOperations = parsed
+        .where((item) => item.snapshot is LorebookRewriteOperationSnapshot)
+        .toList(growable: false);
+    final patches = cardOperations
         .expand((item) => item.patches)
         .toList(growable: false);
-    final validation = AnchoredScalarPatchValidator.validate(
-      patches: patches,
-      currentCardValues: _values(input.sourceCharacter),
-      fullCardBaselineSize: CardCanonicalizer.serialize(
-        input.sourceCharacter,
-      ).length,
-    );
-    if (!validation.isValid) {
-      return const ManualRewriteApplyOutcome.blocked('anchorOrBudget');
+    if (patches.isNotEmpty) {
+      final validation = AnchoredScalarPatchValidator.validate(
+        patches: patches,
+        currentCardValues: _values(input.sourceCharacter),
+        fullCardBaselineSize: CardCanonicalizer.serialize(
+          input.sourceCharacter,
+        ).length,
+      );
+      if (!validation.isValid) {
+        return const ManualRewriteApplyOutcome.blocked('anchorOrBudget');
+      }
     }
     for (
       var operationIndex = 0;
-      operationIndex < parsed.length;
+      operationIndex < cardOperations.length;
       operationIndex++
     ) {
-      final operation = parsed[operationIndex];
+      final operation = cardOperations[operationIndex];
       if (!_isValidGlobalTransition(operation.transition) ||
           operation.patches.any(
             (patch) =>
@@ -191,47 +201,59 @@ class ManualRewriteApplyRepo {
       }
     }
 
-    var next = _fieldValue(input.sourceCharacter, field);
+    final patchesByField = <CardRewriteField, List<AnchoredScalarPatch>>{};
     for (final patch in patches) {
-      next = next.replaceFirst(patch.anchor, patch.value);
+      (patchesByField[patch.field] ??= []).add(patch);
     }
-    final updated = _withField(input.sourceCharacter, field, next);
+    var updated = input.sourceCharacter;
+    final values = <CardRewriteField, String>{};
+    for (final entry in patchesByField.entries) {
+      var next = _fieldValue(updated, entry.key);
+      for (final patch in entry.value) {
+        next = next.replaceFirst(patch.anchor, patch.value);
+      }
+      values[entry.key] = next;
+      updated = _withField(updated, entry.key, next);
+    }
     final parent = input.lineage.last;
-    final newRevision = parent.revision + 1;
-    final newHash = CardCanonicalizer.sha256(updated);
-    if (newHash == parent.revisionHash) {
-      return const ManualRewriteApplyOutcome.blocked('noEffectiveChange');
+    var newRevision = 0;
+    var newHash = '';
+    if (cardOperations.isNotEmpty) {
+      newRevision = parent.revision + 1;
+      newHash = CardCanonicalizer.sha256(updated);
+      if (newHash == parent.revisionHash) {
+        return const ManualRewriteApplyOutcome.blocked('noEffectiveChange');
+      }
+      await beforeScalarUpdateHook?.call();
+      if (!await _updateFields(
+        job.characterId,
+        input.sourceCharacter,
+        input.sourceCharacter.updatedAt,
+        values,
+        updated,
+      )) {
+        return const ManualRewriteApplyOutcome.blocked('staleCharacterField');
+      }
+      failureHook?.call(ManualRewriteApplyFailurePoint.afterCharacterUpdate);
+      await _db
+          .into(_db.characterRevisionRows)
+          .insert(
+            CharacterRevisionRowsCompanion.insert(
+              characterId: job.characterId,
+              revision: newRevision,
+              revisionHash: newHash,
+              parentRevisionHash: Value(parent.revisionHash),
+              snapshotJson: jsonEncode(updated.toJson()),
+              createdAt: Value(currentTimestampSeconds()),
+            ),
+          );
     }
-    await beforeScalarUpdateHook?.call();
-    if (!await _updateScalar(
-      job.characterId,
-      field,
-      _nullableFieldValue(input.sourceCharacter, field),
-      input.sourceCharacter.updatedAt,
-      next,
-      updated,
-    )) {
-      return const ManualRewriteApplyOutcome.blocked('staleCharacterField');
-    }
-    failureHook?.call(ManualRewriteApplyFailurePoint.afterCharacterUpdate);
-    await _db
-        .into(_db.characterRevisionRows)
-        .insert(
-          CharacterRevisionRowsCompanion.insert(
-            characterId: job.characterId,
-            revision: newRevision,
-            revisionHash: newHash,
-            parentRevisionHash: Value(parent.revisionHash),
-            snapshotJson: jsonEncode(updated.toJson()),
-            createdAt: Value(currentTimestampSeconds()),
-          ),
-        );
     for (
       var operationIndex = 0;
-      operationIndex < parsed.length;
+      operationIndex < cardOperations.length;
       operationIndex++
     ) {
-      final operation = parsed[operationIndex];
+      final operation = cardOperations[operationIndex];
       await _db
           .into(_db.appliedCanonTransitionRows)
           .insert(
@@ -270,8 +292,23 @@ class ManualRewriteApplyRepo {
         );
       }
     }
+    for (final operation in lorebookOperations) {
+      final lore = operation.snapshot as LorebookRewriteOperationSnapshot;
+      if (!await _lorebookEvolutionRepo.applyPatchesInTransaction(
+        sessionId: job.chatSessionId,
+        lorebookId: lore.lorebookId,
+        entryId: lore.entryId,
+        baseContent: lore.baseContent,
+        expectedContentHash: lore.expectedContentHash,
+        patches: lore.patches,
+      )) {
+        throw const _ApplyBlocked('staleLorebookEntry');
+      }
+    }
     failureHook?.call(ManualRewriteApplyFailurePoint.afterProvenance);
-    for (final operation in approved) {
+    for (var index = 0; index < approved.length; index++) {
+      final operation = approved[index];
+      final snapshot = parsed[index].snapshot;
       final changed =
           await (_db.update(_db.rewriteOperations)..where(
                 (t) =>
@@ -286,8 +323,16 @@ class ManualRewriteApplyRepo {
               .write(
                 RewriteOperationsCompanion(
                   status: const Value('applied'),
-                  appliedCharacterRevision: Value(newRevision),
-                  appliedCharacterRevisionHash: Value(newHash),
+                  appliedCharacterRevision: Value(
+                    snapshot is CardRewriteOperationSnapshot
+                        ? newRevision
+                        : 0,
+                  ),
+                  appliedCharacterRevisionHash: Value(
+                    snapshot is CardRewriteOperationSnapshot
+                        ? newHash
+                        : '',
+                  ),
                   updatedAt: Value(currentTimestampSeconds()),
                 ),
               );
@@ -314,24 +359,34 @@ class ManualRewriteApplyRepo {
     if (jobChanged != 1) {
       throw StateError('Job CAS changed inside apply transaction.');
     }
-    return const ManualRewriteApplyOutcome.applied();
-  });
+        return const ManualRewriteApplyOutcome.applied();
+      });
+    } on _ApplyBlocked catch (blocked) {
+      return ManualRewriteApplyOutcome.blocked(blocked.reason);
+    }
+  }
 
   Future<ManualRewriteApplyOutcome> _alreadyApplied(
     RewriteJobRow job,
     List<RewriteOperationRow> operations,
   ) async {
+    final approved = operations.where((o) => o.decision == 'approved');
+    if (approved.any((o) => o.status != 'applied')) {
+      return const ManualRewriteApplyOutcome.blocked('inconsistentAppliedJob');
+    }
+    if (job.appliedCharacterRevision == 0 &&
+        job.appliedCharacterRevisionHash.isEmpty) {
+      return const ManualRewriteApplyOutcome.alreadyApplied();
+    }
     if (job.appliedCharacterRevision <= 0 ||
         job.appliedCharacterRevisionHash.isEmpty ||
-        operations
-            .where((o) => o.decision == 'approved')
-            .any(
-              (o) =>
-                  o.status != 'applied' ||
-                  o.appliedCharacterRevision != job.appliedCharacterRevision ||
+        approved.any(
+          (o) =>
+              o.appliedCharacterRevision != 0 &&
+              (o.appliedCharacterRevision != job.appliedCharacterRevision ||
                   o.appliedCharacterRevisionHash !=
-                      job.appliedCharacterRevisionHash,
-            )) {
+                      job.appliedCharacterRevisionHash),
+        )) {
       return const ManualRewriteApplyOutcome.blocked('inconsistentAppliedJob');
     }
     final revision =
@@ -347,62 +402,61 @@ class ManualRewriteApplyRepo {
         : const ManualRewriteApplyOutcome.alreadyApplied();
   }
 
-  Future<bool> _updateScalar(
+  Future<bool> _updateFields(
     String id,
-    CardRewriteField field,
-    String? expectedValue,
+    Character expected,
     int expectedUpdatedAt,
-    String value,
+    Map<CardRewriteField, String> values,
     Character updated,
   ) async {
     final row = _db.update(_db.characters)
       ..where((t) {
-        final fieldColumn = switch (field) {
-          CardRewriteField.description => t.description,
-          CardRewriteField.personality => t.personality,
-          CardRewriteField.scenario => t.scenario,
-          CardRewriteField.systemPrompt => t.systemPrompt,
-          CardRewriteField.postHistoryInstructions => t.postHistoryInstructions,
-          CardRewriteField.creatorNotes => t.creatorNotes,
-        };
-        return t.charId.equals(id) &
-            t.updatedAt.equals(expectedUpdatedAt) &
-            (expectedValue == null
-                ? fieldColumn.isNull()
-                : fieldColumn.equals(expectedValue));
+        var predicate =
+            t.charId.equals(id) & t.updatedAt.equals(expectedUpdatedAt);
+        for (final field in values.keys) {
+          final expectedValue = _nullableFieldValue(expected, field);
+          final fieldColumn = switch (field) {
+            CardRewriteField.description => t.description,
+            CardRewriteField.personality => t.personality,
+            CardRewriteField.scenario => t.scenario,
+            CardRewriteField.systemPrompt => t.systemPrompt,
+            CardRewriteField.postHistoryInstructions =>
+              t.postHistoryInstructions,
+            CardRewriteField.creatorNotes => t.creatorNotes,
+          };
+          predicate =
+              predicate &
+              (expectedValue == null
+                  ? fieldColumn.isNull()
+                  : fieldColumn.equals(expectedValue));
+        }
+        return predicate;
       });
-    final result = await row.write(switch (field) {
-      CardRewriteField.description => CharactersCompanion(
-        description: Value(value),
+    final result = await row.write(
+      CharactersCompanion(
+        description: values.containsKey(CardRewriteField.description)
+            ? Value(values[CardRewriteField.description]!)
+            : const Value.absent(),
+        personality: values.containsKey(CardRewriteField.personality)
+            ? Value(values[CardRewriteField.personality]!)
+            : const Value.absent(),
+        scenario: values.containsKey(CardRewriteField.scenario)
+            ? Value(values[CardRewriteField.scenario]!)
+            : const Value.absent(),
+        systemPrompt: values.containsKey(CardRewriteField.systemPrompt)
+            ? Value(values[CardRewriteField.systemPrompt]!)
+            : const Value.absent(),
+        postHistoryInstructions:
+            values.containsKey(CardRewriteField.postHistoryInstructions)
+            ? Value(values[CardRewriteField.postHistoryInstructions]!)
+            : const Value.absent(),
+        creatorNotes: values.containsKey(CardRewriteField.creatorNotes)
+            ? Value(values[CardRewriteField.creatorNotes]!)
+            : const Value.absent(),
         updatedAt: Value(currentTimestampSeconds()),
         tokenCount: Value(estimateCharacterTokens(updated)),
       ),
-      CardRewriteField.personality => CharactersCompanion(
-        personality: Value(value),
-        updatedAt: Value(currentTimestampSeconds()),
-        tokenCount: Value(estimateCharacterTokens(updated)),
-      ),
-      CardRewriteField.scenario => CharactersCompanion(
-        scenario: Value(value),
-        updatedAt: Value(currentTimestampSeconds()),
-        tokenCount: Value(estimateCharacterTokens(updated)),
-      ),
-      CardRewriteField.systemPrompt => CharactersCompanion(
-        systemPrompt: Value(value),
-        updatedAt: Value(currentTimestampSeconds()),
-        tokenCount: Value(estimateCharacterTokens(updated)),
-      ),
-      CardRewriteField.postHistoryInstructions => CharactersCompanion(
-        postHistoryInstructions: Value(value),
-        updatedAt: Value(currentTimestampSeconds()),
-        tokenCount: Value(estimateCharacterTokens(updated)),
-      ),
-      CardRewriteField.creatorNotes => CharactersCompanion(
-        creatorNotes: Value(value),
-        updatedAt: Value(currentTimestampSeconds()),
-        tokenCount: Value(estimateCharacterTokens(updated)),
-      ),
-    });
+    );
     return result == 1;
   }
 
@@ -476,37 +530,33 @@ class ManualRewriteApplyRepo {
   }
 }
 
+final class _ApplyBlocked implements Exception {
+  const _ApplyBlocked(this.reason);
+  final String reason;
+}
+
 final class _StoredOperation {
-  const _StoredOperation(this.id, this.field, this.patches, this.transition);
+  const _StoredOperation(this.id, this.snapshot);
   final String id;
-  final CardRewriteField field;
-  final List<AnchoredScalarPatch> patches;
-  final _Transition transition;
+  final RewriteOperationSnapshot snapshot;
+  List<AnchoredScalarPatch> get patches =>
+      (snapshot as CardRewriteOperationSnapshot).patches;
+  _Transition get transition {
+    final value = (snapshot as CardRewriteOperationSnapshot).transition;
+    return _Transition(
+      value.id,
+      value.scopeKey,
+      value.canonicalClaim,
+      value.promotionDestination,
+      value.affectedTrackerKeys,
+      value.factIds,
+      value.chatSessionId,
+    );
+  }
   static _StoredOperation? tryParse(String id, String source) {
     try {
-      final json = jsonDecode(source) as Map<String, dynamic>;
-      final field = CardRewriteField.values
-          .where((v) => v.wireName == json['field'])
-          .single;
-      final patches = (json['patches'] as List)
-          .map((v) {
-            final p = v as Map<String, dynamic>;
-            return AnchoredScalarPatch(
-              scopeKey: p['scopeKey'] as String,
-              field: field,
-              anchor: p['anchor'] as String,
-              anchorSha256: p['anchorSha256'] as String,
-              value: p['value'] as String,
-            );
-          })
-          .toList(growable: false);
-      if (patches.isEmpty) return null;
-      return _StoredOperation(
-        id,
-        field,
-        patches,
-        _Transition.parse(json['transition'] as Map<String, dynamic>),
-      );
+      final snapshot = RewriteOperationSnapshotCodec.tryDecode(jsonDecode(source));
+      return snapshot == null ? null : _StoredOperation(id, snapshot);
     } catch (_) {
       return null;
     }
@@ -526,15 +576,6 @@ final class _Transition {
   final String id, scopeKey, canonicalClaim, promotionDestination;
   final List<String> affectedTrackerKeys, factIds;
   final String? chatSessionId;
-  factory _Transition.parse(Map<String, dynamic> v) => _Transition(
-    v['id'] as String,
-    v['scopeKey'] as String,
-    v['canonicalClaim'] as String,
-    v['promotionDestination'] as String? ?? '',
-    List<String>.from(v['affectedTrackerKeys'] as List),
-    List<String>.from(v['factIds'] as List? ?? const []),
-    v['chatSessionId'] as String?,
-  );
   Map<String, Object?> toJson() => {
     'id': id,
     'scopeKey': scopeKey,

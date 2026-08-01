@@ -570,4 +570,17 @@ void main() {
     );
     expect(cancelled!.job.statusReason, 'userCancelled');
   });
+
+  test('watchJobsBySessionId orders a session history by latest update',
+      () async {
+    final first = await createJob(requestKey: 'history-first');
+    await repo.cancel(jobId: first, expectedVersion: 1);
+    await (db.update(db.rewriteJobs)..where((row) => row.id.equals(first)))
+        .write(const RewriteJobsCompanion(updatedAt: Value(1)));
+    final second = await createJob(requestKey: 'history-second');
+
+    final history = await repo.watchJobsBySessionId('s').first;
+
+    expect(history.map((job) => job.id), [second, first]);
+  });
 }

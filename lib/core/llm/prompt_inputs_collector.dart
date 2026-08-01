@@ -104,7 +104,15 @@ class PromptInputsCollector {
       connections,
     );
 
-    final lorebooks = await lorebookRepo.getAll();
+    final sourceLorebooks = await lorebookRepo.getAll();
+    final lorebooks = session == null
+        ? sourceLorebooks
+        : await _ref
+              .read(sessionLorebookEvolutionRepoProvider)
+              .applyOverlays(
+                sessionId: session.id,
+                lorebooks: sourceLorebooks,
+              );
     final lorebookSettings = _ref.read(lorebookSettingsProvider);
     final lorebookActivations = _ref.read(lorebookActivationsProvider);
 

@@ -14,6 +14,78 @@ import 'package:glaze_flutter/core/services/card_rewriter/card_rewriter_contract
 /// [CardCanonicalizer] (stable key order, null text normalized) and there are
 /// no timestamps, randomness, or environment lookups.
 abstract final class CardRewriterPromptBuilder {
+  static String buildEvolution({
+    required Character character,
+    required String instruction,
+  }) {
+    final snapshot = CardCanonicalizer.snapshot(character);
+    final buffer = StringBuffer()
+      ..writeln(
+        'You are the Glaze card rewriter. Propose small anchored scalar patches '
+        'for the character card below.',
+      )
+      ..writeln()
+      ..writeln('# Writable fields')
+      ..writeln(
+        'Only description, personality, and scenario are writable. They are '
+        'all provided as read-only context. Omit a field when its current text '
+        'does not need a durable change.',
+      )
+      ..writeln()
+      ..writeln('# Response format')
+      ..writeln(
+        'Respond with exactly one JSON object and nothing else: '
+        '{"operations":[{"field":"description|personality|scenario",'
+        '"patches":[{"scopeKey":"...","anchor":"...",'
+        '"anchorSha256":"...","value":"..."}],"transition":'
+        '{"id":"...","scopeKey":"...","canonicalClaim":"...",'
+        '"promotionDestination":"...","affectedTrackerKeys":[],'
+        '"factIds":[],"chatSessionId":null}}]}.',
+      )
+      ..writeln(
+        '"operations" may be empty. Each field may occur at most once. Use '
+        'one or more exact anchors per changed field, never a full-field rewrite.',
+      )
+      ..writeln()
+      ..writeln('# Patch rules')
+      ..writeln(
+        '- scopeKey supports npc:<subject>, relationship:<subject>, '
+        'arc:<subject>, world:<subject>, or scene.<subject>. Every patch and '
+        'its transition must use the same scopeKey.',
+      )
+      ..writeln(
+        '- Each anchor must occur exactly once in its current field and its '
+        'anchorSha256 must be the lowercase SHA-256 of the anchor UTF-8 bytes. '
+        'For an empty field only, use an empty anchor to initialize it.',
+      )
+      ..writeln(
+        '- Preserve every {{...}} macro token byte-for-byte in a replacement.',
+      )
+      ..writeln('- Emit no keys beyond those shown above.')
+      ..writeln()
+      ..writeln('# User instruction')
+      ..writeln(instruction)
+      ..writeln()
+      ..writeln('# Canonical character card snapshot (read-only)')
+      ..write(jsonEncode(snapshot));
+    return buffer.toString();
+  }
+
+  static String buildLorebookEvolution({required String instruction}) {
+    return '''You are the Glaze lorebook rewriter. The shared read-only context below contains the character card, recent chat, Ledger facts, and exact lorebook entries actually injected into that chat.
+
+# Writable targets
+Only the supplied lorebookId/entryId pairs are writable. Do not create, delete, move, rename, or change keys/settings. Do not output card patches. Update an entry only when the durable chat evidence requires information that belongs in that entry and is not already represented sufficiently elsewhere in the shared context.
+
+# Response format
+Respond with exactly one JSON object and nothing else:
+{"operations":[{"lorebookId":"...","entryId":"...","baseContent":"...","expectedContentHash":"...","patches":[{"anchor":"...","anchorSha256":"...","value":"..."}]}]}
+"operations" may be empty. Each target may occur at most once. baseContent and expectedContentHash must exactly echo the supplied target. Each anchor must occur exactly once in its supplied current content; anchorSha256 is its lowercase SHA-256 UTF-8 hash. Use smallest exact fragment replacements, never rewrite an entire entry. Preserve every {{...}} macro token byte-for-byte.
+
+# Instruction
+$instruction''';
+  }
+
   static String build({
     required Character character,
     required CardRewriteField field,
@@ -75,9 +147,10 @@ abstract final class CardRewriterPromptBuilder {
         'SAME scopeKey.',
       )
       ..writeln(
-        '- "anchor" MUST be a non-empty literal fragment of the current '
+        '- "anchor" MUST be a literal fragment of the current '
         '"${field.wireName}" text that occurs there EXACTLY ONCE; each anchor '
-        'is replaced by its "value".',
+        'is replaced by its "value". If and only if the current field is empty, '
+        'use an empty anchor with its SHA-256 to initialize it.',
       )
       ..writeln(
         '- "anchorSha256" MUST be the lowercase hex SHA-256 of the anchor\'s '

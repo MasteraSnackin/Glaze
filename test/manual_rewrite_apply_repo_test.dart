@@ -139,11 +139,12 @@ void main() {
     required String id,
     required String anchor,
     required String value,
+    CardRewriteField field = CardRewriteField.description,
     String chatSessionId = 's',
     List<String> factIds = const [],
   }) async {
     final snapshot = jsonEncode({
-      'field': 'description',
+      'field': field.wireName,
       'patches': [
         {
           'scopeKey': 'npc:alice',
@@ -185,6 +186,50 @@ void main() {
             revision: 1,
             snapshotJson: snapshot,
           ),
+    );
+  }
+
+  Future<void> addApprovedLorebookOperation({
+    String expectedContent = 'The district is dangerous.',
+  }) async {
+    final snapshot = RewriteOperationSnapshotCodec.encode(
+      LorebookRewriteOperationSnapshot(
+        lorebookId: 'book',
+        entryId: 'district',
+        baseContent: 'The district is dangerous.',
+        expectedContentHash: CardCanonicalizer.scalarSha256(expectedContent),
+        patches: [
+          LorebookAnchoredPatch(
+            anchor: 'dangerous',
+            anchorSha256: CardCanonicalizer.scalarSha256('dangerous'),
+            value: 'dangerous but lively',
+          ),
+        ],
+      ),
+    );
+    await db
+        .into(db.rewriteOperations)
+        .insert(
+          RewriteOperationsCompanion.insert(
+            id: 'lore-op',
+            rewriteJobId: 'job',
+            chatSessionId: 's',
+            operationJson: Value(snapshot),
+            currentRevision: const Value(1),
+            status: const Value('reviewable'),
+            decision: const Value('approved'),
+            validationStatus: const Value('valid'),
+            decisionRevision: const Value(1),
+          ),
+        );
+    await db
+        .into(db.rewriteOperationRevisions)
+        .insert(
+          RewriteOperationRevisionsCompanion.insert(
+            rewriteOperationId: 'lore-op',
+            revision: 1,
+            snapshotJson: snapshot,
+          ),
         );
   }
 
@@ -219,6 +264,96 @@ void main() {
       );
     },
   );
+
+  test(
+    'applies approved operations for multiple fields in one revision',
+    () async {
+      final stamp = await seed();
+      await addApprovedOperation(
+        id: 'personality',
+        field: CardRewriteField.personality,
+        anchor: 'untouched',
+        value: 'decisive',
+      );
+      await addApprovedOperation(
+        id: 'scenario',
+        field: CardRewriteField.scenario,
+        anchor: '',
+        value: 'Night City',
+      );
+
+      final outcome = await ManualRewriteApplyRepo(db: db, canonReader: reader)
+          .applyApproved(
+            jobId: 'job',
+            expectedCanonStamp: stamp,
+            expectedJobVersion: 1,
+          );
+
+      expect(outcome.kind, 'applied');
+      final card = (await characters.getById('c'))!;
+      expect(card.description, 'new text');
+      expect(card.personality, 'decisive');
+      expect(card.scenario, 'Night City');
+      expect(await revisions.getForCharacter('c'), hasLength(2));
+      expect(
+        await db.select(db.appliedCanonTransitionRows).get(),
+        hasLength(3),
+      );
+      expect(
+        (await db.select(db.rewriteOperations).get()).map(
+          (item) => item.status,
+        ),
+        everyElement('applied'),
+      );
+    },
+  );
+
+  test('applies a lore-only operation to the session overlay', () async {
+    final stamp = await seed();
+    await (db.update(db.rewriteOperations)..where((row) => row.id.equals('op')))
+        .write(const RewriteOperationsCompanion(decision: Value('rejected')));
+    await addApprovedLorebookOperation();
+
+    final outcome = await ManualRewriteApplyRepo(db: db, canonReader: reader)
+        .applyApproved(
+          jobId: 'job',
+          expectedCanonStamp: stamp,
+          expectedJobVersion: 1,
+        );
+
+    expect(outcome.kind, 'applied');
+    expect((await characters.getById('c'))!.description, 'old text');
+    expect(await revisions.getForCharacter('c'), hasLength(1));
+    final overlay = await db.select(db.sessionLorebookEvolutionRows).getSingle();
+    expect(overlay.chatSessionId, 's');
+    expect(overlay.baseContent, 'The district is dangerous.');
+    expect(overlay.content, 'The district is dangerous but lively.');
+    final job = await db.select(db.rewriteJobs).getSingle();
+    expect(job.appliedCharacterRevision, 0);
+    expect(job.appliedCharacterRevisionHash, isEmpty);
+  });
+
+  test('stale lorebook operation rolls card writes back atomically', () async {
+    final stamp = await seed();
+    await addApprovedLorebookOperation(expectedContent: 'concurrent content');
+
+    final outcome = await ManualRewriteApplyRepo(db: db, canonReader: reader)
+        .applyApproved(
+          jobId: 'job',
+          expectedCanonStamp: stamp,
+          expectedJobVersion: 1,
+        );
+
+    expect(outcome.kind, 'blocked');
+    expect(outcome.reason, 'staleLorebookEntry');
+    expect((await characters.getById('c'))!.description, 'old text');
+    expect(await revisions.getForCharacter('c'), hasLength(1));
+    expect(await db.select(db.sessionLorebookEvolutionRows).get(), isEmpty);
+    expect(
+      (await db.select(db.rewriteOperations).get()).map((row) => row.status),
+      everyElement('reviewable'),
+    );
+  });
 
   test('stale source scalar CAS blocks without writes', () async {
     final stamp = await seed();

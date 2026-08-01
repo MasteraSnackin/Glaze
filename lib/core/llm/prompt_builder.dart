@@ -134,6 +134,16 @@ PromptResult buildPrompt(PromptPayload payload) {
     return book == null
         ? entry
         : entry.copyWith(lorebookId: book.id, lorebookName: book.name);
+  }).map((entry) {
+    final book = payload.lorebooks
+        .where((candidate) => candidate.id == entry.lorebookId)
+        .firstOrNull;
+    final effectiveEntry = book?.entries
+        .where((candidate) => candidate.id == entry.id)
+        .firstOrNull;
+    return effectiveEntry == null
+        ? entry
+        : entry.copyWith(content: effectiveEntry.content);
   }).toList();
 
   final mergedEntries = mergeKeywordVector(

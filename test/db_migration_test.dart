@@ -78,7 +78,7 @@ void main() {
 
       // user_version matches the Drift schema version (app_db.dart schemaVersion).
       // Update this constant whenever a new migration step is added.
-      expect(version, 92);
+       expect(version, 93);
     });
 
     test(
@@ -115,7 +115,7 @@ void main() {
         final version = await upgraded
             .customSelect('PRAGMA user_version')
             .get();
-        expect(version.first.read<int>('user_version'), 92);
+         expect(version.first.read<int>('user_version'), 93);
         expect(names, contains('variant_group_id'));
         expect(names, contains('hidden'));
       },
@@ -145,12 +145,12 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 92);
+       expect(version.read<int>('user_version'), 93);
     });
 
     test('current schema includes atomic character fact tables', () async {
       final version = await db.customSelect('PRAGMA user_version').getSingle();
-      expect(version.read<int>('user_version'), 92);
+       expect(version.read<int>('user_version'), 93);
 
       final factColumns = await db
           .customSelect("PRAGMA table_info('character_knowledge_fact_rows')")
@@ -262,7 +262,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 92);
+       expect(version.read<int>('user_version'), 93);
     });
 
     test(
@@ -372,7 +372,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 92);
+       expect(version.read<int>('user_version'), 93);
     });
 
     test('v80 adds Responses API toggle defaulting to off', () async {
@@ -412,7 +412,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 92);
+       expect(version.read<int>('user_version'), 93);
     });
 
     test('v81 adds composite embedding source index', () async {
@@ -446,7 +446,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 92);
+       expect(version.read<int>('user_version'), 93);
     });
 
     test('v82 creates rewrite persistence schema and provenance columns', () async {
@@ -520,7 +520,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 92);
+       expect(version.read<int>('user_version'), 93);
     });
 
     test('v83 rebuilds interim text revision columns without losing rows', () async {
@@ -957,7 +957,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 92);
+       expect(version.read<int>('user_version'), 93);
 
       // Rows and payloads survive; legacy statuses pass through or are
       // normalized fail-closed, and new columns carry neutral defaults.
@@ -1162,7 +1162,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 92);
+       expect(version.read<int>('user_version'), 93);
       final row = await upgraded
           .customSelect(
             'SELECT blocks_json FROM studio_preset_rows WHERE preset_id = ?',
@@ -1278,7 +1278,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 92);
+       expect(version.read<int>('user_version'), 93);
       final check = await upgraded.customSelect('PRAGMA integrity_check').get();
       expect(check.single.read<String>('integrity_check'), 'ok');
     });
@@ -1666,6 +1666,23 @@ void main() {
         "SELECT name FROM sqlite_master WHERE type = 'trigger' AND name = 'card_evolution_proposal_runs_no_update'",
       ).getSingleOrNull();
       expect(trigger, isNotNull);
+    });
+
+    test('v93 session lorebook evolution overlay has the session key', () async {
+      final columns = await db.customSelect(
+        "PRAGMA table_info('session_lorebook_evolution_rows')",
+      ).get();
+      expect(
+        columns.map((row) => row.read<String>('name')),
+        containsAll([
+          'chat_session_id',
+          'lorebook_id',
+          'entry_id',
+          'base_content',
+          'content',
+          'content_hash',
+        ]),
+      );
     });
   });
 }

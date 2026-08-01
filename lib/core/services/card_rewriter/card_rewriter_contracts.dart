@@ -283,7 +283,9 @@ abstract final class AnchoredScalarPatchValidator {
   }
 
   static int _occurrences(String value, String anchor) {
-    if (anchor.isEmpty) return 0;
+    // An empty card field has exactly one unambiguous insertion point. This is
+    // needed to let a reviewable rewrite initialize an otherwise blank field.
+    if (anchor.isEmpty) return value.isEmpty ? 1 : 0;
     var count = 0;
     var from = 0;
     while (true) {
@@ -320,7 +322,11 @@ final class CardRewriteTransitionSnapshot {
 
 /// An immutable, fully-typed rewrite operation: anchored patches for exactly
 /// one writable [field] plus the canon transition they promote.
-final class CardRewriteOperationSnapshot {
+sealed class RewriteOperationSnapshot {
+  const RewriteOperationSnapshot();
+}
+
+final class CardRewriteOperationSnapshot extends RewriteOperationSnapshot {
   const CardRewriteOperationSnapshot({
     required this.field,
     required this.patches,
@@ -330,6 +336,119 @@ final class CardRewriteOperationSnapshot {
   final CardRewriteField field;
   final List<AnchoredScalarPatch> patches;
   final CardRewriteTransitionSnapshot transition;
+}
+
+/// A session-local, anchored replacement for one lorebook entry. The source
+/// book is never changed: apply writes only the current session's overlay.
+final class LorebookAnchoredPatch {
+  const LorebookAnchoredPatch({
+    required this.anchor,
+    required this.anchorSha256,
+    required this.value,
+  });
+
+  final String anchor;
+  final String anchorSha256;
+  final String value;
+}
+
+final class LorebookRewriteOperationSnapshot extends RewriteOperationSnapshot {
+  const LorebookRewriteOperationSnapshot({
+    required this.lorebookId,
+    required this.entryId,
+    required this.baseContent,
+    required this.expectedContentHash,
+    required this.patches,
+  });
+
+  final String lorebookId;
+  final String entryId;
+
+  /// Immutable source content from the exact injected-entry manifest.
+  final String baseContent;
+  final String expectedContentHash;
+  final List<LorebookAnchoredPatch> patches;
+}
+
+/// Codec for every durable review operation. Card snapshots deliberately retain
+/// their legacy untagged shape so existing manual jobs remain readable.
+abstract final class RewriteOperationSnapshotCodec {
+  static String encode(RewriteOperationSnapshot snapshot) => switch (snapshot) {
+    CardRewriteOperationSnapshot card =>
+      ManualRewriteOperationSnapshotCodec.encode(card),
+    LorebookRewriteOperationSnapshot lore => jsonEncode({
+      'target': 'lorebook',
+      'lorebookId': lore.lorebookId,
+      'entryId': lore.entryId,
+      'baseContent': lore.baseContent,
+      'expectedContentHash': lore.expectedContentHash,
+      'patches': [
+        for (final patch in lore.patches)
+          {
+            'anchor': patch.anchor,
+            'anchorSha256': patch.anchorSha256,
+            'value': patch.value,
+          },
+      ],
+    }),
+  };
+
+  static RewriteOperationSnapshot? tryDecode(Object? json) {
+    if (json is! Map) return null;
+    if (json['target'] != 'lorebook') {
+      return ManualRewriteOperationSnapshotCodec.tryDecode(json);
+    }
+    if (json.length != 6 ||
+        json['lorebookId'] is! String ||
+        json['entryId'] is! String ||
+        json['baseContent'] is! String ||
+        json['expectedContentHash'] is! String ||
+        json['patches'] is! List) {
+      return null;
+    }
+    final lorebookId = json['lorebookId'] as String;
+    final entryId = json['entryId'] as String;
+    final baseContent = json['baseContent'] as String;
+    final expectedContentHash = json['expectedContentHash'] as String;
+    final rawPatches = json['patches'] as List;
+    if (lorebookId.isEmpty ||
+        entryId.isEmpty ||
+        rawPatches.isEmpty ||
+        expectedContentHash.isEmpty) {
+      return null;
+    }
+    final patches = <LorebookAnchoredPatch>[];
+    for (final raw in rawPatches) {
+      if (raw is! Map ||
+          raw.length != 3 ||
+          raw['anchor'] is! String ||
+          raw['anchorSha256'] is! String ||
+          raw['value'] is! String) {
+        return null;
+      }
+      final anchor = raw['anchor'] as String;
+      final anchorSha256 = raw['anchorSha256'] as String;
+      final value = raw['value'] as String;
+      if (CardCanonicalizer.scalarSha256(anchor) != anchorSha256 ||
+          !AnchoredScalarPatchValidator.preservesMacroTokens(anchor, value)) {
+        return null;
+      }
+      patches.add(
+        LorebookAnchoredPatch(
+          anchor: anchor,
+          anchorSha256: anchorSha256,
+          value: value,
+        ),
+      );
+    }
+    return LorebookRewriteOperationSnapshot(
+      lorebookId: lorebookId,
+      entryId: entryId,
+      baseContent: baseContent,
+      expectedContentHash: expectedContentHash,
+      patches: List.unmodifiable(patches),
+    );
+  }
 }
 
 /// The single serialization shape for operation snapshots.

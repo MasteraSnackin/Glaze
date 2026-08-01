@@ -23,6 +23,7 @@ part 'app_db.g.dart';
     ApiConfigs,
     Personas,
     Lorebooks,
+    SessionLorebookEvolutionRows,
     LorebookUseManifests,
     LorebookUseManifestEntries,
     LorebookUseAcceptanceRecords,
@@ -64,7 +65,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 92;
+  int get schemaVersion => 93;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -1861,6 +1862,9 @@ class AppDatabase extends _$AppDatabase {
         await m.createTable(cardEvolutionClaims);
         await m.createTable(cardEvolutionProposalRuns);
         await _createCardEvolutionIntegrity();
+      }
+      if (from < 93) {
+        await m.createTable(sessionLorebookEvolutionRows);
       }
     },
   );

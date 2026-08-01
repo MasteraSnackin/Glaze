@@ -169,9 +169,14 @@ class RewriteReviewController extends Notifier<RewriteReviewUiState> {
           op.validationStatus != 'valid') {
         continue;
       }
-      final snapshot = decodeOperationSnapshot(view.currentSnapshotJson);
+      final snapshot = decodeRewriteOperationSnapshot(
+        view.currentSnapshotJson,
+      );
       if (snapshot == null) continue;
-      if (lockOverlap(snapshot, manualControlNames).isNotEmpty) continue;
+      if (snapshot is CardRewriteOperationSnapshot &&
+          lockOverlap(snapshot, manualControlNames).isNotEmpty) {
+        continue;
+      }
       final kind = await decide(view, 'approved');
       // After the first decision the job version moved on; re-read each op
       // through the stream on the next frame. Kinds other than `updated`
@@ -311,8 +316,13 @@ RewriteJobRequest? parseRewriteJobRequest(String requestJson) {
 }
 
 CardRewriteOperationSnapshot? decodeOperationSnapshot(String snapshotJson) {
+  final snapshot = decodeRewriteOperationSnapshot(snapshotJson);
+  return snapshot is CardRewriteOperationSnapshot ? snapshot : null;
+}
+
+RewriteOperationSnapshot? decodeRewriteOperationSnapshot(String snapshotJson) {
   try {
-    return ManualRewriteOperationSnapshotCodec.tryDecode(
+    return RewriteOperationSnapshotCodec.tryDecode(
       jsonDecode(snapshotJson),
     );
   } catch (_) {

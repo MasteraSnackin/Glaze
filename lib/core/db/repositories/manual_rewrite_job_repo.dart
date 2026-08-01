@@ -8,6 +8,7 @@ import '../../utils/time_helpers.dart';
 import '../app_db.dart';
 import 'character_repo.dart';
 import 'ledger_raw_tracker_state_reader.dart';
+import 'session_lorebook_evolution_repo.dart';
 
 /// Caller-generated evidence payload persisted alongside one operation.
 final class ManualRewriteEvidenceDraft {
@@ -19,7 +20,6 @@ final class ManualRewriteEvidenceDraft {
   final String id;
   final String evidenceJson;
 }
-
 /// One parsed generation operation awaiting durable persistence.
 /// [snapshotJson] must already be in the canonical durable request shape
 /// (`{field, patches, transition}`); parsing/serialization of that shape is
@@ -170,9 +170,12 @@ class ManualRewriteJobRepo {
   ManualRewriteJobRepo({
     required AppDatabase db,
     required LedgerRawTrackerStateReader rawTrackerStateReader,
+    SessionLorebookEvolutionRepo? lorebookEvolutionRepo,
   }) : _db = db,
        _rawTrackerStateReader = rawTrackerStateReader,
-       _characters = CharacterRepo(db) {
+       _characters = CharacterRepo(db),
+       _lorebookEvolutionRepo = lorebookEvolutionRepo ??
+           SessionLorebookEvolutionRepo(db) {
     if (!identical(rawTrackerStateReader.db, db)) {
       throw ArgumentError.value(
         rawTrackerStateReader,
@@ -185,6 +188,7 @@ class ManualRewriteJobRepo {
   final AppDatabase _db;
   final LedgerRawTrackerStateReader _rawTrackerStateReader;
   final CharacterRepo _characters;
+  final SessionLorebookEvolutionRepo _lorebookEvolutionRepo;
 
   /// Idempotent job creation: an existing job with the same [requestKey]
   /// wins, then any still-active (generating/pending) job for the
@@ -201,10 +205,9 @@ class ManualRewriteJobRepo {
   }) => _db.transaction(() async {
     final jobs = _db.rewriteJobs;
     if (requestKey != null) {
-      final keyed =
-          await (_db.select(
-            jobs,
-          )..where((t) => t.requestKey.equals(requestKey))).getSingleOrNull();
+      final keyed = await (_db.select(
+        jobs,
+      )..where((t) => t.requestKey.equals(requestKey))).getSingleOrNull();
       if (keyed != null) return CreateRewriteJobOutcome.existing(keyed);
     }
     final active =
@@ -311,9 +314,9 @@ class ManualRewriteJobRepo {
     required String jobId,
     required int expectedVersion,
   }) async {
-    final job = await (_db.select(_db.rewriteJobs)
-          ..where((row) => row.id.equals(jobId)))
-        .getSingleOrNull();
+    final job = await (_db.select(
+      _db.rewriteJobs,
+    )..where((row) => row.id.equals(jobId))).getSingleOrNull();
     if (job == null) return const RewriteJobTransitionOutcome.notFound();
     try {
       final request = jsonDecode(job.requestJson);
@@ -337,7 +340,6 @@ class ManualRewriteJobRepo {
   /// approve, edit, retry, or apply behavior to the automated service.
   Future<RewriteJobRow> insertPendingInTransaction({
     required String jobId,
-    required String operationId,
     required String chatSessionId,
     required String characterId,
     required String requestJson,
@@ -345,58 +347,72 @@ class ManualRewriteJobRepo {
     required int basisRevision,
     required String basisRevisionHash,
     required String canonStamp,
-    required String snapshotJson,
-    required List<ManualRewriteEvidenceDraft> evidence,
+    required List<ManualRewriteOperationDraft> operations,
     required int now,
   }) async {
-    await _db.into(_db.rewriteJobs).insert(RewriteJobsCompanion.insert(
-      id: jobId,
-      chatSessionId: chatSessionId,
-      characterId: characterId,
-      status: const Value('pending'),
-      requestJson: Value(requestJson),
-      requestKey: Value(requestKey),
-      basisRevision: Value(basisRevision),
-      basisRevisionHash: Value(basisRevisionHash),
-      canonStamp: Value(canonStamp),
-      version: const Value(1),
-      createdAt: Value(now),
-      updatedAt: Value(now),
-    ));
-    await _db.into(_db.rewriteOperations).insert(
-          RewriteOperationsCompanion.insert(
-            id: operationId,
-            rewriteJobId: jobId,
+    if (operations.isEmpty) {
+      throw ArgumentError.value(operations, 'operations', 'must not be empty');
+    }
+    await _db
+        .into(_db.rewriteJobs)
+        .insert(
+          RewriteJobsCompanion.insert(
+            id: jobId,
             chatSessionId: chatSessionId,
-            operationJson: Value(snapshotJson),
-            status: const Value('reviewable'),
-            currentRevision: const Value(1),
-            validationStatus: const Value('valid'),
+            characterId: characterId,
+            status: const Value('pending'),
+            requestJson: Value(requestJson),
+            requestKey: Value(requestKey),
+            basisRevision: Value(basisRevision),
+            basisRevisionHash: Value(basisRevisionHash),
+            canonStamp: Value(canonStamp),
+            version: const Value(1),
             createdAt: Value(now),
             updatedAt: Value(now),
           ),
         );
-    await _db.into(_db.rewriteOperationRevisions).insert(
-          RewriteOperationRevisionsCompanion.insert(
-            rewriteOperationId: operationId,
-            revision: 1,
-            snapshotJson: snapshotJson,
-            createdAt: Value(now),
-          ),
-        );
-    for (final item in evidence) {
-      await _db.into(_db.rewriteEvidenceRows).insert(
-            RewriteEvidenceRowsCompanion.insert(
-              id: item.id,
-              rewriteOperationId: operationId,
-              evidenceJson: item.evidenceJson,
+    for (final operation in operations) {
+      await _db
+          .into(_db.rewriteOperations)
+          .insert(
+            RewriteOperationsCompanion.insert(
+              id: operation.id,
+              rewriteJobId: jobId,
+              chatSessionId: chatSessionId,
+              operationJson: Value(operation.snapshotJson),
+              status: const Value('reviewable'),
+              currentRevision: const Value(1),
+              validationStatus: const Value('valid'),
+              createdAt: Value(now),
+              updatedAt: Value(now),
+            ),
+          );
+      await _db
+          .into(_db.rewriteOperationRevisions)
+          .insert(
+            RewriteOperationRevisionsCompanion.insert(
+              rewriteOperationId: operation.id,
+              revision: 1,
+              snapshotJson: operation.snapshotJson,
               createdAt: Value(now),
             ),
           );
+      for (final item in operation.evidence) {
+        await _db
+            .into(_db.rewriteEvidenceRows)
+            .insert(
+              RewriteEvidenceRowsCompanion.insert(
+                id: item.id,
+                rewriteOperationId: operation.id,
+                evidenceJson: item.evidenceJson,
+                createdAt: Value(now),
+              ),
+            );
+      }
     }
-    return (_db.select(_db.rewriteJobs)
-          ..where((row) => row.id.equals(jobId)))
-        .getSingle();
+    return (_db.select(
+      _db.rewriteJobs,
+    )..where((row) => row.id.equals(jobId))).getSingle();
   }
 
   Future<RewriteJobTransitionOutcome> _transition({
@@ -418,12 +434,11 @@ class ManualRewriteJobRepo {
             .write(
               RewriteJobsCompanion(
                 status: Value(toStatus),
-                statusReason:
-                    clearStatusReason
-                        ? const Value<String?>(null)
-                        : statusReason != null
-                        ? Value(statusReason)
-                        : const Value.absent(),
+                statusReason: clearStatusReason
+                    ? const Value<String?>(null)
+                    : statusReason != null
+                    ? Value(statusReason)
+                    : const Value.absent(),
                 version: Value(expectedVersion + 1),
                 updatedAt: Value(currentTimestampSeconds()),
               ),
@@ -664,11 +679,11 @@ class ManualRewriteJobRepo {
                   t.decision.equals('pending') &
                   t.validationStatus.equals('pending'),
             ))
-            .write(RewriteOperationsCompanion(validationStatus: Value(validation)));
+            .write(
+              RewriteOperationsCompanion(validationStatus: Value(validation)),
+            );
     if (validated != 1) {
-      throw StateError(
-        'Revalidation target changed inside edit transaction.',
-      );
+      throw StateError('Revalidation target changed inside edit transaction.');
     }
     await _bumpJobVersion(op.rewriteJobId);
     final updated = await (_db.select(
@@ -700,9 +715,7 @@ class ManualRewriteJobRepo {
     final job = await (_db.select(
       jobs,
     )..where((t) => t.id.equals(jobId))).getSingle();
-    await (_db.update(
-      jobs,
-    )..where((t) => t.id.equals(jobId))).write(
+    await (_db.update(jobs)..where((t) => t.id.equals(jobId))).write(
       RewriteJobsCompanion(
         version: Value(job.version + 1),
         updatedAt: Value(currentTimestampSeconds()),
@@ -710,13 +723,28 @@ class ManualRewriteJobRepo {
     );
   }
 
-  /// Advisory-only validation of one operation snapshot against the live
-  /// card and exact canon lock/override keys. Never authoritative: guarded
-  /// apply revalidates everything; an `invalid` result here only marks the
-  /// durable operation row.
-  Future<String> _validateAdvisory(RewriteJobRow job, String snapshotJson) async {
-    final parsed = _AdvisoryOperation.tryParse(snapshotJson);
-    if (parsed == null) return 'invalid';
+  /// Advisory-only validation against live card or session-overlay content.
+  /// Guarded apply revalidates everything; an `invalid` result here only marks
+  /// the durable operation row.
+  Future<String> _validateAdvisory(
+    RewriteJobRow job,
+    String snapshotJson,
+  ) async {
+    final snapshot = _decodeSnapshot(snapshotJson);
+    if (snapshot == null) return 'invalid';
+    if (snapshot case LorebookRewriteOperationSnapshot lore) {
+      final overlays = await _lorebookEvolutionRepo.getByTargets(
+        sessionId: job.chatSessionId,
+        targets: [(lore.lorebookId, lore.entryId)],
+      );
+      final current = overlays['${lore.lorebookId}\u0000${lore.entryId}']?.content ??
+          lore.baseContent;
+      if (CardCanonicalizer.scalarSha256(current) != lore.expectedContentHash) {
+        return 'invalid';
+      }
+      return _validLorebookPatches(current, lore.patches) ? 'valid' : 'invalid';
+    }
+    final parsed = snapshot as CardRewriteOperationSnapshot;
     final character = await _characters.getById(job.characterId);
     if (character == null) return 'invalid';
     final values = <CardRewriteField, String?>{
@@ -734,10 +762,11 @@ class ManualRewriteJobRepo {
       fullCardBaselineSize: CardCanonicalizer.serialize(character).length,
     );
     if (!validation.isValid) return 'invalid';
-    if (parsed.affectedTrackerKeys.isNotEmpty) {
-      final controls =
-          (await _rawTrackerStateReader.read(job.chatSessionId)).manualControls;
-      final blocked = parsed.affectedTrackerKeys.any(
+    if (parsed.transition.affectedTrackerKeys.isNotEmpty) {
+      final controls = (await _rawTrackerStateReader.read(
+        job.chatSessionId,
+      )).manualControls;
+      final blocked = parsed.transition.affectedTrackerKeys.any(
         (key) => controls.any(
           (control) =>
               control.name == 'canon_override:$key' ||
@@ -747,6 +776,47 @@ class ManualRewriteJobRepo {
       if (blocked) return 'invalid';
     }
     return 'valid';
+  }
+
+  static RewriteOperationSnapshot? _decodeSnapshot(String source) {
+    try {
+      return RewriteOperationSnapshotCodec.tryDecode(jsonDecode(source));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static bool _validLorebookPatches(
+    String content,
+    List<LorebookAnchoredPatch> patches,
+  ) {
+    var current = content;
+    final anchors = <String>{};
+    for (final patch in patches) {
+      if (!anchors.add(patch.anchorSha256) ||
+          CardCanonicalizer.scalarSha256(patch.anchor) != patch.anchorSha256 ||
+          !AnchoredScalarPatchValidator.preservesMacroTokens(
+            patch.anchor,
+            patch.value,
+          ) ||
+          _occurrences(current, patch.anchor) != 1) {
+        return false;
+      }
+      current = current.replaceFirst(patch.anchor, patch.value);
+    }
+    return true;
+  }
+
+  static int _occurrences(String value, String anchor) {
+    if (anchor.isEmpty) return value.isEmpty ? 1 : 0;
+    var count = 0;
+    var from = 0;
+    while (true) {
+      final index = value.indexOf(anchor, from);
+      if (index == -1) return count;
+      count++;
+      from = index + anchor.length;
+    }
   }
 
   /// Read-side aggregate watcher keyed by job id: job row plus each operation
@@ -792,49 +862,16 @@ class ManualRewriteJobRepo {
       );
     });
   }
-}
 
-/// Minimal advisory parse of the durable operation shape. Strict parsing is
-/// owned by the prompt/parser lane; here any malformed payload simply marks
-/// the operation invalid.
-final class _AdvisoryOperation {
-  const _AdvisoryOperation(this.patches, this.affectedTrackerKeys);
-
-  final List<AnchoredScalarPatch> patches;
-  final List<String> affectedTrackerKeys;
-
-  static _AdvisoryOperation? tryParse(String source) {
-    try {
-      final json = jsonDecode(source) as Map<String, dynamic>;
-      final field =
-          CardRewriteField.values
-              .where((value) => value.wireName == json['field'])
-              .single;
-      if (!CardRewritePolicy.isWritable(field)) return null;
-      final patches =
-          (json['patches'] as List)
-              .map((value) {
-                final patch = value as Map<String, dynamic>;
-                return AnchoredScalarPatch(
-                  scopeKey: patch['scopeKey'] as String,
-                  field: field,
-                  anchor: patch['anchor'] as String,
-                  anchorSha256: patch['anchorSha256'] as String,
-                  value: patch['value'] as String,
-                );
-              })
-              .toList(growable: false);
-      if (patches.isEmpty) return null;
-      final transition = json['transition'];
-      final affected =
-          transition is Map<String, dynamic>
-              ? List<String>.from(
-                transition['affectedTrackerKeys'] as List? ?? const [],
-              )
-              : const <String>[];
-      return _AdvisoryOperation(patches, affected);
-    } catch (_) {
-      return null;
-    }
+  /// Read-only session history for review navigation. The durable job rows
+  /// already represent both manual rewrites and automated evolution proposals.
+  Stream<List<RewriteJobRow>> watchJobsBySessionId(String sessionId) {
+    return (_db.select(_db.rewriteJobs)
+          ..where((row) => row.chatSessionId.equals(sessionId))
+          ..orderBy([
+            (row) => OrderingTerm.desc(row.updatedAt),
+            (row) => OrderingTerm.desc(row.id),
+          ]))
+        .watch();
   }
 }

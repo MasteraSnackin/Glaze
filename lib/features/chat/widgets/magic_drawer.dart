@@ -561,11 +561,13 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
   Future<void> _showStudioMenu() async {
     final session = ref.read(chatProvider(widget.charId)).value?.session;
     if (session == null) return;
-    await StudioSettingsSheet.show(
+    final route = await StudioSettingsSheet.show(
       context,
       charId: widget.charId,
       sessionId: session.id,
     );
+    if (!mounted || route == null) return;
+    context.go(route);
   }
 
   Future<void> _showAgentOpsLog() async {

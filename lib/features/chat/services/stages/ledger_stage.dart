@@ -242,7 +242,9 @@ class LedgerStage {
             'ops=${reconciliationResult.opsApplied} '
             'error=${reconciliationResult.error ?? "none"}',
           );
-          if (reconciliationResult.status == 'ok' && isCurrent()) {
+          if (reconciliationResult.status == 'ok' &&
+              pipeline.cardRewriter.enabled &&
+              isCurrent()) {
             await ctx.ref
                 .read(automatedCardEvolutionServiceProvider)
                 .runOneBatch(sessionId);

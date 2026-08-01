@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../db/app_db.dart' show RewriteJobRow;
 import '../../features/settings/api_list_provider.dart';
 import '../llm/card_rewrite_slot_resolver.dart';
 import '../llm/aux_llm_client.dart';
@@ -13,15 +14,13 @@ import 'db_provider.dart';
 /// Wired here (not in `db_provider.dart`) because model resolution reads
 /// `apiListProvider`, which itself imports `db_provider.dart`.
 ///
-/// The rewrite model slot has no persisted setting yet (dedicated settings UI
-/// is a later, designer-owned phase): by default the resolver receives an
-/// empty slot id and fails explicitly, surfacing the durable job failure
-/// `rewriteModelNotConfigured` — there is NO silent fallback to the active
-/// chat config. Until then the slot can be wired localization-free via build
-/// defines (an existing wiring mechanism in this codebase, e.g. `APP_VERSION`
-/// / `buildChannel`): `--dart-define=GLAZE_CARD_REWRITE_API_CONFIG_ID=<id>`
-/// plus optionally `--dart-define=GLAZE_CARD_REWRITE_MODEL=<model>`.
+/// Its dedicated API/model slot is persisted in the global Studio settings.
+/// It always fails explicitly when the selected API preset is absent; it never
+/// falls back to the active chat configuration.
 final manualRewriteServiceProvider = Provider<ManualRewriteService>((ref) {
+  final settings = ref.watch(
+    pipelineSettingsProvider.select((value) => value.cardRewriter),
+  );
   final service = ManualRewriteService(
     db: ref.watch(appDbProvider),
     jobRepo: ref.watch(manualRewriteJobRepoProvider),
@@ -29,16 +28,11 @@ final manualRewriteServiceProvider = Provider<ManualRewriteService>((ref) {
     canonLoader: ref.watch(effectiveCanonContextLoaderProvider),
     resolveModel: () async {
       await ref.read(apiListProvider.future);
-      final apiConfigs =
-          ref.read(apiListProvider).value ?? const <ApiConfig>[];
+      final apiConfigs = ref.read(apiListProvider).value ?? const <ApiConfig>[];
       return CardRewriteSlotResolver.resolve(
         apiConfigs: apiConfigs,
-        apiConfigId: const String.fromEnvironment(
-          'GLAZE_CARD_REWRITE_API_CONFIG_ID',
-        ),
-        modelOverride: const String.fromEnvironment(
-          'GLAZE_CARD_REWRITE_MODEL',
-        ),
+        apiConfigId: settings.apiConfigId,
+        modelOverride: settings.modelOverride,
       );
     },
   );
@@ -48,40 +42,50 @@ final manualRewriteServiceProvider = Provider<ManualRewriteService>((ref) {
 
 final automatedCardEvolutionServiceProvider =
     Provider<AutomatedCardEvolutionService>((ref) {
+      final settings = ref.watch(
+        pipelineSettingsProvider.select((value) => value.cardRewriter),
+      );
       Future<AuxApiConfig> resolveModel() async {
         await ref.read(apiListProvider.future);
         final apiConfigs =
             ref.read(apiListProvider).value ?? const <ApiConfig>[];
         return CardRewriteSlotResolver.resolve(
           apiConfigs: apiConfigs,
-          apiConfigId: const String.fromEnvironment(
-            'GLAZE_CARD_REWRITE_API_CONFIG_ID',
-          ),
-          modelOverride: const String.fromEnvironment(
-            'GLAZE_CARD_REWRITE_MODEL',
-          ),
+          apiConfigId: settings.apiConfigId,
+          modelOverride: settings.modelOverride,
         );
       }
 
       final service = AutomatedCardEvolutionService(
         repo: ref.watch(cardEvolutionRepoProvider),
         resolveModel: resolveModel,
-        executor: ({
-          required config,
-          required prompt,
-          required maxTokens,
-          required temperature,
-          required timeoutMs,
-          cancelToken,
-        }) => const AuxLlmClient().callOnceWithLog(
-          config: config,
-          prompt: prompt,
-          maxTokens: maxTokens,
-          temperature: temperature,
-          timeoutMs: timeoutMs,
-          cancelToken: cancelToken,
-        ),
+        isEnabled: () =>
+            ref.read(pipelineSettingsProvider).cardRewriter.enabled,
+        executor:
+            ({
+              required config,
+              required prompt,
+              required maxTokens,
+              required temperature,
+              required timeoutMs,
+              cancelToken,
+            }) => const AuxLlmClient().callOnceWithLog(
+              config: config,
+              prompt: prompt,
+              maxTokens: maxTokens,
+              temperature: temperature,
+              timeoutMs: timeoutMs,
+              cancelToken: cancelToken,
+            ),
       );
       ref.onDispose(service.dispose);
       return service;
+    });
+
+/// Session-scoped review history for the Card Rewriter Studio screen.
+final cardRewriteJobsBySessionProvider =
+    StreamProvider.family<List<RewriteJobRow>, String>((ref, sessionId) {
+      return ref
+          .watch(manualRewriteJobRepoProvider)
+          .watchJobsBySessionId(sessionId);
     });

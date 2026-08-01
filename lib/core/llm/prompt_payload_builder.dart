@@ -159,7 +159,15 @@ class PromptPayloadBuilder {
       connections,
     );
 
-    final lorebooks = await lorebookRepo.getAll();
+    final sourceLorebooks = await lorebookRepo.getAll();
+    final lorebooks = session == null
+        ? sourceLorebooks
+        : await _ref
+              .read(sessionLorebookEvolutionRepoProvider)
+              .applyOverlays(
+                sessionId: session.id,
+                lorebooks: sourceLorebooks,
+              );
     throwIfAborted();
     final lorebookSettings = _ref.read(lorebookSettingsProvider);
     final lorebookActivations = _ref.read(lorebookActivationsProvider);
@@ -507,6 +515,11 @@ class PromptPayloadBuilder {
     final effectiveCharacter = resolvedContext?.character ?? character;
     final lorebookSettings = _ref.read(lorebookSettingsProvider);
     final lorebookActivations = _ref.read(lorebookActivationsProvider);
+    final effectiveLorebooks = session == null
+        ? lorebooks
+        : await _ref
+              .read(sessionLorebookEvolutionRepoProvider)
+              .applyOverlays(sessionId: session.id, lorebooks: lorebooks);
 
     List<LorebookEntry> vectorEntries = [];
     List<ChatMessage> history = session?.messages ?? [];
@@ -587,7 +600,7 @@ class PromptPayloadBuilder {
       apiConfig: chatApi,
       sessionVars: session?.sessionVars ?? {},
       globalVars: _ref.read(globalVarsProvider),
-      lorebooks: lorebooks,
+      lorebooks: effectiveLorebooks,
       lorebookSettings: lorebookSettings,
       lorebookActivations: lorebookActivations,
       vectorEntries: vectorEntries,

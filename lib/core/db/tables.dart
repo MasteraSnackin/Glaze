@@ -831,6 +831,36 @@ class Lorebooks extends Table {
   Set<Column> get primaryKey => {lorebookId};
 }
 
+/// Session-local evolved content for a source lorebook entry. Global lorebooks
+/// remain the source for new sessions; branches explicitly copy this overlay.
+@DataClassName('SessionLorebookEvolutionRow')
+@TableIndex(
+  name: 'idx_session_lorebook_evolution_session',
+  columns: {#chatSessionId},
+)
+class SessionLorebookEvolutionRows extends Table {
+  @override
+  String get tableName => 'session_lorebook_evolution_rows';
+
+  TextColumn get chatSessionId => text()();
+  TextColumn get lorebookId => text()();
+  TextColumn get entryId => text()();
+  TextColumn get baseContent => text()();
+  TextColumn get baseContentHash => text()();
+  TextColumn get content => text()();
+  TextColumn get contentHash => text()();
+  IntColumn get createdAt => integer()();
+  IntColumn get updatedAt => integer()();
+
+  @override
+  Set<Column> get primaryKey => {chatSessionId, lorebookId, entryId};
+  @override
+  List<String> get customConstraints => [
+    "CHECK (chat_session_id <> '' AND lorebook_id <> '' AND entry_id <> '' "
+        "AND base_content_hash <> '' AND content_hash <> '')",
+  ];
+}
+
 /// Immutable successful reconciliation evidence.  The JSON columns are
 /// canonical codec payloads; their hashes are verified by the repository.
 @DataClassName('LedgerReconciliationSuccessfulRunRow')
@@ -968,8 +998,10 @@ class CardEvolutionClaims extends Table {
   TextColumn get ownerId => text()();
   TextColumn get status => text()();
   IntColumn get leaseExpiresAt => integer()();
-  TextColumn get firstRunId => text()();
-  TextColumn get secondRunId => text()();
+  /// Legacy physical column name retained for v92 database compatibility.
+  TextColumn get chatHistoryHash => text().named('first_run_id')();
+  /// Legacy physical column name retained for v92 database compatibility.
+  TextColumn get effectiveCanonIdentity => text().named('second_run_id')();
   TextColumn get predecessorCursorHash => text()();
   IntColumn get predecessorRunOrdinal => integer()();
   TextColumn get inputHash => text()();
@@ -998,8 +1030,10 @@ class CardEvolutionProposalRuns extends Table {
   TextColumn get sessionId => text()();
   TextColumn get characterId => text()();
   TextColumn get rewriteJobId => text()();
-  TextColumn get firstRunId => text()();
-  TextColumn get secondRunId => text()();
+  /// Legacy physical column name retained for v92 database compatibility.
+  TextColumn get chatHistoryHash => text().named('first_run_id')();
+  /// Legacy physical column name retained for v92 database compatibility.
+  TextColumn get effectiveCanonIdentity => text().named('second_run_id')();
   TextColumn get selectedInputJson => text()();
   TextColumn get inputHash => text()();
   TextColumn get modelOutput => text()();

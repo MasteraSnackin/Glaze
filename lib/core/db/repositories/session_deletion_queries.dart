@@ -122,6 +122,9 @@ class SessionDeletionQueries {
       _db.characterSessionBaselineRows,
     )..where((row) => row.chatSessionId.equals(sessionId))).go();
     await (_db.delete(
+      _db.sessionLorebookEvolutionRows,
+    )..where((row) => row.chatSessionId.equals(sessionId))).go();
+    await (_db.delete(
       _db.studioConfigRows,
     )..where((row) => row.sessionId.equals(sessionId))).go();
     if (chatLorebookIds.isNotEmpty) {

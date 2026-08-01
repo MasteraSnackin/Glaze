@@ -8,6 +8,7 @@ import '../models/preset.dart';
 import '../db/repositories/api_config_repo.dart';
 import '../db/repositories/persona_repo.dart';
 import '../db/repositories/lorebook_repo.dart';
+import '../db/repositories/session_lorebook_evolution_repo.dart';
 import '../db/repositories/lorebook_use_manifest_repo.dart';
 import '../db/repositories/embedding_repo.dart';
 import '../db/repositories/summary_repo.dart';
@@ -117,6 +118,11 @@ final personaRepoProvider = Provider<PersonaRepo>((ref) {
 final lorebookRepoProvider = Provider<LorebookRepo>((ref) {
   return LorebookRepo(ref.watch(appDbProvider));
 });
+
+final sessionLorebookEvolutionRepoProvider =
+    Provider<SessionLorebookEvolutionRepo>((ref) {
+      return SessionLorebookEvolutionRepo(ref.watch(appDbProvider));
+    });
 
 final lorebookUseManifestRepoProvider = Provider<LorebookUseManifestRepo>((
   ref,
@@ -298,6 +304,7 @@ final cardEvolutionRepoProvider = Provider<CardEvolutionRepo>((ref) {
       rawTrackerStateReader: ref.watch(ledgerRawTrackerStateReaderProvider),
     ),
     jobRepo: ref.watch(manualRewriteJobRepoProvider),
+    lorebookEvolutionRepo: ref.watch(sessionLorebookEvolutionRepoProvider),
   );
 });
 
