@@ -10,6 +10,8 @@ import '../widgets/glaze_background.dart';
 import '../widgets/glaze_scaffold.dart' show GlazeAppBar;
 import '../widgets/glaze_toast.dart';
 import 'animated_header_below.dart';
+import 'nav_bar_suppression_provider.dart';
+import 'nav_height_provider.dart';
 import 'shell_header_provider.dart';
 import 'desktop/desktop_layout_provider.dart';
 
@@ -44,6 +46,18 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
     });
   }
 
+  /// Screens pad their bodies by [navHeightProvider], which [GlassNavBar]
+  /// publishes once on mount and never clears. A suppressed bar would leave
+  /// that stale height behind as an empty strip under the editor, so zero it
+  /// while the claim is live — the bar re-measures when it comes back.
+  void _clearNavHeight() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final notifier = ref.read(navHeightProvider.notifier);
+      if (notifier.state != 0) notifier.state = 0;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final currentIndex = widget.navigationShell.currentIndex;
@@ -70,7 +84,13 @@ class _ShellScreenState extends ConsumerState<ShellScreen> {
       '/menu/settings',
       '/menu/themes',
     };
+    // A full-height editor can claim the bar away while it is open (see
+    // [NavBarSuppressor]); route-based hiding alone cannot see it, because such
+    // an editor lives inline inside a sheet rather than on its own route.
+    final navSuppressed = ref.watch(navBarSuppressionProvider).isNotEmpty;
+    if (navSuppressed) _clearNavHeight();
     final showNavBar =
+        !navSuppressed &&
         !location.startsWith('/chat/') &&
         !hideNavBarRoutes.any((r) => location.startsWith(r));
     return GlazeBackground(

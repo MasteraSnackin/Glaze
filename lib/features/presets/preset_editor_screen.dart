@@ -331,22 +331,11 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
         .where((b) => b.enabled && b.content.isNotEmpty)
         .fold(0, (sum, b) => sum + estimateTokens(b.content));
 
+    final onCover = cover != null;
+
     return PresetDashboardCard(
-      leading: cover == null
-          ? null
-          : GestureDetector(
-              onTap: _isFeatured ? null : _pickImage,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: Image(
-                  image: cover,
-                  width: 52,
-                  height: 52,
-                  fit: BoxFit.cover,
-                  errorBuilder: (_, _, _) => const SizedBox.shrink(),
-                ),
-              ),
-            ),
+      coverImage: cover,
+      onCoverTap: _isFeatured ? null : _pickImage,
       title: displayName,
       subtitle: _author.isNotEmpty ? 'by $_author' : null,
       onTitleTap: _showRenameDialog,
@@ -356,10 +345,15 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
           icon: Icons.code,
           count: _regexes.length,
           onTap: _showRegexSheet,
+          onCover: onCover,
         ),
       ],
       utilsTrailing: [
-        PresetStatBadge(icon: Icons.description, label: '${tokens}t'),
+        PresetStatBadge(
+          icon: Icons.description,
+          label: '${tokens}t',
+          onCover: onCover,
+        ),
       ],
       // Add block row position follows the app setting (top or bottom).
       addBlockAtTop: addBlockAtTop,

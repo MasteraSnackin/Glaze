@@ -4,15 +4,13 @@ import '../../../core/llm/studio_controller_ontology.dart';
 import '../../../core/models/studio_config.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../presets/widgets/preset_dashboard_card.dart';
 import '../studio_preset_stats.dart';
 
-/// Collapsible "Agents" section inside the agentic preset's dashboard card,
-/// sitting above the block list: which agents run is what the blocks are
-/// addressed to, so it is read first. Lists the fixed controller slots with an
-/// on/off switch each; tapping a name opens its (read-only) spec card.
-///
-/// Rendered full-bleed with hairline dividers so it lines up with the block
-/// rows below it rather than reading as a separate card.
+/// Collapsible "Agents" card, sitting between the agentic preset's dashboard
+/// and its blocks: which agents run is what the blocks are addressed to, so it
+/// is read first. Lists the fixed controller slots with an on/off switch each;
+/// tapping a name opens its (read-only) spec card.
 class StudioAgentsPanel extends StatelessWidget {
   final StudioPreset preset;
 
@@ -35,21 +33,14 @@ class StudioAgentsPanel extends StatelessWidget {
     final enabled = studioPresetEnabledAgentCount(preset);
     final total = StudioControllerOntology.specs.length;
 
-    return Container(
-      margin: const EdgeInsets.only(top: 16),
-      decoration: const BoxDecoration(
-        border: Border(
-          top: BorderSide(color: Color(0x33808080), width: 1),
-          bottom: BorderSide(color: Color(0x33808080), width: 1),
-        ),
-      ),
+    return PresetCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           InkWell(
             onTap: onToggleExpanded,
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 12, 10),
+              padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
               child: Row(
                 children: [
                   Icon(
@@ -89,8 +80,13 @@ class StudioAgentsPanel extends StatelessWidget {
             ),
           ),
           if (expanded)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 12, 4),
+            Container(
+              decoration: const BoxDecoration(
+                border: Border(
+                  top: BorderSide(color: Color(0x33808080), width: 1),
+                ),
+              ),
+              padding: const EdgeInsets.fromLTRB(16, 0, 12, 6),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
