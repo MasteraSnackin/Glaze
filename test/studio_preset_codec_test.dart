@@ -2,11 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/llm/studio/studio_context.dart';
-import 'package:glaze_flutter/core/models/cleaner_settings.dart';
-import 'package:glaze_flutter/core/models/extra_request_parameter.dart';
-import 'package:glaze_flutter/core/models/ledger_settings.dart';
 import 'package:glaze_flutter/core/models/studio_config.dart';
-import 'package:glaze_flutter/core/models/studio_agent_settings.dart';
 import 'package:glaze_flutter/core/models/studio_preset_codec.dart';
 
 void main() {
@@ -227,25 +223,9 @@ void main() {
   );
 
   test(
-    'canonical runtime round-trips all nested settings and broadcast bytes',
+    'canonical runtime round-trips broadcast blocks',
     () {
       const runtime = StudioRuntimeSettings(
-        agents: StudioAgentSettings(
-          studioFinalMaxTokens: 4321,
-          studioFinalExtraRequestParameters: [
-            ExtraRequestParameter(key: 'final_option', value: '{"x":1}'),
-          ],
-          studioControllerExtraRequestParameters: [
-            ExtraRequestParameter(key: 'tracker_option', value: 'alpha'),
-          ],
-        ),
-        cleaner: CleanerSettings(
-          postCleanerMaxTokens: 987,
-          postCleanerExtraRequestParameters: [
-            ExtraRequestParameter(key: 'cleaner_option', value: 'beta'),
-          ],
-        ),
-        ledger: LedgerSettings(studioLedgerRunMode: 'every_n'),
         broadcastBlocks: ['\uFEFFfirst\r\nline', 'second\nline', 'последний'],
       );
 
@@ -273,7 +253,7 @@ void main() {
         'agents': [
           {'id': 'agent_session_continuity_123'},
         ],
-        'runtime': {'agents': 'not-an-object'},
+        'runtime': 'not-an-object',
       });
 
       expect(absent.preset.runtime, const StudioRuntimeSettings());

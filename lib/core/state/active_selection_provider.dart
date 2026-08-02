@@ -1,17 +1,10 @@
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/persona.dart';
-import '../models/cleaner_settings.dart';
-import '../models/ledger_settings.dart';
-import '../models/pipeline_settings.dart';
 import '../models/preset.dart';
-import '../models/studio_agent_settings.dart';
-import '../models/studio_config.dart';
 import 'db_provider.dart';
 import 'shared_prefs_provider.dart';
 import 'memory_settings_provider.dart';
@@ -72,54 +65,6 @@ Future<void> loadActiveSelections(WidgetRef ref) async {
   }
   await ref.read(memoryGlobalSettingsProvider.notifier).load();
   await ref.read(pipelineSettingsProvider.notifier).load();
-  await _migrateStudioRuntimeToPresets(ref, prefs);
-}
-
-Future<void> _migrateStudioRuntimeToPresets(
-  WidgetRef ref,
-  SharedPreferences prefs,
-) async {
-  final presetRepo = ref.read(studioPresetRepoProvider);
-  await migrateLegacyStudioPresetRuntime(
-    prefs: prefs,
-    pipeline: ref.read(pipelineSettingsProvider),
-    loadPresets: presetRepo.getAll,
-    savePreset: presetRepo.upsert,
-  );
-}
-
-@visibleForTesting
-Future<void> migrateLegacyStudioPresetRuntime({
-  required SharedPreferences prefs,
-  required PipelineSettings pipeline,
-  required Future<List<StudioPreset>> Function() loadPresets,
-  required Future<void> Function(StudioPreset preset) savePreset,
-}) async {
-  const migrationKey = 'studioPresetRuntimeMigrationV1';
-  if (prefs.getBool(migrationKey) == true) return;
-
-  final presets = await loadPresets();
-  if (presets.isEmpty) return;
-
-  for (final preset in presets) {
-    final runtime = preset.runtime;
-    if (runtime.agents != const StudioAgentSettings() ||
-        runtime.cleaner != const CleanerSettings() ||
-        runtime.ledger != const LedgerSettings()) {
-      continue;
-    }
-    await savePreset(
-      preset.copyWith(
-        runtime: StudioRuntimeSettings(
-          agents: pipeline.studioAgent,
-          cleaner: pipeline.cleaner,
-          ledger: pipeline.ledger,
-          broadcastBlocks: runtime.broadcastBlocks,
-        ),
-      ),
-    );
-  }
-  await prefs.setBool(migrationKey, true);
 }
 
 Future<void> setActivePreset(WidgetRef ref, String? id) async {
