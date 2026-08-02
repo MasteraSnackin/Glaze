@@ -60,6 +60,13 @@ class StudioTurnConfigResolver {
           final spec = StudioControllerOntology.specForAgent(agent);
           if (spec == null) return agent.copyWith(enabled: false);
           if (spec.isFinal) return agent.copyWith(enabled: true);
+          // An agent whose stored phase doesn't match its resolved spec's
+          // phase is a legacy mismap (e.g. a retired "beauty" agent re-tagged
+          // to post_clean but still carrying phase=pre_generation). Disable
+          // it rather than letting it run in the wrong lane.
+          if (agent.phase != spec.phase) {
+            return agent.copyWith(enabled: false);
+          }
           return agentEnabled[spec.id] == false
               ? agent.copyWith(enabled: false)
               : agent;
