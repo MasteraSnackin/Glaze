@@ -124,7 +124,7 @@ export class Bridge {
   setGenerating(value) {
     const wasGenerating = this.isGenerating;
     this.isGenerating = !!value;
-    this._syncGenerationActivity();
+    this._syncGenerationTimer();
     // updateHeader() early-returns for the whole streaming window, so the
     // scroll-hide header is frozen at whatever state it had when generation
     // started. If it was hidden — and especially if the chat then shrank (a
@@ -141,11 +141,10 @@ export class Bridge {
 
   setPostGenRunning(value) {
     this.isPostGenRunning = !!value;
-    this._syncGenerationActivity();
   }
 
-  _syncGenerationActivity() {
-    if (this.isGenerating || this.isPostGenRunning) {
+  _syncGenerationTimer() {
+    if (this.isGenerating) {
       this._genTimer.start();
     } else {
       this._genTimer.stop();
