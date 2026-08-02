@@ -23,6 +23,7 @@ import 'tokenizer.dart';
 /// maintains a persistent token cache across requests.
 class PromptWorker {
   static PromptWorker? _instance;
+  static Completer<PromptWorker>? _initGuard;
 
   final Isolate _isolate;
   final ReceivePort _commandPort;
@@ -40,7 +41,18 @@ class PromptWorker {
 
   static Future<PromptWorker> ensureInitialized() async {
     if (_instance != null) return _instance!;
-    _instance = await _create();
+    // Serialize concurrent first-init / respawn attempts.
+    if (_initGuard != null) return _initGuard!.future;
+    _initGuard = Completer<PromptWorker>();
+    try {
+      _instance = await _create();
+      _initGuard!.complete(_instance!);
+    } catch (e, st) {
+      _initGuard!.completeError(e, st);
+      _initGuard = null;
+      rethrow;
+    }
+    _initGuard = null;
     return _instance!;
   }
 
@@ -90,12 +102,36 @@ class PromptWorker {
       const Duration(seconds: 60),
       onTimeout: () {
         _pending.remove(id);
+        // A synchronous regex (ReDoS) or other runaway computation can hang
+        // the isolate forever. Kill it so it stops burning CPU and so the
+        // next ensureInitialized() respawns a fresh worker — otherwise every
+        // subsequent prompt request would also time out.
+        _killAndInvalidate();
         throw TimeoutException(
           'PromptWorker request timed out after 60s',
           const Duration(seconds: 60),
         );
       },
     );
+  }
+
+  /// Kills the isolate, closes ports, errors out all pending requests, and
+  /// clears the singleton so the next [ensureInitialized] recreates it.
+  void _killAndInvalidate() {
+    _isolate.kill(priority: Isolate.immediate);
+    _commandPort.close();
+    _responsePort.close();
+    for (final c in _pending.values) {
+      if (!c.isCompleted) {
+        c.completeError(
+          TimeoutException('PromptWorker isolate killed after timeout'),
+        );
+      }
+    }
+    _pending.clear();
+    if (_instance == this) {
+      _instance = null;
+    }
   }
 
   Future<PromptResult> buildPrompt(PromptPayload payload) async {
