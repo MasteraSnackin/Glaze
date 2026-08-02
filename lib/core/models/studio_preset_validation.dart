@@ -49,8 +49,13 @@ abstract final class StudioPresetValidator {
         issues.add(_error(block, 'Block id "$id" is duplicated.'));
       }
       if (!supportedSections.contains(block.section)) {
+        // A block in an unknown section is never assembled into a prompt, so
+        // it is inert rather than broken — and retired sections (`writeloop`)
+        // still sit in long-lived DBs, which migrations deliberately preserve
+        // as inert data. Erroring here would make a preset the app itself
+        // stores and exports impossible to import back.
         issues.add(
-          _error(block, 'Unsupported Studio section "${block.section}".'),
+          _warning(block, 'Unsupported Studio section "${block.section}".'),
         );
       }
 
@@ -71,7 +76,14 @@ abstract final class StudioPresetValidator {
           if (block.enabled &&
               block.content.trim().isEmpty &&
               !_isGroupBoundary(block.id)) {
-            issues.add(_error(block, 'Instruction content must not be empty.'));
+            // The editor lets a block carry only a title (headers and
+            // separators are built that way), and prompt assembly just emits
+            // nothing for it. Contributing nothing is not the same as being
+            // malformed, so this stays a warning — as an error it made those
+            // presets un-importable after export.
+            issues.add(
+              _warning(block, 'Instruction content must not be empty.'),
+            );
           }
         case StudioBlockType.context:
           if (block.contextSlot == null) {
@@ -135,6 +147,15 @@ abstract final class StudioPresetValidator {
     String message,
   ) => StudioPresetValidationIssue(
     severity: StudioPresetValidationSeverity.error,
+    blockId: block.id,
+    message: message,
+  );
+
+  static StudioPresetValidationIssue _warning(
+    StudioPresetBlock block,
+    String message,
+  ) => StudioPresetValidationIssue(
+    severity: StudioPresetValidationSeverity.warning,
     blockId: block.id,
     message: message,
   );

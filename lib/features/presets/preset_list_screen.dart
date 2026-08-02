@@ -12,6 +12,7 @@ import '../../core/import/silly_tavern_preset_parser.dart';
 import '../../core/models/preset.dart';
 import '../../core/models/preset_folder.dart';
 import '../../core/models/studio_config.dart';
+import '../../core/models/studio_preset_codec.dart';
 import '../../core/services/featured_presets.dart';
 import '../../core/state/active_selection_provider.dart';
 import '../../core/state/db_provider.dart';
@@ -729,6 +730,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
     final imported = <String>[];
     Object? lastError;
     var unreadable = 0;
+    var adjusted = 0;
 
     for (final picked in result.files) {
       try {
@@ -745,12 +747,20 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
         final json = jsonDecode(jsonString) as Map<String, dynamic>;
 
         if (json.containsKey('agentEnabled')) {
-          final studioPreset = StudioPreset.fromJson(json);
+          // Decode through the codec, not `StudioPreset.fromJson`: exported
+          // files can carry the pre-typed block shape (`kind` instead of
+          // `type`/`contextSlot`), and only the codec maps it. Without it every
+          // block silently lands as a plain instruction — context, history and
+          // memory slots included — and the validator then rejects the ones
+          // that are legitimately blank. Every other entry point (cloud sync,
+          // backup import, the repo's read path) already goes through it.
+          final decoded = StudioPresetCodec.decodePreset(json);
+          adjusted += decoded.warnings.length;
           await studioWorkflow.importPreset(
-            imported: studioPreset,
-            name: studioPreset.name,
+            imported: decoded.preset,
+            name: decoded.preset.name,
           );
-          imported.add(studioPreset.name);
+          imported.add(decoded.preset.name);
         } else {
           final preset = parseSillyTavernPreset(json, picked.name);
           await notifier.add(preset);
@@ -773,11 +783,14 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
     }
 
     final name = imported.first;
+    // Blocks the codec could not honour are carried over disabled rather than
+    // dropped, so say so instead of letting them look lost.
+    final suffix = adjusted > 0 ? ' — $adjusted block(s) adjusted' : '';
     GlazeToast.show(
       ctx,
       imported.length == 1
-          ? 'Imported "$name"'
-          : 'Imported ${imported.length} presets',
+          ? 'Imported "$name"$suffix'
+          : 'Imported ${imported.length} presets$suffix',
     );
   }
 
