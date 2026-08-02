@@ -240,6 +240,7 @@ List<StudioPresetBlockGroup> groupStudioPresetBlocks(
         id: '${block.id}_group',
         title: 'Tense',
         section: block.section,
+        injectionPoint: block.injectionPoint,
         order: block.order,
       );
     }
