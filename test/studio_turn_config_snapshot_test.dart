@@ -9,7 +9,6 @@ import 'package:glaze_flutter/core/llm/studio/agent_config_resolver.dart';
 import 'package:glaze_flutter/core/llm/studio_turn_config_snapshot.dart';
 import 'package:glaze_flutter/core/models/api_config.dart';
 import 'package:glaze_flutter/core/models/cleaner_settings.dart';
-import 'package:glaze_flutter/core/models/ledger_settings.dart';
 import 'package:glaze_flutter/core/models/pipeline_settings.dart';
 import 'package:glaze_flutter/core/models/studio_agent_settings.dart';
 import 'package:glaze_flutter/core/models/studio_config.dart';
@@ -98,13 +97,6 @@ void main() {
           defaultLoads++;
           return const StudioPreset(
             id: 'default',
-            runtime: StudioRuntimeSettings(
-              agents: StudioAgentSettings(
-                studioControllerModelOverride: 'preset-tracker-model',
-              ),
-              cleaner: CleanerSettings(postCleanerModel: 'preset-cleaner'),
-              ledger: LedgerSettings(studioLedgerMaxTokens: 321),
-            ),
             agentEnabled: {'agency': false},
             agents: [
               StudioAgent(id: 'final', controllerId: 'final', order: 5),
@@ -129,15 +121,6 @@ void main() {
         'final',
       ]);
       expect(snapshot.apiConfigs, [api]);
-      expect(
-        snapshot.pipelineSettings.studioAgent.studioControllerModelOverride,
-        'preset-tracker-model',
-      );
-      expect(
-        snapshot.pipelineSettings.cleaner.postCleanerModel,
-        'preset-cleaner',
-      );
-      expect(snapshot.pipelineSettings.ledger.studioLedgerMaxTokens, 321);
       expect(
         () => snapshot.apiConfigs.add(api),
         throwsUnsupportedError,
@@ -185,9 +168,6 @@ void main() {
                 ),
               ],
               runtime: StudioRuntimeSettings(
-                agents: StudioAgentSettings(
-                  studioControllerModelOverride: 'preset-override',
-                ),
                 broadcastBlocks: ['preset broadcast'],
               ),
               blocks: [
@@ -282,7 +262,7 @@ void main() {
       expect(snapshot.preset!.runtime.broadcastBlocks, ['preset broadcast']);
       expect(
         snapshot.pipelineSettings.studioAgent.studioControllerModelOverride,
-        'preset-override',
+        'old-override',
       );
       final cleanerConfig = snapshot.resolveCleanerConfig(
         errorLabel: 'test-cleaner',
@@ -318,11 +298,6 @@ void main() {
       preset: const StudioPreset(
         id: 'old-preset',
         cheapApiConfigId: 'old-api',
-        runtime: StudioRuntimeSettings(
-          agents: StudioAgentSettings(
-            studioControllerModelOverride: 'snapshot-model',
-          ),
-        ),
       ),
       pipelineSettings: PipelineSettings(
         studioAgent: StudioAgentSettings(
@@ -419,11 +394,10 @@ void main() {
         preset: const StudioPreset(
           id: 'preset',
           agentEnabled: {'post_clean': false},
-          runtime: StudioRuntimeSettings(
-            cleaner: CleanerSettings(postCleanerEnabled: true),
-          ),
         ),
-        pipelineSettings: const PipelineSettings(),
+        pipelineSettings: const PipelineSettings(
+          cleaner: CleanerSettings(postCleanerEnabled: true),
+        ),
         apiConfigs: const [],
         activeApiConfig: null,
       );
@@ -440,11 +414,10 @@ void main() {
         preset: const StudioPreset(
           id: 'preset',
           agentEnabled: {'post_clean': true},
-          runtime: StudioRuntimeSettings(
-            cleaner: CleanerSettings(postCleanerEnabled: true),
-          ),
         ),
-        pipelineSettings: const PipelineSettings(),
+        pipelineSettings: const PipelineSettings(
+          cleaner: CleanerSettings(postCleanerEnabled: true),
+        ),
         apiConfigs: const [],
         activeApiConfig: null,
       );
@@ -458,13 +431,10 @@ void main() {
     () {
       final snapshot = StudioTurnConfigSnapshot(
         config: const StudioConfig(sessionId: 'session', enabled: true),
-        preset: const StudioPreset(
-          id: 'preset',
-          runtime: StudioRuntimeSettings(
-            cleaner: CleanerSettings(postCleanerEnabled: true),
-          ),
+        preset: const StudioPreset(id: 'preset'),
+        pipelineSettings: const PipelineSettings(
+          cleaner: CleanerSettings(postCleanerEnabled: true),
         ),
-        pipelineSettings: const PipelineSettings(),
         apiConfigs: const [],
         activeApiConfig: null,
       );

@@ -5,10 +5,7 @@ import 'package:drift/drift.dart' show Value;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/db/repositories/studio_preset_repo.dart';
-import 'package:glaze_flutter/core/models/cleaner_settings.dart';
-import 'package:glaze_flutter/core/models/extra_request_parameter.dart';
 import 'package:glaze_flutter/core/models/studio_config.dart';
-import 'package:glaze_flutter/core/models/studio_agent_settings.dart';
 
 void main() {
   late AppDatabase db;
@@ -34,12 +31,6 @@ void main() {
       cleanerApiConfigId: 'cleaner',
       maxFinalHistoryMessages: 17,
       runtime: StudioRuntimeSettings(
-        agents: StudioAgentSettings(
-          studioFinalExtraRequestParameters: [
-            ExtraRequestParameter(key: 'custom', value: '{"nested":true}'),
-          ],
-        ),
-        cleaner: CleanerSettings(postCleanerMaxTokens: 1234),
         broadcastBlocks: ['\uFEFFfirst\r\nline', 'second\nline'],
       ),
     );
