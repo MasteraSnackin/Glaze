@@ -45,6 +45,7 @@ const _exclusiveStudioHeaders = <String>{
   'narrative styles',
   'story difficulty',
   'response length controls',
+  'text formatting',
   'cot selections',
 };
 
@@ -173,7 +174,8 @@ List<StudioPresetBlock> normalizeStudioGroupBoundaries(
 }
 
 /// Groups the flat runtime block list for presentation only. Authored Loom
-/// header blocks define group boundaries, so no extra DB metadata is needed.
+/// header blocks and explicit closing boundaries define group spans, so no
+/// extra DB metadata is needed.
 List<StudioPresetBlockGroup> groupStudioPresetBlocks(
   List<StudioPresetBlock> blocks,
 ) {
@@ -223,7 +225,11 @@ List<StudioPresetBlockGroup> groupStudioPresetBlocks(
   }
 
   for (final block in sorted) {
-    if (isStudioGroupBoundary(block)) continue;
+    if (isStudioGroupClose(block)) {
+      flush();
+      continue;
+    }
+    if (isStudioGroupOpen(block)) continue;
     // Stored block order can interleave stages after older routing repairs.
     // A visual group belongs to exactly one injection point; never let an
     // exclusive `final` group swallow adjacent cleaner/ledger blocks.

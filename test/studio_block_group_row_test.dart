@@ -4,8 +4,9 @@ import 'package:glaze_flutter/core/models/studio_config.dart';
 import 'package:glaze_flutter/core/models/studio_preset_block_groups.dart';
 import 'package:glaze_flutter/features/studio/widgets/studio_block_row.dart';
 
-Widget _host(Widget child) =>
-    MaterialApp(home: Scaffold(body: ListView(children: [child])));
+Widget _host(Widget child) => MaterialApp(
+  home: Scaffold(body: ListView(children: [child])),
+);
 
 void main() {
   testWidgets('exclusive group expands and selects one option', (tester) async {
@@ -16,7 +17,12 @@ void main() {
         content: '<loompov>',
         order: 0,
       ),
-      StudioPresetBlock(id: 'pov_header', title: '━🧍 Point-of-View', order: 1),
+      StudioPresetBlock(
+        id: 'pov_header',
+        title: '━🧍 Point-of-View',
+        content: 'POV header instructions',
+        order: 1,
+      ),
       StudioPresetBlock(
         id: 'third_person',
         title: 'Third Person Narrator',
@@ -50,6 +56,8 @@ void main() {
           onToggle: (_, _) {},
           onEdit: (block) => edited = block,
           onDelete: (_) {},
+          onDeleteGroup: (_) {},
+          onMoveBlock: (_, _) {},
           onToggleGroup: (_) {},
         ),
       ),
@@ -65,11 +73,16 @@ void main() {
 
     expect(find.text('Second Person'), findsOneWidget);
     expect(find.text('Opening tag'), findsOneWidget);
+    expect(find.text('studio_group_header_prompt'), findsOneWidget);
     expect(find.text('Closing tag'), findsOneWidget);
 
     await tester.tap(find.text('Opening tag'));
     await tester.pumpAndSettle();
     expect(edited?.id, 'pov_header_group_open');
+
+    await tester.tap(find.text('studio_group_header_prompt'));
+    await tester.pumpAndSettle();
+    expect(edited?.id, 'pov_header');
 
     // Exclusive children carry radios, not switches.
     expect(find.byType(Switch), findsNothing);
@@ -96,6 +109,8 @@ void main() {
           onToggle: (_, _) => toggled = true,
           onEdit: (_) {},
           onDelete: (_) {},
+          onDeleteGroup: (_) {},
+          onMoveBlock: (_, _) {},
           onToggleGroup: (_) {},
         ),
       ),
@@ -155,6 +170,8 @@ void main() {
           onToggle: (_, _) {},
           onEdit: (_) {},
           onDelete: (_) {},
+          onDeleteGroup: (_) {},
+          onMoveBlock: (_, _) {},
           onToggleGroup: (_) => groupToggled = true,
         ),
       ),
@@ -168,7 +185,9 @@ void main() {
     expect(groupToggled, isTrue);
   });
 
-  testWidgets('non-CoT exclusive group has no whole-group switch', (tester) async {
+  testWidgets('non-CoT exclusive group has no whole-group switch', (
+    tester,
+  ) async {
     const blocks = [
       StudioPresetBlock(id: 'pov_header', title: '━ Point-of-View', order: 0),
       StudioPresetBlock(
@@ -190,11 +209,49 @@ void main() {
           onToggle: (_, _) {},
           onEdit: (_) {},
           onDelete: (_) {},
+          onDeleteGroup: (_) {},
+          onMoveBlock: (_, _) {},
           onToggleGroup: (_) {},
         ),
       ),
     );
 
     expect(find.byType(Switch), findsNothing);
+  });
+
+  testWidgets('folder delete icon triggers onDeleteGroup', (tester) async {
+    const blocks = [
+      StudioPresetBlock(id: 'folder_header', title: '━ My Folder', order: 0),
+      StudioPresetBlock(id: 'child', title: 'Child', enabled: true, order: 1),
+      StudioPresetBlock(
+        id: 'folder_header_group_close',
+        groupBoundary: 'close',
+        order: 2,
+      ),
+    ];
+    final group = groupStudioPresetBlocks(blocks).single;
+    var deleted = false;
+
+    await tester.pumpWidget(
+      _host(
+        StudioBlockGroupRow(
+          group: group,
+          dragIndex: 0,
+          isLast: true,
+          onSelectExclusive: (_) {},
+          onToggle: (_, _) {},
+          onEdit: (_) {},
+          onDelete: (_) {},
+          onDeleteGroup: (_) => deleted = true,
+          onMoveBlock: (_, _) {},
+          onToggleGroup: (_) {},
+        ),
+      ),
+    );
+
+    expect(find.byIcon(Icons.delete_outline), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.delete_outline));
+    await tester.pumpAndSettle();
+    expect(deleted, isTrue);
   });
 }

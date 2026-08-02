@@ -258,11 +258,11 @@ void main() {
       'lib/core/llm/studio_message_builder.dart',
     ).readAsStringSync();
 
-    expect(studioContextFile, isNot(contains('PresetBlock')));
+    expect(studioContextFile, isNot(contains(RegExp(r'\bPresetBlock\b'))));
     expect(studioContextFile, isNot(contains("import 'preset.dart'")));
-    expect(preparerFile, isNot(contains('PresetBlock')));
+    expect(preparerFile, isNot(contains(RegExp(r'\bPresetBlock\b'))));
     expect(preparerFile, isNot(contains("import 'preset.dart'")));
-    expect(builderFile, isNot(contains('PresetBlock')));
+    expect(builderFile, isNot(contains(RegExp(r'\bPresetBlock\b'))));
     expect(builderFile, isNot(contains("import 'preset.dart'")));
   });
 

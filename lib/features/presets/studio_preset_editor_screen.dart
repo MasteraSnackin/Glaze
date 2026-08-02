@@ -13,6 +13,7 @@ import '../../core/utils/id_generator.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/glaze_toast.dart';
+import '../../shared/widgets/folder_name_dialog.dart';
 import '../settings/app_settings_provider.dart';
 import '../studio/studio_agent_toggle.dart';
 import '../studio/studio_injection_points.dart';
@@ -237,9 +238,7 @@ class StudioPresetEditorBodyState
     );
   }
 
-  /// Asks which stage the new block belongs to — with every section on screen
-  /// there is no longer a "current" one to infer it from — then appends it
-  /// there and opens the editor.
+  /// Asks whether to create a block or folder before choosing its stage.
   void _addBlock() {
     final preset = _preset;
     if (preset == null) return;
@@ -247,13 +246,38 @@ class StudioPresetEditorBodyState
       context,
       title: 'add_block'.tr(),
       items: [
+        BottomSheetItem(
+          icon: Icons.note_add_outlined,
+          label: 'studio_add_prompt_block'.tr(),
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            _chooseInjectionPoint(_createBlock);
+          },
+        ),
+        BottomSheetItem(
+          icon: Icons.create_new_folder_outlined,
+          label: 'studio_add_folder'.tr(),
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            _chooseInjectionPoint(_nameAndCreateFolder);
+          },
+        ),
+      ],
+    );
+  }
+
+  void _chooseInjectionPoint(ValueChanged<String> onSelected) {
+    GlazeBottomSheet.show<void>(
+      context,
+      title: 'studio_choose_stage'.tr(),
+      items: [
         for (final section in _sections)
           BottomSheetItem(
             icon: Icons.add,
             label: section.$2,
             onTap: () {
               Navigator.of(context, rootNavigator: true).pop();
-              unawaited(_createBlock(section.$1));
+              onSelected(section.$1);
             },
           ),
       ],
@@ -282,6 +306,50 @@ class StudioPresetEditorBodyState
     if (mounted) _openBlock(draft);
   }
 
+  void _nameAndCreateFolder(String injectionPoint) {
+    GlazeBottomSheet.show<void>(
+      context,
+      title: 'studio_add_folder'.tr(),
+      child: FolderNameDialog(
+        confirmLabel: 'studio_create'.tr(),
+        onSubmit: (name) => unawaited(_createFolder(injectionPoint, name)),
+      ),
+    );
+  }
+
+  Future<void> _createFolder(String injectionPoint, String name) async {
+    final preset = _preset;
+    if (preset == null) return;
+    final maxOrder = preset.blocks.fold<int>(
+      -1,
+      (maximum, block) => block.order > maximum ? block.order : maximum,
+    );
+    final id = generateId();
+    final header = StudioPresetBlock(
+      id: id,
+      title: '━ $name',
+      section: '',
+      role: 'system',
+      mode: 'direct',
+      injectionPoint: injectionPoint,
+      order: maxOrder + 1,
+    );
+    final close = StudioPresetBlock(
+      id: '${id}_group_close',
+      title: 'Closing tag',
+      section: '',
+      role: 'system',
+      enabled: false,
+      mode: 'direct',
+      injectionPoint: injectionPoint,
+      groupBoundary: 'close',
+      order: maxOrder + 2,
+    );
+    await _persistNow(
+      preset.copyWith(blocks: [...preset.blocks, header, close]),
+    );
+  }
+
   Future<void> _deleteBlock(StudioPresetBlock block) async {
     final preset = _preset;
     if (preset == null) return;
@@ -303,6 +371,63 @@ class StudioPresetEditorBodyState
     if (mounted && _editingBlockId == block.id) {
       setState(() => _editingBlockId = null);
     }
+  }
+
+  Future<void> _deleteGroup(StudioPresetBlockGroup group) async {
+    final preset = _preset;
+    final header = group.header;
+    if (preset == null || header == null) return;
+    final title = header.title
+        .replaceFirst(RegExp(r'^━[^\p{L}\p{N}]*', unicode: true), '')
+        .trim();
+    final ok = await confirmStudioDelete(
+      context,
+      title: 'studio_delete_folder'.tr(),
+      description: 'studio_confirm_delete_folder'.tr(
+        args: [title.isEmpty ? header.id : title],
+      ),
+    );
+    if (!ok) return;
+    await _persistNow(
+      preset.copyWith(
+        blocks: dissolveStudioPresetBlockGroup(
+          all: preset.blocks,
+          group: group,
+        ),
+      ),
+    );
+  }
+
+  void _moveBlockToGroup(String blockId, StudioPresetBlockGroup group) {
+    final preset = _preset;
+    if (preset == null) return;
+    unawaited(
+      _persistNow(
+        preset.copyWith(
+          blocks: moveStudioPresetBlockToGroup(
+            all: preset.blocks,
+            blockId: blockId,
+            targetGroup: group,
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _moveBlockToSection(String blockId, String injectionPoint) {
+    final preset = _preset;
+    if (preset == null) return;
+    unawaited(
+      _persistNow(
+        preset.copyWith(
+          blocks: moveStudioPresetBlockToSection(
+            all: preset.blocks,
+            blockId: blockId,
+            injectionPoint: injectionPoint,
+          ),
+        ),
+      ),
+    );
   }
 
   // ── Reordering ─────────────────────────────────────────────────────────────
@@ -395,11 +520,13 @@ class StudioPresetEditorBodyState
         ? null
         : preset.blocks.where((b) => b.id == _editingBlockId).firstOrNull;
     if (editing != null) {
+      final headerPrompt = isStudioPresetGroupHeader(editing);
       return StudioBlockEditorInline(
         key: ValueKey(editing.id),
         block: editing,
         onChanged: _onBlockChanged,
         onDelete: () => _deleteBlock(editing),
+        headerPrompt: headerPrompt,
       );
     }
 
@@ -481,6 +608,9 @@ class StudioPresetEditorBodyState
       onSelectExclusive: _selectExclusive,
       onToggleGroup: _toggleGroup,
       onDelete: _deleteBlock,
+      onDeleteGroup: _deleteGroup,
+      onMoveToGroup: _moveBlockToGroup,
+      onMoveToSection: _moveBlockToSection,
       onToggleAgent: _toggleAgent,
     );
     return PresetCard(

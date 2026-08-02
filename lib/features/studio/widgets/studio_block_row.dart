@@ -49,6 +49,7 @@ class StudioBlockRow extends StatelessWidget {
   final Widget? trailing;
 
   final VoidCallback? onLongPress;
+  final String? moveDragData;
 
   const StudioBlockRow({
     super.key,
@@ -60,6 +61,7 @@ class StudioBlockRow extends StatelessWidget {
     this.onToggle,
     this.trailing,
     this.onLongPress,
+    this.moveDragData,
   });
 
   @override
@@ -127,10 +129,13 @@ class StudioBlockRow extends StatelessWidget {
                 )
               else
                 SizedBox(width: 30.0 + indent, height: 44),
-              Icon(
-                presetBlockRoleIcon(block.role),
-                size: 16,
-                color: context.cs.onSurface.withValues(alpha: 0.6),
+              _moveHandle(
+                context,
+                Icon(
+                  presetBlockRoleIcon(block.role),
+                  size: 16,
+                  color: context.cs.onSurface.withValues(alpha: 0.6),
+                ),
               ),
               const SizedBox(width: 8),
               if (block.locked) ...[
@@ -212,6 +217,31 @@ class StudioBlockRow extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _moveHandle(BuildContext context, Widget child) {
+    final data = moveDragData;
+    if (data == null) return child;
+    return LongPressDraggable<String>(
+      data: data,
+      feedback: Material(
+        color: Colors.transparent,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: context.cs.surface,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: context.cs.primary),
+          ),
+          child: Text(
+            block.title.isEmpty ? block.id : block.title,
+            style: TextStyle(color: context.cs.onSurface),
+          ),
+        ),
+      ),
+      childWhenDragging: Opacity(opacity: 0.25, child: child),
+      child: Tooltip(message: 'studio_move_block'.tr(), child: child),
     );
   }
 
@@ -482,6 +512,8 @@ class StudioBlockGroupRow extends StatefulWidget {
   final void Function(StudioPresetBlock block, bool enabled) onToggle;
   final ValueChanged<StudioPresetBlock> onEdit;
   final ValueChanged<StudioPresetBlock> onDelete;
+  final ValueChanged<StudioPresetBlockGroup> onDeleteGroup;
+  final void Function(String blockId, StudioPresetBlockGroup group) onMoveBlock;
   final ValueChanged<bool> onToggleGroup;
 
   const StudioBlockGroupRow({
@@ -493,6 +525,8 @@ class StudioBlockGroupRow extends StatefulWidget {
     required this.onToggle,
     required this.onEdit,
     required this.onDelete,
+    required this.onDeleteGroup,
+    required this.onMoveBlock,
     required this.onToggleGroup,
   });
 
@@ -523,149 +557,169 @@ class _StudioBlockGroupRowState extends State<StudioBlockGroupRow> {
     final openingBoundary = group.openingBoundary;
     final closingBoundary = group.closingBoundary;
 
-    return Container(
-      decoration: BoxDecoration(
-        border: Border(
-          bottom: BorderSide(
-            color: const Color(0x33808080),
-            width: widget.isLast ? 0 : 1,
+    return DragTarget<String>(
+      onWillAcceptWithDetails: (details) =>
+          !group.children.any((block) => block.id == details.data),
+      onAcceptWithDetails: (details) => widget.onMoveBlock(details.data, group),
+      builder: (context, candidates, _) => Container(
+        decoration: BoxDecoration(
+          color: candidates.isEmpty
+              ? null
+              : context.cs.primary.withValues(alpha: 0.08),
+          border: Border(
+            bottom: BorderSide(
+              color: const Color(0x33808080),
+              width: widget.isLast ? 0 : 1,
+            ),
           ),
         ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          InkWell(
-            onTap: () => setState(() => _expanded = !_expanded),
-            onLongPress: () => widget.onEdit(header),
-            child: Row(
-              children: [
-                ReorderableDragStartListener(
-                  index: widget.dragIndex,
-                  child: SizedBox(
-                    width: 30,
-                    height: 44,
-                    child: Center(
-                      child: Text(
-                        '≡',
-                        style: TextStyle(
-                          fontSize: 20,
-                          color: context.cs.onSurfaceVariant.withValues(
-                            alpha: 0.5,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            InkWell(
+              onTap: () => setState(() => _expanded = !_expanded),
+              onLongPress: () => widget.onDeleteGroup(group),
+              child: Row(
+                children: [
+                  ReorderableDragStartListener(
+                    index: widget.dragIndex,
+                    child: SizedBox(
+                      width: 30,
+                      height: 44,
+                      child: Center(
+                        child: Text(
+                          '≡',
+                          style: TextStyle(
+                            fontSize: 20,
+                            color: context.cs.onSurfaceVariant.withValues(
+                              alpha: 0.5,
+                            ),
                           ),
                         ),
                       ),
                     ),
                   ),
-                ),
-                Icon(
-                  Icons.folder_outlined,
-                  size: 16,
-                  color: context.cs.primary.withValues(alpha: 0.8),
-                ),
-                const SizedBox(width: 8),
-                if (group.exclusive) ...[
-                  StudioBlockBadge(label: 'studio_badge_pick_one'.tr()),
-                  const SizedBox(width: 6),
-                ],
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 6),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          title.isEmpty ? header.id : title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                            color: context.cs.onSurface,
+                  Icon(
+                    Icons.folder_outlined,
+                    size: 16,
+                    color: context.cs.primary.withValues(alpha: 0.8),
+                  ),
+                  const SizedBox(width: 8),
+                  if (group.exclusive) ...[
+                    StudioBlockBadge(label: 'studio_badge_pick_one'.tr()),
+                    const SizedBox(width: 6),
+                  ],
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            title.isEmpty ? header.id : title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                              color: context.cs.onSurface,
+                            ),
                           ),
-                        ),
-                        Text(
-                          subtitle,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: context.cs.onSurfaceVariant,
+                          Text(
+                            subtitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: context.cs.onSurfaceVariant,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
-                ),
-                SizedBox(
-                  width: 36,
-                  height: 44,
-                  child: Material(
-                    color: Colors.transparent,
-                    child: InkWell(
-                      onTap: () => widget.onEdit(header),
+                  if (_isCoTGroup(group))
+                    Switch.adaptive(
+                      value: header.enabled,
+                      onChanged: widget.onToggleGroup,
+                    ),
+                  SizedBox(
+                    width: 36,
+                    height: 44,
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: () => widget.onDeleteGroup(group),
+                        borderRadius: BorderRadius.circular(20),
+                        child: Icon(
+                          Icons.delete_outline,
+                          size: 20,
+                          color: context.cs.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.only(right: 12),
+                    child: AnimatedRotation(
+                      turns: _expanded ? 0.5 : 0,
+                      duration: const Duration(milliseconds: 200),
                       child: Icon(
-                        Icons.edit_outlined,
+                        Icons.expand_more,
                         size: 20,
                         color: context.cs.onSurfaceVariant,
                       ),
                     ),
                   ),
-                ),
-                if (_isCoTGroup(group))
-                  Switch.adaptive(
-                    value: header.enabled,
-                    onChanged: widget.onToggleGroup,
-                  ),
-                Padding(
-                  padding: const EdgeInsets.only(right: 12),
-                  child: AnimatedRotation(
-                    turns: _expanded ? 0.5 : 0,
-                    duration: const Duration(milliseconds: 200),
-                    child: Icon(
-                      Icons.expand_more,
-                      size: 20,
-                      color: context.cs.onSurfaceVariant,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          if (_expanded && openingBoundary != null)
-            StudioBlockRow(
-              key: ValueKey('studio_block_${openingBoundary.id}'),
-              block: openingBoundary,
-              indent: 16,
-              isLast: group.children.isEmpty && closingBoundary == null,
-              onEdit: () => widget.onEdit(openingBoundary),
-            ),
-          if (_expanded)
-            for (var i = 0; i < group.children.length; i++)
-              StudioBlockRow(
-                key: ValueKey('studio_block_${group.children[i].id}'),
-                block: group.children[i],
-                indent: 16,
-                isLast:
-                    i == group.children.length - 1 && closingBoundary == null,
-                onEdit: () => widget.onEdit(group.children[i]),
-                onToggle: group.exclusive
-                    ? null
-                    : (v) => widget.onToggle(group.children[i], v),
-                trailing: group.exclusive
-                    ? _radio(context, group.children[i])
-                    : null,
-                onLongPress: () => widget.onDelete(group.children[i]),
+                ],
               ),
-          if (_expanded && closingBoundary != null)
-            StudioBlockRow(
-              key: ValueKey('studio_block_${closingBoundary.id}'),
-              block: closingBoundary,
-              indent: 16,
-              isLast: true,
-              onEdit: () => widget.onEdit(closingBoundary),
             ),
-        ],
+            if (_expanded && openingBoundary != null)
+              StudioBlockRow(
+                key: ValueKey('studio_block_${openingBoundary.id}'),
+                block: openingBoundary,
+                indent: 16,
+                isLast: group.children.isEmpty && closingBoundary == null,
+                onEdit: () => widget.onEdit(openingBoundary),
+              ),
+            if (_expanded)
+              StudioBlockRow(
+                key: ValueKey('studio_group_prompt_${header.id}'),
+                block: header.copyWith(
+                  title: 'studio_group_header_prompt'.tr(),
+                ),
+                indent: 16,
+                isLast: group.children.isEmpty && closingBoundary == null,
+                onEdit: () => widget.onEdit(header),
+              ),
+            if (_expanded)
+              for (var i = 0; i < group.children.length; i++)
+                StudioBlockRow(
+                  key: ValueKey('studio_block_${group.children[i].id}'),
+                  block: group.children[i],
+                  moveDragData: group.children[i].id,
+                  indent: 16,
+                  isLast:
+                      i == group.children.length - 1 && closingBoundary == null,
+                  onEdit: () => widget.onEdit(group.children[i]),
+                  onToggle: group.exclusive
+                      ? null
+                      : (v) => widget.onToggle(group.children[i], v),
+                  trailing: group.exclusive
+                      ? _radio(context, group.children[i])
+                      : null,
+                  onLongPress: () => widget.onDelete(group.children[i]),
+                ),
+            if (_expanded && closingBoundary != null)
+              StudioBlockRow(
+                key: ValueKey('studio_block_${closingBoundary.id}'),
+                block: closingBoundary,
+                indent: 16,
+                isLast: true,
+                onEdit: () => widget.onEdit(closingBoundary),
+              ),
+          ],
+        ),
       ),
     );
   }

@@ -43,6 +43,10 @@ class StudioBlockSectionList extends StatefulWidget {
   onSelectExclusive;
   final void Function(StudioPresetBlockGroup group, bool enabled) onToggleGroup;
   final ValueChanged<StudioPresetBlock> onDelete;
+  final ValueChanged<StudioPresetBlockGroup> onDeleteGroup;
+  final void Function(String blockId, StudioPresetBlockGroup group)
+  onMoveToGroup;
+  final void Function(String blockId, String injectionPoint) onMoveToSection;
   final void Function(String specId, bool enabled) onToggleAgent;
 
   const StudioBlockSectionList({
@@ -55,6 +59,9 @@ class StudioBlockSectionList extends StatefulWidget {
     required this.onSelectExclusive,
     required this.onToggleGroup,
     required this.onDelete,
+    required this.onDeleteGroup,
+    required this.onMoveToGroup,
+    required this.onMoveToSection,
     required this.onToggleAgent,
   });
 
@@ -184,13 +191,22 @@ class _StudioBlockSectionListState extends State<StudioBlockSectionList> {
   Widget _buildRow(BuildContext context, List<_StudioListRow> rows, int i) {
     final row = rows[i];
     if (row.isHeader) {
-      return StudioBlockSectionHeader(
+      return DragTarget<String>(
         key: ValueKey('studio_section_${row.point}'),
-        label: row.label!,
-        count: row.count,
-        expanded: row.expanded,
-        onToggle: row.onToggle!,
-        isFirst: i == 0,
+        onAcceptWithDetails: (details) =>
+            widget.onMoveToSection(details.data, row.point),
+        builder: (context, candidates, _) => ColoredBox(
+          color: candidates.isEmpty
+              ? Colors.transparent
+              : context.cs.primary.withValues(alpha: 0.08),
+          child: StudioBlockSectionHeader(
+            label: row.label!,
+            count: row.count,
+            expanded: row.expanded,
+            onToggle: row.onToggle!,
+            isFirst: i == 0,
+          ),
+        ),
       );
     }
     // The row before a header (or at the very end) drops its rule: the next
@@ -246,6 +262,8 @@ class _StudioBlockSectionListState extends State<StudioBlockSectionList> {
         onToggle: widget.onToggle,
         onEdit: widget.onEdit,
         onDelete: widget.onDelete,
+        onDeleteGroup: widget.onDeleteGroup,
+        onMoveBlock: widget.onMoveToGroup,
       );
     }
     final block = entry.standalone!;
@@ -257,6 +275,7 @@ class _StudioBlockSectionListState extends State<StudioBlockSectionList> {
       onEdit: () => widget.onEdit(block),
       onToggle: (v) => widget.onToggle(block, v),
       onLongPress: () => widget.onDelete(block),
+      moveDragData: block.id,
     );
   }
 }

@@ -19,12 +19,14 @@ class StudioBlockEditorInline extends StatelessWidget {
   final StudioPresetBlock block;
   final ValueChanged<StudioPresetBlock> onChanged;
   final VoidCallback onDelete;
+  final bool headerPrompt;
 
   const StudioBlockEditorInline({
     super.key,
     required this.block,
     required this.onChanged,
     required this.onDelete,
+    this.headerPrompt = false,
   });
 
   /// Agent dropdown options — the pre-gen controllers (they produce briefs and
@@ -38,74 +40,82 @@ class StudioBlockEditorInline extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final config = [
-      GenericEditorSection(
-        title: null,
-        fields: [
-          GenericEditorField(
-            key: 'title',
-            label: 'placeholder_block_name'.tr(),
-            type: 'text',
-          ),
-          GenericEditorField(
-            key: 'role',
-            label: 'label_role'.tr(),
-            type: 'select',
-            options: const [
-              {'label': 'System', 'value': 'system'},
-              {'label': 'User', 'value': 'user'},
-              {'label': 'Assistant', 'value': 'assistant'},
-            ],
-          ),
-          GenericEditorField(
-            key: 'mode',
-            label: 'studio_field_mode'.tr(),
-            type: 'select',
-            options: [
-              for (final mode in const ['direct', 'pregenBrief', 'agentResponse'])
-                {'label': studioBlockModeLabel(mode), 'value': mode},
-            ],
-          ),
-          GenericEditorField(
-            key: 'sourceAgentId',
-            label: 'studio_field_source_agent'.tr(),
-            type: 'select',
-            options: agentOptions,
-            showIf: (item) => item['mode'] == 'agentResponse',
-          ),
-          GenericEditorField(
-            key: 'injectionPoint',
-            label: 'studio_field_injection_point'.tr(),
-            type: 'select',
-            options: [
-              for (final point in studioInjectionPoints)
-                {'label': studioInjectionPointLabel(point), 'value': point},
-            ],
-          ),
-          GenericEditorField(
-            key: 'targetAgentId',
-            label: 'studio_field_target_agent'.tr(),
-            type: 'select',
-            options: agentOptions,
-            showIf: (item) => item['injectionPoint'] == 'specificAgent',
-          ),
-          // A brief/agent-response block emits what an agent produced, so it
-          // carries no authored text. The field is only hidden, never cleared —
-          // GenericEditor keeps untouched keys in its working copy, so the
-          // content comes back if the mode is switched to direct again.
-          GenericEditorField(
-            key: 'content',
-            label: 'section_content'.tr(),
-            type: 'textarea',
-            rows: 8,
-            expandable: true,
-            showIf: (item) =>
-                item['mode'] != 'pregenBrief' &&
-                item['mode'] != 'agentResponse',
-          ),
+    final fields = <GenericEditorField>[
+      GenericEditorField(
+        key: 'title',
+        label: 'placeholder_block_name'.tr(),
+        type: 'text',
+      ),
+      GenericEditorField(
+        key: 'role',
+        label: 'label_role'.tr(),
+        type: 'select',
+        options: const [
+          {'label': 'System', 'value': 'system'},
+          {'label': 'User', 'value': 'user'},
+          {'label': 'Assistant', 'value': 'assistant'},
         ],
       ),
+      GenericEditorField(
+        key: 'mode',
+        label: 'studio_field_mode'.tr(),
+        type: 'select',
+        options: [
+          for (final mode in const ['direct', 'pregenBrief', 'agentResponse'])
+            {'label': studioBlockModeLabel(mode), 'value': mode},
+        ],
+      ),
+      GenericEditorField(
+        key: 'sourceAgentId',
+        label: 'studio_field_source_agent'.tr(),
+        type: 'select',
+        options: agentOptions,
+        showIf: (item) => item['mode'] == 'agentResponse',
+      ),
+      GenericEditorField(
+        key: 'injectionPoint',
+        label: 'studio_field_injection_point'.tr(),
+        type: 'select',
+        options: [
+          for (final point in studioInjectionPoints)
+            {'label': studioInjectionPointLabel(point), 'value': point},
+        ],
+      ),
+      GenericEditorField(
+        key: 'targetAgentId',
+        label: 'studio_field_target_agent'.tr(),
+        type: 'select',
+        options: agentOptions,
+        showIf: (item) => item['injectionPoint'] == 'specificAgent',
+      ),
+      // A brief/agent-response block emits what an agent produced, so it
+      // carries no authored text. The field is only hidden, never cleared —
+      // GenericEditor keeps untouched keys in its working copy, so the
+      // content comes back if the mode is switched to direct again.
+      GenericEditorField(
+        key: 'content',
+        label: 'section_content'.tr(),
+        type: 'textarea',
+        rows: 8,
+        expandable: true,
+        showIf: (item) =>
+            item['mode'] != 'pregenBrief' && item['mode'] != 'agentResponse',
+      ),
     ];
+    if (headerPrompt) {
+      fields
+        ..clear()
+        ..add(
+          GenericEditorField(
+            key: 'content',
+            label: 'studio_group_header_prompt'.tr(),
+            type: 'textarea',
+            rows: 12,
+            expandable: true,
+          ),
+        );
+    }
+    final config = [GenericEditorSection(title: null, fields: fields)];
 
     return NavBarSuppressor(
       child: Column(
@@ -120,43 +130,44 @@ class StudioBlockEditorInline extends StatelessWidget {
                   onChanged(StudioPresetBlock.fromJson(values)),
             ),
           ),
-          Padding(
-            padding: EdgeInsets.fromLTRB(
-              16,
-              0,
-              16,
-              MediaQuery.paddingOf(context).bottom + 16,
-            ),
-            child: GlassSurface(
-              borderRadius: BorderRadius.circular(12),
-              tint: _danger.withValues(alpha: 0.14),
-              border: Border.all(color: _danger.withValues(alpha: 0.35)),
-              glowColor: _danger,
-              onTap: onDelete,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(
-                      Icons.delete_outlined,
-                      size: 20,
-                      color: _danger,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      'blocks_delete_block'.tr(),
-                      style: const TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
+          if (!headerPrompt)
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                16,
+                0,
+                16,
+                MediaQuery.paddingOf(context).bottom + 16,
+              ),
+              child: GlassSurface(
+                borderRadius: BorderRadius.circular(12),
+                tint: _danger.withValues(alpha: 0.14),
+                border: Border.all(color: _danger.withValues(alpha: 0.35)),
+                glowColor: _danger,
+                onTap: onDelete,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(
+                        Icons.delete_outlined,
+                        size: 20,
                         color: _danger,
                       ),
-                    ),
-                  ],
+                      const SizedBox(width: 8),
+                      Text(
+                        'blocks_delete_block'.tr(),
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: _danger,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
-          ),
         ],
       ),
     );

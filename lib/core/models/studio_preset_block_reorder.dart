@@ -68,7 +68,101 @@ List<StudioPresetBlock> reorderStudioPresetBlocks({
   for (var i = 0; i < slots.length; i++) {
     sorted[slots[i]] = flattened[i];
   }
+  return [for (var i = 0; i < sorted.length; i++) sorted[i].copyWith(order: i)];
+}
+
+/// Moves one ordinary block to the end of [targetGroup]. The flat runtime order
+/// remains authoritative: the block is inserted immediately before the
+/// folder's closing boundary and adopts the folder's injection point.
+List<StudioPresetBlock> moveStudioPresetBlockToGroup({
+  required List<StudioPresetBlock> all,
+  required String blockId,
+  required StudioPresetBlockGroup targetGroup,
+}) {
+  final header = targetGroup.header;
+  if (header == null || blockId == header.id) return all;
+  final source = all.where((block) => block.id == blockId).firstOrNull;
+  if (source == null ||
+      isStudioPresetGroupHeader(source) ||
+      isStudioGroupBoundary(source)) {
+    return all;
+  }
+  if (targetGroup.children.any((block) => block.id == blockId)) return all;
+
+  final sorted = [...all]..sort((a, b) => a.order.compareTo(b.order));
+  sorted.removeWhere((block) => block.id == blockId);
+  final closeId = targetGroup.closingBoundary?.id;
+  var insertAt = closeId == null
+      ? sorted.indexWhere((block) => block.id == header.id) + 1
+      : sorted.indexWhere((block) => block.id == closeId);
+  if (insertAt < 0) return all;
+  if (closeId == null) {
+    final childIds = targetGroup.children.map((block) => block.id).toSet();
+    while (insertAt < sorted.length && childIds.contains(sorted[insertAt].id)) {
+      insertAt++;
+    }
+  }
+  sorted.insert(
+    insertAt,
+    source.copyWith(injectionPoint: header.injectionPoint),
+  );
   return [
-    for (var i = 0; i < sorted.length; i++) sorted[i].copyWith(order: i),
+    for (var index = 0; index < sorted.length; index++)
+      sorted[index].copyWith(order: index),
+  ];
+}
+
+/// Removes an ordinary block from its folder and appends it to an injection
+/// point as a standalone row.
+List<StudioPresetBlock> moveStudioPresetBlockToSection({
+  required List<StudioPresetBlock> all,
+  required String blockId,
+  required String injectionPoint,
+}) {
+  final source = all.where((block) => block.id == blockId).firstOrNull;
+  if (source == null ||
+      isStudioPresetGroupHeader(source) ||
+      isStudioGroupBoundary(source)) {
+    return all;
+  }
+  final currentGroup = groupStudioPresetBlocks(
+    all
+        .where((block) => block.injectionPoint == source.injectionPoint)
+        .toList(),
+  ).where((group) => group.children.any((block) => block.id == blockId));
+  if (currentGroup.isEmpty && source.injectionPoint == injectionPoint) {
+    return all;
+  }
+
+  final sorted = [...all]..sort((a, b) => a.order.compareTo(b.order));
+  sorted.removeWhere((block) => block.id == blockId);
+  sorted.add(source.copyWith(injectionPoint: injectionPoint));
+  return [
+    for (var index = 0; index < sorted.length; index++)
+      sorted[index].copyWith(order: index),
+  ];
+}
+
+/// Removes a folder's structural blocks while preserving its child prompts as
+/// standalone rows in their current order.
+List<StudioPresetBlock> dissolveStudioPresetBlockGroup({
+  required List<StudioPresetBlock> all,
+  required StudioPresetBlockGroup group,
+}) {
+  final header = group.header;
+  if (header == null) return all;
+  final removedIds = {
+    header.id,
+    ?group.openingBoundary?.id,
+    ?group.closingBoundary?.id,
+  };
+  final remaining =
+      all
+          .where((block) => !removedIds.contains(block.id))
+          .toList(growable: false)
+        ..sort((a, b) => a.order.compareTo(b.order));
+  return [
+    for (var index = 0; index < remaining.length; index++)
+      remaining[index].copyWith(order: index),
   ];
 }

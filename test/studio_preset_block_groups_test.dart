@@ -87,6 +87,25 @@ void main() {
     expect(items[3].exclusive, isTrue);
   });
 
+  test('explicit closing boundary ends a folder before standalone blocks', () {
+    const folder = [
+      StudioPresetBlock(id: 'header', title: '━ Folder', order: 0),
+      StudioPresetBlock(id: 'child', order: 1),
+      StudioPresetBlock(
+        id: 'header_group_close',
+        groupBoundary: 'close',
+        order: 2,
+      ),
+      StudioPresetBlock(id: 'standalone', order: 3),
+    ];
+
+    final groups = groupStudioPresetBlocks(folder);
+
+    expect(groups, hasLength(2));
+    expect(groups.first.children.map((block) => block.id), ['child']);
+    expect(groups.last.standalone?.id, 'standalone');
+  });
+
   test('locked blocks cannot be disabled through group updates', () {
     const blocks = [StudioPresetBlock(id: 'core', enabled: true, locked: true)];
 
@@ -150,6 +169,44 @@ void main() {
     );
     expect(
       updated.firstWhere((block) => block.id == 'directional').enabled,
+      isTrue,
+    );
+  });
+
+  test('treats text formatting contracts as exclusive options', () {
+    const formattingBlocks = [
+      StudioPresetBlock(
+        id: 'format_header',
+        title: '━📋 Text Formatting',
+        order: 0,
+      ),
+      StudioPresetBlock(
+        id: 'quote_contract',
+        title: 'Dialogue Quote Contract',
+        order: 1,
+      ),
+      StudioPresetBlock(
+        id: 'asterisk_contract',
+        title: 'Asterisk Roleplay Contract',
+        enabled: false,
+        order: 2,
+      ),
+    ];
+
+    final group = groupStudioPresetBlocks(formattingBlocks).single;
+    expect(group.exclusive, isTrue);
+
+    final updated = selectExclusiveStudioBlock(
+      formattingBlocks,
+      group,
+      'asterisk_contract',
+    );
+    expect(
+      updated.firstWhere((block) => block.id == 'quote_contract').enabled,
+      isFalse,
+    );
+    expect(
+      updated.firstWhere((block) => block.id == 'asterisk_contract').enabled,
       isTrue,
     );
   });

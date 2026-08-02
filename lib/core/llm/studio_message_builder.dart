@@ -1,4 +1,5 @@
 import '../models/studio_config.dart';
+import '../models/studio_preset_block_groups.dart';
 import 'history_assembler.dart';
 import 'studio_brief_deduper.dart';
 import 'studio_controller_ontology.dart';
@@ -44,9 +45,8 @@ class StudioMessageBuilder {
     final spec = StudioControllerOntology.specForAgent(agent);
     final specId = spec?.id;
     final isPostProc = agent.phase == 'post_processing';
-    final blocks =
+    final routedBlocks =
         studioPreset.blocks
-            .where((b) => b.enabled)
             .where((b) => !_blockExpander.isRuntimeComputedBlock(b))
             .where((b) {
               if (b.injectionPoint == 'specificAgent') {
@@ -58,6 +58,7 @@ class StudioMessageBuilder {
             })
             .toList()
           ..sort((a, b) => a.order.compareTo(b.order));
+    final blocks = _attachGroupBoundaries(routedBlocks);
     final hasExplicitBriefMacros =
         isFinalResponse &&
         blocks.any(
@@ -261,6 +262,76 @@ class StudioMessageBuilder {
       });
     }
     return messages;
+  }
+
+  /// Boundary rows stay independently editable in Studio, but XML tags belong
+  /// to the authored prompt they wrap on the wire. Prefix the opening tag to
+  /// the header prompt and suffix the closing tag to the last enabled block in
+  /// the group without merging the intervening prompt blocks.
+  List<StudioPresetBlock> _attachGroupBoundaries(
+    List<StudioPresetBlock> blocks,
+  ) {
+    final output = <StudioPresetBlock>[];
+    String? pendingOpen;
+    int? groupStart;
+    var groupEnabled = true;
+
+    for (final block in blocks) {
+      if (isStudioGroupOpen(block)) {
+        pendingOpen = block.content.trim();
+        continue;
+      }
+      if (isStudioGroupClose(block)) {
+        final start = groupStart;
+        if (groupEnabled && start != null) {
+          for (var index = output.length - 1; index >= start; index--) {
+            if (!output[index].enabled) continue;
+            output[index] = output[index].copyWith(
+              content: _joinBoundary(output[index].content, block.content),
+            );
+            break;
+          }
+        } else if (start == null && output.isNotEmpty) {
+          output[output.length - 1] = output.last.copyWith(
+            content: _joinBoundary(output.last.content, block.content),
+          );
+        }
+        pendingOpen = null;
+        groupStart = null;
+        groupEnabled = true;
+        continue;
+      }
+
+      if (isStudioPresetGroupHeader(block)) {
+        groupEnabled = block.enabled;
+        groupStart = output.length;
+        if (groupEnabled) {
+          final opening = pendingOpen;
+          output.add(
+            opening == null || opening.isEmpty
+                ? block
+                : block.copyWith(
+                    content: _joinBoundary(opening, block.content),
+                  ),
+          );
+        }
+        pendingOpen = null;
+        continue;
+      }
+
+      if (groupStart != null && !groupEnabled) continue;
+      if (block.enabled) output.add(block);
+    }
+
+    return output;
+  }
+
+  String _joinBoundary(String first, String second) {
+    final left = first.trim();
+    final right = second.trim();
+    if (left.isEmpty) return right;
+    if (right.isEmpty) return left;
+    return '$left\n$right';
   }
 
   void _addInstructionMessage(
