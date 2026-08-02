@@ -73,7 +73,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 104;
+  int get schemaVersion => 106;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -1284,12 +1284,6 @@ class AppDatabase extends _$AppDatabase {
         await purgeRetiredAgenticMicroMemory();
         await _replaceLegacyWriteLoopPrompts();
       }
-      if (from < 103) {
-        await _removeRetiredWriteLoopBlocks();
-      }
-      if (from < 104) {
-        await _repairPresetBlockRouting();
-      }
       if (from < 67) {
         // Studio preset is now a global singleton stored in SharedPreferences
         // (activeStudioPresetProvider). Preserve the most recently updated
@@ -1993,6 +1987,12 @@ class AppDatabase extends _$AppDatabase {
         if (!tableNames.contains('preset_folder_members')) {
           await m.createTable(presetFolderMembers);
         }
+      }
+      if (from < 105) {
+        await _removeRetiredWriteLoopBlocks();
+      }
+      if (from < 106) {
+        await _repairPresetBlockRouting();
       }
     },
   );
@@ -2706,7 +2706,7 @@ class AppDatabase extends _$AppDatabase {
           [jsonEncode(kept), row.read<String>('preset_id')],
         );
       } catch (error) {
-        debugPrint('Migration 103 (remove retired write-loop) failed: $error');
+        debugPrint('Migration 105 (remove retired write-loop) failed: $error');
       }
     }
   }
@@ -2739,7 +2739,7 @@ class AppDatabase extends _$AppDatabase {
         );
       } catch (error) {
         debugPrint(
-          'Migration 104 (repair preset block routing) failed: $error',
+          'Migration 106 (repair preset block routing) failed: $error',
         );
       }
     }
