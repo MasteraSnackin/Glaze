@@ -14,6 +14,47 @@ import 'studio_config.dart';
 /// Sections whose backing services were deleted — dead data (§5).
 const _deadSections = {'build', 'brief_parser'};
 
+/// Built-in blocks whose routing was lost by the canonical codec shipped in
+/// nightly #197. Keep this list exact: arbitrary user blocks must remain
+/// movable between stages even when their titles happen to look built-in.
+const _canonicalInjectionPoints = <String, String>{
+  'final_agent_instruction': 'final',
+  'previous_agents': 'final',
+  'final_studio_brief_macros': 'final',
+  'final_response_shape_contract': 'final',
+  'final_jailbreak': 'final',
+  'final_narrative_engine': 'final',
+  'final_main_prompt': 'final',
+  'final_language_pov': 'final',
+  'final_prose_style': 'final',
+  'final_prose_style_anime': 'final',
+  'final_prose_style_ao3': 'final',
+  'final_prose_style_universal': 'final',
+  'final_genre': 'final',
+  'final_user_autonomy': 'final',
+  'final_story_mode': 'final',
+  'final_lumia_ooc': 'final',
+  'cleaner_jailbreak': 'cleaner',
+  'cleaner_system': 'cleaner',
+  'cleaner_aiism': 'cleaner',
+  'cleaner_audit': 'cleaner',
+  'cleaner_rules': 'cleaner',
+  'cleaner_beauty': 'cleaner',
+  'ledger_system': 'ledger',
+  'ledger_reconciliation_prompt': 'ledger',
+};
+
+bool _hasBrokenCanonicalRouting(StudioPresetBlock block) {
+  final expected = _canonicalInjectionPoints[block.id];
+  return expected != null && block.injectionPoint != expected;
+}
+
+StudioPresetBlock _repairCanonicalRouting(StudioPresetBlock block) {
+  final expected = _canonicalInjectionPoints[block.id];
+  if (expected == null || block.injectionPoint == expected) return block;
+  return block.copyWith(section: '', injectionPoint: expected);
+}
+
 /// The retired generic write-loop had no runtime consumer. Remove only its
 /// canonical seed block; user-authored blocks remain untouched.
 bool _isRetiredWriteLoop(StudioPresetBlock block) =>
@@ -103,10 +144,12 @@ List<StudioPresetBlock> migrateStudioPresetBlocksToV2(
   );
   final hasSplitLumia =
       blocks.any(_isLumiaDefinition) && blocks.any(_isLumiaModifiers);
+  final hasBrokenCanonicalRouting = blocks.any(_hasBrokenCanonicalRouting);
   if (!studioPresetBlocksNeedMigration(blocks) &&
       !hasRetiredWriteLoop &&
       !hasOrphanedBoundary &&
-      !hasSplitLumia) {
+      !hasSplitLumia &&
+      !hasBrokenCanonicalRouting) {
     return blocks;
   }
   final out = <StudioPresetBlock>[];
@@ -114,11 +157,13 @@ List<StudioPresetBlock> migrateStudioPresetBlocksToV2(
     if (_isRetiredWriteLoop(b)) continue;
     if (_isOrphanedBoundary(b, ids)) continue;
     if (b.section.isEmpty) {
-      out.add(b); // already migrated / editor-created — preserve as-is.
+      out.add(
+        _repairCanonicalRouting(b),
+      ); // already migrated / editor-created — preserve as-is.
       continue;
     }
     if (_deadSections.contains(b.section)) continue;
-    out.add(_migrateBlock(b));
+    out.add(_repairCanonicalRouting(_migrateBlock(b)));
   }
   return _mergeLumiaSections(out);
 }

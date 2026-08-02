@@ -48,6 +48,8 @@ class NavBarSuppressor extends ConsumerStatefulWidget {
 }
 
 class _NavBarSuppressorState extends ConsumerState<NavBarSuppressor> {
+  final Object _claim = Object();
+
   /// Captured up front: by `dispose` this state is unmounting and `ref.read`
   /// can no longer be relied on, but the registry outlives the widget, so the
   /// claim is released through the notifier directly.
@@ -64,13 +66,20 @@ class _NavBarSuppressorState extends ConsumerState<NavBarSuppressor> {
       // assignment, whose static type is the nullable field.
       final registry = ref.read(navBarSuppressionProvider.notifier);
       _registry = registry;
-      registry.suppress(this);
+      registry.suppress(_claim);
     });
   }
 
   @override
   void dispose() {
-    _registry?.release(this);
+    final registry = _registry;
+    if (registry != null) {
+      // Unmount runs inside BuildOwner.finalizeTree, where Riverpod forbids
+      // synchronous notifications. Release after the widget lifecycle ends.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        registry.release(_claim);
+      });
+    }
     super.dispose();
   }
 
