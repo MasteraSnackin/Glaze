@@ -266,15 +266,6 @@ class CleanerStage {
         return;
       }
 
-      final bookRepo = ctx.ref.read(memoryBookRepoProvider);
-      final book = await bookRepo.getBySessionId(sessionId);
-      if (!ctx.ref.mounted ||
-          !_ownsRun ||
-          !ctx.abortHandler.isCurrentGen(genId)) {
-        return;
-      }
-      if (book == null) return;
-
       // Broadcast rules are part of the selected preset's atomic runtime.
       final broadcastBlocks =
           turnConfig.preset?.runtime.broadcastBlocks ?? const <String>[];
@@ -1074,14 +1065,6 @@ class CleanerStage {
         ? target.agentSwipes[0].content
         : target.content;
     if (finalText.trim().isEmpty) return;
-
-    final bookRepo = ctx.ref.read(memoryBookRepoProvider);
-    final book = await bookRepo.getBySessionId(sessionId);
-    if (!ctx.ref.mounted || !_ownsRun) return;
-    if (book == null) {
-      debugPrint('[PostCleaner] rerun skipped: no memory book for session');
-      return;
-    }
 
     final turnConfig = await ctx.ref
         .read(studioTurnConfigResolverProvider)
