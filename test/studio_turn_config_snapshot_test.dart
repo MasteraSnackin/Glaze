@@ -410,4 +410,66 @@ void main() {
       expect(ids, contains('agent_final'));
     },
   );
+
+  test(
+    'disabling the post_clean agent toggle also disables the cleaner stage',
+    () {
+      final snapshot = StudioTurnConfigSnapshot(
+        config: const StudioConfig(sessionId: 'session', enabled: true),
+        preset: const StudioPreset(
+          id: 'preset',
+          agentEnabled: {'post_clean': false},
+          runtime: StudioRuntimeSettings(
+            cleaner: CleanerSettings(postCleanerEnabled: true),
+          ),
+        ),
+        pipelineSettings: const PipelineSettings(),
+        apiConfigs: const [],
+        activeApiConfig: null,
+      );
+
+      expect(snapshot.pipelineSettings.cleaner.postCleanerEnabled, isFalse);
+    },
+  );
+
+  test(
+    'enabling the post_clean agent toggle preserves the cleaner runtime setting',
+    () {
+      final snapshot = StudioTurnConfigSnapshot(
+        config: const StudioConfig(sessionId: 'session', enabled: true),
+        preset: const StudioPreset(
+          id: 'preset',
+          agentEnabled: {'post_clean': true},
+          runtime: StudioRuntimeSettings(
+            cleaner: CleanerSettings(postCleanerEnabled: true),
+          ),
+        ),
+        pipelineSettings: const PipelineSettings(),
+        apiConfigs: const [],
+        activeApiConfig: null,
+      );
+
+      expect(snapshot.pipelineSettings.cleaner.postCleanerEnabled, isTrue);
+    },
+  );
+
+  test(
+    'post_clean agent toggle defaults to on when absent, preserving cleaner runtime',
+    () {
+      final snapshot = StudioTurnConfigSnapshot(
+        config: const StudioConfig(sessionId: 'session', enabled: true),
+        preset: const StudioPreset(
+          id: 'preset',
+          runtime: StudioRuntimeSettings(
+            cleaner: CleanerSettings(postCleanerEnabled: true),
+          ),
+        ),
+        pipelineSettings: const PipelineSettings(),
+        apiConfigs: const [],
+        activeApiConfig: null,
+      );
+
+      expect(snapshot.pipelineSettings.cleaner.postCleanerEnabled, isTrue);
+    },
+  );
 }

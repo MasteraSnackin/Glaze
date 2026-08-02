@@ -21,7 +21,11 @@ class StudioTurnConfigSnapshot {
   }) : pipelineSettings = config?.enabled == true && preset != null
            ? pipelineSettings.copyWith(
                studioAgent: preset.runtime.agents,
-               cleaner: preset.runtime.cleaner,
+               cleaner: preset.agentEnabled['post_clean'] == false
+                   ? preset.runtime.cleaner.copyWith(
+                       postCleanerEnabled: false,
+                     )
+                   : preset.runtime.cleaner,
                ledger: preset.runtime.ledger,
              )
            : pipelineSettings;
