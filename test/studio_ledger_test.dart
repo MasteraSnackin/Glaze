@@ -212,22 +212,22 @@ void main() {
 
     const planner = LedgerReconciliationPlanner();
 
-    test('runs on N+1 once for the previous six assistant turns', () {
+    test('runs on the Nth assistant once for the previous N-1 turns', () {
       final messages = [
-        ..._conversation(6),
-        const ChatMessage(id: 'u7', role: 'user', content: 'User turn 7'),
+        ..._conversation(5),
+        const ChatMessage(id: 'u6', role: 'user', content: 'User turn 6'),
         const ChatMessage(
-          id: 'a7',
+          id: 'a6',
           role: 'assistant',
-          content: 'Assistant turn 7',
+          content: 'Assistant turn 6',
         ),
       ];
       final plan = planner.plan(
         messages: messages,
-        currentAssistantMessageId: 'a7',
+        currentAssistantMessageId: 'a6',
       );
       expect(plan, isNotNull);
-      expect(plan!.endMessage.id, 'a6');
+      expect(plan!.endMessage.id, 'a5');
 
       final checkpoint = LedgerReconciliationCheckpoint(
         sessionId: 's',
@@ -241,7 +241,7 @@ void main() {
       expect(
         planner.plan(
           messages: messages,
-          currentAssistantMessageId: 'a7',
+          currentAssistantMessageId: 'a6',
           checkpoint: checkpoint,
         ),
         isNull,
@@ -249,10 +249,10 @@ void main() {
       expect(
         planner.plan(
           messages: [
-            ..._conversation(7),
-            const ChatMessage(id: 'a8', role: 'assistant', content: 'Current'),
+            ..._conversation(6),
+            const ChatMessage(id: 'a7', role: 'assistant', content: 'Current'),
           ],
-          currentAssistantMessageId: 'a8',
+          currentAssistantMessageId: 'a7',
           checkpoint: checkpoint,
         ),
         isNull,
@@ -261,12 +261,17 @@ void main() {
 
     test('changed accepted content invalidates the range fingerprint', () {
       final messages = [
-        ..._conversation(6),
-        const ChatMessage(id: 'a7', role: 'assistant', content: 'Current'),
+        ..._conversation(5),
+        const ChatMessage(id: 'u6', role: 'user', content: 'User turn 6'),
+        const ChatMessage(
+          id: 'a6',
+          role: 'assistant',
+          content: 'Assistant turn 6',
+        ),
       ];
       final original = planner.plan(
         messages: messages,
-        currentAssistantMessageId: 'a7',
+        currentAssistantMessageId: 'a6',
       )!;
       final checkpoint = LedgerReconciliationCheckpoint(
         sessionId: 's',
@@ -278,11 +283,11 @@ void main() {
         rangeHash: original.rangeHash,
       );
       final changed = [...messages];
-      changed[11] = changed[11].copyWith(content: 'Changed accepted swipe');
+      changed[9] = changed[9].copyWith(content: 'Changed accepted swipe');
       expect(
         planner.plan(
           messages: changed,
-          currentAssistantMessageId: 'a7',
+          currentAssistantMessageId: 'a6',
           checkpoint: checkpoint,
         ),
         isNotNull,
@@ -291,47 +296,54 @@ void main() {
 
     test('hidden assistant messages do not advance cadence', () {
       final messages = [
-        ..._conversation(6),
+        ..._conversation(5),
         const ChatMessage(
           id: 'hidden',
           role: 'assistant',
           content: 'Internal',
           isHidden: true,
         ),
-        const ChatMessage(id: 'a7', role: 'assistant', content: 'Current'),
+        const ChatMessage(id: 'u6', role: 'user', content: 'User turn 6'),
+        const ChatMessage(
+          id: 'a6',
+          role: 'assistant',
+          content: 'Assistant turn 6',
+        ),
       ];
       final plan = planner.plan(
         messages: messages,
-        currentAssistantMessageId: 'a7',
+        currentAssistantMessageId: 'a6',
       );
       expect(plan, isNotNull);
-      expect(plan!.endMessage.id, 'a6');
+      expect(plan!.endMessage.id, 'a5');
       expect(plan.messageIds, isNot(contains('hidden')));
     });
 
     test('review range is bounded to twenty messages', () {
-      final messages = [
-        ..._conversation(12),
-        const ChatMessage(id: 'a13', role: 'assistant', content: 'Current'),
-      ];
+      final messages = _conversation(12);
       final plan = planner.plan(
         messages: messages,
-        currentAssistantMessageId: 'a13',
+        currentAssistantMessageId: 'a12',
       )!;
       expect(plan.messages, hasLength(20));
-      expect(plan.endMessage.id, 'a12');
+      expect(plan.endMessage.id, 'a11');
     });
 
     test(
       'prompt includes stale placeholder state outside direct name match',
       () {
         final messages = [
-          ..._conversation(6),
-          const ChatMessage(id: 'a7', role: 'assistant', content: 'Current'),
+          ..._conversation(5),
+          const ChatMessage(id: 'u6', role: 'user', content: 'User turn 6'),
+          const ChatMessage(
+            id: 'a6',
+            role: 'assistant',
+            content: 'Assistant turn 6',
+          ),
         ];
         final plan = planner.plan(
           messages: messages,
-          currentAssistantMessageId: 'a7',
+          currentAssistantMessageId: 'a6',
         )!;
         final prompt = const StudioLedgerReconciliationPrompt().build(
           systemPrompt: 'DB PROMPT',
@@ -667,12 +679,17 @@ void main() {
 
     test('prompt offers relevant inferred and placeholder facts', () {
       final messages = [
-        ..._conversation(6),
-        const ChatMessage(id: 'a7', role: 'assistant', content: 'Current'),
+        ..._conversation(5),
+        const ChatMessage(id: 'u6', role: 'user', content: 'User turn 6'),
+        const ChatMessage(
+          id: 'a6',
+          role: 'assistant',
+          content: 'Assistant turn 6',
+        ),
       ];
       final plan = planner.plan(
         messages: messages,
-        currentAssistantMessageId: 'a7',
+        currentAssistantMessageId: 'a6',
       )!;
       const placeholder = CharacterKnowledgeFact(
         id: 'placeholder',

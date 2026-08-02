@@ -61,14 +61,18 @@ class LedgerReconciliationPlanner {
         .take(currentIndex)
         .where(_isAcceptedAssistant)
         .toList(growable: false);
+    // Trigger once the Nth assistant has just been generated
+    // (N = interval, 2*interval, ...). acceptedAssistants holds a1..a(N-1);
+    // the freshly generated aN is the current message and is excluded from
+    // the review range so its brand-new snapshot cannot be rewritten. A
+    // reroll of aN produces the same boundary (a1..a(N-1)) and is
+    // deduplicated by the checkpoint; a(N+1) must never re-run or rewrite
+    // the older boundary.
     if (acceptedAssistants.isEmpty ||
-        acceptedAssistants.length % interval != 0) {
+        (acceptedAssistants.length + 1) % interval != 0) {
       return null;
     }
 
-    // Review boundary N only while N+1 is being generated. A reroll of N+1
-    // has the same boundary and is deduplicated by the checkpoint; N+2 must
-    // never re-run or rewrite the older boundary.
     final endIndex = messages.indexWhere(
       (message) => message.id == acceptedAssistants.last.id,
     );
