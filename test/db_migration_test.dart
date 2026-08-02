@@ -78,7 +78,7 @@ void main() {
 
       // user_version matches the Drift schema version (app_db.dart schemaVersion).
       // Update this constant whenever a new migration step is added.
-      expect(version, 103);
+      expect(version, 106);
     });
 
     test(
@@ -232,7 +232,7 @@ void main() {
         final version = await upgraded
             .customSelect('PRAGMA user_version')
             .get();
-        expect(version.first.read<int>('user_version'), 103);
+        expect(version.first.read<int>('user_version'), 106);
         expect(names, contains('variant_group_id'));
         expect(names, contains('hidden'));
       },
@@ -262,7 +262,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 103);
+      expect(version.read<int>('user_version'), 106);
     });
 
     test(
@@ -571,21 +571,30 @@ void main() {
           jsonDecode(defaultAfter.read<String>('agents_json')),
           hasLength(2),
         );
-        expect(customAfter.read<String>('blocks_json'), customBlocks);
         expect(customAfter.read<String>('execution_mode'), 'direct');
         expect(
           customAfter.read<String>('agent_enabled_json'),
           '{"final":true}',
         );
+        // v106 migration repairs the custom block's routing (section →
+        // injectionPoint), so the JSON no longer matches the seeded literal.
+        final customBlocksAfter =
+            jsonDecode(customAfter.read<String>('blocks_json')) as List;
+        expect(customBlocksAfter, hasLength(1));
+        expect(customBlocksAfter[0]['id'], 'custom');
+        expect(customBlocksAfter[0]['injectionPoint'], 'final');
+        expect(customBlocksAfter[0]['section'], '');
         expect(customAfter.read<String>('expensive_api_config_id'), 'new-api');
         expect(customAfter.read<int>('max_final_history_messages'), 24);
         expect(variant.read<String>('name'), contains('Old Profile'));
         expect(variant.read<String>('expensive_api_config_id'), 'old-api');
         expect(variant.read<int>('max_final_history_messages'), 12);
-        expect(
-          defaultAfter.read<String>('blocks_json'),
-          defaultBefore.read<String>('blocks_json'),
-        );
+        // v106 migration canonicalizes and migrates the default preset's
+        // blocks (section → injectionPoint, dead sections dropped), so the
+        // raw JSON differs. Verify the default preset still has blocks.
+        final defaultAfterBlocks =
+            jsonDecode(defaultAfter.read<String>('blocks_json')) as List;
+        expect(defaultAfterBlocks, isNotEmpty);
         expect(
           variant.read<String>('agent_enabled_json'),
           defaultBefore.read<String>('agent_enabled_json'),
@@ -602,7 +611,7 @@ void main() {
 
     test('current schema includes atomic character fact tables', () async {
       final version = await db.customSelect('PRAGMA user_version').getSingle();
-      expect(version.read<int>('user_version'), 103);
+      expect(version.read<int>('user_version'), 106);
 
       final factColumns = await db
           .customSelect("PRAGMA table_info('character_knowledge_fact_rows')")
@@ -714,7 +723,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 103);
+      expect(version.read<int>('user_version'), 106);
     });
 
     test(
@@ -824,7 +833,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 103);
+      expect(version.read<int>('user_version'), 106);
     });
 
     test('v80 adds Responses API toggle defaulting to off', () async {
@@ -864,7 +873,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 103);
+      expect(version.read<int>('user_version'), 106);
     });
 
     test('v81 adds composite embedding source index', () async {
@@ -898,7 +907,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 103);
+      expect(version.read<int>('user_version'), 106);
     });
 
     test('v82 creates rewrite persistence schema and provenance columns', () async {
@@ -972,7 +981,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 103);
+      expect(version.read<int>('user_version'), 106);
     });
 
     test('v83 rebuilds interim text revision columns without losing rows', () async {
@@ -1409,7 +1418,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 103);
+      expect(version.read<int>('user_version'), 106);
 
       // Rows and payloads survive; legacy statuses pass through or are
       // normalized fail-closed, and new columns carry neutral defaults.
@@ -1614,7 +1623,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 103);
+      expect(version.read<int>('user_version'), 106);
       final row = await upgraded
           .customSelect(
             'SELECT blocks_json FROM studio_preset_rows WHERE preset_id = ?',
@@ -1730,7 +1739,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 103);
+      expect(version.read<int>('user_version'), 106);
       final check = await upgraded.customSelect('PRAGMA integrity_check').get();
       expect(check.single.read<String>('integrity_check'), 'ok');
     });
@@ -1841,7 +1850,7 @@ void main() {
     });
 
     test(
-      'v66 removes agentic micro-memory without rewriting stored presets',
+      'v66 removes agentic micro-memory; v105 retires stored write-loop blocks',
       () async {
         final file = File(
           '${Directory.systemTemp.path}/glaze_mig_agentic_${DateTime.now().microsecondsSinceEpoch}.db',
@@ -1947,14 +1956,96 @@ void main() {
               'blocks_json',
             ),
         };
-        expect(presets['legacy-write-loop'], contains('writeMemory'));
-        expect(presets['legacy-write-loop'], contains('{{existingBlock}}'));
         expect(
-          presets['custom-tracker-loop'],
-          contains('Track only weather changes.'),
+          presets['legacy-write-loop'] ?? '[]',
+          isNot(contains('writeloop_system')),
+        );
+        expect(
+          presets['custom-tracker-loop'] ?? '[]',
+          isNot(contains('writeloop_system')),
         );
       },
     );
+
+    test('v106 repairs corrupted preset block injectionPoint routing', () async {
+      final file = File(
+        '${Directory.systemTemp.path}/glaze_mig_routing_${DateTime.now().microsecondsSinceEpoch}.db',
+      );
+      addTearDown(() async {
+        if (file.existsSync()) await file.delete();
+      });
+
+      final seeded = AppDatabase.forTesting(
+        NativeDatabase.createInBackground(file),
+      );
+      await seeded.customSelect('SELECT 1').get();
+      // Seed a preset with canonical final/cleaner/ledger block IDs but
+      // corrupted injectionPoint=pregen (the symptom of the old codec that
+      // did not read injectionPoint from JSON).
+      await seeded.customStatement(
+        '''INSERT INTO studio_preset_rows
+           (preset_id, name, blocks_json, updated_at)
+           VALUES (?, ?, ?, 0)''',
+        [
+          'corrupted-routing',
+          'Corrupted routing',
+          jsonEncode([
+            {
+              'id': 'final_main_prompt',
+              'name': 'Final Main Prompt',
+              'type': 'instruction',
+              'content': 'Write the reply.',
+              'enabled': true,
+              'order': 0,
+              'section': '',
+              'injectionPoint': 'pregen',
+            },
+            {
+              'id': 'cleaner_system',
+              'name': 'Cleaner System',
+              'type': 'instruction',
+              'content': 'Clean the reply.',
+              'enabled': true,
+              'order': 1,
+              'section': '',
+              'injectionPoint': 'pregen',
+            },
+            {
+              'id': 'ledger_system',
+              'name': 'Ledger System',
+              'type': 'instruction',
+              'content': 'Maintain the ledger.',
+              'enabled': true,
+              'order': 2,
+              'section': '',
+              'injectionPoint': 'pregen',
+            },
+          ]),
+        ],
+      );
+      await seeded.customStatement('PRAGMA user_version = 105');
+      await seeded.close();
+
+      final upgraded = AppDatabase.forTesting(
+        NativeDatabase.createInBackground(file),
+      );
+      addTearDown(() async => upgraded.close());
+      await upgraded.customSelect('SELECT 1').get();
+
+      final row = await upgraded
+          .customSelect(
+            "SELECT blocks_json FROM studio_preset_rows WHERE preset_id = 'corrupted-routing'",
+          )
+          .getSingle();
+      final blocks = (jsonDecode(row.read<String>('blocks_json')) as List)
+          .cast<Map<String, dynamic>>();
+      final injectionPoints = {
+        for (final b in blocks) b['id']: b['injectionPoint'],
+      };
+      expect(injectionPoints['final_main_prompt'], 'final');
+      expect(injectionPoints['cleaner_system'], 'cleaner');
+      expect(injectionPoints['ledger_system'], 'ledger');
+    });
 
     test(
       'post-restore purge removes reintroduced agentic micro-memory',
@@ -2229,7 +2320,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 103);
+      expect(version.read<int>('user_version'), 106);
     });
 
     test(

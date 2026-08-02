@@ -50,6 +50,7 @@ void main() {
           onToggle: (_, _) {},
           onEdit: (block) => edited = block,
           onDelete: (_) {},
+          onToggleGroup: (_) {},
         ),
       ),
     );
@@ -95,6 +96,7 @@ void main() {
           onToggle: (_, _) => toggled = true,
           onEdit: (_) {},
           onDelete: (_) {},
+          onToggleGroup: (_) {},
         ),
       ),
     );
@@ -105,5 +107,94 @@ void main() {
     final toggle = tester.widget<Switch>(find.byType(Switch));
     expect(toggle.onChanged, isNull);
     expect(toggled, isFalse);
+  });
+
+  testWidgets('CoT group shows a whole-group switch', (tester) async {
+    const blocks = [
+      StudioPresetBlock(
+        id: 'cot_header_group_open',
+        title: 'Opening tag',
+        content: '<loomcot>',
+        order: 0,
+      ),
+      StudioPresetBlock(
+        id: 'cot_header',
+        title: '━ CoT Selections',
+        enabled: true,
+        order: 1,
+      ),
+      StudioPresetBlock(
+        id: 'cot_none',
+        title: 'No CoT',
+        enabled: true,
+        order: 2,
+      ),
+      StudioPresetBlock(
+        id: 'cot_full',
+        title: 'Full CoT',
+        enabled: false,
+        order: 3,
+      ),
+      StudioPresetBlock(
+        id: 'cot_header_group_close',
+        title: 'Closing tag',
+        content: '</loomcot>',
+        order: 4,
+      ),
+    ];
+    final group = groupStudioPresetBlocks(blocks).single;
+    var groupToggled = false;
+
+    await tester.pumpWidget(
+      _host(
+        StudioBlockGroupRow(
+          group: group,
+          dragIndex: 0,
+          isLast: true,
+          onSelectExclusive: (_) {},
+          onToggle: (_, _) {},
+          onEdit: (_) {},
+          onDelete: (_) {},
+          onToggleGroup: (_) => groupToggled = true,
+        ),
+      ),
+    );
+
+    // The CoT group carries a whole-group switch, unlike other exclusive
+    // groups which only expose per-child radios.
+    expect(find.byType(Switch), findsOneWidget);
+    await tester.tap(find.byType(Switch));
+    await tester.pumpAndSettle();
+    expect(groupToggled, isTrue);
+  });
+
+  testWidgets('non-CoT exclusive group has no whole-group switch', (tester) async {
+    const blocks = [
+      StudioPresetBlock(id: 'pov_header', title: '━ Point-of-View', order: 0),
+      StudioPresetBlock(
+        id: 'third',
+        title: 'Third Person',
+        enabled: true,
+        order: 1,
+      ),
+    ];
+    final group = groupStudioPresetBlocks(blocks).single;
+
+    await tester.pumpWidget(
+      _host(
+        StudioBlockGroupRow(
+          group: group,
+          dragIndex: 0,
+          isLast: true,
+          onSelectExclusive: (_) {},
+          onToggle: (_, _) {},
+          onEdit: (_) {},
+          onDelete: (_) {},
+          onToggleGroup: (_) {},
+        ),
+      ),
+    );
+
+    expect(find.byType(Switch), findsNothing);
   });
 }

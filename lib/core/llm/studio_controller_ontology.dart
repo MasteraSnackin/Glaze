@@ -175,7 +175,7 @@ class StudioControllerOntology {
     ),
     StudioControllerSpec(
       id: 'ledger',
-      name: 'Трекер',
+      name: 'Studio Ledger',
       purpose: 'Track session-level state: present characters, location, time, unresolved threads, and key facts — a canonical source of truth for continuity.',
       outputContract: 'Output a compact session-state delta (present now, location, time, facts, threads). Used by Continuity and available as {{studio_session_state}}.',
       laneOwns: 'session-level canonical state: who is present, where, when, what facts are established, and which threads are open.',

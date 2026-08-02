@@ -79,7 +79,7 @@ All schema changes go in `AppDatabase.migration` in `app_db.dart`.
 Bump the schema version and add a `from → to` migration step.
 Never modify existing column types without a migration.
 
-Current version: **103**
+Current version: **106**
 
 Migration history:
 - v18: added `characters.picksHash`
@@ -169,6 +169,13 @@ Migration history:
   `agentic` for rows in `studio_preset_rows`, whose id spaces are independent,
   so it must be part of the key. Deleting a preset must also drop its member
   rows (`PresetFolderRepo.deleteMembersForPreset`).
+- v105: removes the retired default Studio write-loop block (`writeloop_system`)
+  from stored presets. Idempotent — presets without the block are skipped.
+- v106: repairs the `injectionPoint` field of stored preset blocks whose routing
+  was corrupted by the canonical codec shipped in nightly #197 (which did not
+  read `injectionPoint` from JSON, defaulting every block to `pregen`). Runs
+  `migrateStudioPresetBlocksToV2` on each preset's blocks and writes the
+  repaired JSON back. Idempotent — presets that were never affected are skipped.
 
 ---
 

@@ -68,7 +68,7 @@ class _AgenticOperationsLogDialogState
                   ),
                   Tab(
                     icon: Icon(Icons.track_changes_outlined, size: 16),
-                    text: 'Tracker values',
+                    text: 'Studio Ledger',
                   ),
                   Tab(
                     icon: Icon(Icons.warning_amber_outlined, size: 16),

@@ -31,8 +31,8 @@ String studioInjectionPointLabel(String point) => switch (point) {
 ///
 /// `specificAgent` has none: those blocks are routed per block through
 /// `targetAgentId`, not to one fixed stage. The two post-processing agents each
-/// own their own point (`cleaner` → Post Clean, `ledger` → Трекер) even though
-/// they share a phase.
+/// own their own point (`cleaner` → Post Clean, `ledger` → Studio Ledger) even
+/// though they share a phase.
 List<StudioControllerSpec> studioAgentsForInjectionPoint(String point) {
   return switch (point) {
     'pregen' => [

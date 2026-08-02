@@ -58,6 +58,101 @@ void main() {
     expect(restored?.name, preset.name);
   });
 
+  test('round-trips blocks in final, cleaner, and ledger sections', () async {
+    const preset = StudioPreset(
+      id: 'pipeline-sections',
+      name: 'Pipeline sections',
+      agents: [],
+      blocks: [
+        StudioPresetBlock(
+          id: 'final_main_prompt',
+          section: '',
+          injectionPoint: 'final',
+        ),
+        StudioPresetBlock(
+          id: 'cleaner_system',
+          section: '',
+          injectionPoint: 'cleaner',
+        ),
+        StudioPresetBlock(
+          id: 'ledger_system',
+          section: '',
+          injectionPoint: 'ledger',
+        ),
+        StudioPresetBlock(
+          id: 'ledger_reconciliation_prompt',
+          section: '',
+          injectionPoint: 'ledger',
+        ),
+      ],
+    );
+
+    await repo.upsert(preset);
+    final restored = await repo.getById(preset.id);
+
+    expect(restored?.blocks.map((block) => block.injectionPoint), [
+      'final',
+      'cleaner',
+      'ledger',
+      'ledger',
+    ]);
+  });
+
+  test('repairs pipeline routing already corrupted in stored JSON', () async {
+    await db
+        .into(db.studioPresetRows)
+        .insert(
+          StudioPresetRowsCompanion.insert(
+            presetId: 'corrupted-routing',
+            name: 'Corrupted routing',
+            blocksJson: Value(
+              jsonEncode([
+                {
+                  'id': 'final_main_prompt',
+                  'type': 'instruction',
+                  'section': '',
+                  'injectionPoint': 'pregen',
+                },
+                {
+                  'id': 'cleaner_system',
+                  'type': 'instruction',
+                  'section': '',
+                  'injectionPoint': 'final',
+                },
+                {
+                  'id': 'ledger_system',
+                  'type': 'instruction',
+                  'section': '',
+                  'injectionPoint': 'pregen',
+                },
+                {
+                  'id': 'ledger_reconciliation_prompt',
+                  'type': 'instruction',
+                  'section': '',
+                  'injectionPoint': 'final',
+                },
+                {
+                  'id': 'custom',
+                  'type': 'instruction',
+                  'section': '',
+                  'injectionPoint': 'final',
+                },
+              ]),
+            ),
+          ),
+        );
+
+    final restored = await repo.getById('corrupted-routing');
+
+    expect(restored?.blocks.map((block) => block.injectionPoint), [
+      'final',
+      'cleaner',
+      'ledger',
+      'ledger',
+      'final',
+    ]);
+  });
+
   test('reads legacy block rows and upserts canonical JSON', () async {
     await db
         .into(db.studioPresetRows)
@@ -119,6 +214,41 @@ void main() {
         expect(restored?.blocks.single.type, StudioBlockType.history);
         expect(restored?.agents.single.controllerId, 'continuity');
       }
+    },
+  );
+
+  test(
+    'an empty blocks upsert does not erase an existing non-empty preset',
+    () async {
+      const preset = StudioPreset(
+        id: 'guard-target',
+        name: 'Guard target',
+        blocks: [
+          StudioPresetBlock(
+            id: 'final_main_prompt',
+            section: '',
+            injectionPoint: 'final',
+          ),
+          StudioPresetBlock(
+            id: 'cleaner_system',
+            section: '',
+            injectionPoint: 'cleaner',
+          ),
+        ],
+      );
+      await repo.upsert(preset);
+
+      // A later save arrives with an empty block list (e.g. a corrupt decode).
+      await repo.upsert(
+        const StudioPreset(id: 'guard-target', name: 'Guard target'),
+      );
+
+      final restored = await repo.getById('guard-target');
+      expect(restored?.blocks, hasLength(2));
+      expect(restored?.blocks.map((block) => block.injectionPoint), [
+        'final',
+        'cleaner',
+      ]);
     },
   );
 }

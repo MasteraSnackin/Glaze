@@ -62,10 +62,10 @@ class _AgenticTrackerValuesTabState
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Purge tracker values?'),
+        title: const Text('Purge Studio Ledger values?'),
         content: const Text(
-          'This permanently deletes all tracker rows and snapshots for this '
-          'session. Use this to clear orphaned trackers left by deleted '
+          'This permanently deletes all ledger rows and snapshots for this '
+          'session. Use this to clear orphaned entries left by deleted '
           'messages or a Clear chat. The action cannot be undone.',
         ),
         actions: [
@@ -113,7 +113,7 @@ class _AgenticTrackerValuesTabState
             child: Row(
               children: [
                 Text(
-                  '${trackers.length} tracker${trackers.length == 1 ? '' : 's'}',
+                  '${trackers.length} ledger value${trackers.length == 1 ? '' : 's'}',
                   style: TextStyle(
                     color: context.cs.onSurfaceVariant,
                     fontSize: 12,
@@ -144,7 +144,7 @@ class _AgenticTrackerValuesTabState
                   child: Padding(
                     padding: const EdgeInsets.all(24),
                     child: Text(
-                      'No tracker values recorded yet for this session.\n\n'
+                      'No Studio Ledger values recorded yet for this session.\n\n'
                       'Studio Ledger records accepted session state such as '
                       'scene, world, relationships, and character context. '
                       'Manual canon overrides and locks can also appear here.',
@@ -223,10 +223,10 @@ class _TrackerTile extends ConsumerWidget {
             maxLines: 8,
             minLines: 3,
             style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
-            decoration: const InputDecoration(
-              border: OutlineInputBorder(),
-              hintText: 'Tracker value',
-            ),
+          decoration: const InputDecoration(
+            border: OutlineInputBorder(),
+            hintText: 'Ledger value',
+          ),
           ),
         ),
         actions: [
@@ -260,10 +260,10 @@ class _TrackerTile extends ConsumerWidget {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('Delete tracker?'),
+        title: Text('Delete ledger value?'),
         content: Text(
           'Delete "${tracker.name}"? This removes the row from the live '
-          'tracker state. The action cannot be undone.',
+          'ledger state. The action cannot be undone.',
         ),
         actions: [
           TextButton(
@@ -421,7 +421,7 @@ class _TrackerTile extends ConsumerWidget {
                 )
               else
                 Text(
-                  '(empty — the tracker exists but has no value yet)',
+                  '(empty — the ledger entry exists but has no value yet)',
                   style: tt.bodySmall?.copyWith(
                     color: cs.onSurfaceVariant,
                     fontStyle: FontStyle.italic,

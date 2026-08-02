@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../models/studio_preset_block_migration.dart';
 import '../models/studio_preset_codec.dart';
 import '../models/studio_agent_codec.dart';
 import '../models/studio_config.dart';
@@ -72,7 +73,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 103;
+  int get schemaVersion => 106;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -1987,6 +1988,12 @@ class AppDatabase extends _$AppDatabase {
           await m.createTable(presetFolderMembers);
         }
       }
+      if (from < 105) {
+        await _removeRetiredWriteLoopBlocks();
+      }
+      if (from < 106) {
+        await _repairPresetBlockRouting();
+      }
     },
   );
 
@@ -2672,10 +2679,71 @@ class AppDatabase extends _$AppDatabase {
     }
   }
 
-  /// Retains legacy prompt blocks as inert user preset JSON. The generic
-  /// write-loop has no runtime consumer, and migration must not rewrite user
-  /// customizations while upgrading old databases.
+  /// Historical no-op kept for migrations that already call it.
   Future<void> _replaceLegacyWriteLoopPrompts() async {}
+
+  /// Removes only the retired default write-loop seed from every stored preset.
+  /// Matches by canonical id only — never by title, so a user-authored block
+  /// with a similar name is never touched. Skips rows that have no matching
+  /// block so unrelated presets are not rewritten.
+  Future<void> _removeRetiredWriteLoopBlocks() async {
+    const retiredId = 'writeloop_system';
+    final rows = await customSelect(
+      'SELECT preset_id, blocks_json FROM studio_preset_rows',
+    ).get();
+    for (final row in rows) {
+      try {
+        final raw = jsonDecode(row.read<String>('blocks_json')) as List;
+        if (!raw.any((entry) => entry is Map && entry['id'] == retiredId)) {
+          continue;
+        }
+        final kept = raw
+            .whereType<Map<String, dynamic>>()
+            .where((block) => block['id'] != retiredId)
+            .toList(growable: false);
+        await customStatement(
+          'UPDATE studio_preset_rows SET blocks_json = ? WHERE preset_id = ?',
+          [jsonEncode(kept), row.read<String>('preset_id')],
+        );
+      } catch (error) {
+        debugPrint('Migration 105 (remove retired write-loop) failed: $error');
+      }
+    }
+  }
+
+  /// v104 — repairs the `injectionPoint` field of stored preset blocks whose
+  /// routing was corrupted by the canonical codec shipped in nightly #197
+  /// (which did not read `injectionPoint` from JSON, defaulting every block to
+  /// `pregen`). The read-time repair in `migrateStudioPresetBlocksToV2` already
+  /// fixes this in memory; this migration persists the fix so the stored JSON
+  /// matches what the editor displays.
+  Future<void> _repairPresetBlockRouting() async {
+    final rows = await customSelect(
+      'SELECT preset_id, blocks_json FROM studio_preset_rows',
+    ).get();
+    for (final row in rows) {
+      try {
+        final rawBlocks = jsonDecode(row.read<String>('blocks_json')) as List;
+        final blocks = rawBlocks
+            .whereType<Map<String, dynamic>>()
+            .map((json) => StudioPresetCodec.canonicalizeBlock(json).block)
+            .toList();
+        final migrated = migrateStudioPresetBlocksToV2(blocks);
+        if (identical(migrated, blocks)) continue;
+        await customStatement(
+          'UPDATE studio_preset_rows SET blocks_json = ? WHERE preset_id = ?',
+          [
+            jsonEncode(migrated.map((b) => b.toJson()).toList()),
+            row.read<String>('preset_id'),
+          ],
+        );
+      } catch (error) {
+        debugPrint(
+          'Migration 106 (repair preset block routing) failed: $error',
+        );
+      }
+    }
+  }
 }
 
 final class _StudioRuntimePayload {

@@ -217,6 +217,16 @@ class StudioPresetEditorBodyState
     );
   }
 
+  Future<void> _toggleGroup(StudioPresetBlockGroup group, bool enabled) async {
+    final preset = _preset;
+    if (preset == null) return;
+    await _persistNow(
+      preset.copyWith(
+        blocks: toggleStudioPresetBlockGroup(preset.blocks, group, enabled),
+      ),
+    );
+  }
+
   void _onBlockChanged(StudioPresetBlock updated) {
     final preset = _preset;
     if (preset == null) return;
@@ -319,8 +329,7 @@ class StudioPresetEditorBodyState
     showStudioPresetRename(
       context,
       preset: preset,
-      onRename: (name) =>
-          unawaited(_persistNow(preset.copyWith(name: name))),
+      onRename: (name) => unawaited(_persistNow(preset.copyWith(name: name))),
     );
   }
 
@@ -470,6 +479,7 @@ class StudioPresetEditorBodyState
       onEdit: _openBlock,
       onToggle: _toggleBlock,
       onSelectExclusive: _selectExclusive,
+      onToggleGroup: _toggleGroup,
       onDelete: _deleteBlock,
       onToggleAgent: _toggleAgent,
     );

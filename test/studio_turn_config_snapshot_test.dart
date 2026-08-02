@@ -350,4 +350,64 @@ void main() {
     expect(resolved.endpoint, oldApi.endpoint);
     expect(resolved.model, 'snapshot-model');
   });
+
+  test(
+    'resolver disables legacy agents whose phase mismatches their spec',
+    () async {
+      // Reproduces the "beauty" agent corruption: a retired pre-gen agent
+      // whose controllerId was re-tagged to post_clean but still carries
+      // phase=pre_generation. Without the phase-mismatch guard the resolver
+      // maps it to the post_clean spec, sees agentEnabled['post_clean']==true,
+      // and lets it run as a pre-generation controller.
+      final resolver = StudioTurnConfigResolver(
+        readPipelineSettings: () => const PipelineSettings(),
+        readStudioFeatureEnabled: () => true,
+        loadApiConfigs: () async {},
+        readApiConfigs: () => const [],
+        readActiveApiConfig: () => null,
+        loadStudioConfig: (_) async =>
+            const StudioConfig(sessionId: 'session', enabled: true),
+        loadActivePresetId: () async => 'preset',
+        loadPreset: (_) async => const StudioPreset(
+          id: 'preset',
+          agentEnabled: {
+            'continuity': false,
+            'agency': false,
+            'dialogue': false,
+            'guard': false,
+            'world': false,
+            'meta': false,
+            'post_clean': true,
+          },
+          agents: [
+            StudioAgent(
+              id: 'agent_continuity',
+              controllerId: 'continuity',
+              order: 0,
+              phase: 'pre_generation',
+            ),
+            StudioAgent(
+              id: 'agent_beauty',
+              controllerId: 'post_clean',
+              order: 7,
+              phase: 'pre_generation',
+            ),
+            StudioAgent(
+              id: 'agent_final',
+              controllerId: 'final',
+              order: 8,
+              phase: 'final',
+            ),
+          ],
+        ),
+        loadDefaultPreset: () async => null,
+      );
+
+      final snapshot = await resolver.resolve('session');
+
+      final ids = snapshot.preset?.agents.map((a) => a.id).toList();
+      expect(ids, isNot(contains('agent_beauty')));
+      expect(ids, contains('agent_final'));
+    },
+  );
 }

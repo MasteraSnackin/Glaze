@@ -66,7 +66,68 @@ class StudioMessageBuilder {
     final messages = <Map<String, dynamic>>[];
 
     for (final block in blocks) {
-      // Empty mode marks a context slot — resolved by its canonical id.
+      // Type-based resolution takes precedence over mode/id. The codec sets
+      // `type` and `contextSlot` correctly for every preset, but block ids vary
+      // (final_chat_history, loom_chat_history, etc.) so id matching alone is
+      // unreliable. Checking type first fixes presets whose context blocks have
+      // a non-empty mode (e.g. Loom Direct sets mode: 'direct' on history).
+      if (block.type == StudioBlockType.history) {
+        final history = isFinalResponse
+            ? StudioHistoryLimiter.limitFinalHistory(
+                context.history,
+                studioPreset,
+                pipelineOverride: finalContextOverride,
+                reasoningHistoryCount: reasoningHistoryCount,
+              )
+            : StudioHistoryLimiter.limitTrackerHistory(
+                context.history,
+                trackerContextOverride > 0
+                    ? trackerContextOverride
+                    : StudioControllerOntology.contextSizeOf(
+                        StudioControllerOntology.specForAgent(agent),
+                      ),
+              );
+        if (isFinalResponse &&
+            (reasoningHistoryCount == -1 || reasoningHistoryCount > 0)) {
+          messages.addAll(
+            _historyWithReasoning(history, reasoningHistoryCount),
+          );
+        } else {
+          messages.addAll(history.map((m) => m.toApiMap()));
+        }
+        continue;
+      }
+      if (block.type == StudioBlockType.context && block.contextSlot != null) {
+        messages.addAll(
+          context.messagesFor(block.contextSlot!).map((m) => m.toApiMap()),
+        );
+        continue;
+      }
+      if (block.type == StudioBlockType.priorBriefs) {
+        if (!isFinalResponse || hasExplicitBriefMacros) continue;
+        final sanitized = priorBriefs
+            .where((brief) => brief.brief.trim().isNotEmpty)
+            .map(
+              (brief) =>
+                  _briefDeduper.sanitizePriorBriefForFinal(brief, studioPreset),
+            )
+            .toList();
+        final deduped = _briefDeduper.dedupePriorBriefs(sanitized);
+        messages.addAll(
+          deduped
+              .where((brief) => brief.brief.trim().isNotEmpty)
+              .map(
+                (brief) => {
+                  'role': _blockExpander.normalizeInstructionRole(block.role),
+                  'content':
+                      'Studio agent brief: ${brief.agentName}\n${brief.brief}',
+                },
+              ),
+        );
+        continue;
+      }
+      // Instruction blocks: resolve by mode, with a legacy id-based fallback
+      // for context slots that still have an empty mode.
       if (block.mode.isEmpty) {
         final blockId = block.id;
         if (blockId == 'static_context') {
@@ -100,9 +161,7 @@ class StudioMessageBuilder {
         } else {
           final slot = _slotForBlockId(blockId);
           if (slot != null) {
-            messages.addAll(
-              context.messagesFor(slot).map((m) => m.toApiMap()),
-            );
+            messages.addAll(context.messagesFor(slot).map((m) => m.toApiMap()));
           } else {
             final content = _blockExpander
                 .expandStudioBlockContent(
@@ -165,8 +224,10 @@ class StudioMessageBuilder {
           final sanitized = priorBriefs
               .where((brief) => brief.brief.trim().isNotEmpty)
               .map(
-                (brief) =>
-                    _briefDeduper.sanitizePriorBriefForFinal(brief, studioPreset),
+                (brief) => _briefDeduper.sanitizePriorBriefForFinal(
+                  brief,
+                  studioPreset,
+                ),
               )
               .toList();
           final deduped = _briefDeduper.dedupePriorBriefs(sanitized);

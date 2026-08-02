@@ -120,6 +120,69 @@ void main() {
     expect(twice, once);
   });
 
+  test('canonical blocks keep their pipeline section on round-trip', () {
+    const source = StudioPreset(
+      id: 'pipeline-sections',
+      agents: [],
+      blocks: [
+        StudioPresetBlock(
+          id: 'final_main_prompt',
+          section: '',
+          injectionPoint: 'final',
+          mode: 'direct',
+        ),
+        StudioPresetBlock(
+          id: 'cleaner_system',
+          section: '',
+          injectionPoint: 'cleaner',
+          mode: 'direct',
+        ),
+        StudioPresetBlock(
+          id: 'ledger_system',
+          section: '',
+          injectionPoint: 'ledger',
+          mode: 'direct',
+        ),
+        StudioPresetBlock(
+          id: 'ledger_reconciliation_prompt',
+          section: '',
+          injectionPoint: 'ledger',
+          mode: 'agentResponse',
+          sourceAgentId: 'ledger',
+          groupBoundary: 'close',
+          isStatic: true,
+        ),
+      ],
+    );
+
+    final restored = StudioPresetCodec.decodePreset(
+      Map<String, dynamic>.from(jsonDecode(jsonEncode(source.toJson())) as Map),
+    ).preset;
+
+    expect(restored.blocks.map((block) => block.injectionPoint), [
+      'final',
+      'cleaner',
+      'ledger',
+      'ledger',
+    ]);
+    expect(restored.blocks.last.mode, 'agentResponse');
+    expect(restored.blocks.last.sourceAgentId, 'ledger');
+    expect(restored.blocks.last.groupBoundary, 'close');
+    expect(restored.blocks.last.isStatic, isTrue);
+  });
+
+  test('canonical injection point does not require a legacy section', () {
+    final block = StudioPresetCodec.canonicalizeBlock({
+      'id': 'ledger_reconciliation_prompt',
+      'type': 'instruction',
+      'injectionPoint': 'ledger',
+      'mode': 'direct',
+    }).block;
+
+    expect(block.section, isEmpty);
+    expect(block.injectionPoint, 'ledger');
+  });
+
   test('canonicalizes imported agents and defaults runtime fields', () {
     final decoded = StudioPresetCodec.decodePreset({
       'id': 'imported',

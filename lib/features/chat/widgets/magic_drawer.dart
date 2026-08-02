@@ -27,6 +27,7 @@ import '../../../shared/widgets/glaze_toast.dart';
 import '../../image_gen/widgets/image_gen_sheet.dart';
 import '../chat_actions_service.dart';
 import '../chat_provider.dart';
+import '../../card_rewrite/card_rewriter_studio_sheet.dart';
 import '../../character_list/character_detail_screen.dart';
 import '../../lorebooks/lorebook_list_screen.dart';
 import '../../personas/persona_list_screen.dart';
@@ -169,6 +170,12 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
       id: 'agent-ops',
       label: 'Agentic Ops',
       icon: Icons.smart_toy_outlined,
+      category: MagicDrawerCategory.tools,
+    ),
+    MagicDrawerItemDef(
+      id: 'card-rewriter',
+      label: 'magic_card_rewriter'.tr(),
+      icon: Icons.auto_fix_high_outlined,
       category: MagicDrawerCategory.tools,
     ),
   ];
@@ -543,9 +550,27 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
         case 'agent-ops':
           await _showAgentOpsLog();
           break;
+        case 'card-rewriter':
+          await _showCardRewriter();
+          break;
       }
     } finally {
       if (mounted) await _refreshStats();
+    }
+  }
+
+  Future<void> _showCardRewriter() async {
+    final session = ref.read(chatProvider(widget.charId)).value?.session;
+    if (session == null) return;
+    final route = await CardRewriterStudioSheet.show(
+      context,
+      charId: widget.charId,
+      sessionId: session.id,
+    );
+    if (!mounted) return;
+    if (route != null && route.isNotEmpty) {
+      widget.onClose?.call();
+      context.go(route);
     }
   }
 

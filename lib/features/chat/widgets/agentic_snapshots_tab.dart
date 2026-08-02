@@ -90,9 +90,9 @@ class _AgenticSnapshotsTabState extends ConsumerState<AgenticSnapshotsTab> {
                     child: Text(
                       'No snapshots recorded yet for this session.\n\n'
                       'Each ledger run writes a per-message snapshot of the '
-                      'tracker state. Committed snapshots are the accepted '
-                      'base for the next generation; tentative ones are '
-                      'pending the next user turn.',
+                      'Studio Ledger state. Committed snapshots are the '
+                      'accepted base for the next generation; tentative ones '
+                      'are pending the next user turn.',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         color: context.cs.onSurfaceVariant,
@@ -139,7 +139,7 @@ class _SnapshotTile extends ConsumerWidget {
         title: const Text('Rollback to here?'),
         content: Text(
           'This deletes snapshots for message "${snapshot.messageId}" and '
-          'restores the live tracker rows from the previous committed '
+          'restores the live ledger rows from the previous committed '
           'snapshot. The read path falls back to that snapshot as the '
           'accepted base for the next generation.\n\n'
           'The action cannot be undone.',
@@ -220,7 +220,7 @@ class _SnapshotTile extends ConsumerWidget {
       ),
       subtitle: Text(
         'swipe ${snapshot.swipeId} · agent ${snapshot.agentSwipeId} · '
-        '${trackers.length} trackers · '
+         '${trackers.length} ledger values · '
         '${DateTime.fromMillisecondsSinceEpoch(snapshot.createdAt * 1000).toIso8601String()}',
         style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant, fontSize: 11),
       ),
@@ -242,7 +242,7 @@ class _SnapshotTile extends ConsumerWidget {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             child: Text(
-              '(no trackers in this snapshot)',
+              '(no ledger values in this snapshot)',
               style: tt.bodySmall?.copyWith(
                 color: cs.onSurfaceVariant,
                 fontStyle: FontStyle.italic,

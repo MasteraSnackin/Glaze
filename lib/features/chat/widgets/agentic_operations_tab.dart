@@ -81,8 +81,8 @@ class _AgenticOperationsTabState extends ConsumerState<AgenticOperationsTab> {
                     child: Text(
                       'No agentic operations recorded yet.\n\n'
                       'Operations appear here when the POST-cleaner, Studio '
-                      'Ledger, tracker agents, or agentic memory search/write '
-                      'tools are invoked during generation.',
+                      'Ledger, pre-generation controllers, or agentic memory '
+                      'search/write tools are invoked during generation.',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         color: context.cs.onSurfaceVariant,

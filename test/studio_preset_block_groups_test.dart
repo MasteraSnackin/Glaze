@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/models/studio_config.dart';
 import 'package:glaze_flutter/core/models/studio_preset_block_groups.dart';
+import 'package:glaze_flutter/core/models/studio_preset_block_migration.dart';
 
 void main() {
   const blocks = [
@@ -149,6 +150,157 @@ void main() {
     );
     expect(
       updated.firstWhere((block) => block.id == 'directional').enabled,
+      isTrue,
+    );
+  });
+
+  test('merges Lumia definition and modifiers into one section', () {
+    const lumiaBlocks = [
+      StudioPresetBlock(
+        id: 'lumia_definition',
+        title: '━ Lumia Definition',
+        order: 0,
+      ),
+      StudioPresetBlock(
+        id: 'lumia_definition_group_open',
+        groupBoundary: 'open',
+        order: 1,
+      ),
+      StudioPresetBlock(id: 'lumia_choice', title: 'Lumia', order: 2),
+      StudioPresetBlock(
+        id: 'lumia_definition_group_close',
+        groupBoundary: 'close',
+        order: 3,
+      ),
+      StudioPresetBlock(
+        id: 'lumia_modifiers',
+        title: '━ Lumia Modifiers',
+        order: 4,
+      ),
+      StudioPresetBlock(id: 'lumia_modifier', title: 'Warm tone', order: 5),
+      StudioPresetBlock(
+        id: 'lumia_modifiers_group_close',
+        groupBoundary: 'close',
+        order: 6,
+      ),
+    ];
+
+    final migrated = migrateStudioPresetBlocksToV2(lumiaBlocks);
+    final group = groupStudioPresetBlocks(migrated).single;
+
+    expect(group.header?.title, '━ Lumia');
+    expect(group.children.map((block) => block.id), [
+      'lumia_choice',
+      'lumia_modifier',
+    ]);
+    expect(group.openingBoundary?.id, 'lumia_definition_group_open');
+    expect(group.closingBoundary?.id, 'lumia_definition_group_close');
+    expect(
+      migrated.map((block) => block.id),
+      isNot(contains('lumia_modifiers')),
+    );
+  });
+
+  test(
+    'standalone cleaner toggles stay independent across sequential edits',
+    () {
+      const cleanerBlocks = [
+        StudioPresetBlock(
+          id: 'cleaner_jailbreak',
+          title: 'Cleaner jailbreak',
+          injectionPoint: 'cleaner',
+          order: 0,
+        ),
+        StudioPresetBlock(
+          id: 'cleaner_system',
+          title: 'Cleaner system prompt',
+          injectionPoint: 'cleaner',
+          order: 1,
+        ),
+        StudioPresetBlock(
+          id: 'cleaner_aiism',
+          title: 'AI-ism cleanup',
+          enabled: false,
+          injectionPoint: 'cleaner',
+          order: 2,
+        ),
+      ];
+
+      final first = updateStudioPresetBlockRespectingGroups(
+        cleanerBlocks,
+        cleanerBlocks[0].copyWith(enabled: true),
+      );
+      final second = updateStudioPresetBlockRespectingGroups(
+        first,
+        first[1].copyWith(enabled: true),
+      );
+
+      expect(second[0].enabled, isTrue);
+      expect(second[1].enabled, isTrue);
+      expect(second[2].enabled, isFalse);
+    },
+  );
+
+  test('cross-section blocks do not join an exclusive group', () {
+    const interleaved = [
+      StudioPresetBlock(id: 'final_before', title: 'Final before', order: 0),
+      StudioPresetBlock(
+        id: 'cleaner_jailbreak',
+        title: 'Cleaner jailbreak',
+        injectionPoint: 'cleaner',
+        order: 1,
+      ),
+      StudioPresetBlock(
+        id: 'cot_header',
+        title: '━ CoT Selections',
+        injectionPoint: 'final',
+        order: 2,
+      ),
+      StudioPresetBlock(
+        id: 'cot_compact',
+        title: 'Compact Planning',
+        injectionPoint: 'final',
+        order: 3,
+      ),
+      StudioPresetBlock(
+        id: 'cleaner_system',
+        title: 'Cleaner system prompt',
+        injectionPoint: 'cleaner',
+        order: 4,
+      ),
+      StudioPresetBlock(
+        id: 'cleaner_aiism',
+        title: 'AI-ism cleanup',
+        enabled: true,
+        injectionPoint: 'cleaner',
+        order: 5,
+      ),
+      StudioPresetBlock(
+        id: 'cleaner_beauty',
+        title: 'Beauty post-cleaner',
+        enabled: true,
+        injectionPoint: 'cleaner',
+        order: 6,
+      ),
+    ];
+
+    final enabled = updateStudioPresetBlockRespectingGroups(
+      interleaved,
+      interleaved
+          .firstWhere((block) => block.id == 'cleaner_system')
+          .copyWith(enabled: true),
+    );
+
+    expect(
+      enabled.firstWhere((block) => block.id == 'cleaner_system').enabled,
+      isTrue,
+    );
+    expect(
+      enabled.firstWhere((block) => block.id == 'cleaner_aiism').enabled,
+      isTrue,
+    );
+    expect(
+      enabled.firstWhere((block) => block.id == 'cleaner_beauty').enabled,
       isTrue,
     );
   });
