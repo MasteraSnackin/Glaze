@@ -224,6 +224,12 @@ List<StudioPresetBlockGroup> groupStudioPresetBlocks(
 
   for (final block in sorted) {
     if (isStudioGroupBoundary(block)) continue;
+    // Stored block order can interleave stages after older routing repairs.
+    // A visual group belongs to exactly one injection point; never let an
+    // exclusive `final` group swallow adjacent cleaner/ledger blocks.
+    if (header != null && block.injectionPoint != header!.injectionPoint) {
+      flush();
+    }
     final startsTenseSubgroup =
         header != null &&
         _isPointOfViewHeader(header!.title) &&

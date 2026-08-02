@@ -201,6 +201,110 @@ void main() {
     );
   });
 
+  test(
+    'standalone cleaner toggles stay independent across sequential edits',
+    () {
+      const cleanerBlocks = [
+        StudioPresetBlock(
+          id: 'cleaner_jailbreak',
+          title: 'Cleaner jailbreak',
+          injectionPoint: 'cleaner',
+          order: 0,
+        ),
+        StudioPresetBlock(
+          id: 'cleaner_system',
+          title: 'Cleaner system prompt',
+          injectionPoint: 'cleaner',
+          order: 1,
+        ),
+        StudioPresetBlock(
+          id: 'cleaner_aiism',
+          title: 'AI-ism cleanup',
+          enabled: false,
+          injectionPoint: 'cleaner',
+          order: 2,
+        ),
+      ];
+
+      final first = updateStudioPresetBlockRespectingGroups(
+        cleanerBlocks,
+        cleanerBlocks[0].copyWith(enabled: true),
+      );
+      final second = updateStudioPresetBlockRespectingGroups(
+        first,
+        first[1].copyWith(enabled: true),
+      );
+
+      expect(second[0].enabled, isTrue);
+      expect(second[1].enabled, isTrue);
+      expect(second[2].enabled, isFalse);
+    },
+  );
+
+  test('cross-section blocks do not join an exclusive group', () {
+    const interleaved = [
+      StudioPresetBlock(id: 'final_before', title: 'Final before', order: 0),
+      StudioPresetBlock(
+        id: 'cleaner_jailbreak',
+        title: 'Cleaner jailbreak',
+        injectionPoint: 'cleaner',
+        order: 1,
+      ),
+      StudioPresetBlock(
+        id: 'cot_header',
+        title: '━ CoT Selections',
+        injectionPoint: 'final',
+        order: 2,
+      ),
+      StudioPresetBlock(
+        id: 'cot_compact',
+        title: 'Compact Planning',
+        injectionPoint: 'final',
+        order: 3,
+      ),
+      StudioPresetBlock(
+        id: 'cleaner_system',
+        title: 'Cleaner system prompt',
+        injectionPoint: 'cleaner',
+        order: 4,
+      ),
+      StudioPresetBlock(
+        id: 'cleaner_aiism',
+        title: 'AI-ism cleanup',
+        enabled: true,
+        injectionPoint: 'cleaner',
+        order: 5,
+      ),
+      StudioPresetBlock(
+        id: 'cleaner_beauty',
+        title: 'Beauty post-cleaner',
+        enabled: true,
+        injectionPoint: 'cleaner',
+        order: 6,
+      ),
+    ];
+
+    final enabled = updateStudioPresetBlockRespectingGroups(
+      interleaved,
+      interleaved
+          .firstWhere((block) => block.id == 'cleaner_system')
+          .copyWith(enabled: true),
+    );
+
+    expect(
+      enabled.firstWhere((block) => block.id == 'cleaner_system').enabled,
+      isTrue,
+    );
+    expect(
+      enabled.firstWhere((block) => block.id == 'cleaner_aiism').enabled,
+      isTrue,
+    );
+    expect(
+      enabled.firstWhere((block) => block.id == 'cleaner_beauty').enabled,
+      isTrue,
+    );
+  });
+
   test('renders narrative modifiers as independent add-on switches', () {
     const narrativeBlocks = [
       StudioPresetBlock(
