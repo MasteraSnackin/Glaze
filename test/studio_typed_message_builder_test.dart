@@ -124,6 +124,78 @@ void main() {
     ]);
   });
 
+  test(
+    'type-based history resolution works even when mode is direct (Loom Direct fix)',
+    () {
+      final messages = builder.buildAgentMessages(
+        agent: const StudioAgent(id: 'final'),
+        context: context,
+        config: config,
+        studioPreset: const StudioPreset(
+          id: 'studio',
+          blocks: [
+            StudioPresetBlock(
+              id: 'loom_chat_history',
+              type: StudioBlockType.history,
+              mode: 'direct',
+              injectionPoint: 'final',
+              order: 1,
+            ),
+          ],
+        ),
+        priorBriefs: const [],
+        isFinalResponse: true,
+      );
+
+      expect(messages.map((message) => message['role']), ['user', 'assistant']);
+      expect(messages.map((message) => message['content']), [
+        'First',
+        'Second',
+      ]);
+    },
+  );
+
+  test(
+    'type-based context resolution works even when mode is direct (Loom Direct fix)',
+    () {
+      final messages = builder.buildAgentMessages(
+        agent: const StudioAgent(id: 'final'),
+        context: context,
+        config: config,
+        studioPreset: const StudioPreset(
+          id: 'studio',
+          blocks: [
+            StudioPresetBlock(
+              id: 'loom_char_card',
+              type: StudioBlockType.context,
+              contextSlot: StudioContextSlot.characterCard,
+              mode: 'direct',
+              content: 'should be ignored — slot takes precedence',
+              injectionPoint: 'final',
+              order: 1,
+            ),
+            StudioPresetBlock(
+              id: 'loom_summary',
+              type: StudioBlockType.context,
+              contextSlot: StudioContextSlot.summary,
+              mode: 'direct',
+              content: 'should be ignored — slot takes precedence',
+              injectionPoint: 'final',
+              order: 2,
+            ),
+          ],
+        ),
+        priorBriefs: const [],
+        isFinalResponse: true,
+      );
+
+      expect(messages.map((message) => message['content']), [
+        'Typed character card',
+        'Typed summary',
+      ]);
+    },
+  );
+
   test('static and dynamic groups are explicit typed projections', () {
     final messages = builder.buildAgentMessages(
       agent: const StudioAgent(id: 'tracker'),
