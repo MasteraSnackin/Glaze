@@ -1010,17 +1010,19 @@ void main() {
       expect(bridgeControllerJs, contains('new GenTimer('));
     });
 
-    test('setGenerating delegates to generation activity reconciliation', () {
+    test('setGenerating delegates to generation timer reconciliation', () {
       final marker = 'setGenerating(value) {';
       final idx = bridgeControllerJs.indexOf(marker);
       expect(idx, isNot(-1));
       final body = _extractBlockBody(bridgeControllerJs, idx);
-      expect(body, contains('this._syncGenerationActivity()'));
+      expect(body, contains('this._syncGenerationTimer()'));
     });
 
     test('upward scroll restores a hidden header during generation', () {
       final marker = 'if (this.isGenerating) {';
-      final idx = bridgeControllerJs.indexOf(marker);
+      final updateHeaderIdx = bridgeControllerJs.indexOf('const updateHeader = () => {');
+      expect(updateHeaderIdx, isNot(-1));
+      final idx = bridgeControllerJs.indexOf(marker, updateHeaderIdx);
       expect(idx, isNot(-1));
       final body = _extractBlockBody(bridgeControllerJs, idx);
       expect(body, contains('st < this._headerLastTop - 3'));
@@ -1054,13 +1056,19 @@ void main() {
       expect(body, contains('Date.now() < this._headerRebaselineUntil'));
     });
 
-    test('post-gen activity keeps the generation timer active separately', () {
+    test('post-gen activity does not keep the generation timer running', () {
       expect(bridgeControllerJs, contains('setPostGenRunning(value)'));
-      final marker = '_syncGenerationActivity() {';
+      final postGenIdx = bridgeControllerJs.indexOf('setPostGenRunning(value) {');
+      expect(postGenIdx, isNot(-1));
+      final postGenBody = _extractBlockBody(bridgeControllerJs, postGenIdx);
+      expect(postGenBody, isNot(contains('_syncGenerationTimer')));
+
+      final marker = '_syncGenerationTimer() {';
       final idx = bridgeControllerJs.indexOf(marker);
       expect(idx, isNot(-1));
       final body = _extractBlockBody(bridgeControllerJs, idx);
-      expect(body, contains('this.isGenerating || this.isPostGenRunning'));
+      expect(body, contains('this.isGenerating'));
+      expect(body, isNot(contains('this.isPostGenRunning')));
       expect(body, contains('this._genTimer.start()'));
       expect(body, contains('this._genTimer.stop()'));
     });
