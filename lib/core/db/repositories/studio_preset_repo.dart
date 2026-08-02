@@ -65,26 +65,50 @@ class StudioPresetRepo implements SyncStudioPresetStore {
 
   Future<void> upsert(StudioPreset preset) async {
     final normalized = _normalizePreset(preset);
+    // Guard against accidental data loss: if the incoming preset has no blocks
+    // but an existing row already carries a non-empty block list, keep the
+    // stored blocks rather than overwriting them with an empty list. This
+    // happens when a corrupt/malformed row decode yields `blocks: []` and the
+    // editor persists the empty state. Single-block deletion still works
+    // because the list never crosses zero until the user removes the last one
+    // (and even then the guard preserves the prior content rather than erasing
+    // the preset, which is the safer failure mode for an agentic preset).
+    final existing = await (db.select(
+      db.studioPresetRows,
+    )..where((t) => t.presetId.equals(normalized.id))).getSingleOrNull();
+    final storedBlocks = existing == null
+        ? const <StudioPresetBlock>[]
+        : _rowToModel(existing).blocks;
+    final safeNormalized =
+        (normalized.blocks.isEmpty && storedBlocks.isNotEmpty)
+        ? normalized.copyWith(blocks: storedBlocks)
+        : normalized;
     await db
         .into(db.studioPresetRows)
         .insertOnConflictUpdate(
           StudioPresetRowsCompanion.insert(
-            presetId: normalized.id,
-            name: normalized.name,
+            presetId: safeNormalized.id,
+            name: safeNormalized.name,
             blocksJson: Value(
-              jsonEncode(normalized.blocks.map((b) => b.toJson()).toList()),
+              jsonEncode(safeNormalized.blocks.map((b) => b.toJson()).toList()),
             ),
-            agentsJson: Value(StudioAgentCodec.encodeAgents(normalized.agents)),
-            expensiveApiConfigId: Value(normalized.expensiveApiConfigId),
-            cheapApiConfigId: Value(normalized.cheapApiConfigId),
-            cleanerApiConfigId: Value(normalized.cleanerApiConfigId),
-            ledgerApiConfigId: Value(normalized.ledgerApiConfigId),
-            maxFinalHistoryMessages: Value(normalized.maxFinalHistoryMessages),
-            agentEnabledJson: Value(jsonEncode(normalized.agentEnabled)),
+            agentsJson: Value(
+              StudioAgentCodec.encodeAgents(safeNormalized.agents),
+            ),
+            expensiveApiConfigId: Value(safeNormalized.expensiveApiConfigId),
+            cheapApiConfigId: Value(safeNormalized.cheapApiConfigId),
+            cleanerApiConfigId: Value(safeNormalized.cleanerApiConfigId),
+            ledgerApiConfigId: Value(safeNormalized.ledgerApiConfigId),
+            maxFinalHistoryMessages: Value(
+              safeNormalized.maxFinalHistoryMessages,
+            ),
+            agentEnabledJson: Value(jsonEncode(safeNormalized.agentEnabled)),
             runtimeSettingsJson: Value(
-              jsonEncode(StudioPresetCodec.encodeRuntime(normalized.runtime)),
+              jsonEncode(
+                StudioPresetCodec.encodeRuntime(safeNormalized.runtime),
+              ),
             ),
-            updatedAt: Value(normalized.updatedAt),
+            updatedAt: Value(safeNormalized.updatedAt),
           ),
         );
   }

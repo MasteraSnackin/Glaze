@@ -216,4 +216,39 @@ void main() {
       }
     },
   );
+
+  test(
+    'an empty blocks upsert does not erase an existing non-empty preset',
+    () async {
+      const preset = StudioPreset(
+        id: 'guard-target',
+        name: 'Guard target',
+        blocks: [
+          StudioPresetBlock(
+            id: 'final_main_prompt',
+            section: '',
+            injectionPoint: 'final',
+          ),
+          StudioPresetBlock(
+            id: 'cleaner_system',
+            section: '',
+            injectionPoint: 'cleaner',
+          ),
+        ],
+      );
+      await repo.upsert(preset);
+
+      // A later save arrives with an empty block list (e.g. a corrupt decode).
+      await repo.upsert(
+        const StudioPreset(id: 'guard-target', name: 'Guard target'),
+      );
+
+      final restored = await repo.getById('guard-target');
+      expect(restored?.blocks, hasLength(2));
+      expect(restored?.blocks.map((block) => block.injectionPoint), [
+        'final',
+        'cleaner',
+      ]);
+    },
+  );
 }
