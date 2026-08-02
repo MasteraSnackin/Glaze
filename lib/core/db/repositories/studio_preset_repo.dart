@@ -65,14 +65,14 @@ class StudioPresetRepo implements SyncStudioPresetStore {
 
   Future<void> upsert(StudioPreset preset) async {
     final normalized = _normalizePreset(preset);
-    // Guard against accidental data loss: if the incoming preset has no blocks
-    // but an existing row already carries a non-empty block list, keep the
-    // stored blocks rather than overwriting them with an empty list. This
-    // happens when a corrupt/malformed row decode yields `blocks: []` and the
-    // editor persists the empty state. Single-block deletion still works
-    // because the list never crosses zero until the user removes the last one
-    // (and even then the guard preserves the prior content rather than erasing
-    // the preset, which is the safer failure mode for an agentic preset).
+    // Safety net: the editor has been observed persisting an empty block list
+    // over a non-empty preset (root cause not yet identified — likely a
+    // malformed row decode yielding `blocks: []` that the editor then saves).
+    // Until the source is found, refuse to overwrite a non-empty preset with
+    // an empty block list. Single-block deletion still works because the list
+    // never crosses zero through normal editing; even if the user removes the
+    // last block, the guard keeps the prior content, which is the safer
+    // failure mode for an agentic preset.
     final existing = await (db.select(
       db.studioPresetRows,
     )..where((t) => t.presetId.equals(normalized.id))).getSingleOrNull();

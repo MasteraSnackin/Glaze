@@ -14,8 +14,12 @@ import 'studio_config.dart';
 /// Sections whose backing services were deleted — dead data (§5).
 const _deadSections = {'build', 'brief_parser'};
 
-/// Built-in blocks whose routing was lost by the canonical codec shipped in
-/// nightly #197. Keep this list exact: arbitrary user blocks must remain
+/// One-time repair shim: built-in blocks whose routing was lost by the
+/// canonical codec shipped in nightly #197 (which did not read
+/// `injectionPoint` from JSON, defaulting every block to `pregen`). Once the
+/// v104 DB migration has persisted the repair for all users, this map and its
+/// helpers can be removed — the codec fix in [StudioPresetCodec._block] is the
+/// permanent fix. Keep this list exact: arbitrary user blocks must remain
 /// movable between stages even when their titles happen to look built-in.
 const _canonicalInjectionPoints = <String, String>{
   'final_agent_instruction': 'final',

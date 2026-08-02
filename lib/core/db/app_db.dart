@@ -2683,24 +2683,27 @@ class AppDatabase extends _$AppDatabase {
   Future<void> _replaceLegacyWriteLoopPrompts() async {}
 
   /// Removes only the retired default write-loop seed from every stored preset.
-  /// It deliberately does not match arbitrary user-authored prompts by content.
+  /// Matches by canonical id only — never by title, so a user-authored block
+  /// with a similar name is never touched. Skips rows that have no matching
+  /// block so unrelated presets are not rewritten.
   Future<void> _removeRetiredWriteLoopBlocks() async {
+    const retiredId = 'writeloop_system';
     final rows = await customSelect(
       'SELECT preset_id, blocks_json FROM studio_preset_rows',
     ).get();
     for (final row in rows) {
       try {
-        final blocks = (jsonDecode(row.read<String>('blocks_json')) as List)
+        final raw = jsonDecode(row.read<String>('blocks_json')) as List;
+        if (!raw.any((entry) => entry is Map && entry['id'] == retiredId)) {
+          continue;
+        }
+        final kept = raw
             .whereType<Map<String, dynamic>>()
-            .where(
-              (block) =>
-                  block['id'] != 'writeloop_system' &&
-                  block['name'] != 'Retired write-loop prompt',
-            )
+            .where((block) => block['id'] != retiredId)
             .toList(growable: false);
         await customStatement(
           'UPDATE studio_preset_rows SET blocks_json = ? WHERE preset_id = ?',
-          [jsonEncode(blocks), row.read<String>('preset_id')],
+          [jsonEncode(kept), row.read<String>('preset_id')],
         );
       } catch (error) {
         debugPrint('Migration 103 (remove retired write-loop) failed: $error');
