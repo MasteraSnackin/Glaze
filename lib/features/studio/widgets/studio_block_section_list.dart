@@ -110,9 +110,12 @@ class _StudioBlockSectionListState extends State<StudioBlockSectionList> {
 
       for (final spec in studioAgentsForInjectionPoint(point)) {
         rows.add(_StudioListRow.agent(point, spec));
-        // The post-processing context is one global value shared by Post Clean
-        // and the Ledger, so it shows under whichever of them is running.
+        // The post-processing context setting controls how many trailing
+        // messages a post-processing agent is handed. It only applies to the
+        // Post Clean agent — the Ledger always pulls its own fixed window of
+        // recent history, so the setting is not surfaced under it.
         if (spec.phase == 'post_processing' &&
+            spec.id != 'ledger' &&
             studioAgentEnabled(widget.preset, spec)) {
           rows.add(_StudioListRow.postContext(point));
         }

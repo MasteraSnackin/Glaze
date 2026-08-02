@@ -129,9 +129,9 @@ class StudioAgentRow extends StatelessWidget {
 /// turn plus the response it has to edit).
 ///
 /// One global setting — `StudioAgentSettings.studioPostControllerContextSize`
-/// applies to every agent whose phase is `post_processing`. It is therefore
-/// rendered under each of them (Post Clean and Трекер); editing it under one
-/// moves it for the other.
+/// applies to the Post Clean agent. It is therefore rendered under it. The
+/// Ledger does not use this setting; it always pulls its own fixed window of
+/// recent history at runtime.
 class StudioPostContextSetting extends ConsumerWidget {
   /// Last row of its section — drops the bottom rule.
   final bool isLast;
