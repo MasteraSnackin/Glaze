@@ -1841,7 +1841,7 @@ void main() {
     });
 
     test(
-      'v66 removes agentic micro-memory without rewriting stored presets',
+      'v66 removes agentic micro-memory; v103 retires stored write-loop blocks',
       () async {
         final file = File(
           '${Directory.systemTemp.path}/glaze_mig_agentic_${DateTime.now().microsecondsSinceEpoch}.db',
@@ -1947,11 +1947,13 @@ void main() {
               'blocks_json',
             ),
         };
-        expect(presets['legacy-write-loop'], contains('writeMemory'));
-        expect(presets['legacy-write-loop'], contains('{{existingBlock}}'));
         expect(
-          presets['custom-tracker-loop'],
-          contains('Track only weather changes.'),
+          presets['legacy-write-loop'] ?? '[]',
+          isNot(contains('writeloop_system')),
+        );
+        expect(
+          presets['custom-tracker-loop'] ?? '[]',
+          isNot(contains('writeloop_system')),
         );
       },
     );

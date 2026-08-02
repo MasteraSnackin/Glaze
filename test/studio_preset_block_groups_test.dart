@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/models/studio_config.dart';
 import 'package:glaze_flutter/core/models/studio_preset_block_groups.dart';
+import 'package:glaze_flutter/core/models/studio_preset_block_migration.dart';
 
 void main() {
   const blocks = [
@@ -150,6 +151,53 @@ void main() {
     expect(
       updated.firstWhere((block) => block.id == 'directional').enabled,
       isTrue,
+    );
+  });
+
+  test('merges Lumia definition and modifiers into one section', () {
+    const lumiaBlocks = [
+      StudioPresetBlock(
+        id: 'lumia_definition',
+        title: '━ Lumia Definition',
+        order: 0,
+      ),
+      StudioPresetBlock(
+        id: 'lumia_definition_group_open',
+        groupBoundary: 'open',
+        order: 1,
+      ),
+      StudioPresetBlock(id: 'lumia_choice', title: 'Lumia', order: 2),
+      StudioPresetBlock(
+        id: 'lumia_definition_group_close',
+        groupBoundary: 'close',
+        order: 3,
+      ),
+      StudioPresetBlock(
+        id: 'lumia_modifiers',
+        title: '━ Lumia Modifiers',
+        order: 4,
+      ),
+      StudioPresetBlock(id: 'lumia_modifier', title: 'Warm tone', order: 5),
+      StudioPresetBlock(
+        id: 'lumia_modifiers_group_close',
+        groupBoundary: 'close',
+        order: 6,
+      ),
+    ];
+
+    final migrated = migrateStudioPresetBlocksToV2(lumiaBlocks);
+    final group = groupStudioPresetBlocks(migrated).single;
+
+    expect(group.header?.title, '━ Lumia');
+    expect(group.children.map((block) => block.id), [
+      'lumia_choice',
+      'lumia_modifier',
+    ]);
+    expect(group.openingBoundary?.id, 'lumia_definition_group_open');
+    expect(group.closingBoundary?.id, 'lumia_definition_group_close');
+    expect(
+      migrated.map((block) => block.id),
+      isNot(contains('lumia_modifiers')),
     );
   });
 

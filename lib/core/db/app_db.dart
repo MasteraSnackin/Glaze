@@ -1283,6 +1283,9 @@ class AppDatabase extends _$AppDatabase {
         await purgeRetiredAgenticMicroMemory();
         await _replaceLegacyWriteLoopPrompts();
       }
+      if (from < 103) {
+        await _removeRetiredWriteLoopBlocks();
+      }
       if (from < 67) {
         // Studio preset is now a global singleton stored in SharedPreferences
         // (activeStudioPresetProvider). Preserve the most recently updated
@@ -2672,10 +2675,34 @@ class AppDatabase extends _$AppDatabase {
     }
   }
 
-  /// Retains legacy prompt blocks as inert user preset JSON. The generic
-  /// write-loop has no runtime consumer, and migration must not rewrite user
-  /// customizations while upgrading old databases.
+  /// Historical no-op kept for migrations that already call it.
   Future<void> _replaceLegacyWriteLoopPrompts() async {}
+
+  /// Removes only the retired default write-loop seed from every stored preset.
+  /// It deliberately does not match arbitrary user-authored prompts by content.
+  Future<void> _removeRetiredWriteLoopBlocks() async {
+    final rows = await customSelect(
+      'SELECT preset_id, blocks_json FROM studio_preset_rows',
+    ).get();
+    for (final row in rows) {
+      try {
+        final blocks = (jsonDecode(row.read<String>('blocks_json')) as List)
+            .whereType<Map<String, dynamic>>()
+            .where(
+              (block) =>
+                  block['id'] != 'writeloop_system' &&
+                  block['name'] != 'Retired write-loop prompt',
+            )
+            .toList(growable: false);
+        await customStatement(
+          'UPDATE studio_preset_rows SET blocks_json = ? WHERE preset_id = ?',
+          [jsonEncode(blocks), row.read<String>('preset_id')],
+        );
+      } catch (error) {
+        debugPrint('Migration 103 (remove retired write-loop) failed: $error');
+      }
+    }
+  }
 }
 
 final class _StudioRuntimePayload {

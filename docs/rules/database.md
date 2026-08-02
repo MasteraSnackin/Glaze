@@ -168,7 +168,8 @@ Migration history:
   `{folderId, presetId, kind}` — `kind` is `normal` for rows in `presets` and
   `agentic` for rows in `studio_preset_rows`, whose id spaces are independent,
   so it must be part of the key. Deleting a preset must also drop its member
-  rows (`PresetFolderRepo.deleteMembersForPreset`).
+  rows (`PresetFolderRepo.deleteMembersForPreset`). Also removes the retired
+  default Studio write-loop block (`writeloop_system`) from stored presets.
 
 ---
 

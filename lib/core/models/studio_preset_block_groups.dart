@@ -61,8 +61,7 @@ bool isStudioPresetGroupHeader(StudioPresetBlock block) =>
 /// [normalizeStudioGroupBoundaries] or by the persisted `groupBoundary` field
 /// after the §5 migration cleared `kind`.
 bool isStudioGroupOpen(StudioPresetBlock block) =>
-    block.groupBoundary == 'open' ||
-    block.id.endsWith('_group_open');
+    block.groupBoundary == 'open' || block.id.endsWith('_group_open');
 
 bool isStudioGroupClose(StudioPresetBlock block) =>
     block.groupBoundary == 'close' ||
@@ -249,6 +248,32 @@ List<StudioPresetBlockGroup> groupStudioPresetBlocks(
   }
   flush();
   return result;
+}
+
+/// Enables or disables a visual group. Exclusive groups normally require one
+/// choice, except when the whole group is deliberately disabled (for example
+/// CoT selections).
+List<StudioPresetBlock> toggleStudioPresetBlockGroup(
+  List<StudioPresetBlock> blocks,
+  StudioPresetBlockGroup group,
+  bool enabled,
+) {
+  final ids = <String>{
+    group.header?.id ?? '',
+    ...group.children.map((block) => block.id),
+  }..remove('');
+  if (ids.isEmpty) return blocks;
+  final selectedId = group.children.firstOrNull?.id;
+  return blocks
+      .map((block) {
+        if (!ids.contains(block.id)) return block;
+        if (block.id == group.header?.id) {
+          return block.copyWith(enabled: enabled);
+        }
+        if (!enabled) return block.copyWith(enabled: false);
+        return block.copyWith(enabled: block.id == selectedId);
+      })
+      .toList(growable: false);
 }
 
 /// Enables [selectedId] and disables every sibling in an exclusive group.

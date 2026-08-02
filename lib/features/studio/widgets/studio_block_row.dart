@@ -15,9 +15,7 @@ import '../../presets/widgets/preset_block_row.dart';
 String studioAgentShortName(String specId) {
   for (final spec in StudioControllerOntology.specs) {
     if (spec.id != specId) continue;
-    return spec.name
-        .replaceFirst(RegExp(r'\s+(Controller|Agent)$'), '')
-        .trim();
+    return spec.name.replaceFirst(RegExp(r'\s+(Controller|Agent)$'), '').trim();
   }
   return specId;
 }
@@ -69,7 +67,8 @@ class StudioBlockRow extends StatelessWidget {
     final title = block.title.isNotEmpty ? block.title : block.id;
     final tokens = _blockTokens(block);
     final modeLabel = _modeLabel();
-    final targetLabel = block.injectionPoint == 'specificAgent' &&
+    final targetLabel =
+        block.injectionPoint == 'specificAgent' &&
             (block.targetAgentId ?? '').isNotEmpty
         ? '→ ${studioAgentShortName(block.targetAgentId!)}'
         : null;
@@ -135,7 +134,10 @@ class StudioBlockRow extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               if (block.locked) ...[
-                StudioBlockBadge(label: 'studio_badge_locked'.tr(), muted: true),
+                StudioBlockBadge(
+                  label: 'studio_badge_locked'.tr(),
+                  muted: true,
+                ),
                 const SizedBox(width: 6),
               ],
               if (modeLabel != null) ...[
@@ -218,9 +220,10 @@ class StudioBlockRow extends StatelessWidget {
   String? _modeLabel() {
     return switch (block.mode) {
       'pregenBrief' => 'studio_badge_brief'.tr(),
-      'agentResponse' => block.sourceAgentId.isEmpty
-          ? 'studio_badge_agent'.tr()
-          : '← ${studioAgentShortName(block.sourceAgentId)}',
+      'agentResponse' =>
+        block.sourceAgentId.isEmpty
+            ? 'studio_badge_agent'.tr()
+            : '← ${studioAgentShortName(block.sourceAgentId)}',
       _ => null,
     };
   }
@@ -230,10 +233,18 @@ class StudioBlockRow extends StatelessWidget {
 
 /// Label above one injection point's blocks. The whole preset is rendered at
 /// once, split into these sections in pipeline order, so the header is what
-/// tells the reader which stage the rows underneath are addressed to.
+/// tells the reader which stage the rows underneath are addressed to. Tapping
+/// the header folds the section's agents and blocks so a phone-sized screen is
+/// not one giant list.
 class StudioBlockSectionHeader extends StatelessWidget {
   final String label;
   final int count;
+
+  /// Whether the section's rows are currently shown.
+  final bool expanded;
+
+  /// Toggles the section's expanded state.
+  final VoidCallback onToggle;
 
   /// The first header follows the agents section's own divider, so it drops
   /// its rule to avoid two hairlines a gap apart.
@@ -243,6 +254,8 @@ class StudioBlockSectionHeader extends StatelessWidget {
     super.key,
     required this.label,
     required this.count,
+    required this.expanded,
+    required this.onToggle,
     this.isFirst = false,
   });
 
@@ -256,32 +269,157 @@ class StudioBlockSectionHeader extends StatelessWidget {
               : const BorderSide(color: Color(0x33808080), width: 1),
         ),
       ),
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(
-              label.toUpperCase(),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.6,
-                color: context.cs.onSurfaceVariant,
+      child: InkWell(
+        onTap: onToggle,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  label.toUpperCase(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.6,
+                    color: context.cs.onSurfaceVariant,
+                  ),
+                ),
               ),
-            ),
+              const SizedBox(width: 8),
+              Text(
+                '$count',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: context.cs.onSurfaceVariant.withValues(alpha: 0.6),
+                ),
+              ),
+              const SizedBox(width: 4),
+              AnimatedRotation(
+                turns: expanded ? 0.5 : 0,
+                duration: const Duration(milliseconds: 200),
+                child: Icon(
+                  Icons.expand_more,
+                  size: 20,
+                  color: context.cs.onSurfaceVariant,
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: 8),
-          Text(
-            '$count',
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: context.cs.onSurfaceVariant.withValues(alpha: 0.6),
-            ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─── StudioFactCheckerRow ─────────────────────────────────────────────────────
+
+/// Surfaces the `cleaner_audit` Post Clean block as a distinct, prominently
+/// labelled Fact Checker row instead of burying it among the generic Post Clean
+/// blocks. Its toggle is the block's `enabled` flag; tapping opens the block
+/// editor so the audit prompt itself can be edited.
+class StudioFactCheckerRow extends StatelessWidget {
+  final StudioPresetBlock block;
+  final bool isLast;
+  final VoidCallback onEdit;
+  final ValueChanged<bool> onToggle;
+
+  const StudioFactCheckerRow({
+    super.key,
+    required this.block,
+    required this.isLast,
+    required this.onEdit,
+    required this.onToggle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(
+            color: const Color(0x33808080),
+            width: isLast ? 0 : 1,
           ),
-        ],
+        ),
+      ),
+      child: Opacity(
+        opacity: block.enabled ? 1.0 : 0.5,
+        child: InkWell(
+          onTap: onEdit,
+          child: Row(
+            children: [
+              const SizedBox(width: 30, height: 48),
+              Icon(
+                Icons.fact_check_outlined,
+                size: 18,
+                color: context.cs.primary,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'studio_fact_checker'.tr(),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                          color: context.cs.onSurface,
+                        ),
+                      ),
+                      Text(
+                        'studio_fact_checker_desc'.tr(),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 12,
+                          height: 1.3,
+                          color: context.cs.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 36,
+                height: 48,
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: onEdit,
+                    child: Icon(
+                      Icons.edit_outlined,
+                      size: 20,
+                      color: context.cs.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(right: 12),
+                child: Transform.scale(
+                  scale: 0.8,
+                  alignment: Alignment.centerRight,
+                  child: Switch(
+                    value: block.enabled,
+                    onChanged: onToggle,
+                    activeThumbColor: context.cs.primary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -297,11 +435,7 @@ class StudioBlockBadge extends StatelessWidget {
   /// Muted badges use the neutral white tint instead of the accent colour.
   final bool muted;
 
-  const StudioBlockBadge({
-    super.key,
-    required this.label,
-    this.muted = false,
-  });
+  const StudioBlockBadge({super.key, required this.label, this.muted = false});
 
   @override
   Widget build(BuildContext context) {
@@ -348,6 +482,7 @@ class StudioBlockGroupRow extends StatefulWidget {
   final void Function(StudioPresetBlock block, bool enabled) onToggle;
   final ValueChanged<StudioPresetBlock> onEdit;
   final ValueChanged<StudioPresetBlock> onDelete;
+  final ValueChanged<bool> onToggleGroup;
 
   const StudioBlockGroupRow({
     super.key,
@@ -358,6 +493,7 @@ class StudioBlockGroupRow extends StatefulWidget {
     required this.onToggle,
     required this.onEdit,
     required this.onDelete,
+    required this.onToggleGroup,
   });
 
   @override
@@ -384,10 +520,8 @@ class _StudioBlockGroupRowState extends State<StudioBlockGroupRow> {
             args: ['$enabledCount', '${group.children.length}'],
           );
 
-    final boundaries = <StudioPresetBlock>[
-      ?group.openingBoundary,
-      ?group.closingBoundary,
-    ];
+    final openingBoundary = group.openingBoundary;
+    final closingBoundary = group.closingBoundary;
 
     return Container(
       decoration: BoxDecoration(
@@ -478,6 +612,11 @@ class _StudioBlockGroupRowState extends State<StudioBlockGroupRow> {
                     ),
                   ),
                 ),
+                if (_isCoTGroup(group))
+                  Switch.adaptive(
+                    value: header.enabled,
+                    onChanged: widget.onToggleGroup,
+                  ),
                 Padding(
                   padding: const EdgeInsets.only(right: 12),
                   child: AnimatedRotation(
@@ -493,13 +632,22 @@ class _StudioBlockGroupRowState extends State<StudioBlockGroupRow> {
               ],
             ),
           ),
+          if (_expanded && openingBoundary != null)
+            StudioBlockRow(
+              key: ValueKey('studio_block_${openingBoundary.id}'),
+              block: openingBoundary,
+              indent: 16,
+              isLast: group.children.isEmpty && closingBoundary == null,
+              onEdit: () => widget.onEdit(openingBoundary),
+            ),
           if (_expanded)
             for (var i = 0; i < group.children.length; i++)
               StudioBlockRow(
                 key: ValueKey('studio_block_${group.children[i].id}'),
                 block: group.children[i],
                 indent: 16,
-                isLast: i == group.children.length - 1 && boundaries.isEmpty,
+                isLast:
+                    i == group.children.length - 1 && closingBoundary == null,
                 onEdit: () => widget.onEdit(group.children[i]),
                 onToggle: group.exclusive
                     ? null
@@ -509,15 +657,14 @@ class _StudioBlockGroupRowState extends State<StudioBlockGroupRow> {
                     : null,
                 onLongPress: () => widget.onDelete(group.children[i]),
               ),
-          if (_expanded)
-            for (var i = 0; i < boundaries.length; i++)
-              StudioBlockRow(
-                key: ValueKey('studio_block_${boundaries[i].id}'),
-                block: boundaries[i],
-                indent: 16,
-                isLast: i == boundaries.length - 1,
-                onEdit: () => widget.onEdit(boundaries[i]),
-              ),
+          if (_expanded && closingBoundary != null)
+            StudioBlockRow(
+              key: ValueKey('studio_block_${closingBoundary.id}'),
+              block: closingBoundary,
+              indent: 16,
+              isLast: true,
+              onEdit: () => widget.onEdit(closingBoundary),
+            ),
         ],
       ),
     );
@@ -531,14 +678,23 @@ class _StudioBlockGroupRowState extends State<StudioBlockGroupRow> {
           ? null
           : () => widget.onSelectExclusive(block.id),
       icon: Icon(
-        block.enabled
-            ? Icons.radio_button_checked
-            : Icons.radio_button_off,
+        block.enabled ? Icons.radio_button_checked : Icons.radio_button_off,
         size: 20,
-        color: block.enabled
-            ? context.cs.primary
-            : context.cs.onSurfaceVariant,
+        color: block.enabled ? context.cs.primary : context.cs.onSurfaceVariant,
       ),
     );
   }
+}
+
+/// Whether [group] is the CoT Selections section, the only exclusive group the
+/// user can turn off wholesale (every other exclusive group keeps its radio
+/// behaviour — exactly one option must stay picked).
+bool _isCoTGroup(StudioPresetBlockGroup group) {
+  final header = group.header;
+  if (header == null) return false;
+  final normalized = header.title
+      .replaceFirst(RegExp(r'^━[^\p{L}\p{N}]*', unicode: true), '')
+      .trim()
+      .toLowerCase();
+  return normalized == 'cot selections';
 }

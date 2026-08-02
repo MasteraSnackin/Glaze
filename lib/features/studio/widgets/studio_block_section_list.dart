@@ -11,18 +11,24 @@ import '../studio_preset_stats.dart';
 import 'studio_agent_row.dart';
 import 'studio_block_row.dart';
 
+/// The id of the Post Clean block that drives the Fact Checker pass. Surfaced
+/// as its own row rather than buried among the generic Post Clean blocks.
+const _kCleanerAuditBlockId = 'cleaner_audit';
+
 /// The agentic preset's whole block list: every injection point rendered at
 /// once, one section per stage, in the pipeline order given by [sections].
 ///
 /// A section reads top to bottom as the stage itself: its header, the agents
-/// that run there, then the blocks addressed to them.
+/// that run there, then the blocks addressed to them. Each section is
+/// collapsible — tapping its header folds the agents and blocks underneath, so
+/// a phone-sized screen is not one giant list.
 ///
 /// It is a single [ReorderableListView] rather than one list per section, so a
 /// block can be dragged across a section header — the section a row lands in
 /// becomes its injection point, and [onReorder] reports the resulting
 /// placements. Only block rows carry a drag handle; headers, agents and the
 /// post-processing setting never move.
-class StudioBlockSectionList extends StatelessWidget {
+class StudioBlockSectionList extends StatefulWidget {
   /// The preset being edited — its blocks fill the sections, and its
   /// `agentEnabled` map drives the agent switches.
   final StudioPreset preset;
@@ -35,6 +41,7 @@ class StudioBlockSectionList extends StatelessWidget {
   final void Function(StudioPresetBlock block, bool enabled) onToggle;
   final void Function(StudioPresetBlockGroup group, String blockId)
   onSelectExclusive;
+  final void Function(StudioPresetBlockGroup group, bool enabled) onToggleGroup;
   final ValueChanged<StudioPresetBlock> onDelete;
   final void Function(String specId, bool enabled) onToggleAgent;
 
@@ -46,30 +53,72 @@ class StudioBlockSectionList extends StatelessWidget {
     required this.onEdit,
     required this.onToggle,
     required this.onSelectExclusive,
+    required this.onToggleGroup,
     required this.onDelete,
     required this.onToggleAgent,
   });
 
+  @override
+  State<StudioBlockSectionList> createState() => _StudioBlockSectionListState();
+}
+
+class _StudioBlockSectionListState extends State<StudioBlockSectionList> {
+  /// Per-section expanded state, keyed by injection point. Defaults to expanded
+  /// so the editor opens showing everything (no regression for desktop); the
+  /// user folds what they are not editing.
+  final Map<String, bool> _expanded = {};
+
+  bool _isExpanded(String point) => _expanded[point] ?? true;
+
+  void _toggle(String point) {
+    setState(() => _expanded[point] = !_isExpanded(point));
+  }
+
   /// Flattens the sections into the list's items: a header per stage, the
   /// agents that run there (each followed by its own settings, where it has
-  /// any), then the grouped block rows or an empty placeholder.
+  /// any), then the grouped block rows or an empty placeholder. Collapsed
+  /// sections emit only their header.
   List<_StudioListRow> _rows() {
     final rows = <_StudioListRow>[];
-    for (final (point, label) in sections) {
-      final sectionBlocks =
-          preset.blocks.where((b) => b.injectionPoint == point).toList()
+    for (final (point, label) in widget.sections) {
+      final allSectionBlocks =
+          widget.preset.blocks.where((b) => b.injectionPoint == point).toList()
             ..sort((a, b) => a.order.compareTo(b.order));
       rows.add(
-        _StudioListRow.header(point, label: label, count: sectionBlocks.length),
+        _StudioListRow.header(
+          point,
+          label: label,
+          count: allSectionBlocks.length,
+          expanded: _isExpanded(point),
+          onToggle: () => _toggle(point),
+        ),
       );
+      if (!_isExpanded(point)) continue;
+
+      // The Fact Checker is a Post Clean block with its own surfaced row, so
+      // pull it out before grouping the rest.
+      final StudioPresetBlock? factChecker = (point == 'cleaner')
+          ? allSectionBlocks
+                .where((b) => b.id == _kCleanerAuditBlockId)
+                .firstOrNull
+          : null;
+      final sectionBlocks = factChecker == null
+          ? allSectionBlocks
+          : allSectionBlocks
+                .where((b) => b.id != _kCleanerAuditBlockId)
+                .toList();
+
       for (final spec in studioAgentsForInjectionPoint(point)) {
         rows.add(_StudioListRow.agent(point, spec));
         // The post-processing context is one global value shared by Post Clean
-        // and Трекер, so it shows under whichever of them is running.
+        // and the Ledger, so it shows under whichever of them is running.
         if (spec.phase == 'post_processing' &&
-            studioAgentEnabled(preset, spec)) {
+            studioAgentEnabled(widget.preset, spec)) {
           rows.add(_StudioListRow.postContext(point));
         }
+      }
+      if (factChecker != null) {
+        rows.add(_StudioListRow.factChecker(point, factChecker));
       }
       final entries = groupStudioPresetBlocks(sectionBlocks);
       if (entries.isEmpty) {
@@ -95,7 +144,7 @@ class StudioBlockSectionList extends StatelessWidget {
 
     // Walk the reordered list and hand each row the section it now sits under.
     // A row dropped above the very first header belongs to that first section.
-    var current = sections.first.$1;
+    var current = widget.sections.first.$1;
     final placements = <StudioPresetRowPlacement>[];
     for (final row in moved) {
       if (row.isHeader) {
@@ -103,12 +152,14 @@ class StudioBlockSectionList extends StatelessWidget {
         continue;
       }
       final entry = row.entry;
-      if (entry == null) continue; // agent, settings or placeholder
+      if (entry == null) {
+        continue; // agent, settings, fact checker or placeholder
+      }
       placements.add(
         StudioPresetRowPlacement(entry: entry, injectionPoint: current),
       );
     }
-    onReorder(placements);
+    widget.onReorder(placements);
   }
 
   @override
@@ -134,6 +185,8 @@ class StudioBlockSectionList extends StatelessWidget {
         key: ValueKey('studio_section_${row.point}'),
         label: row.label!,
         count: row.count,
+        expanded: row.expanded,
+        onToggle: row.onToggle!,
         isFirst: i == 0,
       );
     }
@@ -144,8 +197,8 @@ class StudioBlockSectionList extends StatelessWidget {
       return StudioAgentRow(
         key: ValueKey('studio_agent_${row.point}_${spec.id}'),
         spec: spec,
-        enabled: studioAgentEnabled(preset, spec),
-        onToggle: (v) => onToggleAgent(spec.id, v),
+        enabled: studioAgentEnabled(widget.preset, spec),
+        onToggle: (v) => widget.onToggleAgent(spec.id, v),
         isLast: isLast,
       );
     }
@@ -153,6 +206,16 @@ class StudioBlockSectionList extends StatelessWidget {
       return StudioPostContextSetting(
         key: ValueKey('studio_post_context_${row.point}'),
         isLast: isLast,
+      );
+    }
+    if (row.isFactChecker) {
+      final block = row.factCheckerBlock!;
+      return StudioFactCheckerRow(
+        key: ValueKey('studio_fact_checker_${block.id}'),
+        block: block,
+        isLast: isLast,
+        onEdit: () => widget.onEdit(block),
+        onToggle: (v) => widget.onToggle(block, v),
       );
     }
     final entry = row.entry;
@@ -175,10 +238,11 @@ class StudioBlockSectionList extends StatelessWidget {
         group: entry,
         dragIndex: i,
         isLast: isLast,
-        onSelectExclusive: (id) => onSelectExclusive(entry, id),
-        onToggle: onToggle,
-        onEdit: onEdit,
-        onDelete: onDelete,
+        onSelectExclusive: (id) => widget.onSelectExclusive(entry, id),
+        onToggleGroup: (enabled) => widget.onToggleGroup(entry, enabled),
+        onToggle: widget.onToggle,
+        onEdit: widget.onEdit,
+        onDelete: widget.onDelete,
       );
     }
     final block = entry.standalone!;
@@ -187,57 +251,92 @@ class StudioBlockSectionList extends StatelessWidget {
       block: block,
       dragIndex: i,
       isLast: isLast,
-      onEdit: () => onEdit(block),
-      onToggle: (v) => onToggle(block, v),
-      onLongPress: () => onDelete(block),
+      onEdit: () => widget.onEdit(block),
+      onToggle: (v) => widget.onToggle(block, v),
+      onLongPress: () => widget.onDelete(block),
     );
   }
 }
 
 /// One item of the flat list: a section header, one of the section's agents,
-/// the post-processing setting, the empty placeholder, or a draggable block
-/// row. Only the last carries an [entry] and can be dragged.
+/// the post-processing setting, the Fact Checker row, the empty placeholder,
+/// or a draggable block row. Only the last carries an [entry] and can be
+/// dragged.
 class _StudioListRow {
   final String point;
   final String? label;
   final int count;
+  final bool expanded;
+  final VoidCallback? onToggle;
   final StudioPresetBlockGroup? entry;
   final StudioControllerSpec? spec;
   final bool isPostContext;
+  final bool isFactChecker;
+  final StudioPresetBlock? factCheckerBlock;
 
   const _StudioListRow.header(
     this.point, {
     required this.label,
     required this.count,
+    required this.expanded,
+    required this.onToggle,
   }) : entry = null,
        spec = null,
-       isPostContext = false;
+       isPostContext = false,
+       isFactChecker = false,
+       factCheckerBlock = null;
 
   const _StudioListRow.agent(this.point, this.spec)
     : label = null,
       count = 0,
+      expanded = false,
+      onToggle = null,
       entry = null,
-      isPostContext = false;
+      isPostContext = false,
+      isFactChecker = false,
+      factCheckerBlock = null;
 
   const _StudioListRow.postContext(this.point)
     : label = null,
       count = 0,
+      expanded = false,
+      onToggle = null,
       entry = null,
       spec = null,
-      isPostContext = true;
+      isPostContext = true,
+      isFactChecker = false,
+      factCheckerBlock = null;
+
+  const _StudioListRow.factChecker(this.point, this.factCheckerBlock)
+    : label = null,
+      count = 0,
+      expanded = false,
+      onToggle = null,
+      entry = null,
+      spec = null,
+      isPostContext = false,
+      isFactChecker = true;
 
   const _StudioListRow.placeholder(this.point)
     : label = null,
       count = 0,
+      expanded = false,
+      onToggle = null,
       entry = null,
       spec = null,
-      isPostContext = false;
+      isPostContext = false,
+      isFactChecker = false,
+      factCheckerBlock = null;
 
   const _StudioListRow.block(this.point, this.entry)
     : label = null,
       count = 0,
+      expanded = false,
+      onToggle = null,
       spec = null,
-      isPostContext = false;
+      isPostContext = false,
+      isFactChecker = false,
+      factCheckerBlock = null;
 
   bool get isHeader => label != null;
 }
