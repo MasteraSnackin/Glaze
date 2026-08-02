@@ -134,10 +134,7 @@ void main() {
           reason: '$id should follow its section',
         );
       }
-      expect(
-        result.firstWhere((b) => b.id == 'lead').injectionPoint,
-        'pregen',
-      );
+      expect(result.firstWhere((b) => b.id == 'lead').injectionPoint, 'pregen');
     });
 
     test('skips the synthesized Tense header instead of bailing out', () {
@@ -196,6 +193,80 @@ void main() {
         'child',
         'head_group_close',
       ]);
+    });
+  });
+
+  group('folder block movement', () {
+    test(
+      'moves a standalone block into a folder before its closing boundary',
+      () {
+        final blocks = [
+          _block('header', title: '━ Folder', order: 0),
+          _block('child', order: 1),
+          _block('header_group_close', order: 2),
+          _block('standalone', order: 3, injectionPoint: 'final'),
+        ];
+        blocks[2] = blocks[2].copyWith(groupBoundary: 'close');
+        final group = groupStudioPresetBlocks(blocks).first;
+
+        final result = moveStudioPresetBlockToGroup(
+          all: blocks,
+          blockId: 'standalone',
+          targetGroup: group,
+        );
+
+        expect(_idsInOrder(result), [
+          'header',
+          'child',
+          'standalone',
+          'header_group_close',
+        ]);
+        expect(
+          result.firstWhere((block) => block.id == 'standalone').injectionPoint,
+          'pregen',
+        );
+      },
+    );
+
+    test('moves a child out to an injection point as a standalone block', () {
+      final blocks = [
+        _block('header', title: '━ Folder', order: 0),
+        _block('child', order: 1),
+        _block('header_group_close', order: 2),
+      ];
+      blocks[2] = blocks[2].copyWith(groupBoundary: 'close');
+
+      final result = moveStudioPresetBlockToSection(
+        all: blocks,
+        blockId: 'child',
+        injectionPoint: 'final',
+      );
+
+      expect(_idsInOrder(result), ['header', 'header_group_close', 'child']);
+      expect(groupStudioPresetBlocks(result).last.standalone?.id, 'child');
+    });
+
+    test('dissolves a folder without deleting its children', () {
+      final blocks = [
+        _block('open', order: 0),
+        _block('header', title: '━ Folder', order: 1),
+        _block('child', order: 2),
+        _block('close', order: 3),
+      ];
+      blocks[0] = blocks[0].copyWith(
+        id: 'header_group_open',
+        groupBoundary: 'open',
+      );
+      blocks[3] = blocks[3].copyWith(
+        id: 'header_group_close',
+        groupBoundary: 'close',
+      );
+      final group = groupStudioPresetBlocks(blocks).single;
+
+      final result = dissolveStudioPresetBlockGroup(all: blocks, group: group);
+
+      expect(_idsInOrder(result), ['child']);
+      expect(groupStudioPresetBlocks(result).single.standalone?.id, 'child');
     });
   });
 }

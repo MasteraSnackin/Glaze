@@ -56,6 +56,8 @@ void main() {
           onToggle: (_, _) {},
           onEdit: (block) => edited = block,
           onDelete: (_) {},
+          onDeleteGroup: (_) {},
+          onMoveBlock: (_, _) {},
           onToggleGroup: (_) {},
         ),
       ),
@@ -107,6 +109,8 @@ void main() {
           onToggle: (_, _) => toggled = true,
           onEdit: (_) {},
           onDelete: (_) {},
+          onDeleteGroup: (_) {},
+          onMoveBlock: (_, _) {},
           onToggleGroup: (_) {},
         ),
       ),
@@ -166,6 +170,8 @@ void main() {
           onToggle: (_, _) {},
           onEdit: (_) {},
           onDelete: (_) {},
+          onDeleteGroup: (_) {},
+          onMoveBlock: (_, _) {},
           onToggleGroup: (_) => groupToggled = true,
         ),
       ),
@@ -203,11 +209,49 @@ void main() {
           onToggle: (_, _) {},
           onEdit: (_) {},
           onDelete: (_) {},
+          onDeleteGroup: (_) {},
+          onMoveBlock: (_, _) {},
           onToggleGroup: (_) {},
         ),
       ),
     );
 
     expect(find.byType(Switch), findsNothing);
+  });
+
+  testWidgets('folder delete icon triggers onDeleteGroup', (tester) async {
+    const blocks = [
+      StudioPresetBlock(id: 'folder_header', title: '━ My Folder', order: 0),
+      StudioPresetBlock(id: 'child', title: 'Child', enabled: true, order: 1),
+      StudioPresetBlock(
+        id: 'folder_header_group_close',
+        groupBoundary: 'close',
+        order: 2,
+      ),
+    ];
+    final group = groupStudioPresetBlocks(blocks).single;
+    var deleted = false;
+
+    await tester.pumpWidget(
+      _host(
+        StudioBlockGroupRow(
+          group: group,
+          dragIndex: 0,
+          isLast: true,
+          onSelectExclusive: (_) {},
+          onToggle: (_, _) {},
+          onEdit: (_) {},
+          onDelete: (_) {},
+          onDeleteGroup: (_) => deleted = true,
+          onMoveBlock: (_, _) {},
+          onToggleGroup: (_) {},
+        ),
+      ),
+    );
+
+    expect(find.byIcon(Icons.delete_outline), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.delete_outline));
+    await tester.pumpAndSettle();
+    expect(deleted, isTrue);
   });
 }
