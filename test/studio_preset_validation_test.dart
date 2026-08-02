@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/llm/studio/studio_context.dart';
 import 'package:glaze_flutter/core/models/studio_config.dart';
+import 'package:glaze_flutter/core/models/studio_preset_codec.dart';
 import 'package:glaze_flutter/core/models/studio_preset_validation.dart';
 
 void main() {
@@ -54,6 +55,61 @@ void main() {
         'Context blocks cannot target an agent.',
         'Instruction blocks cannot select context.',
         'Unknown target agent "unknown".',
+      ]),
+    );
+  });
+
+  test('an exported legacy preset decodes into an importable preset', () {
+    // Shape of a Studio preset exported before blocks became typed: `kind`
+    // instead of `type`/`contextSlot`, runtime-injected slots with no content,
+    // a title-only separator, and the retired `writeloop` section. Import used
+    // to bypass the codec and then fail validation on all four.
+    final decoded = StudioPresetCodec.decodePreset({
+      'id': 'legacy_export',
+      'name': 'Legacy export',
+      'agentEnabled': <String, dynamic>{},
+      'blocks': [
+        {
+          'id': 'note',
+          'kind': 'authors_note',
+          'content': '',
+          'section': 'final',
+        },
+        {
+          'id': 'history',
+          'kind': 'chat_history',
+          'content': '',
+          'section': 'final',
+        },
+        {
+          'id': 'header',
+          'kind': 'custom_text',
+          'title': '━ Final Response',
+          'content': '',
+          'section': 'final',
+        },
+        {
+          'id': 'writeloop_system',
+          'kind': 'instruction',
+          'content': 'Retired write-loop prompt',
+          'section': 'writeloop',
+        },
+      ],
+    });
+
+    final blocks = decoded.preset.blocks;
+    expect(blocks[0].type, StudioBlockType.context);
+    expect(blocks[0].contextSlot, StudioContextSlot.authorsNote);
+    expect(blocks[1].type, StudioBlockType.history);
+
+    final issues = StudioPresetValidator.validate(decoded.preset);
+
+    expect(StudioPresetValidator.hasErrors(issues), isFalse);
+    expect(
+      issues.map((issue) => issue.message),
+      containsAll([
+        'Instruction content must not be empty.',
+        'Unsupported Studio section "writeloop".',
       ]),
     );
   });
