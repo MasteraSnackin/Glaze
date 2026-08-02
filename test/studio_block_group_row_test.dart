@@ -4,8 +4,9 @@ import 'package:glaze_flutter/core/models/studio_config.dart';
 import 'package:glaze_flutter/core/models/studio_preset_block_groups.dart';
 import 'package:glaze_flutter/features/studio/widgets/studio_block_row.dart';
 
-Widget _host(Widget child) =>
-    MaterialApp(home: Scaffold(body: ListView(children: [child])));
+Widget _host(Widget child) => MaterialApp(
+  home: Scaffold(body: ListView(children: [child])),
+);
 
 void main() {
   testWidgets('exclusive group expands and selects one option', (tester) async {
@@ -16,7 +17,12 @@ void main() {
         content: '<loompov>',
         order: 0,
       ),
-      StudioPresetBlock(id: 'pov_header', title: '━🧍 Point-of-View', order: 1),
+      StudioPresetBlock(
+        id: 'pov_header',
+        title: '━🧍 Point-of-View',
+        content: 'POV header instructions',
+        order: 1,
+      ),
       StudioPresetBlock(
         id: 'third_person',
         title: 'Third Person Narrator',
@@ -65,11 +71,16 @@ void main() {
 
     expect(find.text('Second Person'), findsOneWidget);
     expect(find.text('Opening tag'), findsOneWidget);
+    expect(find.text('studio_group_header_prompt'), findsOneWidget);
     expect(find.text('Closing tag'), findsOneWidget);
 
     await tester.tap(find.text('Opening tag'));
     await tester.pumpAndSettle();
     expect(edited?.id, 'pov_header_group_open');
+
+    await tester.tap(find.text('studio_group_header_prompt'));
+    await tester.pumpAndSettle();
+    expect(edited?.id, 'pov_header');
 
     // Exclusive children carry radios, not switches.
     expect(find.byType(Switch), findsNothing);
@@ -168,7 +179,9 @@ void main() {
     expect(groupToggled, isTrue);
   });
 
-  testWidgets('non-CoT exclusive group has no whole-group switch', (tester) async {
+  testWidgets('non-CoT exclusive group has no whole-group switch', (
+    tester,
+  ) async {
     const blocks = [
       StudioPresetBlock(id: 'pov_header', title: '━ Point-of-View', order: 0),
       StudioPresetBlock(

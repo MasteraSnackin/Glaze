@@ -330,7 +330,7 @@ void main() {
       expect(text, isNot(contains('{{studio_state}}')));
     });
 
-    test('group boundaries remain separate ordered system messages', () {
+    test('group boundaries wrap header and last enabled child', () {
       final messages = builder.buildAgentMessages(
         agent: const StudioAgent(id: 'final', name: 'Main Responder'),
         context: context,
@@ -349,11 +349,29 @@ void main() {
             ),
             StudioPresetBlock(
               id: 'pov_content',
+              title: '━ Point-of-View',
               role: 'system',
-              content: 'POV instructions',
+              content: 'POV header instructions',
               mode: 'direct',
               injectionPoint: 'final',
               order: 2,
+            ),
+            StudioPresetBlock(
+              id: 'pov_child',
+              role: 'system',
+              content: 'Selected POV',
+              mode: 'direct',
+              injectionPoint: 'final',
+              order: 3,
+            ),
+            StudioPresetBlock(
+              id: 'disabled_child',
+              role: 'system',
+              content: 'Disabled POV',
+              enabled: false,
+              mode: 'direct',
+              injectionPoint: 'final',
+              order: 4,
             ),
             StudioPresetBlock(
               id: 'pov_close',
@@ -361,6 +379,49 @@ void main() {
               mode: '',
               role: 'system',
               content: '</loompov>',
+              injectionPoint: 'final',
+              order: 5,
+            ),
+          ],
+        ),
+        priorBriefs: const [],
+        isFinalResponse: true,
+      );
+
+      expect(messages.map((message) => (message['role'], message['content'])), [
+        ('system', '<loompov>\nPOV header instructions'),
+        ('system', 'Selected POV\n</loompov>'),
+      ]);
+    });
+
+    test('group boundaries wrap an empty group header', () {
+      final messages = builder.buildAgentMessages(
+        agent: const StudioAgent(id: 'final', name: 'Main Responder'),
+        context: context,
+        config: config,
+        studioPreset: const StudioPreset(
+          id: 'empty_group',
+          blocks: [
+            StudioPresetBlock(
+              id: 'group_group_open',
+              groupBoundary: 'open',
+              mode: '',
+              content: '<group>',
+              injectionPoint: 'final',
+              order: 1,
+            ),
+            StudioPresetBlock(
+              id: 'group',
+              title: '━ Group',
+              content: 'Header instructions',
+              injectionPoint: 'final',
+              order: 2,
+            ),
+            StudioPresetBlock(
+              id: 'group_group_close',
+              groupBoundary: 'close',
+              mode: '',
+              content: '</group>',
               injectionPoint: 'final',
               order: 3,
             ),
@@ -370,11 +431,57 @@ void main() {
         isFinalResponse: true,
       );
 
-      expect(messages.map((message) => (message['role'], message['content'])), [
-        ('system', '<loompov>'),
-        ('system', 'POV instructions'),
-        ('system', '</loompov>'),
-      ]);
+      expect(
+        messages.single['content'],
+        '<group>\nHeader instructions\n</group>',
+      );
+    });
+
+    test('disabled group emits neither boundaries nor content', () {
+      final messages = builder.buildAgentMessages(
+        agent: const StudioAgent(id: 'final', name: 'Main Responder'),
+        context: context,
+        config: config,
+        studioPreset: const StudioPreset(
+          id: 'disabled_group',
+          blocks: [
+            StudioPresetBlock(
+              id: 'group_group_open',
+              groupBoundary: 'open',
+              mode: '',
+              content: '<group>',
+              injectionPoint: 'final',
+              order: 1,
+            ),
+            StudioPresetBlock(
+              id: 'group',
+              title: '━ Group',
+              content: 'Header instructions',
+              enabled: false,
+              injectionPoint: 'final',
+              order: 2,
+            ),
+            StudioPresetBlock(
+              id: 'child',
+              content: 'Enabled child',
+              injectionPoint: 'final',
+              order: 3,
+            ),
+            StudioPresetBlock(
+              id: 'group_group_close',
+              groupBoundary: 'close',
+              mode: '',
+              content: '</group>',
+              injectionPoint: 'final',
+              order: 4,
+            ),
+          ],
+        ),
+        priorBriefs: const [],
+        isFinalResponse: true,
+      );
+
+      expect(messages, isEmpty);
     });
 
     test('cleaner run receives only cleaner-section Studio blocks', () {
@@ -423,11 +530,7 @@ void main() {
     });
 
     test('shared pre-gen blocks go to the batch role, not the tasks', () {
-      final role = builder.batchRoleText(
-        config,
-        preset,
-        context,
-      );
+      final role = builder.batchRoleText(config, preset, context);
 
       expect(role, contains('SHARED PREGEN'));
       // A specific-agent block is one agent's job — it must not leak into the
@@ -647,10 +750,7 @@ void main() {
       expect(envelope.toLowerCase(), isNot(contains('paragraph')));
       expect(envelope.toLowerCase(), isNot(contains('word budget')));
       expect(guard.purpose.toLowerCase(), isNot(contains('paragraph')));
-      expect(
-        guard.outputContract.toLowerCase(),
-        isNot(contains('paragraph')),
-      );
+      expect(guard.outputContract.toLowerCase(), isNot(contains('paragraph')));
     });
   });
 
@@ -745,8 +845,6 @@ void main() {
       final migrated = _migrateForTest(guard);
       expect(migrated.refreshPolicy, 'turn');
     });
-
-
   });
 
   group('Meta-Weaver auto-disable when no lumia block', () {

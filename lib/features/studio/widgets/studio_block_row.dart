@@ -537,7 +537,6 @@ class _StudioBlockGroupRowState extends State<StudioBlockGroupRow> {
         children: [
           InkWell(
             onTap: () => setState(() => _expanded = !_expanded),
-            onLongPress: () => widget.onEdit(header),
             child: Row(
               children: [
                 ReorderableDragStartListener(
@@ -597,21 +596,6 @@ class _StudioBlockGroupRowState extends State<StudioBlockGroupRow> {
                     ),
                   ),
                 ),
-                SizedBox(
-                  width: 36,
-                  height: 44,
-                  child: Material(
-                    color: Colors.transparent,
-                    child: InkWell(
-                      onTap: () => widget.onEdit(header),
-                      child: Icon(
-                        Icons.edit_outlined,
-                        size: 20,
-                        color: context.cs.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
-                ),
                 if (_isCoTGroup(group))
                   Switch.adaptive(
                     value: header.enabled,
@@ -639,6 +623,14 @@ class _StudioBlockGroupRowState extends State<StudioBlockGroupRow> {
               indent: 16,
               isLast: group.children.isEmpty && closingBoundary == null,
               onEdit: () => widget.onEdit(openingBoundary),
+            ),
+          if (_expanded)
+            StudioBlockRow(
+              key: ValueKey('studio_group_prompt_${header.id}'),
+              block: header.copyWith(title: 'studio_group_header_prompt'.tr()),
+              indent: 16,
+              isLast: group.children.isEmpty && closingBoundary == null,
+              onEdit: () => widget.onEdit(header),
             ),
           if (_expanded)
             for (var i = 0; i < group.children.length; i++)

@@ -395,11 +395,13 @@ class StudioPresetEditorBodyState
         ? null
         : preset.blocks.where((b) => b.id == _editingBlockId).firstOrNull;
     if (editing != null) {
+      final headerPrompt = isStudioPresetGroupHeader(editing);
       return StudioBlockEditorInline(
         key: ValueKey(editing.id),
         block: editing,
         onChanged: _onBlockChanged,
         onDelete: () => _deleteBlock(editing),
+        headerPrompt: headerPrompt,
       );
     }
 
