@@ -307,7 +307,15 @@ abstract final class StudioPresetCodec {
     enabled: forceDisabled ? false : json['enabled'] != false,
     locked: json['locked'] == true,
     order: _integer(json['order']),
-    section: _string(json['section'], 'pregen'),
+    section: _string(
+      json['section'],
+      json.containsKey('injectionPoint') ? '' : 'pregen',
+    ),
+    mode: _string(json['mode'], 'direct'),
+    isStatic: json['isStatic'] == true,
+    injectionPoint: _string(json['injectionPoint'], 'pregen'),
+    sourceAgentId: _string(json['sourceAgentId']),
+    groupBoundary: _string(json['groupBoundary'], 'none'),
   );
 
   static String? _resolveLegacyTarget(String id, String title) {

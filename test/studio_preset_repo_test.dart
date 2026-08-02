@@ -58,6 +58,46 @@ void main() {
     expect(restored?.name, preset.name);
   });
 
+  test('round-trips blocks in final, cleaner, and ledger sections', () async {
+    const preset = StudioPreset(
+      id: 'pipeline-sections',
+      name: 'Pipeline sections',
+      agents: [],
+      blocks: [
+        StudioPresetBlock(
+          id: 'final_main_prompt',
+          section: '',
+          injectionPoint: 'final',
+        ),
+        StudioPresetBlock(
+          id: 'cleaner_system',
+          section: '',
+          injectionPoint: 'cleaner',
+        ),
+        StudioPresetBlock(
+          id: 'ledger_system',
+          section: '',
+          injectionPoint: 'ledger',
+        ),
+        StudioPresetBlock(
+          id: 'ledger_reconciliation_prompt',
+          section: '',
+          injectionPoint: 'ledger',
+        ),
+      ],
+    );
+
+    await repo.upsert(preset);
+    final restored = await repo.getById(preset.id);
+
+    expect(restored?.blocks.map((block) => block.injectionPoint), [
+      'final',
+      'cleaner',
+      'ledger',
+      'ledger',
+    ]);
+  });
+
   test('reads legacy block rows and upserts canonical JSON', () async {
     await db
         .into(db.studioPresetRows)
