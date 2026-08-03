@@ -55,6 +55,11 @@ abstract class StudioAgentSettings with _$StudioAgentSettings {
     // Include reasoning_content from the N most recent assistant messages in
     // final-generator history. -1 includes all retained history; 0 disables it.
     @Default(0) int studioFinalReasoningHistoryCount,
+    // When true, reasoning tokens are still sent to the provider but are NOT
+    // counted toward the history trim budget for the final generator. This
+    // lets more chat history fit when reasoning blocks are large. Overrides
+    // the API config flag when the Studio final slot is active.
+    @Default(false) bool studioFinalExcludeReasoningFromContextBudget,
     // When true, the final generator's request forces requestReasoning=false
     // and omitReasoning=true regardless of the ApiConfig. Targeted at Gemini
     // Flash thinking models that spend most of the token budget on a
@@ -115,7 +120,8 @@ Map<String, dynamic> _normalizeStudioAgentSettingsJson(
   Map<String, dynamic> json,
 ) {
   final n = Map<String, dynamic>.from(json);
-  for (final oldKey in n.keys.where((k) => k.startsWith('studioTracker')).toList()) {
+  for (final oldKey
+      in n.keys.where((k) => k.startsWith('studioTracker')).toList()) {
     final newKey = oldKey.replaceFirst('studioTracker', 'studioController');
     if (!n.containsKey(newKey)) {
       n[newKey] = n[oldKey];

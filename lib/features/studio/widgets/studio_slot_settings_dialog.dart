@@ -33,6 +33,7 @@ class StudioSlotSettings {
   final bool omitReasoning;
   final bool omitReasoningEffort;
   final int reasoningHistoryCount;
+  final bool excludeReasoningFromContextBudget;
   final int maxTokens;
   final int timeoutMs;
   final List<ExtraRequestParameter> extraRequestParameters;
@@ -51,6 +52,7 @@ class StudioSlotSettings {
     required this.omitReasoning,
     required this.omitReasoningEffort,
     this.reasoningHistoryCount = 0,
+    this.excludeReasoningFromContextBudget = false,
     required this.maxTokens,
     required this.timeoutMs,
     required this.extraRequestParameters,
@@ -74,6 +76,8 @@ class StudioSlotSettings {
             studioFinalOmitReasoning: omitReasoning,
             studioFinalOmitReasoningEffort: omitReasoningEffort,
             studioFinalReasoningHistoryCount: reasoningHistoryCount,
+            studioFinalExcludeReasoningFromContextBudget:
+                excludeReasoningFromContextBudget,
             studioFinalMaxTokens: maxTokens,
             studioFinalTimeoutMs: timeoutMs,
             studioFinalExtraRequestParameters: extraRequestParameters,
@@ -164,6 +168,7 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
   late bool _omitTopP;
   late bool _omitReasoning;
   late bool _omitReasoningEffort;
+  late bool _excludeReasoningFromContextBudget;
   late TextEditingController _reasoningHistoryCountCtrl;
   late TextEditingController _maxTokensCtrl;
   late TextEditingController _timeoutCtrl;
@@ -190,6 +195,8 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
         _omitTopP = a.studioFinalOmitTopP;
         _omitReasoning = a.studioFinalOmitReasoning;
         _omitReasoningEffort = a.studioFinalOmitReasoningEffort;
+        _excludeReasoningFromContextBudget =
+            a.studioFinalExcludeReasoningFromContextBudget;
         _reasoningHistoryCountCtrl = TextEditingController(
           text: '${a.studioFinalReasoningHistoryCount}',
         );
@@ -216,6 +223,7 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
         _omitTopP = a.studioControllerOmitTopP;
         _omitReasoning = a.studioControllerOmitReasoning;
         _omitReasoningEffort = a.studioControllerOmitReasoningEffort;
+        _excludeReasoningFromContextBudget = false;
         _reasoningHistoryCountCtrl = TextEditingController(text: '0');
         _maxTokensCtrl = TextEditingController(
           text: a.studioControllerMaxTokens > 0
@@ -242,6 +250,7 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
         _omitTopP = c.postCleanerOmitTopP;
         _omitReasoning = c.postCleanerOmitReasoning;
         _omitReasoningEffort = c.postCleanerOmitReasoningEffort;
+        _excludeReasoningFromContextBudget = false;
         _reasoningHistoryCountCtrl = TextEditingController(text: '0');
         _maxTokensCtrl = TextEditingController(
           text: c.postCleanerMaxTokens > 0 ? '${c.postCleanerMaxTokens}' : '',
@@ -352,6 +361,7 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
         reasoningHistoryCount: reasoningHistoryCount < -1
             ? 0
             : reasoningHistoryCount,
+        excludeReasoningFromContextBudget: _excludeReasoningFromContextBudget,
         maxTokens: maxTokens,
         timeoutMs: timeoutMs,
         extraRequestParameters: _extraRequestParameters,
@@ -494,6 +504,14 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
                     keyboardType: const TextInputType.numberWithOptions(
                       signed: true,
                     ),
+                  ),
+                if (widget.slot == StudioSlot.finalGenerator)
+                  MenuSwitchItem(
+                    label: 'label_exclude_reasoning_from_budget'.tr(),
+                    description: 'desc_exclude_reasoning_from_budget'.tr(),
+                    value: _excludeReasoningFromContextBudget,
+                    onChanged: (v) =>
+                        setState(() => _excludeReasoningFromContextBudget = v),
                   ),
               ],
             ),

@@ -293,7 +293,7 @@ class StudioAgentExecutor {
       reasoningHistoryCount:
           settings.studioAgent.studioFinalReasoningHistoryCount,
       excludeReasoningFromContextBudget:
-          apiConfig.excludeReasoningFromContextBudget,
+          settings.studioAgent.studioFinalExcludeReasoningFromContextBudget,
     );
     onMessagesBuilt?.call(messages);
     return _runner.runAgent(
