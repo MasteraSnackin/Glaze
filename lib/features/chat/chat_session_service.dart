@@ -289,6 +289,13 @@ class ChatSessionService {
             messageIds: messageIds,
           );
       await _ref
+          .read(ledgerReconciliationRunRepoProvider)
+          .copyForSessionBranch(
+            fromSessionId: current.id,
+            toSessionId: branch.id,
+            messageIds: messageIds,
+          );
+      await _ref
           .read(infoBlocksRepoProvider)
           .copyForSessionBranch(
             fromSessionId: current.id,

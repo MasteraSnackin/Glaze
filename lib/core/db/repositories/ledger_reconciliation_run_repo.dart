@@ -323,6 +323,59 @@ class LedgerReconciliationRunRepo {
             ..limit(1))
           .getSingleOrNull();
 
+  /// Copies all reconciliation runs from [fromSessionId] to [toSessionId],
+  /// preserving the ordinal chain. Only runs whose endpoint message falls
+  /// within the branched slice ([messageIds]) are copied. The chain hashes
+  /// remain valid because ordinals are preserved and the physical order is
+  /// unchanged. Used by `branchSession` so the cadence gate continues from
+  /// the parent's reconciliation count instead of resetting to zero.
+  Future<void> copyForSessionBranch({
+    required String fromSessionId,
+    required String toSessionId,
+    required Set<String> messageIds,
+  }) async {
+    if (messageIds.isEmpty) return;
+    final rows =
+        await (_db.select(_db.ledgerReconciliationSuccessfulRuns)
+              ..where((r) => r.sessionId.equals(fromSessionId))
+              ..where((r) => r.endMessageId.isIn(messageIds))
+              ..orderBy([(r) => OrderingTerm.asc(r.ordinal)]))
+            .get();
+    if (rows.isEmpty) return;
+    await _db.batch((batch) {
+      for (final row in rows) {
+        batch.insert(
+          _db.ledgerReconciliationSuccessfulRuns,
+          LedgerReconciliationSuccessfulRunsCompanion.insert(
+            id: row.id,
+            sessionId: toSessionId,
+            ordinal: row.ordinal,
+            startMessageId: row.startMessageId,
+            startSwipeId: row.startSwipeId,
+            startAgentSwipeId: row.startAgentSwipeId,
+            endMessageId: row.endMessageId,
+            endSwipeId: row.endSwipeId,
+            endAgentSwipeId: row.endAgentSwipeId,
+            anchorsJson: row.anchorsJson,
+            rangeHash: row.rangeHash,
+            acceptedManifestRefsJson: row.acceptedManifestRefsJson,
+            effectiveCanonStamp: row.effectiveCanonStamp,
+            effectiveCanonRevision: row.effectiveCanonRevision,
+            effectiveCanonHash: row.effectiveCanonHash,
+            canonicalResultJson: row.canonicalResultJson,
+            contentHash: row.contentHash,
+            predecessorChainHash: row.predecessorChainHash,
+            chainHash: row.chainHash,
+            contractVersion: row.contractVersion,
+            opsAppliedJson: row.opsAppliedJson,
+            createdAt: row.createdAt,
+          ),
+          mode: InsertMode.insertOrReplace,
+        );
+      }
+    });
+  }
+
   /// A head is authoritative only if the whole durable chain is canonical and
   /// the latest run remains valid in the public read projection.
   Future<LedgerReconciliationSuccessfulRunRow?> getHead(
@@ -387,21 +440,25 @@ class LedgerReconciliationRunRepo {
     return rows;
   }
 
-  Future<bool> _cursorEndpointMatches(LedgerReconciliationCursorRow cursor) async {
-    final run = await (_db.select(_db.ledgerReconciliationSuccessfulRuns)
-          ..where((row) => row.id.equals(cursor.throughRunId))
-          ..where((row) => row.sessionId.equals(cursor.sessionId)))
-        .getSingleOrNull();
+  Future<bool> _cursorEndpointMatches(
+    LedgerReconciliationCursorRow cursor,
+  ) async {
+    final run =
+        await (_db.select(_db.ledgerReconciliationSuccessfulRuns)
+              ..where((row) => row.id.equals(cursor.throughRunId))
+              ..where((row) => row.sessionId.equals(cursor.sessionId)))
+            .getSingleOrNull();
     if (run == null ||
         run.ordinal != cursor.throughRunOrdinal ||
         run.chainHash != cursor.throughRunChainHash) {
       return false;
     }
-    final invalidation = await (_db.select(_db.ledgerReconciliationRunInvalidations)
-          ..where((row) => row.sessionId.equals(cursor.sessionId))
-          ..where((row) => row.runId.equals(cursor.throughRunId))
-          ..limit(1))
-        .getSingleOrNull();
+    final invalidation =
+        await (_db.select(_db.ledgerReconciliationRunInvalidations)
+              ..where((row) => row.sessionId.equals(cursor.sessionId))
+              ..where((row) => row.runId.equals(cursor.throughRunId))
+              ..limit(1))
+            .getSingleOrNull();
     return invalidation == null;
   }
 
