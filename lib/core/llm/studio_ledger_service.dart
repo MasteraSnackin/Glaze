@@ -210,6 +210,7 @@ class StudioLedgerService {
         plan: plan,
         trackers: promptTrackers,
         knowledgeFacts: offeredFacts,
+        character: canon.source,
       );
       await _throwIfReconciliationAborted(token, isStillCurrent);
       final outcome = await _llm.callOnceWithLog(
@@ -547,6 +548,7 @@ class StudioLedgerService {
         recentMemoryEntries: recentEntries,
         ledgerBlocks: ledgerBlocks,
         macroCtx: macroCtx,
+        character: canon.source,
       );
 
       debugPrint(
@@ -805,6 +807,7 @@ class StudioLedgerService {
     required List<MemoryEntry> recentMemoryEntries,
     List<StudioPresetBlock> ledgerBlocks = const [],
     MacroContext? macroCtx,
+    Character? character,
   }) {
     final hasActiveLedgerBlocks = ledgerBlocks.any(
       (block) =>
@@ -819,6 +822,7 @@ class StudioLedgerService {
         recentHistoryText: recentHistoryText,
         currentTrackers: currentTrackers,
         recentMemoryEntries: recentMemoryEntries,
+        character: character,
       );
     }
 
@@ -828,10 +832,11 @@ class StudioLedgerService {
     );
     final keyCatalog = _promptBuilder.buildExistingKeyCatalog(currentTrackers);
     final memoryBlock = _buildMemoryBlock(recentMemoryEntries);
+    final cardSection = StudioLedgerPrompt.buildCharacterCardSection(character);
 
     final runtimeSuffix =
         '''
-<current_state>
+$cardSection<current_state>
 $trackerBlock
 </current_state>
 

@@ -1,3 +1,4 @@
+import '../models/character.dart';
 import '../models/memory_book.dart';
 import '../models/tracker.dart';
 
@@ -34,11 +35,16 @@ class StudioLedgerPrompt {
   ///
   /// [recentMemoryEntries] — up to 20 active MemoryBook entries (title + keys
   /// only, content omitted to keep prompt lean).
+  ///
+  /// [character] — the character card for this session. Name, description, and
+  /// personality are injected as a reference section so the ledger can resolve
+  /// aliases and placeholders to the canonical identity.
   String build({
     required String finalAssistantText,
     required String recentHistoryText,
     required List<Tracker> currentTrackers,
     required List<MemoryEntry> recentMemoryEntries,
+    Character? character,
   }) {
     final trackerBlock = buildCurrentStateBlock(
       currentTrackers,
@@ -46,9 +52,11 @@ class StudioLedgerPrompt {
     );
     final keyCatalog = buildExistingKeyCatalog(currentTrackers);
     final memoryBlock = _buildMemoryBlock(recentMemoryEntries);
+    final cardBlock = buildCharacterCardSection(character);
 
     return '''$_systemPrompt
 
+$cardBlock
 <current_state>
 $trackerBlock
 </current_state>
@@ -179,6 +187,34 @@ knowledgeFacts rules:
           return '- ${e.title.isNotEmpty ? e.title : e.id}$keys$locked';
         })
         .join('\n');
+  }
+
+  /// Compact `<character_card>` section for the ledger prompt.
+  ///
+  /// Includes name, description, and personality (each capped at 2000 chars)
+  /// so the ledger agent can resolve descriptive aliases ("беловолосая
+  /// женщина") and transliteration variants ("Lucy" / "Люси") to the canonical
+  /// character identity from the card.
+  static String buildCharacterCardSection(Character? character) {
+    if (character == null) return '';
+    final parts = <String>[];
+    final name = (character.displayName?.isNotEmpty ?? false)
+        ? character.displayName!
+        : character.name;
+    parts.add('Name: $name');
+    if (character.description != null && character.description!.isNotEmpty) {
+      final desc = character.description!;
+      parts.add(
+        'Description: ${desc.length > 2000 ? '${desc.substring(0, 2000)}…' : desc}',
+      );
+    }
+    if (character.personality != null && character.personality!.isNotEmpty) {
+      final pers = character.personality!;
+      parts.add(
+        'Personality: ${pers.length > 2000 ? '${pers.substring(0, 2000)}…' : pers}',
+      );
+    }
+    return '<character_card>\n${parts.join('\n')}\n</character_card>\n\n';
   }
 
   static const String _systemPrompt =
