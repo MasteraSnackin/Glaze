@@ -903,6 +903,9 @@ Required response template (follow this exact structure):
 <glaze_memory_export>
 {"ops":[],"knowledgeFacts":[]}
 </glaze_memory_export>
+<glaze_knowledge_cleanup>
+{"ops":[]}
+</glaze_knowledge_cleanup>
 <studio_ledger>
 Compact continuity snapshot here.
 </studio_ledger>
@@ -911,6 +914,14 @@ The <glaze_memory_export> block MUST come first, before <studio_ledger>.
 It must contain a single JSON object with "ops" and "knowledgeFacts" arrays.
 When there are no state changes or knowledge facts, output empty arrays —
 do NOT skip the block.
+
+The <glaze_knowledge_cleanup> block is OPTIONAL. Include it only when you
+need to rename a descriptive alias entity to a canonical identity. Use:
+{"ops":[{"op":"rename_entity","fromKey":"entity:descriptive_alias","toKey":"entity:canonical","canonicalName":"Name"}]}
+Only rename placeholder/descriptive identities listed in
+<existing_fact_entities>. Never rename an already-named entity to a
+different name. The canonicalName must appear in the final assistant
+response or recent chat.
 
 Ops format:
 {"ops":[{"op":"set","key":"npc:Name.field","value":"…","evidence":"…","eventState":"completed"},…],"knowledgeFacts":[]}
