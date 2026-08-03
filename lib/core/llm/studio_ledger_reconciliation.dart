@@ -3,10 +3,12 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 
 import '../db/repositories/ledger_reconciliation_checkpoint_repo.dart';
+import '../models/character.dart';
 import '../models/character_knowledge_fact.dart';
 import '../models/chat_message.dart';
 import '../models/knowledge_cleanup.dart';
 import '../models/tracker.dart';
+import 'studio_ledger_prompt.dart';
 
 const ledgerReconciliationPromptBlockId = 'ledger_reconciliation_prompt';
 
@@ -144,6 +146,7 @@ class StudioLedgerReconciliationPrompt {
     required LedgerReconciliationPlan plan,
     required List<Tracker> trackers,
     List<CharacterKnowledgeFact> knowledgeFacts = const [],
+    Character? character,
   }) {
     final chat = plan.messages
         .map(
@@ -165,10 +168,11 @@ class StudioLedgerReconciliationPrompt {
     final factLines = facts.isEmpty
         ? '(no reviewable knowledge facts)'
         : facts.map(_factLine).join('\n');
+    final cardSection = StudioLedgerPrompt.buildCharacterCardSection(character);
 
     return '''$systemPrompt
 
-<review_range start="${plan.startMessageId}" end="${plan.endMessage.id}">
+$cardSection<review_range start="${plan.startMessageId}" end="${plan.endMessage.id}">
 $chat
 </review_range>
 

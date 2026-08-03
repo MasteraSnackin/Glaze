@@ -36,6 +36,7 @@ class StudioHistoryLimiter {
     StudioPreset preset, {
     int pipelineOverride = 0,
     int reasoningHistoryCount = 0,
+    bool excludeReasoningFromContextBudget = false,
   }) {
     final msgLimit = pipelineOverride > 0
         ? pipelineOverride
@@ -56,7 +57,9 @@ class StudioHistoryLimiter {
       if ((includeAllReasoning || remainingReasoning > 0) &&
           m.role == 'assistant' &&
           reasoning?.isNotEmpty == true) {
-        tokens += estimateTokens(reasoning!);
+        if (!excludeReasoningFromContextBudget) {
+          tokens += estimateTokens(reasoning!);
+        }
         if (!includeAllReasoning) remainingReasoning--;
       }
       // Always keep at least the last message.

@@ -246,9 +246,9 @@ class ImageGenService {
         ? llmEndpoint
         : settings.customEndpoint;
     final apiKey = settings.useSameEndpoint ? llmApiKey : settings.customApiKey;
-    final model = settings.useSameEndpoint
+    final model = settings.customModel.isEmpty
         ? 'dall-e-3'
-        : (settings.customModel.isEmpty ? 'dall-e-3' : settings.customModel);
+        : settings.customModel;
 
     return OpenaiImageProvider().generate(
       endpoint: endpoint,

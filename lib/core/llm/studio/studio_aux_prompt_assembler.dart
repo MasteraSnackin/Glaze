@@ -1,5 +1,6 @@
 import '../macro_engine.dart';
 import '../../models/studio_config.dart';
+import '../../models/studio_preset_block_groups.dart';
 
 /// Assembles an auxiliary-stage prompt (cleaner or ledger) from preset blocks
 /// preset blocks instead of hardcoded text.
@@ -44,12 +45,13 @@ class StudioAuxPromptAssembler {
     String runtimeSuffix = '',
     Set<String> skipBlockIds = const {},
   }) {
-    final sectionBlocks =
+    final routedBlocks =
         blocks
-            .where((b) => b.enabled && b.injectionPoint == injectionPoint)
+            .where((b) => b.injectionPoint == injectionPoint)
             .where((b) => !skipBlockIds.contains(b.id))
             .toList()
           ..sort((a, b) => a.order.compareTo(b.order));
+    final sectionBlocks = resolveEnabledStudioPresetBlocks(routedBlocks);
 
     final parts = <String>[];
     for (final block in sectionBlocks) {

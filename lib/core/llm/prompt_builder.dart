@@ -740,6 +740,8 @@ PromptResult _assembleMessages({
     contextSize: payload.apiConfig.contextSize,
     maxTokens: payload.apiConfig.maxTokens,
     reasoningHistoryCount: payload.apiConfig.reasoningHistoryCount,
+    excludeReasoningFromContextBudget:
+        payload.apiConfig.excludeReasoningFromContextBudget,
   );
   var historyOnly = messages.where((m) => m.isHistory).toList();
 

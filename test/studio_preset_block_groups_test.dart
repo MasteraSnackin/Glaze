@@ -362,7 +362,7 @@ void main() {
     );
   });
 
-  test('renders narrative modifiers as independent add-on switches', () {
+  test('keeps narrative modifiers independent inside their folder', () {
     const narrativeBlocks = [
       StudioPresetBlock(
         id: 'style_header',
@@ -404,18 +404,23 @@ void main() {
 
     final items = groupStudioPresetBlocks(narrativeBlocks);
 
-    expect(items, hasLength(4));
-    expect(items.first.exclusive, isTrue);
-    expect(items.first.children.map((block) => block.id), [
+    expect(items, hasLength(1));
+    final group = items.single;
+    expect(group.exclusive, isTrue);
+    expect(group.children.map((block) => block.id), [
       'ao3',
       'endless',
-      'anime',
-    ]);
-    expect(items.skip(1).map((item) => item.standalone?.id), [
       'bratty',
+      'anime',
       'doujinshi',
       'deflections',
     ]);
+    expect(
+      group.children
+          .where((block) => isIndependentStudioGroupChild(group, block))
+          .map((block) => block.id),
+      ['bratty', 'doujinshi', 'deflections'],
+    );
 
     final withBratty = updateStudioPresetBlockRespectingGroups(
       narrativeBlocks,
@@ -428,6 +433,70 @@ void main() {
       withBratty.firstWhere((block) => block.id == 'bratty').enabled,
       isTrue,
     );
+
+    final withAnime = selectExclusiveStudioBlock(
+      withBratty,
+      groupStudioPresetBlocks(withBratty).single,
+      'anime',
+    );
+    expect(withAnime.firstWhere((block) => block.id == 'ao3').enabled, isFalse);
+    expect(
+      withAnime.firstWhere((block) => block.id == 'anime').enabled,
+      isTrue,
+    );
+    expect(
+      withAnime.firstWhere((block) => block.id == 'bratty').enabled,
+      isTrue,
+    );
+  });
+
+  test('folder toggle preserves child selections and suppresses injection', () {
+    const folderBlocks = [
+      StudioPresetBlock(
+        id: 'folder_group_open',
+        content: '<folder>',
+        groupBoundary: 'open',
+        order: 0,
+      ),
+      StudioPresetBlock(
+        id: 'folder',
+        title: '━ Folder',
+        content: 'Header',
+        order: 1,
+      ),
+      StudioPresetBlock(id: 'first', content: 'First', order: 2),
+      StudioPresetBlock(
+        id: 'second',
+        content: 'Second',
+        enabled: false,
+        order: 3,
+      ),
+      StudioPresetBlock(
+        id: 'folder_group_close',
+        content: '</folder>',
+        groupBoundary: 'close',
+        order: 4,
+      ),
+      StudioPresetBlock(id: 'outside', content: 'Outside', order: 5),
+    ];
+    final group = groupStudioPresetBlocks(folderBlocks).first;
+
+    final disabled = toggleStudioPresetBlockGroup(folderBlocks, group, false);
+    expect(disabled.firstWhere((block) => block.id == 'first').enabled, isTrue);
+    expect(
+      disabled.firstWhere((block) => block.id == 'second').enabled,
+      isFalse,
+    );
+    expect(
+      resolveEnabledStudioPresetBlocks(disabled).map((block) => block.id),
+      ['outside'],
+    );
+
+    final restored = toggleStudioPresetBlockGroup(disabled, group, true);
+    final resolved = resolveEnabledStudioPresetBlocks(restored);
+    expect(resolved.map((block) => block.id), ['folder', 'first', 'outside']);
+    expect(resolved.first.content, '<folder>\nHeader');
+    expect(resolved[1].content, 'First\n</folder>');
   });
 
   test('repairs a mismatched legacy close from the owned opening tag', () {

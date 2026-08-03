@@ -53,6 +53,8 @@ PromptResult buildFallbackPrompt(PromptPayload payload) {
     contextSize: payload.apiConfig.contextSize,
     maxTokens: payload.apiConfig.maxTokens,
     reasoningHistoryCount: payload.apiConfig.reasoningHistoryCount,
+    excludeReasoningFromContextBudget:
+        payload.apiConfig.excludeReasoningFromContextBudget,
   );
   final breakdown = calculator.calculate(
     staticBlocks: const [
@@ -68,9 +70,17 @@ PromptResult buildFallbackPrompt(PromptPayload payload) {
     messages: [
       systemMessage,
       if (canon?.characterKnowledge case final content? when content.isNotEmpty)
-        PromptMessage(role: 'system', content: content, blockId: 'current_character_state'),
+        PromptMessage(
+          role: 'system',
+          content: content,
+          blockId: 'current_character_state',
+        ),
       if (canon?.sessionState case final content? when content.isNotEmpty)
-        PromptMessage(role: 'system', content: content, blockId: 'studio_session_state'),
+        PromptMessage(
+          role: 'system',
+          content: content,
+          blockId: 'studio_session_state',
+        ),
       ...breakdown.trimmedHistory,
     ],
     breakdown: breakdown,
@@ -80,5 +90,8 @@ PromptResult buildFallbackPrompt(PromptPayload payload) {
 }
 
 String _latestText(List<ChatMessage> history, String role) => history
-    .lastWhere((message) => message.role == role, orElse: () => const ChatMessage(id: '', role: '', content: ''))
+    .lastWhere(
+      (message) => message.role == role,
+      orElse: () => const ChatMessage(id: '', role: '', content: ''),
+    )
     .content;

@@ -23,7 +23,7 @@ class OpenaiImageProvider {
       url = '$url/images/generations';
     }
 
-    final b64 = await _http.postAndExtractBase64(
+    return _http.postAndExtract(
       url: url,
       apiKey: apiKey,
       body: {
@@ -35,12 +35,30 @@ class OpenaiImageProvider {
         'response_format': 'b64_json',
       },
       cancelToken: cancelToken,
-      extractBase64: (json) {
+      extract: (json) async {
         final data = json['data'] as List?;
-        if (data == null || data.isEmpty) throw Exception('No image data in response');
-        return (data.first as Map<String, dynamic>)['b64_json'] as String;
+        if (data == null || data.isEmpty) {
+          throw Exception('No image data in response');
+        }
+        for (final item in data) {
+          if (item is! Map) continue;
+          final imageObj = Map<String, dynamic>.from(item);
+          final b64 = imageObj['b64_json'] as String?;
+          if (b64 != null && b64.isNotEmpty) {
+            return ImageGenHttp.base64ToBytes(
+              ImageGenHttp.stripBase64Prefix(b64),
+            );
+          }
+          final imgUrl = imageObj['url'] as String?;
+          if (imgUrl != null && imgUrl.isNotEmpty) {
+            return await ImageGenHttp.downloadImage(
+              imgUrl,
+              cancelToken: cancelToken,
+            );
+          }
+        }
+        throw Exception('No b64_json or url in image response');
       },
     );
-    return ImageGenHttp.base64ToBytes(b64);
   }
 }

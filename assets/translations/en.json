@@ -145,6 +145,8 @@
   "label_reasoning": "Show Native Reasoning",
   "label_include_last_reasoning": "Reasoning blocks (-1 = all, 0 = off)",
   "desc_include_last_reasoning": "Number of recent reasoning_content blocks from chat history",
+  "label_exclude_reasoning_from_budget": "Exclude reasoning from context budget",
+  "desc_exclude_reasoning_from_budget": "Reasoning blocks are sent but their tokens don't count toward the context trim limit, keeping more chat history visible",
   "label_prompt_cache_ttl": "Anthropic Prompt Cache",
   "desc_prompt_cache_ttl": "Inject cache_control: ephemeral for Anthropic or custom OpenAI-compatible backends. 1 hour keeps cache alive across long pauses (expensive write, cheap read).",
   "prompt_cache_ttl_off": "Off",

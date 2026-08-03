@@ -84,8 +84,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(edited?.id, 'pov_header');
 
-    // Exclusive children carry radios, not switches.
-    expect(find.byType(Switch), findsNothing);
+    // Exclusive children carry radios, not switches. The folder header is
+    // the only Switch in this expanded exclusive group.
+    expect(find.byType(Switch), findsOneWidget);
     await tester.tap(find.byIcon(Icons.radio_button_off));
     await tester.pumpAndSettle();
     expect(selected, 'second_person');
@@ -119,8 +120,14 @@ void main() {
     await tester.tap(find.text('Core'));
     await tester.pumpAndSettle();
 
-    final toggle = tester.widget<Switch>(find.byType(Switch));
-    expect(toggle.onChanged, isNull);
+    // Two switches after expansion: the folder header toggle and the child
+    // toggle. The locked child's switch is the one with onChanged == null.
+    final switches = tester.widgetList<Switch>(find.byType(Switch)).toList();
+    expect(switches, hasLength(2));
+    final lockedChildSwitch = switches.singleWhere(
+      (s) => s.onChanged == null,
+    );
+    expect(lockedChildSwitch.value, isTrue);
     expect(toggled, isFalse);
   });
 
@@ -177,15 +184,13 @@ void main() {
       ),
     );
 
-    // The CoT group carries a whole-group switch, unlike other exclusive
-    // groups which only expose per-child radios.
     expect(find.byType(Switch), findsOneWidget);
     await tester.tap(find.byType(Switch));
     await tester.pumpAndSettle();
     expect(groupToggled, isTrue);
   });
 
-  testWidgets('non-CoT exclusive group has no whole-group switch', (
+  testWidgets('non-CoT exclusive group has a whole-group switch', (
     tester,
   ) async {
     const blocks = [
@@ -216,7 +221,7 @@ void main() {
       ),
     );
 
-    expect(find.byType(Switch), findsNothing);
+    expect(find.byType(Switch), findsOneWidget);
   });
 
   testWidgets('folder delete icon triggers onDeleteGroup', (tester) async {

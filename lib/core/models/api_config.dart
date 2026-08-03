@@ -29,6 +29,7 @@ abstract class ApiConfig with _$ApiConfig {
     @Default(false) bool useResponsesApi,
     @Default(true) bool showNativeReasoning,
     @Default(0) int reasoningHistoryCount,
+    @Default(false) bool excludeReasoningFromContextBudget,
     String? reasoningTagStart,
     String? reasoningTagEnd,
     @Default(false) bool omitTemperature,

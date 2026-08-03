@@ -210,6 +210,7 @@ class StudioLedgerService {
         plan: plan,
         trackers: promptTrackers,
         knowledgeFacts: offeredFacts,
+        character: canon.source,
       );
       await _throwIfReconciliationAborted(token, isStillCurrent);
       final outcome = await _llm.callOnceWithLog(
@@ -531,6 +532,9 @@ class StudioLedgerService {
       final recentEntries =
           book?.entries.where((e) => e.status == 'active').take(20).toList() ??
           const <MemoryEntry>[];
+      final entityAliases = await _knowledgeFactRepo.getEntityAliases(
+        sessionId,
+      );
 
       if (token.isCancelled || await _isStillCurrent(isStillCurrent) == false) {
         return LedgerRunResult.aborted;
@@ -547,6 +551,8 @@ class StudioLedgerService {
         recentMemoryEntries: recentEntries,
         ledgerBlocks: ledgerBlocks,
         macroCtx: macroCtx,
+        character: canon.source,
+        entityAliases: entityAliases,
       );
 
       debugPrint(
@@ -646,6 +652,14 @@ class StudioLedgerService {
         swipeId: swipeId,
         agentSwipeId: agentSwipeId,
         content: finalAssistantText,
+      );
+      // Parse optional knowledge cleanup (rename_entity) from the same
+      // response. Applied after the main transaction so a cleanup failure
+      // does not roll back tracker/fact writes — the reconciler will retry.
+      final cleanupOps = const KnowledgeCleanupParser().parse(
+        output: rawResponse,
+        reviewText: '$recentHistoryText\n$finalAssistantText',
+        entityKeys: entityAliases.keys.toSet(),
       );
       final facts = export.knowledgeFacts
           .map(
@@ -756,6 +770,28 @@ class StudioLedgerService {
         '[StudioLedger] applied $opsApplied/${export.ops.length} ops session=$sessionId',
       );
 
+      // ── 7. Apply knowledge cleanup (rename_entity) ─────────────────────
+      if (cleanupOps.isNotEmpty) {
+        try {
+          final cleanupApplied = await _knowledgeFactRepo
+              .applyReconciliationCleanup(
+                sessionId: sessionId,
+                ops: cleanupOps,
+                endpointMessageId: null,
+              );
+          opsApplied += cleanupApplied;
+          debugPrint(
+            '[StudioLedger] cleanup ops=${cleanupOps.length} '
+            'applied=$cleanupApplied session=$sessionId',
+          );
+        } catch (e) {
+          // Cleanup failure is non-fatal — reconciler will retry.
+          debugPrint(
+            '[StudioLedger] cleanup failed (non-fatal) session=$sessionId: $e',
+          );
+        }
+      }
+
       sw.stop();
       debugPrint(
         '[StudioLedger] done session=$sessionId '
@@ -805,6 +841,8 @@ class StudioLedgerService {
     required List<MemoryEntry> recentMemoryEntries,
     List<StudioPresetBlock> ledgerBlocks = const [],
     MacroContext? macroCtx,
+    Character? character,
+    Map<String, String> entityAliases = const {},
   }) {
     final hasActiveLedgerBlocks = ledgerBlocks.any(
       (block) =>
@@ -819,6 +857,8 @@ class StudioLedgerService {
         recentHistoryText: recentHistoryText,
         currentTrackers: currentTrackers,
         recentMemoryEntries: recentMemoryEntries,
+        character: character,
+        entityAliases: entityAliases,
       );
     }
 
@@ -828,10 +868,14 @@ class StudioLedgerService {
     );
     final keyCatalog = _promptBuilder.buildExistingKeyCatalog(currentTrackers);
     final memoryBlock = _buildMemoryBlock(recentMemoryEntries);
+    final cardSection = StudioLedgerPrompt.buildCharacterCardSection(character);
+    final entitySection = StudioLedgerPrompt.buildEntityAliasSection(
+      entityAliases,
+    );
 
     final runtimeSuffix =
         '''
-<current_state>
+$cardSection$entitySection<current_state>
 $trackerBlock
 </current_state>
 
@@ -859,6 +903,9 @@ Required response template (follow this exact structure):
 <glaze_memory_export>
 {"ops":[],"knowledgeFacts":[]}
 </glaze_memory_export>
+<glaze_knowledge_cleanup>
+{"ops":[]}
+</glaze_knowledge_cleanup>
 <studio_ledger>
 Compact continuity snapshot here.
 </studio_ledger>
@@ -867,6 +914,14 @@ The <glaze_memory_export> block MUST come first, before <studio_ledger>.
 It must contain a single JSON object with "ops" and "knowledgeFacts" arrays.
 When there are no state changes or knowledge facts, output empty arrays —
 do NOT skip the block.
+
+The <glaze_knowledge_cleanup> block is OPTIONAL. Include it only when you
+need to rename a descriptive alias entity to a canonical identity. Use:
+{"ops":[{"op":"rename_entity","fromKey":"entity:descriptive_alias","toKey":"entity:canonical","canonicalName":"Name"}]}
+Only rename placeholder/descriptive identities listed in
+<existing_fact_entities>. Never rename an already-named entity to a
+different name. The canonicalName must appear in the final assistant
+response or recent chat.
 
 Ops format:
 {"ops":[{"op":"set","key":"npc:Name.field","value":"…","evidence":"…","eventState":"completed"},…],"knowledgeFacts":[]}

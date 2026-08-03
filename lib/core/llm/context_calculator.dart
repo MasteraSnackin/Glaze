@@ -16,11 +16,13 @@ class ContextCalculator {
   final int contextSize;
   final int maxTokens;
   final int reasoningHistoryCount;
+  final bool excludeReasoningFromContextBudget;
 
   ContextCalculator({
     required this.contextSize,
     required this.maxTokens,
     this.reasoningHistoryCount = 0,
+    this.excludeReasoningFromContextBudget = false,
   });
 
   /// Context window available for the *prompt*, i.e. everything we send.
@@ -145,7 +147,9 @@ class ContextCalculator {
           (includeAllReasoning || remainingReasoning > 0) &&
           message.role == 'assistant' &&
           reasoning?.isNotEmpty == true;
-      if (includesReasoning) tokens += estimateTokens(reasoning!);
+      if (includesReasoning && !excludeReasoningFromContextBudget) {
+        tokens += estimateTokens(reasoning!);
+      }
       if (used + tokens > budget) break;
       used += tokens;
       kept.insert(0, message);

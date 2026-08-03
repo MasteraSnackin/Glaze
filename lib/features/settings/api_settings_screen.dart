@@ -68,6 +68,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   bool _requestReasoning = false;
   bool _useResponsesApi = false;
   bool _showNativeReasoning = true;
+  bool _excludeReasoningFromContextBudget = false;
   String _reasoningEffort = 'medium';
   bool _omitTemperature = false;
   bool _omitTopP = false;
@@ -226,6 +227,8 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       _requestReasoning = values.requestReasoning;
       _useResponsesApi = values.useResponsesApi;
       _showNativeReasoning = values.showNativeReasoning;
+      _excludeReasoningFromContextBudget =
+          values.excludeReasoningFromContextBudget;
       _reasoningEffort = values.reasoningEffort;
       _omitTemperature = values.omitTemperature;
       _omitTopP = values.omitTopP;
@@ -261,6 +264,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
         requestReasoning: _requestReasoning,
         useResponsesApi: _useResponsesApi,
         showNativeReasoning: _showNativeReasoning,
+        excludeReasoningFromContextBudget: _excludeReasoningFromContextBudget,
         reasoningEffort: _reasoningEffort,
         omitTemperature: _omitTemperature,
         omitTopP: _omitTopP,
@@ -774,6 +778,17 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
                   keyboardType: const TextInputType.numberWithOptions(
                     signed: true,
                   ),
+                ),
+              if (_supportsReasoning)
+                MenuSwitchItem(
+                  label: 'label_exclude_reasoning_from_budget'.tr(),
+                  helpTerm: 'reasoning-budget',
+                  description: 'desc_exclude_reasoning_from_budget'.tr(),
+                  value: _excludeReasoningFromContextBudget,
+                  onChanged: (v) {
+                    setState(() => _excludeReasoningFromContextBudget = v);
+                    _scheduleSave();
+                  },
                 ),
               if (_supportsPromptCache)
                 MenuSelectorItem(
