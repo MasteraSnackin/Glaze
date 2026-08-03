@@ -335,7 +335,7 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
         int.tryParse(_reasoningHistoryCountCtrl.text.trim()) ?? 0;
     final seconds = int.tryParse(_timeoutCtrl.text.trim()) ?? 0;
     final timeoutMs = seconds > 0 ? seconds * 1000 : 0;
-    Navigator.of(context).pop(
+    Navigator.of(context, rootNavigator: true).pop(
       StudioSlotSettings(
         temperature: _temperature,
         topP: _topP,
