@@ -39,12 +39,18 @@ class StudioLedgerPrompt {
   /// [character] — the character card for this session. Name, description, and
   /// personality are injected as a reference section so the ledger can resolve
   /// aliases and placeholders to the canonical identity.
+  ///
+  /// [entityAliases] — compact `{subjectKey: subjectName}` map of entities
+  /// that already appear in active knowledge facts. Lets the ledger issue
+  /// `rename_entity` ops to merge descriptive aliases into canonical
+  /// identities immediately, without waiting for reconciliation.
   String build({
     required String finalAssistantText,
     required String recentHistoryText,
     required List<Tracker> currentTrackers,
     required List<MemoryEntry> recentMemoryEntries,
     Character? character,
+    Map<String, String> entityAliases = const {},
   }) {
     final trackerBlock = buildCurrentStateBlock(
       currentTrackers,
@@ -53,6 +59,7 @@ class StudioLedgerPrompt {
     final keyCatalog = buildExistingKeyCatalog(currentTrackers);
     final memoryBlock = _buildMemoryBlock(recentMemoryEntries);
     final cardBlock = buildCharacterCardSection(character);
+    final entityBlock = buildEntityAliasSection(entityAliases);
 
     return '''$_systemPrompt
 
@@ -65,7 +72,7 @@ $trackerBlock
 $keyCatalog
 </existing_keys>
 
-<existing_memory>
+$entityBlock<existing_memory>
 $memoryBlock
 </existing_memory>
 
@@ -85,6 +92,9 @@ Required response template (follow this exact structure):
 <glaze_memory_export>
 {"ops":[],"knowledgeFacts":[]}
 </glaze_memory_export>
+<glaze_knowledge_cleanup>
+{"ops":[]}
+</glaze_knowledge_cleanup>
 <studio_ledger>
 Compact continuity snapshot here.
 </studio_ledger>
@@ -93,6 +103,14 @@ The <glaze_memory_export> block MUST come first, before <studio_ledger>.
 It must contain a single JSON object with "ops" and "knowledgeFacts" arrays.
 When there are no state changes or knowledge facts, output empty arrays —
 do NOT skip the block.
+
+The <glaze_knowledge_cleanup> block is OPTIONAL. Include it only when you
+need to rename a descriptive alias entity to a canonical identity. Use:
+{"ops":[{"op":"rename_entity","fromKey":"entity:descriptive_alias","toKey":"entity:canonical","canonicalName":"Name"}]}
+Only rename placeholder/descriptive identities listed in
+<existing_fact_entities>. Never rename an already-named entity to a
+different name. The canonicalName must appear in the final assistant
+response or recent chat.
 
 Ops format:
 {"ops":[{"op":"set","key":"npc:Name.field","value":"…","evidence":"…","eventState":"completed"},…],"knowledgeFacts":[{"knowerKey":"entity:lucy","knowerName":"Lucy","subjectKey":"entity:danvi","subjectName":"Danvi","factClass":"relationship","scopeKey":"relationship:danvi","predicate":"trusts","object":"Trusts Danvi.","epistemicState":"confirmed","confidence":0.9,"importance":0.8,"entities":["Lucy"],"topics":["trust"],"supersedesId":null}]}
@@ -215,6 +233,18 @@ knowledgeFacts rules:
       );
     }
     return '<character_card>\n${parts.join('\n')}\n</character_card>\n\n';
+  }
+
+  /// Compact `<existing_fact_entities>` section — entity keys and display
+  /// names only, no fact content. Lets the ledger issue `rename_entity` ops
+  /// to merge aliases without injecting full fact bodies (which would grow
+  /// the prompt unboundedly with fact count).
+  static String buildEntityAliasSection(Map<String, String> entityAliases) {
+    if (entityAliases.isEmpty) return '';
+    final lines = entityAliases.entries
+        .map((e) => '- ${e.key}: ${e.value}')
+        .join('\n');
+    return '<existing_fact_entities>\n$lines\n</existing_fact_entities>\n\n';
   }
 
   static const String _systemPrompt =

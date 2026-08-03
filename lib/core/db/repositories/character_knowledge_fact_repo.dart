@@ -328,6 +328,36 @@ class CharacterKnowledgeFactRepo {
     return rows.map(_fromRow).toList(growable: false);
   }
 
+  /// Compact entity-alias registry for the ledger prompt.
+  ///
+  /// Returns `{subjectKey: subjectName}` for every distinct entity that
+  /// appears as a subject in active/tentative facts. This lets the ledger
+  /// agent issue `rename_entity` ops to merge descriptive aliases
+  /// ("беловолосая женщина") into canonical identities ("Люси") without
+  /// injecting full fact content (which would grow the prompt unboundedly).
+  /// Capped at [maxEntities] entries, sorted by most-recently-updated first.
+  Future<Map<String, String>> getEntityAliases(
+    String sessionId, {
+    int maxEntities = 40,
+  }) async {
+    final rows =
+        await (db.select(db.characterKnowledgeFactRows)
+              ..where((row) => row.chatSessionId.equals(sessionId))
+              ..where(
+                (row) => row.lifecycle.isIn(const ['active', 'tentative']),
+              )
+              ..orderBy([(row) => OrderingTerm.desc(row.updatedAt)]))
+            .get();
+    final result = <String, String>{};
+    for (final row in rows) {
+      final key = row.subjectKey;
+      if (result.containsKey(key)) continue;
+      result[key] = row.subjectName;
+      if (result.length >= maxEntities) break;
+    }
+    return result;
+  }
+
   Future<int> applyReconciliationCleanup({
     required String sessionId,
     required List<KnowledgeCleanupOp> ops,

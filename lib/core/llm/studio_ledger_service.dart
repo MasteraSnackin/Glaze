@@ -532,6 +532,9 @@ class StudioLedgerService {
       final recentEntries =
           book?.entries.where((e) => e.status == 'active').take(20).toList() ??
           const <MemoryEntry>[];
+      final entityAliases = await _knowledgeFactRepo.getEntityAliases(
+        sessionId,
+      );
 
       if (token.isCancelled || await _isStillCurrent(isStillCurrent) == false) {
         return LedgerRunResult.aborted;
@@ -549,6 +552,7 @@ class StudioLedgerService {
         ledgerBlocks: ledgerBlocks,
         macroCtx: macroCtx,
         character: canon.source,
+        entityAliases: entityAliases,
       );
 
       debugPrint(
@@ -648,6 +652,14 @@ class StudioLedgerService {
         swipeId: swipeId,
         agentSwipeId: agentSwipeId,
         content: finalAssistantText,
+      );
+      // Parse optional knowledge cleanup (rename_entity) from the same
+      // response. Applied after the main transaction so a cleanup failure
+      // does not roll back tracker/fact writes — the reconciler will retry.
+      final cleanupOps = const KnowledgeCleanupParser().parse(
+        output: rawResponse,
+        reviewText: '$recentHistoryText\n$finalAssistantText',
+        entityKeys: entityAliases.keys.toSet(),
       );
       final facts = export.knowledgeFacts
           .map(
@@ -758,6 +770,28 @@ class StudioLedgerService {
         '[StudioLedger] applied $opsApplied/${export.ops.length} ops session=$sessionId',
       );
 
+      // ── 7. Apply knowledge cleanup (rename_entity) ─────────────────────
+      if (cleanupOps.isNotEmpty) {
+        try {
+          final cleanupApplied = await _knowledgeFactRepo
+              .applyReconciliationCleanup(
+                sessionId: sessionId,
+                ops: cleanupOps,
+                endpointMessageId: null,
+              );
+          opsApplied += cleanupApplied;
+          debugPrint(
+            '[StudioLedger] cleanup ops=${cleanupOps.length} '
+            'applied=$cleanupApplied session=$sessionId',
+          );
+        } catch (e) {
+          // Cleanup failure is non-fatal — reconciler will retry.
+          debugPrint(
+            '[StudioLedger] cleanup failed (non-fatal) session=$sessionId: $e',
+          );
+        }
+      }
+
       sw.stop();
       debugPrint(
         '[StudioLedger] done session=$sessionId '
@@ -808,6 +842,7 @@ class StudioLedgerService {
     List<StudioPresetBlock> ledgerBlocks = const [],
     MacroContext? macroCtx,
     Character? character,
+    Map<String, String> entityAliases = const {},
   }) {
     final hasActiveLedgerBlocks = ledgerBlocks.any(
       (block) =>
@@ -823,6 +858,7 @@ class StudioLedgerService {
         currentTrackers: currentTrackers,
         recentMemoryEntries: recentMemoryEntries,
         character: character,
+        entityAliases: entityAliases,
       );
     }
 
@@ -833,10 +869,13 @@ class StudioLedgerService {
     final keyCatalog = _promptBuilder.buildExistingKeyCatalog(currentTrackers);
     final memoryBlock = _buildMemoryBlock(recentMemoryEntries);
     final cardSection = StudioLedgerPrompt.buildCharacterCardSection(character);
+    final entitySection = StudioLedgerPrompt.buildEntityAliasSection(
+      entityAliases,
+    );
 
     final runtimeSuffix =
         '''
-$cardSection<current_state>
+$cardSection$entitySection<current_state>
 $trackerBlock
 </current_state>
 
