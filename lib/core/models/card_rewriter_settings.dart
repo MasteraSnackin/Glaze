@@ -17,6 +17,14 @@ abstract class CardRewriterSettings with _$CardRewriterSettings {
     @Default(180000) int timeoutMs,
     @Default('') String apiConfigId,
     @Default('') String modelOverride,
+    // Confirmations required before an observation is promoted to a validated
+    // target injected into the next card writer call.
+    @Default(3) int observationPromotionThreshold,
+    // Minimum confidence for an observation to become a validated target.
+    @Default(0.7) double observationMinConfidence,
+    // Observation passes without confirmation before an active observation
+    // expires. 4 passes ~ 48 turns ~ 96 messages.
+    @Default(4) int observationExpiryRuns,
   }) = _CardRewriterSettings;
 
   factory CardRewriterSettings.fromJson(Map<String, dynamic> json) =>

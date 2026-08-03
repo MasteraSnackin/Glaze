@@ -54,6 +54,7 @@ part 'app_db.g.dart';
     CardEvolutionClaims,
     CardEvolutionProposalRuns,
     CardEvolutionDebugRuns,
+    CardEvolutionObservations,
     CharacterKnowledgeFactRows,
     CharacterSessionBaselineRows,
     CharacterRevisionRows,
@@ -73,7 +74,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 107;
+  int get schemaVersion => 108;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -2007,6 +2008,9 @@ class AppDatabase extends _$AppDatabase {
             apiConfigs.excludeReasoningFromContextBudget,
           );
         }
+      }
+      if (from < 108) {
+        await m.createTable(cardEvolutionObservations);
       }
     },
   );

@@ -1123,6 +1123,51 @@ class CardEvolutionDebugRuns extends Table {
   ];
 }
 
+/// Observation journal entries recording candidate durable character changes
+/// surfaced by the observation pass. One active observation per semantic scope
+/// per session; confirmations bump `repeatCount`/`lastConfirmedRun`. Promotion
+/// flips `status` to `promoted`; expiry to `consumed` after a successful apply.
+@DataClassName('CardEvolutionObservationRow')
+@TableIndex(
+  name: 'idx_card_evolution_observation_session',
+  columns: {#sessionId, #status},
+)
+class CardEvolutionObservations extends Table {
+  @override
+  String get tableName => 'card_evolution_observations';
+  TextColumn get id => text()();
+  TextColumn get sessionId => text()();
+  TextColumn get characterId => text()();
+  IntColumn get runOrdinal => integer()();
+  TextColumn get semanticScopeKey => text()();
+  TextColumn get observedChange => text()();
+  TextColumn get canonicalClaim => text().nullable()();
+  TextColumn get evidenceMessageIds => text()();
+  TextColumn get cardFieldPath => text().nullable()();
+  TextColumn get lorebookEntryId => text().nullable()();
+  RealColumn get confidence => real()();
+  TextColumn get status => text()();
+  IntColumn get firstSeenRun => integer()();
+  IntColumn get repeatCount => integer().withDefault(const Constant(1))();
+  IntColumn get lastConfirmedRun => integer().nullable()();
+  IntColumn get createdAt => integer()();
+  IntColumn get updatedAt => integer()();
+  @override
+  Set<Column> get primaryKey => {id};
+  @override
+  List<Set<Column>> get uniqueKeys => [
+    {sessionId, semanticScopeKey},
+  ];
+  @override
+  List<String> get customConstraints => [
+    "CHECK (status IN ('active', 'promoted', 'expired', 'consumed'))",
+    "CHECK (id <> '' AND session_id <> '' AND character_id <> '' "
+        "AND semantic_scope_key <> '' AND observed_change <> '' "
+        "AND evidence_message_ids <> '' AND confidence >= 0.0 "
+        "AND confidence <= 1.0 AND first_seen_run > 0 AND repeat_count > 0)",
+  ];
+}
+
 /// Immutable canonical lorebook-use manifest at one message variation anchor.
 @DataClassName('LorebookUseManifestRow')
 @TableIndex(

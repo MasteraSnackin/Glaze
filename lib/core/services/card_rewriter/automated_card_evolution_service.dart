@@ -3,10 +3,12 @@ import 'dart:convert';
 
 import 'package:dio/dio.dart';
 
+import '../../db/repositories/card_evolution_observation_repo.dart';
 import '../../db/repositories/card_evolution_repo.dart';
 import '../../llm/card_rewrite_slot_resolver.dart';
 import '../../llm/aux_retry_runner.dart';
 import '../../models/agent_operation_record.dart';
+import '../../models/card_evolution_observation.dart';
 import '../../utils/id_generator.dart';
 import '../../utils/time_helpers.dart';
 import 'card_rewrite_operation_parser.dart';
@@ -28,15 +30,24 @@ class AutomatedCardEvolutionService {
     this.isLorebookEvolutionEnabled,
     this.timeoutMs = 180000,
     this.leaseSeconds = 300,
-  });
+    CardEvolutionObservationRepo? observationRepo,
+    this.observationPromotionThreshold,
+    this.observationMinConfidence,
+    this.observationExpiryRuns,
+  }) : observationRepo =
+           observationRepo ?? CardEvolutionObservationRepo(repo.db);
 
   final CardEvolutionRepo repo;
+  final CardEvolutionObservationRepo observationRepo;
   final CardRewriteModelResolver resolveModel;
   final CardRewriteLlmExecutor _executor;
   final bool Function()? isEnabled;
   final bool Function()? isLorebookEvolutionEnabled;
   final int timeoutMs;
   final int leaseSeconds;
+  final int Function()? observationPromotionThreshold;
+  final double Function()? observationMinConfidence;
+  final int Function()? observationExpiryRuns;
   final Map<String, CancelToken> _tokens = {};
   final Map<String, Future<CardEvolutionFinalizeOutcome>> _inFlight = {};
 
@@ -52,6 +63,7 @@ class AutomatedCardEvolutionService {
   }
 
   Future<CardEvolutionFinalizeOutcome> _run(String sessionId) async {
+    await _maybeRunObservationPass(sessionId);
     final owner = 'evolution-owner-${generateId()}';
     final now = currentTimestampSeconds();
     final claimed = await repo.claim(
@@ -84,8 +96,11 @@ class AutomatedCardEvolutionService {
       final cardOperations = <CardRewriteOperationSnapshot>[];
       String? cardOutput;
       if (allowedCardFields.isNotEmpty) {
+        final validatedTargets = _extractValidatedTargets(
+          snapshot.selectedInputJson,
+        );
         final cardPrompt =
-            '${CardRewriterPromptBuilder.buildEvolution(character: snapshot.character, instruction: 'Use the available non-empty card fields, the 20 latest immutable chat messages, and the current Ledger-backed factual context below to infer durable character evolution. Ledger supports the chat evidence; it does not replace it. Return patches only for fields with a durable, supported change. Change the smallest exact fragments possible; do not rewrite a whole field or card. Do not invent canon.')}\n\n# Immutable chat history and effective canon\n${snapshot.selectedInputJson}';
+            '${CardRewriterPromptBuilder.buildEvolution(character: snapshot.character, instruction: 'Use the available non-empty card fields, the 40 latest immutable chat messages, and the current Ledger-backed factual context below to infer durable character evolution. Ledger supports the chat evidence; it does not replace it. Return patches only for fields with a durable, supported change. Change the smallest exact fragments possible; do not rewrite a whole field or card. Do not invent canon.', validatedTargets: validatedTargets)}\n\n# Immutable chat history and effective canon\n${snapshot.selectedInputJson}';
         final cardOutcome = await _executor(
           config: config,
           prompt: cardPrompt,
@@ -105,17 +120,19 @@ class AutomatedCardEvolutionService {
             !cardOutcome.isOk ||
             cardOutcome.text == null) {
           return CardEvolutionFinalizeOutcome(
-            token.isCancelled || cardOutcome.status == AgentOperationStatus.aborted
+            token.isCancelled ||
+                    cardOutcome.status == AgentOperationStatus.aborted
                 ? 'cancelled'
                 : 'cardModelFailed',
             null,
             _modelFailureDetail(cardOutcome),
           );
         }
-        final parsedCardOperations = CardRewriteOperationParser.parseEvolutionBatch(
-          cardOutcome.text!,
-          allowedFields: allowedCardFields,
-        );
+        final parsedCardOperations =
+            CardRewriteOperationParser.parseEvolutionBatch(
+              cardOutcome.text!,
+              allowedFields: allowedCardFields,
+            );
         if (parsedCardOperations == null) {
           return CardEvolutionFinalizeOutcome(
             'invalidCardOutput',
@@ -139,7 +156,7 @@ class AutomatedCardEvolutionService {
         final lorebookOutcome = await _executor(
           config: config,
           prompt:
-               '${CardRewriterPromptBuilder.buildLorebookEvolution(instruction: 'Use the shared card, chat, and Ledger context to keep only the supplied injected lorebook entries current. Prefer the card for character relationships and enduring behavior; prefer lorebook entries for their specific locations, people, objects, or setting facts. Do not duplicate a current or proposed card fact into lorebook. Return a patch whenever the chat supports a durable update that belongs in an injected entry and is not already covered by the card.')}\n\n# Shared immutable context\n$sharedContext\n\n# Proposed card operations (read-only)\n${_cardProposalContext(cardOperations)}',
+              '${CardRewriterPromptBuilder.buildLorebookEvolution(instruction: 'Use the shared card, chat, and Ledger context to keep only the supplied injected lorebook entries current. Prefer the card for character relationships and enduring behavior; prefer lorebook entries for their specific locations, people, objects, or setting facts. Do not duplicate a current or proposed card fact into lorebook. Return a patch whenever the chat supports a durable update that belongs in an injected entry and is not already covered by the card.')}\n\n# Shared immutable context\n$sharedContext\n\n# Proposed card operations (read-only)\n${_cardProposalContext(cardOperations)}',
           maxTokens: _writerMaxTokens,
           temperature: 0.2,
           timeoutMs: timeoutMs,
@@ -193,6 +210,12 @@ class AutomatedCardEvolutionService {
         operations: operations,
       );
       finalized = result.isPersisted;
+      if (finalized) {
+        await repo.consumePromotedObservations(
+          sessionId,
+          now: currentTimestampSeconds(),
+        );
+      }
       return result;
     } on CardRewriteModelNotConfigured {
       return const CardEvolutionFinalizeOutcome('modelNotConfigured');
@@ -209,6 +232,7 @@ class AutomatedCardEvolutionService {
   }
 
   void cancelSession(String sessionId) {
+    _tokens['observation-$sessionId']?.cancel('generationAborted');
     _tokens[sessionId]?.cancel('generationAborted');
   }
 
@@ -229,6 +253,243 @@ class AutomatedCardEvolutionService {
     }
   }
 
+  /// Runs the observation pass when the cadence gate is active (every 2nd
+  /// successful reconciliation). Failures are non-blocking: the card writer
+  /// continues without validated targets.
+  Future<void> _maybeRunObservationPass(String sessionId) async {
+    try {
+      final count = await repo.countSuccessfulReconciliations(sessionId);
+      if (count == 0 || count % 2 != 0) return;
+      final runOrdinal = count ~/ 2;
+      await _runObservationPass(sessionId, runOrdinal);
+      await _checkPromotionsAndExpiry(sessionId, runOrdinal);
+    } catch (_) {
+      // Observation pass failures are intentionally non-blocking.
+    }
+  }
+
+  Future<void> _runObservationPass(String sessionId, int runOrdinal) async {
+    final snapshot = await repo.buildObservationSnapshot(sessionId);
+    if (snapshot == null) return;
+    final config = await resolveModel();
+    final active = await observationRepo.getActiveObservations(sessionId);
+    final activeMaps = active
+        .map(
+          (o) => <String, Object?>{
+            'scopeKey': o.semanticScopeKey,
+            'observedChange': o.observedChange,
+            'canonicalClaim': o.canonicalClaim,
+            'repeatCount': o.repeatCount,
+            'firstSeenRun': o.firstSeenRun,
+            'lastConfirmedRun': o.lastConfirmedRun,
+            'confidence': o.confidence,
+          },
+        )
+        .toList();
+    final prompt =
+        '${CardRewriterPromptBuilder.buildObservationPass(character: snapshot.character, activeObservations: activeMaps, instruction: 'Review the last 40 immutable chat messages and the current Ledger-backed canon below. For each active observation, decide whether the chat history still supports it. Identify any new repeatedly demonstrated shift in preference, attitude, relationship dynamics, or lasting character development. Do not record one-off events or temporary state. Be conservative.')}\n\n# Immutable chat history and effective canon\n${snapshot.selectedInputJson}';
+    final token = CancelToken();
+    _tokens['observation-$sessionId'] = token;
+    try {
+      if (token.isCancelled) return;
+      final outcome = await _executor(
+        config: config,
+        prompt: prompt,
+        maxTokens: _writerMaxTokens,
+        temperature: 0.2,
+        timeoutMs: timeoutMs,
+        cancelToken: token,
+      );
+      if (token.isCancelled ||
+          outcome.status == AgentOperationStatus.aborted ||
+          !outcome.isOk ||
+          outcome.text == null) {
+        return;
+      }
+      final actions = _parseObservationResponse(outcome.text!);
+      if (actions == null) return;
+      final now = currentTimestampSeconds();
+      for (final action in actions) {
+        await _applyObservationAction(
+          sessionId: sessionId,
+          characterId: snapshot.character.id,
+          runOrdinal: runOrdinal,
+          now: now,
+          action: action,
+        );
+      }
+    } finally {
+      if (identical(_tokens['observation-$sessionId'], token)) {
+        _tokens.remove('observation-$sessionId');
+      }
+    }
+  }
+
+  Future<void> _applyObservationAction({
+    required String sessionId,
+    required String characterId,
+    required int runOrdinal,
+    required int now,
+    required _ParsedObservationAction action,
+  }) async {
+    switch (action.action) {
+      case 'confirm':
+        final existing = await observationRepo.findByScopeKey(
+          sessionId,
+          action.scopeKey,
+        );
+        if (existing != null && existing.status == 'active') {
+          await observationRepo.confirmObservation(
+            id: existing.id,
+            runOrdinal: runOrdinal,
+            confidence: action.confidence,
+            now: now,
+          );
+        }
+        break;
+      case 'new':
+        final existing = await observationRepo.findByScopeKey(
+          sessionId,
+          action.scopeKey,
+        );
+        if (existing == null) {
+          await observationRepo.insertObservation(
+            CardEvolutionObservation(
+              id: 'observation-${generateId()}',
+              sessionId: sessionId,
+              characterId: characterId,
+              runOrdinal: runOrdinal,
+              semanticScopeKey: action.scopeKey,
+              observedChange: action.observedChange,
+              canonicalClaim: action.canonicalClaim,
+              evidenceMessageIds: action.evidenceMessageIds,
+              cardFieldPath: action.cardFieldPath,
+              lorebookEntryId: action.lorebookEntryId,
+              confidence: action.confidence,
+              status: 'active',
+              firstSeenRun: runOrdinal,
+              createdAt: now,
+              updatedAt: now,
+            ),
+          );
+        }
+        break;
+      case 'expire':
+        final existing = await observationRepo.findByScopeKey(
+          sessionId,
+          action.scopeKey,
+        );
+        if (existing != null && existing.status == 'active') {
+          await observationRepo.expireObservation(existing.id, now: now);
+        }
+        break;
+    }
+  }
+
+  Future<void> _checkPromotionsAndExpiry(
+    String sessionId,
+    int runOrdinal,
+  ) async {
+    final now = currentTimestampSeconds();
+    final threshold = observationPromotionThreshold?.call() ?? 3;
+    final minConfidence = observationMinConfidence?.call() ?? 0.7;
+    final expiryRuns = observationExpiryRuns?.call() ?? 4;
+    final promotable = await observationRepo.getPromotableObservations(
+      sessionId,
+      minRepeatCount: threshold,
+      minConfidence: minConfidence,
+    );
+    for (final obs in promotable) {
+      await observationRepo.promoteObservation(obs.id, now: now);
+    }
+    final expired = await observationRepo.getExpiryCandidates(
+      sessionId,
+      currentRunOrdinal: runOrdinal,
+      expiryRuns: expiryRuns,
+    );
+    for (final obs in expired) {
+      await observationRepo.expireObservation(obs.id, now: now);
+    }
+  }
+
+  static List<Map<String, Object?>> _extractValidatedTargets(
+    String selectedInputJson,
+  ) {
+    try {
+      final input = jsonDecode(selectedInputJson) as Map;
+      final targets = input['validatedTargets'];
+      if (targets is! List) return const [];
+      return [
+        for (final target in targets)
+          if (target is Map<String, Object?>) target,
+      ];
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  static List<_ParsedObservationAction>? _parseObservationResponse(
+    String output,
+  ) {
+    try {
+      final cleaned = output
+          .replaceAll(RegExp(r'^```(?:json)?\s*'), '')
+          .replaceAll(RegExp(r'\s*```$'), '')
+          .trim();
+      final decoded = jsonDecode(cleaned);
+      if (decoded is! Map) return null;
+      final observations = decoded['observations'];
+      if (observations is! List) return null;
+      final result = <_ParsedObservationAction>[];
+      for (final raw in observations) {
+        if (raw is! Map) return null;
+        final action = raw['action'];
+        final scopeKey = raw['scopeKey'];
+        final observedChange = raw['observedChange'];
+        final confidence = raw['confidence'];
+        if (action is! String ||
+            !const {'confirm', 'new', 'expire'}.contains(action) ||
+            scopeKey is! String ||
+            scopeKey.isEmpty ||
+            observedChange is! String ||
+            observedChange.isEmpty) {
+          return null;
+        }
+        final conf = confidence is num ? confidence.toDouble() : 0.5;
+        final clampedConf = conf < 0.0
+            ? 0.0
+            : conf > 1.0
+            ? 1.0
+            : conf;
+        final evidenceRaw = raw['evidenceMessageIds'];
+        final evidence = evidenceRaw is List
+            ? [for (final item in evidenceRaw) item.toString()]
+            : const <String>[];
+        result.add(
+          _ParsedObservationAction(
+            action: action,
+            scopeKey: scopeKey,
+            observedChange: observedChange,
+            canonicalClaim: raw['canonicalClaim'] is String
+                ? raw['canonicalClaim'] as String
+                : null,
+            evidenceMessageIds: evidence,
+            cardFieldPath: raw['cardFieldPath'] is String
+                ? raw['cardFieldPath'] as String
+                : null,
+            lorebookEntryId: raw['lorebookEntryId'] is String
+                ? raw['lorebookEntryId'] as String
+                : null,
+            confidence: clampedConf,
+          ),
+        );
+      }
+      return result;
+    } catch (_) {
+      return null;
+    }
+  }
+
   static String _cardProposalContext(
     List<CardRewriteOperationSnapshot> operations,
   ) => jsonEncode([
@@ -238,7 +499,9 @@ class AutomatedCardEvolutionService {
 
   static String _diagnostic(String? reason, String output) {
     final compact = output.replaceAll(RegExp(r'\s+'), ' ').trim();
-    final preview = compact.length > 240 ? '${compact.substring(0, 240)}...' : compact;
+    final preview = compact.length > 240
+        ? '${compact.substring(0, 240)}...'
+        : compact;
     return '${reason ?? 'unrecognized response'}; response: $preview';
   }
 
@@ -270,4 +533,26 @@ class AutomatedCardEvolutionService {
     ]),
     updatedAt: currentTimestampSeconds(),
   );
+}
+
+final class _ParsedObservationAction {
+  const _ParsedObservationAction({
+    required this.action,
+    required this.scopeKey,
+    required this.observedChange,
+    required this.canonicalClaim,
+    required this.evidenceMessageIds,
+    required this.cardFieldPath,
+    required this.lorebookEntryId,
+    required this.confidence,
+  });
+
+  final String action;
+  final String scopeKey;
+  final String observedChange;
+  final String? canonicalClaim;
+  final List<String> evidenceMessageIds;
+  final String? cardFieldPath;
+  final String? lorebookEntryId;
+  final double confidence;
 }

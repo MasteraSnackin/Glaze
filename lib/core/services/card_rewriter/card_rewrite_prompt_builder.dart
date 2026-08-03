@@ -15,13 +15,18 @@ abstract final class CardRewriterPromptBuilder {
   static String buildEvolution({
     required Character character,
     required String instruction,
+    List<Map<String, Object?>> validatedTargets = const [],
   }) {
     final writableFields = CardRewritePolicy.nonEmptyEvolutionFields(character);
-    final snapshot = Map<String, Object?>.from(CardCanonicalizer.snapshot(character));
+    final snapshot = Map<String, Object?>.from(
+      CardCanonicalizer.snapshot(character),
+    );
     for (final field in CardRewritePolicy.evolutionFields) {
       if (!writableFields.contains(field)) snapshot.remove(field.wireName);
     }
-    final writableFieldNames = writableFields.map((field) => field.wireName).join(', ');
+    final writableFieldNames = writableFields
+        .map((field) => field.wireName)
+        .join(', ');
     final buffer = StringBuffer()
       ..writeln(
         'You are the Glaze card rewriter. Propose small anchored scalar patches '
@@ -55,27 +60,27 @@ abstract final class CardRewriterPromptBuilder {
         'to omit a card patch. Use one or more exact anchors per changed field, '
         'never a full-field rewrite.',
       )
-       ..writeln(
-         'Prefer replacing or refining an existing outdated card fragment over '
-         'appending a new standalone fact. Append only when no existing fragment '
-         'can accurately absorb the durable development. This keeps the card '
-         'compact while allowing it to grow gradually when necessary.',
-       )
-       ..writeln(
-         'The card is a long-term character reference, not an event log. Keep '
-         'one-off actions, recent scene beats, invitations, travel, meals, and '
-         'the current state of a relationship in Ledger. Do not patch the card '
-         'merely because {{user}} and the character went somewhere or did '
-         'something together. Patch it only when the evidence establishes a '
-         'lasting change in personality, relationship pattern, enduring goal, '
-         'boundary, worldview, or baseline premise that future scenes need.',
-       )
-       ..writeln(
-         'For example, accepting a drink is a Ledger event; a repeatedly '
-         'demonstrated shift from guarded distrust to cautious trust may justify '
-         'a small card refinement. Do not turn a single event into a permanent '
-         'trait or relationship claim.',
-       )
+      ..writeln(
+        'Prefer replacing or refining an existing outdated card fragment over '
+        'appending a new standalone fact. Append only when no existing fragment '
+        'can accurately absorb the durable development. This keeps the card '
+        'compact while allowing it to grow gradually when necessary.',
+      )
+      ..writeln(
+        'The card is a long-term character reference, not an event log. Keep '
+        'one-off actions, recent scene beats, invitations, travel, meals, and '
+        'the current state of a relationship in Ledger. Do not patch the card '
+        'merely because {{user}} and the character went somewhere or did '
+        'something together. Patch it only when the evidence establishes a '
+        'lasting change in personality, relationship pattern, enduring goal, '
+        'boundary, worldview, or baseline premise that future scenes need.',
+      )
+      ..writeln(
+        'For example, accepting a drink is a Ledger event; a repeatedly '
+        'demonstrated shift from guarded distrust to cautious trust may justify '
+        'a small card refinement. Do not turn a single event into a permanent '
+        'trait or relationship claim.',
+      )
       ..writeln()
       ..writeln('# Patch rules')
       ..writeln(
@@ -85,25 +90,25 @@ abstract final class CardRewriterPromptBuilder {
         'only: for example relationship:danvi, never relationship:Danvi.',
       )
       ..writeln(
-         '- Each anchor must occur exactly once in its current field and its '
-         'anchorSha256 must be present as a string; the application recomputes '
-         'it from the anchor bytes. '
-         'Empty anchors are forbidden. Use a meaningful literal phrase of at '
-         'least 12 code units, never an isolated word, number, punctuation mark, '
-         'or identifier. Never '
-         'use chat-history text as an anchor: anchors are copied only from the '
-         'canonical card field you are patching.',
+        '- Each anchor must occur exactly once in its current field and its '
+        'anchorSha256 must be present as a string; the application recomputes '
+        'it from the anchor bytes. '
+        'Empty anchors are forbidden. Use a meaningful literal phrase of at '
+        'least 12 code units, never an isolated word, number, punctuation mark, '
+        'or identifier. Never '
+        'use chat-history text as an anchor: anchors are copied only from the '
+        'canonical card field you are patching.',
       )
       ..writeln(
         '- Preserve every {{...}} macro token byte-for-byte in a replacement.',
       )
-       ..writeln(
-         '- Treat the immutable chat history and Ledger facts as evidence for '
-         'card evolution. Ledger may establish the evidence, but its event '
-         'records are not themselves card content. Avoid duplication only '
-         'against the supplied injected lorebook entries, not against chat '
-         'history or Ledger.',
-       )
+      ..writeln(
+        '- Treat the immutable chat history and Ledger facts as evidence for '
+        'card evolution. Ledger may establish the evidence, but its event '
+        'records are not themselves card content. Avoid duplication only '
+        'against the supplied injected lorebook entries, not against chat '
+        'history or Ledger.',
+      )
       ..writeln('- Emit no keys beyond those shown above.')
       ..writeln()
       ..writeln('# User instruction')
@@ -111,6 +116,97 @@ abstract final class CardRewriterPromptBuilder {
       ..writeln()
       ..writeln('# Canonical character card snapshot (read-only)')
       ..write(jsonEncode(snapshot));
+    if (validatedTargets.isNotEmpty) {
+      buffer
+        ..writeln()
+        ..writeln('# Validated targets from observation journal')
+        ..writeln(
+          'These changes have been confirmed durable across multiple '
+          'observation passes. Produce patches for them with priority. You '
+          'may also propose additional changes from the current chat window, '
+          'but validated targets take precedence. A validated target may be '
+          'omitted only when the current chat window clearly contradicts it.',
+        )
+        ..write(jsonEncode(validatedTargets));
+    }
+    return buffer.toString();
+  }
+
+  static String buildObservationPass({
+    required Character character,
+    required List<Map<String, Object?>> activeObservations,
+    required String instruction,
+  }) {
+    final buffer = StringBuffer()
+      ..writeln(
+        'You are an observation journal keeper for a roleplay character card. '
+        'You do NOT edit the card. You record and confirm observations about '
+        'durable character changes.',
+      )
+      ..writeln()
+      ..writeln('# Rules')
+      ..writeln(
+        '- An observation is a candidate durable change, NOT a confirmed edit.',
+      )
+      ..writeln(
+        '- One-off events (going somewhere, eating, single conversations) are '
+        'NOT observations.',
+      )
+      ..writeln(
+        '- Temporary state (current mood, location, clothing, injury) is NOT '
+        'an observation.',
+      )
+      ..writeln(
+        '- Repeatedly demonstrated shifts in preference, attitude, relationship '
+        'dynamics, or lasting character development ARE observations.',
+      )
+      ..writeln(
+        '- Each observation has a narrow semantic scope key '
+        '(e.g. character.preference.X).',
+      )
+      ..writeln(
+        '- Confidence 0.0-1.0 reflects how strongly the chat history supports '
+        'this change.',
+      )
+      ..writeln()
+      ..writeln('# Active observations from previous passes')
+      ..writeln(jsonEncode(activeObservations))
+      ..writeln()
+      ..writeln('# Actions')
+      ..writeln('For each existing observation, choose:')
+      ..writeln(
+        '- "confirm": the latest chat history still supports this change. '
+        'Update confidence.',
+      )
+      ..writeln(
+        '- "expire": the latest chat history contradicts or no longer supports '
+        'this change.',
+      )
+      ..writeln('For new observations, choose:')
+      ..writeln(
+        '- "new": a new candidate durable change is evident from the chat '
+        'history.',
+      )
+      ..writeln()
+      ..writeln('# Response format')
+      ..writeln(
+        'Respond with exactly one JSON object and nothing else: '
+        '{"observations":[{"action":"confirm|new|expire","scopeKey":"...",'
+        '"observedChange":"...","canonicalClaim":"...",'
+        '"evidenceMessageIds":[],"cardFieldPath":"personality"|null,'
+        '"lorebookEntryId":"bookId:entryId"|null,"confidence":0.0-1.0}]}.',
+      )
+      ..writeln(
+        'Return an empty "observations" list ONLY when the chat history '
+        'contains no new durable changes and no existing observation needs '
+        'confirmation or expiry.',
+      )
+      ..writeln()
+      ..writeln('# Instruction')
+      ..writeln(instruction)
+      ..writeln()
+      ..writeln('# Canonical character card snapshot (read-only)')
+      ..write(jsonEncode(CardCanonicalizer.snapshot(character)));
     return buffer.toString();
   }
 

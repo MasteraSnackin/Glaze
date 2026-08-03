@@ -14,7 +14,7 @@ import '../app_db.dart';
 import 'manual_rewrite_job_repo.dart';
 import 'session_lorebook_evolution_repo.dart';
 
-const _maxChatHistoryMessages = 20;
+const _maxChatHistoryMessages = 40;
 
 final class CardEvolutionClaim {
   const CardEvolutionClaim({
@@ -50,6 +50,19 @@ final class CardEvolutionFinalizeOutcome {
   final RewriteJobRow? job;
   final String? detail;
   bool get isPersisted => kind == 'persisted' || kind == 'alreadyCompleted';
+}
+
+/// Read-only context for the observation pass: the character and the canonical
+/// selected input (chat history, card snapshot, effective canon). Unlike
+/// [CardEvolutionPromptSnapshot] this does not require a live claim lease.
+final class CardEvolutionObservationSnapshot {
+  const CardEvolutionObservationSnapshot({
+    required this.character,
+    required this.selectedInputJson,
+  });
+
+  final Character character;
+  final String selectedInputJson;
 }
 
 /// Owns eligibility, lease ownership and the all-or-nothing automated proposal
@@ -106,11 +119,12 @@ class CardEvolutionRepo {
       // An expired owner cannot finalize (finalize checks the same lease). Do
       // not reuse its snapshot: chat/canon may have advanced while the app was
       // closed, so drop the stale lease and create a fresh claim below.
-      final deleted = await (db.delete(db.cardEvolutionClaims)
-            ..where((row) => row.id.equals(existing.id))
-            ..where((row) => row.status.equals('claimed'))
-            ..where((row) => row.leaseExpiresAt.isSmallerOrEqualValue(now)))
-          .go();
+      final deleted =
+          await (db.delete(db.cardEvolutionClaims)
+                ..where((row) => row.id.equals(existing.id))
+                ..where((row) => row.status.equals('claimed'))
+                ..where((row) => row.leaseExpiresAt.isSmallerOrEqualValue(now)))
+              .go();
       if (deleted != 1) {
         return const CardEvolutionClaimOutcome('busy');
       }
@@ -247,8 +261,8 @@ class CardEvolutionRepo {
     final allowedLoreTargets = _loreTargetsFromInput(selected);
     if (allowedLoreTargets == null ||
         lorebookOperations.any((operation) {
-          final target = allowedLoreTargets[
-              '${operation.lorebookId}\u0000${operation.entryId}'];
+          final target =
+              allowedLoreTargets['${operation.lorebookId}\u0000${operation.entryId}'];
           return target == null ||
               target.$1 != operation.baseContent ||
               target.$2 != operation.expectedContentHash;
@@ -261,7 +275,8 @@ class CardEvolutionRepo {
     };
     for (final operation in cardOperations) {
       if (operation.patches.any(
-        (patch) => patch.anchor.trim().length < _minimumEvolutionAnchorCodeUnits,
+        (patch) =>
+            patch.anchor.trim().length < _minimumEvolutionAnchorCodeUnits,
       )) {
         return CardEvolutionFinalizeOutcome(
           'invalidOperation',
@@ -279,7 +294,7 @@ class CardEvolutionRepo {
           'invalidOperation',
           null,
           '${operation.field.wireName}: '
-          '${validation.violations.map((violation) => violation.name).join(', ')}',
+              '${validation.violations.map((violation) => violation.name).join(', ')}',
         );
       }
     }
@@ -392,7 +407,7 @@ class CardEvolutionRepo {
           ..where((row) => row.id.equals(claimId))
           ..where((row) => row.ownerId.equals(ownerId))
           ..where((row) => row.status.equals('claimed')))
-         .go();
+        .go();
   });
 
   /// Replaces the session's diagnostic record after every writer call. It is
@@ -406,17 +421,71 @@ class CardEvolutionRepo {
     required String? output,
     required String attemptsJson,
     required int updatedAt,
-  }) => db.into(db.cardEvolutionDebugRuns).insertOnConflictUpdate(
-    CardEvolutionDebugRunsCompanion.insert(
-      sessionId: sessionId,
-      stage: stage,
-      status: status,
-      model: model,
-      output: Value(output),
-      attemptsJson: attemptsJson,
-      updatedAt: updatedAt,
-    ),
-  );
+  }) => db
+      .into(db.cardEvolutionDebugRuns)
+      .insertOnConflictUpdate(
+        CardEvolutionDebugRunsCompanion.insert(
+          sessionId: sessionId,
+          stage: stage,
+          status: status,
+          model: model,
+          output: Value(output),
+          attemptsJson: attemptsJson,
+          updatedAt: updatedAt,
+        ),
+      );
+
+  /// Builds a read-only observation snapshot (character + canonical selected
+  /// input) without claiming a lease. Used by the observation pass which runs
+  /// before the regular claim/finalize card-writer flow.
+  Future<CardEvolutionObservationSnapshot?> buildObservationSnapshot(
+    String sessionId,
+  ) => db.transaction(() async {
+    final selected = await _selectInput(sessionId);
+    if (selected == null) return null;
+    final session = await (db.select(
+      db.chatSessions,
+    )..where((row) => row.sessionId.equals(sessionId))).getSingleOrNull();
+    if (session == null) return null;
+    final assembled = await _assemble(sessionId, session.characterId);
+    if (assembled == null || assembled.$2.requiresBaselineDecision) {
+      return null;
+    }
+    return CardEvolutionObservationSnapshot(
+      character: assembled.$2.character,
+      selectedInputJson: selected,
+    );
+  });
+
+  /// Counts successful Ledger reconciliations for the session. The observation
+  /// pass runs on every even count (every 2nd reconciliation cadence).
+  Future<int> countSuccessfulReconciliations(String sessionId) async {
+    final result = await db
+        .customSelect(
+          'SELECT COUNT(*) AS cnt FROM reconciliation_successful_runs '
+          'WHERE session_id = ?',
+          variables: [Variable.withString(sessionId)],
+        )
+        .getSingle();
+    return result.read<int>('cnt');
+  }
+
+  /// Marks all promoted observations for the session as consumed after a
+  /// successful card writer apply. Promoted observations that were not
+  /// referenced by the proposal remain promoted for the next cycle.
+  Future<void> consumePromotedObservations(
+    String sessionId, {
+    required int now,
+  }) =>
+      (db.update(db.cardEvolutionObservations)
+            ..where((r) => r.sessionId.equals(sessionId))
+            ..where((r) => r.status.equals('promoted')))
+          .write(
+            CardEvolutionObservationsCompanion(
+              status: const Value('consumed'),
+              updatedAt: Value(now),
+            ),
+          );
 
   Future<String?> _selectedInputForClaim(CardEvolutionClaimRow claim) async {
     final selected = await _selectInput(claim.sessionId);
@@ -432,10 +501,9 @@ class CardEvolutionRepo {
 
   Future<String?> _selectInput(String sessionId) async {
     try {
-      final session =
-           await (db.select(db.chatSessions)
-                ..where((row) => row.sessionId.equals(sessionId)))
-               .getSingleOrNull();
+      final session = await (db.select(
+        db.chatSessions,
+      )..where((row) => row.sessionId.equals(sessionId))).getSingleOrNull();
       if (session == null) return null;
       final messages = jsonDecode(session.messagesJson);
       if (messages is! List) return null;
@@ -466,11 +534,15 @@ class CardEvolutionRepo {
       final writableFields = CardRewritePolicy.nonEmptyEvolutionFields(
         assembled.$2.character,
       );
+      final promotedObservations =
+          await (db.select(db.cardEvolutionObservations)
+                ..where((r) => r.sessionId.equals(sessionId))
+                ..where((r) => r.status.equals('promoted'))
+                ..orderBy([(r) => OrderingTerm.asc(r.createdAt)]))
+              .get();
       return _canonicalJson({
         'contractVersion': 7,
-        'fields': [
-          for (final field in writableFields) field.wireName,
-        ],
+        'fields': [for (final field in writableFields) field.wireName],
         'chatHistoryHash': computeHash(historyJson),
         'effectiveCanonIdentity': assembled.$2.identity,
         'limits': {
@@ -481,6 +553,20 @@ class CardEvolutionRepo {
         'card': _evolutionCardSnapshot(assembled.$2.character),
         'effectiveCanon': jsonDecode(canonEvidence),
         'injectedLorebookEntries': lorebookEntries,
+        'validatedTargets': [
+          for (final obs in promotedObservations)
+            {
+              'scopeKey': obs.semanticScopeKey,
+              'observedChange': obs.observedChange,
+              'canonicalClaim': obs.canonicalClaim,
+              'evidenceMessageIds': _decodeJsonArray(obs.evidenceMessageIds),
+              'cardFieldPath': obs.cardFieldPath,
+              'lorebookEntryId': obs.lorebookEntryId,
+              'confidence': obs.confidence,
+              'repeatCount': obs.repeatCount,
+              'firstSeenRun': obs.firstSeenRun,
+            },
+        ],
       });
     } catch (_) {
       return null;
@@ -500,20 +586,19 @@ class CardEvolutionRepo {
       if (messageId is! String || swipeId is! int || agentSwipeId is! int) {
         return null;
       }
-      final row = await (db.select(db.lorebookUseManifests)
-            ..where((value) => value.sessionId.equals(sessionId))
-            ..where((value) => value.messageId.equals(messageId))
-            ..where((value) => value.swipeId.equals(swipeId))
-            ..where((value) => value.agentSwipeId.equals(agentSwipeId)))
-          .getSingleOrNull();
+      final row =
+          await (db.select(db.lorebookUseManifests)
+                ..where((value) => value.sessionId.equals(sessionId))
+                ..where((value) => value.messageId.equals(messageId))
+                ..where((value) => value.swipeId.equals(swipeId))
+                ..where((value) => value.agentSwipeId.equals(agentSwipeId)))
+              .getSingleOrNull();
       if (row == null) continue;
       try {
-        final manifest = ExactLorebookManifest.decodeDurable(
-          {
-            ...Map<String, dynamic>.from(jsonDecode(row.manifestJson) as Map),
-            'canonicalHash': row.manifestHash,
-          },
-        );
+        final manifest = ExactLorebookManifest.decodeDurable({
+          ...Map<String, dynamic>.from(jsonDecode(row.manifestJson) as Map),
+          'canonicalHash': row.manifestHash,
+        });
         for (final entry in manifest.entries) {
           selected['${entry.lorebookId}\u0000${entry.entryId}'] = entry;
         }
@@ -566,9 +651,7 @@ class CardEvolutionRepo {
             ..limit(1))
           .getSingleOrNull();
 
-  List<Object?>? _selectChatHistory({
-    required List<dynamic> messages,
-  }) {
+  List<Object?>? _selectChatHistory({required List<dynamic> messages}) {
     final candidates = <Map<String, Object?>>[];
     for (var index = 0; index < messages.length; index++) {
       final message = messages[index];
@@ -596,7 +679,10 @@ class CardEvolutionRepo {
     if (stableCandidates.length >= 2 &&
         stableCandidates[stableCandidates.length - 2]['role'] == 'user' &&
         stableCandidates.last['role'] == 'assistant') {
-      stableCandidates.removeRange(stableCandidates.length - 2, stableCandidates.length);
+      stableCandidates.removeRange(
+        stableCandidates.length - 2,
+        stableCandidates.length,
+      );
     }
     final start = stableCandidates.length > _maxChatHistoryMessages
         ? stableCandidates.length - _maxChatHistoryMessages
@@ -663,9 +749,7 @@ bool _hasEvolutionOperations(
       allowedCardFields.containsAll(fields);
 }
 
-Map<String, (String, String)>? _loreTargetsFromInput(
-  String selectedInputJson,
-) {
+Map<String, (String, String)>? _loreTargetsFromInput(String selectedInputJson) {
   try {
     final input = jsonDecode(selectedInputJson) as Map;
     final entries = input['injectedLorebookEntries'];
@@ -687,6 +771,15 @@ Map<String, (String, String)>? _loreTargetsFromInput(
     return result;
   } catch (_) {
     return null;
+  }
+}
+
+List<Object?> _decodeJsonArray(String encoded) {
+  try {
+    final decoded = jsonDecode(encoded);
+    return decoded is List ? decoded : const [];
+  } catch (_) {
+    return const [];
   }
 }
 
