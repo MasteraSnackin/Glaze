@@ -169,6 +169,11 @@ Future<void> initChatWebViewEnvironment() async {
   try {
     final availableVersion = await WebViewEnvironment.getAvailableVersion();
     if (availableVersion == null) {
+      debugPrint(
+        '[ChatWebViewEnvironment] WebView2 Runtime is not installed. '
+        'Chat rendering will not work. Install "Microsoft Edge WebView2 Runtime" '
+        'from https://developer.microsoft.com/microsoft-edge/webview2/',
+      );
       return;
     }
     _janitorWebViewUserAgent = _deriveJanitorWebViewUA(availableVersion);
@@ -176,7 +181,14 @@ Future<void> initChatWebViewEnvironment() async {
     _chatWebViewEnvironment = await WebViewEnvironment.create();
     await _startChatWebViewLocalFileServer();
     await _startChatWebViewAssetServer();
-  } catch (_) {}
+  } catch (e, st) {
+    // Previously this was `catch (_) {}` which silently swallowed every error,
+    // leaving a blank chat with no diagnostic. Log so the user (and dev) can
+    // see why the WebView failed to initialize.
+    debugPrint(
+      '[ChatWebViewEnvironment] WebView2 environment setup failed: $e\n$st',
+    );
+  }
 }
 
 WebUri? _localFileServingBaseUrl() =>
