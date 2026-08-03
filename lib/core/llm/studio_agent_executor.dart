@@ -292,6 +292,8 @@ class StudioAgentExecutor {
       finalContextOverride: settings.studioAgent.studioFinalContextSize,
       reasoningHistoryCount:
           settings.studioAgent.studioFinalReasoningHistoryCount,
+      excludeReasoningFromContextBudget:
+          apiConfig.excludeReasoningFromContextBudget,
     );
     onMessagesBuilt?.call(messages);
     return _runner.runAgent(

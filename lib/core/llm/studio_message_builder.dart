@@ -40,6 +40,7 @@ class StudioMessageBuilder {
     // its own (§4).
     int trackerContextOverride = 0,
     int reasoningHistoryCount = 0,
+    bool excludeReasoningFromContextBudget = false,
   }) {
     final point = _blockExpander.injectionPointForRun(agent, isFinalResponse);
     final spec = StudioControllerOntology.specForAgent(agent);
@@ -79,6 +80,8 @@ class StudioMessageBuilder {
                 studioPreset,
                 pipelineOverride: finalContextOverride,
                 reasoningHistoryCount: reasoningHistoryCount,
+                excludeReasoningFromContextBudget:
+                    excludeReasoningFromContextBudget,
               )
             : StudioHistoryLimiter.limitTrackerHistory(
                 context.history,
@@ -140,6 +143,8 @@ class StudioMessageBuilder {
                   studioPreset,
                   pipelineOverride: finalContextOverride,
                   reasoningHistoryCount: reasoningHistoryCount,
+                  excludeReasoningFromContextBudget:
+                      excludeReasoningFromContextBudget,
                 )
               : StudioHistoryLimiter.limitTrackerHistory(
                   context.history,

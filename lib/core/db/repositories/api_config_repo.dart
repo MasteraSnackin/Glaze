@@ -64,6 +64,7 @@ class ApiConfigRepo implements SyncApiConfigStore {
     useResponsesApi: c.useResponsesApi,
     showNativeReasoning: c.showNativeReasoning,
     reasoningHistoryCount: c.reasoningHistoryCount,
+    excludeReasoningFromContextBudget: c.excludeReasoningFromContextBudget,
     reasoningTagStart: c.reasoningTagStart,
     reasoningTagEnd: c.reasoningTagEnd,
     embeddingUseSame: c.embeddingUseSame,
@@ -116,6 +117,9 @@ class ApiConfigRepo implements SyncApiConfigStore {
     showNativeReasoning: Value(m.showNativeReasoning),
     includeLastReasoning: Value(m.reasoningHistoryCount != 0),
     reasoningHistoryCount: Value(m.reasoningHistoryCount),
+    excludeReasoningFromContextBudget: Value(
+      m.excludeReasoningFromContextBudget,
+    ),
     reasoningTagStart: Value(m.reasoningTagStart),
     reasoningTagEnd: Value(m.reasoningTagEnd),
     embeddingUseSame: Value(m.embeddingUseSame),

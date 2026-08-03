@@ -789,6 +789,8 @@ class ApiConfigs extends Table {
       boolean().withDefault(const Constant(false))();
   IntColumn get reasoningHistoryCount =>
       integer().withDefault(const Constant(0))();
+  BoolColumn get excludeReasoningFromContextBudget =>
+      boolean().withDefault(const Constant(false))();
   TextColumn get reasoningTagStart => text().nullable()();
   TextColumn get reasoningTagEnd => text().nullable()();
   BoolColumn get omitTemperature =>
