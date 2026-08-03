@@ -638,11 +638,10 @@ class _StudioBlockGroupRowState extends State<StudioBlockGroupRow> {
                       ),
                     ),
                   ),
-                  if (_isCoTGroup(group))
-                    Switch.adaptive(
-                      value: header.enabled,
-                      onChanged: widget.onToggleGroup,
-                    ),
+                  Switch.adaptive(
+                    value: header.enabled,
+                    onChanged: widget.onToggleGroup,
+                  ),
                   SizedBox(
                     width: 36,
                     height: 44,
@@ -702,10 +701,20 @@ class _StudioBlockGroupRowState extends State<StudioBlockGroupRow> {
                   isLast:
                       i == group.children.length - 1 && closingBoundary == null,
                   onEdit: () => widget.onEdit(group.children[i]),
-                  onToggle: group.exclusive
+                  onToggle:
+                      group.exclusive &&
+                          !isIndependentStudioGroupChild(
+                            group,
+                            group.children[i],
+                          )
                       ? null
                       : (v) => widget.onToggle(group.children[i], v),
-                  trailing: group.exclusive
+                  trailing:
+                      group.exclusive &&
+                          !isIndependentStudioGroupChild(
+                            group,
+                            group.children[i],
+                          )
                       ? _radio(context, group.children[i])
                       : null,
                   onLongPress: () => widget.onDelete(group.children[i]),
@@ -738,17 +747,4 @@ class _StudioBlockGroupRowState extends State<StudioBlockGroupRow> {
       ),
     );
   }
-}
-
-/// Whether [group] is the CoT Selections section, the only exclusive group the
-/// user can turn off wholesale (every other exclusive group keeps its radio
-/// behaviour — exactly one option must stay picked).
-bool _isCoTGroup(StudioPresetBlockGroup group) {
-  final header = group.header;
-  if (header == null) return false;
-  final normalized = header.title
-      .replaceFirst(RegExp(r'^━[^\p{L}\p{N}]*', unicode: true), '')
-      .trim()
-      .toLowerCase();
-  return normalized == 'cot selections';
 }
