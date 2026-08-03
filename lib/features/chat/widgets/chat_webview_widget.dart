@@ -239,6 +239,8 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
 
   /// Polls for the bridge (set by the surface's `onWebViewCreated`) and runs
   /// the idempotent init once it exists. Bounded so it can never spin forever.
+  /// If the bridge never appears (e.g. WebView2 not installed on Windows), an
+  /// error dialog is shown so the user is not left with a blank screen.
   Future<void> _kickInitWhenReady() async {
     for (var i = 0; i < 50; i++) {
       if (!mounted) return;
@@ -249,6 +251,22 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       }
       await Future<void>.delayed(const Duration(milliseconds: 100));
     }
+    // Bridge never appeared after 5 seconds of polling — the native WebView
+    // could not be created (e.g. WebView2 Runtime missing on Windows, or
+    // environment setup failed at app startup). Show a diagnostic dialog
+    // instead of leaving a blank page.
+    if (!mounted || _bridgeFailureNotified) return;
+    _bridgeFailureNotified = true;
+    debugPrint(
+      '[ChatWebView] bridge was not created after 5s — '
+      'native WebView failed to initialize (WebView2 missing?)',
+    );
+    GlazeErrorDialog.show(
+      context,
+      'Chat view could not be initialized. '
+      'On Windows, ensure "Microsoft Edge WebView2 Runtime" is installed.',
+      prefix: 'Chat view failed to load',
+    );
   }
 
   ChatWebViewPanelRefresher _panelRefresher() => ChatWebViewPanelRefresher(
@@ -447,6 +465,16 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       unawaited(_applySessionSwitch(deferred));
     } else if (initSessionId != widget.sessionId) {
       unawaited(_syncCurrentSessionToBridge());
+    } else {
+      // On Windows (no keep-alive), init can take several seconds. During
+      // that time didUpdateWidget may fire with new messages, but the sync
+      // dispatcher skips them because _ready is false. After init completes,
+      // re-sync the current messages to catch any changes that were missed
+      // during the init window. The ChatWebViewInitializer already pushed
+      // the messages captured at init-construction time, but if the widget
+      // received newer messages since then, this ensures they reach the JS
+      // bridge. On mobile (keep-alive) this is a no-op when messages match.
+      unawaited(_resyncMessagesAfterInit());
     }
   }
 
@@ -509,6 +537,29 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     } finally {
       if (mounted) setState(() => _sessionSwitching = false);
     }
+  }
+
+  /// Re-syncs messages after init completes. On Windows (no keep-alive), the
+  /// init sequence can take several seconds during which `didUpdateWidget` may
+  /// fire with updated messages. The sync dispatcher skips updates while
+  /// `_ready` is false, so those changes are lost. This method pushes the
+  /// current `widget.messages` to the bridge after init, ensuring no updates
+  /// are missed. The message sync is diff-based: if nothing changed it is a
+  /// no-op.
+  Future<void> _resyncMessagesAfterInit() async {
+    final bridge = _bridge;
+    if (bridge == null || !_ready || !mounted) return;
+    await _bridgeOp(
+      _messageSync.sync(
+        bridge: bridge,
+        oldMsgs: const <ChatMessage>[],
+        newMsgs: widget.messages,
+        visibleStartIndex: widget.visibleStartIndex,
+        isGenerating: widget.isGenerating,
+        sessionSwitching: false,
+      ),
+      label: 'resyncMessagesAfterInit',
+    );
   }
 
   void _bindBridgeCallbacks() {
