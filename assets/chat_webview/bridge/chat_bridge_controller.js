@@ -620,16 +620,6 @@ export class Bridge {
       center.appendChild(guided);
     }
 
-    if (isChar && isLast && isGenerating) {
-      const stop = document.createElement('button');
-      stop.className = 'stop-btn';
-      stop.dataset.action = 'stop';
-      stop.dataset.messageId = section.dataset.messageId;
-      stop.title = 'Stop';
-      stop.innerHTML = ICON.stop;
-      center.appendChild(stop);
-    }
-
     if (showRegen) {
       const regen = document.createElement('div');
       regen.className = 'msg-regenerate';
@@ -657,7 +647,6 @@ export class Bridge {
       if (center) {
         center.querySelector('.msg-regenerate')?.remove();
         center.querySelector('.msg-guided-swipe-btn')?.remove();
-        center.querySelector('.stop-btn')?.remove();
       }
     }
     if (!newLastId) return;
