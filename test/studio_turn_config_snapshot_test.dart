@@ -34,7 +34,6 @@ void main() {
         model: 'active-model',
       );
       var apiLoads = 0;
-      var configLoads = 0;
       var presetLoads = 0;
       final resolver = StudioTurnConfigResolver(
         readPipelineSettings: () => settings,
@@ -42,10 +41,6 @@ void main() {
         loadApiConfigs: () async => apiLoads++,
         readApiConfigs: () => throw StateError('API list must not be read'),
         readActiveApiConfig: () => activeApi,
-        loadStudioConfig: (_) async {
-          configLoads++;
-          return null;
-        },
         loadActivePresetId: () async {
           presetLoads++;
           return 'selected';
@@ -64,13 +59,12 @@ void main() {
       expect(snapshot.apiConfigs, isEmpty);
       expect(snapshot.activeApiConfig, activeApi);
       expect(apiLoads, 0);
-      expect(configLoads, 0);
       expect(presetLoads, 0);
     },
   );
 
   test(
-    'resolver loads APIs, falls back to default preset, and applies all gates',
+    'resolver enables the selected preset for any session and falls back to default',
     () async {
       const api = ApiConfig(
         id: 'api',
@@ -89,8 +83,6 @@ void main() {
           return sourceApis;
         },
         readActiveApiConfig: () => api,
-        loadStudioConfig: (_) async =>
-            const StudioConfig(sessionId: 'session', enabled: true),
         loadActivePresetId: () async => 'missing',
         loadPreset: (_) async => null,
         loadDefaultPreset: () async {
@@ -120,6 +112,8 @@ void main() {
         'continuity',
         'final',
       ]);
+      expect(snapshot.config?.sessionId, 'session');
+      expect(snapshot.config?.enabled, isTrue);
       expect(snapshot.apiConfigs, [api]);
       expect(
         () => snapshot.apiConfigs.add(api),
@@ -143,9 +137,6 @@ void main() {
       await container
           .read(studioFeatureEnabledProvider.notifier)
           .setEnabled(true);
-      await container
-          .read(studioConfigRepoProvider)
-          .upsert(const StudioConfig(sessionId: 'session', enabled: true));
       await container
           .read(studioPresetRepoProvider)
           .upsert(
@@ -244,9 +235,6 @@ void main() {
             ),
           );
       await container
-          .read(studioConfigRepoProvider)
-          .upsert(snapshot.config!.copyWith(enabled: false));
-      await container
           .read(pipelineSettingsProvider.notifier)
           .save(
             const PipelineSettings(
@@ -295,10 +283,7 @@ void main() {
     );
     final snapshot = StudioTurnConfigSnapshot(
       config: StudioConfig(sessionId: 'session', enabled: true),
-      preset: const StudioPreset(
-        id: 'old-preset',
-        cheapApiConfigId: 'old-api',
-      ),
+      preset: const StudioPreset(id: 'old-preset', cheapApiConfigId: 'old-api'),
       pipelineSettings: PipelineSettings(
         studioAgent: StudioAgentSettings(
           studioControllerModelOverride: 'snapshot-model',
@@ -340,8 +325,6 @@ void main() {
         loadApiConfigs: () async {},
         readApiConfigs: () => const [],
         readActiveApiConfig: () => null,
-        loadStudioConfig: (_) async =>
-            const StudioConfig(sessionId: 'session', enabled: true),
         loadActivePresetId: () async => 'preset',
         loadPreset: (_) async => const StudioPreset(
           id: 'preset',

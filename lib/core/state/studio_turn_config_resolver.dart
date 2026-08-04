@@ -15,7 +15,6 @@ class StudioTurnConfigResolver {
   final Future<void> Function() loadApiConfigs;
   final List<ApiConfig> Function() readApiConfigs;
   final ApiConfig? Function() readActiveApiConfig;
-  final Future<StudioConfig?> Function(String sessionId) loadStudioConfig;
   final Future<String> Function() loadActivePresetId;
   final Future<StudioPreset?> Function(String presetId) loadPreset;
   final Future<StudioPreset?> Function() loadDefaultPreset;
@@ -26,7 +25,6 @@ class StudioTurnConfigResolver {
     required this.loadApiConfigs,
     required this.readApiConfigs,
     required this.readActiveApiConfig,
-    required this.loadStudioConfig,
     required this.loadActivePresetId,
     required this.loadPreset,
     required this.loadDefaultPreset,
@@ -48,40 +46,40 @@ class StudioTurnConfigResolver {
     final apiConfigs = List<ApiConfig>.unmodifiable(readApiConfigs());
     final activeApiConfig = readActiveApiConfig();
 
-    StudioConfig? effectiveConfig;
     StudioPreset? preset;
-    final storedConfig = await loadStudioConfig(sessionId);
-    if (storedConfig?.enabled == true) {
-      final presetId = await loadActivePresetId();
-      preset = (await loadPreset(presetId)) ?? (await loadDefaultPreset());
-      if (preset != null) {
-        final agentEnabled = preset.agentEnabled;
-        final agents = preset.agents.map((agent) {
-          final spec = StudioControllerOntology.specForAgent(agent);
-          if (spec == null) return agent.copyWith(enabled: false);
-          if (spec.isFinal) return agent.copyWith(enabled: true);
-          // An agent whose stored phase doesn't match its resolved spec's
-          // phase is a legacy mismap (e.g. a retired "beauty" agent re-tagged
-          // to post_clean but still carrying phase=pre_generation). Disable
-          // it rather than letting it run in the wrong lane.
-          if (agent.phase != spec.phase) {
-            return agent.copyWith(enabled: false);
-          }
-          return agentEnabled[spec.id] == false
-              ? agent.copyWith(enabled: false)
-              : agent;
-        }).toList();
-        final gated = agents.where((agent) => agent.enabled).toList()
-          ..sort((a, b) => a.order.compareTo(b.order));
-        if (gated.isNotEmpty) {
-          preset = preset.copyWith(agents: gated);
-          effectiveConfig = storedConfig;
+    final presetId = await loadActivePresetId();
+    preset = (await loadPreset(presetId)) ?? (await loadDefaultPreset());
+    if (preset != null) {
+      final agentEnabled = preset.agentEnabled;
+      final agents = preset.agents.map((agent) {
+        final spec = StudioControllerOntology.specForAgent(agent);
+        if (spec == null) return agent.copyWith(enabled: false);
+        if (spec.isFinal) return agent.copyWith(enabled: true);
+        // An agent whose stored phase doesn't match its resolved spec's
+        // phase is a legacy mismap (e.g. a retired "beauty" agent re-tagged
+        // to post_clean but still carrying phase=pre_generation). Disable
+        // it rather than letting it run in the wrong lane.
+        if (agent.phase != spec.phase) {
+          return agent.copyWith(enabled: false);
         }
+        return agentEnabled[spec.id] == false
+            ? agent.copyWith(enabled: false)
+            : agent;
+      }).toList();
+      final gated = agents.where((agent) => agent.enabled).toList()
+        ..sort((a, b) => a.order.compareTo(b.order));
+      if (gated.isNotEmpty) {
+        preset = preset.copyWith(agents: gated);
       }
     }
 
     return StudioTurnConfigSnapshot(
-      config: effectiveConfig,
+      // Studio is global once an agentic preset is selected. The config still
+      // carries the session identity required by the execution pipeline, but
+      // must not restore the retired per-chat enable switch.
+      config: preset == null
+          ? null
+          : StudioConfig(sessionId: sessionId, enabled: true),
       preset: preset,
       pipelineSettings: pipelineSettings,
       apiConfigs: apiConfigs,
@@ -102,8 +100,6 @@ final studioTurnConfigResolverProvider = Provider<StudioTurnConfigResolver>((
     readApiConfigs: () =>
         ref.read(apiListProvider).value ?? const <ApiConfig>[],
     readActiveApiConfig: () => ref.read(activeApiConfigProvider),
-    loadStudioConfig: (sessionId) =>
-        ref.read(studioConfigRepoProvider).getBySessionId(sessionId),
     loadActivePresetId: () => ref.read(activeStudioPresetProvider.future),
     loadPreset: (presetId) =>
         ref.read(studioPresetRepoProvider).getById(presetId),

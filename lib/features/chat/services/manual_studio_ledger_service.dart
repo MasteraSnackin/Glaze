@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/db/repositories/character_repo.dart';
 import '../../../core/db/repositories/chat_repo.dart';
-import '../../../core/db/repositories/studio_config_repo.dart';
 import '../../../core/db/repositories/studio_preset_repo.dart';
 import '../../../core/db/repositories/tracker_repo.dart';
 import '../../../core/db/repositories/tracker_snapshot_repo.dart';
@@ -28,7 +27,6 @@ final manualStudioLedgerServiceProvider = Provider<ManualStudioLedgerService>((
 ) {
   return ManualStudioLedgerService(
     chatRepo: ref.watch(chatRepoProvider),
-    studioConfigRepo: ref.watch(studioConfigRepoProvider),
     snapshotRepo: ref.watch(trackerSnapshotRepoProvider),
     trackerRepo: ref.watch(trackerRepoProvider),
     presetRepo: ref.watch(studioPresetRepoProvider),
@@ -148,7 +146,6 @@ class DefaultStudioLedgerExecutor implements StudioLedgerExecutor {
 class ManualStudioLedgerService {
   const ManualStudioLedgerService({
     required this.chatRepo,
-    required this.studioConfigRepo,
     required this.snapshotRepo,
     required this.trackerRepo,
     required this.presetRepo,
@@ -163,7 +160,6 @@ class ManualStudioLedgerService {
   });
 
   final ChatRepo chatRepo;
-  final StudioConfigRepo studioConfigRepo;
   final TrackerSnapshotRepo snapshotRepo;
   final TrackerRepo trackerRepo;
   final StudioPresetRepo presetRepo;
@@ -188,9 +184,7 @@ class ManualStudioLedgerService {
     final turnConfig = await turnConfigFuture;
     final AuxApiConfig ledgerConfig;
     try {
-      ledgerConfig = turnConfig.resolveLedgerConfig(
-        errorLabel: 'ledger-rerun',
-      );
+      ledgerConfig = turnConfig.resolveLedgerConfig(errorLabel: 'ledger-rerun');
     } catch (e) {
       throw ManualStudioLedgerConfigException(e);
     }
@@ -308,10 +302,11 @@ class ManualStudioLedgerService {
     final pipeline = readPipelineSettings();
     final activeApiConfig = readActiveApiConfig();
     final apiConfigs = List<ApiConfig>.unmodifiable(await loadApiConfigs());
-    final config = await studioConfigRepo.getBySessionId(sessionId);
     final preset = await presetRepo.getById(await loadActivePresetId());
     return StudioTurnConfigSnapshot(
-      config: config,
+      config: preset == null
+          ? null
+          : StudioConfig(sessionId: sessionId, enabled: true),
       preset: preset,
       pipelineSettings: pipeline,
       apiConfigs: apiConfigs,
