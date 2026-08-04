@@ -70,6 +70,10 @@ class StudioTurnConfigResolver {
         ..sort((a, b) => a.order.compareTo(b.order));
       if (gated.isNotEmpty) {
         preset = preset.copyWith(agents: gated);
+      } else {
+        // A preset without a runnable agent is not an active Studio turn.
+        // Keep the old default-deny behavior for empty or corrupted presets.
+        preset = null;
       }
     }
 
