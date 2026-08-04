@@ -175,26 +175,20 @@ final studioPresetProvider = FutureProvider<StudioPreset?>((ref) async {
   return ref.watch(studioPresetRepoProvider).getDefault();
 });
 
-final studioPresetListProvider = FutureProvider<List<StudioPreset>>((ref) async {
+final studioPresetListProvider = FutureProvider<List<StudioPreset>>((
+  ref,
+) async {
   return ref.watch(studioPresetRepoProvider).getAll();
 });
 
-/// Whether Studio is enabled for a given session. Drives Studio-only chat UI
-/// affordances (e.g. the per-message "Re-run cleaner" button, which is a no-op
-/// when Studio is off). Invalidated by the Studio settings sheet on save so the
-/// UI reflects a toggle immediately. Returns `false` for a null/absent config.
+/// Whether Studio is enabled globally. The session id remains part of the
+/// provider API for its chat UI consumers, but no longer controls activation.
 final sessionStudioEnabledProvider = FutureProvider.family<bool, String>((
   ref,
   sessionId,
 ) async {
   if (sessionId.isEmpty) return false;
-  // Respect the global Experimental Features master switch: Studio is off
-  // everywhere when the feature is disabled, regardless of per-session config.
-  if (!ref.watch(studioFeatureEnabledProvider)) return false;
-  final config = await ref
-      .watch(studioConfigRepoProvider)
-      .getBySessionId(sessionId);
-  return config?.enabled == true;
+  return ref.watch(studioFeatureEnabledProvider);
 });
 
 final trackerRepoProvider = Provider<TrackerRepo>((ref) {

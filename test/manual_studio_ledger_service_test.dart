@@ -6,7 +6,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/db/repositories/character_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/chat_repo.dart';
-import 'package:glaze_flutter/core/db/repositories/studio_config_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/studio_preset_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/tracker_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/tracker_snapshot_repo.dart';
@@ -27,7 +26,6 @@ import 'package:glaze_flutter/features/chat/services/manual_studio_ledger_servic
 void main() {
   late AppDatabase db;
   late ChatRepo chatRepo;
-  late StudioConfigRepo configRepo;
   late StudioPresetRepo presetRepo;
   late TrackerRepo trackerRepo;
   late TrackerSnapshotRepo snapshotRepo;
@@ -45,7 +43,6 @@ void main() {
   setUp(() async {
     db = AppDatabase.forTesting(NativeDatabase.memory());
     chatRepo = ChatRepo(db);
-    configRepo = StudioConfigRepo(db);
     presetRepo = StudioPresetRepo(db);
     trackerRepo = TrackerRepo(db);
     snapshotRepo = TrackerSnapshotRepo(db);
@@ -67,12 +64,6 @@ void main() {
       ),
     ];
     await characterRepo.put(const Character(id: 'char', name: 'Character'));
-    await configRepo.put(
-      const StudioConfig(
-        sessionId: 'session',
-        enabled: true,
-      ),
-    );
     await presetRepo.put(
       const StudioPreset(
         id: 'preset',
@@ -87,7 +78,6 @@ void main() {
   ManualStudioLedgerService createService() {
     return ManualStudioLedgerService(
       chatRepo: chatRepo,
-      studioConfigRepo: configRepo,
       snapshotRepo: snapshotRepo,
       trackerRepo: trackerRepo,
       presetRepo: presetRepo,
@@ -200,12 +190,6 @@ void main() {
   test('diagnostic writes remain isolated to the requested session', () async {
     await putSession('session');
     await putSession('other');
-    await configRepo.put(
-      const StudioConfig(
-        sessionId: 'other',
-        enabled: true,
-      ),
-    );
     await commit('session', assistant2, 1);
     await trackerRepo.upsertValue(
       'other',
