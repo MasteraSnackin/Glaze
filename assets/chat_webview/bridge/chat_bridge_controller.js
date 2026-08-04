@@ -620,16 +620,6 @@ export class Bridge {
       center.appendChild(guided);
     }
 
-    if (isChar && isLast && isGenerating) {
-      const stop = document.createElement('button');
-      stop.className = 'stop-btn';
-      stop.dataset.action = 'stop';
-      stop.dataset.messageId = section.dataset.messageId;
-      stop.title = 'Stop';
-      stop.innerHTML = ICON.stop;
-      center.appendChild(stop);
-    }
-
     if (showRegen) {
       const regen = document.createElement('div');
       regen.className = 'msg-regenerate';

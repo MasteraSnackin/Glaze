@@ -25,7 +25,7 @@ import { SHADOW_STYLE } from './shadow_style.js';
  *       (bubble layout) .bubble-meta — gen-stat / token-count-inline / bubble-time
  *     .msg-footer
  *       .msg-meta            — gen-stat (full layout only)
- *       .msg-center-controls — .msg-switcher / .msg-regenerate / .msg-guided-swipe-btn / .stop-btn
+ *       .msg-center-controls — .msg-switcher / .msg-regenerate / .msg-guided-swipe-btn
  *       .msg-actions-btn or .edit-buttons
  *   .guided-swipe-container (toggled by bridge)
  * ============================================================ */
@@ -506,16 +506,6 @@ if (messageData.isEditing) classes.push('editing');
       guided.title = 'Guided swipe';
       guided.innerHTML = ICON.guided;
       center.appendChild(guided);
-    }
-
-    if (isChar && m.isLast && m.isGenerating) {
-      const stop = document.createElement('button');
-      stop.className = 'stop-btn';
-      stop.dataset.action = 'stop';
-      stop.dataset.messageId = m.id;
-      stop.title = 'Stop';
-      stop.innerHTML = ICON.stop;
-      center.appendChild(stop);
     }
 
     if (showRegen) {
