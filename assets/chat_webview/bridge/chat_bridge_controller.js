@@ -647,7 +647,6 @@ export class Bridge {
       if (center) {
         center.querySelector('.msg-regenerate')?.remove();
         center.querySelector('.msg-guided-swipe-btn')?.remove();
-        center.querySelector('.stop-btn')?.remove();
       }
     }
     if (!newLastId) return;
