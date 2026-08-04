@@ -19,6 +19,7 @@ import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
 import 'package:glaze_flutter/core/models/cleaner_settings.dart';
 import 'package:glaze_flutter/core/models/pipeline_settings.dart';
+import 'package:glaze_flutter/core/models/studio_config.dart';
 import 'package:glaze_flutter/core/models/tracker_snapshot.dart';
 import 'package:glaze_flutter/features/chat/services/manual_studio_ledger_service.dart';
 

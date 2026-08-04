@@ -15,6 +15,7 @@ import '../../../core/llm/studio_turn_config_snapshot.dart';
 import '../../../core/models/api_config.dart';
 import '../../../core/models/chat_message.dart';
 import '../../../core/models/pipeline_settings.dart';
+import '../../../core/models/studio_config.dart';
 import '../../../core/services/generation_notification_service.dart';
 import '../../../core/services/post_gen_foreground_guard.dart';
 import '../../../core/state/active_studio_preset_provider.dart';
