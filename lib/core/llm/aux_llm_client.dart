@@ -270,6 +270,7 @@ class AuxLlmClient {
           omitReasoning: omitReasoning,
           omitReasoningEffort: omitReasoningEffort,
           extraRequestParameters: config.extraRequestParameters,
+          receiveTimeoutMs: timeoutMs,
         ),
         cancelToken: cancelToken,
         onUpdate: (delta, reasoningDelta) {
