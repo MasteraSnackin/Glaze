@@ -277,6 +277,7 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
         _omitTopP = false;
         _omitReasoning = true;
         _omitReasoningEffort = true;
+        _excludeReasoningFromContextBudget = false;
         _reasoningHistoryCountCtrl = TextEditingController(text: '0');
         _maxTokensCtrl = TextEditingController(
           text: l.studioLedgerMaxTokens > 0 ? '${l.studioLedgerMaxTokens}' : '',
