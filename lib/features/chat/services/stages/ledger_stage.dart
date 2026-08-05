@@ -245,10 +245,22 @@ class LedgerStage {
           if (reconciliationResult.status == 'ok' &&
               pipeline.cardRewriter.enabled &&
               isCurrent()) {
-            await ctx.ref
-                .read(automatedCardEvolutionServiceProvider)
-                .runOneBatch(sessionId);
-            if (!isCurrent()) return;
+            // Card-rewriter runs on every 2nd successful reconciliation
+            // (plan §Automated Card Evolution cadence). Counting via the run
+            // repo head ordinal keeps the cadence durable across rerolls and
+            // app restarts; the single-row checkpoint cannot do this.
+            final runHead = await ctx
+                .ref
+                .read(ledgerReconciliationRunRepoProvider)
+                .getHead(sessionId);
+            if (runHead != null &&
+                runHead.ordinal % 2 == 0 &&
+                isCurrent()) {
+              await ctx.ref
+                  .read(automatedCardEvolutionServiceProvider)
+                  .runOneBatch(sessionId);
+              if (!isCurrent()) return;
+            }
           }
           if (!isCurrent()) return;
         }
