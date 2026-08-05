@@ -44,7 +44,21 @@ export function renderStyledSegment(seg, processRichText) {
   // dialogue inside *"..."* gets the quote color (colored italic), not the
   // gray italic default. Color markers above keep skipQuotes=true (default)
   // so chat-quote color does not override their fill.
-  const rq = (raw) => processRichText ? processRichText(raw, false) : raw;
+  const rq = (raw) => {
+    if (!processRichText) return raw;
+    const rich = processRichText(raw, false);
+    // _processText treats every standalone fragment as a paragraph. Styled
+    // markers are inline, though, so keeping that wrapper would produce
+    // invalid block-in-inline markup such as <em><p>action</p></em>. Browsers
+    // then lay every *action* out on its own line even when the source contains
+    // no newline. Unwrap only a single paragraph; preserve genuinely
+    // multi-paragraph content as-is.
+    const paragraph = rich.match(/^\s*<p>([\s\S]*)<\/p>\s*$/i);
+    if (paragraph && !/<\/?p(?:\s|>)/i.test(paragraph[1])) {
+      return paragraph[1];
+    }
+    return rich;
+  };
   m = seg.match(/^\*\*\*(.+?)\*\*\*$/s);
   if (m) return `<strong><em>${rq(m[1])}</em></strong>`;
   m = seg.match(/^\*\*(.+?)\*\*$/s);
