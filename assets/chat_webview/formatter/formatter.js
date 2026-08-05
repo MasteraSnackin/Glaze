@@ -230,7 +230,9 @@ export class Formatter {
     // 9. Restore styled segments with Glaze marker rendering
     html = html.replace(/\x01S_(\d+)\x01/g, (_, i) => {
       const seg = styledSegments[parseInt(i)];
-      return renderStyledSegment(seg, (innerRaw) => this._processText(innerRaw, false, true));
+      // skipQuotes defaults to true (preserve color markers' fills);
+      // plain formatting (italic/bold/strike) opts out via the second arg.
+      return renderStyledSegment(seg, (innerRaw, skipQuotes = true) => this._processText(innerRaw, false, skipQuotes));
     });
 
     // 10. Markdown Parsing
