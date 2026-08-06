@@ -1,0 +1,112 @@
+import 'package:flutter/material.dart';
+
+import '../image_gen_capabilities.dart';
+import '../image_gen_models.dart';
+import 'model_fields.dart';
+import 'rows.dart' as rows;
+
+/// Model-field rows for OpenRouter.
+///
+/// The aspect-ratio and resolution lists follow the selected model: Gemini
+/// models take an `image_size`, FLUX and friends do not (see
+/// [openRouterCapabilities]).
+List<Widget> buildOpenRouterModelFields(
+  ImageGenSettings s, {
+  required bool isFetching,
+  required VoidCallback onFetchModels,
+  required ValueChanged<ImageGenSettings> onUpdate,
+  required ShowOptionsCallback showOptions,
+}) {
+  final config = s.openrouter;
+  final caps = openRouterCapabilities(config.model);
+
+  return [
+    rows.ImageGenTextFieldItem(
+      label: 'Model',
+      value: config.model,
+      hint: 'google/gemini-2.5-flash-image',
+      onChanged: (v) =>
+          onUpdate(s.copyWith(openrouter: config.copyWith(model: v))),
+      suffix: rows.ImageGenFetchButton(
+        isFetching: isFetching,
+        onPressed: onFetchModels,
+      ),
+    ),
+    rows.ImageGenSelectorRow(
+      label: 'Aspect Ratio',
+      value: config.aspectRatio,
+      onTap: () => showOptions<String>(
+        title: 'Aspect Ratio',
+        items: caps.aspectRatios,
+        labelBuilder: (v) => v,
+        isSelected: (v) => config.aspectRatio == v,
+        onSelected: (v) =>
+            onUpdate(s.copyWith(openrouter: config.copyWith(aspectRatio: v))),
+      ),
+    ),
+    if (caps.imageSizes != null)
+      rows.ImageGenSelectorRow(
+        label: 'Resolution',
+        value: config.imageSize,
+        onTap: () => showOptions<String>(
+          title: 'Resolution',
+          items: caps.imageSizes!,
+          labelBuilder: (v) => v,
+          isSelected: (v) => config.imageSize == v,
+          onSelected: (v) =>
+              onUpdate(s.copyWith(openrouter: config.copyWith(imageSize: v))),
+        ),
+      ),
+  ];
+}
+
+/// Model-field rows for Electron Hub. It speaks the OpenAI images API, so the
+/// aspect ratio is mapped to a `size` per model family at request time; the
+/// explicit size below is the fallback for families without a mapping.
+List<Widget> buildElectronHubModelFields(
+  ImageGenSettings s, {
+  required bool isFetching,
+  required VoidCallback onFetchModels,
+  required ValueChanged<ImageGenSettings> onUpdate,
+  required ShowOptionsCallback showOptions,
+}) {
+  final config = s.electronhub;
+
+  return [
+    rows.ImageGenTextFieldItem(
+      label: 'Model',
+      value: config.model,
+      hint: 'gpt-image-1',
+      onChanged: (v) =>
+          onUpdate(s.copyWith(electronhub: config.copyWith(model: v))),
+      suffix: rows.ImageGenFetchButton(
+        isFetching: isFetching,
+        onPressed: onFetchModels,
+      ),
+    ),
+    rows.ImageGenSelectorRow(
+      label: 'Image Size',
+      value: config.size,
+      onTap: () => showOptions<String>(
+        title: 'Image Size',
+        items: ElectronHubConstants.sizes,
+        labelBuilder: (v) => v,
+        isSelected: (v) => config.size == v,
+        onSelected: (v) =>
+            onUpdate(s.copyWith(electronhub: config.copyWith(size: v))),
+      ),
+    ),
+    rows.ImageGenSelectorRow(
+      label: 'Quality',
+      value: config.quality == 'hd' ? 'HD' : 'Standard',
+      onTap: () => showOptions<String>(
+        title: 'Quality',
+        items: ElectronHubConstants.qualities,
+        labelBuilder: (v) => v == 'hd' ? 'HD' : 'Standard',
+        isSelected: (v) => config.quality == v,
+        onSelected: (v) =>
+            onUpdate(s.copyWith(electronhub: config.copyWith(quality: v))),
+      ),
+    ),
+  ];
+}

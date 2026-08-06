@@ -147,6 +147,45 @@ class ImageGenCheckboxRow extends StatelessWidget {
   }
 }
 
+/// Refresh button rendered as the suffix of a model text field; shows a
+/// spinner while the model list is being fetched.
+class ImageGenFetchButton extends StatelessWidget {
+  final bool isFetching;
+  final VoidCallback onPressed;
+
+  const ImageGenFetchButton({
+    super.key,
+    required this.isFetching,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onPressed,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        width: 40,
+        height: 40,
+        decoration: BoxDecoration(
+          color: context.cs.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.black12),
+        ),
+        child: isFetching
+            ? const Center(
+                child: SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              )
+            : Icon(Icons.refresh, size: 18, color: context.cs.primary),
+      ),
+    );
+  }
+}
+
 class ImageGenTextFieldItem extends StatefulWidget {
   final String label;
   final String value;
@@ -237,7 +276,9 @@ class _ImageGenTextFieldItemState extends State<ImageGenTextFieldItem> {
 class ImageGenReferenceRow extends StatefulWidget {
   final ReferenceImage refItem;
   final ValueChanged<String> onNameChanged;
+  final ValueChanged<String> onDescriptionChanged;
   final ValueChanged<String> onMatchModeChanged;
+  final ValueChanged<bool> onEnabledChanged;
   final VoidCallback onPickImage;
   final VoidCallback onRemove;
 
@@ -245,7 +286,9 @@ class ImageGenReferenceRow extends StatefulWidget {
     super.key,
     required this.refItem,
     required this.onNameChanged,
+    required this.onDescriptionChanged,
     required this.onMatchModeChanged,
+    required this.onEnabledChanged,
     required this.onPickImage,
     required this.onRemove,
   });
@@ -258,6 +301,8 @@ class _ImageGenReferenceRowState extends State<ImageGenReferenceRow> {
   late final TextEditingController _controller = TextEditingController(
     text: widget.refItem.name,
   );
+  late final TextEditingController _descriptionController =
+      TextEditingController(text: widget.refItem.description);
 
   @override
   void didUpdateWidget(covariant ImageGenReferenceRow oldWidget) {
@@ -266,11 +311,16 @@ class _ImageGenReferenceRowState extends State<ImageGenReferenceRow> {
         widget.refItem.name != _controller.text) {
       _controller.text = widget.refItem.name;
     }
+    if (widget.refItem.description != oldWidget.refItem.description &&
+        widget.refItem.description != _descriptionController.text) {
+      _descriptionController.text = widget.refItem.description;
+    }
   }
 
   @override
   void dispose() {
     _controller.dispose();
+    _descriptionController.dispose();
     super.dispose();
   }
 
@@ -278,6 +328,33 @@ class _ImageGenReferenceRowState extends State<ImageGenReferenceRow> {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: Column(children: [_topRow(context), _descriptionField(context)]),
+    );
+  }
+
+  Widget _descriptionField(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 48, bottom: 4),
+      child: TextField(
+        controller: _descriptionController,
+        onChanged: widget.onDescriptionChanged,
+        style: const TextStyle(fontSize: 13),
+        decoration: InputDecoration(
+          hintText: 'imggen_ref_description_hint'.tr(),
+          isDense: true,
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 8,
+            vertical: 6,
+          ),
+          border: InputBorder.none,
+        ),
+      ),
+    );
+  }
+
+  Widget _topRow(BuildContext context) {
+    return Opacity(
+      opacity: widget.refItem.enabled ? 1 : 0.5,
       child: Row(
         children: [
           InkWell(
@@ -400,7 +477,11 @@ class _ImageGenReferenceRowState extends State<ImageGenReferenceRow> {
               ],
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 4),
+          Switch(
+            value: widget.refItem.enabled,
+            onChanged: widget.onEnabledChanged,
+          ),
           IconButton(
             icon: const Icon(Icons.close, size: 18, color: Colors.grey),
             onPressed: widget.onRemove,

@@ -7,18 +7,24 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/models/api_config.dart';
 import '../../../core/utils/platform_paths.dart';
 import '../../character_gallery/gallery_image_picker.dart';
 import '../../settings/api_list_provider.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/help_tip.dart';
 import '../../../shared/widgets/sheet_view.dart';
+import '../image_gen_capabilities.dart';
 import '../image_gen_models.dart';
 import '../image_gen_provider.dart';
 import '../services/image_gen_connection_service.dart';
+import 'a1111_fields.dart';
 import 'connection_fields.dart';
 import 'model_fields.dart';
+import 'openrouter_fields.dart';
+import 'reference_library_section.dart';
 import 'rows.dart' as rows;
+import 'style_library_sheet.dart';
 
 class ImageGenSheet extends ConsumerStatefulWidget {
   const ImageGenSheet({super.key, this.charId});
@@ -84,7 +90,13 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
       before.customApiKey != after.customApiKey ||
       before.naisteraApiKey != after.naisteraApiKey ||
       before.routmyApiKey != after.routmyApiKey ||
-      before.ruRoutmyApiKey != after.ruRoutmyApiKey;
+      before.ruRoutmyApiKey != after.ruRoutmyApiKey ||
+      before.openrouter.apiKey != after.openrouter.apiKey ||
+      before.openrouter.endpoint != after.openrouter.endpoint ||
+      before.electronhub.apiKey != after.electronhub.apiKey ||
+      before.electronhub.endpoint != after.electronhub.endpoint ||
+      before.a1111.endpoint != after.a1111.endpoint ||
+      before.a1111.apiKey != after.a1111.apiKey;
 
   void _scheduleConnectionCheck(
     ImageGenSettings settings, {
@@ -189,13 +201,7 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
     _showOptions<ImageGenApiType>(
       title: 'API Type',
       items: ImageGenApiType.values,
-      labelBuilder: (t) => switch (t) {
-        ImageGenApiType.openai => 'OpenAI',
-        ImageGenApiType.gemini => 'Gemini',
-        ImageGenApiType.naistera => 'Naistera',
-        ImageGenApiType.routmy => 'rout.my',
-        ImageGenApiType.ruRoutmy => 'RU-rout.my',
-      },
+      labelBuilder: (t) => t.label,
       isSelected: (t) => _settings.apiType == t,
       onSelected: (t) => _update(_settings.copyWith(apiType: t)),
     );
@@ -223,7 +229,36 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
       fitContent: false,
       scrollController: _scrollController,
       enableHeaderBlur: false,
-      body: s.enabled ? _buildBody(context, s) : const SizedBox.shrink(),
+      body: s.enabled ? _buildBody(context, s) : _buildDisabledPlaceholder(),
+    );
+  }
+
+  /// Shown instead of the settings when generation is off, so the sheet does
+  /// not read as broken or empty.
+  Widget _buildDisabledPlaceholder() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.image_outlined,
+              size: 56,
+              color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'imggen_disabled_placeholder'.tr(),
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 14,
+                color: context.cs.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -261,6 +296,16 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
                   style: const TextStyle(color: Colors.red, fontSize: 12),
                 ),
               ),
+            rows.ImageGenMenuGroup(
+              title: 'imggen_styles'.tr(),
+              children: [
+                rows.ImageGenSelectorRow(
+                  label: 'imggen_style_active'.tr(),
+                  value: s.activeStyle?.name ?? 'imggen_style_none'.tr(),
+                  onTap: _openStyleLibrary,
+                ),
+              ],
+            ),
             if (s.apiType == ImageGenApiType.naistera &&
                 NaisteraConstants.noRefModels.contains(s.naisteraModel))
               Container(
@@ -281,13 +326,15 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
                   ),
                 ),
               ),
-            if ((s.apiType == ImageGenApiType.naistera &&
-                    !NaisteraConstants.noRefModels.contains(s.naisteraModel)) ||
-                s.apiType == ImageGenApiType.routmy ||
-                s.apiType == ImageGenApiType.ruRoutmy)
-              ..._buildReferences(s),
-            if (s.apiType != ImageGenApiType.naistera ||
-                !NaisteraConstants.noRefModels.contains(s.naisteraModel))
+            if (providerMaxReferences(s) > 0)
+              ...buildReferenceSections(
+                context: context,
+                settings: s,
+                maxReferences: providerMaxReferences(s),
+                onUpdate: _update,
+                pickImage: _pickReferenceImage,
+              ),
+            if (providerMaxReferences(s) > 0)
               rows.ImageGenMenuGroup(
                 title: 'Image Context',
                 children: [
@@ -354,13 +401,7 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
   }
 
   Widget _buildPresetSelector(ImageGenApiType selected) {
-    final name = switch (selected) {
-      ImageGenApiType.openai => 'OpenAI',
-      ImageGenApiType.gemini => 'Gemini',
-      ImageGenApiType.naistera => 'Naistera',
-      ImageGenApiType.routmy => 'rout.my',
-      ImageGenApiType.ruRoutmy => 'RU-rout.my',
-    };
+    final name = selected.label;
     return InkWell(
       onTap: _openApiTypeSelector,
       borderRadius: BorderRadius.circular(16),
@@ -441,10 +482,26 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
         return buildRoutmyConnectionFields(s, isRu: false, onUpdate: _update);
       case ImageGenApiType.ruRoutmy:
         return buildRoutmyConnectionFields(s, isRu: true, onUpdate: _update);
+      case ImageGenApiType.openrouter:
+        return buildOpenRouterConnectionFields(s, _update);
+      case ImageGenApiType.electronhub:
+        return buildElectronHubConnectionFields(s, _update);
+      case ImageGenApiType.a1111:
+        return buildA1111ConnectionFields(s, _update);
       case ImageGenApiType.openai:
       case ImageGenApiType.gemini:
         return buildOpenaiConnectionFields(s, _update);
     }
+  }
+
+  void _openStyleLibrary() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useRootNavigator: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => StyleLibrarySheet(settings: _settings, onUpdate: _update),
+    );
   }
 
   List<Widget> _buildModelFields(ImageGenSettings s) {
@@ -477,6 +534,30 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
         );
       case ImageGenApiType.gemini:
         return buildGeminiModelFields(s, _update, showOptions);
+      case ImageGenApiType.openrouter:
+        return buildOpenRouterModelFields(
+          s,
+          isFetching: _isFetchingModels,
+          onFetchModels: _onFetchModels,
+          onUpdate: _update,
+          showOptions: showOptions,
+        );
+      case ImageGenApiType.electronhub:
+        return buildElectronHubModelFields(
+          s,
+          isFetching: _isFetchingModels,
+          onFetchModels: _onFetchModels,
+          onUpdate: _update,
+          showOptions: showOptions,
+        );
+      case ImageGenApiType.a1111:
+        return buildA1111ModelFields(
+          s,
+          isFetching: _isFetchingModels,
+          onFetchModels: _onFetchModels,
+          onUpdate: _update,
+          showOptions: showOptions,
+        );
     }
   }
 
@@ -498,18 +579,68 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
     };
   }
 
+  /// Model discovery differs per provider: OpenAI-style `/v1/models` for the
+  /// OpenAI and Gemini paths, filtered listings for OpenRouter and Electron
+  /// Hub, and loaded checkpoints for a local AUTOMATIC1111 server.
+  Future<List<String>> _fetchModelsForProvider(ApiConfig? apiConfig) {
+    switch (_settings.apiType) {
+      case ImageGenApiType.openrouter:
+        return _connectionService.fetchOpenRouterModels(_settings);
+      case ImageGenApiType.electronhub:
+        return _connectionService.fetchElectronHubModels(_settings);
+      case ImageGenApiType.a1111:
+        return _connectionService.fetchA1111Models(_settings);
+      case ImageGenApiType.openai:
+      case ImageGenApiType.gemini:
+      case ImageGenApiType.naistera:
+      case ImageGenApiType.routmy:
+      case ImageGenApiType.ruRoutmy:
+        return _connectionService.fetchOpenAiModels(
+          settings: _settings,
+          llmEndpoint: apiConfig?.endpoint ?? '',
+          llmApiKey: apiConfig?.apiKey ?? '',
+        );
+    }
+  }
+
+  bool _isSelectedModel(String model) => switch (_settings.apiType) {
+    ImageGenApiType.openrouter => _settings.openrouter.model == model,
+    ImageGenApiType.electronhub => _settings.electronhub.model == model,
+    ImageGenApiType.a1111 => _settings.a1111.model == model,
+    _ => _settings.customModel == model,
+  };
+
+  void _applyModel(String model) {
+    switch (_settings.apiType) {
+      case ImageGenApiType.openrouter:
+        _update(
+          _settings.copyWith(
+            openrouter: _settings.openrouter.copyWith(model: model),
+          ),
+        );
+      case ImageGenApiType.electronhub:
+        _update(
+          _settings.copyWith(
+            electronhub: _settings.electronhub.copyWith(model: model),
+          ),
+        );
+      case ImageGenApiType.a1111:
+        _update(
+          _settings.copyWith(a1111: _settings.a1111.copyWith(model: model)),
+        );
+      default:
+        _update(_settings.copyWith(customModel: model));
+    }
+  }
+
   Future<void> _onFetchModels() async {
     setState(() => _isFetchingModels = true);
     final apiConfig = ref.read(activeApiConfigProvider);
     try {
-      final models = await _connectionService.fetchOpenAiModels(
-        settings: _settings,
-        llmEndpoint: apiConfig?.endpoint ?? '',
-        llmApiKey: apiConfig?.apiKey ?? '',
-      );
+      final models = await _fetchModelsForProvider(apiConfig);
       if (!mounted) return;
       if (models.isEmpty) {
-        setState(() => _modelFetchError = 'No image models found');
+        setState(() => _modelFetchError = 'imggen_no_models'.tr());
         return;
       }
       setState(() => _modelFetchError = '');
@@ -517,8 +648,8 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
         title: 'Image models',
         items: models,
         labelBuilder: (model) => model,
-        isSelected: (model) => _settings.customModel == model,
-        onSelected: (model) => _update(_settings.copyWith(customModel: model)),
+        isSelected: _isSelectedModel,
+        onSelected: _applyModel,
       );
     } catch (error) {
       if (!mounted) return;
@@ -602,165 +733,5 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
     if (lower.endsWith('.webp')) return 'image/webp';
     if (lower.endsWith('.gif')) return 'image/gif';
     return 'image/png';
-  }
-
-  List<Widget> _buildReferences(ImageGenSettings s) {
-    final isRoutmy = s.apiType == ImageGenApiType.routmy;
-    final isRuRoutmy = s.apiType == ImageGenApiType.ruRoutmy;
-
-    final sendCharAvatar = isRoutmy
-        ? s.routmySendCharAvatar
-        : (isRuRoutmy ? s.ruRoutmySendCharAvatar : s.naisteraSendCharAvatar);
-    final sendUserAvatar = isRoutmy
-        ? s.routmySendUserAvatar
-        : (isRuRoutmy ? s.ruRoutmySendUserAvatar : s.naisteraSendUserAvatar);
-
-    final refs = (isRoutmy || isRuRoutmy)
-        ? s.routmyAdditionalRefs
-        : s.additionalReferences;
-
-    return [
-      rows.ImageGenMenuGroup(
-        title: 'Reference Images',
-        children: [
-          rows.ImageGenCheckboxRow(
-            label: 'imggen_send_char_avatar'.tr(),
-            description: 'imggen_send_char_avatar_desc'.tr(),
-            value: sendCharAvatar,
-            onChanged: (v) {
-              if (isRoutmy) {
-                _update(s.copyWith(routmySendCharAvatar: v));
-              } else if (isRuRoutmy) {
-                _update(s.copyWith(ruRoutmySendCharAvatar: v));
-              } else {
-                _update(s.copyWith(naisteraSendCharAvatar: v));
-              }
-            },
-          ),
-          rows.ImageGenCheckboxRow(
-            label: 'imggen_send_user_avatar'.tr(),
-            description: 'imggen_send_user_avatar_desc'.tr(),
-            value: sendUserAvatar,
-            onChanged: (v) {
-              if (isRoutmy) {
-                _update(s.copyWith(routmySendUserAvatar: v));
-              } else if (isRuRoutmy) {
-                _update(s.copyWith(ruRoutmySendUserAvatar: v));
-              } else {
-                _update(s.copyWith(naisteraSendUserAvatar: v));
-              }
-            },
-          ),
-        ],
-      ),
-      rows.ImageGenMenuGroup(
-        title: 'Additional References',
-        trailing: Text(
-          isRoutmy || isRuRoutmy ? '${refs.length}' : '${refs.length}/8',
-          style: TextStyle(fontSize: 13, color: context.cs.onSurfaceVariant),
-        ),
-        children: [
-          if (isRoutmy || isRuRoutmy)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-              child: Text(
-                'You can save any number of references. If more than '
-                '$routmyMaxInjectedReferenceImages match, only the first '
-                '$routmyMaxInjectedReferenceImages are sent.',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: context.cs.onSurfaceVariant,
-                ),
-              ),
-            ),
-          for (int i = 0; i < refs.length; i++)
-            rows.ImageGenReferenceRow(
-              key: ValueKey('ref_$i'),
-              refItem: refs[i],
-              onNameChanged: (v) {
-                final copy = List<ReferenceImage>.from(refs);
-                copy[i] = copy[i].copyWith(name: v);
-                if (isRoutmy || isRuRoutmy) {
-                  _update(s.copyWith(routmyAdditionalRefs: copy));
-                } else {
-                  _update(s.copyWith(additionalReferences: copy));
-                }
-              },
-              onMatchModeChanged: (v) {
-                final copy = List<ReferenceImage>.from(refs);
-                copy[i] = copy[i].copyWith(matchMode: v);
-                if (isRoutmy || isRuRoutmy) {
-                  _update(s.copyWith(routmyAdditionalRefs: copy));
-                } else {
-                  _update(s.copyWith(additionalReferences: copy));
-                }
-              },
-              onPickImage: () async {
-                final imageData = await _pickReferenceImage();
-                if (imageData == null || !mounted) return;
-                final copy = List<ReferenceImage>.from(refs);
-                copy[i] = copy[i].copyWith(imageData: imageData);
-                if (isRoutmy || isRuRoutmy) {
-                  _update(s.copyWith(routmyAdditionalRefs: copy));
-                } else {
-                  _update(s.copyWith(additionalReferences: copy));
-                }
-              },
-              onRemove: () {
-                final copy = List<ReferenceImage>.from(refs);
-                copy.removeAt(i);
-                if (isRoutmy || isRuRoutmy) {
-                  _update(s.copyWith(routmyAdditionalRefs: copy));
-                } else {
-                  _update(s.copyWith(additionalReferences: copy));
-                }
-              },
-            ),
-          if (isRoutmy || isRuRoutmy || refs.length < 8)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: InkWell(
-                onTap: () {
-                  final copy = List<ReferenceImage>.from(refs);
-                  copy.add(
-                    const ReferenceImage(
-                      name: '',
-                      imageData: '',
-                      matchMode: 'match',
-                    ),
-                  );
-                  if (isRoutmy || isRuRoutmy) {
-                    _update(s.copyWith(routmyAdditionalRefs: copy));
-                  } else {
-                    _update(s.copyWith(additionalReferences: copy));
-                  }
-                },
-                borderRadius: BorderRadius.circular(10),
-                child: Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: context.cs.primary.withValues(alpha: 0.4),
-                      style: BorderStyle.solid,
-                    ),
-                  ),
-                  child: Center(
-                    child: Text(
-                      '+ ${'imggen_add_ref'.tr()}',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                        color: context.cs.primary,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
-    ];
   }
 }

@@ -15,7 +15,7 @@ List<Widget> buildNaisteraConnectionFields(
 ) {
   return [
     rows.ImageGenTextFieldItem(
-        label: 'imggen_api_key'.tr(),
+      label: 'imggen_api_key'.tr(),
       value: s.naisteraApiKey,
       obscure: true,
       hint: 'sk-...',
@@ -33,7 +33,10 @@ List<Widget> buildNaisteraConnectionFields(
         ),
         child: Row(
           children: [
-            Text('imggen_naistera_hint'.tr(), style: const TextStyle(fontSize: 13)),
+            Text(
+              'imggen_naistera_hint'.tr(),
+              style: const TextStyle(fontSize: 13),
+            ),
             const SizedBox(width: 4),
             const Icon(Icons.public, size: 14, color: Colors.blue),
             const SizedBox(width: 4),
@@ -69,6 +72,82 @@ List<Widget> buildRoutmyConnectionFields(
   ];
 }
 
+/// Connection-field rows for OpenRouter. The endpoint is optional — empty
+/// falls back to `https://openrouter.ai/api/v1`, so OpenRouter-compatible
+/// proxies can be pointed at without any other change.
+List<Widget> buildOpenRouterConnectionFields(
+  ImageGenSettings s,
+  ValueChanged<ImageGenSettings> onUpdate,
+) {
+  return [
+    rows.ImageGenTextFieldItem(
+      label: 'imggen_api_key'.tr(),
+      value: s.openrouter.apiKey,
+      obscure: true,
+      hint: 'sk-or-...',
+      onChanged: (v) =>
+          onUpdate(s.copyWith(openrouter: s.openrouter.copyWith(apiKey: v))),
+    ),
+    rows.ImageGenTextFieldItem(
+      label: 'imggen_endpoint'.tr(),
+      value: s.openrouter.endpoint,
+      hint: OpenRouterConstants.defaultEndpoint,
+      onChanged: (v) =>
+          onUpdate(s.copyWith(openrouter: s.openrouter.copyWith(endpoint: v))),
+    ),
+  ];
+}
+
+/// Connection-field rows for Electron Hub (OpenAI-compatible aggregator).
+List<Widget> buildElectronHubConnectionFields(
+  ImageGenSettings s,
+  ValueChanged<ImageGenSettings> onUpdate,
+) {
+  return [
+    rows.ImageGenTextFieldItem(
+      label: 'imggen_api_key'.tr(),
+      value: s.electronhub.apiKey,
+      obscure: true,
+      hint: 'ek-...',
+      onChanged: (v) =>
+          onUpdate(s.copyWith(electronhub: s.electronhub.copyWith(apiKey: v))),
+    ),
+    rows.ImageGenTextFieldItem(
+      label: 'imggen_endpoint'.tr(),
+      value: s.electronhub.endpoint,
+      hint: ElectronHubConstants.defaultEndpoint,
+      onChanged: (v) => onUpdate(
+        s.copyWith(electronhub: s.electronhub.copyWith(endpoint: v)),
+      ),
+    ),
+  ];
+}
+
+/// Connection-field rows for a local AUTOMATIC1111 / Forge server. The API key
+/// is only needed when the server runs with `--api-auth user:password`.
+List<Widget> buildA1111ConnectionFields(
+  ImageGenSettings s,
+  ValueChanged<ImageGenSettings> onUpdate,
+) {
+  return [
+    rows.ImageGenTextFieldItem(
+      label: 'imggen_endpoint'.tr(),
+      value: s.a1111.endpoint,
+      hint: A1111Constants.defaultEndpoint,
+      onChanged: (v) =>
+          onUpdate(s.copyWith(a1111: s.a1111.copyWith(endpoint: v))),
+    ),
+    rows.ImageGenTextFieldItem(
+      label: 'imggen_a1111_auth'.tr(),
+      value: s.a1111.apiKey,
+      obscure: true,
+      hint: 'user:password',
+      onChanged: (v) =>
+          onUpdate(s.copyWith(a1111: s.a1111.copyWith(apiKey: v))),
+    ),
+  ];
+}
+
 /// Connection-field rows for the OpenAI-compatible path. If [useSame]
 /// is true only the "Use LLM API" switch is shown — no endpoint or
 /// key fields. Otherwise both endpoint URL and API key are visible.
@@ -91,7 +170,7 @@ List<Widget> buildOpenaiConnectionFields(
         onChanged: (v) => onUpdate(s.copyWith(customEndpoint: v)),
       ),
       rows.ImageGenTextFieldItem(
-      label: 'imggen_api_key'.tr(),
+        label: 'imggen_api_key'.tr(),
         value: s.customApiKey,
         obscure: true,
         hint: 'sk-...',

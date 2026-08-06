@@ -170,14 +170,14 @@ class ImagePixelRenderer {
         RegExp(r'^SCENE_PROMPT:\s*'),
         '',
       );
-      final prompt = style.isNotEmpty ? '$style, $cleanPrompt' : cleanPrompt;
       final instructionAspectRatio =
           instructions.first['aspect_ratio'] as String?;
       final instructionImageSize = instructions.first['image_size'] as String?;
 
       final imageBytes = await imageService.generateImage(
         settings: imgGenSettings,
-        prompt: prompt,
+        prompt: cleanPrompt,
+        tagStyle: style,
         llmEndpoint: '',
         llmApiKey: '',
         llmModel: '',
