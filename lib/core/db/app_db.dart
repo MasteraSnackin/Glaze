@@ -74,7 +74,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 108;
+  int get schemaVersion => 109;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -2011,6 +2011,23 @@ class AppDatabase extends _$AppDatabase {
       }
       if (from < 108) {
         await m.createTable(cardEvolutionObservations);
+      }
+      if (from < 109) {
+        final columns = await customSelect(
+          "PRAGMA table_info('api_configs')",
+        ).get();
+        final names = columns
+            .map((column) => column.read<String>('name'))
+            .toSet();
+        if (!names.contains('gemini_system_instruction')) {
+          await m.addColumn(apiConfigs, apiConfigs.geminiSystemInstruction);
+        }
+        // The Responses API opt-in became a protocol of its own; presets that
+        // had the flag on keep talking to `/responses` after the split.
+        await customStatement(
+          "UPDATE api_configs SET protocol = 'openai_responses' "
+          "WHERE protocol = 'openai' AND use_responses_api = 1",
+        );
       }
     },
   );

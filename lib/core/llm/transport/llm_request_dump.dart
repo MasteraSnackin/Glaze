@@ -108,6 +108,10 @@ class LoggingChatTransport implements ChatTransport {
   final ChatTransport _inner;
   final String? label;
 
+  /// The wrapped transport. Exposed so tests can assert factory routing.
+  @visibleForTesting
+  ChatTransport get inner => _inner;
+
   @override
   Future<void> stream({
     required ChatTransportRequest request,

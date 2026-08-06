@@ -1,12 +1,19 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:glaze_flutter/core/llm/transport/llm_protocol.dart';
 import 'package:glaze_flutter/core/models/api_config.dart';
 
 void main() {
   test('Responses API defaults off and round-trips when enabled', () {
     expect(ApiConfig.fromJson(const {'id': 'api'}).useResponsesApi, isFalse);
-    final config = ApiConfig(id: 'api', useResponsesApi: true);
+    final config = ApiConfig(
+      id: 'api',
+      protocol: LlmProtocol.openaiResponses,
+      useResponsesApi: true,
+    );
 
-    expect(ApiConfig.fromJson(config.toJson()).useResponsesApi, isTrue);
+    final restored = ApiConfig.fromJson(config.toJson());
+    expect(restored.useResponsesApi, isTrue);
+    expect(restored.protocol, LlmProtocol.openaiResponses);
   });
 
   test('reasoning settings are backward-compatible', () {

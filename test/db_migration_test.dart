@@ -78,7 +78,7 @@ void main() {
 
       // user_version matches the Drift schema version (app_db.dart schemaVersion).
       // Update this constant whenever a new migration step is added.
-      expect(version, 108);
+      expect(version, 109);
     });
 
     test(
@@ -232,7 +232,7 @@ void main() {
         final version = await upgraded
             .customSelect('PRAGMA user_version')
             .get();
-        expect(version.first.read<int>('user_version'), 108);
+        expect(version.first.read<int>('user_version'), 109);
         expect(names, contains('variant_group_id'));
         expect(names, contains('hidden'));
       },
@@ -262,7 +262,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 108);
+      expect(version.read<int>('user_version'), 109);
     });
 
     test(
@@ -611,7 +611,7 @@ void main() {
 
     test('current schema includes atomic character fact tables', () async {
       final version = await db.customSelect('PRAGMA user_version').getSingle();
-      expect(version.read<int>('user_version'), 108);
+      expect(version.read<int>('user_version'), 109);
 
       final factColumns = await db
           .customSelect("PRAGMA table_info('character_knowledge_fact_rows')")
@@ -723,7 +723,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 108);
+      expect(version.read<int>('user_version'), 109);
     });
 
     test(
@@ -833,7 +833,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 108);
+      expect(version.read<int>('user_version'), 109);
     });
 
     test('v80 adds Responses API toggle defaulting to off', () async {
@@ -873,7 +873,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 108);
+      expect(version.read<int>('user_version'), 109);
     });
 
     test('v81 adds composite embedding source index', () async {
@@ -907,7 +907,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 108);
+      expect(version.read<int>('user_version'), 109);
     });
 
     test('v82 creates rewrite persistence schema and provenance columns', () async {
@@ -981,7 +981,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 108);
+      expect(version.read<int>('user_version'), 109);
     });
 
     test('v83 rebuilds interim text revision columns without losing rows', () async {
@@ -1418,7 +1418,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 108);
+      expect(version.read<int>('user_version'), 109);
 
       // Rows and payloads survive; legacy statuses pass through or are
       // normalized fail-closed, and new columns carry neutral defaults.
@@ -1623,7 +1623,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 108);
+      expect(version.read<int>('user_version'), 109);
       final row = await upgraded
           .customSelect(
             'SELECT blocks_json FROM studio_preset_rows WHERE preset_id = ?',
@@ -1739,7 +1739,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 108);
+      expect(version.read<int>('user_version'), 109);
       final check = await upgraded.customSelect('PRAGMA integrity_check').get();
       expect(check.single.read<String>('integrity_check'), 'ok');
     });
@@ -2320,7 +2320,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 108);
+      expect(version.read<int>('user_version'), 109);
     });
 
     test(
@@ -2345,6 +2345,72 @@ void main() {
             .where((row) => row.read<int>('pk') > 0)
             .map((row) => row.read<String>('name'));
         expect(primaryKey, containsAll(['session_id', 'stage']));
+      },
+    );
+
+    test(
+      'v109 adds the Gemini system instruction and splits the Responses API '
+      'opt-in into its own protocol',
+      () async {
+        final file = File(
+          '${Directory.systemTemp.path}/glaze_mig_sys_instruction_${DateTime.now().microsecondsSinceEpoch}.db',
+        );
+        addTearDown(() async {
+          if (file.existsSync()) await file.delete();
+        });
+
+        final seeded = AppDatabase.forTesting(
+          NativeDatabase.createInBackground(file),
+        );
+        await seeded.customSelect('SELECT 1').get();
+        await seeded.customStatement(
+          'INSERT INTO api_configs (config_id, name, protocol, '
+          'use_responses_api) VALUES (?, ?, ?, ?)',
+          ['chat', 'Chat Completions', 'openai', 0],
+        );
+        await seeded.customStatement(
+          'INSERT INTO api_configs (config_id, name, protocol, '
+          'use_responses_api) VALUES (?, ?, ?, ?)',
+          ['responses', 'Responses', 'openai', 1],
+        );
+        await seeded.customStatement(
+          'INSERT INTO api_configs (config_id, name, protocol, '
+          'use_responses_api) VALUES (?, ?, ?, ?)',
+          ['gemini', 'Gemini', 'gemini', 1],
+        );
+        await seeded.customStatement(
+          'ALTER TABLE api_configs DROP COLUMN gemini_system_instruction',
+        );
+        await seeded.customStatement('PRAGMA user_version = 108');
+        await seeded.close();
+
+        final upgraded = AppDatabase.forTesting(
+          NativeDatabase.createInBackground(file),
+        );
+        addTearDown(() async => upgraded.close());
+        final rows = await upgraded
+            .customSelect(
+              'SELECT config_id, protocol, gemini_system_instruction '
+              'FROM api_configs ORDER BY config_id',
+            )
+            .get();
+        final byId = {
+          for (final row in rows)
+            row.read<String>('config_id'): row.read<String>('protocol'),
+        };
+
+        expect(byId['chat'], 'openai');
+        expect(byId['responses'], 'openai_responses');
+        // Only the OpenAI-compatible protocol carried the opt-in.
+        expect(byId['gemini'], 'gemini');
+        for (final row in rows) {
+          expect(row.read<String>('gemini_system_instruction'), '');
+        }
+
+        final version = await upgraded
+            .customSelect('PRAGMA user_version')
+            .getSingle();
+        expect(version.read<int>('user_version'), 109);
       },
     );
   });

@@ -13,6 +13,7 @@ ChatTransportRequest _req({
   bool stream = true,
   bool requestReasoning = false,
   String? reasoningEffort,
+  String systemInstruction = '',
 }) {
   return ChatTransportRequest(
     endpoint: 'https://generativelanguage.googleapis.com',
@@ -32,6 +33,7 @@ ChatTransportRequest _req({
     stream: stream,
     requestReasoning: requestReasoning,
     reasoningEffort: reasoningEffort,
+    systemInstruction: systemInstruction,
   );
 }
 
@@ -133,6 +135,52 @@ void main() {
           messages: [
             {'role': 'user', 'content': 'hi'},
           ],
+        ),
+      );
+      expect(built.body.containsKey('systemInstruction'), isFalse);
+    });
+
+    test('preset system_instruction is sent when the prompt has none', () {
+      final built = GeminiChatTransport.buildRequest(
+        _req(
+          messages: [
+            {'role': 'user', 'content': 'hi'},
+          ],
+          systemInstruction: 'stay in character',
+        ),
+      );
+      expect(built.body['systemInstruction'], {
+        'parts': [
+          {'text': 'stay in character'},
+        ],
+      });
+    });
+
+    test('preset system_instruction leads the prompt-derived parts', () {
+      final built = GeminiChatTransport.buildRequest(
+        _req(
+          messages: [
+            {'role': 'system', 'content': 'sysA'},
+            {'role': 'user', 'content': 'q1'},
+            {'role': 'assistant', 'content': 'a1'},
+            {'role': 'user', 'content': 'q2'},
+          ],
+          systemInstruction: '  stay in character  ',
+        ),
+      );
+      final parts = (built.body['systemInstruction'] as Map)['parts'] as List;
+      expect(parts, hasLength(2));
+      expect(parts.first['text'], 'stay in character');
+      expect(parts.last['text'], 'sysA\n\nq1');
+    });
+
+    test('blank preset system_instruction changes nothing', () {
+      final built = GeminiChatTransport.buildRequest(
+        _req(
+          messages: [
+            {'role': 'user', 'content': 'hi'},
+          ],
+          systemInstruction: '   ',
         ),
       );
       expect(built.body.containsKey('systemInstruction'), isFalse);

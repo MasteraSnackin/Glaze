@@ -52,6 +52,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   final _maxTokensCtrl = TextEditingController();
   final _contextSizeCtrl = TextEditingController();
   final _firstChunkTimeoutCtrl = TextEditingController();
+  final _geminiSystemInstructionCtrl = TextEditingController();
   final _reasoningHistoryCountCtrl = TextEditingController();
   final _embEndpointCtrl = TextEditingController();
   final _embApiKeyCtrl = TextEditingController();
@@ -66,7 +67,6 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   int _topK = 0;
   bool _stream = true;
   bool _requestReasoning = false;
-  bool _useResponsesApi = false;
   bool _showNativeReasoning = true;
   bool _excludeReasoningFromContextBudget = false;
   String _reasoningEffort = 'medium';
@@ -109,6 +109,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     _maxTokensCtrl,
     _contextSizeCtrl,
     _firstChunkTimeoutCtrl,
+    _geminiSystemInstructionCtrl,
     _reasoningHistoryCountCtrl,
     _embEndpointCtrl,
     _embApiKeyCtrl,
@@ -211,6 +212,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     _maxTokensCtrl.text = draft.maxTokens;
     _contextSizeCtrl.text = draft.contextSize;
     _firstChunkTimeoutCtrl.text = draft.firstChunkTimeoutSeconds;
+    _geminiSystemInstructionCtrl.text = draft.geminiSystemInstruction;
     _reasoningHistoryCountCtrl.text = draft.reasoningHistoryCount;
     _embEndpointCtrl.text = draft.embeddingEndpoint;
     _embApiKeyCtrl.text = draft.embeddingApiKey;
@@ -225,7 +227,6 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       _presencePenalty = values.presencePenalty;
       _stream = values.stream;
       _requestReasoning = values.requestReasoning;
-      _useResponsesApi = values.useResponsesApi;
       _showNativeReasoning = values.showNativeReasoning;
       _excludeReasoningFromContextBudget =
           values.excludeReasoningFromContextBudget;
@@ -262,7 +263,6 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
         presencePenalty: _presencePenalty,
         stream: _stream,
         requestReasoning: _requestReasoning,
-        useResponsesApi: _useResponsesApi,
         showNativeReasoning: _showNativeReasoning,
         excludeReasoningFromContextBudget: _excludeReasoningFromContextBudget,
         reasoningEffort: _reasoningEffort,
@@ -288,6 +288,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       maxTokens: _maxTokensCtrl.text,
       contextSize: _contextSizeCtrl.text,
       firstChunkTimeoutSeconds: _firstChunkTimeoutCtrl.text,
+      geminiSystemInstruction: _geminiSystemInstructionCtrl.text,
       reasoningHistoryCount: _reasoningHistoryCountCtrl.text,
       embeddingEndpoint: _embEndpointCtrl.text,
       embeddingApiKey: _embApiKeyCtrl.text,
@@ -301,25 +302,38 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
 
   bool get _supportsTopP => true;
 
-  bool get _supportsTopK =>
+  /// True for both OpenAI-compatible protocols — Chat Completions and
+  /// Responses share the same knobs; only the wire format differs.
+  bool get _isOpenAiCompatible =>
       _protocol == LlmProtocol.openai ||
+      _protocol == LlmProtocol.openaiResponses;
+
+  bool get _supportsTopK =>
+      _isOpenAiCompatible ||
       _protocol == LlmProtocol.openrouter ||
       _protocol == LlmProtocol.anthropic ||
       _protocol == LlmProtocol.gemini;
 
   bool get _supportsFrequencyPenalty =>
-      _protocol == LlmProtocol.openai || _protocol == LlmProtocol.openrouter;
+      _isOpenAiCompatible || _protocol == LlmProtocol.openrouter;
 
   bool get _supportsPresencePenalty =>
-      _protocol == LlmProtocol.openai || _protocol == LlmProtocol.openrouter;
+      _isOpenAiCompatible || _protocol == LlmProtocol.openrouter;
 
   bool get _supportsPromptCache =>
-      _protocol == LlmProtocol.anthropic || _protocol == LlmProtocol.openai;
+      _protocol == LlmProtocol.anthropic || _isOpenAiCompatible;
 
   bool get _supportsReasoning => true;
 
+  /// Gemini is the only protocol with a provider-level `system_instruction`
+  /// field separate from the prompt's own system messages.
+  bool get _supportsSystemInstruction => _protocol == LlmProtocol.gemini;
+
+  /// Derived from the protocol — the Responses API is no longer a toggle.
+  bool get _useResponsesApi => _protocol == LlmProtocol.openaiResponses;
+
   bool get _showsOmitSamplingControls =>
-      _protocol == LlmProtocol.openai || _protocol == LlmProtocol.openrouter;
+      _isOpenAiCompatible || _protocol == LlmProtocol.openrouter;
 
   bool get _hideSamplingWhileReasoningAnthropic =>
       _protocol == LlmProtocol.anthropic && _requestReasoning;
@@ -726,6 +740,14 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
                 placeholder: '60',
                 keyboardType: TextInputType.number,
               ),
+              if (_supportsSystemInstruction)
+                MenuFieldItem(
+                  label: 'label_system_instruction'.tr(),
+                  controller: _geminiSystemInstructionCtrl,
+                  placeholder: 'label_system_instruction_hint'.tr(),
+                  keyboardType: TextInputType.multiline,
+                  maxLines: 4,
+                ),
             ],
           ),
           MenuGroup(
@@ -733,16 +755,6 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
             header: 'label_reasoning_settings'.tr(),
             helpTerm: 'preset-reasoning',
             items: [
-              if (_protocol == LlmProtocol.openai)
-                MenuSwitchItem(
-                  label: 'label_use_responses_api'.tr(),
-                  description: 'desc_use_responses_api'.tr(),
-                  value: _useResponsesApi,
-                  onChanged: (value) {
-                    setState(() => _useResponsesApi = value);
-                    _scheduleSave();
-                  },
-                ),
               if (_supportsReasoning)
                 MenuSwitchItem(
                   label: 'label_reasoning'.tr(),

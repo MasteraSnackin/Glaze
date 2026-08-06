@@ -176,6 +176,15 @@ Migration history:
   read `injectionPoint` from JSON, defaulting every block to `pregen`). Runs
   `migrateStudioPresetBlocksToV2` on each preset's blocks and writes the
   repaired JSON back. Idempotent — presets that were never affected are skipped.
+- v107: added `api_configs.exclude_reasoning_from_context_budget` BOOLEAN
+  DEFAULT 0.
+- v108: added `card_evolution_observations`.
+- v109: added `api_configs.gemini_system_instruction` TEXT NOT NULL DEFAULT
+  `''` — preset-level Gemini `system_instruction`, prepended to the
+  `systemInstruction` parts derived from the prompt. Also rewrites
+  `protocol = 'openai'` rows with `use_responses_api = 1` to
+  `protocol = 'openai_responses'`: the Responses API is now a protocol of its
+  own instead of a boolean opt-in, and `use_responses_api` is derived from it.
 
 ---
 

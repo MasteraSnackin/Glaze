@@ -12,6 +12,7 @@ class ApiConfigDraft {
     required this.maxTokens,
     required this.contextSize,
     required this.firstChunkTimeoutSeconds,
+    required this.geminiSystemInstruction,
     required this.reasoningHistoryCount,
     required this.embeddingEndpoint,
     required this.embeddingApiKey,
@@ -34,6 +35,7 @@ class ApiConfigDraft {
       maxTokens: values.maxTokens.toString(),
       contextSize: values.contextSize.toString(),
       firstChunkTimeoutSeconds: (values.firstChunkTimeoutMs ~/ 1000).toString(),
+      geminiSystemInstruction: values.geminiSystemInstruction,
       reasoningHistoryCount: values.reasoningHistoryCount.toString(),
       embeddingEndpoint: values.embeddingEndpoint,
       embeddingApiKey: values.embeddingApiKey,
@@ -50,6 +52,7 @@ class ApiConfigDraft {
   final String maxTokens;
   final String contextSize;
   final String firstChunkTimeoutSeconds;
+  final String geminiSystemInstruction;
   final String reasoningHistoryCount;
   final String embeddingEndpoint;
   final String embeddingApiKey;
@@ -88,12 +91,19 @@ class ApiConfigDraft {
         ? 'low'
         : 'medium';
     final supportsOpenAiOptions =
-        protocol == LlmProtocol.openai || protocol == LlmProtocol.openrouter;
+        protocol == LlmProtocol.openai ||
+        protocol == LlmProtocol.openaiResponses ||
+        protocol == LlmProtocol.openrouter;
     final supportsPromptCache =
-        protocol == LlmProtocol.anthropic || protocol == LlmProtocol.openai;
+        protocol == LlmProtocol.anthropic ||
+        protocol == LlmProtocol.openai ||
+        protocol == LlmProtocol.openaiResponses;
 
     return values.copyWith(
       protocol: protocol,
+      // The Responses API is a protocol now, so the legacy boolean is derived
+      // from it rather than edited on its own.
+      useResponsesApi: protocol == LlmProtocol.openaiResponses,
       reasoningEffort: reasoningEffort,
       omitTemperature: supportsOpenAiOptions ? values.omitTemperature : false,
       omitTopP: supportsOpenAiOptions ? values.omitTopP : false,
@@ -120,6 +130,7 @@ class ApiConfigDraft {
       contextSize: int.tryParse(contextSize) ?? base.contextSize,
       firstChunkTimeoutMs:
           (int.tryParse(firstChunkTimeoutSeconds) ?? 60) * 1000,
+      geminiSystemInstruction: geminiSystemInstruction,
       temperature: normalized.temperature,
       topP: normalized.topP,
       topK: normalized.topK,

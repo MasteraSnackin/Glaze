@@ -138,8 +138,16 @@ class GeminiChatTransport implements ChatTransport {
       'safetySettings': _safetyAllOff,
       'generationConfig': generationConfig,
     };
-    if (converted.hasSystemInstruction) {
-      body['systemInstruction'] = converted.systemInstruction;
+    // The preset-level `system_instruction` leads, then the parts converted
+    // from the prompt's own system messages.
+    final configuredInstruction = request.systemInstruction.trim();
+    final systemParts = <Map<String, dynamic>>[
+      if (configuredInstruction.isNotEmpty) {'text': configuredInstruction},
+      ...?(converted.systemInstruction['parts'] as List?)
+          ?.cast<Map<String, dynamic>>(),
+    ];
+    if (systemParts.isNotEmpty) {
+      body['systemInstruction'] = {'parts': systemParts};
     }
     if (request.sessionIdMode == 'always' &&
         request.sessionId != null &&

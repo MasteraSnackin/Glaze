@@ -25,7 +25,6 @@ void main() {
       stream: false,
       reasoningEffort: 'high',
       requestReasoning: true,
-      useResponsesApi: true,
       showNativeReasoning: false,
       reasoningHistoryCount: -1,
       reasoningTagStart: '<think>',
@@ -46,6 +45,7 @@ void main() {
       cacheBreakpointMode: 'stable_prefix',
       sessionIdMode: 'always',
       firstChunkTimeoutMs: 45000,
+      geminiSystemInstruction: 'stay in character',
       extraRequestParameters: [ExtraRequestParameter(key: 'seed', value: '42')],
     );
 
@@ -71,6 +71,7 @@ void main() {
       maxTokens: 'invalid',
       contextSize: 'invalid',
       firstChunkTimeoutSeconds: 'invalid',
+      geminiSystemInstruction: '',
       reasoningHistoryCount: '-2',
       embeddingEndpoint: '  embedding endpoint  ',
       embeddingApiKey: '  embedding key  ',
@@ -92,6 +93,41 @@ void main() {
     expect(mapped.embeddingApiKey, 'embedding key');
     expect(mapped.embeddingModel, 'embedding model');
     expect(mapped.embeddingMaxChunkTokens, 789);
+  });
+
+  test('the Responses protocol derives the legacy opt-in flag', () {
+    const config = ApiConfig(
+      id: 'api',
+      protocol: LlmProtocol.openaiResponses,
+    );
+
+    final draft = ApiConfigDraft.fromConfig(config);
+
+    expect(draft.values.useResponsesApi, isTrue);
+    expect(draft.toConfig(config).useResponsesApi, isTrue);
+  });
+
+  test('leaving the Responses protocol clears the legacy opt-in flag', () {
+    const config = ApiConfig(
+      id: 'api',
+      protocol: LlmProtocol.openai,
+      useResponsesApi: true,
+    );
+
+    final draft = ApiConfigDraft.fromConfig(config);
+
+    expect(draft.values.useResponsesApi, isFalse);
+    expect(draft.toConfig(config).useResponsesApi, isFalse);
+  });
+
+  test('a legacy JSON preset with the opt-in maps onto the new protocol', () {
+    final config = ApiConfig.fromJson(const {
+      'id': 'api',
+      'protocol': 'openai',
+      'useResponsesApi': true,
+    });
+
+    expect(config.protocol, LlmProtocol.openaiResponses);
   });
 
   test('invalid protocol falls back to OpenAI during load and save', () {
@@ -131,6 +167,11 @@ void main() {
       in <({String protocol, bool keepsOpenAiOptions, bool keepsPromptCache})>[
         (
           protocol: LlmProtocol.openai,
+          keepsOpenAiOptions: true,
+          keepsPromptCache: true,
+        ),
+        (
+          protocol: LlmProtocol.openaiResponses,
           keepsOpenAiOptions: true,
           keepsPromptCache: true,
         ),

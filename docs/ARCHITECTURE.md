@@ -163,10 +163,11 @@ lib/
 │   ├── llm/transport/                # LLM HTTP/SSE transports (one per protocol)
 │   │   ├── chat_transport.dart       # Abstract ChatTransport interface
 │   │   ├── chat_transport_request.dart # Shared request value object
-│   │   ├── llm_protocol.dart         # Protocol enum (openai/anthropic/gemini/openrouter)
+│   │   ├── llm_protocol.dart         # Protocol enum (openai/openai_responses/anthropic/gemini/openrouter)
 │   │   ├── transport_factory.dart    # ApiConfig.protocol → ChatTransport (wraps in LoggingChatTransport)
 │   │   ├── llm_request_dump.dart     # Diagnostics: dump every outgoing LLM request to JSONL (off by default)
 │   │   ├── openai_chat_transport.dart
+│   │   ├── openai_responses_transport.dart # OpenAI Responses API (`/responses`)
 │   │   ├── anthropic_chat_transport.dart
 │   │   ├── gemini_chat_transport.dart
 │   │   └── openrouter_chat_transport.dart
