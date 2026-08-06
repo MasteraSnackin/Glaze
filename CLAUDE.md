@@ -36,6 +36,9 @@ dart run build_runner build              # Regenerate after editing freezed/drif
 & "Z:\GlazeProject\flutter\bin\dart.bat" run build_runner build
 ```
 
+**Do not run `flutter analyze` locally.** The GitHub CI check is the
+authoritative analyzer; use targeted tests and wait for CI instead.
+
 For `flutter run` (dev server), see below — the agent cannot run it.
 
 **`flutter run` and `flutter test --watch` are permanently unavailable to the agent.**

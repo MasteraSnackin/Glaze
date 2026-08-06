@@ -804,6 +804,10 @@ class InteractionDispatch {
         const { instr, messageId } = this._extractImgInstruction(el, e.composedPath());
         bridge._sendToFlutter('onImgRetry', [instr, messageId]);
       },
+      'img-enable-retry': (e, el) => {
+        const { instr, messageId } = this._extractImgInstruction(el, e.composedPath());
+        bridge._sendToFlutter('onImgEnableRetry', [instr, messageId]);
+      },
       'img-find': (e, el) => {
         const { instr, messageId } = this._extractImgInstruction(el, e.composedPath());
         bridge._sendToFlutter('onImgFind', [instr, messageId]);

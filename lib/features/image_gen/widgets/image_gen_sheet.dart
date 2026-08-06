@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -8,11 +9,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/utils/platform_paths.dart';
 import '../../character_gallery/gallery_image_picker.dart';
+import '../../settings/api_list_provider.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/help_tip.dart';
 import '../../../shared/widgets/sheet_view.dart';
 import '../image_gen_models.dart';
 import '../image_gen_provider.dart';
+import '../services/image_gen_connection_service.dart';
 import 'connection_fields.dart';
 import 'model_fields.dart';
 import 'rows.dart' as rows;
@@ -29,25 +32,94 @@ class ImageGenSheet extends ConsumerStatefulWidget {
 class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
   late ImageGenSettings _settings;
   bool _isFetchingModels = false;
+  final ImageGenConnectionService _connectionService =
+      ImageGenConnectionService();
   final ScrollController _scrollController = ScrollController();
+  Timer? _connectionDebounce;
+  int _connectionEpoch = 0;
+  String _connectionStatus = 'idle';
+  String _connectionError = '';
+  String _modelFetchError = '';
 
   @override
   void initState() {
     super.initState();
     _settings =
         ref.read(imageGenSettingsProvider).value ?? const ImageGenSettings();
+    if (_settings.enabled) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _scheduleConnectionCheck(_settings, immediate: true);
+      });
+    }
   }
 
   void _update(ImageGenSettings s) {
+    final wasEnabled = _settings.enabled;
+    final connectionChanged = _hasConnectionChanged(_settings, s);
     _settings = s;
     ref.read(imageGenSettingsProvider.notifier).save(s);
+    if (!s.enabled) {
+      _connectionDebounce?.cancel();
+      _connectionEpoch++;
+      _connectionStatus = 'idle';
+      _connectionError = '';
+    } else if (!wasEnabled || connectionChanged) {
+      _scheduleConnectionCheck(s);
+    }
     if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
+    _connectionDebounce?.cancel();
+    _connectionService.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  bool _hasConnectionChanged(ImageGenSettings before, ImageGenSettings after) =>
+      before.apiType != after.apiType ||
+      before.useSameEndpoint != after.useSameEndpoint ||
+      before.customEndpoint != after.customEndpoint ||
+      before.customApiKey != after.customApiKey ||
+      before.naisteraApiKey != after.naisteraApiKey ||
+      before.routmyApiKey != after.routmyApiKey ||
+      before.ruRoutmyApiKey != after.ruRoutmyApiKey;
+
+  void _scheduleConnectionCheck(
+    ImageGenSettings settings, {
+    bool immediate = false,
+  }) {
+    final epoch = ++_connectionEpoch;
+    _connectionDebounce?.cancel();
+    _connectionDebounce = Timer(
+      immediate ? Duration.zero : const Duration(milliseconds: 900),
+      () => _checkConnection(settings, epoch),
+    );
+  }
+
+  Future<void> _checkConnection(ImageGenSettings settings, int epoch) async {
+    if (!mounted || epoch != _connectionEpoch || !settings.enabled) return;
+    setState(() {
+      _connectionStatus = 'connecting';
+      _connectionError = '';
+    });
+    final apiConfig = ref.read(activeApiConfigProvider);
+    try {
+      await _connectionService.checkConnection(
+        settings: settings,
+        llmEndpoint: apiConfig?.endpoint ?? '',
+        llmApiKey: apiConfig?.apiKey ?? '',
+      );
+      if (!mounted || epoch != _connectionEpoch) return;
+      setState(() => _connectionStatus = 'connected');
+    } catch (error) {
+      if (!mounted || epoch != _connectionEpoch) return;
+      setState(() {
+        _connectionStatus = 'failed';
+        _connectionError = error.toString().replaceFirst('Bad state: ', '');
+      });
+    }
   }
 
   void _showOptions<T>({
@@ -172,6 +244,7 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
                 child: _buildPresetSelector(s.apiType),
               ),
             ),
+            _buildConnectionStatus(s),
             rows.ImageGenMenuGroup(
               title: 'Connection',
               children: _buildConnectionFields(s),
@@ -180,6 +253,14 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
               title: 'Model',
               children: _buildModelFields(s),
             ),
+            if (_modelFetchError.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Text(
+                  _modelFetchError,
+                  style: const TextStyle(color: Colors.red, fontSize: 12),
+                ),
+              ),
             if (s.apiType == ImageGenApiType.naistera &&
                 NaisteraConstants.noRefModels.contains(s.naisteraModel))
               Container(
@@ -313,6 +394,45 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
     );
   }
 
+  Widget _buildConnectionStatus(ImageGenSettings settings) {
+    final (
+      IconData icon,
+      Color color,
+      String label,
+    ) = switch (_connectionStatus) {
+      'connecting' => (
+        Icons.sync,
+        context.cs.primary,
+        'Checking connection...',
+      ),
+      'connected' => (Icons.check_circle_outline, Colors.green, 'Connected'),
+      'failed' => (Icons.error_outline, Colors.red, _connectionError),
+      _ => (Icons.cloud_outlined, context.cs.onSurfaceVariant, 'Not checked'),
+    };
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      child: Row(
+        children: [
+          Icon(icon, size: 16, color: color),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 12, color: color),
+            ),
+          ),
+          TextButton(
+            onPressed: () =>
+                _scheduleConnectionCheck(settings, immediate: true),
+            child: const Text('Check'),
+          ),
+        ],
+      ),
+    );
+  }
+
   List<Widget> _buildConnectionFields(ImageGenSettings s) {
     switch (s.apiType) {
       case ImageGenApiType.naistera:
@@ -380,9 +500,34 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
 
   Future<void> _onFetchModels() async {
     setState(() => _isFetchingModels = true);
-    await Future<void>.delayed(const Duration(seconds: 1));
-    if (mounted) {
-      setState(() => _isFetchingModels = false);
+    final apiConfig = ref.read(activeApiConfigProvider);
+    try {
+      final models = await _connectionService.fetchOpenAiModels(
+        settings: _settings,
+        llmEndpoint: apiConfig?.endpoint ?? '',
+        llmApiKey: apiConfig?.apiKey ?? '',
+      );
+      if (!mounted) return;
+      if (models.isEmpty) {
+        setState(() => _modelFetchError = 'No image models found');
+        return;
+      }
+      setState(() => _modelFetchError = '');
+      _showOptions<String>(
+        title: 'Image models',
+        items: models,
+        labelBuilder: (model) => model,
+        isSelected: (model) => _settings.customModel == model,
+        onSelected: (model) => _update(_settings.copyWith(customModel: model)),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(
+        () =>
+            _modelFetchError = error.toString().replaceFirst('Bad state: ', ''),
+      );
+    } finally {
+      if (mounted) setState(() => _isFetchingModels = false);
     }
   }
 

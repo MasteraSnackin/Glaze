@@ -433,6 +433,7 @@ void main() {
         'onSelectionChange',
         'onInjectClick',
         'onImgRetry',
+        'onImgEnableRetry',
         'onImgFind',
         'onImgRegen',
         'onImgCancel',
@@ -474,9 +475,14 @@ void main() {
     });
 
     test(
-      'image callbacks (retry/find/regen) send instruction and messageId',
+      'image callbacks (retry/enable/find/regen) send instruction and messageId',
       () {
-        for (final action in ['onImgRetry', 'onImgFind', 'onImgRegen']) {
+        for (final action in [
+          'onImgRetry',
+          'onImgEnableRetry',
+          'onImgFind',
+          'onImgRegen',
+        ]) {
           expect(
             interactionDispatchJs,
             contains("'$action'"),

@@ -285,6 +285,7 @@ class ChatBridgeController {
   void Function(List<String> ids)? onSelectionChange;
   void Function(String id)? onInjectClick;
   void Function(String instruction, String messageId)? onImgRetry;
+  void Function(String instruction, String messageId)? onImgEnableRetry;
   void Function(String instruction, String messageId)? onImgFind;
   void Function(String instruction, String messageId)? onImgRegen;
   void Function(String src, String instruction, String messageId)? onImgOptions;
@@ -521,6 +522,8 @@ class ChatBridgeController {
     switch (name) {
       case 'onImgRetry':
         onImgRetry?.call(instr, msgId);
+      case 'onImgEnableRetry':
+        onImgEnableRetry?.call(instr, msgId);
       case 'onImgFind':
         onImgFind?.call(instr, msgId);
       case 'onImgRegen':

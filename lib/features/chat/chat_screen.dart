@@ -38,6 +38,7 @@ import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/image_viewer.dart';
 import '../character_list/character_detail_screen.dart';
+import '../image_gen/image_gen_provider.dart';
 import '../personas/persona_list_screen.dart';
 import '../presets/preset_editor_screen.dart';
 import '../settings/api_list_provider.dart';
@@ -1005,10 +1006,8 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
               );
               Navigator.of(context).push(
                 MaterialPageRoute<void>(
-                  builder: (_) => PresetEditorScreen(
-                    preset: preset,
-                    charId: widget.charId,
-                  ),
+                  builder: (_) =>
+                      PresetEditorScreen(preset: preset, charId: widget.charId),
                 ),
               );
             },
@@ -1231,8 +1230,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                         isGeneratingImage: widget.state.isGeneratingImage,
                         isPostGenRunning: widget.state.isPostGenRunning,
                         regenTargetId: widget.state.regenTargetId,
-                        continuationTargetId:
-                            widget.state.continuationTargetId,
+                        continuationTargetId: widget.state.continuationTargetId,
                         bottomInset: webViewBottomInset,
                         viewportHeight: _webViewBoxHeight,
                         topInset: effectiveTopInset,
@@ -1500,6 +1498,15 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                         imageGenActions: ImageGenCallbacks(
                           onImgRetry: (instruction, messageId) {
                             ref
+                                .read(chatProvider(widget.charId).notifier)
+                                .retryImageGenerationForMessage(messageId);
+                          },
+                          onImgEnableRetry: (instruction, messageId) async {
+                            await ref
+                                .read(imageGenSettingsProvider.notifier)
+                                .updateEnabled(true);
+                            if (!mounted) return;
+                            await ref
                                 .read(chatProvider(widget.charId).notifier)
                                 .retryImageGenerationForMessage(messageId);
                           },

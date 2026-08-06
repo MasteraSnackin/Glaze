@@ -78,6 +78,7 @@ const Map<String, HandlerSpec> bridgeHandlers = {
   'onInjectClick': HandlerSpec(HandlerKind.stringArg),
   // Image generation
   'onImgRetry': HandlerSpec(HandlerKind.imageAction),
+  'onImgEnableRetry': HandlerSpec(HandlerKind.imageAction),
   'onImgFind': HandlerSpec(HandlerKind.imageAction),
   'onImgRegen': HandlerSpec(
     HandlerKind.imageAction,
