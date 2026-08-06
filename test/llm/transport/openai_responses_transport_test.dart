@@ -16,6 +16,8 @@ ChatTransportRequest _request({
   double frequencyPenalty = 0,
   double presencePenalty = 0,
   int topK = 0,
+  String? sessionId,
+  String sessionIdMode = 'openrouter',
 }) => ChatTransportRequest(
   endpoint: 'https://api.rout.my/v1/chat/completions',
   apiKey: 'test-key',
@@ -40,6 +42,8 @@ ChatTransportRequest _request({
   presencePenalty: presencePenalty,
   omitTemperature: omitTemperature,
   omitTopP: omitTopP,
+  sessionId: sessionId,
+  sessionIdMode: sessionIdMode,
   stream: stream,
   requestReasoning: true,
   reasoningEffort: 'high',
@@ -156,6 +160,28 @@ void main() {
     ]) {
       expect(body.containsKey(key), isFalse, reason: key);
     }
+  });
+
+  test('session_id follows the same gate as Chat Completions', () {
+    // Default 'openrouter' mode: a plain OpenAI endpoint gets nothing.
+    expect(
+      OpenAiResponsesTransport.buildBody(
+        _request(sessionId: 'sess-1'),
+      ).containsKey('session_id'),
+      isFalse,
+    );
+    expect(
+      OpenAiResponsesTransport.buildBody(
+        _request(sessionId: 'sess-1', sessionIdMode: 'always'),
+      )['session_id'],
+      'sess-1',
+    );
+    expect(
+      OpenAiResponsesTransport.buildBody(
+        _request(sessionId: 'sess-1', sessionIdMode: 'off'),
+      ).containsKey('session_id'),
+      isFalse,
+    );
   });
 
   test('parses streamed output text and reasoning summary', () async {

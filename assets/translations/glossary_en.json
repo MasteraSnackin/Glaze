@@ -81,6 +81,11 @@
                     "desc": "A secret code that proves you have permission to use an AI service. Never share it — anyone who has it can use the service as if they were you."
                 },
                 {
+                    "id": "session-id",
+                    "name": "Send session_id",
+                    "desc": "Sends the provider a session number so the prompt cache stays warm. Requires a compatible provider. Leave it off if you are unsure."
+                },
+                {
                     "id": "streaming",
                     "name": "Streaming",
                     "desc": "When turned on, the AI sends its reply word by word as it writes — like watching someone type in real time. When turned off, you wait for the full reply before seeing anything. May provoke stronger censorship from the model. Recommended to disable."

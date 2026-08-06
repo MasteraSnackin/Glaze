@@ -129,6 +129,21 @@ void main() {
     expect(config.protocol, LlmProtocol.openaiResponses);
   });
 
+  test('OpenRouter keeps a live cache TTL so OR markers can be placed', () {
+    const config = ApiConfig(
+      id: 'api',
+      protocol: LlmProtocol.openrouter,
+      cacheControlTtl: '1h',
+      cacheBreakpointMode: 'stable_prefix',
+    );
+
+    final draft = ApiConfigDraft.fromConfig(config);
+
+    expect(draft.values.cacheControlTtl, '1h');
+    expect(draft.toConfig(config).cacheControlTtl, '1h');
+    expect(draft.toConfig(config).cacheBreakpointMode, 'stable_prefix');
+  });
+
   test('invalid protocol falls back to OpenAI during load and save', () {
     const config = ApiConfig(id: 'api', protocol: 'invalid');
 
@@ -189,7 +204,7 @@ void main() {
           protocol: LlmProtocol.openrouter,
           keepsOpenAiOptions: true,
           keepsPenalties: true,
-          keepsPromptCache: false,
+          keepsPromptCache: true,
         ),
         (
           protocol: LlmProtocol.anthropic,

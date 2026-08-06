@@ -76,6 +76,16 @@ class ChatTransportRequest {
 
   final List<ExtraRequestParameter> extraRequestParameters;
 
+  /// Whether `session_id` belongs in the body for an OpenAI-shaped request:
+  /// `'always'` sends it everywhere, `'openrouter'` only to OpenRouter itself
+  /// (where it drives sticky routing so the prompt cache stays warm), `'off'`
+  /// never. Anthropic and Gemini apply the `'always'` half of this themselves.
+  bool get shouldSendOpenAiSessionId =>
+      sessionId != null &&
+      sessionId!.isNotEmpty &&
+      (sessionIdMode == 'always' ||
+          (sessionIdMode == 'openrouter' && endpoint.contains('openrouter.ai')));
+
   const ChatTransportRequest({
     required this.endpoint,
     required this.apiKey,

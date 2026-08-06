@@ -302,9 +302,8 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
 
   bool get _supportsTopP => true;
 
-  /// The Responses API has no `top_k`, no penalties, no body-level
-  /// `cache_control` and no `session_id`, so those controls are hidden for it
-  /// rather than shown and silently ignored.
+  /// The Responses API has no `top_k` and no penalties, so those controls are
+  /// hidden for it rather than shown and silently ignored.
   bool get _isResponses => _protocol == LlmProtocol.openaiResponses;
 
   bool get _supportsTopK =>
@@ -319,10 +318,12 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   bool get _supportsPresencePenalty =>
       _protocol == LlmProtocol.openai || _protocol == LlmProtocol.openrouter;
 
+  /// OpenRouter included: `buildRouterRequest` needs a live TTL to place
+  /// `cache_control` markers for Claude-through-OR.
   bool get _supportsPromptCache =>
-      _protocol == LlmProtocol.anthropic || _protocol == LlmProtocol.openai;
-
-  bool get _supportsSessionId => !_isResponses;
+      _protocol == LlmProtocol.anthropic ||
+      _protocol == LlmProtocol.openai ||
+      _protocol == LlmProtocol.openrouter;
 
   bool get _supportsReasoning => true;
 
@@ -605,6 +606,12 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
                   onPressed: () => setState(() => _showApiKey = !_showApiKey),
                 ),
               ),
+              MenuSelectorItem(
+                label: 'label_session_id_mode'.tr(),
+                helpTerm: 'session-id',
+                currentValue: _sessionIdModeLabel(_sessionIdMode),
+                onTap: _openSessionIdModeSelector,
+              ),
               MenuSwitchItem(
                 label: 'label_stream'.tr(),
                 helpTerm: 'streaming',
@@ -614,6 +621,13 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
                   setState(() => _stream = v);
                   _scheduleSave();
                 },
+              ),
+              MenuFieldItem(
+                label: 'label_first_chunk_timeout'.tr(),
+                helpTerm: 'first-chunk-timeout',
+                controller: _firstChunkTimeoutCtrl,
+                placeholder: '60',
+                keyboardType: TextInputType.number,
               ),
             ],
           ),
@@ -738,13 +752,6 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
                 placeholder: '32000',
                 keyboardType: TextInputType.number,
               ),
-              MenuFieldItem(
-                label: 'label_first_chunk_timeout'.tr(),
-                helpTerm: 'first-chunk-timeout',
-                controller: _firstChunkTimeoutCtrl,
-                placeholder: '60',
-                keyboardType: TextInputType.number,
-              ),
               if (_supportsSystemInstruction)
                 MenuSwitchItem(
                   label: 'label_use_system_instruction'.tr(),
@@ -820,12 +827,6 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
                   label: 'label_prompt_cache_breakpoint'.tr(),
                   currentValue: _cacheBreakpointModeLabel(_cacheBreakpointMode),
                   onTap: _openCacheBreakpointModeSelector,
-                ),
-              if (_supportsSessionId)
-                MenuSelectorItem(
-                  label: 'label_session_id_mode'.tr(),
-                  currentValue: _sessionIdModeLabel(_sessionIdMode),
-                  onTap: _openSessionIdModeSelector,
                 ),
             ],
           ),

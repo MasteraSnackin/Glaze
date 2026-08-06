@@ -72,8 +72,13 @@ class ApiConfigDraft {
     // The Responses API has no penalties and no body-level cache_control.
     final supportsPenalties =
         protocol == LlmProtocol.openai || protocol == LlmProtocol.openrouter;
+    // OpenRouter kept a live TTL out of reach: the UI hid the control and this
+    // forced it to 'off', so `buildRouterRequest` never placed cache markers
+    // for Claude-through-OR.
     final supportsPromptCache =
-        protocol == LlmProtocol.anthropic || protocol == LlmProtocol.openai;
+        protocol == LlmProtocol.anthropic ||
+        protocol == LlmProtocol.openai ||
+        protocol == LlmProtocol.openrouter;
 
     return values.copyWith(
       protocol: protocol,

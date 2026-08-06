@@ -77,6 +77,10 @@ class OpenAiResponsesTransport implements ChatTransport {
       };
     }
 
+    if (request.shouldSendOpenAiSessionId) {
+      body['session_id'] = request.sessionId;
+    }
+
     final tools = request.tools?.map(_convertTool).toList(growable: false);
     if (tools != null && tools.isNotEmpty) {
       body['tools'] = tools;
