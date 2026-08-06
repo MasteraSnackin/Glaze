@@ -13,7 +13,7 @@ ChatTransportRequest _req({
   bool stream = true,
   bool requestReasoning = false,
   String? reasoningEffort,
-  String systemInstruction = '',
+  bool useSystemInstruction = true,
 }) {
   return ChatTransportRequest(
     endpoint: 'https://generativelanguage.googleapis.com',
@@ -33,7 +33,7 @@ ChatTransportRequest _req({
     stream: stream,
     requestReasoning: requestReasoning,
     reasoningEffort: reasoningEffort,
-    systemInstruction: systemInstruction,
+    useSystemInstruction: useSystemInstruction,
   );
 }
 
@@ -140,50 +140,50 @@ void main() {
       expect(built.body.containsKey('systemInstruction'), isFalse);
     });
 
-    test('preset system_instruction is sent when the prompt has none', () {
-      final built = GeminiChatTransport.buildRequest(
-        _req(
-          messages: [
-            {'role': 'user', 'content': 'hi'},
-          ],
-          systemInstruction: 'stay in character',
-        ),
+    test('useSystemInstruction: false keeps the system block inline', () {
+      const messages = [
+        {'role': 'system', 'content': 'sysA'},
+        {'role': 'user', 'content': 'q1'},
+        {'role': 'assistant', 'content': 'a1'},
+        {'role': 'user', 'content': 'q2'},
+      ];
+
+      final hoisted = GeminiChatTransport.buildRequest(
+        _req(messages: messages),
       );
-      expect(built.body['systemInstruction'], {
-        'parts': [
-          {'text': 'stay in character'},
-        ],
-      });
+      expect(
+        ((hoisted.body['systemInstruction'] as Map)['parts'] as List).first,
+        {'text': 'sysA\n\nq1'},
+      );
+
+      final inline = GeminiChatTransport.buildRequest(
+        _req(messages: messages, useSystemInstruction: false),
+      );
+      expect(inline.body.containsKey('systemInstruction'), isFalse);
+      // The block is not dropped — it leads `contents` as a user turn.
+      final contents = inline.body['contents'] as List;
+      expect(contents.first['role'], 'user');
+      expect((contents.first['parts'] as List).first, {'text': 'sysA\n\nq1'});
     });
 
-    test('preset system_instruction leads the prompt-derived parts', () {
+    test('system turns after the opening block are always user turns', () {
       final built = GeminiChatTransport.buildRequest(
         _req(
           messages: [
             {'role': 'system', 'content': 'sysA'},
             {'role': 'user', 'content': 'q1'},
             {'role': 'assistant', 'content': 'a1'},
+            {'role': 'system', 'content': 'mid-chat note'},
             {'role': 'user', 'content': 'q2'},
           ],
-          systemInstruction: '  stay in character  ',
         ),
       );
-      final parts = (built.body['systemInstruction'] as Map)['parts'] as List;
-      expect(parts, hasLength(2));
-      expect(parts.first['text'], 'stay in character');
-      expect(parts.last['text'], 'sysA\n\nq1');
-    });
-
-    test('blank preset system_instruction changes nothing', () {
-      final built = GeminiChatTransport.buildRequest(
-        _req(
-          messages: [
-            {'role': 'user', 'content': 'hi'},
-          ],
-          systemInstruction: '   ',
-        ),
-      );
-      expect(built.body.containsKey('systemInstruction'), isFalse);
+      final contents = built.body['contents'] as List;
+      // model turn, then the merged (system + user) tail as one user turn.
+      expect(contents.map((c) => c['role']), ['model', 'user']);
+      expect((contents.last['parts'] as List).first, {
+        'text': 'mid-chat note\n\nq2',
+      });
     });
 
     test('temperature/topP in generationConfig', () {

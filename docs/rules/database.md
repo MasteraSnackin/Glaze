@@ -179,12 +179,13 @@ Migration history:
 - v107: added `api_configs.exclude_reasoning_from_context_budget` BOOLEAN
   DEFAULT 0.
 - v108: added `card_evolution_observations`.
-- v109: added `api_configs.gemini_system_instruction` TEXT NOT NULL DEFAULT
-  `''` — preset-level Gemini `system_instruction`, prepended to the
-  `systemInstruction` parts derived from the prompt. Also rewrites
-  `protocol = 'openai'` rows with `use_responses_api = 1` to
-  `protocol = 'openai_responses'`: the Responses API is now a protocol of its
+- v109: rewrites `protocol = 'openai'` rows with `use_responses_api = 1` to
+  `protocol = 'openai_responses'`. The Responses API is now a protocol of its
   own instead of a boolean opt-in, and `use_responses_api` is derived from it.
+- v110: added `api_configs.gemini_use_system_instruction` BOOLEAN NOT NULL
+  DEFAULT 1 — whether the leading system block is lifted into Gemini's native
+  `system_instruction`. Defaults on, which is the behaviour that shipped
+  before the toggle existed.
 
 ---
 

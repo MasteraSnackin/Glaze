@@ -68,11 +68,11 @@ class ChatTransportRequest {
   /// Only sent when [tools] is non-null.
   final String? toolChoice;
 
-  /// Provider-level system instruction configured on the API preset, separate
-  /// from the system messages the prompt builder emits. Only the Gemini
-  /// transport consumes it today (`system_instruction`); other transports
-  /// ignore it.
-  final String systemInstruction;
+  /// Whether the leading run of system messages may be lifted out of the
+  /// conversation into the provider's native system field. When false it stays
+  /// inline and is delivered as the first user turn. Only the Gemini transport
+  /// consumes it today (`system_instruction`); other transports ignore it.
+  final bool useSystemInstruction;
 
   final List<ExtraRequestParameter> extraRequestParameters;
 
@@ -107,7 +107,7 @@ class ChatTransportRequest {
     this.sessionIdMode = 'openrouter',
     this.tools,
     this.toolChoice,
-    this.systemInstruction = '',
+    this.useSystemInstruction = true,
     this.extraRequestParameters = const [],
   });
 
@@ -154,7 +154,7 @@ class ChatTransportRequest {
     sessionIdMode: apiConfig.sessionIdMode,
     tools: tools,
     toolChoice: toolChoice,
-    systemInstruction: apiConfig.geminiSystemInstruction,
+    useSystemInstruction: apiConfig.geminiUseSystemInstruction,
     extraRequestParameters: apiConfig.extraRequestParameters,
   );
 }

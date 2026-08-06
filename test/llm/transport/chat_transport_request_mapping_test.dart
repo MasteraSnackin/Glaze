@@ -36,7 +36,7 @@ void main() {
     cacheControlTtl: '1h',
     cacheBreakpointMode: 'stable_prefix',
     sessionIdMode: 'always',
-    geminiSystemInstruction: 'stay in character',
+    geminiUseSystemInstruction: false,
     extraRequestParameters: extraParameters,
   );
 
@@ -136,9 +136,9 @@ void main() {
         expected: config.sessionIdMode,
       ),
       (
-        name: 'systemInstruction',
-        actual: request.systemInstruction,
-        expected: config.geminiSystemInstruction,
+        name: 'useSystemInstruction',
+        actual: request.useSystemInstruction,
+        expected: config.geminiUseSystemInstruction,
       ),
       (
         name: 'extraRequestParameters',

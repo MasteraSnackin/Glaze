@@ -45,7 +45,7 @@ void main() {
       cacheBreakpointMode: 'stable_prefix',
       sessionIdMode: 'always',
       firstChunkTimeoutMs: 45000,
-      geminiSystemInstruction: 'stay in character',
+      geminiUseSystemInstruction: false,
       extraRequestParameters: [ExtraRequestParameter(key: 'seed', value: '42')],
     );
 
@@ -71,7 +71,6 @@ void main() {
       maxTokens: 'invalid',
       contextSize: 'invalid',
       firstChunkTimeoutSeconds: 'invalid',
-      geminiSystemInstruction: '',
       reasoningHistoryCount: '-2',
       embeddingEndpoint: '  embedding endpoint  ',
       embeddingApiKey: '  embedding key  ',

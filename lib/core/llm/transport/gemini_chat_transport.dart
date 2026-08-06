@@ -98,7 +98,10 @@ class GeminiChatTransport implements ChatTransport {
   /// Pure: build URL + body + headers from a [ChatTransportRequest]. Exposed
   /// for unit tests.
   static GeminiBuiltRequest buildRequest(ChatTransportRequest request) {
-    final converted = convertGoogleMessagesMerged(request.messages);
+    final converted = convertGoogleMessagesMerged(
+      request.messages,
+      useSystemInstruction: request.useSystemInstruction,
+    );
 
     final generationConfig = <String, dynamic>{'candidateCount': 1};
     if (request.maxTokens > 0) {
@@ -138,16 +141,8 @@ class GeminiChatTransport implements ChatTransport {
       'safetySettings': _safetyAllOff,
       'generationConfig': generationConfig,
     };
-    // The preset-level `system_instruction` leads, then the parts converted
-    // from the prompt's own system messages.
-    final configuredInstruction = request.systemInstruction.trim();
-    final systemParts = <Map<String, dynamic>>[
-      if (configuredInstruction.isNotEmpty) {'text': configuredInstruction},
-      ...?(converted.systemInstruction['parts'] as List?)
-          ?.cast<Map<String, dynamic>>(),
-    ];
-    if (systemParts.isNotEmpty) {
-      body['systemInstruction'] = {'parts': systemParts};
+    if (converted.hasSystemInstruction) {
+      body['systemInstruction'] = converted.systemInstruction;
     }
     if (request.sessionIdMode == 'always' &&
         request.sessionId != null &&

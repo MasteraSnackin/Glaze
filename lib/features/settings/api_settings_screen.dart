@@ -52,7 +52,6 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   final _maxTokensCtrl = TextEditingController();
   final _contextSizeCtrl = TextEditingController();
   final _firstChunkTimeoutCtrl = TextEditingController();
-  final _geminiSystemInstructionCtrl = TextEditingController();
   final _reasoningHistoryCountCtrl = TextEditingController();
   final _embEndpointCtrl = TextEditingController();
   final _embApiKeyCtrl = TextEditingController();
@@ -67,6 +66,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   int _topK = 0;
   bool _stream = true;
   bool _requestReasoning = false;
+  bool _geminiUseSystemInstruction = true;
   bool _showNativeReasoning = true;
   bool _excludeReasoningFromContextBudget = false;
   String _reasoningEffort = 'medium';
@@ -109,7 +109,6 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     _maxTokensCtrl,
     _contextSizeCtrl,
     _firstChunkTimeoutCtrl,
-    _geminiSystemInstructionCtrl,
     _reasoningHistoryCountCtrl,
     _embEndpointCtrl,
     _embApiKeyCtrl,
@@ -212,7 +211,6 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     _maxTokensCtrl.text = draft.maxTokens;
     _contextSizeCtrl.text = draft.contextSize;
     _firstChunkTimeoutCtrl.text = draft.firstChunkTimeoutSeconds;
-    _geminiSystemInstructionCtrl.text = draft.geminiSystemInstruction;
     _reasoningHistoryCountCtrl.text = draft.reasoningHistoryCount;
     _embEndpointCtrl.text = draft.embeddingEndpoint;
     _embApiKeyCtrl.text = draft.embeddingApiKey;
@@ -227,6 +225,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       _presencePenalty = values.presencePenalty;
       _stream = values.stream;
       _requestReasoning = values.requestReasoning;
+      _geminiUseSystemInstruction = values.geminiUseSystemInstruction;
       _showNativeReasoning = values.showNativeReasoning;
       _excludeReasoningFromContextBudget =
           values.excludeReasoningFromContextBudget;
@@ -263,6 +262,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
         presencePenalty: _presencePenalty,
         stream: _stream,
         requestReasoning: _requestReasoning,
+        geminiUseSystemInstruction: _geminiUseSystemInstruction,
         showNativeReasoning: _showNativeReasoning,
         excludeReasoningFromContextBudget: _excludeReasoningFromContextBudget,
         reasoningEffort: _reasoningEffort,
@@ -288,7 +288,6 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       maxTokens: _maxTokensCtrl.text,
       contextSize: _contextSizeCtrl.text,
       firstChunkTimeoutSeconds: _firstChunkTimeoutCtrl.text,
-      geminiSystemInstruction: _geminiSystemInstructionCtrl.text,
       reasoningHistoryCount: _reasoningHistoryCountCtrl.text,
       embeddingEndpoint: _embEndpointCtrl.text,
       embeddingApiKey: _embApiKeyCtrl.text,
@@ -325,8 +324,8 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
 
   bool get _supportsReasoning => true;
 
-  /// Gemini is the only protocol with a provider-level `system_instruction`
-  /// field separate from the prompt's own system messages.
+  /// Gemini is the only protocol with a native `system_instruction` field the
+  /// leading system block can be lifted into.
   bool get _supportsSystemInstruction => _protocol == LlmProtocol.gemini;
 
   /// Derived from the protocol — the Responses API is no longer a toggle.
@@ -741,12 +740,14 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
                 keyboardType: TextInputType.number,
               ),
               if (_supportsSystemInstruction)
-                MenuFieldItem(
-                  label: 'label_system_instruction'.tr(),
-                  controller: _geminiSystemInstructionCtrl,
-                  placeholder: 'label_system_instruction_hint'.tr(),
-                  keyboardType: TextInputType.multiline,
-                  maxLines: 4,
+                MenuSwitchItem(
+                  label: 'label_use_system_instruction'.tr(),
+                  description: 'desc_use_system_instruction'.tr(),
+                  value: _geminiUseSystemInstruction,
+                  onChanged: (v) {
+                    setState(() => _geminiUseSystemInstruction = v);
+                    _scheduleSave();
+                  },
                 ),
             ],
           ),

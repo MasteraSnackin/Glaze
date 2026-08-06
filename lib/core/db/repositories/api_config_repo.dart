@@ -84,7 +84,7 @@ class ApiConfigRepo implements SyncApiConfigStore {
     cacheBreakpointMode: c.cacheBreakpointMode,
     sessionIdMode: c.sessionIdMode,
     firstChunkTimeoutMs: c.firstChunkTimeoutMs,
-    geminiSystemInstruction: c.geminiSystemInstruction,
+    geminiUseSystemInstruction: c.geminiUseSystemInstruction,
     extraRequestParameters:
         (jsonDecode(c.extraRequestParametersJson) as List<dynamic>)
             .map(
@@ -140,7 +140,7 @@ class ApiConfigRepo implements SyncApiConfigStore {
     cacheBreakpointMode: Value(m.cacheBreakpointMode),
     sessionIdMode: Value(m.sessionIdMode),
     firstChunkTimeoutMs: Value(m.firstChunkTimeoutMs),
-    geminiSystemInstruction: Value(m.geminiSystemInstruction),
+    geminiUseSystemInstruction: Value(m.geminiUseSystemInstruction),
     extraRequestParametersJson: Value(
       jsonEncode(
         m.extraRequestParameters.map((value) => value.toJson()).toList(),
