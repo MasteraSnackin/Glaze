@@ -9,7 +9,14 @@ import 'package:glaze_flutter/core/llm/transport/openai_responses_transport.dart
 
 import '_sse_adapter.dart';
 
-ChatTransportRequest _request({bool stream = true}) => ChatTransportRequest(
+ChatTransportRequest _request({
+  bool stream = true,
+  bool omitTemperature = false,
+  bool omitTopP = false,
+  double frequencyPenalty = 0,
+  double presencePenalty = 0,
+  int topK = 0,
+}) => ChatTransportRequest(
   endpoint: 'https://api.rout.my/v1/chat/completions',
   apiKey: 'test-key',
   model: 'openai/gpt-5.6-sol',
@@ -28,6 +35,11 @@ ChatTransportRequest _request({bool stream = true}) => ChatTransportRequest(
   maxTokens: 500,
   temperature: 0.7,
   topP: 0.9,
+  topK: topK,
+  frequencyPenalty: frequencyPenalty,
+  presencePenalty: presencePenalty,
+  omitTemperature: omitTemperature,
+  omitTopP: omitTopP,
   stream: stream,
   requestReasoning: true,
   reasoningEffort: 'high',
@@ -107,6 +119,8 @@ void main() {
       'https://api.rout.my/v1/responses',
     );
     expect(body['max_output_tokens'], 500);
+    expect(body['temperature'], 0.7);
+    expect(body['top_p'], 0.9);
     expect(body['reasoning'], {'summary': 'auto', 'effort': 'high'});
     expect(body['input'], [
       {
@@ -117,6 +131,31 @@ void main() {
         ],
       },
     ]);
+  });
+
+  test('omit toggles drop sampling for reasoning models', () {
+    final body = OpenAiResponsesTransport.buildBody(
+      _request(omitTemperature: true, omitTopP: true),
+    );
+
+    expect(body.containsKey('temperature'), isFalse);
+    expect(body.containsKey('top_p'), isFalse);
+  });
+
+  test('parameters with no Responses equivalent are never sent', () {
+    final body = OpenAiResponsesTransport.buildBody(
+      _request(frequencyPenalty: 1.5, presencePenalty: -1, topK: 40),
+    );
+
+    for (final key in const [
+      'frequency_penalty',
+      'presence_penalty',
+      'top_k',
+      'messages',
+      'max_tokens',
+    ]) {
+      expect(body.containsKey(key), isFalse, reason: key);
+    }
   });
 
   test('parses streamed output text and reasoning summary', () async {
