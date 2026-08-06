@@ -649,6 +649,14 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
             _scheduleSave();
           },
         ),
+        MenuFieldItem(
+          label: 'label_first_chunk_timeout'.tr(),
+          helpTerm: 'first-chunk-timeout',
+          description: 'desc_first_chunk_timeout'.tr(),
+          controller: _firstChunkTimeoutCtrl,
+          placeholder: '60',
+          keyboardType: TextInputType.number,
+        ),
       ],
     );
   }
@@ -889,28 +897,23 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     );
   }
 
+  /// Protocol-specific odds and ends. Empty for every protocol but Gemini, so
+  /// it renders nothing rather than a bare header.
   Widget _buildOtherGroup() {
+    if (!_supportsSystemInstruction) return const SizedBox.shrink();
     return MenuGroup(
       compact: true,
       header: 'section_other'.tr(),
       items: [
-        MenuFieldItem(
-          label: 'label_first_chunk_timeout'.tr(),
-          helpTerm: 'first-chunk-timeout',
-          controller: _firstChunkTimeoutCtrl,
-          placeholder: '60',
-          keyboardType: TextInputType.number,
+        MenuSwitchItem(
+          label: 'label_use_system_instruction'.tr(),
+          helpTerm: 'system-instruction',
+          value: _geminiUseSystemInstruction,
+          onChanged: (v) {
+            setState(() => _geminiUseSystemInstruction = v);
+            _scheduleSave();
+          },
         ),
-        if (_supportsSystemInstruction)
-          MenuSwitchItem(
-            label: 'label_use_system_instruction'.tr(),
-            helpTerm: 'system-instruction',
-            value: _geminiUseSystemInstruction,
-            onChanged: (v) {
-              setState(() => _geminiUseSystemInstruction = v);
-              _scheduleSave();
-            },
-          ),
       ],
     );
   }
