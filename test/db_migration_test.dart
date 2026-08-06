@@ -78,7 +78,7 @@ void main() {
 
       // user_version matches the Drift schema version (app_db.dart schemaVersion).
       // Update this constant whenever a new migration step is added.
-      expect(version, 110);
+      expect(version, 111);
     });
 
     test(
@@ -232,7 +232,7 @@ void main() {
         final version = await upgraded
             .customSelect('PRAGMA user_version')
             .get();
-        expect(version.first.read<int>('user_version'), 110);
+        expect(version.first.read<int>('user_version'), 111);
         expect(names, contains('variant_group_id'));
         expect(names, contains('hidden'));
       },
@@ -262,7 +262,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 110);
+      expect(version.read<int>('user_version'), 111);
     });
 
     test(
@@ -611,7 +611,7 @@ void main() {
 
     test('current schema includes atomic character fact tables', () async {
       final version = await db.customSelect('PRAGMA user_version').getSingle();
-      expect(version.read<int>('user_version'), 110);
+      expect(version.read<int>('user_version'), 111);
 
       final factColumns = await db
           .customSelect("PRAGMA table_info('character_knowledge_fact_rows')")
@@ -723,7 +723,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 110);
+      expect(version.read<int>('user_version'), 111);
     });
 
     test(
@@ -833,7 +833,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 110);
+      expect(version.read<int>('user_version'), 111);
     });
 
     test('v80 adds Responses API toggle defaulting to off', () async {
@@ -873,7 +873,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 110);
+      expect(version.read<int>('user_version'), 111);
     });
 
     test('v81 adds composite embedding source index', () async {
@@ -907,7 +907,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 110);
+      expect(version.read<int>('user_version'), 111);
     });
 
     test('v82 creates rewrite persistence schema and provenance columns', () async {
@@ -981,7 +981,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 110);
+      expect(version.read<int>('user_version'), 111);
     });
 
     test('v83 rebuilds interim text revision columns without losing rows', () async {
@@ -1418,7 +1418,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 110);
+      expect(version.read<int>('user_version'), 111);
 
       // Rows and payloads survive; legacy statuses pass through or are
       // normalized fail-closed, and new columns carry neutral defaults.
@@ -1623,7 +1623,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 110);
+      expect(version.read<int>('user_version'), 111);
       final row = await upgraded
           .customSelect(
             'SELECT blocks_json FROM studio_preset_rows WHERE preset_id = ?',
@@ -1739,7 +1739,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 110);
+      expect(version.read<int>('user_version'), 111);
       final check = await upgraded.customSelect('PRAGMA integrity_check').get();
       expect(check.single.read<String>('integrity_check'), 'ok');
     });
@@ -2320,7 +2320,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 110);
+      expect(version.read<int>('user_version'), 111);
     });
 
     test(
@@ -2411,9 +2411,58 @@ void main() {
         final version = await upgraded
             .customSelect('PRAGMA user_version')
             .getSingle();
-        expect(version.read<int>('user_version'), 110);
+        expect(version.read<int>('user_version'), 111);
       },
     );
+
+    test('v111 resolves the retired session_id_mode default', () async {
+      final file = File(
+        '${Directory.systemTemp.path}/glaze_mig_session_id_${DateTime.now().microsecondsSinceEpoch}.db',
+      );
+      addTearDown(() async {
+        if (file.existsSync()) await file.delete();
+      });
+
+      final seeded = AppDatabase.forTesting(
+        NativeDatabase.createInBackground(file),
+      );
+      await seeded.customSelect('SELECT 1').get();
+      for (final row in const [
+        ('or-protocol', 'openrouter', '', 'openrouter'),
+        ('or-endpoint', 'openai', 'https://openrouter.ai/api/v1', 'openrouter'),
+        ('plain', 'openai', 'https://api.openai.com/v1', 'openrouter'),
+        ('explicit-on', 'openai', 'https://api.openai.com/v1', 'always'),
+        ('explicit-off', 'openrouter', '', 'off'),
+      ]) {
+        await seeded.customStatement(
+          'INSERT INTO api_configs (config_id, name, protocol, endpoint, '
+          'session_id_mode) VALUES (?, ?, ?, ?, ?)',
+          [row.$1, row.$1, row.$2, row.$3, row.$4],
+        );
+      }
+      await seeded.customStatement('PRAGMA user_version = 110');
+      await seeded.close();
+
+      final upgraded = AppDatabase.forTesting(
+        NativeDatabase.createInBackground(file),
+      );
+      addTearDown(() async => upgraded.close());
+      final rows = await upgraded
+          .customSelect('SELECT config_id, session_id_mode FROM api_configs')
+          .get();
+      final byId = {
+        for (final row in rows)
+          row.read<String>('config_id'): row.read<String>('session_id_mode'),
+      };
+
+      // The retired default meant "only openrouter.ai" — preserved either way.
+      expect(byId['or-protocol'], 'always');
+      expect(byId['or-endpoint'], 'always');
+      expect(byId['plain'], 'off');
+      // Explicit choices are left alone.
+      expect(byId['explicit-on'], 'always');
+      expect(byId['explicit-off'], 'off');
+    });
   });
 }
 

@@ -144,6 +144,52 @@ void main() {
     expect(draft.toConfig(config).cacheBreakpointMode, 'stable_prefix');
   });
 
+  for (final testCase in <({String name, String protocol, String endpoint,
+      String stored, String resolved})>[
+    (
+      name: 'OpenRouter protocol keeps the legacy default on',
+      protocol: LlmProtocol.openrouter,
+      endpoint: '',
+      stored: 'openrouter',
+      resolved: 'always',
+    ),
+    (
+      name: 'a custom preset pointed at OpenRouter keeps it on',
+      protocol: LlmProtocol.openai,
+      endpoint: 'https://openrouter.ai/api/v1',
+      stored: 'openrouter',
+      resolved: 'always',
+    ),
+    (
+      name: 'a plain OpenAI preset resolves the legacy default to off',
+      protocol: LlmProtocol.openai,
+      endpoint: 'https://api.openai.com/v1',
+      stored: 'openrouter',
+      resolved: 'off',
+    ),
+    (
+      name: 'an explicit off on OpenRouter is not overridden',
+      protocol: LlmProtocol.openrouter,
+      endpoint: '',
+      stored: 'off',
+      resolved: 'off',
+    ),
+  ]) {
+    test('session_id: ${testCase.name}', () {
+      final config = ApiConfig(
+        id: 'api',
+        protocol: testCase.protocol,
+        endpoint: testCase.endpoint,
+        sessionIdMode: testCase.stored,
+      );
+
+      final draft = ApiConfigDraft.fromConfig(config);
+
+      expect(draft.values.sessionIdMode, testCase.resolved);
+      expect(draft.toConfig(config).sessionIdMode, testCase.resolved);
+    });
+  }
+
   test('invalid protocol falls back to OpenAI during load and save', () {
     const config = ApiConfig(id: 'api', protocol: 'invalid');
 

@@ -606,11 +606,14 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
                   onPressed: () => setState(() => _showApiKey = !_showApiKey),
                 ),
               ),
-              MenuSelectorItem(
+              MenuSwitchItem(
                 label: 'label_session_id_mode'.tr(),
                 helpTerm: 'session-id',
-                currentValue: _sessionIdModeLabel(_sessionIdMode),
-                onTap: _openSessionIdModeSelector,
+                value: _sessionIdMode == 'always',
+                onChanged: (v) {
+                  setState(() => _sessionIdMode = v ? 'always' : 'off');
+                  _scheduleSave();
+                },
               ),
               MenuSwitchItem(
                 label: 'label_stream'.tr(),
@@ -1169,14 +1172,6 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     };
   }
 
-  String _sessionIdModeLabel(String mode) {
-    return switch (mode) {
-      'always' => 'session_id_mode_always'.tr(),
-      'off' => 'session_id_mode_off'.tr(),
-      _ => 'session_id_mode_openrouter'.tr(),
-    };
-  }
-
   void _openCacheControlTtlSelector() {
     const options = ['off', '5min', '1h'];
     GlazeBottomSheet.show<void>(
@@ -1214,28 +1209,6 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
           onTap: () {
             Navigator.of(context, rootNavigator: true).pop();
             setState(() => _cacheBreakpointMode = e);
-            _scheduleSave();
-          },
-        );
-      }).toList(),
-    );
-  }
-
-  void _openSessionIdModeSelector() {
-    const options = ['openrouter', 'always', 'off'];
-    GlazeBottomSheet.show<void>(
-      context,
-      title: 'label_session_id_mode'.tr(),
-      items: options.map((e) {
-        final label = _sessionIdModeLabel(e);
-        final active = e == _sessionIdMode;
-        return BottomSheetItem(
-          label: label,
-          icon: active ? Icons.check : null,
-          iconColor: context.cs.primary,
-          onTap: () {
-            Navigator.of(context, rootNavigator: true).pop();
-            setState(() => _sessionIdMode = e);
             _scheduleSave();
           },
         );

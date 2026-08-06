@@ -186,6 +186,11 @@ Migration history:
   DEFAULT 1 — whether the leading system block is lifted into Gemini's native
   `system_instruction`. Defaults on, which is the behaviour that shipped
   before the toggle existed.
+- v111: collapses `api_configs.session_id_mode` to a two-state toggle. The
+  retired default `'openrouter'` meant "send only to openrouter.ai", so rows
+  still holding it become `'always'` when the preset is an OpenRouter one (by
+  protocol or by endpoint) and `'off'` otherwise. Explicit `'always'`/`'off'`
+  rows are untouched.
 
 ---
 

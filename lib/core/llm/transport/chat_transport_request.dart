@@ -76,10 +76,12 @@ class ChatTransportRequest {
 
   final List<ExtraRequestParameter> extraRequestParameters;
 
-  /// Whether `session_id` belongs in the body for an OpenAI-shaped request:
-  /// `'always'` sends it everywhere, `'openrouter'` only to OpenRouter itself
-  /// (where it drives sticky routing so the prompt cache stays warm), `'off'`
-  /// never. Anthropic and Gemini apply the `'always'` half of this themselves.
+  /// Whether `session_id` belongs in the body for an OpenAI-shaped request.
+  /// The setting is a toggle — `'always'` or `'off'`. `'openrouter'` is the
+  /// retired default (send only to openrouter.ai, where it drives sticky
+  /// routing so the prompt cache stays warm); it is still honoured here for
+  /// presets that predate migration v111 or arrive from older JSON.
+  /// Anthropic and Gemini apply the `'always'` half of this themselves.
   bool get shouldSendOpenAiSessionId =>
       sessionId != null &&
       sessionId!.isNotEmpty &&

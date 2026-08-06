@@ -74,7 +74,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 110;
+  int get schemaVersion => 111;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -2030,6 +2030,17 @@ class AppDatabase extends _$AppDatabase {
         if (!names.contains('gemini_use_system_instruction')) {
           await m.addColumn(apiConfigs, apiConfigs.geminiUseSystemInstruction);
         }
+      }
+      if (from < 111) {
+        // `session_id` became a plain toggle. The retired default,
+        // 'openrouter', meant "send only to openrouter.ai" — resolve it to
+        // what it actually did for each preset so behaviour is unchanged.
+        await customStatement(
+          "UPDATE api_configs SET session_id_mode = CASE "
+          "WHEN protocol = 'openrouter' OR endpoint LIKE '%openrouter.ai%' "
+          "THEN 'always' ELSE 'off' END "
+          "WHERE session_id_mode NOT IN ('always', 'off')",
+        );
       }
     },
   );

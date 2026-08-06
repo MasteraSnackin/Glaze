@@ -82,6 +82,7 @@ class ApiConfigDraft {
 
     return values.copyWith(
       protocol: protocol,
+      sessionIdMode: _resolveSessionIdMode(values, protocol),
       // The Responses API is a protocol now, so the legacy boolean is derived
       // from it rather than edited on its own.
       useResponsesApi: protocol == LlmProtocol.openaiResponses,
@@ -96,6 +97,23 @@ class ApiConfigDraft {
       presencePenalty: supportsPenalties ? values.presencePenalty : 0.0,
       cacheControlTtl: supportsPromptCache ? values.cacheControlTtl : 'off',
     );
+  }
+
+  /// `session_id` used to be a three-way selector whose default,
+  /// `'openrouter'`, meant "send only to openrouter.ai". It is a plain toggle
+  /// now, so that legacy value resolves once, to whatever it used to do for
+  /// this preset — on for OpenRouter, off everywhere else.
+  static String _resolveSessionIdMode(ApiConfig values, String protocol) {
+    switch (values.sessionIdMode) {
+      case 'always':
+      case 'off':
+        return values.sessionIdMode;
+      default:
+        return protocol == LlmProtocol.openrouter ||
+                values.endpoint.contains('openrouter.ai')
+            ? 'always'
+            : 'off';
+    }
   }
 
   ApiConfig toConfig(ApiConfig base) {
