@@ -243,10 +243,9 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
                 12,
                 16 + MediaQuery.of(context).padding.bottom,
               ),
-              child: Wrap(
-                spacing: 6,
-                runSpacing: 8,
-                children: List.generate(cards.length, (index) {
+              child: MagicCardGrid(
+                columns: 3,
+                cells: List.generate(cards.length, (index) {
                   final item = cards[index];
                   if (item.isAddButton) {
                     return SizedBox(

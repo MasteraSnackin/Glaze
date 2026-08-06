@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 
 import '../models/studio_config.dart';
 import '../utils/cast_helpers.dart';
+import 'agent_runner.dart';
 import 'prompt_builder.dart';
 import 'studio_brief_parser.dart';
 import 'studio_stage_brief.dart';
@@ -14,8 +15,8 @@ import 'studio_stage_brief.dart';
 /// and the surrounding helpers are pure functions of their parameters.
 ///
 /// The cache is per-session-lifetime (in-memory, not persisted to Drift). Keys
-/// hash the agent's source config + preset hash + (for `scene` policy) the
-/// scene signature, so a config edit invalidates automatically.
+/// hash the session, execution-relevant agent and preset content, and (for
+/// `scene` policy) the scene signature, so edits invalidate automatically.
 class StudioBriefCache {
   final Map<String, CachedStudioBrief> _briefCache = {};
   final StudioBriefParser _briefParser;
@@ -29,7 +30,12 @@ class StudioBriefCache {
   CacheProbe probeCache({
     required StudioAgent agent,
     required StudioConfig config,
-    required String presetId,
+    required StudioPreset studioPreset,
+    required String sessionId,
+    required ResolvedAgentConfig resolvedConfig,
+    required int trackerContextSize,
+    required int? maxTokensOverride,
+    required double? temperatureOverride,
     required PromptPayload promptPayload,
     required String sceneKey,
     required int turnIndex,
@@ -37,7 +43,12 @@ class StudioBriefCache {
     final policy = effectiveRefreshPolicy(agent);
     final cacheKey = cacheKeyForAgent(
       config: config,
-      presetId: presetId,
+      studioPreset: studioPreset,
+      sessionId: sessionId,
+      resolvedConfig: resolvedConfig,
+      trackerContextSize: trackerContextSize,
+      maxTokensOverride: maxTokensOverride,
+      temperatureOverride: temperatureOverride,
       agent: agent,
       policy: policy,
       sceneKey: sceneKey,
@@ -84,6 +95,8 @@ class StudioBriefCache {
     if (cancelToken.isCancelled) return;
     if (brief.status != 'ok') return;
     if (!isCacheablePolicy(policy)) return;
+    final existing = _briefCache[cacheKey];
+    if (existing != null && existing.createdTurnIndex > turnIndex) return;
     _briefCache[cacheKey] = CachedStudioBrief(
       brief: brief.brief,
       policy: policy,
@@ -112,20 +125,99 @@ class StudioBriefCache {
 
   String cacheKeyForAgent({
     required StudioConfig config,
-    required String presetId,
+    required StudioPreset studioPreset,
+    required String sessionId,
+    required ResolvedAgentConfig resolvedConfig,
+    required int trackerContextSize,
+    required int? maxTokensOverride,
+    required double? temperatureOverride,
     required StudioAgent agent,
     required String policy,
     required String sceneKey,
   }) {
+    final agentEnabledKeys = studioPreset.agentEnabled.keys.toList()..sort();
+    final blocks = studioPreset.blocks.indexed.toList()
+      ..sort((a, b) {
+        final result = a.$2.order.compareTo(b.$2.order);
+        if (result != 0) return result;
+        return a.$1.compareTo(b.$1);
+      });
     final base = <String, dynamic>{
-      'v': 2,
+      'v': 3,
+      'sessionId': sessionId,
       'profileId': config.profileId,
-      'studioPresetId': presetId,
-      'configUpdatedAt': config.updatedAt,
-      'agentId': agent.id,
-      'sourceBlockNames': agent.sourceBlockNames,
+      'studioConfigId': config.sessionId,
+      'runApiConfigId': config.runApiConfigId,
+      'cheapApiConfigId': config.cheapApiConfigId,
+      'resolvedExecution': {
+        'endpoint': resolvedConfig.endpoint,
+        'model': resolvedConfig.model,
+        'protocol': resolvedConfig.protocol,
+        'topP': resolvedConfig.topP,
+        'topK': resolvedConfig.topK,
+        'frequencyPenalty': resolvedConfig.frequencyPenalty,
+        'presencePenalty': resolvedConfig.presencePenalty,
+        'omitTemperature': resolvedConfig.omitTemperature,
+        'omitTopP': resolvedConfig.omitTopP,
+        'stream': resolvedConfig.stream,
+        'cacheControlTtl': resolvedConfig.cacheControlTtl,
+        'cacheBreakpointMode': resolvedConfig.cacheBreakpointMode,
+        'sessionIdMode': resolvedConfig.sessionIdMode,
+        'contextSize': resolvedConfig.contextSize,
+        'trackerContextSize': trackerContextSize,
+        'maxTokensOverride': maxTokensOverride,
+        'temperatureOverride': temperatureOverride,
+        'extraRequestParameters': [
+          for (final parameter in resolvedConfig.extraRequestParameters)
+            {
+              'key': parameter.key,
+              'value': parameter.value,
+              'enabled': parameter.enabled,
+            },
+        ],
+      },
+      'preset': {
+        'id': studioPreset.id,
+        'executionMode': studioPreset.executionMode.wireName,
+        'agentEnabled': {
+          for (final key in agentEnabledKeys)
+            key: studioPreset.agentEnabled[key],
+        },
+        'blocks': [
+          for (final (_, block) in blocks)
+            {
+              'id': block.id,
+              'section': block.section,
+              'kind': block.kind,
+              'role': block.role,
+              'enabled': block.enabled,
+              'order': block.order,
+              'content': block.content,
+            },
+        ],
+      },
+      'agent': {
+        'id': agent.id,
+        'name': agent.name,
+        'role': agent.role,
+        'order': agent.order,
+        'enabled': agent.enabled,
+        'endpoint': agent.endpoint,
+        'timeoutMs': agent.timeoutMs,
+        'temperature': agent.temperature,
+        'maxTokens': agent.maxTokens,
+        'sourceBlockNames': agent.sourceBlockNames,
+        'refreshPolicy': agent.refreshPolicy,
+        'invalidationSignals': agent.invalidationSignals,
+        'contextSize': agent.contextSize,
+        'runInterval': agent.runInterval,
+        'maxParallelJobs': agent.maxParallelJobs,
+        'runIndividually': agent.runIndividually,
+        'activationKeywords': agent.activationKeywords,
+        'activationScanDepth': agent.activationScanDepth,
+        'phase': agent.phase,
+      },
       'refreshPolicy': policy,
-      'invalidationSignals': agent.invalidationSignals,
       if (policy == 'scene') 'sceneKey': sceneKey,
     };
     return computeHash(jsonEncode(base));

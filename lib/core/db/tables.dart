@@ -535,6 +535,8 @@ class ApiConfigs extends Table {
   TextColumn get reasoningEffort => text().nullable()();
   BoolColumn get requestReasoning =>
       boolean().withDefault(const Constant(false))();
+  BoolColumn get useResponsesApi =>
+      boolean().withDefault(const Constant(false))();
   BoolColumn get showNativeReasoning =>
       boolean().withDefault(const Constant(true))();
   BoolColumn get includeLastReasoning =>
@@ -621,6 +623,10 @@ class Lorebooks extends Table {
 @DataClassName('EmbeddingRow')
 @TableIndex(name: 'idx_embeddings_source_type', columns: {#sourceType})
 @TableIndex(name: 'idx_embeddings_source_id', columns: {#sourceId})
+@TableIndex(
+  name: 'idx_embeddings_source_type_id',
+  columns: {#sourceType, #sourceId},
+)
 class Embeddings extends Table {
   @override
   String get tableName => 'embeddings';

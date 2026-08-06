@@ -11,7 +11,6 @@ import '../../models/block_run_status.dart';
 import '../../models/info_block.dart';
 import '../../providers/info_blocks_provider.dart';
 import '../block_context_builder.dart';
-import '../js_engine_service.dart';
 import 'block_context.dart';
 import 'infoblock_handler.dart';
 
@@ -35,15 +34,13 @@ class JsBlockExecutor {
   }) async {
     final blockConfig = context.blockConfig;
     final bridge = ref.read(chatBridgeRegistryProvider(context.charId));
-    final engine = JsEngineService.instance;
-    if (!engine.isReady && bridge == null) {
+    if (bridge == null) {
       debugPrint(
-        '[ExtPostGen] jsRunner "${blockConfig.name}" - no JS engine or bridge',
+        '[ExtPostGen] jsRunner "${blockConfig.name}" - Chat WebView bridge unavailable',
       );
       return markBlockError(
         context: context,
-        errorMessage:
-            'JS engine not ready and WebView bridge not available (jsRunner needs at least one of them)',
+        errorMessage: 'Chat WebView JS bridge is unavailable',
       );
     }
 
@@ -54,7 +51,6 @@ class JsBlockExecutor {
         count: blockConfig.contextMessageCount,
       );
       final result = await runWithFallback(
-        engine: engine,
         bridge: bridge,
         script: script,
         contextMessages: contextMessages,
@@ -136,7 +132,6 @@ class JsBlockExecutor {
   }
 
   static Future<String> runWithFallback({
-    required JsEngineService engine,
     required ChatBridgeController? bridge,
     required String script,
     required List<ChatMessage> contextMessages,
@@ -145,36 +140,9 @@ class JsBlockExecutor {
     required String? previousOutput,
     required CancelToken cancelToken,
   }) async {
-    if (engine.isReady) {
-      try {
-        final contextMap = jsContextMap(
-          messages: contextMessages
-              .map((m) => {'role': m.role, 'text': m.content})
-              .toList(),
-          character: character,
-          sessionId: sessionId,
-          previousOutput: previousOutput,
-        );
-        return await engine.runScript(
-          script: script,
-          context: contextMap,
-          cancelToken: cancelToken,
-        );
-      } on HeadlessUnavailableError catch (e) {
-        debugPrint(
-          '[ExtPostGen] headless engine unavailable, falling back: $e',
-        );
-      } catch (e) {
-        // Non-fatal: fall through to visual bridge. Bridge will record the
-        // error in its own logs.
-        debugPrint('[ExtPostGen] headless engine run failed: $e');
-      }
-    }
     final visualBridge = bridge;
     if (visualBridge == null) {
-      throw StateError(
-        'JS engine is not ready and visual WebView bridge is not available',
-      );
+      throw StateError('Chat WebView JS bridge is unavailable');
     }
     return visualBridge.runJsBlock(
       script: script,

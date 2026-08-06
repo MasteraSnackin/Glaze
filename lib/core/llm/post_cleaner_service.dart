@@ -11,7 +11,6 @@ import '../models/character.dart';
 import '../models/persona.dart';
 import '../models/pipeline_settings.dart';
 import '../utils/think_tags.dart';
-import '../../features/chat/chat_session_service.dart';
 import 'aux_llm_client.dart';
 import 'aux_retry_runner.dart';
 import 'beauty_state_parser.dart';
@@ -44,12 +43,14 @@ class PostCleanerService {
   final AuxLlmClient _llm;
   final ChatRepo _chatRepo;
   final TrackerSnapshotRepo _snapshotRepo;
+  final void Function(ChatSession) onSessionUpdated;
   final void Function() _invalidateChatHistory;
 
   PostCleanerService({
     required this._llm,
     required this._chatRepo,
     required this._snapshotRepo,
+    required this.onSessionUpdated,
     required this._invalidateChatHistory,
   });
 
@@ -571,7 +572,7 @@ class PostCleanerService {
     // Refresh cache + reactive streams.
     final session = await chatRepo.getById(sessionId);
     if (session != null) {
-      ChatSessionService.updateCache(session);
+      onSessionUpdated(session);
     }
     _invalidateChatHistory();
 

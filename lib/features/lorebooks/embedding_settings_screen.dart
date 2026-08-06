@@ -5,10 +5,11 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/db/repositories/embedding_repo.dart';
 import '../../../core/services/api_connection_tester.dart';
-import '../../../core/llm/lorebook_providers.dart';
 import '../../../core/llm/vector_rebuild_service.dart';
+import '../../../core/state/lorebook_embedding_provider.dart';
 import '../../../core/state/lorebook_provider.dart';
 import '../../../core/state/shared_prefs_provider.dart';
+import '../../../core/state/vector_rebuild_provider.dart';
 import '../../../shared/shell/shell_header_provider.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_error_dialog.dart';

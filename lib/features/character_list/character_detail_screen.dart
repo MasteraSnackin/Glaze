@@ -39,6 +39,7 @@ import '../../shared/widgets/image_viewer.dart';
 import '../../shared/widgets/sheet_view.dart';
 import '../../shared/widgets/colored_markdown.dart';
 import 'character_editor_screen.dart';
+import '../character_gallery/widgets/character_gallery_view.dart';
 import 'widgets/character_variations_sheet.dart';
 import 'widgets/character_hiding_onboarding_sheet.dart';
 
@@ -68,13 +69,17 @@ Border _detailHeaderBorder(BuildContext context, ThemePreset preset) {
 
 // ─── Tabs ──────────────────────────────────────────────────────────────────
 
-// Only two tabs: Info (with comments folded in under the bio) and Prompt Blocks
-// (with lorebooks folded in under the prompts).
+// Info (with comments folded in under the bio), Prompt Blocks (with lorebooks
+// folded in under the prompts), and the character's image gallery.
 List<GlazeTabItem> _detailTabs(BuildContext context) => [
   GlazeTabItem(label: 'section_info'.tr(), icon: Icons.info_outline_rounded),
   GlazeTabItem(
     label: 'section_prompt_blocks'.tr(),
     icon: Icons.description_outlined,
+  ),
+  GlazeTabItem(
+    label: 'section_images'.tr(),
+    icon: Icons.photo_library_outlined,
   ),
 ];
 
@@ -99,7 +104,8 @@ class _CharacterDetailSheetLauncherState
 
   Future<void> _show() async {
     final location = GoRouterState.of(context).uri.path;
-    final isSubRoute = location.endsWith('/edit') || location.endsWith('/gallery');
+    final isSubRoute =
+        location.endsWith('/edit') || location.endsWith('/gallery');
     if (isSubRoute) return;
     String? navTarget;
     try {
@@ -319,6 +325,7 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
     final isHidden = char?.hidden ?? false;
     final catalogUrl = char?.extensions['catalogUrl'];
     final hasCatalogUrl = catalogUrl is String && catalogUrl.isNotEmpty;
+    final variantCount = _variantCount(char);
     GlazeBottomSheet.show<void>(
       context,
       items: [
@@ -342,17 +349,13 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
           },
         ),
         BottomSheetItem(
-          icon: Icons.photo_library_outlined,
-          label: 'menu_image_viewer'.tr(),
-          onTap: () {
-            rootNav.pop();
-            if (!mounted) return;
-            context.push('/character/${widget.charId}/gallery');
-          },
-        ),
-        BottomSheetItem(
           icon: Icons.dynamic_feed_rounded,
           label: 'variations_title'.tr(),
+          // Surface the group size on the entry point itself, so the menu says
+          // whether there is anything behind it before you tap.
+          hint: variantCount > 1
+              ? 'variations_count'.plural(variantCount)
+              : 'variations_hint_single'.tr(),
           onTap: () {
             rootNav.pop();
             if (!mounted) return;
@@ -401,32 +404,34 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
     if (!context.mounted) return;
 
     final rootNav = Navigator.of(context, rootNavigator: true);
-    unawaited(GlazeBottomSheet.show<void>(
-      context,
-      title: 'action_delete_char'.tr(),
-      bigInfo: BottomSheetBigInfo(
-        icon: Icons.delete_outline,
-        description:
-            '${'confirm_delete_character'.tr().replaceAll('?', '')} "${char.displayName?.trim().isNotEmpty == true ? char.displayName!.trim() : char.name}"?',
+    unawaited(
+      GlazeBottomSheet.show<void>(
+        context,
+        title: 'action_delete_char'.tr(),
+        bigInfo: BottomSheetBigInfo(
+          icon: Icons.delete_outline,
+          description:
+              '${'confirm_delete_character'.tr().replaceAll('?', '')} "${char.displayName?.trim().isNotEmpty == true ? char.displayName!.trim() : char.name}"?',
+        ),
+        items: [
+          BottomSheetItem(
+            label: 'action_delete_msg'.tr(),
+            isDestructive: true,
+            centered: true,
+            onTap: () async {
+              await ref.read(charactersProvider.notifier).remove(char.id);
+              if (!context.mounted) return;
+              _closeSheetAndNavigate('/characters');
+            },
+          ),
+          BottomSheetItem(
+            label: 'btn_cancel'.tr(),
+            centered: true,
+            onTap: () => rootNav.pop(),
+          ),
+        ],
       ),
-      items: [
-        BottomSheetItem(
-          label: 'action_delete_msg'.tr(),
-          isDestructive: true,
-          centered: true,
-          onTap: () async {
-            await ref.read(charactersProvider.notifier).remove(char.id);
-            if (!context.mounted) return;
-            _closeSheetAndNavigate('/characters');
-          },
-        ),
-        BottomSheetItem(
-          label: 'btn_cancel'.tr(),
-          centered: true,
-          onTap: () => rootNav.pop(),
-        ),
-      ],
-    ));
+    );
   }
 
   Future<void> _toggleHidden(bool wasHidden) async {
@@ -443,18 +448,26 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
     }
   }
 
+  /// Number of variations in [char]'s group (1 for a standalone character).
+  int _variantCount(Character? char) {
+    if (char == null) return 1;
+    final groupId = char.variantGroupId.isEmpty
+        ? char.id
+        : char.variantGroupId;
+    return ref.read(variantGroupStatsProvider).value?[groupId]?.count ?? 1;
+  }
+
+  /// Opens the variations grid for this character's group. Picking a card there
+  /// opens that variation's own sheet on top of this one, so nothing comes back.
   void _showVariations(BuildContext context) {
     final char = ref.read(characterByIdProvider(widget.charId));
     final groupId = (char == null || char.variantGroupId.isEmpty)
         ? widget.charId
         : char.variantGroupId;
-    showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      useRootNavigator: true,
-      useSafeArea: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => CharacterVariationsSheet(groupId: groupId),
+    showCharacterVariationsSheet(
+      context,
+      groupId: groupId,
+      sourceId: widget.charId,
     );
   }
 
@@ -498,28 +511,13 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
     );
   }
 
+  /// Opens a chat with [cId], asking only which *session* to open.
+  ///
+  /// It no longer asks which variation: this sheet now belongs to exactly one
+  /// variation (the library opens the variations grid first, and picking a card
+  /// there opens that variation's sheet), so a prompt here would be the same
+  /// question twice.
   Future<void> _openChat(BuildContext context, String cId) async {
-    // When the character has multiple variations, choose which one to start the
-    // chat with. The chosen variation is a distinct character id, so its chat
-    // sessions (and history group) are independent and can't be switched later.
-    final all = ref.read(charactersProvider).value ?? const <Character>[];
-    final current = all.where((c) => c.id == cId).firstOrNull;
-    if (current != null) {
-      final groupId = current.variantGroupId.isEmpty
-          ? current.id
-          : current.variantGroupId;
-      final variants = all
-          .where((c) =>
-              (c.variantGroupId.isEmpty ? c.id : c.variantGroupId) == groupId)
-          .toList()
-        ..sort((a, b) => a.variantOrder.compareTo(b.variantOrder));
-      if (variants.length > 1) {
-        final pickedId = await _pickVariation(context, variants);
-        if (pickedId == null || !context.mounted) return;
-        cId = pickedId;
-      }
-    }
-
     final sessions = await ref
         .read(chatSessionOpsProvider.notifier)
         .getSessionMetadataByCharacter(cId);
@@ -551,8 +549,10 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
             ),
             hint:
                 '${s.messageCount} ${'count_messages'.plural(s.messageCount)}',
-            onTap: () => Navigator.of(context, rootNavigator: true)
-                .pop('session:${s.sessionIndex}'),
+            onTap: () => Navigator.of(
+              context,
+              rootNavigator: true,
+            ).pop('session:${s.sessionIndex}'),
           ),
         ),
       ],
@@ -572,27 +572,6 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
     Navigator.of(context, rootNavigator: true).pop<String>(route);
   }
 
-  Future<String?> _pickVariation(
-    BuildContext context,
-    List<Character> variants,
-  ) {
-    return GlazeBottomSheet.show<String>(
-      context,
-      title: 'variation_pick_title'.tr(),
-      items: [
-        for (final v in variants)
-          BottomSheetItem(
-            icon: Icons.person_outline_rounded,
-            label: v.variantName?.trim().isNotEmpty == true
-                ? v.variantName!.trim()
-                : 'variation_original'.tr(),
-            onTap: () =>
-                Navigator.of(context, rootNavigator: true).pop(v.id),
-          ),
-      ],
-    );
-  }
-
   Future<void> _importChat(String charId) async {
     final result = await FilePicker.pickFiles(
       type: Platform.isIOS ? FileType.any : FileType.custom,
@@ -609,10 +588,12 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
         final importResult = importChatFromJsonlString(
           utf8.decode(file.bytes!),
         );
-        saveResult = await ref.read(chatActionsServiceProvider)
+        saveResult = await ref
+            .read(chatActionsServiceProvider)
             .importChatFromResult(charId, importResult);
       } else if (filePath != null) {
-        saveResult = await ref.read(chatActionsServiceProvider)
+        saveResult = await ref
+            .read(chatActionsServiceProvider)
             .importChat(charId, filePath);
       } else {
         return;
@@ -632,11 +613,19 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
         // Using _closeSheetAndNavigate here popped twice — the first pop closed
         // the modal with a null result, so the launcher never navigated and the
         // chat opened as a blank dark screen.
-        Navigator.of(context, rootNavigator: true)
-            .pop<String>('/chat/$charId?session=$sessionIndex');
+        Navigator.of(
+          context,
+          rootNavigator: true,
+        ).pop<String>('/chat/$charId?session=$sessionIndex');
       }
     } catch (e) {
-      if (mounted) GlazeErrorDialog.show(context, e, prefix: '${'settings_err_failed'.tr()} ');
+      if (mounted) {
+        GlazeErrorDialog.show(
+          context,
+          e,
+          prefix: '${'settings_err_failed'.tr()} ',
+        );
+      }
     }
   }
 
@@ -656,12 +645,12 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
       floatingActionButton: char == null
           ? null
           : widget.isPreview
-              ? _ImportFab(
-                  importing: widget.importing,
-                  phase: widget.importPhase,
-                  onTap: _handleImportTap,
-                )
-              : _ChatFab(onTap: () => _openChat(context, char.id)),
+          ? _ImportFab(
+              importing: widget.importing,
+              phase: widget.importPhase,
+              onTap: _handleImportTap,
+            )
+          : _ChatFab(onTap: () => _openChat(context, char.id)),
     );
   }
 
@@ -681,6 +670,7 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
       );
     }
     final safeBottom = MediaQuery.of(context).padding.bottom;
+    final tabs = _detailTabs(context);
     return ScrollConfiguration(
       behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
       child: SingleChildScrollView(
@@ -698,14 +688,14 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
               child: GlazeTabBar(
-                tabs: _detailTabs(context),
+                tabs: tabs,
                 activeIndex: _activeTabIndex,
                 onChanged: _onTabChanged,
               ),
             ),
             SwipeTabSwitcher(
               index: _activeTabIndex,
-              length: 2,
+              length: tabs.length,
               onChanged: _onTabChanged,
               child: TabSlideSwitcher(
                 index: _activeTabIndex,
@@ -720,6 +710,18 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
   }
 
   Widget _buildTabContent(Character char) {
+    if (_activeTabIndex == 2) {
+      // Gallery. In preview mode the character is not in the DB, so the entries
+      // come from the in-memory card instead of a query that would find nothing.
+      return KeyedSubtree(
+        key: const ValueKey('gallery'),
+        child: CharacterGalleryView(
+          charId: widget.charId,
+          shrinkWrap: true,
+          entries: widget.isPreview ? char.gallery : null,
+        ),
+      );
+    }
     if (_activeTabIndex == 0) {
       // Info tab: bio/tags, with the character's comments folded in below it.
       return KeyedSubtree(
@@ -828,7 +830,11 @@ class _ChatFab extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.chat_bubble_rounded, color: Colors.white, size: 18),
+            const Icon(
+              Icons.chat_bubble_rounded,
+              color: Colors.white,
+              size: 18,
+            ),
             const SizedBox(width: 8),
             Text(
               'btn_open_chat'.tr(),
@@ -925,9 +931,10 @@ class _DetailHeaderButtonState extends ConsumerState<_DetailHeaderButton>
       duration: const Duration(milliseconds: 80),
       reverseDuration: const Duration(milliseconds: 150),
     );
-    _scale = Tween<double>(begin: 1.0, end: 0.82).animate(
-      CurvedAnimation(parent: _press, curve: Curves.easeOut),
-    );
+    _scale = Tween<double>(
+      begin: 1.0,
+      end: 0.82,
+    ).animate(CurvedAnimation(parent: _press, curve: Curves.easeOut));
   }
 
   @override
@@ -992,8 +999,11 @@ class _HeroSection extends StatelessWidget {
           ImageProvider? provider;
           if (previewAvatarUrl != null && previewAvatarUrl!.isNotEmpty) {
             provider = CachedNetworkImageProvider(previewAvatarUrl!);
-          } else if (character.avatarPath != null && character.avatarPath!.isNotEmpty) {
-            provider = FileImage(File(resolveGlazeFilePath(character.avatarPath!)!));
+          } else if (character.avatarPath != null &&
+              character.avatarPath!.isNotEmpty) {
+            provider = FileImage(
+              File(resolveGlazeFilePath(character.avatarPath!)!),
+            );
           }
           if (provider != null) {
             ImageViewer.show(
@@ -1010,49 +1020,51 @@ class _HeroSection extends StatelessWidget {
             const DecoratedBox(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                stops: [0.35, 0.60, 1.0],
-                colors: [
-                  Colors.transparent,
-                  Color(0x33000000),
-                  Color(0xBF000000),
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  stops: [0.35, 0.60, 1.0],
+                  colors: [
+                    Colors.transparent,
+                    Color(0x33000000),
+                    Color(0xBF000000),
+                  ],
+                ),
+              ),
+            ),
+            Positioned(
+              left: 16,
+              right: 16,
+              bottom: 16,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    _displayName,
+                    style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                      shadows: [
+                        Shadow(blurRadius: 6, color: Color(0xCC000000)),
+                      ],
+                    ),
+                  ),
+                  if (character.creator != null &&
+                      character.creator!.isNotEmpty)
+                    _buildAuthorLabel(context),
                 ],
               ),
             ),
-          ),
-          Positioned(
-            left: 16,
-            right: 16,
-            bottom: 16,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  _displayName,
-                  style: const TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w700,
-                    color: Colors.white,
-                    shadows: [Shadow(blurRadius: 6, color: Color(0xCC000000))],
-                  ),
-                ),
-                if (character.creator != null && character.creator!.isNotEmpty)
-                  _buildAuthorLabel(context),
-              ],
-            ),
-          ),
-        ],
+          ],
         ),
       ),
     );
   }
 
   Widget _buildAuthorLabel(BuildContext context) {
-    final hasLink = authorUrl != null &&
-        authorUrl!.isNotEmpty &&
-        onOpenAuthor != null;
+    final hasLink =
+        authorUrl != null && authorUrl!.isNotEmpty && onOpenAuthor != null;
     final label = Text(
       '@${character.creator}',
       style: TextStyle(
@@ -1150,7 +1162,7 @@ class _TabSectionHeader extends StatelessWidget {
 
 class _InfoTab extends StatelessWidget {
   final Character character;
-  const _InfoTab({super.key, required this.character});
+  const _InfoTab({required this.character});
 
   @override
   Widget build(BuildContext context) {
@@ -1379,7 +1391,7 @@ class _TagChip extends StatelessWidget {
 
 class _PromptsTab extends StatefulWidget {
   final Character character;
-  const _PromptsTab({super.key, required this.character});
+  const _PromptsTab({required this.character});
 
   @override
   State<_PromptsTab> createState() => _PromptsTabState();
@@ -1391,11 +1403,27 @@ class _PromptsTabState extends State<_PromptsTab> {
   List<({String key, String label, String text})> get _sections {
     final c = widget.character;
     return [
-      (key: 'description', label: 'label_description'.tr(), text: c.description ?? ''),
-      (key: 'personality', label: 'label_personality'.tr(), text: c.personality ?? ''),
+      (
+        key: 'description',
+        label: 'label_description'.tr(),
+        text: c.description ?? '',
+      ),
+      (
+        key: 'personality',
+        label: 'label_personality'.tr(),
+        text: c.personality ?? '',
+      ),
       (key: 'scenario', label: 'label_scenario'.tr(), text: c.scenario ?? ''),
-      (key: 'mesExample', label: 'label_mes_example'.tr(), text: c.mesExample ?? ''),
-      (key: 'systemPrompt', label: 'role_system'.tr(), text: c.systemPrompt ?? ''),
+      (
+        key: 'mesExample',
+        label: 'label_mes_example'.tr(),
+        text: c.mesExample ?? '',
+      ),
+      (
+        key: 'systemPrompt',
+        label: 'role_system'.tr(),
+        text: c.systemPrompt ?? '',
+      ),
       (
         key: 'postHistory',
         label: 'role_system'.tr(),

@@ -1,13 +1,13 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:glaze_flutter/features/extensions/services/js_bridge/handlers/generation_handler.dart';
-import 'package:glaze_flutter/features/extensions/services/js_bridge/js_bridge_context.dart';
+import '../helpers/js_bridge_test_support.dart';
 
 void main() {
   group('GenerationHandler', () {
     test('generateText validates preset before delegating', () async {
       final handler = GenerationHandler();
-      final bridge = JsBridgeContext(
+      final bridge = TestJsBridge.context(
         params: {
           'prompt': 'Hello',
           'options': {'preset': 'tiny'},
@@ -22,7 +22,7 @@ void main() {
 
     test('generateText delegates prompt, options, and context', () async {
       final handler = GenerationHandler();
-      final bridge = JsBridgeContext(
+      final bridge = TestJsBridge.context(
         params: {
           'prompt': 'Write one line',
           'options': {'preset': 'small'},
@@ -44,7 +44,7 @@ void main() {
       'triggerGeneration resolves character id from context first',
       () async {
         final handler = GenerationHandler();
-        final bridge = JsBridgeContext(
+        final bridge = TestJsBridge.context(
           params: {'mode': 'auto'},
           context: {'characterId': 'explicit'},
           currentCharacterId: () => 'fallback',
@@ -61,15 +61,29 @@ void main() {
       },
     );
 
-    test('default-denies when permission check is missing', () {
-      final handler = GenerationHandler();
-      final bridge = JsBridgeContext(
-        params: {'prompt': 'Hello'},
-        context: const {},
-        generateText: (_, _, _) async => 'must not run',
-      );
+    test(
+      'canonical dispatch default-denies without a permission check',
+      () async {
+        final bridge = TestJsBridge.create(
+          generateText: (_, _, _) async => 'must not run',
+        );
 
-      expect(() => handler.generateText(bridge), throwsA(isA<StateError>()));
-    });
+        final response = await bridge.dispatch({
+          'method': 'generateText',
+          'params': {'prompt': 'Hello'},
+        });
+
+        expect(response['ok'], isFalse);
+        expect(response['error'], isA<Map<String, dynamic>>());
+        expect(
+          (response['error'] as Map<String, dynamic>)['code'],
+          'bridge_error',
+        );
+        expect(
+          (response['error'] as Map<String, dynamic>)['message'],
+          contains('Permission denied: generate_text'),
+        );
+      },
+    );
   });
 }

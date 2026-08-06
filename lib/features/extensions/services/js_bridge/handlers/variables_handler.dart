@@ -1,6 +1,5 @@
 import 'dart:convert';
 
-import '../capability_resolver.dart';
 import '../js_bridge_context.dart';
 
 class VariablesHandler {
@@ -12,19 +11,16 @@ class VariablesHandler {
 
   Future<dynamic> getVariables(JsBridgeContext bridge) {
     final scope = _scope(bridge.params);
-    bridge.requireCapability(readCapabilityForScope(scope));
     return _getVariables(bridge, scope);
   }
 
   Future<Map<String, dynamic>> setVariables(JsBridgeContext bridge) {
     final scope = _scope(bridge.params);
-    bridge.requireCapability(writeCapabilityForScope(scope));
     return _setVariables(bridge, scope);
   }
 
   Future<Map<String, dynamic>> deleteVariable(JsBridgeContext bridge) {
     final scope = _scope(bridge.params);
-    bridge.requireCapability(deleteCapabilityForScope(scope));
     return _deleteVariable(bridge, scope);
   }
 
@@ -77,8 +73,7 @@ class VariablesHandler {
   ) async {
     switch (scope) {
       case 'chat':
-        final repo =
-            bridge.chatRepo ?? (throw StateError('Chat repo is not available'));
+        final repo = bridge.chatRepo;
         final session = await repo.getById(bridge.sessionId());
         if (session == null) {
           throw StateError(
@@ -87,18 +82,14 @@ class VariablesHandler {
         }
         return _decodeChatVars(session.sessionVars);
       case 'character':
-        final repo =
-            bridge.characterRepo ??
-            (throw StateError('Character repo is not available'));
+        final repo = bridge.characterRepo;
         final character = await repo.getById(bridge.characterId());
         if (character == null) {
           throw StateError('Character "${bridge.characterId()}" was not found');
         }
         return _decodeCharacterVars(character.extensions);
       case 'global':
-        final repo =
-            bridge.globalVariablesRepo ??
-            (throw StateError('Global variables repo is not available'));
+        final repo = bridge.globalVariablesRepo;
         return await repo.read();
       case 'message':
         return _readMessageScope(bridge);
@@ -114,8 +105,7 @@ class VariablesHandler {
   ) async {
     switch (scope) {
       case 'chat':
-        final repo =
-            bridge.chatRepo ?? (throw StateError('Chat repo is not available'));
+        final repo = bridge.chatRepo;
         Map<String, dynamic> nextRoot = const {};
         await repo.updateSessionVarsJson(bridge.sessionId(), (vars) {
           nextRoot = update(_decodeChatVars(vars));
@@ -128,9 +118,7 @@ class VariablesHandler {
         });
         return Map<String, dynamic>.from(nextRoot);
       case 'character':
-        final repo =
-            bridge.characterRepo ??
-            (throw StateError('Character repo is not available'));
+        final repo = bridge.characterRepo;
         Map<String, dynamic> nextRoot = const {};
         await repo.updateExtensionsJson(bridge.characterId(), (extensions) {
           nextRoot = update(_decodeCharacterVars(extensions));
@@ -143,9 +131,7 @@ class VariablesHandler {
         });
         return Map<String, dynamic>.from(nextRoot);
       case 'global':
-        final repo =
-            bridge.globalVariablesRepo ??
-            (throw StateError('Global variables repo is not available'));
+        final repo = bridge.globalVariablesRepo;
         return await repo.update(update);
       case 'message':
         return _updateMessageScope(bridge, update);
@@ -155,9 +141,7 @@ class VariablesHandler {
   }
 
   Map<String, dynamic> _readMessageScope(JsBridgeContext bridge) {
-    final accessor =
-        bridge.messageVariables ??
-        (throw StateError('Message variables accessor is not available'));
+    final accessor = bridge.messageVariables;
     return accessor().read(bridge.sessionId(), bridge.messageId());
   }
 
@@ -165,9 +149,7 @@ class VariablesHandler {
     JsBridgeContext bridge,
     Map<String, dynamic> Function(Map<String, dynamic> root) update,
   ) {
-    final accessor =
-        bridge.messageVariables ??
-        (throw StateError('Message variables accessor is not available'));
+    final accessor = bridge.messageVariables;
     return accessor().update(bridge.sessionId(), bridge.messageId(), update);
   }
 

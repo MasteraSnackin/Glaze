@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import 'package:path/path.dart' as p;
 
 import '../../../core/constants/build_channel.dart';
 import '../../../core/utils/platform_paths.dart';
@@ -88,6 +89,23 @@ URLRequest? chatWebViewInitialUrlRequest() {
   return null;
 }
 
+NavigationActionPolicy chatWebViewNavigationPolicy(WebUri? url) {
+  if (url == null) return NavigationActionPolicy.CANCEL;
+
+  final initialUrl = chatWebViewInitialUrlRequest()?.url;
+  if (initialUrl != null && url == initialUrl) {
+    return NavigationActionPolicy.ALLOW;
+  }
+
+  if (initialUrl == null &&
+      url.scheme == 'file' &&
+      url.path.endsWith('/assets/chat_webview/index.html')) {
+    return NavigationActionPolicy.ALLOW;
+  }
+
+  return NavigationActionPolicy.CANCEL;
+}
+
 String? chatWebViewResolveLocalFileUrl(String? source) {
   if (source == null || source.isEmpty) return source;
   if (source.startsWith('data:') ||
@@ -97,7 +115,9 @@ String? chatWebViewResolveLocalFileUrl(String? source) {
   }
 
   final path = _sourceToFilePath(source);
-  if (path == null) return source;
+  // Anything other than an explicitly allowed remote/data URL is a local-file
+  // candidate. Unknown, relative, or malformed candidates fail closed.
+  if (path == null) return null;
   // A restored database may contain an absolute path from an older iOS
   // sandbox or another desktop build channel. Rebase it onto this build's
   // data root before applying the local-file security boundary.
@@ -105,12 +125,15 @@ String? chatWebViewResolveLocalFileUrl(String? source) {
   final filePath = chatWebViewUsesAndroidAssetLoader()
       ? healed
       : File(healed).absolute.path;
-  if (!_isInsideGlazeData(filePath)) {
-    return source;
+  if (!_isAllowedGlazeMediaPath(filePath)) {
+    return null;
   }
 
   final fileBase = _localFileServingBaseUrl();
-  if (fileBase == null) return source;
+  // macOS/Linux currently use neither the Android asset loader nor the
+  // iOS/Windows loopback asset architecture. Do not leak a raw file URL when
+  // no isolated local-file origin has been initialized for the platform.
+  if (fileBase == null) return null;
 
   final url = fileBase.uriValue.replace(
     path: '/__glaze_file__',
@@ -135,6 +158,7 @@ Future<void> initChatWebViewEnvironment() async {
     // mirrors the Windows path, but assets come from `rootBundle` (the iOS
     // app bundle layout differs from the Windows `data/flutter_assets` tree).
     await getAppDataDir();
+    await _startChatWebViewLocalFileServer();
     await _startChatWebViewBundleServer();
     _janitorWebViewUserAgent = await _deriveMobileJanitorWebViewUA();
     return;
@@ -145,13 +169,26 @@ Future<void> initChatWebViewEnvironment() async {
   try {
     final availableVersion = await WebViewEnvironment.getAvailableVersion();
     if (availableVersion == null) {
+      debugPrint(
+        '[ChatWebViewEnvironment] WebView2 Runtime is not installed. '
+        'Chat rendering will not work. Install "Microsoft Edge WebView2 Runtime" '
+        'from https://developer.microsoft.com/microsoft-edge/webview2/',
+      );
       return;
     }
     _janitorWebViewUserAgent = _deriveJanitorWebViewUA(availableVersion);
 
     _chatWebViewEnvironment = await WebViewEnvironment.create();
+    await _startChatWebViewLocalFileServer();
     await _startChatWebViewAssetServer();
-  } catch (_) {}
+  } catch (e, st) {
+    // Previously this was `catch (_) {}` which silently swallowed every error,
+    // leaving a blank chat with no diagnostic. Log so the user (and dev) can
+    // see why the WebView failed to initialize.
+    debugPrint(
+      '[ChatWebViewEnvironment] WebView2 environment setup failed: $e\n$st',
+    );
+  }
 }
 
 WebUri? _localFileServingBaseUrl() =>
@@ -171,8 +208,8 @@ Future<void> _startChatWebViewAssetServer() async {
   unawaited(_serveChatWebViewAssets(server, assetDir));
 }
 
-/// Loopback server for Glaze user files on Android. Bundled chat assets keep
-/// using [WebViewAssetLoader]; only avatars / generated images go through here.
+/// Loopback server for approved Glaze media files. It intentionally uses a
+/// different origin from the iOS/Windows chat asset server.
 Future<void> _startChatWebViewLocalFileServer() async {
   if (_chatWebViewLocalFileServer != null) return;
 
@@ -182,9 +219,8 @@ Future<void> _startChatWebViewLocalFileServer() async {
   unawaited(_serveChatWebViewLocalFiles(server));
 }
 
-/// Loopback server for iOS: serves bundled chat assets from [rootBundle] and
-/// Glaze data files (avatars/generated images) from a `?path=` query, all over
-/// one http origin so WKWebView can load ES modules and local images.
+/// Loopback server for iOS bundled chat assets. User files are served by the
+/// separate local-file server so message content cannot read them same-origin.
 Future<void> _startChatWebViewBundleServer() async {
   if (_chatWebViewAssetServer != null) return;
 
@@ -197,11 +233,6 @@ Future<void> _startChatWebViewBundleServer() async {
 Future<void> _serveChatWebViewBundleAssets(HttpServer server) async {
   await for (final request in server) {
     try {
-      if (request.uri.path == '/__glaze_file__') {
-        await _serveGlazeDataFile(request);
-        continue;
-      }
-
       final path = _safeAssetPath(request.uri.path);
       if (path == null) {
         request.response.statusCode = HttpStatus.forbidden;
@@ -266,11 +297,6 @@ Directory _chatWebViewAssetDirectory() {
 Future<void> _serveChatWebViewAssets(HttpServer server, Directory root) async {
   await for (final request in server) {
     try {
-      if (request.uri.path == '/__glaze_file__') {
-        await _serveGlazeDataFile(request);
-        continue;
-      }
-
       final path = _safeAssetPath(request.uri.path);
       if (path == null) {
         request.response.statusCode = HttpStatus.forbidden;
@@ -296,8 +322,15 @@ Future<void> _serveChatWebViewAssets(HttpServer server, Directory root) async {
 }
 
 Future<void> _serveGlazeDataFile(HttpRequest request) async {
+  if (request.method != 'GET' && request.method != 'HEAD') {
+    request.response.statusCode = HttpStatus.methodNotAllowed;
+    request.response.headers.set(HttpHeaders.allowHeader, 'GET, HEAD');
+    await request.response.close();
+    return;
+  }
+
   final path = request.uri.queryParameters['path'];
-  if (path == null || !_isInsideGlazeData(path)) {
+  if (path == null || !await isAllowedGlazeMediaFile(path)) {
     request.response.statusCode = HttpStatus.forbidden;
     await request.response.close();
     return;
@@ -311,11 +344,11 @@ Future<void> _serveGlazeDataFile(HttpRequest request) async {
   }
 
   request.response.headers.contentType = _contentTypeFor(file.path);
-  await request.response.addStream(file.openRead());
+  if (request.method == 'GET') {
+    await request.response.addStream(file.openRead());
+  }
   await request.response.close();
 }
-
-String _normalizeAndroidPath(String path) => path.replaceAll('\\', '/');
 
 String? _sourceToFilePath(String source) {
   if (source.startsWith('file://')) {
@@ -331,24 +364,83 @@ String? _sourceToFilePath(String source) {
   return null;
 }
 
-bool _isInsideGlazeData(String path) {
+const _allowedGlazeMediaDirectories = {
+  'avatars',
+  'thumbnails',
+  'generated',
+  'gallery',
+};
+
+const _allowedGlazeMediaExtensions = {
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.webp',
+  '.gif',
+  '.avif',
+};
+
+bool _pathsEqual(String left, String right) {
+  if (Platform.isWindows) return left.toLowerCase() == right.toLowerCase();
+  return left == right;
+}
+
+bool _isInsideDirectory(String path, String root) {
+  final relative = p.relative(path, from: root);
+  return relative != '.' &&
+      relative != '..' &&
+      !relative.startsWith('..${p.separator}') &&
+      !p.isAbsolute(relative);
+}
+
+String _glazeDataRootPath() {
   if (chatWebViewUsesAndroidAssetLoader()) {
     final root = chatWebViewAndroidFileRoot;
-    if (root == null || root.isEmpty) return false;
-    final rootDir = _normalizeAndroidPath(root);
-    final rootPrefix = rootDir.endsWith('/') ? rootDir : '$rootDir/';
-    return _normalizeAndroidPath(path).startsWith(rootPrefix);
+    if (root != null && root.isNotEmpty) return root;
+  }
+  return _glazeDataDirectory().absolute.path;
+}
+
+bool _isAllowedGlazeMediaPath(String path) {
+  if (!_allowedGlazeMediaExtensions.contains(p.extension(path).toLowerCase())) {
+    return false;
+  }
+  final root = p.normalize(File(_glazeDataRootPath()).absolute.path);
+  final file = p.normalize(File(path).absolute.path);
+  for (final directory in _allowedGlazeMediaDirectories) {
+    final mediaRoot = p.join(root, directory);
+    if (_isInsideDirectory(file, mediaRoot)) return true;
+  }
+  return false;
+}
+
+@visibleForTesting
+Future<bool> isAllowedGlazeMediaFile(String path) async {
+  if (!_isAllowedGlazeMediaPath(path)) return false;
+  if (await FileSystemEntity.type(path, followLinks: true) !=
+      FileSystemEntityType.file) {
+    return false;
   }
 
-  final root = _glazeDataDirectory().absolute.path;
-  final file = File(path).absolute.path;
-  final rootPrefix = root.endsWith(Platform.pathSeparator)
-      ? root
-      : '$root${Platform.pathSeparator}';
-  if (Platform.isWindows) {
-    return file.toLowerCase().startsWith(rootPrefix.toLowerCase());
+  try {
+    final canonicalFile = await File(path).resolveSymbolicLinks();
+    final canonicalRoot = await Directory(
+      _glazeDataRootPath(),
+    ).resolveSymbolicLinks();
+    for (final directory in _allowedGlazeMediaDirectories) {
+      final mediaRoot = Directory(p.join(canonicalRoot, directory));
+      if (!await mediaRoot.exists()) continue;
+      final canonicalMediaRoot = await mediaRoot.resolveSymbolicLinks();
+      final expectedMediaRoot = p.normalize(p.join(canonicalRoot, directory));
+      if (!_pathsEqual(p.normalize(canonicalMediaRoot), expectedMediaRoot)) {
+        continue;
+      }
+      if (_isInsideDirectory(canonicalFile, canonicalMediaRoot)) return true;
+    }
+  } on FileSystemException {
+    return false;
   }
-  return file.startsWith(rootPrefix);
+  return false;
 }
 
 Directory _glazeDataDirectory() {

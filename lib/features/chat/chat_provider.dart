@@ -8,10 +8,12 @@ import 'package:flutter_riverpod/legacy.dart';
 
 import '../../core/llm/tokenizer.dart';
 import '../../core/models/chat_message.dart';
+import '../../core/db/repositories/chat_repo.dart';
 import '../../core/services/generation_notification_service.dart';
 import '../../core/utils/id_generator.dart';
 import '../../core/utils/time_helpers.dart';
 import '../../core/state/db_provider.dart';
+import '../../core/state/persona_resolution.dart';
 import '../chat_history/chat_history_provider.dart';
 import '../memory/state/memory_active_drafts_provider.dart';
 import 'abort_handler.dart';
@@ -69,13 +71,6 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
 
   final String arg;
   bool _buildComplete = false;
-
-  void _persistSession(ChatSession session) {
-    ref.read(chatRepoProvider).put(session).catchError((Object e) {
-      debugPrint('[ChatNotifier] failed to persist session: $e');
-    });
-    ChatSessionService.updateCache(session);
-  }
 
   /// Reflects the active session's generation state into
   /// [generatingSessionsProvider]. Called on every state transition; membership
@@ -167,7 +162,14 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       state = s;
     },
     getState: () => state,
-    persistSession: _persistSession,
+    mutateSession: (sessionId, mutate) => ref
+        .read(chatRepoProvider)
+        .mutateSession(
+          sessionId: sessionId,
+          mutate: mutate,
+          updatedAt: currentTimestampSeconds(),
+        ),
+    loadSession: ref.read(chatRepoProvider).getById,
   );
 
   void setCancelToken(CancelToken token, {required int genId}) =>
@@ -179,7 +181,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       ImageRecoveryService.fixupSwipesWithImageResults(session);
 
   void abortImageGeneration() => _abortHandler.abortImageGeneration();
-  void abortGeneration() => _abortHandler.abortGeneration();
+  Future<void> abortGeneration() => _abortHandler.abortGeneration();
   void cancelImageGeneration() => _abortHandler.cancelImageGeneration();
   Future<void> retryImageGeneration() async =>
       _imageRecoverySvc.retryImageGeneration();
@@ -287,7 +289,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
 
   Future<void> clearChat() => _messageOpsCtrl.clearChat();
 
-  void setSwipe(int messageIndex, int swipeId) =>
+  Future<void> setSwipe(int messageIndex, int swipeId) =>
       _swipeCtrl.setSwipe(messageIndex, swipeId);
 
   Future<void> changeSwipe(
@@ -502,7 +504,9 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         charId: arg,
         session: session,
         character: character,
-        persona: null,
+        persona: ref.read(
+          effectivePersonaForChatProvider((charId: arg, sessionId: session.id)),
+        ),
       );
     } catch (e) {
       debugPrint('[ChatNotifier] afterUser dispatch failed: $e');
@@ -514,7 +518,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     if (ref.read(editingMessageIdProvider(arg)) != null) return;
     if (state.value?.isGenerating == true ||
         state.value?.isPostGenRunning == true) {
-      abortGeneration();
+      await abortGeneration();
     }
     final current = state.value;
     if (current == null ||
@@ -762,16 +766,41 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       if (!ref.mounted || !_abortHandler.isCurrentGen(genId)) return;
 
       var completedResult = result;
-      final updatedMessages = mergeContinuationMessages(
-        result.messages,
-        lastMsg,
-      );
-      if (updatedMessages != null) {
-        final finalSession = result.session!.copyWith(
-          messages: updatedMessages,
-          updatedAt: currentTimestampSeconds(),
-        );
-        await ref.read(chatRepoProvider).put(finalSession);
+      final generated = result.messages.lastOrNull;
+      if (generated?.role == 'assistant' && result.session != null) {
+        final finalSession = await ref
+            .read(chatRepoProvider)
+            .mutateSession(
+              sessionId: current.session!.id,
+              updatedAt: currentTimestampSeconds(),
+              mutate: (latest) {
+                final latestIndex = latest.messages.indexWhere(
+                  (message) => message.id == lastMsg.id,
+                );
+                if (latestIndex < 0 ||
+                    latestIndex != latest.messages.length - 1 ||
+                    latest.messages[latestIndex].content != lastMsg.content ||
+                    latest.messages[latestIndex].swipeId != lastMsg.swipeId ||
+                    latest.messages[latestIndex].agentSwipeId !=
+                        lastMsg.agentSwipeId) {
+                  return null;
+                }
+                final messages = List<ChatMessage>.from(latest.messages);
+                messages[latestIndex] = mergeContinuationMessage(
+                  messages[latestIndex],
+                  generated!,
+                );
+                return latest.copyWith(
+                  messages: messages,
+                  sessionVars: ChatRepo.applySessionVarDelta(
+                    latest.sessionVars,
+                    current.session!.sessionVars,
+                    result.session!.sessionVars,
+                  ),
+                );
+              },
+            );
+        if (finalSession == null) return;
         if (!ref.mounted || !_abortHandler.isCurrentGen(genId)) return;
         ChatSessionService.updateCache(finalSession);
         _invalidateHistory();

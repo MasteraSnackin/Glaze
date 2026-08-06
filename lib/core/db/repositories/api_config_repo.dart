@@ -4,7 +4,7 @@ import 'package:drift/drift.dart';
 
 import '../app_db.dart';
 import '../../models/api_config.dart';
-import '../../../features/cloud_sync/sync_repo_interfaces.dart';
+import '../../application/sync_repo_interfaces.dart';
 import '../../models/extra_request_parameter.dart';
 
 class ApiConfigRepo implements SyncApiConfigStore {
@@ -61,6 +61,7 @@ class ApiConfigRepo implements SyncApiConfigStore {
     stream: c.stream,
     reasoningEffort: c.reasoningEffort ?? 'medium',
     requestReasoning: c.requestReasoning,
+    useResponsesApi: c.useResponsesApi,
     showNativeReasoning: c.showNativeReasoning,
     reasoningHistoryCount: c.reasoningHistoryCount,
     reasoningTagStart: c.reasoningTagStart,
@@ -111,6 +112,7 @@ class ApiConfigRepo implements SyncApiConfigStore {
     stream: Value(m.stream),
     reasoningEffort: Value(m.reasoningEffort),
     requestReasoning: Value(m.requestReasoning),
+    useResponsesApi: Value(m.useResponsesApi),
     showNativeReasoning: Value(m.showNativeReasoning),
     includeLastReasoning: Value(m.reasoningHistoryCount != 0),
     reasoningHistoryCount: Value(m.reasoningHistoryCount),

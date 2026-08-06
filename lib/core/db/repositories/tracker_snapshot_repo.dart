@@ -326,7 +326,13 @@ class TrackerSnapshotRepo {
             messageId: row.messageId,
             swipeId: Value(row.swipeId),
             agentSwipeId: Value(row.agentSwipeId),
-            trackersJson: Value(row.trackersJson),
+            trackersJson: Value(
+              jsonEncode(
+                _rowToModel(row).trackers
+                    .map((tracker) => tracker.copyWith(sessionId: toSessionId))
+                    .toList(),
+              ),
+            ),
             committed: Value(row.committed),
             createdAt: Value(row.createdAt),
           ),

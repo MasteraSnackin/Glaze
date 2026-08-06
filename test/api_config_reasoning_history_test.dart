@@ -2,6 +2,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/models/api_config.dart';
 
 void main() {
+  test('Responses API defaults off and round-trips when enabled', () {
+    expect(ApiConfig.fromJson(const {'id': 'api'}).useResponsesApi, isFalse);
+    final config = ApiConfig(id: 'api', useResponsesApi: true);
+
+    expect(ApiConfig.fromJson(config.toJson()).useResponsesApi, isTrue);
+  });
+
   test('reasoning settings are backward-compatible', () {
     final config = ApiConfig.fromJson(const {'id': 'api'});
 

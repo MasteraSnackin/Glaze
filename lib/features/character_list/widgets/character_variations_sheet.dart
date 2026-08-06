@@ -1,64 +1,132 @@
-import 'dart:io';
-
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../../core/models/character.dart';
 import '../../../core/state/character_provider.dart';
-import '../../../core/utils/platform_paths.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/sheet_view.dart';
+import 'character_card.dart';
 
-/// Manages the variations of one character group: list, add (copy of the
-/// current card), rename, set-as-cover, and delete. Opened from the character
-/// detail sheet. Each variation is a full character card sharing a
-/// [Character.variantGroupId]; the representative (order 0) is the list cover.
+/// Opens the variations grid for [groupId] as a modal sheet.
+///
+/// Shared by the library card and the character sheet so the presentation
+/// options (root navigator, transparent background, safe area) stay in one
+/// place — the sheet stacks over whatever opened it and returns nothing.
+void showCharacterVariationsSheet(
+  BuildContext context, {
+  required String groupId,
+  required String sourceId,
+}) {
+  showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    useRootNavigator: true,
+    useSafeArea: true,
+    backgroundColor: Colors.transparent,
+    builder: (_) =>
+        CharacterVariationsSheet(groupId: groupId, sourceId: sourceId),
+  );
+}
+
+/// The variations of one character group, as a grid of cards in the library's
+/// visual language.
+///
+/// Each variation is a full character row sharing a [Character.variantGroupId];
+/// the row at order 0 is the original the group grew out of. Order is creation
+/// order and the user cannot change it — a reassignable "main" variation is the
+/// confusion this screen exists to avoid.
+///
+/// Tapping a card opens that variation's own character sheet, which is where
+/// editing, chats and the gallery live.
 class CharacterVariationsSheet extends ConsumerWidget {
   final String groupId;
 
-  const CharacterVariationsSheet({super.key, required this.groupId});
+  /// The variation this sheet was opened from. New variations are cloned from
+  /// it — cloning the original regardless of where the user came from meant
+  /// "add variation" on a variation silently duplicated a different character.
+  final String sourceId;
+
+  const CharacterVariationsSheet({
+    super.key,
+    required this.groupId,
+    required this.sourceId,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final variantsAsync = ref.watch(characterVariantsProvider(groupId));
-    final variants = variantsAsync.value ?? const <Character>[];
+    final variants =
+        ref.watch(characterVariantsProvider(groupId)).value ??
+        const <Character>[];
 
     return SheetView(
       title: 'variations_title'.tr(),
       showHandle: true,
-      bodyPadding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-      body: ListView(
-        children: [
-          const SizedBox(height: 8),
-          _AddVariationTile(
-            onTap: variants.isEmpty
-                ? null
-                : () => _promptAdd(context, ref, variants.first),
-          ),
-          for (var i = 0; i < variants.length; i++)
-            _VariationTile(
-              variant: variants[i],
-              isCover: i == 0,
-              onTap: () {
-                Navigator.of(context, rootNavigator: true).pop();
-                context.push('/character/${variants[i].id}/edit');
-              },
-              onMore: () => _variantActions(context, ref, variants, i),
+      bodyPadding: const EdgeInsets.symmetric(horizontal: 16),
+      floatingActionButton: variants.isEmpty
+          ? null
+          : _AddVariationFab(
+              onTap: () => _promptAdd(context, ref, _source(variants), variants),
             ),
-        ],
+      // Builder so the padding read below is the one SheetView injects for its
+      // header and the nav bar. A ListView would consume that automatically;
+      // a CustomScrollView does not, and without this the first row of cards
+      // scrolls under the header instead of below it.
+      body: Builder(
+        builder: (context) {
+          final inset = MediaQuery.paddingOf(context);
+          return CustomScrollView(
+            slivers: [
+              SliverToBoxAdapter(child: SizedBox(height: inset.top + 8)),
+              SliverGrid(
+                // Same delegate as the library grid, so a variation card reads
+                // as the same kind of object as the card you came from.
+                gridDelegate:
+                    const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 2,
+                      mainAxisSpacing: 10,
+                      crossAxisSpacing: 10,
+                      childAspectRatio: 2 / 3,
+                    ),
+                delegate: SliverChildBuilderDelegate((context, i) {
+                  final variant = variants[i];
+                  return CharacterCard(
+                    key: ValueKey(variant.id),
+                    character: variant,
+                    inVariationsGrid: true,
+                  );
+                }, childCount: variants.length),
+              ),
+              // Trailing room so the last row can scroll clear of the FAB.
+              SliverToBoxAdapter(
+                child: SizedBox(height: inset.bottom + kVariationsFabClearance),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
 
-  void _promptAdd(BuildContext context, WidgetRef ref, Character source) {
+  /// The variation new copies are cloned from: the one this sheet was opened
+  /// from, falling back to the original if it has since been deleted.
+  Character _source(List<Character> variants) =>
+      variants.where((v) => v.id == sourceId).firstOrNull ?? variants.first;
+
+  void _promptAdd(
+    BuildContext context,
+    WidgetRef ref,
+    Character source,
+    List<Character> variants,
+  ) {
     GlazeBottomSheet.show<void>(
       context,
       title: 'variation_add'.tr(),
       input: BottomSheetInput(
         placeholder: 'variation_name'.tr(),
+        // Prefilled so creating a variation is one confirm, not a naming task.
+        value: _defaultVariantName(variants),
         confirmLabel: 'btn_create'.tr(),
         onConfirm: (val) async {
           Navigator.of(context, rootNavigator: true).pop();
@@ -70,238 +138,63 @@ class CharacterVariationsSheet extends ConsumerWidget {
     );
   }
 
-  void _variantActions(
-    BuildContext context,
-    WidgetRef ref,
-    List<Character> variants,
-    int index,
-  ) {
-    final variant = variants[index];
-    final isCover = index == 0;
-    GlazeBottomSheet.show<void>(
-      context,
-      title: variant.variantName?.trim().isNotEmpty == true
-          ? variant.variantName!.trim()
-          : 'variation_original'.tr(),
-      items: [
-        BottomSheetItem(
-          icon: Icons.drive_file_rename_outline,
-          label: 'action_rename'.tr(),
-          onTap: () {
-            Navigator.of(context, rootNavigator: true).pop();
-            _promptRename(context, ref, variant);
-          },
-        ),
-        if (!isCover)
-          BottomSheetItem(
-            icon: Icons.star_outline_rounded,
-            label: 'variation_make_cover'.tr(),
-            onTap: () {
-              Navigator.of(context, rootNavigator: true).pop();
-              final ordered = [
-                variant.id,
-                for (final v in variants)
-                  if (v.id != variant.id) v.id,
-              ];
-              ref
-                  .read(charactersProvider.notifier)
-                  .reorderVariants(groupId, ordered);
-            },
-          ),
-        BottomSheetItem(
-          icon: Icons.delete_outline,
-          label: 'variation_delete'.tr(),
-          isDestructive: true,
-          onTap: () {
-            Navigator.of(context, rootNavigator: true).pop();
-            _confirmDelete(context, ref, variant);
-          },
-        ),
-      ],
-    );
-  }
-
-  void _promptRename(BuildContext context, WidgetRef ref, Character variant) {
-    GlazeBottomSheet.show<void>(
-      context,
-      title: 'action_rename'.tr(),
-      input: BottomSheetInput(
-        placeholder: 'variation_name'.tr(),
-        value: variant.variantName ?? '',
-        confirmLabel: 'btn_save'.tr(),
-        onConfirm: (val) {
-          Navigator.of(context, rootNavigator: true).pop();
-          ref
-              .read(charactersProvider.notifier)
-              .renameVariant(variant.id, val.trim());
-        },
-      ),
-    );
-  }
-
-  void _confirmDelete(BuildContext context, WidgetRef ref, Character variant) {
-    GlazeBottomSheet.show<void>(
-      context,
-      title: 'variation_delete'.tr(),
-      bigInfo: BottomSheetBigInfo(
-        icon: Icons.delete_outline,
-        description: 'variation_delete_confirm'.tr(),
-      ),
-      items: [
-        BottomSheetItem(
-          label: 'btn_delete'.tr(),
-          isDestructive: true,
-          centered: true,
-          onTap: () {
-            Navigator.of(context, rootNavigator: true).pop();
-            ref.read(charactersProvider.notifier).remove(variant.id);
-          },
-        ),
-        BottomSheetItem(
-          label: 'btn_cancel'.tr(),
-          centered: true,
-          onTap: () => Navigator.of(context, rootNavigator: true).pop(),
-        ),
-      ],
-    );
+  /// A free "Variation N" name, skipping numbers already taken in the group.
+  String _defaultVariantName(List<Character> variants) {
+    final taken = {
+      for (final v in variants)
+        if (v.variantName?.trim().isNotEmpty == true) v.variantName!.trim(),
+    };
+    for (var n = variants.length; n < variants.length + 100; n++) {
+      final candidate = 'variation_default_name'.tr(
+        namedArgs: {'n': '${n + 1}'},
+      );
+      if (!taken.contains(candidate)) return candidate;
+    }
+    return '';
   }
 }
 
-class _AddVariationTile extends StatelessWidget {
-  final VoidCallback? onTap;
-  const _AddVariationTile({required this.onTap});
+/// Height reserved below the last row so it can scroll clear of the FAB
+/// (48pt button + the 16pt margin SheetView positions it with, plus air).
+const double kVariationsFabClearance = 80;
 
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Material(
-        color: context.cs.primary.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(12),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-            child: Row(
-              children: [
-                Icon(Icons.add_rounded, size: 20, color: context.cs.primary),
-                const SizedBox(width: 12),
-                Text(
-                  'variation_add'.tr(),
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: context.cs.primary,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _VariationTile extends StatelessWidget {
-  final Character variant;
-  final bool isCover;
+/// "Add variation" as a floating pill, mirroring the character sheet's chat
+/// FAB. It used to be the first row of the list, where the sheet header sat on
+/// top of it and it read as part of the content rather than the primary action.
+class _AddVariationFab extends StatelessWidget {
   final VoidCallback onTap;
-  final VoidCallback onMore;
 
-  const _VariationTile({
-    required this.variant,
-    required this.isCover,
-    required this.onTap,
-    required this.onMore,
-  });
+  const _AddVariationFab({required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    final label = variant.variantName?.trim().isNotEmpty == true
-        ? variant.variantName!.trim()
-        : 'variation_original'.tr();
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Material(
-        color: Colors.white.withValues(alpha: 0.04),
-        borderRadius: BorderRadius.circular(12),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: onTap,
-          onLongPress: onMore,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            child: Row(
-              children: [
-                _avatar(context),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Row(
-                    children: [
-                      Flexible(
-                        child: Text(
-                          label,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 15,
-                            color: context.cs.onSurface,
-                          ),
-                        ),
-                      ),
-                      if (isCover) ...[
-                        const SizedBox(width: 8),
-                        Icon(
-                          Icons.star_rounded,
-                          size: 16,
-                          color: context.cs.primary,
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-                IconButton(
-                  icon: Icon(
-                    Icons.more_horiz_rounded,
-                    color: context.cs.onSurfaceVariant,
-                  ),
-                  onPressed: onMore,
-                ),
-              ],
-            ),
-          ),
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        height: 48,
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        decoration: BoxDecoration(
+          color: context.cs.primary,
+          borderRadius: BorderRadius.circular(24),
+          boxShadow: const [
+            BoxShadow(blurRadius: 16, color: Color(0x80000000)),
+          ],
         ),
-      ),
-    );
-  }
-
-  Widget _avatar(BuildContext context) {
-    final path = variant.avatarPath;
-    final resolved =
-        (path != null && path.isNotEmpty) ? resolveGlazeFilePath(path) : null;
-    return ClipOval(
-      child: SizedBox.square(
-        dimension: 44,
-        child: resolved != null
-            ? Image.file(
-                File(resolved),
-                fit: BoxFit.cover,
-                errorBuilder: (_, _, _) => _placeholder(context),
-              )
-            : _placeholder(context),
-      ),
-    );
-  }
-
-  Widget _placeholder(BuildContext context) {
-    return Container(
-      color: context.cs.primary,
-      alignment: Alignment.center,
-      child: Text(
-        variant.name.isNotEmpty ? variant.name[0].toUpperCase() : '?',
-        style: const TextStyle(color: Colors.black, fontSize: 16),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.add_rounded, color: Colors.white, size: 20),
+            const SizedBox(width: 8),
+            Text(
+              'variation_add'.tr(),
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
+                fontSize: 15,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

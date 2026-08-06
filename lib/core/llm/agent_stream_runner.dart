@@ -87,6 +87,7 @@ class AgentStreamRunner {
       presencePenalty: resolved.presencePenalty,
       stream: shouldStream,
       requestReasoning: resolved.requestReasoning,
+      useResponsesApi: resolved.useResponsesApi,
       reasoningEffort: resolved.requestReasoning
           ? resolved.reasoningEffort
           : null,

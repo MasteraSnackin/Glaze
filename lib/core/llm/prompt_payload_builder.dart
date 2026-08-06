@@ -2,7 +2,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:dio/dio.dart';
 
-import '../../features/settings/api_list_provider.dart';
 import '../models/api_config.dart';
 import '../models/character.dart';
 import '../models/chat_message.dart';
@@ -11,17 +10,17 @@ import '../models/lorebook.dart';
 import '../models/memory_book.dart';
 import '../models/persona.dart';
 import '../models/preset.dart';
+import '../models/tracker.dart';
 import '../state/active_selection_provider.dart';
 import '../state/db_provider.dart';
 import '../state/global_regex_provider.dart';
+import '../state/lorebook_embedding_provider.dart';
 import '../state/lorebook_provider.dart';
 import '../state/memory_settings_provider.dart';
-import 'lorebook_providers.dart';
+import '../state/summary_providers.dart';
 import 'memory_injection_service.dart';
 import 'message_recall_service.dart';
 import 'memory_selector.dart';
-import '../../features/extensions/services/ext_blocks_prompt_injection.dart';
-import '../../features/extensions/services/runtime_prompt_injection_service.dart';
 import 'prompt_builder.dart';
 import 'prompt/arc_state_builder.dart';
 import 'prompt/ledger_tracker_loader.dart';
@@ -30,7 +29,6 @@ import 'prompt/studio_session_state_compiler.dart';
 import 'knowledge/character_knowledge_projection.dart';
 import 'prompt_inputs.dart';
 import 'prompt_inputs_collector.dart';
-import 'summary_service.dart';
 
 // Re-export for backward compat — tests import this from here.
 export 'prompt/studio_session_state_compiler.dart'
@@ -38,17 +36,54 @@ export 'prompt/studio_session_state_compiler.dart'
 
 class PromptPayloadBuilder {
   final Ref _ref;
-  late final PromptInputsCollector _inputsCollector = PromptInputsCollector(
-    _ref,
-  );
-  late final LedgerTrackerLoader _ledgerTrackerLoader = LedgerTrackerLoader(
-    _ref,
-  );
+  final Future<List<Tracker>> Function(String sessionId)
+  _loadEffectiveLedgerTrackers;
+  final PromptInputsCollector _inputsCollector;
+  final ApiConfigInitializer _initializeApiConfigs;
+  final ActiveApiConfigReader _readActiveApiConfig;
+  final PromptHistoryInjector _injectHistory;
+  final RuntimePromptBlocksReader _readRuntimePromptBlocks;
   late final LorebookVectorSearcher _vectorSearcher = LorebookVectorSearcher(
     _ref,
+    onDiagnostic: onLorebookVectorSearchDiagnostic,
   );
 
-  PromptPayloadBuilder(this._ref);
+  final void Function(LorebookVectorSearchDiagnostic diagnostic)?
+  onLorebookVectorSearchDiagnostic;
+
+  factory PromptPayloadBuilder(
+    Ref ref, {
+    required PromptInputsCollector inputsCollector,
+    required ApiConfigInitializer initializeApiConfigs,
+    required ActiveApiConfigReader readActiveApiConfig,
+    required PromptHistoryInjector injectHistory,
+    required RuntimePromptBlocksReader readRuntimePromptBlocks,
+    Future<List<Tracker>> Function(String sessionId)?
+    loadEffectiveLedgerTrackers,
+    void Function(LorebookVectorSearchDiagnostic diagnostic)?
+    onLorebookVectorSearchDiagnostic,
+  }) => PromptPayloadBuilder._(
+    ref,
+    inputsCollector,
+    initializeApiConfigs,
+    readActiveApiConfig,
+    injectHistory,
+    readRuntimePromptBlocks,
+    loadEffectiveLedgerTrackers ??
+        LedgerTrackerLoader(ref).loadEffectiveLedgerTrackers,
+    onLorebookVectorSearchDiagnostic,
+  );
+
+  PromptPayloadBuilder._(
+    this._ref,
+    this._inputsCollector,
+    this._initializeApiConfigs,
+    this._readActiveApiConfig,
+    this._injectHistory,
+    this._readRuntimePromptBlocks,
+    this._loadEffectiveLedgerTrackers,
+    this.onLorebookVectorSearchDiagnostic,
+  );
 
   /// Collects raw inputs from DB/providers for isolate-based processing.
   /// Fast path: DB reads only, no memory injection or vector search.
@@ -66,6 +101,7 @@ class PromptPayloadBuilder {
   Future<PromptPayload> buildFromSession({
     required String charId,
     required ChatSession? session,
+    ApiConfig? apiConfigOverride,
     String? guidanceText,
     bool skipVectorSearch = false,
     bool Function()? shouldAbort,
@@ -87,9 +123,9 @@ class PromptPayloadBuilder {
     throwIfAborted();
     if (character == null) throw StateError('Character not found: $charId');
 
-    await _ref.read(apiListProvider.future);
+    await _initializeApiConfigs();
     throwIfAborted();
-    final chatApi = _ref.read(activeApiConfigProvider);
+    final chatApi = apiConfigOverride ?? _readActiveApiConfig();
     if (chatApi == null || chatApi.mode == 'embedding') {
       throw StateError('No chat API config available');
     }
@@ -133,7 +169,17 @@ class PromptPayloadBuilder {
     String? recalledMessagesContent;
     List<RecalledMessageChunk> recalledMessageChunks = const [];
     final g = _ref.read(memoryGlobalSettingsProvider);
+    MemoryBook? memoryBook;
+    var memoryGraphEnabled = g.enabled;
+    if (memoryGraphEnabled && sessionId != null) {
+      memoryBook = await _ref
+          .read(memoryBookRepoProvider)
+          .getBySessionId(sessionId);
+      throwIfAborted();
+      memoryGraphEnabled = memoryBook?.settings.enabled ?? true;
+    }
     var memorySettings = MemoryBookSettings(
+      enabled: g.enabled,
       memoryExcerptingEnabled: g.memoryExcerptingEnabled,
       memoryPackingMode: g.memoryPackingMode,
       memoryExcerptTokensPerChunk: g.memoryExcerptTokensPerChunk,
@@ -143,22 +189,9 @@ class PromptPayloadBuilder {
     );
 
     if (session != null) {
-      history = await _ref
-          .read(extBlocksPromptInjectionProvider)
-          .injectIntoHistory(sessionId: session.id, messages: history);
+      history = await _injectHistory(sessionId: session.id, messages: history);
       throwIfAborted();
-      runtimePromptBlocks = _ref
-          .read(runtimePromptInjectionProvider.notifier)
-          .bySession(session.id)
-          .map(
-            (block) => RuntimePromptBlock(
-              id: block.id,
-              content: block.content,
-              depth: block.depth,
-              role: block.role,
-            ),
-          )
-          .toList(growable: false);
+      runtimePromptBlocks = _readRuntimePromptBlocks(session.id);
 
       final summaryService = _ref.read(summaryServiceProvider);
       summaryContent = await summaryService.getSummary(session.id);
@@ -187,15 +220,23 @@ class PromptPayloadBuilder {
                 .timeout(const Duration(seconds: 30), onTimeout: () => const [])
           : Future<List<LorebookEntry>>.value(const []);
 
-      final memoryFuture = memoryService.buildCandidatesWithDiagnostics(
-        sessionId: session.id,
-        history: session.messages,
-        currentText: currentText,
-        embeddingConfig: embeddingConfig,
-        shouldAbort: shouldAbort,
-        cancelToken: cancelToken,
-        contextBudgetTokens: chatApi.contextSize,
-      );
+      final memoryFuture = memoryGraphEnabled && memoryBook != null
+          ? memoryService.buildCandidatesWithDiagnostics(
+              sessionId: session.id,
+              history: session.messages,
+              currentText: currentText,
+              embeddingConfig: embeddingConfig,
+              shouldAbort: shouldAbort,
+              cancelToken: cancelToken,
+              contextBudgetTokens: chatApi.contextSize,
+            )
+          : Future.value(
+              MemoryCandidateBuildResult(
+                selection: const MemorySelection(),
+                diagnostics: null,
+                settings: memoryBook?.settings,
+              ),
+            );
 
       // NEW (patch #3): raw-message recall — cosine search over
       // `sourceType='chat_message'` chunks embedded by
@@ -321,7 +362,8 @@ class PromptPayloadBuilder {
     // recall or optional InfBlocks.
     String? studioSessionStateContent;
     String? characterKnowledgeContent;
-    if (sessionId != null) {
+    List<Tracker>? ledgerTrackers;
+    if (memoryGraphEnabled && sessionId != null) {
       try {
         final facts = await _ref
             .read(characterKnowledgeFactRepoProvider)
@@ -335,11 +377,17 @@ class PromptPayloadBuilder {
         debugPrint('[PromptBuilder] character knowledge load failed: $e');
       }
     }
-    if (sessionId != null) {
+    if (memoryGraphEnabled && sessionId != null) {
       try {
-        final ledgerTrackers = await _ledgerTrackerLoader
-            .loadEffectiveLedgerTrackers(sessionId);
-        if (ledgerTrackers.isNotEmpty) {
+        ledgerTrackers = List.unmodifiable(
+          await _loadEffectiveLedgerTrackers(sessionId),
+        );
+      } catch (e) {
+        debugPrint('[PromptBuilder] studio_session_state load failed: $e');
+      }
+      try {
+        if (ledgerTrackers case final ledgerTrackers?
+            when ledgerTrackers.isNotEmpty) {
           studioSessionStateContent = compileStudioSessionState(
             ledgerTrackers,
             sessionId,
@@ -363,15 +411,17 @@ class PromptPayloadBuilder {
     // unrelated completed arcs unless needed to prevent card-baseline regression.
     String? arcContent;
     String? entitiesContent;
-    if (memorySettings.memoryMode != 'fast' && sessionId != null) {
+    if (memoryGraphEnabled &&
+        memorySettings.memoryMode != 'fast' &&
+        sessionId != null) {
       try {
-        final allLedger = await _ledgerTrackerLoader
-            .loadEffectiveLedgerTrackers(sessionId);
-        arcContent = buildArcContent(
-          allLedger,
-          latestUserText: latestUserTextFromHistory(history),
-          latestAssistantText: latestAssistantTextFromHistory(history),
-        );
+        if (ledgerTrackers != null) {
+          arcContent = buildArcContent(
+            ledgerTrackers,
+            latestUserText: latestUserTextFromHistory(history),
+            latestAssistantText: latestAssistantTextFromHistory(history),
+          );
+        }
       } catch (_) {}
       try {
         final entities = await _ref
@@ -457,9 +507,7 @@ class PromptPayloadBuilder {
     List<LorebookEntry> vectorEntries = [];
     List<ChatMessage> history = session?.messages ?? [];
     if (session != null) {
-      history = await _ref
-          .read(extBlocksPromptInjectionProvider)
-          .injectIntoHistory(sessionId: session.id, messages: history);
+      history = await _injectHistory(sessionId: session.id, messages: history);
     }
     if (!skipVectorSearch && session != null) {
       vectorEntries = await _vectorSearcher.search(
@@ -472,12 +520,27 @@ class PromptPayloadBuilder {
     }
 
     final memSettings = _ref.read(memoryGlobalSettingsProvider);
+    MemoryBook? memoryBook;
+    var memoryGraphEnabled = memSettings.enabled;
+    if (memoryGraphEnabled && session != null) {
+      memoryBook = await _ref
+          .read(memoryBookRepoProvider)
+          .getBySessionId(session.id);
+      memoryGraphEnabled = memoryBook?.settings.enabled ?? true;
+    }
     String? studioSessionStateContent;
-    if (session != null) {
+    List<Tracker>? ledgerTrackers;
+    if (memoryGraphEnabled && session != null) {
       try {
-        final ledgerTrackers = await _ledgerTrackerLoader
-            .loadEffectiveLedgerTrackers(session.id);
-        if (ledgerTrackers.isNotEmpty) {
+        ledgerTrackers = List.unmodifiable(
+          await _loadEffectiveLedgerTrackers(session.id),
+        );
+      } catch (e) {
+        debugPrint('[PromptBuilder] studio_session_state load failed: $e');
+      }
+      try {
+        if (ledgerTrackers case final ledgerTrackers?
+            when ledgerTrackers.isNotEmpty) {
           studioSessionStateContent = compileStudioSessionState(
             ledgerTrackers,
             session.id,
@@ -491,15 +554,17 @@ class PromptPayloadBuilder {
     }
     String? arcContent;
     String? entitiesContent;
-    if (memSettings.memoryMode != 'fast' && session != null) {
+    if (memoryGraphEnabled &&
+        (memoryBook?.settings.memoryMode ?? memSettings.memoryMode) != 'fast' &&
+        session != null) {
       try {
-        final allLedger = await _ledgerTrackerLoader
-            .loadEffectiveLedgerTrackers(session.id);
-        arcContent = buildArcContent(
-          allLedger,
-          latestUserText: latestUserTextFromHistory(history),
-          latestAssistantText: latestAssistantTextFromHistory(history),
-        );
+        if (ledgerTrackers != null) {
+          arcContent = buildArcContent(
+            ledgerTrackers,
+            latestUserText: latestUserTextFromHistory(history),
+            latestAssistantText: latestAssistantTextFromHistory(history),
+          );
+        }
       } catch (_) {}
       try {
         final entities = await _ref
@@ -562,7 +627,3 @@ class PromptPayloadBuilder {
 class _GenerationAbortedException implements Exception {
   const _GenerationAbortedException();
 }
-
-final promptPayloadBuilderProvider = Provider<PromptPayloadBuilder>((ref) {
-  return PromptPayloadBuilder(ref);
-});

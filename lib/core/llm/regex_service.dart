@@ -1,8 +1,11 @@
+import 'package:flutter/foundation.dart';
+
 import '../models/preset.dart';
 import '../models/character.dart';
 import '../models/persona.dart';
 import '../models/chat_message.dart' show TriggeredEntry;
 import 'macro_engine.dart';
+import 'regex_validator.dart';
 
 class RegexApplyContext {
   final Character? char;
@@ -118,6 +121,12 @@ String _applySingleScript(String text, PresetRegex script, RegexApplyContext ctx
   }
 
   if (pattern.isEmpty) return processed;
+
+  final safety = classifyRegexSafety(pattern);
+  if (safety == RegexSafety.pathological) {
+    debugPrint('[regex] skipping pathological pattern "${script.name}": $pattern');
+    return processed;
+  }
 
   final parsed = _parseRegexPattern(pattern);
   try {

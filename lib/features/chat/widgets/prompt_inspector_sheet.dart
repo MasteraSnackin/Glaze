@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
 import '../../../shared/widgets/sheet_view.dart';
@@ -55,24 +56,24 @@ class _PromptInspectorSheetState extends State<PromptInspectorSheet> {
     );
 
     return SheetView(
-      title: 'Prompt Inspector',
+      title: 'prompt_inspector_title'.tr(),
       showBack: true,
       startExpanded: true,
       onBack: () => Navigator.of(context).maybePop(),
-      tabs: const [
+      tabs: [
         SheetViewTab(
           id: PromptInspectorSheet._tabContext,
-          label: 'Context',
+          label: 'tab_context'.tr(),
           icon: Icons.segment,
         ),
         SheetViewTab(
           id: PromptInspectorSheet._tabPreview,
-          label: 'Request',
+          label: 'tab_request'.tr(),
           icon: Icons.visibility,
         ),
         SheetViewTab(
           id: PromptInspectorSheet._tabCoverage,
-          label: 'Coverage',
+          label: 'tab_coverage'.tr(),
           icon: Icons.search,
         ),
       ],

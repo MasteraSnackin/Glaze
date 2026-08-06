@@ -1,6 +1,7 @@
 import { ICON } from './icon_library.js';
 import { createImageAttachment, setImageAttachmentHidden } from './image_embed.js';
 import { writeShadowContent } from './markdown.js';
+import { sanitizeMessageHtml } from '../bridge/html_sanitizer.js';
 import {
   defaultName,
   formatDate,
@@ -24,7 +25,7 @@ import { SHADOW_STYLE } from './shadow_style.js';
  *       (bubble layout) .bubble-meta — gen-stat / token-count-inline / bubble-time
  *     .msg-footer
  *       .msg-meta            — gen-stat (full layout only)
- *       .msg-center-controls — .msg-switcher / .msg-regenerate / .msg-guided-swipe-btn / .stop-btn
+ *       .msg-center-controls — .msg-switcher / .msg-regenerate / .msg-guided-swipe-btn
  *       .msg-actions-btn or .edit-buttons
  *   .guided-swipe-container (toggled by bridge)
  * ============================================================ */
@@ -38,6 +39,7 @@ export class Renderer {
     this.searchMatches = [];
     this._lastTimestamps = { date: null, idx: -1 };
     this.selectionManager = null;
+    this.allowMessageScripts = false;
   }
 
   /* ----- Public: render a message ----- */
@@ -506,16 +508,6 @@ if (messageData.isEditing) classes.push('editing');
       center.appendChild(guided);
     }
 
-    if (isChar && m.isLast && m.isGenerating) {
-      const stop = document.createElement('button');
-      stop.className = 'stop-btn';
-      stop.dataset.action = 'stop';
-      stop.dataset.messageId = m.id;
-      stop.title = 'Stop';
-      stop.innerHTML = ICON.stop;
-      center.appendChild(stop);
-    }
-
     if (showRegen) {
       const regen = document.createElement('div');
       regen.className = 'msg-regenerate';
@@ -630,6 +622,7 @@ if (messageData.isEditing) classes.push('editing');
       formatter: this.formatter,
       searchQuery: this.searchQuery,
       applySearchHighlight: (html) => this._applySearchHighlight(html),
+      allowMessageScripts: this.allowMessageScripts,
     });
   }
 
@@ -985,7 +978,11 @@ if (messageData.isEditing) classes.push('editing');
           if (root) {
             const formatted = this.formatter.format(rawText, isUser);
             const prevMatchIndex = globalState.matchIndex;
-            root.innerHTML = this._applySearchHighlight(formatted, globalState);
+            const highlighted = this._applySearchHighlight(formatted, globalState);
+            root.innerHTML = this.allowMessageScripts
+              ? highlighted
+              : sanitizeMessageHtml(highlighted);
+            root.querySelectorAll('script').forEach(script => script.remove());
             
             if (activeIndex >= prevMatchIndex && activeIndex < globalState.matchIndex) {
               activeMessageId = section.dataset.messageId || section.dataset.vlId;

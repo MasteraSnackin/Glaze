@@ -8,6 +8,7 @@ import { EditController } from './edit_controller.js';
 import { SwipeGestureHandler } from './swipe_gesture_handler.js';
 import { InteractionDispatch } from './interaction_dispatch.js';
 import { PanelHost } from './panel_host.js';
+import { sanitizeExtBlockHtml } from './html_sanitizer.js';
 import { ICON } from '../renderer/icon_library.js';
 
 export class Bridge {
@@ -123,7 +124,7 @@ export class Bridge {
   setGenerating(value) {
     const wasGenerating = this.isGenerating;
     this.isGenerating = !!value;
-    this._syncGenerationActivity();
+    this._syncGenerationTimer();
     // updateHeader() early-returns for the whole streaming window, so the
     // scroll-hide header is frozen at whatever state it had when generation
     // started. If it was hidden — and especially if the chat then shrank (a
@@ -140,11 +141,10 @@ export class Bridge {
 
   setPostGenRunning(value) {
     this.isPostGenRunning = !!value;
-    this._syncGenerationActivity();
   }
 
-  _syncGenerationActivity() {
-    if (this.isGenerating || this.isPostGenRunning) {
+  _syncGenerationTimer() {
+    if (this.isGenerating) {
       this._genTimer.start();
     } else {
       this._genTimer.stop();
@@ -188,7 +188,7 @@ export class Bridge {
           type: 'glaze:response',
           id: data.id,
           ok: false,
-          error: { message: String(error && error.message ? error.message : error) },
+          error: { code: error && error.code, message: String(error && error.message ? error.message : error) },
         }, '*');
       }
     });
@@ -201,7 +201,9 @@ export class Bridge {
     const response = await window.flutter_inappwebview.callHandler('glazeBridge', request);
     if (response && response.ok === false) {
       const error = response.error || {};
-      throw new Error(error.message || 'Glaze bridge error');
+      const bridgeError = new Error(error.message || 'Glaze bridge error');
+      bridgeError.code = error.code;
+      throw bridgeError;
     }
     return response && Object.prototype.hasOwnProperty.call(response, 'result')
       ? response.result
@@ -618,16 +620,6 @@ export class Bridge {
       center.appendChild(guided);
     }
 
-    if (isChar && isLast && isGenerating) {
-      const stop = document.createElement('button');
-      stop.className = 'stop-btn';
-      stop.dataset.action = 'stop';
-      stop.dataset.messageId = section.dataset.messageId;
-      stop.title = 'Stop';
-      stop.innerHTML = ICON.stop;
-      center.appendChild(stop);
-    }
-
     if (showRegen) {
       const regen = document.createElement('div');
       regen.className = 'msg-regenerate';
@@ -655,7 +647,6 @@ export class Bridge {
       if (center) {
         center.querySelector('.msg-regenerate')?.remove();
         center.querySelector('.msg-guided-swipe-btn')?.remove();
-        center.querySelector('.stop-btn')?.remove();
       }
     }
     if (!newLastId) return;
@@ -698,7 +689,14 @@ export class Bridge {
     const el = document.querySelector(`[data-message-id="${messageId}"]`);
     if (el && this.renderer) {
       this.renderer.animateRemoveSection(el, () => {
-        this.virtualList.remove(messageId);
+        // The exit animation runs for ~340ms and the id can be re-registered
+        // in the meantime — the streaming placeholder reuses one constant id,
+        // and `append` already evicted the node we animated out. Dropping the
+        // id here regardless would delete the *new* bubble.
+        const item = this.virtualList.itemMap?.get(messageId);
+        if (!item || item.el === el) {
+          this.virtualList.remove(messageId);
+        }
         this._pruneOrphanSeparators();
       });
     } else {
@@ -1105,6 +1103,10 @@ export class Bridge {
     container.classList.toggle('hide-rerun-cleaner', !s.studioEnabled);
     // Battery saver kills the overlay backdrop-filter strips too.
     this._renderOverlayBlurRegions();
+  }
+
+  setAllowMessageScripts(enabled) {
+    this.renderer.allowMessageScripts = enabled === true;
   }
 
   /* ---------- Inline edit (toggle into .msg-body) ---------- */
@@ -1668,17 +1670,17 @@ export class Bridge {
       );
       const htmlEl = document.createElement('div');
       htmlEl.className = 'ext-block-content';
-      htmlEl.innerHTML = html;
+      htmlEl.innerHTML = sanitizeExtBlockHtml(html);
       body.appendChild(htmlEl);
     } else if (hasImgResult) {
       const imgMatch = block.content.match(imgResultRegex);
       const wrapper = document.createElement('span');
-      wrapper.innerHTML = this._renderExtBlockImageHtml(imgMatch[1]);
+      wrapper.innerHTML = sanitizeExtBlockHtml(this._renderExtBlockImageHtml(imgMatch[1]));
       body.appendChild(wrapper.firstElementChild);
     } else {
       const html = document.createElement('div');
       html.className = 'ext-block-content';
-      html.innerHTML = block.content;
+      html.innerHTML = sanitizeExtBlockHtml(block.content);
       body.appendChild(html);
     }
   }

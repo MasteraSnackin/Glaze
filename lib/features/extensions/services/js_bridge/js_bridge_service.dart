@@ -12,6 +12,7 @@ import 'handlers/prompt_injection_handler.dart';
 import 'handlers/toast_handler.dart';
 import 'handlers/variables_handler.dart';
 import 'js_bridge_context.dart';
+import 'js_bridge_method_registry.dart';
 
 export 'js_bridge_context.dart'
     show
@@ -24,22 +25,28 @@ export 'js_bridge_context.dart'
         ShowToastHandler,
         TriggerGenerationHandlerFn,
         UninjectPromptHandler;
+export 'js_bridge_method_registry.dart'
+    show
+        JsBridgeHostProfile,
+        JsBridgeMethodDefinition,
+        JsBridgeMethodRegistry,
+        JsBridgeOperation;
 
 class JsBridgeService {
-  final ChatRepo? _chatRepo;
-  final CharacterRepo? _characterRepo;
-  final GlobalVariablesRepo? _globalVariablesRepo;
-  final MessageVariablesAccessor? _messageVariables;
-  final String? Function()? _currentSessionId;
-  final String? Function()? _currentCharacterId;
-  final GenerateTextHandler? _generateText;
-  final InjectPromptHandler? _injectPrompt;
-  final UninjectPromptHandler? _uninjectPrompt;
-  final TriggerGenerationHandlerFn? _triggerGeneration;
-  final PermissionCheck? _permissionCheck;
-  final PlayAudioHandler? _playAudio;
-  final ExecuteCommandHandler? _executeCommand;
-  final ShowToastHandler? _showToast;
+  final ChatRepo _chatRepo;
+  final CharacterRepo _characterRepo;
+  final GlobalVariablesRepo _globalVariablesRepo;
+  final MessageVariablesAccessor _messageVariables;
+  final String? Function() _currentSessionId;
+  final String? Function() _currentCharacterId;
+  final GenerateTextHandler _generateText;
+  final InjectPromptHandler _injectPrompt;
+  final UninjectPromptHandler _uninjectPrompt;
+  final TriggerGenerationHandlerFn _triggerGeneration;
+  final PermissionCheck _permissionCheck;
+  final PlayAudioHandler _playAudio;
+  final ExecuteCommandHandler _executeCommand;
+  final ShowToastHandler _showToast;
 
   final VariablesHandler _variablesHandler;
   final GenerationHandler _generationHandler;
@@ -49,20 +56,20 @@ class JsBridgeService {
   final ToastHandler _toastHandler;
 
   JsBridgeService({
-    ChatRepo? chatRepo,
-    CharacterRepo? characterRepo,
-    GlobalVariablesRepo? globalVariablesRepo,
-    MessageVariablesAccessor? messageVariables,
-    String? Function()? currentSessionId,
-    String? Function()? currentCharacterId,
-    GenerateTextHandler? generateText,
-    InjectPromptHandler? injectPrompt,
-    UninjectPromptHandler? uninjectPrompt,
-    TriggerGenerationHandlerFn? triggerGeneration,
-    PermissionCheck? permissionCheck,
-    PlayAudioHandler? playAudio,
-    ExecuteCommandHandler? executeCommand,
-    ShowToastHandler? showToast,
+    required ChatRepo chatRepo,
+    required CharacterRepo characterRepo,
+    required GlobalVariablesRepo globalVariablesRepo,
+    required MessageVariablesAccessor messageVariables,
+    required String? Function() currentSessionId,
+    required String? Function() currentCharacterId,
+    required GenerateTextHandler generateText,
+    required InjectPromptHandler injectPrompt,
+    required UninjectPromptHandler uninjectPrompt,
+    required TriggerGenerationHandlerFn triggerGeneration,
+    required PermissionCheck permissionCheck,
+    required PlayAudioHandler playAudio,
+    required ExecuteCommandHandler executeCommand,
+    required ShowToastHandler showToast,
   }) : this._(
          chatRepo,
          characterRepo,
@@ -141,6 +148,11 @@ class JsBridgeService {
     Map<String, dynamic> params,
     Map<String, dynamic> context,
   ) {
+    final definition = JsBridgeMethodRegistry.lookup(method);
+    if (definition == null) {
+      throw UnsupportedError('Unknown glaze method "$method"');
+    }
+
     final bridge = JsBridgeContext(
       params: params,
       context: context,
@@ -159,30 +171,29 @@ class JsBridgeService {
       executeCommand: _executeCommand,
       showToast: _showToast,
     );
+    bridge.requireCapability(definition.capabilityFor(params));
 
-    switch (method) {
-      case 'showToast':
+    switch (definition.operation) {
+      case JsBridgeOperation.showToast:
         return _toastHandler.showToast(bridge);
-      case 'getVariables':
+      case JsBridgeOperation.getVariables:
         return _variablesHandler.getVariables(bridge);
-      case 'setVariables':
+      case JsBridgeOperation.setVariables:
         return _variablesHandler.setVariables(bridge);
-      case 'deleteVariable':
+      case JsBridgeOperation.deleteVariable:
         return _variablesHandler.deleteVariable(bridge);
-      case 'executeCommand':
+      case JsBridgeOperation.executeCommand:
         return _commandHandler.executeCommand(bridge);
-      case 'triggerGeneration':
+      case JsBridgeOperation.triggerGeneration:
         return _generationHandler.triggerGeneration(bridge);
-      case 'playAudio':
+      case JsBridgeOperation.playAudio:
         return _audioHandler.playAudio(bridge);
-      case 'injectPrompt':
+      case JsBridgeOperation.injectPrompt:
         return _promptInjectionHandler.injectPrompt(bridge);
-      case 'uninjectPrompt':
+      case JsBridgeOperation.uninjectPrompt:
         return _promptInjectionHandler.uninjectPrompt(bridge);
-      case 'generateText':
+      case JsBridgeOperation.generateText:
         return _generationHandler.generateText(bridge);
-      default:
-        throw UnsupportedError('Unknown glaze method "$method"');
     }
   }
 }

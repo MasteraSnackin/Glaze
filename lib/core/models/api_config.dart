@@ -26,6 +26,7 @@ abstract class ApiConfig with _$ApiConfig {
     @Default(true) bool stream,
     @Default('medium') String reasoningEffort,
     @Default(false) bool requestReasoning,
+    @Default(false) bool useResponsesApi,
     @Default(true) bool showNativeReasoning,
     @Default(0) int reasoningHistoryCount,
     String? reasoningTagStart,

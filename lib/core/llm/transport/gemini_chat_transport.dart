@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
+import '../../utils/error_format.dart';
 import '../converters/gemini_messages.dart';
 import '../converters/thinking_budget.dart';
 import 'chat_transport.dart';
@@ -217,7 +218,7 @@ class GeminiChatTransport implements ChatTransport {
           await Future<void>.delayed(const Duration(seconds: 1));
           continue;
         }
-        onError?.call(e);
+        onError?.call(await decodeStreamingError(e));
         return;
       } catch (e) {
         onError?.call(e);

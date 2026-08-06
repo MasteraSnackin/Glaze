@@ -56,17 +56,16 @@ class _TabSlideSwitcherState extends State<TabSlideSwitcher> {
           // whose animation runs in reverse — leaves toward `-_direction`.
           final begin = Offset(isIncoming ? _direction : -_direction, 0);
           return SlideTransition(
-            position: Tween<Offset>(begin: begin, end: Offset.zero)
-                .animate(animation),
+            position: Tween<Offset>(
+              begin: begin,
+              end: Offset.zero,
+            ).animate(animation),
             child: child,
           );
         },
         layoutBuilder: (currentChild, previousChildren) => Stack(
           alignment: Alignment.topCenter,
-          children: [
-            ...previousChildren,
-            if (currentChild != null) currentChild,
-          ],
+          children: [...previousChildren, ?currentChild],
         ),
         child: KeyedSubtree(
           key: ValueKey<int>(widget.index),

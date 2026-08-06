@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -28,6 +30,7 @@ void main() {
   group('chat WebView file access policy', () {
     tearDown(() {
       debugDefaultTargetPlatformOverride = null;
+      setChatWebViewLocalFileBaseUrlForTesting(null);
     });
 
     test('allows bundled asset module imports on Windows', () {
@@ -40,6 +43,18 @@ void main() {
       debugDefaultTargetPlatformOverride = TargetPlatform.android;
 
       expect(chatWebViewAllowFileAccessFromFileUrls(), isFalse);
+    });
+
+    test('fails closed on desktop platforms without a local-file server', () {
+      debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+
+      expect(
+        chatWebViewResolveLocalFileUrl(
+          '${Directory.current.path}${Platform.pathSeparator}avatars'
+          '${Platform.pathSeparator}avatar.png',
+        ),
+        isNull,
+      );
     });
   });
 
@@ -84,12 +99,16 @@ void main() {
       final resolved = chatWebViewResolveLocalFileUrl(
         '/data/user/0/com.hydall.glaze/Glaze/avatars/char.png',
       );
-      expect(resolved, startsWith('http://127.0.0.1:42424/__glaze_file__?path='));
+      expect(
+        resolved,
+        startsWith('http://127.0.0.1:42424/__glaze_file__?path='),
+      );
       expect(resolved, contains('avatars'));
       expect(
         chatWebViewResolveLocalFileUrl('/data/user/0/com.other/app/avatar.png'),
-        '/data/user/0/com.other/app/avatar.png',
+        isNull,
       );
+      expect(chatWebViewResolveLocalFileUrl('relative/avatar.png'), isNull);
     });
 
     test('does not use Android asset loader on Windows', () {
@@ -146,6 +165,40 @@ void main() {
       expect(
         chatWebViewInitialUrlRequest()?.url.toString(),
         'http://127.0.0.1:51234/index.html',
+      );
+    });
+
+    test('allows the loopback bootstrap navigation and blocks others', () {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      setChatWebViewAssetBaseUrlForTesting(WebUri('http://127.0.0.1:51234/'));
+
+      expect(
+        chatWebViewNavigationPolicy(
+          WebUri('http://127.0.0.1:51234/index.html'),
+        ),
+        NavigationActionPolicy.ALLOW,
+      );
+      expect(
+        chatWebViewNavigationPolicy(WebUri('https://example.com/')),
+        NavigationActionPolicy.CANCEL,
+      );
+    });
+
+    test('allows the loopback bootstrap navigation on Windows', () {
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      setChatWebViewAssetBaseUrlForTesting(WebUri('http://127.0.0.1:51234/'));
+
+      expect(
+        chatWebViewNavigationPolicy(
+          WebUri('http://127.0.0.1:51234/index.html'),
+        ),
+        NavigationActionPolicy.ALLOW,
+      );
+      expect(
+        chatWebViewNavigationPolicy(
+          WebUri('http://127.0.0.1:51234/bridge/index.js'),
+        ),
+        NavigationActionPolicy.CANCEL,
       );
     });
   });

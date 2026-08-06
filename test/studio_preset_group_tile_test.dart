@@ -75,4 +75,32 @@ void main() {
 
     expect(selected, 'second_person');
   });
+
+  testWidgets('locked group child cannot be toggled', (tester) async {
+    const blocks = [
+      StudioPresetBlock(id: 'header', title: '━ Core'),
+      StudioPresetBlock(id: 'core', title: 'Core Directive', locked: true),
+    ];
+    final group = groupStudioPresetBlocks(blocks).single;
+    var toggled = false;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: StudioPresetGroupTile(
+            group: group,
+            onSelectExclusive: (_) {},
+            onToggle: (_, _) => toggled = true,
+            onEdit: (_) {},
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Core'));
+    await tester.pumpAndSettle();
+
+    final toggle = tester.widget<Switch>(find.byType(Switch));
+    expect(toggle.onChanged, isNull);
+    expect(toggled, isFalse);
+  });
 }

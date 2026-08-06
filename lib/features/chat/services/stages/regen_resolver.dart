@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -20,12 +22,13 @@ class RegenResolver {
 
   /// Returns the final state to apply if [regenTargetId] was set, or null
   /// to fall through to the normal-result path.
-  GenerationOutcome? resolve({
+  Future<GenerationOutcome?> resolve({
     required ChatState result,
     required String? regenTargetId,
     required ChatSession? saveSession,
     required ChatSession session,
-  }) {
+    required int genId,
+  }) async {
     if (regenTargetId == null) return null;
 
     if (result.regenTargetId == regenTargetId) {
@@ -92,25 +95,67 @@ class RegenResolver {
       // normal-looking bubble whose text is an error message.
       isError: restoredVariationIsError(original, rollbackSwipesMeta),
     );
-    final restoredMessages = [...restoreSession.messages];
-    restoredMessages[idx] = restored;
-    final restoredSession = session.copyWith(
-      messages: restoredMessages,
-      updatedAt: currentTimestampSeconds(),
-    );
-    // Note: persist is fire-and-forget here; full sync lives in the
-    // caller's pre-save path.
-    // ignore: unawaited_futures
-    ctx.ref.read(chatRepoProvider).put(restoredSession).catchError((Object e) {
+    final expected = result.session?.messages
+        .where((message) => message.id == regenTargetId)
+        .firstOrNull;
+    ChatSession? durableSession;
+    try {
+      if (expected != null) {
+        durableSession = await ctx.ref
+            .read(chatRepoProvider)
+            .mutateSession(
+              sessionId: restoreSession.id,
+              updatedAt: currentTimestampSeconds(),
+              mutate: (latest) {
+                if (!ctx.abortHandler.isCurrentGen(genId)) return null;
+                final latestIdx = latest.messages.indexWhere(
+                  (message) => message.id == regenTargetId,
+                );
+                if (latestIdx < 0 ||
+                    !_sameGenerationAnchor(
+                      expected,
+                      latest.messages[latestIdx],
+                    )) {
+                  return null;
+                }
+                final messages = [...latest.messages];
+                messages[latestIdx] = restored.copyWith(
+                  isHidden: messages[latestIdx].isHidden,
+                  imageHidden: messages[latestIdx].imageHidden,
+                );
+                return latest.copyWith(messages: messages);
+              },
+            );
+      }
+      durableSession ??= await ctx.ref
+          .read(chatRepoProvider)
+          .getById(restoreSession.id);
+    } catch (e) {
       debugPrint('[RegenResolver] failed to persist restored session: $e');
-    });
-    ChatSessionService.updateCache(restoredSession);
+      try {
+        durableSession = await ctx.ref
+            .read(chatRepoProvider)
+            .getById(restoreSession.id);
+      } catch (reloadError) {
+        debugPrint(
+          '[RegenResolver] failed to reload current session: $reloadError',
+        );
+      }
+    }
+    if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) return null;
+    if (durableSession == null) {
+      return GenerationOutcome(
+        state: ctx.getState().value ?? result,
+        clearRestorationMessage: original,
+      );
+    }
+    ChatSessionService.updateCache(durableSession);
     ctx.ref.invalidate(chatHistoryProvider);
     ctx.abortHandler.restorationMessage = null;
     ctx.setState(
       AsyncData(
         ChatState(
-          session: restoredSession,
+          session: durableSession,
           isGenerating: false,
           error: result.error,
           regenTargetId: null,
@@ -121,5 +166,19 @@ class RegenResolver {
       state: ctx.getState().value ?? result,
       clearRestorationMessage: null,
     );
+  }
+
+  static bool _sameGenerationAnchor(ChatMessage expected, ChatMessage current) {
+    return expected.content == current.content &&
+        expected.swipeId == current.swipeId &&
+        expected.agentSwipeId == current.agentSwipeId &&
+        jsonEncode(expected.swipes) == jsonEncode(current.swipes) &&
+        jsonEncode(expected.swipesMeta) == jsonEncode(current.swipesMeta) &&
+        jsonEncode(
+              expected.agentSwipes.map((swipe) => swipe.toJson()).toList(),
+            ) ==
+            jsonEncode(
+              current.agentSwipes.map((swipe) => swipe.toJson()).toList(),
+            );
   }
 }

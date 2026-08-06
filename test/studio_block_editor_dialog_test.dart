@@ -47,7 +47,7 @@ void main() {
 
       await tester.tap(find.text('Open'));
       await tester.pumpAndSettle();
-      return result == null ? null : result;
+      return result;
     }
 
     testWidgets('returns updated block on Save', (tester) async {

@@ -53,6 +53,9 @@ class ImageGenProcessor {
           );
     if (targetIdx < 0) return;
     final targetMsg = session.messages[targetIdx];
+    final stableTargetMessageId = targetMsg.id;
+    final targetSwipeId = targetMsg.swipeId;
+    final targetAgentSwipeId = targetMsg.agentSwipeId;
     if (targetMsg.role != 'assistant') return;
 
     final notifier = _ref.read(imageGenSettingsProvider.notifier);
@@ -116,9 +119,10 @@ class ImageGenProcessor {
           // operation from reaching a replacement generation.
           if (!_ownsOperation) return;
           latestSession = _replaceMessage(
-            session,
-            targetIdx,
-            targetMsg,
+            latestSession,
+            stableTargetMessageId,
+            targetSwipeId,
+            targetAgentSwipeId,
             updatedText,
           );
           _onStateUpdate(
@@ -152,24 +156,44 @@ class ImageGenProcessor {
           cancelContent = replaced;
         }
         latestSession = _replaceMessage(
-          session,
-          targetIdx,
-          targetMsg,
+          latestSession,
+          stableTargetMessageId,
+          targetSwipeId,
+          targetAgentSwipeId,
           cancelContent,
         );
-        await _ref.read(chatRepoProvider).put(latestSession);
-        ChatSessionService.updateCache(latestSession);
+        final durable = await _persistMessageContent(
+          session.id,
+          stableTargetMessageId,
+          targetSwipeId,
+          targetAgentSwipeId,
+          cancelContent,
+        );
+        if (durable != null) {
+          latestSession = durable;
+          ChatSessionService.updateCache(durable);
+        }
         return;
       }
 
       latestSession = _replaceMessage(
-        session,
-        targetIdx,
-        targetMsg,
+        latestSession,
+        stableTargetMessageId,
+        targetSwipeId,
+        targetAgentSwipeId,
         updatedContent,
       );
-      await _ref.read(chatRepoProvider).put(latestSession);
-      ChatSessionService.updateCache(latestSession);
+      final durable = await _persistMessageContent(
+        session.id,
+        stableTargetMessageId,
+        targetSwipeId,
+        targetAgentSwipeId,
+        updatedContent,
+      );
+      if (durable != null) {
+        latestSession = durable;
+        ChatSessionService.updateCache(durable);
+      }
     } on DioException catch (e) {
       if (!CancelToken.isCancel(e)) rethrow;
     } finally {
@@ -191,6 +215,7 @@ class ImageGenProcessor {
     required ChatState? liveState,
     required ChatState update,
     required String sessionId,
+    required String targetMessageId,
     required bool ownsOperation,
   }) {
     if (!ownsOperation ||
@@ -200,24 +225,71 @@ class ImageGenProcessor {
       return null;
     }
 
+    final liveSession = liveState.session!;
+    final updatedMessage = update.session!.messages
+        .where((message) => message.id == targetMessageId)
+        .firstOrNull;
+    final liveIndex = liveSession.messages.indexWhere(
+      (message) => message.id == targetMessageId,
+    );
+    final mergedSession = updatedMessage == null || liveIndex < 0
+        ? liveSession
+        : liveSession.copyWith(
+            messages: List<ChatMessage>.from(liveSession.messages)
+              ..[liveIndex] = updatedMessage,
+            updatedAt: update.session!.updatedAt,
+          );
+
     return liveState.copyWith(
-      session: update.session,
+      session: mergedSession,
       isGeneratingImage: update.isGeneratingImage,
     );
   }
 
   ChatSession _replaceMessage(
     ChatSession session,
-    int messageIndex,
-    ChatMessage message,
+    String messageId,
+    int swipeId,
+    int agentSwipeId,
     String content,
   ) {
+    final messageIndex = session.messages.indexWhere(
+      (message) => message.id == messageId,
+    );
+    if (messageIndex < 0) return session;
     final newMessages = List<ChatMessage>.from(session.messages);
-    newMessages[messageIndex] = replaceActiveImageContent(message, content);
+    newMessages[messageIndex] = replaceImageContentAt(
+      newMessages[messageIndex],
+      content,
+      swipeId: swipeId,
+      agentSwipeId: agentSwipeId,
+    );
     return session.copyWith(
       messages: newMessages,
       updatedAt: currentTimestampSeconds(),
     );
+  }
+
+  Future<ChatSession?> _persistMessageContent(
+    String sessionId,
+    String messageId,
+    int swipeId,
+    int agentSwipeId,
+    String content,
+  ) {
+    return _ref
+        .read(chatRepoProvider)
+        .mutateMessage(
+          sessionId: sessionId,
+          messageId: messageId,
+          updatedAt: currentTimestampSeconds(),
+          mutate: (message) => replaceImageContentAt(
+            message,
+            content,
+            swipeId: swipeId,
+            agentSwipeId: agentSwipeId,
+          ),
+        );
   }
 
   static ChatMessage appendImageRegenerationSwipe(
@@ -283,27 +355,22 @@ class ImageGenProcessor {
   static ChatMessage replaceActiveImageContent(
     ChatMessage message,
     String content,
-  ) {
-    final swipes = List<String>.from(message.swipes);
-    if (message.swipeId >= 0 && message.swipeId < swipes.length) {
-      swipes[message.swipeId] = content;
-    }
+  ) => replaceImageContentAt(
+    message,
+    content,
+    swipeId: message.swipeId,
+    agentSwipeId: message.agentSwipeId,
+  );
 
-    final agentSwipes = message.agentSwipes.isEmpty && swipes.isNotEmpty
-        ? <AgentSwipe>[
-            AgentSwipe(
-              content: content,
-              reasoning: message.reasoning,
-              genTime: message.genTime,
-              tokens: message.tokens,
-              studioOutputs: message.studioOutputs,
-            ),
-          ]
-        : List<AgentSwipe>.from(message.agentSwipes);
-    if (message.agentSwipeId >= 0 &&
-        message.agentSwipeId < agentSwipes.length) {
-      agentSwipes[message.agentSwipeId] = agentSwipes[message.agentSwipeId]
-          .copyWith(content: content);
+  static ChatMessage replaceImageContentAt(
+    ChatMessage message,
+    String content, {
+    required int swipeId,
+    required int agentSwipeId,
+  }) {
+    final swipes = List<String>.from(message.swipes);
+    if (swipeId >= 0 && swipeId < swipes.length) {
+      swipes[swipeId] = content;
     }
 
     final meta = List<Map<String, dynamic>>.generate(
@@ -312,20 +379,50 @@ class ImageGenProcessor {
           ? Map<String, dynamic>.from(message.swipesMeta[index])
           : <String, dynamic>{},
     );
-    if (message.swipeId >= 0 && message.swipeId < meta.length) {
-      meta[message.swipeId] = {
-        ...meta[message.swipeId],
+    final isActiveSwipe = message.swipeId == swipeId;
+    var agentSwipes = isActiveSwipe
+        ? List<AgentSwipe>.from(message.agentSwipes)
+        : <AgentSwipe>[];
+    if (!isActiveSwipe && swipeId >= 0 && swipeId < meta.length) {
+      final stored = meta[swipeId]['agentSwipes'];
+      if (stored is List) {
+        agentSwipes = stored
+            .whereType<Map<Object?, Object?>>()
+            .map(
+              (value) => AgentSwipe.fromJson(Map<String, dynamic>.from(value)),
+            )
+            .toList();
+      }
+    }
+    if (agentSwipes.isEmpty && swipes.isNotEmpty) {
+      agentSwipes = [
+        AgentSwipe(
+          content: content,
+          reasoning: message.reasoning,
+          genTime: message.genTime,
+          tokens: message.tokens,
+          studioOutputs: message.studioOutputs,
+        ),
+      ];
+    } else if (agentSwipeId >= 0 && agentSwipeId < agentSwipes.length) {
+      agentSwipes[agentSwipeId] = agentSwipes[agentSwipeId].copyWith(
+        content: content,
+      );
+    }
+    if (swipeId >= 0 && swipeId < meta.length) {
+      meta[swipeId] = {
+        ...meta[swipeId],
         if (agentSwipes.isNotEmpty)
           'agentSwipes': agentSwipes.map((swipe) => swipe.toJson()).toList(),
-        if (agentSwipes.isNotEmpty) 'agentSwipeId': message.agentSwipeId,
+        if (agentSwipes.isNotEmpty) 'agentSwipeId': agentSwipeId,
       };
     }
 
     return message.copyWith(
-      content: content,
+      content: isActiveSwipe ? content : message.content,
       swipes: swipes,
       swipesMeta: meta,
-      agentSwipes: agentSwipes,
+      agentSwipes: isActiveSwipe ? agentSwipes : message.agentSwipes,
     );
   }
 
@@ -338,6 +435,6 @@ class ImageGenProcessor {
       final paths = ImageTagMarkup.extractImageResultPaths(messages[i].content);
       contexts.addAll(paths);
     }
-    return contexts.reversed.toList();
+    return contexts;
   }
 }

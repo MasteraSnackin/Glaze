@@ -46,7 +46,7 @@ class _ChatWebViewPreloaderState extends State<ChatWebViewPreloader> {
                     if (mounted) setState(() => _preloaded = true);
                   },
                   shouldOverrideUrlLoading: (controller, request) async {
-                    return NavigationActionPolicy.CANCEL;
+                    return chatWebViewNavigationPolicy(request.request.url);
                   },
                 ),
               ),

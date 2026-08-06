@@ -1,4 +1,3 @@
-
 import '../../models/api_config.dart';
 import 'anthropic_chat_transport.dart';
 import 'chat_transport.dart';
@@ -6,6 +5,7 @@ import 'gemini_chat_transport.dart';
 import 'llm_protocol.dart';
 import 'llm_request_dump.dart';
 import 'openai_chat_transport.dart';
+import 'openai_responses_transport.dart';
 import 'openrouter_chat_transport.dart';
 
 /// Resolves a [ChatTransport] for the given protocol string.
@@ -20,7 +20,7 @@ ChatTransport pickChatTransport(String protocol) {
   final ChatTransport inner;
   switch (protocol) {
     case LlmProtocol.openai:
-      inner = OpenAiChatTransport();
+      inner = OpenAiCompatibleTransport();
     case LlmProtocol.anthropic:
       inner = AnthropicChatTransport();
     case LlmProtocol.gemini:

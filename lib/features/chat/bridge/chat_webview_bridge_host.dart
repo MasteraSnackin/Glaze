@@ -60,18 +60,6 @@ class ChatWebViewBridgeHost {
 
   final JsBridgeToastController _toastController = JsBridgeToastController();
 
-  late final TriggerGenerationHandler _triggerHandler =
-      TriggerGenerationHandler(
-        dispatcher: ref.read(generationDispatcherProvider),
-        log: (line) => debugPrint(line),
-      );
-
-  late final RuntimePromptInjectionNotifier _promptInjection = ref.read(
-    runtimePromptInjectionProvider.notifier,
-  );
-
-  late final CommandRegistry _commandRegistry = _buildWiredCommandRegistry();
-
   /// Resolves the preset permissions for the current preset, returning
   /// `false` (default-deny) if the lookup fails. Mirrors the previous
   /// in-widget `_bridgePermissionCheck`.
@@ -84,35 +72,16 @@ class ChatWebViewBridgeHost {
     }
   }
 
-  /// Slash-command registry. The wired registry routes `/trigger`,
-  /// `/getvar`, `/setvar`, `/inject`, and `/toast` to the same services
-  /// as the dedicated bridge methods (so permissions / scope / JSON
-  /// validation are preserved end-to-end).
-  CommandRegistry _buildWiredCommandRegistry() {
-    return buildWiredCommandRegistry(
-      WiredCommandDeps(
-        bridge: JsBridgeService(
-          chatRepo: ref.read(chatRepoProvider),
-          characterRepo: ref.read(characterRepoProvider),
-          currentSessionId: currentSessionId,
-          currentCharacterId: currentCharacterId,
-          permissionCheck: _bridgePermissionCheck,
-          messageVariables: () => ref.read(messageVariablesProvider.notifier),
-        ),
-        toastController: _toastController,
-        promptInjection: _promptInjection,
-        triggerHandler: _triggerHandler,
-      ),
-    );
-  }
-
   /// Build a fresh [JsBridgeService] wired to the current widget state.
-  /// Called from `onWebViewCreated` and from any code path that needs to
-  /// (re)create the bridge service (e.g. the wired `/getvar`/``/setvar``
-  /// registry which only needs the deps subset).
+  /// Called from `onWebViewCreated`; its command registry re-enters this same
+  /// bridge so dedicated capabilities and context resolution remain canonical.
   Future<JsBridgeService> buildJsBridgeService() async {
     final globalRepo = await ref.read(globalVariablesRepoProvider.future);
-    return JsBridgeService(
+    late final JsBridgeService bridge;
+    final commandRegistry = buildWiredCommandRegistry(
+      WiredCommandDeps(bridgeDispatch: (request) => bridge.dispatch(request)),
+    );
+    bridge = JsBridgeService(
       chatRepo: ref.read(chatRepoProvider),
       characterRepo: ref.read(characterRepoProvider),
       globalVariablesRepo: globalRepo,
@@ -125,9 +94,11 @@ class ChatWebViewBridgeHost {
       triggerGeneration: _triggerBridgeGeneration,
       permissionCheck: _bridgePermissionCheck,
       playAudio: _playBridgeAudio,
-      executeCommand: _executeBridgeCommand,
+      executeCommand: (command, args, context) =>
+          _executeBridgeCommand(commandRegistry, command, args, context),
       showToast: _showBridgeToast,
     );
+    return bridge;
   }
 
   Future<String> _generateBridgeText(
@@ -167,32 +138,13 @@ class ChatWebViewBridgeHost {
     final transport = pickChatTransport(apiConfig.protocol);
     unawaited(
       transport.stream(
-        request: ChatTransportRequest(
-          endpoint: apiConfig.endpoint,
-          apiKey: apiConfig.apiKey,
-          model: apiConfig.model,
+        request: ChatTransportRequest.fromApiConfig(
+          apiConfig,
           messages: [
             {'role': 'user', 'content': prompt},
           ],
-          maxTokens: apiConfig.maxTokens,
-          temperature: apiConfig.temperature,
-          topP: apiConfig.topP,
-          topK: apiConfig.topK,
-          frequencyPenalty: apiConfig.frequencyPenalty,
-          presencePenalty: apiConfig.presencePenalty,
           stream: false,
-          requestReasoning: apiConfig.requestReasoning,
-          reasoningEffort: apiConfig.reasoningEffort,
-          omitTemperature: apiConfig.omitTemperature,
-          omitTopP: apiConfig.omitTopP,
-          omitTopK: apiConfig.omitTopK,
-          omitFrequencyPenalty: apiConfig.omitFrequencyPenalty,
-          omitPresencePenalty: apiConfig.omitPresencePenalty,
-          omitReasoning: apiConfig.omitReasoning,
-          omitReasoningEffort: apiConfig.omitReasoningEffort,
-          showNativeReasoning: apiConfig.showNativeReasoning,
           sessionId: currentSessionId(),
-          cacheControlTtl: apiConfig.cacheControlTtl,
         ),
         cancelToken: cancelToken,
         onComplete: (text, _, {rawResponseJson}) {
@@ -295,16 +247,25 @@ class ChatWebViewBridgeHost {
   }
 
   Future<Map<String, dynamic>> _executeBridgeCommand(
+    CommandRegistry commandRegistry,
     String command,
     Map<String, dynamic> args,
     Map<String, dynamic> context,
   ) async {
-    final result = await _commandRegistry.run(
+    final characterId =
+        (context['characterId'] as String?) ?? currentCharacterId();
+    final result = await commandRegistry.run(
       command,
       args,
       context: CommandContext(
-        charId: currentCharacterId(),
+        charId: characterId,
         presetId: ref.read(extensionsSettingsProvider).activePresetId,
+        bridgeContext: {
+          ...context,
+          if (!context.containsKey('sessionId'))
+            'sessionId': currentSessionId(),
+          if (!context.containsKey('characterId')) 'characterId': characterId,
+        },
       ),
     );
     return result.toMap();

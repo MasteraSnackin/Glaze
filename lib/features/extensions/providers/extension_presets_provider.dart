@@ -25,6 +25,7 @@ class ExtensionPresetsNotifier extends StateNotifier<List<ExtensionPreset>> {
   }
 
   final Ref _ref;
+  Future<void> _persistTail = Future<void>.value();
 
   ExtensionPresetsRepository get _repo =>
       ExtensionPresetsRepository(_ref.read(appDbProvider));
@@ -39,11 +40,17 @@ class ExtensionPresetsNotifier extends StateNotifier<List<ExtensionPreset>> {
   }
 
   Future<void> update(ExtensionPreset preset) async {
-    await _repo.updatePreset(preset);
     state = [
       for (final p in state)
         if (p.id == preset.id) preset else p,
     ];
+    await _enqueuePersist(preset);
+  }
+
+  Future<void> _enqueuePersist(ExtensionPreset preset) {
+    final write = _persistTail.then((_) => _repo.updatePreset(preset));
+    _persistTail = write.catchError((_) {});
+    return write;
   }
 
   Future<void> delete(String id) async {

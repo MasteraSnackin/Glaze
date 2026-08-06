@@ -17,6 +17,7 @@ import '../chat_state.dart';
 import '../editing_message_provider.dart';
 import '../services/continuation_message_merger.dart';
 import 'chat_message_sync.dart';
+import 'chat_streaming_bridge_sync.dart';
 import 'chat_webview_sync_dispatcher.dart';
 
 /// Wires the `build()`-side `ref.listen` plumbing for the chat
@@ -42,6 +43,7 @@ class ChatWebViewBuildListeners {
     required this.visibleStartIndex,
     required this.onRefreshExtBlocksPanel,
     required this.onSyncExtBlockPanels,
+    this.isCurrentBridge,
   });
 
   final WidgetRef ref;
@@ -61,6 +63,7 @@ class ChatWebViewBuildListeners {
   final Future<void> Function(String sessionId, String messageId)
   onRefreshExtBlocksPanel;
   final Future<void> Function() onSyncExtBlockPanels;
+  final bool Function(ChatBridgeController bridge)? isCurrentBridge;
 
   /// Attach all `ref.listen` callbacks for the current build. Call
   /// from the top of `State.build` after the `ref.watch` reads.
@@ -70,8 +73,7 @@ class ChatWebViewBuildListeners {
     _listenStreaming();
     _listenInfoBlocks();
     _listenExtSettingsAndPresets();
-  }
-
+}
   void _listenDisplayRegexes() {
     ref.listen<AsyncValue<List<PresetRegex>>>(displayRegexesProvider, (
       prev,
@@ -143,9 +145,15 @@ class ChatWebViewBuildListeners {
   }
 
   void _listenStreaming() {
+    final listenerEpoch = syncState.streamEpoch;
     ref.listen<StreamingState>(streamingStateProvider(charId), (prev, next) {
       final b = bridge;
-      if (b == null || !ready()) return;
+      if (b == null ||
+          !ready() ||
+          syncState.streamEpoch != listenerEpoch ||
+          isCurrentBridge?.call(b) == false) {
+        return;
+      }
       if (next.text.isEmpty && next.reasoning == null) {
         return;
       }
@@ -213,14 +221,21 @@ class ChatWebViewBuildListeners {
         isTyping: true,
       );
 
-      if (!syncState.streamingSent) {
-        b.appendMessage(msg);
-        syncState.streamingSent = true;
-      } else {
-        b.updateMessage(msg);
-      }
+      unawaited(_pushStreamingMessage(b, msg, listenerEpoch));
     });
   }
+
+  Future<void> _pushStreamingMessage(
+    ChatBridgeController bridge,
+    ChatMessage message,
+    int epoch,
+  ) => pushStreamingMessageOwned(
+    bridge: bridge,
+    message: message,
+    syncState: syncState,
+    epoch: epoch,
+    isCurrent: () => ready() && (isCurrentBridge?.call(bridge) ?? true),
+  );
 
   void _listenInfoBlocks() {
     final sid = sessionId;

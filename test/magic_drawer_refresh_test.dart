@@ -45,5 +45,31 @@ void main() {
         contains('if (!mounted || request != _statsRequest) return;'),
       );
     });
+
+    test('does not schedule token work after the drawer unmounts', () {
+      final source = File(
+        'lib/features/chat/widgets/magic_drawer.dart',
+      ).readAsStringSync();
+
+      final schedulerStart = source.indexOf('void _scheduleTokenStats()');
+      final schedulerEnd = source.indexOf(
+        'Future<void> _loadTokenStats()',
+        schedulerStart,
+      );
+      final refreshStart = source.indexOf('Future<void> _refreshStats()');
+      final refreshEnd = source.indexOf(
+        'void _scheduleRefresh()',
+        refreshStart,
+      );
+
+      expect(
+        source.substring(schedulerStart, schedulerEnd),
+        contains('if (!mounted) return;'),
+      );
+      expect(
+        source.substring(refreshStart, refreshEnd),
+        contains('if (!mounted) return;'),
+      );
+    });
   });
 }

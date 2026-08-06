@@ -19,6 +19,7 @@ class StudioSlotSettings {
   final double frequencyPenalty;
   final double presencePenalty;
   final bool requestReasoning;
+  final bool useResponsesApi;
   final String reasoningEffort;
   final bool omitTemperature;
   final bool omitTopP;
@@ -36,6 +37,7 @@ class StudioSlotSettings {
     required this.frequencyPenalty,
     required this.presencePenalty,
     required this.requestReasoning,
+    required this.useResponsesApi,
     required this.reasoningEffort,
     required this.omitTemperature,
     required this.omitTopP,
@@ -58,6 +60,7 @@ class StudioSlotSettings {
             studioFinalFrequencyPenalty: frequencyPenalty,
             studioFinalPresencePenalty: presencePenalty,
             studioFinalRequestReasoning: requestReasoning,
+            studioFinalUseResponsesApi: useResponsesApi,
             studioFinalReasoningEffort: reasoningEffort,
             studioFinalOmitTemperature: omitTemperature,
             studioFinalOmitTopP: omitTopP,
@@ -78,6 +81,7 @@ class StudioSlotSettings {
             studioTrackerFrequencyPenalty: frequencyPenalty,
             studioTrackerPresencePenalty: presencePenalty,
             studioTrackerRequestReasoning: requestReasoning,
+            studioTrackerUseResponsesApi: useResponsesApi,
             studioTrackerReasoningEffort: reasoningEffort,
             studioTrackerOmitTemperature: omitTemperature,
             studioTrackerOmitTopP: omitTopP,
@@ -97,6 +101,7 @@ class StudioSlotSettings {
             postCleanerFrequencyPenalty: frequencyPenalty,
             postCleanerPresencePenalty: presencePenalty,
             postCleanerRequestReasoning: requestReasoning,
+            postCleanerUseResponsesApi: useResponsesApi,
             postCleanerReasoningEffort: reasoningEffort,
             postCleanerOmitTemperature: omitTemperature,
             postCleanerOmitTopP: omitTopP,
@@ -133,6 +138,7 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
   late double _frequencyPenalty;
   late double _presencePenalty;
   late bool _requestReasoning;
+  late bool _useResponsesApi;
   late String _reasoningEffort;
   late bool _omitTemperature;
   late bool _omitTopP;
@@ -155,6 +161,7 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
         _frequencyPenalty = p.studioAgent.studioFinalFrequencyPenalty;
         _presencePenalty = p.studioAgent.studioFinalPresencePenalty;
         _requestReasoning = p.studioAgent.studioFinalRequestReasoning;
+        _useResponsesApi = p.studioAgent.studioFinalUseResponsesApi;
         _reasoningEffort = p.studioAgent.studioFinalReasoningEffort;
         _omitTemperature = p.studioAgent.studioFinalOmitTemperature;
         _omitTopP = p.studioAgent.studioFinalOmitTopP;
@@ -182,6 +189,7 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
         _frequencyPenalty = p.studioAgent.studioTrackerFrequencyPenalty;
         _presencePenalty = p.studioAgent.studioTrackerPresencePenalty;
         _requestReasoning = p.studioAgent.studioTrackerRequestReasoning;
+        _useResponsesApi = p.studioAgent.studioTrackerUseResponsesApi;
         _reasoningEffort = p.studioAgent.studioTrackerReasoningEffort;
         _omitTemperature = p.studioAgent.studioTrackerOmitTemperature;
         _omitTopP = p.studioAgent.studioTrackerOmitTopP;
@@ -207,6 +215,7 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
         _frequencyPenalty = p.cleaner.postCleanerFrequencyPenalty;
         _presencePenalty = p.cleaner.postCleanerPresencePenalty;
         _requestReasoning = p.cleaner.postCleanerRequestReasoning;
+        _useResponsesApi = p.cleaner.postCleanerUseResponsesApi;
         _reasoningEffort = p.cleaner.postCleanerReasoningEffort;
         _omitTemperature = p.cleaner.postCleanerOmitTemperature;
         _omitTopP = p.cleaner.postCleanerOmitTopP;
@@ -340,6 +349,7 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
         frequencyPenalty: _frequencyPenalty,
         presencePenalty: _presencePenalty,
         requestReasoning: _requestReasoning,
+        useResponsesApi: _useResponsesApi,
         reasoningEffort: _reasoningEffort,
         omitTemperature: _omitTemperature,
         omitTopP: _omitTopP,
@@ -455,6 +465,12 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
             compact: true,
             header: 'Мышление',
             items: [
+              MenuSwitchItem(
+                label: 'label_use_responses_api'.tr(),
+                description: 'desc_use_responses_api'.tr(),
+                value: _useResponsesApi,
+                onChanged: (value) => setState(() => _useResponsesApi = value),
+              ),
               MenuSwitchItem(
                 label: 'Запросить нативное мышление',
                 description: 'Показывает блок нативного мышления модели',

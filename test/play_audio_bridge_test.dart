@@ -1,13 +1,13 @@
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:glaze_flutter/features/extensions/services/js_bridge_service.dart';
+import 'helpers/js_bridge_test_support.dart';
 
 void main() {
   group('JsBridgeService playAudio', () {
     test('delegates source + options to the injected handler', () async {
       String? seenSource;
       Map<String, dynamic>? seenOptions;
-      final bridge = JsBridgeService(
+      final bridge = TestJsBridge.create(
         permissionCheck: (_) => true,
         playAudio: (source, options) async {
           seenSource = source;
@@ -27,7 +27,7 @@ void main() {
     });
 
     test('rejects non-string source with invalid_request', () async {
-      final bridge = JsBridgeService(
+      final bridge = TestJsBridge.create(
         permissionCheck: (_) => true,
         playAudio: (_, _) async {},
       );
@@ -40,7 +40,7 @@ void main() {
     });
 
     test('denies when play_audio capability is not granted', () async {
-      final bridge = JsBridgeService(
+      final bridge = TestJsBridge.create(
         permissionCheck: (_) => false,
         playAudio: (_, _) async {},
       );
@@ -53,9 +53,7 @@ void main() {
     });
 
     test('returns unsupported_method when no handler is registered', () async {
-      final bridge = JsBridgeService(
-        permissionCheck: (_) => true,
-      );
+      final bridge = TestJsBridge.create(permissionCheck: (_) => true);
       final result = await bridge.dispatch({
         'method': 'playAudio',
         'params': {'source': 'click'},

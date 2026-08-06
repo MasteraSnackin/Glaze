@@ -16,7 +16,7 @@ import '../../../features/settings/app_settings_provider.dart';
 import '../../../core/state/active_selection_provider.dart';
 import '../../../core/state/chat_session_ops_provider.dart';
 import '../../../core/state/studio_feature_provider.dart';
-import '../../../core/llm/summary_service.dart';
+import '../../../core/state/summary_providers.dart';
 import '../../../features/chat_history/chat_history_provider.dart';
 import '../../../shared/utils/time_formatter.dart';
 import '../../../shared/theme/app_colors.dart';
@@ -244,6 +244,7 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
   }
 
   void _scheduleTokenStats() {
+    if (!mounted) return;
     _debounceTimer?.cancel();
     final delay = ref.read(appSettingsProvider).value?.batterySaver == true
         ? const Duration(milliseconds: 700)
@@ -255,9 +256,15 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
     if (!mounted) return;
     setState(() => _loadingTokens = true);
     final request = _statsRequest;
-    final updated = await MagicDrawerStatsService(
-      ref,
-    ).computeTokenStats(widget.charId, _stats);
+    MagicDrawerStats updated;
+    try {
+      updated = await MagicDrawerStatsService(
+        ref,
+      ).computeTokenStats(widget.charId, _stats);
+    } catch (e) {
+      debugPrint('[MagicDrawer] _loadTokenStats error: $e');
+      return;
+    }
     if (!mounted || request != _statsRequest) return;
     setState(() {
       _stats = updated;
@@ -274,7 +281,8 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
     } catch (e) {
       debugPrint('[MagicDrawer] _refreshStats error: $e');
     }
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    setState(() {});
     _scheduleTokenStats();
   }
 
@@ -825,10 +833,9 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
                 12,
                 16 + MediaQuery.of(context).padding.bottom,
               ),
-              child: Wrap(
-                spacing: 6,
-                runSpacing: 8,
-                children: List.generate(items.length, (index) {
+              child: MagicCardGrid(
+                columns: 3,
+                cells: List.generate(items.length, (index) {
                   final item = items[index];
                   final card = MagicCard(
                     item: item,

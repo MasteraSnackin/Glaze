@@ -1,10 +1,17 @@
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:glaze_flutter/core/db/app_db.dart';
+import 'package:glaze_flutter/core/db/repositories/chat_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/embedding_repo.dart';
+import 'package:glaze_flutter/core/db/repositories/lorebook_repo.dart';
+import 'package:glaze_flutter/core/llm/chat_message_embedding_service.dart';
 import 'package:glaze_flutter/core/llm/embedding_service.dart';
+import 'package:glaze_flutter/core/llm/lorebook_embedding_service.dart';
+import 'package:glaze_flutter/core/llm/memory_embedding_service.dart';
 import 'package:glaze_flutter/core/llm/vector_rebuild_service.dart';
+import 'package:glaze_flutter/core/state/db_provider.dart';
 
 void main() {
   group('vectorRebuildDelayForRate', () {
@@ -18,6 +25,45 @@ void main() {
       expect(vectorRebuildDelayForRate(30), const Duration(seconds: 2));
     });
   });
+
+  test(
+    'constructor-injected service completes when repositories are empty',
+    () async {
+      final db = AppDatabase.forTesting(NativeDatabase.memory());
+      addTearDown(db.close);
+      final container = ProviderContainer(
+        overrides: [appDbProvider.overrideWithValue(db)],
+      );
+      addTearDown(container.dispose);
+      final embeddingRepo = EmbeddingRepo(db);
+      final embeddingService = EmbeddingService();
+      final service = VectorRebuildService(
+        ChatRepo(db),
+        container.read(memoryBookRepoProvider),
+        LorebookRepo(db),
+        embeddingRepo,
+        MemoryEmbeddingService(embeddingRepo, embeddingService),
+        LorebookEmbeddingService(embeddingRepo, embeddingService),
+        ChatMessageEmbeddingService(embeddingRepo, embeddingService),
+        const EmbeddingConfig(endpoint: 'http://localhost/v1', model: 'test'),
+      );
+
+      final result = await service.rebuild(
+        const VectorRebuildRequest(
+          sources: {
+            VectorRebuildSource.memoryBooks,
+            VectorRebuildSource.lorebooks,
+            VectorRebuildSource.rawChat,
+          },
+          vectorsPerMinute: 0,
+        ),
+      );
+
+      expect(result.total, 0);
+      expect(result.cancelled, isFalse);
+      expect(result.failed, 0);
+    },
+  );
 
   group('embedding stale metadata', () {
     test(

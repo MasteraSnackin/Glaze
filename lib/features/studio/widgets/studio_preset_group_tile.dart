@@ -72,7 +72,9 @@ class StudioPresetGroupTile extends StatelessWidget {
                   )
                 : Switch(
                     value: block.enabled,
-                    onChanged: (enabled) => onToggle(block, enabled),
+                    onChanged: block.locked
+                        ? null
+                        : (enabled) => onToggle(block, enabled),
                   ),
             onTap: () => onEdit(block),
             onLongPress: onDelete == null ? null : () => onDelete!(block),

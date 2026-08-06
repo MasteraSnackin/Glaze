@@ -1,68 +1,16 @@
-import 'dart:async';
-
 import 'package:flutter/foundation.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../db/repositories/chat_repo.dart';
+import '../db/repositories/embedding_repo.dart';
+import '../db/repositories/lorebook_repo.dart';
+import '../db/repositories/memory_book_repo.dart';
 import '../models/chat_message.dart';
-import '../state/db_provider.dart';
-import '../../features/settings/api_list_provider.dart';
 import 'chat_message_embedding_service.dart';
 import 'embedding_service.dart';
-import 'lorebook_providers.dart';
-import 'memory_injection_service.dart';
+import 'lorebook_embedding_service.dart';
+import 'memory_embedding_service.dart';
 
 enum VectorRebuildSource { memoryBooks, lorebooks, rawChat }
-
-enum VectorRebuildStatus { idle, running, paused, cancelled, completed, error }
-
-class VectorRebuildState {
-  final VectorRebuildStatus status;
-  final int current;
-  final int total;
-  final int indexed;
-  final int skipped;
-  final int failed;
-  final String currentLabel;
-  final String message;
-
-  const VectorRebuildState({
-    this.status = VectorRebuildStatus.idle,
-    this.current = 0,
-    this.total = 0,
-    this.indexed = 0,
-    this.skipped = 0,
-    this.failed = 0,
-    this.currentLabel = '',
-    this.message = '',
-  });
-
-  double get progress => total <= 0 ? 0 : current / total;
-  bool get isRunning => status == VectorRebuildStatus.running;
-  bool get isPaused => status == VectorRebuildStatus.paused;
-  bool get canStart => !isRunning && !isPaused;
-
-  VectorRebuildState copyWith({
-    VectorRebuildStatus? status,
-    int? current,
-    int? total,
-    int? indexed,
-    int? skipped,
-    int? failed,
-    String? currentLabel,
-    String? message,
-  }) {
-    return VectorRebuildState(
-      status: status ?? this.status,
-      current: current ?? this.current,
-      total: total ?? this.total,
-      indexed: indexed ?? this.indexed,
-      skipped: skipped ?? this.skipped,
-      failed: failed ?? this.failed,
-      currentLabel: currentLabel ?? this.currentLabel,
-      message: message ?? this.message,
-    );
-  }
-}
 
 class VectorRebuildRequest {
   final Set<VectorRebuildSource> sources;
@@ -78,162 +26,129 @@ class VectorRebuildRequest {
   });
 }
 
-final vectorRebuildControllerProvider =
-    NotifierProvider<VectorRebuildController, VectorRebuildState>(
-      VectorRebuildController.new,
-    );
+class VectorRebuildResult {
+  final int total;
+  final int indexed;
+  final int skipped;
+  final int failed;
+  final bool cancelled;
 
-final embeddingStaleStatsProvider = FutureProvider((ref) async {
-  await ref.watch(apiListProvider.future);
-  final config = ref.watch(embeddingConfigProvider);
-  final signature = embeddingModelSignature(config);
-  return ref.watch(embeddingRepoProvider).getStaleStats(signature);
-});
+  const VectorRebuildResult({
+    required this.total,
+    required this.indexed,
+    required this.skipped,
+    required this.failed,
+    this.cancelled = false,
+  });
+}
 
-class VectorRebuildController extends Notifier<VectorRebuildState> {
-  bool _cancelRequested = false;
-  Completer<void>? _pauseCompleter;
+class VectorRebuildService {
+  final ChatRepo _chatRepo;
+  final MemoryBookRepo _memoryBookRepo;
+  final LorebookRepo _lorebookRepo;
+  final EmbeddingRepo _embeddingRepo;
+  final MemoryEmbeddingService _memoryEmbeddingService;
+  final LorebookEmbeddingService _lorebookEmbeddingService;
+  final ChatMessageEmbeddingService _chatMessageEmbeddingService;
+  final EmbeddingConfig _config;
 
-  @override
-  VectorRebuildState build() => const VectorRebuildState();
+  const VectorRebuildService(
+    this._chatRepo,
+    this._memoryBookRepo,
+    this._lorebookRepo,
+    this._embeddingRepo,
+    this._memoryEmbeddingService,
+    this._lorebookEmbeddingService,
+    this._chatMessageEmbeddingService,
+    this._config,
+  );
 
-  Future<void> start(VectorRebuildRequest request) async {
-    if (!state.canStart || request.sources.isEmpty) return;
+  Future<VectorRebuildResult> rebuild(
+    VectorRebuildRequest request, {
+    bool Function()? isCancelled,
+    Future<void> Function()? waitIfPaused,
+    void Function(int total)? onPrepared,
+    void Function(int current, String label, String sourceLabel)? onTaskStarted,
+    void Function(int current, VectorRebuildResult result)? onTaskCompleted,
+  }) async {
+    final tasks = await _buildTasks(request);
+    onPrepared?.call(tasks.length);
+    var indexed = 0;
+    var skipped = 0;
+    var failed = 0;
+    final delay = vectorRebuildDelayForRate(request.vectorsPerMinute);
+    final batchSize = request.batchSize < 1 ? 1 : request.batchSize;
 
-    _cancelRequested = false;
-    _pauseCompleter = null;
-    state = const VectorRebuildState(
-      status: VectorRebuildStatus.running,
-      message: 'Preparing vector rebuild...',
-    );
-
-    try {
-      await ref.read(apiListProvider.future);
-      final config = ref.read(embeddingConfigProvider);
-      if (config.endpoint.isEmpty) {
-        state = state.copyWith(
-          status: VectorRebuildStatus.error,
-          message: 'Configure an embedding endpoint before rebuilding vectors.',
+    for (var i = 0; i < tasks.length; i++) {
+      if (isCancelled?.call() == true) {
+        return VectorRebuildResult(
+          total: tasks.length,
+          indexed: indexed,
+          skipped: skipped,
+          failed: failed,
+          cancelled: true,
         );
-        return;
+      }
+      await waitIfPaused?.call();
+      if (isCancelled?.call() == true) {
+        return VectorRebuildResult(
+          total: tasks.length,
+          indexed: indexed,
+          skipped: skipped,
+          failed: failed,
+          cancelled: true,
+        );
       }
 
-      final tasks = await _buildTasks(request);
-      if (tasks.isEmpty) {
-        state = state.copyWith(
-          status: VectorRebuildStatus.completed,
-          message: 'No vector rebuild work found.',
-        );
-        return;
+      final task = tasks[i];
+      onTaskStarted?.call(i, task.label, task.sourceLabel);
+      try {
+        final result = await task.run();
+        indexed += result.indexed;
+        skipped += result.skipped;
+        failed += result.failed;
+      } catch (e) {
+        debugPrint('[VectorRebuild] failed task=${task.label}: $e');
+        failed++;
       }
 
-      final delay = vectorRebuildDelayForRate(request.vectorsPerMinute);
-      final batchSize = request.batchSize < 1 ? 1 : request.batchSize;
-      state = state.copyWith(
-        total: tasks.length,
-        message: 'Rebuilding vectors...',
+      final current = i + 1;
+      onTaskCompleted?.call(
+        current,
+        VectorRebuildResult(
+          total: tasks.length,
+          indexed: indexed,
+          skipped: skipped,
+          failed: failed,
+        ),
       );
-
-      for (var i = 0; i < tasks.length; i++) {
-        if (_cancelRequested) {
-          state = state.copyWith(
-            status: VectorRebuildStatus.cancelled,
-            message: 'Vector rebuild cancelled.',
-          );
-          return;
-        }
-        await _waitIfPaused();
-        if (_cancelRequested) continue;
-
-        final task = tasks[i];
-        state = state.copyWith(
-          status: VectorRebuildStatus.running,
-          currentLabel: task.label,
-          message: task.sourceLabel,
-        );
-
-        try {
-          final result = await task.run();
-          state = state.copyWith(
-            indexed: state.indexed + result.indexed,
-            skipped: state.skipped + result.skipped,
-            failed: state.failed + result.failed,
-          );
-        } catch (e) {
-          debugPrint('[VectorRebuild] failed task=${task.label}: $e');
-          state = state.copyWith(failed: state.failed + 1);
-        }
-
-        state = state.copyWith(current: i + 1);
-        if (i + 1 < tasks.length && delay > Duration.zero) {
-          await Future<void>.delayed(delay);
-        }
-        if ((i + 1) % batchSize == 0) {
-          await Future<void>.delayed(Duration.zero);
-        }
+      if (current < tasks.length && delay > Duration.zero) {
+        await Future<void>.delayed(delay);
       }
-
-      state = state.copyWith(
-        status: VectorRebuildStatus.completed,
-        currentLabel: '',
-        message: 'Vector rebuild complete.',
-      );
-      ref.invalidate(embeddingStaleStatsProvider);
-    } catch (e) {
-      state = state.copyWith(
-        status: VectorRebuildStatus.error,
-        message: 'Vector rebuild failed: $e',
-      );
+      if (current % batchSize == 0) {
+        await Future<void>.delayed(Duration.zero);
+      }
     }
-  }
 
-  void pause() {
-    if (!state.isRunning) return;
-    _pauseCompleter ??= Completer<void>();
-    state = state.copyWith(
-      status: VectorRebuildStatus.paused,
-      message: 'Vector rebuild paused.',
+    return VectorRebuildResult(
+      total: tasks.length,
+      indexed: indexed,
+      skipped: skipped,
+      failed: failed,
     );
-  }
-
-  void resume() {
-    if (!state.isPaused) return;
-    final completer = _pauseCompleter;
-    _pauseCompleter = null;
-    if (completer != null && !completer.isCompleted) {
-      completer.complete();
-    }
-    state = state.copyWith(
-      status: VectorRebuildStatus.running,
-      message: 'Rebuilding vectors...',
-    );
-  }
-
-  void cancel() {
-    if (!state.isRunning && !state.isPaused) return;
-    _cancelRequested = true;
-    resume();
-  }
-
-  Future<void> _waitIfPaused() async {
-    final completer = _pauseCompleter;
-    if (completer != null) await completer.future;
   }
 
   Future<List<_VectorRebuildTask>> _buildTasks(
     VectorRebuildRequest request,
   ) async {
     final tasks = <_VectorRebuildTask>[];
-    final config = ref.read(embeddingConfigProvider);
 
     if (request.sources.contains(VectorRebuildSource.memoryBooks)) {
-      final sessions = await ref.read(chatRepoProvider).getAllSessions();
+      final sessions = await _chatRepo.getAllSessions();
       final charBySession = {
         for (final session in sessions) session.id: session.characterId,
       };
-      final books = await ref.read(memoryBookRepoProvider).getAll();
-      final memoryService = ref.read(memoryEmbeddingServiceProvider);
-      final embeddingRepo = ref.read(embeddingRepoProvider);
+      final books = await _memoryBookRepo.getAll();
       for (final book in books) {
         final charId = charBySession[book.sessionId];
         if (charId == null) continue;
@@ -245,13 +160,13 @@ class VectorRebuildController extends Notifier<VectorRebuildState> {
               label: entry.title.isNotEmpty ? entry.title : entry.id,
               run: () async {
                 if (request.forceReindex) {
-                  await embeddingRepo.deleteByEntryId(entry.id);
+                  await _embeddingRepo.deleteByEntryId(entry.id);
                 }
-                await memoryService.indexMemoryEntry(
+                await _memoryEmbeddingService.indexMemoryEntry(
                   entry,
                   charId: charId,
                   sessionId: book.sessionId,
-                  config: config,
+                  config: _config,
                 );
                 return const _VectorTaskResult(indexed: 1);
               },
@@ -262,8 +177,7 @@ class VectorRebuildController extends Notifier<VectorRebuildState> {
     }
 
     if (request.sources.contains(VectorRebuildSource.lorebooks)) {
-      final lorebookService = ref.read(lorebookEmbeddingServiceProvider);
-      final lorebooks = await ref.read(lorebookRepoProvider).getAll();
+      final lorebooks = await _lorebookRepo.getAll();
       for (final lorebook in lorebooks) {
         for (final entry in lorebook.entries) {
           if (!entry.enabled || entry.constant) continue;
@@ -278,14 +192,15 @@ class VectorRebuildController extends Notifier<VectorRebuildState> {
               label:
                   '${lorebook.name}: ${entry.comment.isNotEmpty ? entry.comment : entry.id}',
               run: () async {
-                final result = await lorebookService.indexLorebookEntries(
-                  lorebook.id,
-                  [entry],
-                  config,
-                  forceReindex: request.forceReindex,
-                  embeddingTarget:
-                      lorebook.settings?.embeddingTarget ?? 'content',
-                );
+                final result = await _lorebookEmbeddingService
+                    .indexLorebookEntries(
+                      lorebook.id,
+                      [entry],
+                      _config,
+                      forceReindex: request.forceReindex,
+                      embeddingTarget:
+                          lorebook.settings?.embeddingTarget ?? 'content',
+                    );
                 return _VectorTaskResult(
                   indexed: result.indexed,
                   skipped: result.skipped,
@@ -299,9 +214,7 @@ class VectorRebuildController extends Notifier<VectorRebuildState> {
     }
 
     if (request.sources.contains(VectorRebuildSource.rawChat)) {
-      final chatService = ref.read(chatMessageEmbeddingServiceProvider);
-      final embeddingRepo = ref.read(embeddingRepoProvider);
-      final sessions = await ref.read(chatRepoProvider).getAllSessions();
+      final sessions = await _chatRepo.getAllSessions();
       for (final session in sessions) {
         final eligibleCount = session.messages
             .where(_isEmbeddableMessage)
@@ -315,12 +228,12 @@ class VectorRebuildController extends Notifier<VectorRebuildState> {
             label: 'Session ${session.sessionIndex}',
             run: () async {
               if (request.forceReindex) {
-                await embeddingRepo.deleteBySourceId(session.id);
+                await _embeddingRepo.deleteBySourceId(session.id);
               }
-              await chatService.indexSessionMessages(
+              await _chatMessageEmbeddingService.indexSessionMessages(
                 sessionId: session.id,
                 messages: session.messages,
-                config: config,
+                config: _config,
               );
               return const _VectorTaskResult(indexed: 1);
             },

@@ -19,6 +19,7 @@ import '../../shared/widgets/tab_slide_switcher.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/sheet_view.dart';
+import 'api_config_draft.dart';
 import 'api_list_provider.dart';
 import 'widgets/connection_status.dart';
 import '../../shared/widgets/menu_group.dart';
@@ -64,6 +65,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   int _topK = 0;
   bool _stream = true;
   bool _requestReasoning = false;
+  bool _useResponsesApi = false;
   bool _showNativeReasoning = true;
   String _reasoningEffort = 'medium';
   bool _omitTemperature = false;
@@ -195,48 +197,47 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     if (config.id == _loadedPresetId) return;
     _loadedPresetId = config.id;
     _loading = true;
+    final draft = ApiConfigDraft.fromConfig(config);
+    final values = draft.values;
 
-    _nameCtrl.text = config.name;
-    _endpointCtrl.text = config.endpoint;
-    _keyCtrl.text = config.apiKey;
-    _modelCtrl.text = config.model;
-    _maxTokensCtrl.text = config.maxTokens.toString();
-    _contextSizeCtrl.text = config.contextSize.toString();
-    _firstChunkTimeoutCtrl.text = (config.firstChunkTimeoutMs ~/ 1000)
-        .toString();
-    _reasoningHistoryCountCtrl.text = config.reasoningHistoryCount.toString();
-    _embEndpointCtrl.text = config.embeddingEndpoint;
-    _embApiKeyCtrl.text = config.embeddingApiKey;
-    _embModelCtrl.text = config.embeddingModel;
-    _embChunkTokensCtrl.text = config.embeddingMaxChunkTokens.toString();
+    _nameCtrl.text = draft.name;
+    _endpointCtrl.text = draft.endpoint;
+    _keyCtrl.text = draft.apiKey;
+    _modelCtrl.text = draft.model;
+    _maxTokensCtrl.text = draft.maxTokens;
+    _contextSizeCtrl.text = draft.contextSize;
+    _firstChunkTimeoutCtrl.text = draft.firstChunkTimeoutSeconds;
+    _reasoningHistoryCountCtrl.text = draft.reasoningHistoryCount;
+    _embEndpointCtrl.text = draft.embeddingEndpoint;
+    _embApiKeyCtrl.text = draft.embeddingApiKey;
+    _embModelCtrl.text = draft.embeddingModel;
+    _embChunkTokensCtrl.text = draft.embeddingMaxChunkTokens;
 
     setState(() {
-      _temperature = config.temperature;
-      _topP = config.topP;
-      _topK = config.topK;
-      _frequencyPenalty = config.frequencyPenalty;
-      _presencePenalty = config.presencePenalty;
-      _stream = config.stream;
-      _requestReasoning = config.requestReasoning && !config.omitReasoning;
-      _showNativeReasoning = config.showNativeReasoning;
-      _reasoningEffort = config.reasoningEffort;
-      _omitTemperature = config.omitTemperature;
-      _omitTopP = config.omitTopP;
-      _omitTopK = config.omitTopK;
-      _omitFrequencyPenalty = config.omitFrequencyPenalty;
-      _omitPresencePenalty = config.omitPresencePenalty;
-      _omitReasoning = config.omitReasoning;
-      _omitReasoningEffort = config.omitReasoningEffort;
-      _embeddingEnabled = config.embeddingEnabled;
-      _embeddingUseSame = config.embeddingUseSame;
-      _cacheControlTtl = config.cacheControlTtl;
-      _cacheBreakpointMode = config.cacheBreakpointMode;
-      _sessionIdMode = config.sessionIdMode;
-      _protocol = LlmProtocol.isValid(config.protocol)
-          ? config.protocol
-          : LlmProtocol.openai;
-      _extraRequestParameters = config.extraRequestParameters;
-      _applyProtocolUiPolicy(_protocol);
+      _temperature = values.temperature;
+      _topP = values.topP;
+      _topK = values.topK;
+      _frequencyPenalty = values.frequencyPenalty;
+      _presencePenalty = values.presencePenalty;
+      _stream = values.stream;
+      _requestReasoning = values.requestReasoning;
+      _useResponsesApi = values.useResponsesApi;
+      _showNativeReasoning = values.showNativeReasoning;
+      _reasoningEffort = values.reasoningEffort;
+      _omitTemperature = values.omitTemperature;
+      _omitTopP = values.omitTopP;
+      _omitTopK = values.omitTopK;
+      _omitFrequencyPenalty = values.omitFrequencyPenalty;
+      _omitPresencePenalty = values.omitPresencePenalty;
+      _omitReasoning = values.omitReasoning;
+      _omitReasoningEffort = values.omitReasoningEffort;
+      _embeddingEnabled = values.embeddingEnabled;
+      _embeddingUseSame = values.embeddingUseSame;
+      _cacheControlTtl = values.cacheControlTtl;
+      _cacheBreakpointMode = values.cacheBreakpointMode;
+      _sessionIdMode = values.sessionIdMode;
+      _protocol = values.protocol;
+      _extraRequestParameters = values.extraRequestParameters;
       _fetchedModels = [];
     });
 
@@ -246,55 +247,47 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   Future<void> _save() async {
     final config = _ref.read(activeApiConfigProvider);
     if (config == null) return;
-    final reasoningHistoryCount =
-        int.tryParse(_reasoningHistoryCountCtrl.text) ?? 0;
-    await _ref
-        .read(apiListProvider.notifier)
-        .put(
-          config.copyWith(
-            name: _nameCtrl.text.trim(),
-            endpoint: _endpointCtrl.text.trim(),
-            apiKey: _keyCtrl.text.trim(),
-            model: _modelCtrl.text.trim(),
-            maxTokens: int.tryParse(_maxTokensCtrl.text) ?? config.maxTokens,
-            contextSize:
-                int.tryParse(_contextSizeCtrl.text) ?? config.contextSize,
-            firstChunkTimeoutMs:
-                (int.tryParse(_firstChunkTimeoutCtrl.text) ?? 60) * 1000,
-            temperature: _temperature,
-            topP: _topP,
-            topK: _topK,
-            frequencyPenalty: _frequencyPenalty,
-            presencePenalty: _presencePenalty,
-            stream: _stream,
-            requestReasoning: _requestReasoning,
-            showNativeReasoning: _showNativeReasoning,
-            reasoningHistoryCount: reasoningHistoryCount < -1
-                ? 0
-                : reasoningHistoryCount,
-            reasoningEffort: _reasoningEffort,
-            omitTemperature: _omitTemperature,
-            omitTopP: _omitTopP,
-            omitTopK: _omitTopK,
-            omitFrequencyPenalty: _omitFrequencyPenalty,
-            omitPresencePenalty: _omitPresencePenalty,
-            omitReasoning: _omitReasoning,
-            omitReasoningEffort: _omitReasoningEffort,
-            embeddingEnabled: _embeddingEnabled,
-            embeddingUseSame: _embeddingUseSame,
-            cacheControlTtl: _cacheControlTtl,
-            cacheBreakpointMode: _cacheBreakpointMode,
-            sessionIdMode: _sessionIdMode,
-            protocol: _protocol,
-            embeddingEndpoint: _embEndpointCtrl.text.trim(),
-            embeddingApiKey: _embApiKeyCtrl.text.trim(),
-            embeddingModel: _embModelCtrl.text.trim(),
-            embeddingMaxChunkTokens:
-                int.tryParse(_embChunkTokensCtrl.text) ??
-                config.embeddingMaxChunkTokens,
-            extraRequestParameters: _extraRequestParameters,
-          ),
-        );
+    final draft = ApiConfigDraft(
+      values: config.copyWith(
+        temperature: _temperature,
+        topP: _topP,
+        topK: _topK,
+        frequencyPenalty: _frequencyPenalty,
+        presencePenalty: _presencePenalty,
+        stream: _stream,
+        requestReasoning: _requestReasoning,
+        useResponsesApi: _useResponsesApi,
+        showNativeReasoning: _showNativeReasoning,
+        reasoningEffort: _reasoningEffort,
+        omitTemperature: _omitTemperature,
+        omitTopP: _omitTopP,
+        omitTopK: _omitTopK,
+        omitFrequencyPenalty: _omitFrequencyPenalty,
+        omitPresencePenalty: _omitPresencePenalty,
+        omitReasoning: _omitReasoning,
+        omitReasoningEffort: _omitReasoningEffort,
+        embeddingEnabled: _embeddingEnabled,
+        embeddingUseSame: _embeddingUseSame,
+        cacheControlTtl: _cacheControlTtl,
+        cacheBreakpointMode: _cacheBreakpointMode,
+        sessionIdMode: _sessionIdMode,
+        protocol: _protocol,
+        extraRequestParameters: _extraRequestParameters,
+      ),
+      name: _nameCtrl.text,
+      endpoint: _endpointCtrl.text,
+      apiKey: _keyCtrl.text,
+      model: _modelCtrl.text,
+      maxTokens: _maxTokensCtrl.text,
+      contextSize: _contextSizeCtrl.text,
+      firstChunkTimeoutSeconds: _firstChunkTimeoutCtrl.text,
+      reasoningHistoryCount: _reasoningHistoryCountCtrl.text,
+      embeddingEndpoint: _embEndpointCtrl.text,
+      embeddingApiKey: _embApiKeyCtrl.text,
+      embeddingModel: _embModelCtrl.text,
+      embeddingMaxChunkTokens: _embChunkTokensCtrl.text,
+    );
+    await _ref.read(apiListProvider.notifier).put(draft.toConfig(config));
   }
 
   bool get _supportsTemperature => true;
@@ -324,46 +317,33 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   bool get _hideSamplingWhileReasoningAnthropic =>
       _protocol == LlmProtocol.anthropic && _requestReasoning;
 
-  List<String> get _reasoningEffortOptions {
-    switch (_protocol) {
-      case LlmProtocol.anthropic:
-      case LlmProtocol.gemini:
-        return const ['auto', 'min', 'low', 'medium', 'high', 'max'];
-      case LlmProtocol.openai:
-      case LlmProtocol.openrouter:
-      default:
-        return const ['auto', 'low', 'medium', 'high', 'max'];
-    }
-  }
-
-  String _normalizeReasoningEffortForProtocol(String protocol, String effort) {
-    final allowed =
-        protocol == LlmProtocol.anthropic || protocol == LlmProtocol.gemini
-        ? const ['auto', 'min', 'low', 'medium', 'high', 'max']
-        : const ['auto', 'low', 'medium', 'high', 'max'];
-    if (allowed.contains(effort)) return effort;
-    if (effort == 'min') return 'low';
-    return 'medium';
-  }
+  List<String> get _reasoningEffortOptions =>
+      ApiConfigDraft.reasoningEffortOptions(_protocol);
 
   void _applyProtocolUiPolicy(String protocol) {
-    _reasoningEffort = _normalizeReasoningEffortForProtocol(
-      protocol,
-      _reasoningEffort,
+    final normalized = ApiConfigDraft.normalizeValues(
+      ApiConfig(
+        id: '',
+        protocol: protocol,
+        reasoningEffort: _reasoningEffort,
+        omitTemperature: _omitTemperature,
+        omitTopP: _omitTopP,
+        omitReasoning: _omitReasoning,
+        omitReasoningEffort: _omitReasoningEffort,
+        frequencyPenalty: _frequencyPenalty,
+        presencePenalty: _presencePenalty,
+        cacheControlTtl: _cacheControlTtl,
+      ),
     );
-    if (protocol != LlmProtocol.openai && protocol != LlmProtocol.openrouter) {
-      _omitTemperature = false;
-      _omitTopP = false;
-      _omitReasoning = false;
-      _omitReasoningEffort = false;
-    }
-    if (protocol != LlmProtocol.openai && protocol != LlmProtocol.openrouter) {
-      _frequencyPenalty = 0.0;
-      _presencePenalty = 0.0;
-    }
-    if (protocol != LlmProtocol.anthropic && protocol != LlmProtocol.openai) {
-      _cacheControlTtl = 'off';
-    }
+    _protocol = normalized.protocol;
+    _reasoningEffort = normalized.reasoningEffort;
+    _omitTemperature = normalized.omitTemperature;
+    _omitTopP = normalized.omitTopP;
+    _omitReasoning = normalized.omitReasoning;
+    _omitReasoningEffort = normalized.omitReasoningEffort;
+    _frequencyPenalty = normalized.frequencyPenalty;
+    _presencePenalty = normalized.presencePenalty;
+    _cacheControlTtl = normalized.cacheControlTtl;
   }
 
   // ── Build ─────────────────────────────────────────────────────────────────────
@@ -736,6 +716,16 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
             header: 'label_reasoning_settings'.tr(),
             helpTerm: 'preset-reasoning',
             items: [
+              if (_protocol == LlmProtocol.openai)
+                MenuSwitchItem(
+                  label: 'label_use_responses_api'.tr(),
+                  description: 'desc_use_responses_api'.tr(),
+                  value: _useResponsesApi,
+                  onChanged: (value) {
+                    setState(() => _useResponsesApi = value);
+                    _scheduleSave();
+                  },
+                ),
               if (_supportsReasoning)
                 MenuSwitchItem(
                   label: 'label_reasoning'.tr(),
@@ -1261,6 +1251,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       apiKey: apiKey,
       model: model,
       protocol: _protocol,
+      useResponsesApi: _useResponsesApi,
     );
     if (!mounted) return;
     switch (result) {

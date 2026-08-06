@@ -5,7 +5,8 @@ final chatWebViewKeepAlive = InAppWebViewKeepAlive();
 
 /// Mobile preloads the chat WebView at app startup and reuses it when a chat
 /// opens. Desktop creates the WebView when the chat opens, so there is no
-/// preloaded instance to attach to.
+/// preloaded instance to attach to. Enabling keep-alive on Windows was
+/// attempted but caused silent crashes, so it remains disabled.
 InAppWebViewKeepAlive? chatWebViewKeepAliveForPlatform() {
   if (defaultTargetPlatform == TargetPlatform.windows) return null;
   return chatWebViewKeepAlive;

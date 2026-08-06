@@ -1,4 +1,5 @@
 import '../../models/extra_request_parameter.dart';
+import '../../models/api_config.dart';
 
 /// Provider-neutral input for [ChatTransport.stream].
 ///
@@ -27,6 +28,7 @@ class ChatTransportRequest {
   final double presencePenalty;
   final bool stream;
   final bool requestReasoning;
+  final bool useResponsesApi;
   final String? reasoningEffort;
   final bool omitTemperature;
   final bool omitTopP;
@@ -81,6 +83,7 @@ class ChatTransportRequest {
     this.presencePenalty = 0.0,
     this.stream = true,
     this.requestReasoning = false,
+    this.useResponsesApi = false,
     this.reasoningEffort,
     this.omitTemperature = false,
     this.omitTopP = false,
@@ -100,4 +103,50 @@ class ChatTransportRequest {
     this.toolChoice,
     this.extraRequestParameters = const [],
   });
+
+  /// Maps the request-level options from [apiConfig] while allowing callers to
+  /// supply data that belongs to one generation rather than the saved config.
+  factory ChatTransportRequest.fromApiConfig(
+    ApiConfig apiConfig, {
+    required List<Map<String, dynamic>> messages,
+    String? model,
+    bool? stream,
+    int? receiveTimeoutMs,
+    String? sessionId,
+    List<Map<String, dynamic>>? previousMessages,
+    List<Map<String, dynamic>>? tools,
+    String? toolChoice,
+  }) => ChatTransportRequest(
+    endpoint: apiConfig.endpoint,
+    apiKey: apiConfig.apiKey,
+    model: model ?? apiConfig.model,
+    messages: messages,
+    maxTokens: apiConfig.maxTokens,
+    temperature: apiConfig.temperature,
+    topP: apiConfig.topP,
+    topK: apiConfig.topK,
+    frequencyPenalty: apiConfig.frequencyPenalty,
+    presencePenalty: apiConfig.presencePenalty,
+    stream: stream ?? apiConfig.stream,
+    requestReasoning: apiConfig.requestReasoning,
+    useResponsesApi: apiConfig.useResponsesApi,
+    reasoningEffort: apiConfig.reasoningEffort,
+    omitTemperature: apiConfig.omitTemperature,
+    omitTopP: apiConfig.omitTopP,
+    omitTopK: apiConfig.omitTopK,
+    omitFrequencyPenalty: apiConfig.omitFrequencyPenalty,
+    omitPresencePenalty: apiConfig.omitPresencePenalty,
+    omitReasoning: apiConfig.omitReasoning,
+    omitReasoningEffort: apiConfig.omitReasoningEffort,
+    showNativeReasoning: apiConfig.showNativeReasoning,
+    receiveTimeoutMs: receiveTimeoutMs,
+    sessionId: sessionId,
+    previousMessages: previousMessages,
+    cacheControlTtl: apiConfig.cacheControlTtl,
+    cacheBreakpointMode: apiConfig.cacheBreakpointMode,
+    sessionIdMode: apiConfig.sessionIdMode,
+    tools: tools,
+    toolChoice: toolChoice,
+    extraRequestParameters: apiConfig.extraRequestParameters,
+  );
 }

@@ -38,6 +38,7 @@ class MemoryDraftGenerator {
     String apiKey;
     String model;
     String protocol;
+    var useResponsesApi = false;
 
     if (isCustom) {
       endpoint = pipeline.memoryBookApi.generationEndpoint;
@@ -56,6 +57,7 @@ class MemoryDraftGenerator {
           ? pipeline.memoryBookApi.generationModel
           : chatConfig.model;
       protocol = chatConfig.protocol;
+      useResponsesApi = chatConfig.useResponsesApi;
     }
 
     final endpointRequired = protocol != LlmProtocol.openrouter;
@@ -83,6 +85,7 @@ class MemoryDraftGenerator {
         temperature: temperature,
         topP: 1.0,
         stream: false,
+        useResponsesApi: useResponsesApi,
       ),
       cancelToken: cancelToken,
       onComplete: (text, _, {rawResponseJson}) {

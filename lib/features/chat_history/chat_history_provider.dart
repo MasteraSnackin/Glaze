@@ -10,12 +10,35 @@ import '../../core/state/db_provider.dart';
 import '../../core/utils/sync_deletion_tracker.dart';
 import '../../shared/utils/time_formatter.dart';
 import '../chat/chat_session_service.dart';
+import '../extensions/state/message_variables_notifier.dart';
 
 class ChatSessionInfo {
   final String sessionId;
   final String characterId;
+
+  /// The character's own name — **without** any variation suffix. The variation
+  /// travels separately in [variantName] so the list can render it as a chip
+  /// that survives truncation, instead of gluing it onto the end of a string
+  /// where the ellipsis eats exactly the part that tells two rows apart.
   final String characterName;
+
+  /// Variation group of [characterId], used to keep a character's variations in
+  /// one collapsible group instead of scattering them across the list as
+  /// look-alike top-level entries.
+  final String variantGroupId;
+
+  /// Name of the variation this session belongs to, or null for the group's
+  /// original/unnamed character row.
+  final String? variantName;
+
+  /// This session's own variation avatar.
   final String? avatarPath;
+
+  /// Avatar of the group's original. The collapsed group header stands for the
+  /// whole character rather than for one of its variations, so it uses this and
+  /// its face stops changing with whichever variation you chatted with last.
+  final String? groupAvatarPath;
+
   final String lastMessage;
   final int lastMessageTime;
   final int messageCount;
@@ -26,13 +49,41 @@ class ChatSessionInfo {
     required this.sessionId,
     required this.characterId,
     required this.characterName,
+    required this.variantGroupId,
+    this.variantName,
     this.avatarPath,
+    this.groupAvatarPath,
     required this.lastMessage,
     required this.lastMessageTime,
     required this.messageCount,
     required this.sessionIndex,
     this.sessionName,
   });
+
+  /// Full name for places that need one flat string (dialog copy, tooltips).
+  String get fullCharacterName {
+    final variant = variantName?.trim();
+    return (variant != null && variant.isNotEmpty)
+        ? '$characterName — $variant'
+        : characterName;
+  }
+
+  /// This session with a new display name. Takes the name positionally so a
+  /// null genuinely clears it, rather than being read as "leave unchanged".
+  ChatSessionInfo withSessionName(String? name) => ChatSessionInfo(
+    sessionId: sessionId,
+    characterId: characterId,
+    characterName: characterName,
+    variantGroupId: variantGroupId,
+    variantName: variantName,
+    avatarPath: avatarPath,
+    groupAvatarPath: groupAvatarPath,
+    lastMessage: lastMessage,
+    lastMessageTime: lastMessageTime,
+    messageCount: messageCount,
+    sessionIndex: sessionIndex,
+    sessionName: name,
+  );
 }
 
 final chatHistoryProvider =
@@ -79,6 +130,9 @@ class ChatHistoryNotifier extends AsyncNotifier<List<ChatSessionInfo>> {
   ) async {
     final charIds = allMeta.map((m) => m.characterId).toSet();
     final charMap = await charRepo.getByIds(charIds);
+    // Keyed by group, not by session character: a group's original may have no
+    // chats of its own, so it can be missing from [charMap] entirely.
+    final groupAvatars = await charRepo.getGroupAvatars();
 
     final result = <ChatSessionInfo>[];
     for (final m in allMeta) {
@@ -91,12 +145,13 @@ class ChatHistoryNotifier extends AsyncNotifier<List<ChatSessionInfo>> {
       final baseName = char?.displayName?.trim().isNotEmpty == true
           ? char!.displayName!.trim()
           : (char?.name ?? 'Unknown');
-      // Variations are separate history groups; surface the variation name on
-      // the chip as "Name — Variation" so they stay distinguishable.
+      // Variation identity is carried as its own field, not concatenated into
+      // the name: the list renders it as a chip, and grouping keys off the
+      // group id so a character's variations stay under one entry.
       final variant = char?.variantName?.trim();
-      final characterName = (variant != null && variant.isNotEmpty)
-          ? '$baseName — $variant'
-          : baseName;
+      final variantGroupId = (char == null || char.variantGroupId.isEmpty)
+          ? m.characterId
+          : char.variantGroupId;
       // While the origin event (branch/creation) is the most recent thing to
       // have happened, surface it as the preview and sort key so a freshly
       // branched or created chat rises to the top with a "Branched on …" /
@@ -109,17 +164,23 @@ class ChatHistoryNotifier extends AsyncNotifier<List<ChatSessionInfo>> {
         lastMessage = formatOriginPreview(m.originKind!, m.originTimestamp);
         lastMessageTime = m.originTimestamp;
       }
-      result.add(ChatSessionInfo(
-        sessionId: m.sessionId,
-        characterId: m.characterId,
-        characterName: characterName,
-        avatarPath: char?.avatarPath,
-        lastMessage: lastMessage,
-        lastMessageTime: lastMessageTime,
-        messageCount: m.messageCount,
-        sessionIndex: m.sessionIndex,
-        sessionName: m.sessionName,
-      ));
+      result.add(
+        ChatSessionInfo(
+          sessionId: m.sessionId,
+          characterId: m.characterId,
+          characterName: baseName,
+          variantGroupId: variantGroupId,
+          variantName: (variant != null && variant.isNotEmpty) ? variant : null,
+          avatarPath: char?.avatarPath,
+          groupAvatarPath:
+              groupAvatars[variantGroupId] ?? char?.avatarPath,
+          lastMessage: lastMessage,
+          lastMessageTime: lastMessageTime,
+          messageCount: m.messageCount,
+          sessionIndex: m.sessionIndex,
+          sessionName: m.sessionName,
+        ),
+      );
     }
 
     result.sort((a, b) => b.lastMessageTime.compareTo(a.lastMessageTime));
@@ -145,7 +206,10 @@ class ChatHistoryNotifier extends AsyncNotifier<List<ChatSessionInfo>> {
       final ai = a[i], bi = b[i];
       if (ai.sessionId != bi.sessionId ||
           ai.characterName != bi.characterName ||
+          ai.variantName != bi.variantName ||
+          ai.variantGroupId != bi.variantGroupId ||
           ai.avatarPath != bi.avatarPath ||
+          ai.groupAvatarPath != bi.groupAvatarPath ||
           ai.lastMessageTime != bi.lastMessageTime ||
           ai.messageCount != bi.messageCount ||
           ai.lastMessage != bi.lastMessage ||
@@ -160,14 +224,7 @@ class ChatHistoryNotifier extends AsyncNotifier<List<ChatSessionInfo>> {
     final studioConfig = await ref
         .read(studioConfigRepoProvider)
         .getBySessionId(sessionId);
-    await ref.read(chatRepoProvider).delete(sessionId);
-    await ref.read(memoryBookRepoProvider).deleteBySessionId(sessionId);
-    await ref.read(trackerRepoProvider).clearForSession(sessionId);
-    await ref.read(trackerSnapshotRepoProvider).deleteBySessionId(sessionId);
-    await ref
-        .read(ledgerReconciliationCheckpointRepoProvider)
-        .deleteBySessionId(sessionId);
-    await ref.read(studioConfigRepoProvider).deleteBySessionId(sessionId);
+    await ref.read(sessionDeletionRepoProvider).deleteSession(sessionId);
     ChatSessionService.clearCache();
     await SyncDeletionTracker.record('chat', sessionId);
     await SyncDeletionTracker.record('memory_book', sessionId);
@@ -181,48 +238,30 @@ class ChatHistoryNotifier extends AsyncNotifier<List<ChatSessionInfo>> {
   }
 
   Future<void> clearChat(String sessionId) async {
-    final chatRepo = ref.read(chatRepoProvider);
-    final sessions = await chatRepo.getAllSessionMetadata();
-    final meta = sessions.where((s) => s.sessionId == sessionId).firstOrNull;
-    if (meta == null) return;
-
-    final clearedSession = ChatSession(
-      id: sessionId,
-      characterId: meta.characterId,
-      sessionIndex: meta.sessionIndex,
-      messages: [],
-    );
-    await chatRepo.put(clearedSession);
-    // Wipe tracker snapshots so stale state from before the clear does not
-    // leak into the fresh chat.
-    await ref.read(trackerSnapshotRepoProvider).deleteBySessionId(sessionId);
-    await ref
-        .read(ledgerReconciliationCheckpointRepoProvider)
-        .deleteBySessionId(sessionId);
+    final clearedSession = await ref
+        .read(sessionDeletionRepoProvider)
+        .clearSession(sessionId: sessionId, replacementMessages: const []);
+    if (clearedSession == null) return;
+    ChatSessionService.updateCache(clearedSession);
+    ref.invalidate(memoryBookProvider(sessionId));
+    ref.read(messageVariablesProvider.notifier).clearSession(sessionId);
+    await SyncDeletionTracker.recordSessionRuntimeClear(sessionId);
   }
 
   Future<void> renameSession(String sessionId, String newName) async {
     final chatRepo = ref.read(chatRepoProvider);
-    final session = await chatRepo.getById(sessionId);
-    if (session == null) return;
-    final updatedVars = Map<String, String>.from(session.sessionVars);
-    updatedVars['sessionName'] = newName;
-    await chatRepo.put(session.copyWith(sessionVars: updatedVars));
+    final updated = await chatRepo.renameSession(
+      sessionId: sessionId,
+      name: newName,
+    );
+    if (updated == null) return;
+    ChatSessionService.updateCache(updated);
+    final durableName = updated.sessionVars['sessionName'];
     state = state.whenData(
       (sessions) => [
         for (final item in sessions)
           item.sessionId == sessionId
-              ? ChatSessionInfo(
-                  sessionId: item.sessionId,
-                  characterId: item.characterId,
-                  characterName: item.characterName,
-                  avatarPath: item.avatarPath,
-                  lastMessage: item.lastMessage,
-                  lastMessageTime: item.lastMessageTime,
-                  messageCount: item.messageCount,
-                  sessionIndex: item.sessionIndex,
-                  sessionName: newName,
-                )
+              ? item.withSessionName(durableName)
               : item,
       ],
     );
