@@ -564,6 +564,7 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
         cacheControlTtl: cfg.cacheControlTtl,
         cacheBreakpointMode: cfg.cacheBreakpointMode,
         sessionIdMode: cfg.sessionIdMode,
+        useSystemInstruction: cfg.useSystemInstruction,
         extraRequestParameters: cfg.extraRequestParameters,
       );
 
@@ -574,6 +575,9 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
         LlmProtocol.gemini => GeminiChatTransport.buildRequest(request).body,
         LlmProtocol.openrouter => OpenAiChatTransport.buildBody(
           OpenRouterChatTransport.buildRouterRequest(request),
+        ),
+        LlmProtocol.openaiResponses => OpenAiResponsesTransport.buildBody(
+          request,
         ),
         _ =>
           cfg.useResponsesApi

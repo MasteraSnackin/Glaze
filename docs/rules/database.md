@@ -176,6 +176,24 @@ Migration history:
   read `injectionPoint` from JSON, defaulting every block to `pregen`). Runs
   `migrateStudioPresetBlocksToV2` on each preset's blocks and writes the
   repaired JSON back. Idempotent — presets that were never affected are skipped.
+- v107: added `api_configs.exclude_reasoning_from_context_budget` BOOLEAN
+  DEFAULT 0.
+- v108: added `card_evolution_observations`.
+- v109: rewrites `protocol = 'openai'` rows with `use_responses_api = 1` to
+  `protocol = 'openai_responses'`. The Responses API is now a protocol of its
+  own instead of a boolean opt-in, and `use_responses_api` is derived from it.
+- v110: added `api_configs.use_system_instruction` BOOLEAN NOT NULL DEFAULT 1 —
+  whether the leading system run is lifted into the provider's own field.
+  Defaults on, which is the behaviour that shipped before the toggle existed.
+- v111: collapses `api_configs.session_id_mode` to a two-state toggle. The
+  retired default `'openrouter'` meant "send only to openrouter.ai", so rows
+  still holding it become `'always'` when the preset is an OpenRouter one (by
+  protocol or by endpoint) and `'off'` otherwise. Explicit `'always'`/`'off'`
+  rows are untouched.
+- v112: renames `api_configs.gemini_use_system_instruction` to
+  `use_system_instruction` — the toggle covers Anthropic's `system` as well as
+  Gemini's `system_instruction`. Guarded: runs only on databases that still
+  carry the prefixed name (v110/v111 builds of the branch that introduced it).
 
 ---
 

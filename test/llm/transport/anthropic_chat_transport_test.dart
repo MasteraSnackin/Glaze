@@ -16,6 +16,7 @@ ChatTransportRequest _req({
   String cacheControlTtl = 'off',
   String cacheBreakpointMode = 'depth',
   List<Map<String, dynamic>>? previousMessages,
+  bool useSystemInstruction = true,
 }) {
   return ChatTransportRequest(
     endpoint: 'https://api.anthropic.com',
@@ -38,6 +39,7 @@ ChatTransportRequest _req({
     cacheControlTtl: cacheControlTtl,
     cacheBreakpointMode: cacheBreakpointMode,
     previousMessages: previousMessages,
+    useSystemInstruction: useSystemInstruction,
   );
 }
 
@@ -110,6 +112,34 @@ void main() {
         ),
       );
       expect(built.body.containsKey('system'), isFalse);
+    });
+
+    test('useSystemInstruction: false keeps the system run inline', () {
+      const messages = [
+        {'role': 'system', 'content': 'sysA'},
+        {'role': 'system', 'content': 'sysB'},
+        {'role': 'user', 'content': 'hi'},
+      ];
+
+      final hoisted = AnthropicChatTransport.buildRequest(
+        _req(messages: messages),
+      );
+      expect((hoisted.body['system'] as List), hasLength(2));
+      expect((hoisted.body['messages'] as List), hasLength(1));
+
+      final inline = AnthropicChatTransport.buildRequest(
+        _req(messages: messages, useSystemInstruction: false),
+      );
+      expect(inline.body.containsKey('system'), isFalse);
+      // Nothing is dropped — the run becomes user turns ahead of the message.
+      final texts = (inline.body['messages'] as List)
+          .expand((m) => (m['content'] as List))
+          .map((part) => part['text'])
+          .toList();
+      expect(texts, containsAllInOrder(['sysA', 'sysB', 'hi']));
+      for (final message in inline.body['messages'] as List) {
+        expect(message['role'], 'user');
+      }
     });
 
     test('temperature/top_p preserved by default', () {

@@ -35,8 +35,10 @@ class GeminiBuiltRequest {
 ///   `generationConfig` (incl. `thinkingConfig`) + `safetySettings`.
 ///
 /// Behaviours:
-/// - Unconditionally collapses non-assistant chrome via `mergeNonAssistant`
-///   before converting (per user requirement).
+/// - Message shaping matches SillyTavern's `convertGooglePrompt`: only the
+///   leading run of genuine `system` messages is lifted into
+///   `systemInstruction` (one part each), everything else keeps its place and
+///   consecutive same-role turns are squashed inside `contents`.
 /// - Safety settings: all five HARM_* categories set to `OFF`.
 /// - Extended thinking: `generationConfig.thinkingConfig.thinkingBudget`
 ///   (int) or `.thinkingLevel` (string for Gemini 3) per
@@ -98,7 +100,10 @@ class GeminiChatTransport implements ChatTransport {
   /// Pure: build URL + body + headers from a [ChatTransportRequest]. Exposed
   /// for unit tests.
   static GeminiBuiltRequest buildRequest(ChatTransportRequest request) {
-    final converted = convertGoogleMessagesMerged(request.messages);
+    final converted = convertGoogleMessages(
+      request.messages,
+      useSystemInstruction: request.useSystemInstruction,
+    );
 
     final generationConfig = <String, dynamic>{'candidateCount': 1};
     if (request.maxTokens > 0) {

@@ -25,7 +25,6 @@ void main() {
       stream: false,
       reasoningEffort: 'high',
       requestReasoning: true,
-      useResponsesApi: true,
       showNativeReasoning: false,
       reasoningHistoryCount: -1,
       reasoningTagStart: '<think>',
@@ -46,6 +45,7 @@ void main() {
       cacheBreakpointMode: 'stable_prefix',
       sessionIdMode: 'always',
       firstChunkTimeoutMs: 45000,
+      useSystemInstruction: false,
       extraRequestParameters: [ExtraRequestParameter(key: 'seed', value: '42')],
     );
 
@@ -94,6 +94,102 @@ void main() {
     expect(mapped.embeddingMaxChunkTokens, 789);
   });
 
+  test('the Responses protocol derives the legacy opt-in flag', () {
+    const config = ApiConfig(
+      id: 'api',
+      protocol: LlmProtocol.openaiResponses,
+    );
+
+    final draft = ApiConfigDraft.fromConfig(config);
+
+    expect(draft.values.useResponsesApi, isTrue);
+    expect(draft.toConfig(config).useResponsesApi, isTrue);
+  });
+
+  test('leaving the Responses protocol clears the legacy opt-in flag', () {
+    const config = ApiConfig(
+      id: 'api',
+      protocol: LlmProtocol.openai,
+      useResponsesApi: true,
+    );
+
+    final draft = ApiConfigDraft.fromConfig(config);
+
+    expect(draft.values.useResponsesApi, isFalse);
+    expect(draft.toConfig(config).useResponsesApi, isFalse);
+  });
+
+  test('a legacy JSON preset with the opt-in maps onto the new protocol', () {
+    final config = ApiConfig.fromJson(const {
+      'id': 'api',
+      'protocol': 'openai',
+      'useResponsesApi': true,
+    });
+
+    expect(config.protocol, LlmProtocol.openaiResponses);
+  });
+
+  test('OpenRouter keeps a live cache TTL so OR markers can be placed', () {
+    const config = ApiConfig(
+      id: 'api',
+      protocol: LlmProtocol.openrouter,
+      cacheControlTtl: '1h',
+      cacheBreakpointMode: 'stable_prefix',
+    );
+
+    final draft = ApiConfigDraft.fromConfig(config);
+
+    expect(draft.values.cacheControlTtl, '1h');
+    expect(draft.toConfig(config).cacheControlTtl, '1h');
+    expect(draft.toConfig(config).cacheBreakpointMode, 'stable_prefix');
+  });
+
+  for (final testCase in <({String name, String protocol, String endpoint,
+      String stored, String resolved})>[
+    (
+      name: 'OpenRouter protocol keeps the legacy default on',
+      protocol: LlmProtocol.openrouter,
+      endpoint: '',
+      stored: 'openrouter',
+      resolved: 'always',
+    ),
+    (
+      name: 'a custom preset pointed at OpenRouter keeps it on',
+      protocol: LlmProtocol.openai,
+      endpoint: 'https://openrouter.ai/api/v1',
+      stored: 'openrouter',
+      resolved: 'always',
+    ),
+    (
+      name: 'a plain OpenAI preset resolves the legacy default to off',
+      protocol: LlmProtocol.openai,
+      endpoint: 'https://api.openai.com/v1',
+      stored: 'openrouter',
+      resolved: 'off',
+    ),
+    (
+      name: 'an explicit off on OpenRouter is not overridden',
+      protocol: LlmProtocol.openrouter,
+      endpoint: '',
+      stored: 'off',
+      resolved: 'off',
+    ),
+  ]) {
+    test('session_id: ${testCase.name}', () {
+      final config = ApiConfig(
+        id: 'api',
+        protocol: testCase.protocol,
+        endpoint: testCase.endpoint,
+        sessionIdMode: testCase.stored,
+      );
+
+      final draft = ApiConfigDraft.fromConfig(config);
+
+      expect(draft.values.sessionIdMode, testCase.resolved);
+      expect(draft.toConfig(config).sessionIdMode, testCase.resolved);
+    });
+  }
+
   test('invalid protocol falls back to OpenAI during load and save', () {
     const config = ApiConfig(id: 'api', protocol: 'invalid');
 
@@ -104,10 +200,15 @@ void main() {
   });
 
   for (final testCase in <({String protocol, String input, String output})>[
+    // Every protocol keeps all six steps now — the collapse to what the API
+    // accepts happens at send time (converters/reasoning_effort.dart), not by
+    // rewriting the stored preset.
     (protocol: LlmProtocol.anthropic, input: 'min', output: 'min'),
     (protocol: LlmProtocol.gemini, input: 'min', output: 'min'),
-    (protocol: LlmProtocol.openai, input: 'min', output: 'low'),
-    (protocol: LlmProtocol.openrouter, input: 'min', output: 'low'),
+    (protocol: LlmProtocol.openai, input: 'min', output: 'min'),
+    (protocol: LlmProtocol.openaiResponses, input: 'min', output: 'min'),
+    (protocol: LlmProtocol.openrouter, input: 'min', output: 'min'),
+    (protocol: LlmProtocol.openai, input: 'max', output: 'max'),
     (protocol: LlmProtocol.openai, input: 'invalid', output: 'medium'),
   ]) {
     test(
@@ -127,26 +228,40 @@ void main() {
     );
   }
 
-  for (final testCase
-      in <({String protocol, bool keepsOpenAiOptions, bool keepsPromptCache})>[
+  for (final testCase in <({
+    String protocol,
+    bool keepsOpenAiOptions,
+    bool keepsPenalties,
+    bool keepsPromptCache,
+  })>[
         (
           protocol: LlmProtocol.openai,
           keepsOpenAiOptions: true,
+          keepsPenalties: true,
           keepsPromptCache: true,
+        ),
+        (
+          protocol: LlmProtocol.openaiResponses,
+          keepsOpenAiOptions: true,
+          keepsPenalties: false,
+          keepsPromptCache: false,
         ),
         (
           protocol: LlmProtocol.openrouter,
           keepsOpenAiOptions: true,
-          keepsPromptCache: false,
+          keepsPenalties: true,
+          keepsPromptCache: true,
         ),
         (
           protocol: LlmProtocol.anthropic,
           keepsOpenAiOptions: false,
+          keepsPenalties: false,
           keepsPromptCache: true,
         ),
         (
           protocol: LlmProtocol.gemini,
           keepsOpenAiOptions: false,
+          keepsPenalties: false,
           keepsPromptCache: false,
         ),
       ]) {
@@ -169,14 +284,8 @@ void main() {
         expect(values.omitTopP, testCase.keepsOpenAiOptions);
         expect(values.omitReasoning, testCase.keepsOpenAiOptions);
         expect(values.omitReasoningEffort, testCase.keepsOpenAiOptions);
-        expect(
-          values.frequencyPenalty,
-          testCase.keepsOpenAiOptions ? 1.5 : 0.0,
-        );
-        expect(
-          values.presencePenalty,
-          testCase.keepsOpenAiOptions ? -1.5 : 0.0,
-        );
+        expect(values.frequencyPenalty, testCase.keepsPenalties ? 1.5 : 0.0);
+        expect(values.presencePenalty, testCase.keepsPenalties ? -1.5 : 0.0);
         expect(
           values.cacheControlTtl,
           testCase.keepsPromptCache ? '1h' : 'off',

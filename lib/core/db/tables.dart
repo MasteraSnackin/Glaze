@@ -821,6 +821,8 @@ class ApiConfigs extends Table {
       text().withDefault(const Constant('openrouter'))();
   IntColumn get firstChunkTimeoutMs =>
       integer().withDefault(const Constant(60000))();
+  BoolColumn get useSystemInstruction =>
+      boolean().withDefault(const Constant(true))();
   TextColumn get extraRequestParametersJson =>
       text().withDefault(const Constant('[]'))();
 

@@ -21,6 +21,8 @@ ChatTransport pickChatTransport(String protocol) {
   switch (protocol) {
     case LlmProtocol.openai:
       inner = OpenAiCompatibleTransport();
+    case LlmProtocol.openaiResponses:
+      inner = OpenAiResponsesTransport();
     case LlmProtocol.anthropic:
       inner = AnthropicChatTransport();
     case LlmProtocol.gemini:

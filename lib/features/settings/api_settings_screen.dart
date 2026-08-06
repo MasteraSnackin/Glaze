@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/llm/converters/reasoning_effort.dart';
 import '../../core/llm/transport/llm_protocol.dart';
 import '../../core/llm/transport/transport_factory.dart';
 import '../../core/services/api_connection_tester.dart';
@@ -66,7 +67,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   int _topK = 0;
   bool _stream = true;
   bool _requestReasoning = false;
-  bool _useResponsesApi = false;
+  bool _useSystemInstruction = true;
   bool _showNativeReasoning = true;
   bool _excludeReasoningFromContextBudget = false;
   String _reasoningEffort = 'medium';
@@ -225,7 +226,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       _presencePenalty = values.presencePenalty;
       _stream = values.stream;
       _requestReasoning = values.requestReasoning;
-      _useResponsesApi = values.useResponsesApi;
+      _useSystemInstruction = values.useSystemInstruction;
       _showNativeReasoning = values.showNativeReasoning;
       _excludeReasoningFromContextBudget =
           values.excludeReasoningFromContextBudget;
@@ -262,7 +263,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
         presencePenalty: _presencePenalty,
         stream: _stream,
         requestReasoning: _requestReasoning,
-        useResponsesApi: _useResponsesApi,
+        useSystemInstruction: _useSystemInstruction,
         showNativeReasoning: _showNativeReasoning,
         excludeReasoningFromContextBudget: _excludeReasoningFromContextBudget,
         reasoningEffort: _reasoningEffort,
@@ -301,6 +302,10 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
 
   bool get _supportsTopP => true;
 
+  /// The Responses API has no `top_k` and no penalties, so those controls are
+  /// hidden for it rather than shown and silently ignored.
+  bool get _isResponses => _protocol == LlmProtocol.openaiResponses;
+
   bool get _supportsTopK =>
       _protocol == LlmProtocol.openai ||
       _protocol == LlmProtocol.openrouter ||
@@ -313,19 +318,38 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   bool get _supportsPresencePenalty =>
       _protocol == LlmProtocol.openai || _protocol == LlmProtocol.openrouter;
 
+  /// OpenRouter included: `buildRouterRequest` needs a live TTL to place
+  /// `cache_control` markers for Claude-through-OR.
   bool get _supportsPromptCache =>
-      _protocol == LlmProtocol.anthropic || _protocol == LlmProtocol.openai;
+      _protocol == LlmProtocol.anthropic ||
+      _protocol == LlmProtocol.openai ||
+      _protocol == LlmProtocol.openrouter;
 
   bool get _supportsReasoning => true;
 
+  /// Protocols with a dedicated field for the leading system block. The field
+  /// is named differently per provider, so the label carries its actual name.
+  bool get _supportsSystemInstruction =>
+      _protocol == LlmProtocol.gemini || _protocol == LlmProtocol.anthropic;
+
+  String get _systemInstructionFieldName =>
+      _protocol == LlmProtocol.anthropic ? 'system' : 'system_instruction';
+
+  /// Derived from the protocol — the Responses API is no longer a toggle.
+  bool get _useResponsesApi => _isResponses;
+
   bool get _showsOmitSamplingControls =>
-      _protocol == LlmProtocol.openai || _protocol == LlmProtocol.openrouter;
+      _protocol == LlmProtocol.openai ||
+      _protocol == LlmProtocol.openaiResponses ||
+      _protocol == LlmProtocol.openrouter;
 
   bool get _hideSamplingWhileReasoningAnthropic =>
       _protocol == LlmProtocol.anthropic && _requestReasoning;
 
-  List<String> get _reasoningEffortOptions =>
-      ApiConfigDraft.reasoningEffortOptions(_protocol);
+  /// Every protocol offers the same six steps, like SillyTavern — what a step
+  /// becomes on the wire is decided at send time by `resolveReasoningEffort`,
+  /// not by shrinking the dropdown.
+  List<String> get _reasoningEffortOptions => reasoningEffortSteps;
 
   void _applyProtocolUiPolicy(String protocol) {
     final normalized = ApiConfigDraft.normalizeValues(
@@ -523,307 +547,380 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
             child: _buildTopControls(list, activeName),
           ),
-          MenuGroup(
-            compact: true,
-            header: 'onboarding_connection'.tr(),
-            helpTerm: 'api',
-            items: [
-              MenuFieldItem(
-                label: 'settings_config_name'.tr(),
-                controller: _nameCtrl,
-                placeholder: 'My OpenAI',
-              ),
-              MenuSelectorItem(
-                label: 'settings_protocol'.tr(),
-                currentValue: LlmProtocol.labels[_protocol] ?? _protocol,
-                onTap: _openProtocolSelector,
-              ),
-              if (_protocol != LlmProtocol.openrouter)
-                MenuFieldItem(
-                  label: 'onboarding_label_endpoint'.tr(),
-                  controller: _endpointCtrl,
-                  placeholder: 'https://your-endpoint.example',
-                ),
-              MenuFieldItem(
-                label: 'onboarding_label_model'.tr(),
-                controller: _modelCtrl,
-                placeholder: 'gemini-3-pro-preview',
-                suffix: _isLoadingModels
-                    ? const Padding(
-                        padding: EdgeInsets.all(12),
-                        child: SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        ),
-                      )
-                    : IconButton(
-                        icon: Icon(
-                          Icons.keyboard_arrow_down_rounded,
-                          color: context.cs.onSurfaceVariant,
-                          size: 22,
-                        ),
-                        tooltip: _fetchedModels.isEmpty
-                            ? 'settings_fetch_models'.tr()
-                            : 'settings_select_model'.tr(),
-                        onPressed: _openModelSelector,
-                      ),
-              ),
-              MenuFieldItem(
-                label: 'onboarding_label_key'.tr(),
-                helpTerm: 'apikey',
-                controller: _keyCtrl,
-                placeholder: 'sk-...',
-                obscure: !_showApiKey,
-                suffix: IconButton(
-                  icon: Icon(
-                    _showApiKey
-                        ? Icons.visibility_off_outlined
-                        : Icons.visibility_outlined,
-                    color: context.cs.onSurfaceVariant,
-                    size: 20,
-                  ),
-                  onPressed: () => setState(() => _showApiKey = !_showApiKey),
-                ),
-              ),
-              MenuSwitchItem(
-                label: 'label_stream'.tr(),
-                helpTerm: 'streaming',
-                description: 'desc_stream'.tr(),
-                value: _stream,
-                onChanged: (v) {
-                  setState(() => _stream = v);
+          _buildConnectionGroup(context),
+          _buildGenerationGroup(),
+          _buildReasoningGroup(),
+          // Everything below is for troubleshooting or provider quirks, not
+          // day-to-day tuning — one tap away instead of in the way.
+          MenuCollapsibleSection(
+            label: 'section_advanced'.tr(),
+            children: [
+              _buildSamplingGroup(),
+              _buildCacheGroup(),
+              _buildReasoningDeliveryGroup(),
+              _buildOtherGroup(),
+              ExtraRequestParametersEditor(
+                key: ValueKey('api-extra-parameters-$_loadedPresetId'),
+                parameters: _extraRequestParameters,
+                title: 'extra_request_parameters'.tr(),
+                description: 'extra_request_parameters_desc'.tr(),
+                keyLabel: 'extra_request_parameter_key'.tr(),
+                valueLabel: 'extra_request_parameter_value'.tr(),
+                addLabel: 'extra_request_parameter_add'.tr(),
+                onChanged: (parameters) {
+                  _extraRequestParameters = parameters;
                   _scheduleSave();
                 },
               ),
             ],
           ),
-          MenuGroup(
-            compact: true,
-            header: 'section_gen_params'.tr(),
-            helpTerm: 'guided',
-            items: [
-              if (_supportsTemperature && !_hideSamplingWhileReasoningAnthropic)
-                MenuRangeItem(
-                  label: 'label_temperature'.tr(),
-                  helpTerm: 'temperature',
-                  value: _temperature,
-                  min: 0,
-                  max: 2,
-                  divisions: 200,
-                  editableValue: true,
-                  included: _showsOmitSamplingControls
-                      ? !_omitTemperature
-                      : null,
-                  onIncludedChanged: _showsOmitSamplingControls
-                      ? (v) {
-                          setState(() => _omitTemperature = !v);
-                          _scheduleSave();
-                        }
-                      : null,
-                  onChanged: (v) {
-                    setState(() => _temperature = v);
-                    _scheduleSave();
-                  },
-                ),
-              if (_supportsTopP && !_hideSamplingWhileReasoningAnthropic)
-                MenuRangeItem(
-                  label: 'label_top_p'.tr(),
-                  helpTerm: 'top-p',
-                  value: _topP,
-                  min: 0,
-                  max: 1,
-                  divisions: 100,
-                  editableValue: true,
-                  included: _showsOmitSamplingControls ? !_omitTopP : null,
-                  onIncludedChanged: _showsOmitSamplingControls
-                      ? (v) {
-                          setState(() => _omitTopP = !v);
-                          _scheduleSave();
-                        }
-                      : null,
-                  onChanged: (v) {
-                    setState(() => _topP = v);
-                    _scheduleSave();
-                  },
-                ),
-              if (_supportsTopK && !_hideSamplingWhileReasoningAnthropic)
-                MenuRangeItem(
-                  label: 'label_top_k_sampling'.tr(),
-                  helpTerm: 'top-k',
-                  value: _topK.toDouble(),
-                  min: 0,
-                  max: 200,
-                  divisions: 200,
-                  editableValue: true,
-                  decimalPlaces: 0,
-                  included: !_omitTopK,
-                  onIncludedChanged: (v) {
-                    setState(() => _omitTopK = !v);
-                    _scheduleSave();
-                  },
-                  onChanged: (v) {
-                    setState(() => _topK = v.round());
-                    _scheduleSave();
-                  },
-                ),
-              if (_supportsFrequencyPenalty)
-                MenuRangeItem(
-                  label: 'label_frequency_penalty'.tr(),
-                  helpTerm: 'frequency-penalty',
-                  value: _frequencyPenalty,
-                  min: -2,
-                  max: 2,
-                  divisions: 80,
-                  editableValue: true,
-                  included: !_omitFrequencyPenalty,
-                  onIncludedChanged: (v) {
-                    setState(() => _omitFrequencyPenalty = !v);
-                    _scheduleSave();
-                  },
-                  onChanged: (v) {
-                    setState(() => _frequencyPenalty = v);
-                    _scheduleSave();
-                  },
-                ),
-              if (_supportsPresencePenalty)
-                MenuRangeItem(
-                  label: 'label_presence_penalty'.tr(),
-                  helpTerm: 'presence-penalty',
-                  value: _presencePenalty,
-                  min: -2,
-                  max: 2,
-                  divisions: 80,
-                  editableValue: true,
-                  included: !_omitPresencePenalty,
-                  onIncludedChanged: (v) {
-                    setState(() => _omitPresencePenalty = !v);
-                    _scheduleSave();
-                  },
-                  onChanged: (v) {
-                    setState(() => _presencePenalty = v);
-                    _scheduleSave();
-                  },
-                ),
-              MenuFieldItem(
-                label: 'label_max_tokens'.tr(),
-                helpTerm: 'max-tokens',
-                controller: _maxTokensCtrl,
-                placeholder: '8000',
-                keyboardType: TextInputType.number,
-              ),
-              MenuFieldItem(
-                label: 'label_context_size'.tr(),
-                helpTerm: 'context-size',
-                controller: _contextSizeCtrl,
-                placeholder: '32000',
-                keyboardType: TextInputType.number,
-              ),
-              MenuFieldItem(
-                label: 'label_first_chunk_timeout'.tr(),
-                helpTerm: 'first-chunk-timeout',
-                controller: _firstChunkTimeoutCtrl,
-                placeholder: '60',
-                keyboardType: TextInputType.number,
-              ),
-            ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildConnectionGroup(BuildContext context) {
+    return MenuGroup(
+      compact: true,
+      header: 'onboarding_connection'.tr(),
+      helpTerm: 'api',
+      items: [
+        MenuFieldItem(
+          label: 'settings_config_name'.tr(),
+          controller: _nameCtrl,
+          placeholder: 'My OpenAI',
+        ),
+        MenuSelectorItem(
+          label: 'settings_protocol'.tr(),
+          currentValue: LlmProtocol.labels[_protocol] ?? _protocol,
+          onTap: _openProtocolSelector,
+        ),
+        if (_protocol != LlmProtocol.openrouter)
+          MenuFieldItem(
+            label: 'onboarding_label_endpoint'.tr(),
+            controller: _endpointCtrl,
+            placeholder: 'https://your-endpoint.example',
           ),
-          MenuGroup(
-            compact: true,
-            header: 'label_reasoning_settings'.tr(),
-            helpTerm: 'preset-reasoning',
-            items: [
-              if (_protocol == LlmProtocol.openai)
-                MenuSwitchItem(
-                  label: 'label_use_responses_api'.tr(),
-                  description: 'desc_use_responses_api'.tr(),
-                  value: _useResponsesApi,
-                  onChanged: (value) {
-                    setState(() => _useResponsesApi = value);
-                    _scheduleSave();
-                  },
-                ),
-              if (_supportsReasoning)
-                MenuSwitchItem(
-                  label: 'label_reasoning'.tr(),
-                  helpTerm: 'reasoning-native',
-                  description: 'desc_reasoning'.tr(),
-                  value: _showNativeReasoning,
-                  onChanged: (v) {
-                    setState(() => _showNativeReasoning = v);
-                    _scheduleSave();
-                  },
-                ),
-              if (_supportsReasoning)
-                MenuSelectorItem(
-                  label: 'label_reasoning_effort'.tr(),
-                  helpTerm: 'reasoning-effort',
-                  currentValue: _reasoningEffortLabel(_reasoningEffort),
-                  included: _requestReasoning,
-                  onIncludedChanged: (v) {
-                    setState(() {
-                      _requestReasoning = v;
-                      _omitReasoning = !v;
-                      _omitReasoningEffort = !v;
-                    });
-                    _scheduleSave();
-                  },
-                  onTap: _openReasoningEffortSelector,
-                ),
-              if (_supportsReasoning)
-                MenuFieldItem(
-                  label: 'label_include_last_reasoning'.tr(),
-                  controller: _reasoningHistoryCountCtrl,
-                  placeholder: '0',
-                  keyboardType: const TextInputType.numberWithOptions(
-                    signed: true,
+        MenuFieldItem(
+          label: 'onboarding_label_model'.tr(),
+          controller: _modelCtrl,
+          placeholder: 'gemini-3-pro-preview',
+          suffix: _isLoadingModels
+              ? const Padding(
+                  padding: EdgeInsets.all(12),
+                  child: SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
                   ),
+                )
+              : IconButton(
+                  icon: Icon(
+                    Icons.keyboard_arrow_down_rounded,
+                    color: context.cs.onSurfaceVariant,
+                    size: 22,
+                  ),
+                  tooltip: _fetchedModels.isEmpty
+                      ? 'settings_fetch_models'.tr()
+                      : 'settings_select_model'.tr(),
+                  onPressed: _openModelSelector,
                 ),
-              if (_supportsReasoning)
-                MenuSwitchItem(
-                  label: 'label_exclude_reasoning_from_budget'.tr(),
-                  helpTerm: 'reasoning-budget',
-                  description: 'desc_exclude_reasoning_from_budget'.tr(),
-                  value: _excludeReasoningFromContextBudget,
-                  onChanged: (v) {
-                    setState(() => _excludeReasoningFromContextBudget = v);
-                    _scheduleSave();
-                  },
-                ),
-              if (_supportsPromptCache)
-                MenuSelectorItem(
-                  label: 'label_prompt_cache_ttl'.tr(),
-                  currentValue: _cacheControlTtlLabel(_cacheControlTtl),
-                  onTap: _openCacheControlTtlSelector,
-                ),
-              if (_supportsPromptCache)
-                MenuSelectorItem(
-                  label: 'label_prompt_cache_breakpoint'.tr(),
-                  currentValue: _cacheBreakpointModeLabel(_cacheBreakpointMode),
-                  onTap: _openCacheBreakpointModeSelector,
-                ),
-              MenuSelectorItem(
-                label: 'label_session_id_mode'.tr(),
-                currentValue: _sessionIdModeLabel(_sessionIdMode),
-                onTap: _openSessionIdModeSelector,
-              ),
-            ],
+        ),
+        MenuFieldItem(
+          label: 'onboarding_label_key'.tr(),
+          helpTerm: 'apikey',
+          controller: _keyCtrl,
+          placeholder: 'sk-...',
+          obscure: !_showApiKey,
+          suffix: IconButton(
+            icon: Icon(
+              _showApiKey
+                  ? Icons.visibility_off_outlined
+                  : Icons.visibility_outlined,
+              color: context.cs.onSurfaceVariant,
+              size: 20,
+            ),
+            onPressed: () => setState(() => _showApiKey = !_showApiKey),
           ),
-          ExtraRequestParametersEditor(
-            key: ValueKey('api-extra-parameters-$_loadedPresetId'),
-            parameters: _extraRequestParameters,
-            title: 'extra_request_parameters'.tr(),
-            description: 'extra_request_parameters_desc'.tr(),
-            keyLabel: 'extra_request_parameter_key'.tr(),
-            valueLabel: 'extra_request_parameter_value'.tr(),
-            addLabel: 'extra_request_parameter_add'.tr(),
-            onChanged: (parameters) {
-              _extraRequestParameters = parameters;
+        ),
+        MenuSwitchItem(
+          label: 'label_stream'.tr(),
+          helpTerm: 'streaming',
+          description: 'desc_stream'.tr(),
+          value: _stream,
+          onChanged: (v) {
+            setState(() => _stream = v);
+            _scheduleSave();
+          },
+        ),
+        MenuFieldItem(
+          label: 'label_first_chunk_timeout'.tr(),
+          helpTerm: 'first-chunk-timeout',
+          description: 'desc_first_chunk_timeout'.tr(),
+          controller: _firstChunkTimeoutCtrl,
+          placeholder: '60',
+          keyboardType: TextInputType.number,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildGenerationGroup() {
+    return MenuGroup(
+      compact: true,
+      header: 'section_gen_params'.tr(),
+      helpTerm: 'guided',
+      items: [
+        if (_supportsTemperature && !_hideSamplingWhileReasoningAnthropic)
+          MenuRangeItem(
+            label: 'label_temperature'.tr(),
+            helpTerm: 'temperature',
+            value: _temperature,
+            min: 0,
+            max: 2,
+            divisions: 200,
+            editableValue: true,
+            included: _showsOmitSamplingControls ? !_omitTemperature : null,
+            onIncludedChanged: _showsOmitSamplingControls
+                ? (v) {
+                    setState(() => _omitTemperature = !v);
+                    _scheduleSave();
+                  }
+                : null,
+            onChanged: (v) {
+              setState(() => _temperature = v);
               _scheduleSave();
             },
           ),
-        ],
-      ),
+        MenuFieldItem(
+          label: 'label_max_tokens'.tr(),
+          helpTerm: 'max-tokens',
+          controller: _maxTokensCtrl,
+          placeholder: '8000',
+          keyboardType: TextInputType.number,
+        ),
+        MenuFieldItem(
+          label: 'label_context_size'.tr(),
+          helpTerm: 'context-size',
+          controller: _contextSizeCtrl,
+          placeholder: '32000',
+          keyboardType: TextInputType.number,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildReasoningGroup() {
+    return MenuGroup(
+      compact: true,
+      header: 'label_reasoning_settings'.tr(),
+      helpTerm: 'preset-reasoning',
+      items: [
+        if (_supportsReasoning)
+          MenuSwitchItem(
+            label: 'label_reasoning'.tr(),
+            helpTerm: 'reasoning-native',
+            description: 'desc_reasoning'.tr(),
+            value: _showNativeReasoning,
+            onChanged: (v) {
+              setState(() => _showNativeReasoning = v);
+              _scheduleSave();
+            },
+          ),
+        if (_supportsReasoning)
+          MenuSelectorItem(
+            label: 'label_reasoning_effort'.tr(),
+            helpTerm: 'reasoning-effort',
+            currentValue: _reasoningEffortLabel(_reasoningEffort),
+            included: _requestReasoning,
+            onIncludedChanged: (v) {
+              setState(() {
+                _requestReasoning = v;
+                _omitReasoning = !v;
+                _omitReasoningEffort = !v;
+              });
+              _scheduleSave();
+            },
+            onTap: _openReasoningEffortSelector,
+          ),
+      ],
+    );
+  }
+
+  // ── Advanced ──────────────────────────────────────────────────────────────
+
+  Widget _buildSamplingGroup() {
+    // Anthropic with thinking on hides every sampling control — don't leave an
+    // empty card behind.
+    final items = <Widget>[
+        if (_supportsTopP && !_hideSamplingWhileReasoningAnthropic)
+          MenuRangeItem(
+            label: 'label_top_p'.tr(),
+            helpTerm: 'top-p',
+            value: _topP,
+            min: 0,
+            max: 1,
+            divisions: 100,
+            editableValue: true,
+            included: _showsOmitSamplingControls ? !_omitTopP : null,
+            onIncludedChanged: _showsOmitSamplingControls
+                ? (v) {
+                    setState(() => _omitTopP = !v);
+                    _scheduleSave();
+                  }
+                : null,
+            onChanged: (v) {
+              setState(() => _topP = v);
+              _scheduleSave();
+            },
+          ),
+        if (_supportsTopK && !_hideSamplingWhileReasoningAnthropic)
+          MenuRangeItem(
+            label: 'label_top_k_sampling'.tr(),
+            helpTerm: 'top-k',
+            value: _topK.toDouble(),
+            min: 0,
+            max: 200,
+            divisions: 200,
+            editableValue: true,
+            decimalPlaces: 0,
+            included: !_omitTopK,
+            onIncludedChanged: (v) {
+              setState(() => _omitTopK = !v);
+              _scheduleSave();
+            },
+            onChanged: (v) {
+              setState(() => _topK = v.round());
+              _scheduleSave();
+            },
+          ),
+        if (_supportsFrequencyPenalty)
+          MenuRangeItem(
+            label: 'label_frequency_penalty'.tr(),
+            helpTerm: 'frequency-penalty',
+            value: _frequencyPenalty,
+            min: -2,
+            max: 2,
+            divisions: 80,
+            editableValue: true,
+            included: !_omitFrequencyPenalty,
+            onIncludedChanged: (v) {
+              setState(() => _omitFrequencyPenalty = !v);
+              _scheduleSave();
+            },
+            onChanged: (v) {
+              setState(() => _frequencyPenalty = v);
+              _scheduleSave();
+            },
+          ),
+        if (_supportsPresencePenalty)
+          MenuRangeItem(
+            label: 'label_presence_penalty'.tr(),
+            helpTerm: 'presence-penalty',
+            value: _presencePenalty,
+            min: -2,
+            max: 2,
+            divisions: 80,
+            editableValue: true,
+            included: !_omitPresencePenalty,
+            onIncludedChanged: (v) {
+              setState(() => _omitPresencePenalty = !v);
+              _scheduleSave();
+            },
+            onChanged: (v) {
+              setState(() => _presencePenalty = v);
+              _scheduleSave();
+            },
+          ),
+    ];
+    if (items.isEmpty) return const SizedBox.shrink();
+    return MenuGroup(
+      compact: true,
+      header: 'section_sampling'.tr(),
+      items: items,
+    );
+  }
+
+  /// `session_id` lives here rather than in Connection: its whole purpose is
+  /// keeping the provider's prompt cache warm.
+  Widget _buildCacheGroup() {
+    return MenuGroup(
+      compact: true,
+      header: 'section_cache'.tr(),
+      items: [
+        if (_supportsPromptCache)
+          MenuSelectorItem(
+            label: 'label_prompt_cache_ttl'.tr(),
+            currentValue: _cacheControlTtlLabel(_cacheControlTtl),
+            onTap: _openCacheControlTtlSelector,
+          ),
+        if (_supportsPromptCache)
+          MenuSelectorItem(
+            label: 'label_prompt_cache_breakpoint'.tr(),
+            currentValue: _cacheBreakpointModeLabel(_cacheBreakpointMode),
+            onTap: _openCacheBreakpointModeSelector,
+          ),
+        MenuSwitchItem(
+          label: 'label_session_id_mode'.tr(),
+          helpTerm: 'session-id',
+          value: _sessionIdMode == 'always',
+          onChanged: (v) {
+            setState(() => _sessionIdMode = v ? 'always' : 'off');
+            _scheduleSave();
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _buildReasoningDeliveryGroup() {
+    return MenuGroup(
+      compact: true,
+      header: 'section_reasoning_delivery'.tr(),
+      items: [
+        if (_supportsReasoning)
+          MenuFieldItem(
+            label: 'label_send_reasoning'.tr(),
+            description: 'desc_send_reasoning'.tr(),
+            controller: _reasoningHistoryCountCtrl,
+            placeholder: '0',
+            keyboardType: const TextInputType.numberWithOptions(signed: true),
+          ),
+        if (_supportsReasoning)
+          MenuSwitchItem(
+            label: 'label_exclude_reasoning_from_budget'.tr(),
+            helpTerm: 'reasoning-budget',
+            description: 'desc_exclude_reasoning_from_budget'.tr(),
+            value: _excludeReasoningFromContextBudget,
+            onChanged: (v) {
+              setState(() => _excludeReasoningFromContextBudget = v);
+              _scheduleSave();
+            },
+          ),
+      ],
+    );
+  }
+
+  /// Protocol-specific odds and ends. Empty for every protocol but Gemini, so
+  /// it renders nothing rather than a bare header.
+  Widget _buildOtherGroup() {
+    if (!_supportsSystemInstruction) return const SizedBox.shrink();
+    return MenuGroup(
+      compact: true,
+      header: 'section_other'.tr(),
+      items: [
+        MenuSwitchItem(
+          label: 'label_use_system_instruction'.tr(
+            namedArgs: {'field': _systemInstructionFieldName},
+          ),
+          helpTerm: 'system-instruction',
+          value: _useSystemInstruction,
+          onChanged: (v) {
+            setState(() => _useSystemInstruction = v);
+            _scheduleSave();
+          },
+        ),
+      ],
     );
   }
 
@@ -1095,6 +1192,22 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     };
   }
 
+  /// What the step turns into on the wire for the selected protocol, shown as
+  /// the option's hint so `Maximum → high` is not a surprise.
+  String? _reasoningEffortHint(String effort) {
+    if (effort == 'auto') return 'reasoning_effort_hint_auto'.tr();
+    if (_protocol == LlmProtocol.anthropic || _protocol == LlmProtocol.gemini) {
+      return 'reasoning_effort_hint_budget'.tr();
+    }
+    final resolved = resolveReasoningEffort(
+      protocol: _protocol,
+      effort: effort,
+      model: _modelCtrl.text.trim(),
+    );
+    if (resolved == null || resolved == effort) return null;
+    return 'reasoning_effort_hint_sent'.tr(namedArgs: {'value': resolved});
+  }
+
   void _openReasoningEffortSelector() {
     GlazeBottomSheet.show<void>(
       context,
@@ -1104,6 +1217,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
         final active = e == _reasoningEffort;
         return BottomSheetItem(
           label: label,
+          hint: _reasoningEffortHint(e),
           icon: active ? Icons.check : null,
           iconColor: context.cs.primary,
           onTap: () {
@@ -1128,14 +1242,6 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     return switch (mode) {
       'stable_prefix' => 'prompt_cache_breakpoint_stable'.tr(),
       _ => 'prompt_cache_breakpoint_depth'.tr(),
-    };
-  }
-
-  String _sessionIdModeLabel(String mode) {
-    return switch (mode) {
-      'always' => 'session_id_mode_always'.tr(),
-      'off' => 'session_id_mode_off'.tr(),
-      _ => 'session_id_mode_openrouter'.tr(),
     };
   }
 
@@ -1176,28 +1282,6 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
           onTap: () {
             Navigator.of(context, rootNavigator: true).pop();
             setState(() => _cacheBreakpointMode = e);
-            _scheduleSave();
-          },
-        );
-      }).toList(),
-    );
-  }
-
-  void _openSessionIdModeSelector() {
-    const options = ['openrouter', 'always', 'off'];
-    GlazeBottomSheet.show<void>(
-      context,
-      title: 'label_session_id_mode'.tr(),
-      items: options.map((e) {
-        final label = _sessionIdModeLabel(e);
-        final active = e == _sessionIdMode;
-        return BottomSheetItem(
-          label: label,
-          icon: active ? Icons.check : null,
-          iconColor: context.cs.primary,
-          onTap: () {
-            Navigator.of(context, rootNavigator: true).pop();
-            setState(() => _sessionIdMode = e);
             _scheduleSave();
           },
         );

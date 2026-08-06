@@ -1,5 +1,6 @@
 import 'package:freezed_annotation/freezed_annotation.dart';
 
+import '../llm/transport/llm_protocol.dart';
 import 'extra_request_parameter.dart';
 
 part 'api_config.freezed.dart';
@@ -49,6 +50,12 @@ abstract class ApiConfig with _$ApiConfig {
     @Default('depth') String cacheBreakpointMode,
     @Default('openrouter') String sessionIdMode,
     @Default(60000) int firstChunkTimeoutMs,
+
+    /// Send the leading run of system blocks in the provider's own field —
+    /// Gemini's `system_instruction`, Anthropic's `system`. When off it stays
+    /// inline and is delivered as user turns. Ignored by protocols that have
+    /// no such field.
+    @Default(true) bool useSystemInstruction,
     @Default(<ExtraRequestParameter>[])
     List<ExtraRequestParameter> extraRequestParameters,
   }) = _ApiConfig;
@@ -57,10 +64,21 @@ abstract class ApiConfig with _$ApiConfig {
       _$ApiConfigFromJson(_normalizeApiConfigJson(json));
 }
 
-Map<String, dynamic> _normalizeApiConfigJson(Map<String, dynamic> json) =>
-    Map<String, dynamic>.from(json)
-      ..putIfAbsent('showNativeReasoning', () => json['omitReasoning'] != true)
-      ..putIfAbsent(
-        'reasoningHistoryCount',
-        () => json['includeLastReasoning'] == true ? 1 : 0,
-      );
+Map<String, dynamic> _normalizeApiConfigJson(Map<String, dynamic> json) {
+  final normalized = Map<String, dynamic>.from(json)
+    ..putIfAbsent('showNativeReasoning', () => json['omitReasoning'] != true)
+    ..putIfAbsent(
+      'reasoningHistoryCount',
+      () => json['includeLastReasoning'] == true ? 1 : 0,
+    );
+  // The Responses API used to be a boolean opt-in on the OpenAI-compatible
+  // protocol; it is now a protocol of its own. Payloads exported before the
+  // split (and any JSON that still carries the flag) map onto it here so an
+  // imported preset keeps talking to `/responses`.
+  if (normalized['useResponsesApi'] == true &&
+      (normalized['protocol'] == null ||
+          normalized['protocol'] == LlmProtocol.openai)) {
+    normalized['protocol'] = LlmProtocol.openaiResponses;
+  }
+  return normalized;
+}

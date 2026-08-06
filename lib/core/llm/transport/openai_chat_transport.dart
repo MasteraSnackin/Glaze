@@ -5,9 +5,11 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
 import '../../utils/error_format.dart';
+import '../converters/reasoning_effort.dart';
 import 'chat_transport.dart';
 import 'chat_transport_request.dart';
 import 'extra_request_parameters.dart';
+import 'llm_protocol.dart';
 
 /// OpenAI Chat Completions transport. Also handles any OpenAI-compatible
 /// custom endpoint (LM Studio, Koboldcpp, vLLM, OpenRouter-as-custom, etc.).
@@ -147,12 +149,15 @@ class OpenAiChatTransport implements ChatTransport {
     if (!r.omitPresencePenalty && r.presencePenalty != 0) {
       body['presence_penalty'] = r.presencePenalty;
     }
-    if (!r.omitReasoning &&
-        r.requestReasoning &&
-        !r.omitReasoningEffort &&
-        r.reasoningEffort != null &&
-        r.reasoningEffort != 'auto') {
-      body['reasoning_effort'] = r.reasoningEffort;
+    if (!r.omitReasoning && r.requestReasoning && !r.omitReasoningEffort) {
+      // `min`/`max` are Glaze-side steps; the API only knows
+      // minimal/low/medium/high.
+      final effort = resolveReasoningEffort(
+        protocol: LlmProtocol.openai,
+        effort: r.reasoningEffort,
+        model: r.model,
+      );
+      if (effort != null) body['reasoning_effort'] = effort;
     }
 
     if (r.cacheControlTtl == '5min' || r.cacheControlTtl == '1h') {
@@ -161,13 +166,7 @@ class OpenAiChatTransport implements ChatTransport {
         if (r.cacheControlTtl == '1h') 'ttl': '1h',
       };
     }
-    final shouldSendSessionId =
-        r.sessionId != null &&
-        r.sessionId!.isNotEmpty &&
-        (r.sessionIdMode == 'always' ||
-            (r.sessionIdMode == 'openrouter' &&
-                r.endpoint.contains('openrouter.ai')));
-    if (shouldSendSessionId) {
+    if (r.shouldSendOpenAiSessionId) {
       body['session_id'] = r.sessionId;
     }
 

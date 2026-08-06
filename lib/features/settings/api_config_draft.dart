@@ -1,3 +1,4 @@
+import '../../core/llm/converters/reasoning_effort.dart';
 import '../../core/llm/transport/llm_protocol.dart';
 import '../../core/models/api_config.dart';
 
@@ -56,44 +57,35 @@ class ApiConfigDraft {
   final String embeddingModel;
   final String embeddingMaxChunkTokens;
 
-  static const _standardReasoningEfforts = [
-    'auto',
-    'low',
-    'medium',
-    'high',
-    'max',
-  ];
-  static const _extendedReasoningEfforts = [
-    'auto',
-    'min',
-    'low',
-    'medium',
-    'high',
-    'max',
-  ];
-
-  static List<String> reasoningEffortOptions(String protocol) =>
-      protocol == LlmProtocol.anthropic || protocol == LlmProtocol.gemini
-      ? _extendedReasoningEfforts
-      : _standardReasoningEfforts;
-
   static ApiConfig normalizeValues(ApiConfig values) {
     final protocol = LlmProtocol.isValid(values.protocol)
         ? values.protocol
         : LlmProtocol.openai;
-    final efforts = reasoningEffortOptions(protocol);
-    final reasoningEffort = efforts.contains(values.reasoningEffort)
+    final reasoningEffort = isValidReasoningEffort(values.reasoningEffort)
         ? values.reasoningEffort
-        : values.reasoningEffort == 'min'
-        ? 'low'
         : 'medium';
+    // Sampling omit-toggles: both OpenAI wire formats plus OpenRouter.
     final supportsOpenAiOptions =
+        protocol == LlmProtocol.openai ||
+        protocol == LlmProtocol.openaiResponses ||
+        protocol == LlmProtocol.openrouter;
+    // The Responses API has no penalties and no body-level cache_control.
+    final supportsPenalties =
         protocol == LlmProtocol.openai || protocol == LlmProtocol.openrouter;
+    // OpenRouter kept a live TTL out of reach: the UI hid the control and this
+    // forced it to 'off', so `buildRouterRequest` never placed cache markers
+    // for Claude-through-OR.
     final supportsPromptCache =
-        protocol == LlmProtocol.anthropic || protocol == LlmProtocol.openai;
+        protocol == LlmProtocol.anthropic ||
+        protocol == LlmProtocol.openai ||
+        protocol == LlmProtocol.openrouter;
 
     return values.copyWith(
       protocol: protocol,
+      sessionIdMode: _resolveSessionIdMode(values, protocol),
+      // The Responses API is a protocol now, so the legacy boolean is derived
+      // from it rather than edited on its own.
+      useResponsesApi: protocol == LlmProtocol.openaiResponses,
       reasoningEffort: reasoningEffort,
       omitTemperature: supportsOpenAiOptions ? values.omitTemperature : false,
       omitTopP: supportsOpenAiOptions ? values.omitTopP : false,
@@ -101,10 +93,27 @@ class ApiConfigDraft {
       omitReasoningEffort: supportsOpenAiOptions
           ? values.omitReasoningEffort
           : false,
-      frequencyPenalty: supportsOpenAiOptions ? values.frequencyPenalty : 0.0,
-      presencePenalty: supportsOpenAiOptions ? values.presencePenalty : 0.0,
+      frequencyPenalty: supportsPenalties ? values.frequencyPenalty : 0.0,
+      presencePenalty: supportsPenalties ? values.presencePenalty : 0.0,
       cacheControlTtl: supportsPromptCache ? values.cacheControlTtl : 'off',
     );
+  }
+
+  /// `session_id` used to be a three-way selector whose default,
+  /// `'openrouter'`, meant "send only to openrouter.ai". It is a plain toggle
+  /// now, so that legacy value resolves once, to whatever it used to do for
+  /// this preset — on for OpenRouter, off everywhere else.
+  static String _resolveSessionIdMode(ApiConfig values, String protocol) {
+    switch (values.sessionIdMode) {
+      case 'always':
+      case 'off':
+        return values.sessionIdMode;
+      default:
+        return protocol == LlmProtocol.openrouter ||
+                values.endpoint.contains('openrouter.ai')
+            ? 'always'
+            : 'off';
+    }
   }
 
   ApiConfig toConfig(ApiConfig base) {
@@ -128,6 +137,7 @@ class ApiConfigDraft {
       stream: normalized.stream,
       requestReasoning: normalized.requestReasoning,
       useResponsesApi: normalized.useResponsesApi,
+      useSystemInstruction: normalized.useSystemInstruction,
       showNativeReasoning: normalized.showNativeReasoning,
       reasoningHistoryCount: parsedReasoningHistoryCount < -1
           ? 0

@@ -74,7 +74,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 108;
+  int get schemaVersion => 112;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -2011,6 +2011,54 @@ class AppDatabase extends _$AppDatabase {
       }
       if (from < 108) {
         await m.createTable(cardEvolutionObservations);
+      }
+      if (from < 109) {
+        // The Responses API opt-in became a protocol of its own; presets that
+        // had the flag on keep talking to `/responses` after the split.
+        await customStatement(
+          "UPDATE api_configs SET protocol = 'openai_responses' "
+          "WHERE protocol = 'openai' AND use_responses_api = 1",
+        );
+      }
+      if (from < 110) {
+        final columns = await customSelect(
+          "PRAGMA table_info('api_configs')",
+        ).get();
+        final names = columns
+            .map((column) => column.read<String>('name'))
+            .toSet();
+        if (!names.contains('use_system_instruction')) {
+          await m.addColumn(apiConfigs, apiConfigs.useSystemInstruction);
+        }
+      }
+      if (from < 111) {
+        // `session_id` became a plain toggle. The retired default,
+        // 'openrouter', meant "send only to openrouter.ai" — resolve it to
+        // what it actually did for each preset so behaviour is unchanged.
+        await customStatement(
+          "UPDATE api_configs SET session_id_mode = CASE "
+          "WHEN protocol = 'openrouter' OR endpoint LIKE '%openrouter.ai%' "
+          "THEN 'always' ELSE 'off' END "
+          "WHERE session_id_mode NOT IN ('always', 'off')",
+        );
+      }
+      if (from < 112) {
+        // The toggle covers Anthropic's `system` as well as Gemini's
+        // `system_instruction`, so the column lost its `gemini_` prefix.
+        final columns = await customSelect(
+          "PRAGMA table_info('api_configs')",
+        ).get();
+        final names = columns
+            .map((column) => column.read<String>('name'))
+            .toSet();
+        if (names.contains('gemini_use_system_instruction') &&
+            !names.contains('use_system_instruction')) {
+          await customStatement(
+            'ALTER TABLE api_configs '
+            'RENAME COLUMN gemini_use_system_instruction '
+            'TO use_system_instruction',
+          );
+        }
       }
     },
   );

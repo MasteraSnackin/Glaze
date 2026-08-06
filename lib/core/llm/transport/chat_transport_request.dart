@@ -68,7 +68,25 @@ class ChatTransportRequest {
   /// Only sent when [tools] is non-null.
   final String? toolChoice;
 
+  /// Whether the leading run of system messages may be lifted out of the
+  /// conversation into the provider's native system field. When false it stays
+  /// inline and is delivered as the first user turn. Only the Gemini transport
+  /// consumes it today (`system_instruction`); other transports ignore it.
+  final bool useSystemInstruction;
+
   final List<ExtraRequestParameter> extraRequestParameters;
+
+  /// Whether `session_id` belongs in the body for an OpenAI-shaped request.
+  /// The setting is a toggle — `'always'` or `'off'`. `'openrouter'` is the
+  /// retired default (send only to openrouter.ai, where it drives sticky
+  /// routing so the prompt cache stays warm); it is still honoured here for
+  /// presets that predate migration v111 or arrive from older JSON.
+  /// Anthropic and Gemini apply the `'always'` half of this themselves.
+  bool get shouldSendOpenAiSessionId =>
+      sessionId != null &&
+      sessionId!.isNotEmpty &&
+      (sessionIdMode == 'always' ||
+          (sessionIdMode == 'openrouter' && endpoint.contains('openrouter.ai')));
 
   const ChatTransportRequest({
     required this.endpoint,
@@ -101,6 +119,7 @@ class ChatTransportRequest {
     this.sessionIdMode = 'openrouter',
     this.tools,
     this.toolChoice,
+    this.useSystemInstruction = true,
     this.extraRequestParameters = const [],
   });
 
@@ -147,6 +166,7 @@ class ChatTransportRequest {
     sessionIdMode: apiConfig.sessionIdMode,
     tools: tools,
     toolChoice: toolChoice,
+    useSystemInstruction: apiConfig.useSystemInstruction,
     extraRequestParameters: apiConfig.extraRequestParameters,
   );
 }

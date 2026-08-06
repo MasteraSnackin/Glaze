@@ -4,9 +4,11 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 
 import '../../utils/error_format.dart';
+import '../converters/reasoning_effort.dart';
 import 'chat_transport.dart';
 import 'chat_transport_request.dart';
 import 'extra_request_parameters.dart';
+import 'llm_protocol.dart';
 import 'openai_chat_transport.dart';
 
 /// Opt-in OpenAI Responses API transport. Existing OpenAI-compatible presets
@@ -46,19 +48,37 @@ class OpenAiResponsesTransport implements ChatTransport {
     if (request.maxTokens > 0) {
       body['max_output_tokens'] = request.maxTokens;
     }
+    // Same guards as the Chat Completions body. `frequency_penalty`,
+    // `presence_penalty` and `top_k` have no Responses equivalent and are
+    // dropped; reasoning models reject sampling outright, which is what the
+    // omit toggles are for.
+    if (!request.omitTemperature && request.temperature > 0) {
+      body['temperature'] = request.temperature;
+    }
+    if (!request.omitTopP && request.topP > 0 && request.topP < 1) {
+      body['top_p'] = request.topP;
+    }
 
     final showReasoning =
         request.requestReasoning &&
         !request.omitReasoning &&
         (request.showNativeReasoning ?? true);
     if (showReasoning) {
+      final effort = request.omitReasoningEffort
+          ? null
+          : resolveReasoningEffort(
+              protocol: LlmProtocol.openaiResponses,
+              effort: request.reasoningEffort,
+              model: request.model,
+            );
       body['reasoning'] = <String, dynamic>{
         'summary': 'auto',
-        if (!request.omitReasoningEffort &&
-            request.reasoningEffort != null &&
-            request.reasoningEffort != 'auto')
-          'effort': request.reasoningEffort,
+        'effort': ?effort,
       };
+    }
+
+    if (request.shouldSendOpenAiSessionId) {
+      body['session_id'] = request.sessionId;
     }
 
     final tools = request.tools?.map(_convertTool).toList(growable: false);
