@@ -139,10 +139,15 @@ void main() {
   });
 
   for (final testCase in <({String protocol, String input, String output})>[
+    // Every protocol keeps all six steps now — the collapse to what the API
+    // accepts happens at send time (converters/reasoning_effort.dart), not by
+    // rewriting the stored preset.
     (protocol: LlmProtocol.anthropic, input: 'min', output: 'min'),
     (protocol: LlmProtocol.gemini, input: 'min', output: 'min'),
-    (protocol: LlmProtocol.openai, input: 'min', output: 'low'),
-    (protocol: LlmProtocol.openrouter, input: 'min', output: 'low'),
+    (protocol: LlmProtocol.openai, input: 'min', output: 'min'),
+    (protocol: LlmProtocol.openaiResponses, input: 'min', output: 'min'),
+    (protocol: LlmProtocol.openrouter, input: 'min', output: 'min'),
+    (protocol: LlmProtocol.openai, input: 'max', output: 'max'),
     (protocol: LlmProtocol.openai, input: 'invalid', output: 'medium'),
   ]) {
     test(
@@ -162,31 +167,40 @@ void main() {
     );
   }
 
-  for (final testCase
-      in <({String protocol, bool keepsOpenAiOptions, bool keepsPromptCache})>[
+  for (final testCase in <({
+    String protocol,
+    bool keepsOpenAiOptions,
+    bool keepsPenalties,
+    bool keepsPromptCache,
+  })>[
         (
           protocol: LlmProtocol.openai,
           keepsOpenAiOptions: true,
+          keepsPenalties: true,
           keepsPromptCache: true,
         ),
         (
           protocol: LlmProtocol.openaiResponses,
           keepsOpenAiOptions: true,
-          keepsPromptCache: true,
+          keepsPenalties: false,
+          keepsPromptCache: false,
         ),
         (
           protocol: LlmProtocol.openrouter,
           keepsOpenAiOptions: true,
+          keepsPenalties: true,
           keepsPromptCache: false,
         ),
         (
           protocol: LlmProtocol.anthropic,
           keepsOpenAiOptions: false,
+          keepsPenalties: false,
           keepsPromptCache: true,
         ),
         (
           protocol: LlmProtocol.gemini,
           keepsOpenAiOptions: false,
+          keepsPenalties: false,
           keepsPromptCache: false,
         ),
       ]) {
@@ -209,14 +223,8 @@ void main() {
         expect(values.omitTopP, testCase.keepsOpenAiOptions);
         expect(values.omitReasoning, testCase.keepsOpenAiOptions);
         expect(values.omitReasoningEffort, testCase.keepsOpenAiOptions);
-        expect(
-          values.frequencyPenalty,
-          testCase.keepsOpenAiOptions ? 1.5 : 0.0,
-        );
-        expect(
-          values.presencePenalty,
-          testCase.keepsOpenAiOptions ? -1.5 : 0.0,
-        );
+        expect(values.frequencyPenalty, testCase.keepsPenalties ? 1.5 : 0.0);
+        expect(values.presencePenalty, testCase.keepsPenalties ? -1.5 : 0.0);
         expect(
           values.cacheControlTtl,
           testCase.keepsPromptCache ? '1h' : 'off',

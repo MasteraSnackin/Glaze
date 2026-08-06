@@ -1,3 +1,4 @@
+import '../../core/llm/converters/reasoning_effort.dart';
 import '../../core/llm/transport/llm_protocol.dart';
 import '../../core/models/api_config.dart';
 
@@ -56,45 +57,23 @@ class ApiConfigDraft {
   final String embeddingModel;
   final String embeddingMaxChunkTokens;
 
-  static const _standardReasoningEfforts = [
-    'auto',
-    'low',
-    'medium',
-    'high',
-    'max',
-  ];
-  static const _extendedReasoningEfforts = [
-    'auto',
-    'min',
-    'low',
-    'medium',
-    'high',
-    'max',
-  ];
-
-  static List<String> reasoningEffortOptions(String protocol) =>
-      protocol == LlmProtocol.anthropic || protocol == LlmProtocol.gemini
-      ? _extendedReasoningEfforts
-      : _standardReasoningEfforts;
-
   static ApiConfig normalizeValues(ApiConfig values) {
     final protocol = LlmProtocol.isValid(values.protocol)
         ? values.protocol
         : LlmProtocol.openai;
-    final efforts = reasoningEffortOptions(protocol);
-    final reasoningEffort = efforts.contains(values.reasoningEffort)
+    final reasoningEffort = isValidReasoningEffort(values.reasoningEffort)
         ? values.reasoningEffort
-        : values.reasoningEffort == 'min'
-        ? 'low'
         : 'medium';
+    // Sampling omit-toggles: both OpenAI wire formats plus OpenRouter.
     final supportsOpenAiOptions =
         protocol == LlmProtocol.openai ||
         protocol == LlmProtocol.openaiResponses ||
         protocol == LlmProtocol.openrouter;
+    // The Responses API has no penalties and no body-level cache_control.
+    final supportsPenalties =
+        protocol == LlmProtocol.openai || protocol == LlmProtocol.openrouter;
     final supportsPromptCache =
-        protocol == LlmProtocol.anthropic ||
-        protocol == LlmProtocol.openai ||
-        protocol == LlmProtocol.openaiResponses;
+        protocol == LlmProtocol.anthropic || protocol == LlmProtocol.openai;
 
     return values.copyWith(
       protocol: protocol,
@@ -108,8 +87,8 @@ class ApiConfigDraft {
       omitReasoningEffort: supportsOpenAiOptions
           ? values.omitReasoningEffort
           : false,
-      frequencyPenalty: supportsOpenAiOptions ? values.frequencyPenalty : 0.0,
-      presencePenalty: supportsOpenAiOptions ? values.presencePenalty : 0.0,
+      frequencyPenalty: supportsPenalties ? values.frequencyPenalty : 0.0,
+      presencePenalty: supportsPenalties ? values.presencePenalty : 0.0,
       cacheControlTtl: supportsPromptCache ? values.cacheControlTtl : 'off',
     );
   }

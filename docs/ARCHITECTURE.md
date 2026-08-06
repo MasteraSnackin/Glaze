@@ -159,7 +159,8 @@ lib/
 │   │   ├── message_merger.dart       # Consecutive same-role message merging
 │   │   ├── attachment_encoder.dart   # Image/file → provider attachment payload
 │   │   ├── cache_breakpoint_marker.dart # Anthropic/OpenRouter cache_control placement
-│   │   └── thinking_budget.dart      # Extended-thinking budget mapping per protocol
+│   │   ├── thinking_budget.dart      # Extended-thinking budget mapping per protocol
+│   │   └── reasoning_effort.dart     # Effort step → per-protocol wire value
 │   ├── llm/transport/                # LLM HTTP/SSE transports (one per protocol)
 │   │   ├── chat_transport.dart       # Abstract ChatTransport interface
 │   │   ├── chat_transport_request.dart # Shared request value object

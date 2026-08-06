@@ -4,9 +4,11 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 
 import '../../utils/error_format.dart';
+import '../converters/reasoning_effort.dart';
 import 'chat_transport.dart';
 import 'chat_transport_request.dart';
 import 'extra_request_parameters.dart';
+import 'llm_protocol.dart';
 import 'openai_chat_transport.dart';
 
 /// Opt-in OpenAI Responses API transport. Existing OpenAI-compatible presets
@@ -62,12 +64,16 @@ class OpenAiResponsesTransport implements ChatTransport {
         !request.omitReasoning &&
         (request.showNativeReasoning ?? true);
     if (showReasoning) {
+      final effort = request.omitReasoningEffort
+          ? null
+          : resolveReasoningEffort(
+              protocol: LlmProtocol.openaiResponses,
+              effort: request.reasoningEffort,
+              model: request.model,
+            );
       body['reasoning'] = <String, dynamic>{
         'summary': 'auto',
-        if (!request.omitReasoningEffort &&
-            request.reasoningEffort != null &&
-            request.reasoningEffort != 'auto')
-          'effort': request.reasoningEffort,
+        if (effort != null) 'effort': effort,
       };
     }
 

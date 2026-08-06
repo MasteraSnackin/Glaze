@@ -121,6 +121,14 @@ the transport for provider-native reasoning and should not persist reasoning
 unless the provider explicitly returns it on an enabled final response. Do not
 interpret these flags as a universal provider-side "thinking off" switch.
 
+The effort scale is protocol-agnostic in the UI (`auto | min | low | medium |
+high | max`, same six steps everywhere, like SillyTavern) and is translated at
+send time by `converters/reasoning_effort.dart`: `auto` sends nothing, OpenAI
+wire formats collapse `max` to `high` and `min` to `minimal` (GPT-5 family) or
+`low`, and Anthropic/Gemini read the raw step as a share of the thinking
+budget. Never widen a stored preset's effort by rewriting it on protocol
+switch — resolve it at the transport instead.
+
 Provider notes:
 - OpenAI-compatible/custom transports omit `reasoning_effort` when reasoning is omitted.
 - Anthropic/Gemini transports omit their native thinking config when reasoning is omitted.

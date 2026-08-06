@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/llm/converters/reasoning_effort.dart';
 import '../../core/llm/transport/llm_protocol.dart';
 import '../../core/llm/transport/transport_factory.dart';
 import '../../core/services/api_connection_tester.dart';
@@ -301,26 +302,27 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
 
   bool get _supportsTopP => true;
 
-  /// True for both OpenAI-compatible protocols — Chat Completions and
-  /// Responses share the same knobs; only the wire format differs.
-  bool get _isOpenAiCompatible =>
-      _protocol == LlmProtocol.openai ||
-      _protocol == LlmProtocol.openaiResponses;
+  /// The Responses API has no `top_k`, no penalties, no body-level
+  /// `cache_control` and no `session_id`, so those controls are hidden for it
+  /// rather than shown and silently ignored.
+  bool get _isResponses => _protocol == LlmProtocol.openaiResponses;
 
   bool get _supportsTopK =>
-      _isOpenAiCompatible ||
+      _protocol == LlmProtocol.openai ||
       _protocol == LlmProtocol.openrouter ||
       _protocol == LlmProtocol.anthropic ||
       _protocol == LlmProtocol.gemini;
 
   bool get _supportsFrequencyPenalty =>
-      _isOpenAiCompatible || _protocol == LlmProtocol.openrouter;
+      _protocol == LlmProtocol.openai || _protocol == LlmProtocol.openrouter;
 
   bool get _supportsPresencePenalty =>
-      _isOpenAiCompatible || _protocol == LlmProtocol.openrouter;
+      _protocol == LlmProtocol.openai || _protocol == LlmProtocol.openrouter;
 
   bool get _supportsPromptCache =>
-      _protocol == LlmProtocol.anthropic || _isOpenAiCompatible;
+      _protocol == LlmProtocol.anthropic || _protocol == LlmProtocol.openai;
+
+  bool get _supportsSessionId => !_isResponses;
 
   bool get _supportsReasoning => true;
 
@@ -329,16 +331,20 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   bool get _supportsSystemInstruction => _protocol == LlmProtocol.gemini;
 
   /// Derived from the protocol — the Responses API is no longer a toggle.
-  bool get _useResponsesApi => _protocol == LlmProtocol.openaiResponses;
+  bool get _useResponsesApi => _isResponses;
 
   bool get _showsOmitSamplingControls =>
-      _isOpenAiCompatible || _protocol == LlmProtocol.openrouter;
+      _protocol == LlmProtocol.openai ||
+      _protocol == LlmProtocol.openaiResponses ||
+      _protocol == LlmProtocol.openrouter;
 
   bool get _hideSamplingWhileReasoningAnthropic =>
       _protocol == LlmProtocol.anthropic && _requestReasoning;
 
-  List<String> get _reasoningEffortOptions =>
-      ApiConfigDraft.reasoningEffortOptions(_protocol);
+  /// Every protocol offers the same six steps, like SillyTavern — what a step
+  /// becomes on the wire is decided at send time by `resolveReasoningEffort`,
+  /// not by shrinking the dropdown.
+  List<String> get _reasoningEffortOptions => reasoningEffortSteps;
 
   void _applyProtocolUiPolicy(String protocol) {
     final normalized = ApiConfigDraft.normalizeValues(
@@ -815,11 +821,12 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
                   currentValue: _cacheBreakpointModeLabel(_cacheBreakpointMode),
                   onTap: _openCacheBreakpointModeSelector,
                 ),
-              MenuSelectorItem(
-                label: 'label_session_id_mode'.tr(),
-                currentValue: _sessionIdModeLabel(_sessionIdMode),
-                onTap: _openSessionIdModeSelector,
-              ),
+              if (_supportsSessionId)
+                MenuSelectorItem(
+                  label: 'label_session_id_mode'.tr(),
+                  currentValue: _sessionIdModeLabel(_sessionIdMode),
+                  onTap: _openSessionIdModeSelector,
+                ),
             ],
           ),
           ExtraRequestParametersEditor(
@@ -1108,6 +1115,22 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     };
   }
 
+  /// What the step turns into on the wire for the selected protocol, shown as
+  /// the option's hint so `Maximum → high` is not a surprise.
+  String? _reasoningEffortHint(String effort) {
+    if (effort == 'auto') return 'reasoning_effort_hint_auto'.tr();
+    if (_protocol == LlmProtocol.anthropic || _protocol == LlmProtocol.gemini) {
+      return 'reasoning_effort_hint_budget'.tr();
+    }
+    final resolved = resolveReasoningEffort(
+      protocol: _protocol,
+      effort: effort,
+      model: _modelCtrl.text.trim(),
+    );
+    if (resolved == null || resolved == effort) return null;
+    return 'reasoning_effort_hint_sent'.tr(namedArgs: {'value': resolved});
+  }
+
   void _openReasoningEffortSelector() {
     GlazeBottomSheet.show<void>(
       context,
@@ -1117,6 +1140,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
         final active = e == _reasoningEffort;
         return BottomSheetItem(
           label: label,
+          hint: _reasoningEffortHint(e),
           icon: active ? Icons.check : null,
           iconColor: context.cs.primary,
           onTap: () {
