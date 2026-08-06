@@ -94,14 +94,17 @@ void main() {
                 ),
           );
 
+      // The turn just generated is the 6th assistant, i.e. the reconciliation
+      // cadence boundary: the planner fires on the Nth assistant and reviews
+      // up to a(N-1), leaving the fresh aN out of the range.
       const assistant = ChatMessage(
-        id: 'a7',
+        id: 'a6',
         role: 'assistant',
         content: 'Raw direct response',
         timestamp: 1,
       );
       final messages = <ChatMessage>[
-        for (var turn = 1; turn <= 6; turn++) ...[
+        for (var turn = 1; turn <= 5; turn++) ...[
           ChatMessage(id: 'u$turn', role: 'user', content: 'User turn $turn'),
           ChatMessage(
             id: 'a$turn',
@@ -109,7 +112,7 @@ void main() {
             content: 'Assistant turn $turn',
           ),
         ],
-        const ChatMessage(id: 'u7', role: 'user', content: 'User turn 7'),
+        const ChatMessage(id: 'u6', role: 'user', content: 'User turn 6'),
         assistant,
       ];
       const session = ChatSession(
@@ -174,7 +177,7 @@ void main() {
         currentAssistantMessageId: ledger.targetMessage!.id,
       );
       expect(plan, isNotNull);
-      expect(plan!.endMessage.id, 'a6');
+      expect(plan!.endMessage.id, 'a5');
     },
   );
 }
