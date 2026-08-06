@@ -29,6 +29,7 @@ import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/folder_name_dialog.dart';
 import '../../shared/widgets/glass_surface.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../shared/widgets/list_controls.dart';
 import '../../shared/widgets/sheet_view.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../shared/widgets/glaze_toast.dart';
@@ -79,6 +80,9 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
   /// Folder currently being browsed, or null at the top level.
   String? _currentFolderId;
   PresetListFilters _filters = const PresetListFilters();
+
+  /// Preset kind picked in the control-row dropdown; null = every kind.
+  PresetKind? _typeFilter;
 
   final ScrollController _scrollController = ScrollController();
 
@@ -205,21 +209,6 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
       title: title,
       showBack: true,
       onBack: _handleBack,
-      actions: _inAnyEditor
-          ? const []
-          : [
-              SheetViewAction(
-                icon: Icon(
-                  Icons.tune_rounded,
-                  size: 20,
-                  color: _filters.isActive
-                      ? context.cs.primary
-                      : context.cs.onSurfaceVariant,
-                ),
-                tooltip: 'catalog_filters'.tr(),
-                onPressed: () => _showFilterSheet(context),
-              ),
-            ],
       floating: _inAnyEditor || !selection.active
           ? null
           : Align(
@@ -303,6 +292,10 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
       final keys = memberships.presetsIn(folderId);
       items = items.where((e) => keys.contains(e.memberKey)).toList();
     }
+    final kind = _typeFilter;
+    if (kind != null) {
+      items = items.where((e) => e.kind == kind).toList();
+    }
     items = items.where(_filters.matches).toList();
 
     // Studio ON ⇒ only an agentic preset can be active; Studio OFF ⇒ only a
@@ -315,7 +308,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
 
     // Auto-reveal the active preset the first time the plain (unfiltered,
     // top-level) list is shown.
-    if (folderId == null && !_filters.isActive) {
+    if (folderId == null && !_filters.isActive && _typeFilter == null) {
       _scheduleAutoScroll(activeIndex);
     }
 
@@ -330,14 +323,19 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
           sliver: SliverToBoxAdapter(
             child: KeyedSubtree(
               key: _headerKey,
-              child: folderId == null
-                  ? PresetFoldersSection(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _buildControlsRow(context),
+                  if (folderId == null)
+                    PresetFoldersSection(
                       onOpenFolder: (id) {
                         ref.read(presetSelectionProvider.notifier).clear();
                         setState(() => _currentFolderId = id);
                       },
-                    )
-                  : const SizedBox.shrink(),
+                    ),
+                ],
+              ),
             ),
           ),
         ),
@@ -482,6 +480,63 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
 
   // ─── filters ───────────────────────────────────────────────────────────
 
+  /// Control row under the header, mirroring the catalog's: the type dropdown
+  /// on the left, the filter-sheet button on the right.
+  Widget _buildControlsRow(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        children: [
+          GlazeDropdownChip(
+            label: _typeLabel(_typeFilter),
+            onTap: () => _showTypePicker(context),
+          ),
+          const Spacer(),
+          GlazeFilterIconButton(
+            count: _filters.activeCount,
+            onTap: () => _showFilterSheet(context),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static String _typeLabel(PresetKind? kind) => switch (kind) {
+    null => 'preset_type_all'.tr(),
+    PresetKind.normal => 'preset_type_normal'.tr(),
+    PresetKind.agentic => 'preset_type_agentic'.tr(),
+  };
+
+  static IconData _typeIcon(PresetKind? kind) => switch (kind) {
+    null => Icons.apps_rounded,
+    PresetKind.normal => Icons.description_outlined,
+    PresetKind.agentic => Icons.smart_toy_outlined,
+  };
+
+  void _showTypePicker(BuildContext context) {
+    showGlazePickerSheet(
+      context,
+      title: 'preset_filter_type'.tr(),
+      items: [
+        for (final kind in const <PresetKind?>[
+          null,
+          PresetKind.normal,
+          PresetKind.agentic,
+        ])
+          GlazePickerItem(
+            label: _typeLabel(kind),
+            icon: _typeIcon(kind),
+            isActive: kind == _typeFilter,
+            // A null value is unambiguous here — it is the "every kind" row.
+            value: kind,
+          ),
+      ],
+      onSelect: (v) {
+        if (mounted) setState(() => _typeFilter = v as PresetKind?);
+      },
+    );
+  }
+
   void _showFilterSheet(BuildContext context) {
     showModalBottomSheet<void>(
       context: context,
@@ -491,8 +546,6 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
       backgroundColor: Colors.transparent,
       builder: (_) => PresetFilterSheet(
         filters: _filters,
-        showTypeFilter:
-            (ref.read(studioPresetListProvider).value ?? const []).isNotEmpty,
         onApply: (f) {
           if (mounted) setState(() => _filters = f);
         },
