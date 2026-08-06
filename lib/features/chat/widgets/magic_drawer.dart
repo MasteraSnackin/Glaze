@@ -14,7 +14,9 @@ import '../../../core/models/chat_message.dart';
 import '../../../core/state/lorebook_provider.dart';
 import '../../../features/settings/app_settings_provider.dart';
 import '../../../core/state/active_selection_provider.dart';
+import '../../../core/state/active_studio_preset_provider.dart';
 import '../../../core/state/chat_session_ops_provider.dart';
+import '../../../core/state/preset_resolution.dart';
 import '../../../core/state/studio_feature_provider.dart';
 import '../../../core/state/summary_providers.dart';
 import '../../../features/chat_history/chat_history_provider.dart';
@@ -366,11 +368,11 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
             ? _stats.apiConfig!.name
             : _stats.apiConfig?.model,
       'presets' =>
-        _stats.activePreset == null
+        _stats.activePresetDisplayName == null
             ? 'label_default'.tr()
-            : _stats.presetTokens > 0
-            ? '${_stats.activePreset!.name} • ${_stats.presetTokens} tokens'
-            : _stats.activePreset!.name,
+        : _stats.presetTokens > 0
+            ? '${_stats.activePresetDisplayName} • ${_stats.presetTokens} tokens'
+            : _stats.activePresetDisplayName,
       'personas' => _stats.activePersona?.name ?? 'label_default'.tr(),
       'image-gen' => _stats.imageGenEnabled ? 'on'.tr() : 'off'.tr(),
       'authors-note' =>
@@ -775,6 +777,15 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
       }
     });
     ref.listen(activePresetIdProvider, (prev, next) {
+      if (prev != next) _scheduleRefresh();
+    });
+    ref.listen(presetConnectionsProvider, (prev, next) {
+      if (prev != next) _scheduleRefresh();
+    });
+    ref.listen(activeStudioPresetProvider, (prev, next) {
+      if (prev?.value != next.value) _scheduleRefresh();
+    });
+    ref.listen(studioFeatureEnabledProvider, (prev, next) {
       if (prev != next) _scheduleRefresh();
     });
     // Summary is written straight to its repo (not through chatProvider), so
