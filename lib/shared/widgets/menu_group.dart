@@ -7,6 +7,87 @@ import 'help_tip.dart';
 
 enum MenuGroupHeaderVariant { standard, accentCaps }
 
+// ── Collapsible section ────────────────────────────────────────────────────────
+
+/// A disclosure header that hides a run of [MenuGroup]s until tapped.
+///
+/// Use it for settings that exist for troubleshooting or provider quirks
+/// rather than day-to-day tuning: the screen stays readable for someone who
+/// only needs an endpoint and a key, and the rest is one tap away. Collapsed
+/// state is per-mount on purpose — reopening the screen starts tidy again.
+class MenuCollapsibleSection extends StatefulWidget {
+  final String label;
+  final String? helpTerm;
+  final List<Widget> children;
+
+  const MenuCollapsibleSection({
+    super.key,
+    required this.label,
+    this.helpTerm,
+    required this.children,
+  });
+
+  @override
+  State<MenuCollapsibleSection> createState() => _MenuCollapsibleSectionState();
+}
+
+class _MenuCollapsibleSectionState extends State<MenuCollapsibleSection> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          child: GlassSurface(
+            enableRipple: true,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: context.cs.outlineVariant),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(20),
+              onTap: () {
+                Haptics.selectionClick();
+                setState(() => _expanded = !_expanded);
+              },
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 14,
+                ),
+                child: Row(
+                  children: [
+                    Text(
+                      widget.label,
+                      style: TextStyle(
+                        color: context.cs.onSurfaceVariant,
+                        fontSize: 16,
+                      ),
+                    ),
+                    if (widget.helpTerm != null)
+                      HelpTip(term: widget.helpTerm!),
+                    const Spacer(),
+                    AnimatedRotation(
+                      turns: _expanded ? 0.5 : 0,
+                      duration: const Duration(milliseconds: 150),
+                      child: Icon(
+                        Icons.keyboard_arrow_down_rounded,
+                        color: context.cs.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+        if (_expanded) ...widget.children,
+      ],
+    );
+  }
+}
+
 // ── Group container ────────────────────────────────────────────────────────────
 
 class MenuGroup extends StatelessWidget {
@@ -362,6 +443,10 @@ class MenuFieldItem extends StatelessWidget {
   final int maxLines;
   final VoidCallback? onExpand;
 
+  /// Muted hint under the label — for legends that would otherwise be crammed
+  /// into the label itself.
+  final String? description;
+
   const MenuFieldItem({
     super.key,
     required this.label,
@@ -375,6 +460,7 @@ class MenuFieldItem extends StatelessWidget {
     this.onChanged,
     this.maxLines = 1,
     this.onExpand,
+    this.description,
   });
 
   @override
@@ -406,6 +492,17 @@ class MenuFieldItem extends StatelessWidget {
                 ),
             ],
           ),
+          if (description != null) ...[
+            const SizedBox(height: 1),
+            Text(
+              description!,
+              style: const TextStyle(
+                color: Color(0xFF99A2AD),
+                fontSize: 12,
+                fontWeight: FontWeight.normal,
+              ),
+            ),
+          ],
           const SizedBox(height: 6),
           TextField(
             controller: controller,
