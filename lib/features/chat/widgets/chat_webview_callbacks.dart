@@ -123,6 +123,10 @@ class ChatWebViewCallbacks {
     imageGenActions.onImgRetry?.call(instruction, messageId);
   }
 
+  void onImgEnableRetry(String instruction, String messageId) {
+    imageGenActions.onImgEnableRetry?.call(instruction, messageId);
+  }
+
   void onImgFind(String instruction, String messageId) {
     imageGenActions.onImgFind?.call(instruction, messageId);
   }

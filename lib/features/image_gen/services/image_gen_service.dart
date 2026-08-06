@@ -35,7 +35,13 @@ class ImageGenService {
     void Function(String updatedText)? onUpdate,
     void Function(String error)? onError,
   }) async {
-    if (!settings.enabled) return text;
+    if (!settings.enabled) {
+      final disabledText = ImageTagMarkup.replaceAllImageGenTagsWithDisabled(
+        text,
+      );
+      if (disabledText != text) onUpdate?.call(disabledText);
+      return disabledText;
+    }
 
     final instructions = ImageTagMarkup.extractImageGenInstructions(text);
     if (instructions.isEmpty) return text;
@@ -204,6 +210,7 @@ class ImageGenService {
           llmApiKey,
           instructionAspectRatio,
           instructionImageSize,
+          refs,
           cancelToken,
         );
       case ImageGenApiType.naistera:
@@ -268,6 +275,7 @@ class ImageGenService {
     String llmApiKey,
     String? instructionAspectRatio,
     String? instructionImageSize,
+    List<Map<String, String>> references,
     CancelToken? cancelToken,
   ) async {
     final endpoint = settings.useSameEndpoint
@@ -295,6 +303,7 @@ class ImageGenService {
         GeminiConstants.imageSizes,
         settings.geminiImageSize,
       ),
+      referenceImages: references,
       cancelToken: cancelToken,
     );
   }
@@ -424,7 +433,11 @@ class ImageGenService {
         final path = ImageTagMarkup.normalizeImageResultPayload(ctx);
         final encoded = _fileToBase64(path);
         if (encoded.isNotEmpty) {
-          refs.add({'name': 'context', 'image': encoded});
+          refs.add({
+            'name': 'context',
+            'image': encoded,
+            'mime': _imageMime(path),
+          });
         }
       }
     }
@@ -538,6 +551,14 @@ class ImageGenService {
     final commaIndex = dataUrl.indexOf(',');
     if (commaIndex == -1) return dataUrl;
     return dataUrl.substring(commaIndex + 1);
+  }
+
+  String _imageMime(String path) {
+    final lower = path.toLowerCase();
+    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+    if (lower.endsWith('.webp')) return 'image/webp';
+    if (lower.endsWith('.gif')) return 'image/gif';
+    return 'image/png';
   }
 
   Future<String> _saveGeneratedImage(String filename, Uint8List bytes) async {

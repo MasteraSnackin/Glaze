@@ -595,6 +595,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     bridge.onToggleImageHidden = callbacks.onToggleImageHidden;
     bridge.onInjectClick = callbacks.onInjectClick;
     bridge.onImgRetry = callbacks.onImgRetry;
+    bridge.onImgEnableRetry = callbacks.onImgEnableRetry;
     bridge.onImgFind = callbacks.onImgFind;
     bridge.onImgRegen = callbacks.onImgRegen;
     bridge.onImgOptions = callbacks.onImgOptions;

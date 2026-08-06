@@ -36,14 +36,6 @@ class ImageGenProcessor {
     final session = currentState.session;
     if (session == null) return;
 
-    final imgGenSettingsAsync = _ref.read(imageGenSettingsProvider);
-    if (imgGenSettingsAsync.isLoading) {
-      final imgGenSettings = await _ref.read(imageGenSettingsProvider.future);
-      if (!imgGenSettings.enabled) return;
-    } else {
-      final imgGenSettings = imgGenSettingsAsync.value;
-      if (imgGenSettings == null || !imgGenSettings.enabled) return;
-    }
     final imgGenSettings = await _ref.read(imageGenSettingsProvider.future);
 
     final targetIdx = targetMessageId == null
@@ -58,9 +50,41 @@ class ImageGenProcessor {
     final targetAgentSwipeId = targetMsg.agentSwipeId;
     if (targetMsg.role != 'assistant') return;
 
+    if (!ImageTagMarkup.hasImageGenTags(targetMsg.content)) return;
+
+    var latestSession = session;
+    if (!imgGenSettings.enabled) {
+      final disabledContent = ImageTagMarkup.replaceAllImageGenTagsWithDisabled(
+        targetMsg.content,
+      );
+      if (disabledContent == targetMsg.content || !_ownsOperation) return;
+
+      latestSession = _replaceMessage(
+        latestSession,
+        stableTargetMessageId,
+        targetSwipeId,
+        targetAgentSwipeId,
+        disabledContent,
+      );
+      _onStateUpdate(currentState.copyWith(session: latestSession));
+      final durable = await _persistMessageContent(
+        session.id,
+        stableTargetMessageId,
+        targetSwipeId,
+        targetAgentSwipeId,
+        disabledContent,
+      );
+      if (durable != null) {
+        ChatSessionService.updateCache(durable);
+        if (_ownsOperation) {
+          _onStateUpdate(currentState.copyWith(session: durable));
+        }
+      }
+      return;
+    }
+
     final notifier = _ref.read(imageGenSettingsProvider.notifier);
     final service = await notifier.getServiceAsync();
-    if (!ImageTagMarkup.hasImageGenTags(targetMsg.content)) return;
 
     final apiConfigSync = _ref.read(activeApiConfigProvider);
     final ApiConfig apiConfig;
@@ -94,7 +118,6 @@ class ImageGenProcessor {
     );
 
     final recentContexts = _collectRecentImageContexts(session.messages);
-    var latestSession = session;
     if (!_ownsOperation) return;
 
     debugPrint('[IMGGEN] → setting isGeneratingImage=true');

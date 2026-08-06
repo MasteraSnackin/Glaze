@@ -57,6 +57,25 @@ void main() {
     });
   });
 
+  group('disabled image generation', () {
+    test('replaces pending tags with a retryable disabled error', () async {
+      String? update;
+      final result = await service.processMessageImages(
+        text: '[IMG:GEN:{"prompt":"scene"}]',
+        settings: const ImageGenSettings(enabled: false),
+        llmEndpoint: '',
+        llmApiKey: '',
+        llmModel: '',
+        onUpdate: (value) => update = value,
+      );
+
+      expect(result, contains('[IMG:ERROR:'));
+      expect(result, contains('Image generation disabled'));
+      expect(result, contains(r'{\"prompt\":\"scene\"}'));
+      expect(update, result);
+    });
+  });
+
   group('extractImageGenInstructions', () {
     test('extracts from [IMG:GEN:json]', () {
       final instructions = ImageTagMarkup.extractImageGenInstructions(

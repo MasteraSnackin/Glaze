@@ -59,8 +59,9 @@ class ImageTagMarkup {
 
   static String replaceTagWithResult(String text, int index, String imagePath) {
     final instructions = extractImageGenInstructions(text);
-    final instruction =
-        index < instructions.length ? instructions[index] : null;
+    final instruction = index < instructions.length
+        ? instructions[index]
+        : null;
     final instrJson = instruction != null && instruction.isNotEmpty
         ? jsonEncode(instruction)
         : '';
@@ -118,6 +119,23 @@ class ImageTagMarkup {
     });
     if (count <= index) return text;
     return needStrip ? ImgGenPatterns.stripHtmlImgTags(result) : result;
+  }
+
+  /// Resolves every pending image tag to a retryable disabled-state error.
+  /// Keeping the original instruction lets the UI enable image generation and
+  /// immediately retry the same message without asking the model again.
+  static String replaceAllImageGenTagsWithDisabled(String text) {
+    var result = text;
+    while (hasImageGenTags(result)) {
+      final replaced = replaceTagWithError(
+        result,
+        0,
+        'Image generation disabled',
+      );
+      if (replaced == result) break;
+      result = replaced;
+    }
+    return result;
   }
 
   static String resetErrorTags(String text) {

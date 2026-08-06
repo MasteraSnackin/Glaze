@@ -69,6 +69,7 @@ class EditActionsCallbacks {
 
 class ImageGenCallbacks {
   final ImgActionCallback? onImgRetry;
+  final ImgActionCallback? onImgEnableRetry;
   final ImgActionCallback? onImgFind;
   final ImgActionCallback? onImgRegen;
   final ImgOptionsCallback? onImgOptions;
@@ -77,6 +78,7 @@ class ImageGenCallbacks {
 
   const ImageGenCallbacks({
     this.onImgRetry,
+    this.onImgEnableRetry,
     this.onImgFind,
     this.onImgRegen,
     this.onImgOptions,

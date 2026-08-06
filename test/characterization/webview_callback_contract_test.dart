@@ -56,6 +56,7 @@ void main() {
         'onToggleHidden',
         'onInjectClick',
         'onImgRetry',
+        'onImgEnableRetry',
         'onImgFind',
         'onImgRegen',
         'onImgCancel',
@@ -90,6 +91,7 @@ void main() {
         'onSelectionChange',
         'onInjectClick',
         'onImgRetry',
+        'onImgEnableRetry',
         'onImgFind',
         'onImgRegen',
         'onImgCancel',
@@ -170,6 +172,7 @@ void main() {
           'onSelectionChange',
           'onInjectClick',
           'onImgRetry',
+          'onImgEnableRetry',
           'onImgFind',
           'onImgRegen',
           'onImgCancel',
@@ -198,9 +201,14 @@ void main() {
     );
 
     test(
-      'image callbacks (retry/find/regen) have (String, String) signature',
+      'image callbacks (retry/enable/find/regen) have (String, String) signature',
       () {
-        for (final name in ['onImgRetry', 'onImgFind', 'onImgRegen']) {
+        for (final name in [
+          'onImgRetry',
+          'onImgEnableRetry',
+          'onImgFind',
+          'onImgRegen',
+        ]) {
           expect(
             bridgeControllerSource,
             contains(
