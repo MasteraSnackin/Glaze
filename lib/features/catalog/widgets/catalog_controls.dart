@@ -4,7 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glass_surface.dart';
-import '../../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../../shared/widgets/list_controls.dart';
 import '../catalog_models.dart';
 import '../catalog_provider.dart';
 import '../third_party_providers_provider.dart';
@@ -115,14 +115,14 @@ class CatalogControls extends ConsumerWidget {
     final enabledProviders = ref.watch(enabledCatalogProvidersProvider);
     return Row(
       children: [
-        _LabeledChip(
+        GlazeDropdownChip(
           label: providerLabel(state.activeProvider),
-          onTap: () => _showPickerSheet(
+          onTap: () => showGlazePickerSheet(
             context,
             title: 'blacklist_glossary_chip'.tr(),
             items: enabledProviders
                 .map(
-                  (p) => _PickerItem(
+                  (p) => GlazePickerItem(
                     label: providerLabel(p),
                     isActive: p == state.activeProvider,
                     value: p,
@@ -139,7 +139,7 @@ class CatalogControls extends ConsumerWidget {
           ),
         ),
         const Spacer(),
-        _FilterIconButton(
+        GlazeFilterIconButton(
           count: _activeFilterCount(),
           onTap: () => showModalBottomSheet<void>(
             context: context,
@@ -159,12 +159,12 @@ class CatalogControls extends ConsumerWidget {
         _SortIconChip(
           icon: _currentSortIcon(),
           tooltip: _currentSortLabel(),
-          onTap: () => _showPickerSheet(
+          onTap: () => showGlazePickerSheet(
             context,
             title: 'sort_by'.tr(),
             items: sortOptionsForProvider(state.activeProvider).entries
                 .map(
-                  (e) => _PickerItem(
+                  (e) => GlazePickerItem(
                     label: e.value,
                     isActive: e.key == state.filters.sort,
                     value: e.key,
@@ -178,62 +178,6 @@ class CatalogControls extends ConsumerWidget {
       ],
     );
   }
-
-  void _showPickerSheet(
-    BuildContext context, {
-    required String title,
-    required List<_PickerItem> items,
-    required ValueChanged<dynamic> onSelect,
-    Widget? headerAction,
-  }) {
-    GlazeBottomSheet.show<void>(
-      context,
-      title: title,
-      headerAction: headerAction,
-      items: items
-          .map(
-            (item) => BottomSheetItem(
-              icon: item.icon ?? (item.isActive ? Icons.check_rounded : null),
-              iconColor: item.icon != null
-                  ? (item.isActive
-                        ? context.cs.primary
-                        : context.cs.onSurfaceVariant)
-                  : context.cs.primary,
-              label: item.label,
-              actions: item.icon != null && item.isActive
-                  ? [
-                      BottomSheetAction(
-                        icon: Icons.check_rounded,
-                        color: context.cs.primary,
-                        onTap: () {
-                          Navigator.of(context, rootNavigator: true).pop();
-                          onSelect(item.value);
-                        },
-                      ),
-                    ]
-                  : const [],
-              onTap: () {
-                Navigator.of(context, rootNavigator: true).pop();
-                onSelect(item.value);
-              },
-            ),
-          )
-          .toList(),
-    );
-  }
-}
-
-class _PickerItem {
-  final String label;
-  final bool isActive;
-  final dynamic value;
-  final IconData? icon;
-  const _PickerItem({
-    required this.label,
-    required this.isActive,
-    required this.value,
-    this.icon,
-  });
 }
 
 /// Gear button pinned to the provider-picker sheet header; opens the
@@ -250,50 +194,6 @@ class _SettingsGearButton extends StatelessWidget {
       icon: Icon(Icons.settings_outlined, size: 22, color: context.cs.primary),
       tooltip: 'third_party_providers_title'.tr(),
       visualDensity: VisualDensity.compact,
-    );
-  }
-}
-
-class _LabeledChip extends StatelessWidget {
-  final String label;
-  final VoidCallback onTap;
-
-  const _LabeledChip({required this.label, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: SizedBox(
-        height: 32,
-        child: GlassSurface(
-          borderRadius: BorderRadius.circular(16),
-          tint: context.cs.surface,
-          border: Border.all(color: context.cs.primary.withValues(alpha: 0.18)),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: context.cs.primary,
-                  ),
-                ),
-                const SizedBox(width: 4),
-                Icon(
-                  Icons.keyboard_arrow_down_rounded,
-                  size: 18,
-                  color: context.cs.primary,
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
     );
   }
 }
@@ -337,66 +237,6 @@ class _SortIconChip extends StatelessWidget {
               ),
             ),
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _FilterIconButton extends StatelessWidget {
-  final int count;
-  final VoidCallback onTap;
-
-  const _FilterIconButton({required this.count, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: SizedBox(
-        width: 32,
-        height: 32,
-        child: Stack(
-          clipBehavior: Clip.none,
-          alignment: Alignment.center,
-          children: [
-            GlassSurface(
-              borderRadius: BorderRadius.circular(16),
-              tint: context.cs.surface,
-              border: Border.all(color: context.cs.primary.withValues(alpha: 0.18)),
-              child: Center(
-                child: Icon(
-                  Icons.filter_list_rounded,
-                  size: 18,
-                  color: context.cs.primary,
-                ),
-              ),
-            ),
-            if (count > 0)
-              Positioned(
-                top: -2,
-                right: -2,
-                child: Container(
-                  constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
-                  decoration: BoxDecoration(
-                    color: context.cs.primary,
-                    shape: BoxShape.circle,
-                  ),
-                  child: Center(
-                    child: Text(
-                      '$count',
-                      style: const TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.white,
-                        height: 1.0,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-          ],
         ),
       ),
     );

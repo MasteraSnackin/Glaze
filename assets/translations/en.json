@@ -2103,6 +2103,7 @@
   "studio_fact_checker_desc": "Audits the reply for continuity errors before the rewrite. Tap to edit the audit prompt.",
   "studio_section_collapse": "Collapse section",
   "studio_section_expand": "Expand section",
+  "preset_type_all": "All",
   "preset_filter_type": "Preset type",
   "preset_type_normal": "Regular",
   "preset_type_agentic": "Agentic",
