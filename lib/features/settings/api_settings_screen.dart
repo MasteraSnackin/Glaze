@@ -67,7 +67,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   int _topK = 0;
   bool _stream = true;
   bool _requestReasoning = false;
-  bool _geminiUseSystemInstruction = true;
+  bool _useSystemInstruction = true;
   bool _showNativeReasoning = true;
   bool _excludeReasoningFromContextBudget = false;
   String _reasoningEffort = 'medium';
@@ -226,7 +226,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       _presencePenalty = values.presencePenalty;
       _stream = values.stream;
       _requestReasoning = values.requestReasoning;
-      _geminiUseSystemInstruction = values.geminiUseSystemInstruction;
+      _useSystemInstruction = values.useSystemInstruction;
       _showNativeReasoning = values.showNativeReasoning;
       _excludeReasoningFromContextBudget =
           values.excludeReasoningFromContextBudget;
@@ -263,7 +263,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
         presencePenalty: _presencePenalty,
         stream: _stream,
         requestReasoning: _requestReasoning,
-        geminiUseSystemInstruction: _geminiUseSystemInstruction,
+        useSystemInstruction: _useSystemInstruction,
         showNativeReasoning: _showNativeReasoning,
         excludeReasoningFromContextBudget: _excludeReasoningFromContextBudget,
         reasoningEffort: _reasoningEffort,
@@ -327,9 +327,13 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
 
   bool get _supportsReasoning => true;
 
-  /// Gemini is the only protocol with a native `system_instruction` field the
-  /// leading system block can be lifted into.
-  bool get _supportsSystemInstruction => _protocol == LlmProtocol.gemini;
+  /// Protocols with a dedicated field for the leading system block. The field
+  /// is named differently per provider, so the label carries its actual name.
+  bool get _supportsSystemInstruction =>
+      _protocol == LlmProtocol.gemini || _protocol == LlmProtocol.anthropic;
+
+  String get _systemInstructionFieldName =>
+      _protocol == LlmProtocol.anthropic ? 'system' : 'system_instruction';
 
   /// Derived from the protocol — the Responses API is no longer a toggle.
   bool get _useResponsesApi => _isResponses;
@@ -906,11 +910,13 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       header: 'section_other'.tr(),
       items: [
         MenuSwitchItem(
-          label: 'label_use_system_instruction'.tr(),
+          label: 'label_use_system_instruction'.tr(
+            namedArgs: {'field': _systemInstructionFieldName},
+          ),
           helpTerm: 'system-instruction',
-          value: _geminiUseSystemInstruction,
+          value: _useSystemInstruction,
           onChanged: (v) {
-            setState(() => _geminiUseSystemInstruction = v);
+            setState(() => _useSystemInstruction = v);
             _scheduleSave();
           },
         ),

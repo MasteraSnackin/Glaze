@@ -45,7 +45,7 @@ void main() {
       cacheBreakpointMode: 'stable_prefix',
       sessionIdMode: 'always',
       firstChunkTimeoutMs: 45000,
-      geminiUseSystemInstruction: false,
+      useSystemInstruction: false,
       extraRequestParameters: [ExtraRequestParameter(key: 'seed', value: '42')],
     );
 

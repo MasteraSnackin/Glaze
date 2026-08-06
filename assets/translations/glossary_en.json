@@ -83,7 +83,7 @@
                 {
                     "id": "system-instruction",
                     "name": "Send preset instructions as system_instruction",
-                    "desc": "When enabled, the run of `system` prompt blocks at the start of the prompt is sent in the separate `system_instruction` parameter. It does not touch the chat history itself — blocks inside it stay where they are and go as ordinary messages. Google Gemini only."
+                    "desc": "When enabled, the run of `system` prompt blocks at the very start of the prompt is sent in a separate parameter: `system_instruction` on Google Gemini, `system` on Anthropic. Each block goes as its own part; they are not glued together. It does not touch the chat history itself — blocks inside it stay where they are and go as ordinary messages. Note that only a run at the start is lifted: if a `user` block comes first, nothing is."
                 },
                 {
                     "id": "reasoning-budget",

@@ -137,7 +137,7 @@ class ApiConfigDraft {
       stream: normalized.stream,
       requestReasoning: normalized.requestReasoning,
       useResponsesApi: normalized.useResponsesApi,
-      geminiUseSystemInstruction: normalized.geminiUseSystemInstruction,
+      useSystemInstruction: normalized.useSystemInstruction,
       showNativeReasoning: normalized.showNativeReasoning,
       reasoningHistoryCount: parsedReasoningHistoryCount < -1
           ? 0

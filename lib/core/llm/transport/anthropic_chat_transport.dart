@@ -39,6 +39,9 @@ class AnthropicBuiltRequest {
 ///   When thinking is on, prefill is dropped (Anthropic constraint).
 /// - Cache control: when [ChatTransportRequest.cacheControlTtl] is set, marks
 ///   the last system part and a message at depth=2 with `ephemeral` cache.
+/// - System handling: the leading run of `system` messages goes to the
+///   top-level `system` field unless [ChatTransportRequest.useSystemInstruction]
+///   is off, in which case it stays inline as user turns.
 /// - SSE events: `content_block_delta` → text/reasoning; `message_stop` → done.
 class AnthropicChatTransport implements ChatTransport {
   static const String _apiVersion = '2023-06-01';
@@ -152,6 +155,7 @@ class AnthropicChatTransport implements ChatTransport {
     final converted = convertClaudeMessages(
       request.messages,
       extractPrefill: !useThinking,
+      useSystemInstruction: request.useSystemInstruction,
     );
 
     var messages = converted.messages;
@@ -182,6 +186,7 @@ class AnthropicChatTransport implements ChatTransport {
           : convertClaudeMessages(
               request.previousMessages!,
               extractPrefill: !useThinking,
+              useSystemInstruction: request.useSystemInstruction,
             ).messages;
       messages = markStablePrefixCacheControl(
         messages,

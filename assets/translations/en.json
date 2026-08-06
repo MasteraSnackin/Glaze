@@ -134,7 +134,7 @@
   "section_cache": "Cache",
   "section_reasoning_delivery": "Sending reasoning",
   "section_other": "Other",
-  "label_use_system_instruction": "Send preset instructions as system_instruction",
+  "label_use_system_instruction": "Send preset instructions as {field}",
   "label_stream": "Stream Response",
   "desc_stream": "Show response text as it is generated",
   "label_auto_hide_images": "Auto-hide images",

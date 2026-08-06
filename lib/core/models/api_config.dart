@@ -51,10 +51,11 @@ abstract class ApiConfig with _$ApiConfig {
     @Default('openrouter') String sessionIdMode,
     @Default(60000) int firstChunkTimeoutMs,
 
-    /// Gemini-only: send the leading system block in the native
-    /// `system_instruction` field. When off it stays in `contents` as the
-    /// first user turn. Ignored by every other protocol.
-    @Default(true) bool geminiUseSystemInstruction,
+    /// Send the leading run of system blocks in the provider's own field —
+    /// Gemini's `system_instruction`, Anthropic's `system`. When off it stays
+    /// inline and is delivered as user turns. Ignored by protocols that have
+    /// no such field.
+    @Default(true) bool useSystemInstruction,
     @Default(<ExtraRequestParameter>[])
     List<ExtraRequestParameter> extraRequestParameters,
   }) = _ApiConfig;

@@ -74,7 +74,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 111;
+  int get schemaVersion => 112;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -2027,8 +2027,8 @@ class AppDatabase extends _$AppDatabase {
         final names = columns
             .map((column) => column.read<String>('name'))
             .toSet();
-        if (!names.contains('gemini_use_system_instruction')) {
-          await m.addColumn(apiConfigs, apiConfigs.geminiUseSystemInstruction);
+        if (!names.contains('use_system_instruction')) {
+          await m.addColumn(apiConfigs, apiConfigs.useSystemInstruction);
         }
       }
       if (from < 111) {
@@ -2041,6 +2041,24 @@ class AppDatabase extends _$AppDatabase {
           "THEN 'always' ELSE 'off' END "
           "WHERE session_id_mode NOT IN ('always', 'off')",
         );
+      }
+      if (from < 112) {
+        // The toggle covers Anthropic's `system` as well as Gemini's
+        // `system_instruction`, so the column lost its `gemini_` prefix.
+        final columns = await customSelect(
+          "PRAGMA table_info('api_configs')",
+        ).get();
+        final names = columns
+            .map((column) => column.read<String>('name'))
+            .toSet();
+        if (names.contains('gemini_use_system_instruction') &&
+            !names.contains('use_system_instruction')) {
+          await customStatement(
+            'ALTER TABLE api_configs '
+            'RENAME COLUMN gemini_use_system_instruction '
+            'TO use_system_instruction',
+          );
+        }
       }
     },
   );

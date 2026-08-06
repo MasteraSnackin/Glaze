@@ -564,7 +564,7 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
         cacheControlTtl: cfg.cacheControlTtl,
         cacheBreakpointMode: cfg.cacheBreakpointMode,
         sessionIdMode: cfg.sessionIdMode,
-        useSystemInstruction: cfg.geminiUseSystemInstruction,
+        useSystemInstruction: cfg.useSystemInstruction,
         extraRequestParameters: cfg.extraRequestParameters,
       );
 

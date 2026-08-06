@@ -166,7 +166,7 @@ class ChatTransportRequest {
     sessionIdMode: apiConfig.sessionIdMode,
     tools: tools,
     toolChoice: toolChoice,
-    useSystemInstruction: apiConfig.geminiUseSystemInstruction,
+    useSystemInstruction: apiConfig.useSystemInstruction,
     extraRequestParameters: apiConfig.extraRequestParameters,
   );
 }
