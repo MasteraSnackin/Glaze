@@ -73,7 +73,7 @@ class OpenAiResponsesTransport implements ChatTransport {
             );
       body['reasoning'] = <String, dynamic>{
         'summary': 'auto',
-        if (effort != null) 'effort': effort,
+        'effort': ?effort,
       };
     }
 
