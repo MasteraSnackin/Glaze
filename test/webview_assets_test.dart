@@ -29,6 +29,7 @@ void main() {
   late String rendererMessageJs;
   late String formatterIndexJs;
   late String formatterFormatterJs;
+  late String formatterTextFormatJs;
   late String bridgeIndexJs;
   late String bridgeControllerJs;
   late String editControllerJs;
@@ -48,6 +49,7 @@ void main() {
     rendererMessageJs = _rendererAsset('message_renderer.js');
     formatterIndexJs = _formatterAsset('index.js');
     formatterFormatterJs = _formatterAsset('formatter.js');
+    formatterTextFormatJs = _formatterAsset('text_format.js');
     rendererJs = [
       _rendererAsset('shadow_style.js'),
       _rendererAsset('markdown.js'),
@@ -359,6 +361,19 @@ void main() {
 
     test('legacy formatter shim points at active module entrypoint', () {
       expect(_asset('formatter.js'), contains('formatter/index.js'));
+    });
+
+    test('inline markdown does not keep a generated paragraph wrapper', () {
+      expect(
+        formatterTextFormatJs,
+        contains(r'const paragraph = rich.match(/^\s*<p>([\s\S]*)<\/p>\s*$/i)'),
+      );
+      expect(
+        formatterTextFormatJs,
+        contains(r'!/<\/?p(?:\s|>)/i.test(paragraph[1])'),
+        reason: 'only a single outer paragraph may be unwrapped',
+      );
+      expect(formatterTextFormatJs, contains('return paragraph[1]'));
     });
   });
 
