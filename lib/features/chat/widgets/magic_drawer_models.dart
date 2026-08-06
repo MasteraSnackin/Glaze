@@ -40,6 +40,7 @@ class MagicDrawerCardItem {
 class MagicDrawerStats {
   final Character? character;
   final Preset? activePreset;
+  final String? activePresetDisplayName;
   final Persona? activePersona;
   final ApiConfig? apiConfig;
   final ChatSession? session;
@@ -72,6 +73,7 @@ class MagicDrawerStats {
   const MagicDrawerStats({
     this.character,
     this.activePreset,
+    this.activePresetDisplayName,
     this.activePersona,
     this.apiConfig,
     this.session,
@@ -116,6 +118,7 @@ class MagicDrawerStats {
     return MagicDrawerStats(
       character: character,
       activePreset: activePreset,
+      activePresetDisplayName: activePresetDisplayName,
       activePersona: activePersona,
       apiConfig: apiConfig,
       session: session,

@@ -7,9 +7,12 @@ import '../../../core/llm/context_calculator.dart';
 import '../../../core/llm/prompt_isolate.dart';
 import '../providers/prompt_build_providers.dart';
 import '../../../core/models/preset.dart';
+import '../../../core/state/active_studio_preset_provider.dart';
 import '../../../core/state/active_selection_provider.dart';
 import '../../../core/state/db_provider.dart';
+import '../../../core/state/preset_resolution.dart';
 import '../../../core/state/summary_providers.dart';
+import '../../../core/state/studio_feature_provider.dart';
 import '../../extensions/providers/extension_presets_provider.dart';
 import '../../extensions/providers/extensions_settings_provider.dart';
 import '../../image_gen/image_gen_provider.dart';
@@ -41,7 +44,6 @@ class MagicDrawerStatsService {
     final summaryService = _ref.read(summaryServiceProvider);
     final apiListFuture = _ref.read(apiListProvider.future);
     final activeRegexesFuture = _ref.read(activeRegexesProvider.future);
-    final activePresetId = _ref.read(activePresetIdProvider);
     final activePersonaId = _ref.read(activePersonaIdProvider);
     final chatApi = _ref.read(activeApiConfigProvider);
     final imageGenEnabled =
@@ -55,9 +57,26 @@ class MagicDrawerStatsService {
     final personas = await personaRepo.getAll();
     await apiListFuture;
     final lorebooks = await lorebookRepo.getAll();
-    final activePreset = activePresetId != null
-        ? presets.where((p) => p.id == activePresetId).firstOrNull
-        : presets.firstOrNull;
+    final activePreset = getEffectivePreset(
+      presets,
+      charId,
+      session?.id,
+      _ref.read(activePresetIdProvider),
+      _ref.read(presetConnectionsProvider),
+    );
+    String? activePresetDisplayName = activePreset?.name;
+    if (_ref.read(studioFeatureEnabledProvider)) {
+      try {
+        final studioPreset = await _ref
+            .read(studioPresetRepoProvider)
+            .getById(await _ref.read(activeStudioPresetProvider.future));
+        if (studioPreset != null) {
+          activePresetDisplayName = studioPreset.name;
+        }
+      } catch (e) {
+        debugPrint('[MagicDrawer] active Studio preset error: $e');
+      }
+    }
     final activePersona = activePersonaId != null
         ? personas.where((p) => p.id == activePersonaId).firstOrNull
         : personas.firstOrNull;
@@ -114,6 +133,7 @@ class MagicDrawerStatsService {
     return MagicDrawerStats(
       character: character,
       activePreset: activePreset,
+      activePresetDisplayName: activePresetDisplayName,
       activePersona: activePersona,
       apiConfig: chatApi,
       session: session,
