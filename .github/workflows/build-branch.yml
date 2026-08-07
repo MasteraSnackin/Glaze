@@ -86,10 +86,11 @@ jobs:
           SAFE_BRANCH=$(echo "$BUILD_BRANCH" | sed 's#[/ ]#-#g')
           FILE_SLUG="G-$(date -u '+%d%m%Y-%H%M')-$SAFE_BRANCH"
 
-          # Release channel drives the in-app dev-tooling defaults (developer
-          # mode + build watermark) via --dart-define=BUILD_CHANNEL. Only the
-          # two release branches get a non-nightly channel; every other branch
-          # builds as nightly, i.e. with dev tooling on.
+          # Release channel drives the app identity, data folder, cloud root,
+          # update source and the build-watermark default via
+          # --dart-define=BUILD_CHANNEL. Developer mode is off on every channel
+          # and only unlocks via the About easter egg. Only the two release
+          # branches get a non-nightly channel; every other branch is nightly.
           case "$BUILD_BRANCH" in
             stable)  BUILD_CHANNEL=stable  ;;
             staging) BUILD_CHANNEL=staging ;;
