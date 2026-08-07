@@ -17,11 +17,24 @@ void showStudioPresetOptions(
   /// Omitted where folders don't apply (e.g. the editor opened outside the
   /// preset list).
   VoidCallback? onAddToFolder,
+
+  /// Starts multi-select on this row. Only the list passes it — and it is the
+  /// only way in while the list is drag-ordered, where a long press drags.
+  VoidCallback? onSelect,
 }) {
   GlazeBottomSheet.show<void>(
     context,
     title: 'preset_options'.tr(),
     items: [
+      if (onSelect != null)
+        BottomSheetItem(
+          icon: Icons.check_circle_outline,
+          label: 'action_select'.tr(),
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            onSelect();
+          },
+        ),
       BottomSheetItem(
         icon: Icons.drive_file_rename_outline,
         label: 'action_rename'.tr(),

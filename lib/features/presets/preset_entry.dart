@@ -23,6 +23,23 @@ class PresetItem {
 
   String get id => isAgentic ? studioPreset!.id : preset!.id;
 
+  String get name => isAgentic ? studioPreset!.name : preset!.name;
+
+  /// When the preset entered the library, for "date added" sorting.
+  ///
+  /// Plain presets carry the timestamp themselves. Studio presets don't, but
+  /// every one of them is created with an id of `studio_<seconds>` — so that is
+  /// the creation time, with the last save as the fallback for the built-in
+  /// `default` preset (and any id that predates the convention).
+  int get createdAt {
+    if (!isAgentic) return preset!.createdAt;
+    final sp = studioPreset!;
+    final stamp = sp.id.startsWith('studio_')
+        ? int.tryParse(sp.id.substring('studio_'.length))
+        : null;
+    return stamp ?? sp.updatedAt;
+  }
+
   /// Key this row is stored under in `preset_folder_members`.
   String get memberKey => presetMemberKey(id, kind);
 

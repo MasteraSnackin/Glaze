@@ -14,11 +14,15 @@ class GlazePickerItem {
   /// treatment (icon shown only while active).
   final IconData? icon;
 
+  /// Secondary line under [label], explaining what the option does.
+  final String? hint;
+
   const GlazePickerItem({
     required this.label,
     required this.isActive,
     required this.value,
     this.icon,
+    this.hint,
   });
 }
 
@@ -47,6 +51,7 @@ void showGlazePickerSheet(
             ? (item.isActive ? context.cs.primary : context.cs.onSurfaceVariant)
             : context.cs.primary,
         label: item.label,
+        hint: item.hint,
         actions: item.icon != null && item.isActive
             ? [
                 BottomSheetAction(
@@ -104,6 +109,56 @@ class GlazeDropdownChip extends StatelessWidget {
                   color: context.cs.primary,
                 ),
               ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Glass pill showing the active sort mode as an icon, opening a picker sheet
+/// with the available modes. Shared by the catalog and the Presets list.
+class GlazeSortIconChip extends StatelessWidget {
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  const GlazeSortIconChip({
+    super.key,
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: GestureDetector(
+        onTap: onTap,
+        child: SizedBox(
+          height: 32,
+          child: GlassSurface(
+            borderRadius: BorderRadius.circular(16),
+            tint: context.cs.surface,
+            border: Border.all(
+              color: context.cs.primary.withValues(alpha: 0.18),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, size: 18, color: context.cs.primary),
+                  const SizedBox(width: 2),
+                  Icon(
+                    Icons.keyboard_arrow_down_rounded,
+                    size: 18,
+                    color: context.cs.primary,
+                  ),
+                ],
+              ),
             ),
           ),
         ),

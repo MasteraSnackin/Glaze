@@ -4,17 +4,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/models/preset_folder.dart';
 import '../../../core/state/preset_folder_provider.dart';
-import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/folder_name_dialog.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
+import 'preset_folder_card.dart';
 
-/// Folders strip for the Presets list: a horizontal row of circular folder
-/// covers. Tapping opens a folder; long-pressing exposes rename/delete. New
-/// folders are created from the screen's Add sheet, not here.
-///
-/// Mirrors `CharacterFoldersSection`, minus the character-specific virtual
-/// folders (Favorites / Our Picks) and avatar covers — presets have no images,
-/// so each circle shows the folder glyph with its member count.
+/// Folders block of the Presets list: one card per folder, stacked above the
+/// preset rows and pinned there — folders are never reordered or re-sorted with
+/// the presets below them. Tapping opens a folder; the row's "⋯" (or a long
+/// press) exposes rename/delete. New folders are created from the screen's Add
+/// sheet, not here.
 class PresetFoldersSection extends ConsumerWidget {
   final ValueChanged<String> onOpenFolder;
 
@@ -29,23 +27,20 @@ class PresetFoldersSection extends ConsumerWidget {
         ref.watch(presetFolderMembershipsProvider).value ??
         PresetFolderMemberships.empty;
 
-    return SizedBox(
-      height: 104,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.fromLTRB(0, 12, 0, 4),
-        itemCount: folders.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 16),
-        itemBuilder: (_, i) {
-          final folder = folders[i];
-          return _FolderCircle(
-            folder: folder,
-            count: memberships.countFor(folder.id),
-            onTap: () => onOpenFolder(folder.id),
-            onLongPress: () => showPresetFolderActions(context, ref, folder),
-          );
-        },
-      ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final folder in folders)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: PresetFolderCard(
+              folder: folder,
+              count: memberships.countFor(folder.id),
+              onTap: () => onOpenFolder(folder.id),
+              onMenu: () => showPresetFolderActions(context, ref, folder),
+            ),
+          ),
+      ],
     );
   }
 }
@@ -125,85 +120,4 @@ void _confirmDelete(
       ),
     ],
   );
-}
-
-class _FolderCircle extends StatelessWidget {
-  static const double _diameter = 64;
-
-  final PresetFolder folder;
-  final int count;
-  final VoidCallback onTap;
-  final VoidCallback onLongPress;
-
-  const _FolderCircle({
-    required this.folder,
-    required this.count,
-    required this.onTap,
-    required this.onLongPress,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      onLongPress: onLongPress,
-      child: SizedBox(
-        width: 72,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: _diameter,
-              height: _diameter,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    context.cs.primary.withValues(alpha: 0.35),
-                    context.cs.surfaceContainerHighest,
-                  ],
-                ),
-                border: Border.all(
-                  color: context.cs.primary.withValues(alpha: 0.25),
-                  width: 2,
-                ),
-              ),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.folder_rounded,
-                    size: 24,
-                    color: Colors.white.withValues(alpha: 0.85),
-                  ),
-                  Text(
-                    '$count',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white.withValues(alpha: 0.75),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 6),
-            Text(
-              folder.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                color: context.cs.onSurface,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 }

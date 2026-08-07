@@ -43,10 +43,12 @@ import 'preset_export.dart';
 import 'preset_image.dart';
 import 'preset_list_provider.dart';
 import 'preset_selection_provider.dart';
+import 'preset_sort.dart';
 import 'widgets/add_presets_to_folder_sheet.dart';
 import 'widgets/preset_filter_sheet.dart';
 import 'widgets/preset_folders_section.dart';
 import 'widgets/preset_options_sheet.dart';
+import 'widgets/preset_small_badge.dart';
 
 /// Nominal height of one preset row (card + the gap below it). Only used to
 /// estimate the scroll offset of the active preset before its row is laid out;
@@ -210,6 +212,10 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
       title: title,
       showBack: true,
       onBack: _handleBack,
+      // The type dropdown, the filter button and the sort chip belong to the
+      // header, not to the scroll content: pinned there they stay reachable at
+      // any scroll offset, in the modal sheet and as a fullscreen route alike.
+      headerBottom: _inAnyEditor ? null : _buildControlsRow(context),
       floating: _inAnyEditor || !selection.active
           ? null
           : Align(
@@ -284,20 +290,32 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
         ref.watch(presetFolderMembershipsProvider).value ??
         PresetFolderMemberships.empty;
     final selection = ref.watch(presetSelectionProvider);
+    final sort = ref.watch(presetSortProvider).value ?? const PresetSortState();
+    final hasFolders =
+        (ref.watch(presetFoldersProvider).value ?? const []).isNotEmpty;
 
-    var items = <PresetItem>[
+    final all = <PresetItem>[
       for (final p in presets) PresetItem(preset: p),
       for (final sp in studioList) PresetItem(studioPreset: sp),
     ];
+    var items = all;
     if (folderId != null) {
       final keys = memberships.presetsIn(folderId);
       items = items.where((e) => keys.contains(e.memberKey)).toList();
+    } else {
+      // A preset filed into a folder lives there, not twice: the top level
+      // lists the folders (above) plus the presets that are in none of them.
+      items = items
+          .where((e) => memberships.foldersOf(e.id, e.kind).isEmpty)
+          .toList();
     }
     final kind = _typeFilter;
     if (kind != null) {
       items = items.where((e) => e.kind == kind).toList();
     }
     items = items.where(_filters.matches).toList();
+    items = sortPresetItems(items, sort);
+    final manual = sort.mode == PresetSortMode.manual;
 
     // Studio ON ⇒ only an agentic preset can be active; Studio OFF ⇒ only a
     // plain preset can be active. So the two kinds never both highlight.
@@ -316,6 +334,36 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
     final topInset = MediaQuery.paddingOf(context).top;
     final bottomInset = MediaQuery.paddingOf(context).bottom;
 
+    Widget row(int i) {
+      final item = items[i];
+      final active = isActive(item);
+      return Padding(
+        key: i == activeIndex ? _activeRowKey : null,
+        padding: const EdgeInsets.only(bottom: 10),
+        child: _PsCard(
+          item: item,
+          isActive: active,
+          selectionMode: selection.active,
+          isSelected: selection.contains(item.id, item.kind),
+          onTap: () => _onCardTap(item, active),
+          // While the list is manually ordered a long press starts the drag,
+          // so it can't also open multi-select — that moves to the row menu.
+          onLongPress: manual
+              ? null
+              : () => ref
+                    .read(presetSelectionProvider.notifier)
+                    .start(item.id, item.kind),
+          onConnections: item.isAgentic
+              ? null
+              : () => showPresetConnections(context, item.preset!.id),
+          onEdit: item.isAgentic
+              ? () => _openStudioEditor(item.studioPreset!.id)
+              : () => _openEditor(item.preset),
+          onMenu: () => _showItemMenu(item),
+        ),
+      );
+    }
+
     return CustomScrollView(
       controller: _scrollController,
       slivers: [
@@ -324,23 +372,20 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
           sliver: SliverToBoxAdapter(
             child: KeyedSubtree(
               key: _headerKey,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _buildControlsRow(context),
-                  if (folderId == null)
-                    PresetFoldersSection(
+              child: folderId == null
+                  ? PresetFoldersSection(
                       onOpenFolder: (id) {
                         ref.read(presetSelectionProvider.notifier).clear();
                         setState(() => _currentFolderId = id);
                       },
-                    ),
-                ],
-              ),
+                    )
+                  : const SizedBox.shrink(),
             ),
           ),
         ),
-        if (items.isEmpty)
+        // "No presets" would be a lie at the top level while folders are
+        // listed above it — every preset simply lives in one of them.
+        if (items.isEmpty && !(folderId == null && hasFolders))
           SliverPadding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 40),
             sliver: SliverToBoxAdapter(
@@ -354,36 +399,26 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
               ),
             ),
           )
+        else if (manual)
+          SliverPadding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            sliver: SliverReorderableList(
+              itemCount: items.length,
+              onReorderItem: (oldIndex, newIndex) =>
+                  _onManualReorder(items, all, oldIndex, newIndex),
+              itemBuilder: (_, i) => ReorderableDelayedDragStartListener(
+                key: ValueKey(items[i].memberKey),
+                index: i,
+                child: row(i),
+              ),
+            ),
+          )
         else
           SliverPadding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             sliver: SliverList.builder(
               itemCount: items.length,
-              itemBuilder: (_, i) {
-                final item = items[i];
-                final active = isActive(item);
-                return Padding(
-                  key: i == activeIndex ? _activeRowKey : null,
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: _PsCard(
-                    item: item,
-                    isActive: active,
-                    selectionMode: selection.active,
-                    isSelected: selection.contains(item.id, item.kind),
-                    onTap: () => _onCardTap(item, active),
-                    onLongPress: () => ref
-                        .read(presetSelectionProvider.notifier)
-                        .start(item.id, item.kind),
-                    onConnections: item.isAgentic
-                        ? null
-                        : () => showPresetConnections(context, item.preset!.id),
-                    onEdit: item.isAgentic
-                        ? () => _openStudioEditor(item.studioPreset!.id)
-                        : () => _openEditor(item.preset),
-                    onMenu: () => _showItemMenu(item),
-                  ),
-                );
-              },
+              itemBuilder: (_, i) => row(i),
             ),
           ),
         SliverPadding(
@@ -392,6 +427,43 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
         ),
       ],
     );
+  }
+
+  /// Commits a drag in the manually ordered list.
+  ///
+  /// [visible] is what the user actually dragged over (one folder, one type,
+  /// one token range); [all] is every preset there is. The dragged row is
+  /// re-anchored inside the *full* order so rows hidden by a filter — or filed
+  /// away in a folder — keep the places they had.
+  ///
+  /// [newIndex] is the row's final index: `onReorderItem` already accounts for
+  /// the item being lifted out of [oldIndex] first.
+  void _onManualReorder(
+    List<PresetItem> visible,
+    List<PresetItem> all,
+    int oldIndex,
+    int newIndex,
+  ) {
+    if (oldIndex == newIndex) return;
+    final sort = ref.read(presetSortProvider).value ?? const PresetSortState();
+    final visibleKeys = [for (final e in visible) e.memberKey];
+    final moved = visibleKeys.removeAt(oldIndex);
+    visibleKeys.insert(newIndex, moved);
+    // The row the dragged one now follows; null when it landed first.
+    final anchor = newIndex == 0 ? null : visibleKeys[newIndex - 1];
+
+    final full = [
+      for (final e in sortPresetItems(
+        all,
+        sort.copyWith(mode: PresetSortMode.manual),
+      ))
+        e.memberKey,
+    ];
+    full.remove(moved);
+    final anchorIndex = anchor == null ? -1 : full.indexOf(anchor);
+    full.insert(anchorIndex + 1, moved);
+
+    unawaited(ref.read(presetSortProvider.notifier).setManualOrder(full));
   }
 
   void _onCardTap(PresetItem item, bool isActive) {
@@ -481,24 +553,66 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
 
   // ─── filters ───────────────────────────────────────────────────────────
 
-  /// Control row under the header, mirroring the catalog's: the type dropdown
-  /// on the left, the filter-sheet button on the right.
+  /// Control row pinned to the header, mirroring the catalog's: the type
+  /// dropdown on the left, the filter-sheet button and the sort chip on the
+  /// right.
   Widget _buildControlsRow(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Row(
-        children: [
-          GlazeDropdownChip(
-            label: _typeLabel(_typeFilter),
-            onTap: () => _showTypePicker(context),
+    return Consumer(
+      builder: (context, ref, _) {
+        final mode =
+            ref.watch(presetSortProvider).value?.mode ?? PresetSortMode.manual;
+        return Row(
+          children: [
+            GlazeDropdownChip(
+              label: _typeLabel(_typeFilter),
+              onTap: () => _showTypePicker(context),
+            ),
+            const Spacer(),
+            GlazeFilterIconButton(
+              count: _filters.activeCount,
+              onTap: () => _showFilterSheet(context),
+            ),
+            const SizedBox(width: 8),
+            GlazeSortIconChip(
+              icon: mode.icon,
+              tooltip: mode.label,
+              onTap: () => _showSortPicker(context, mode),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showSortPicker(BuildContext context, PresetSortMode current) {
+    showGlazePickerSheet(
+      context,
+      title: 'sort_by'.tr(),
+      items: [
+        for (final mode in PresetSortMode.values)
+          GlazePickerItem(
+            label: mode.label,
+            icon: mode.icon,
+            hint: mode.hint,
+            isActive: mode == current,
+            value: mode,
           ),
-          const Spacer(),
-          GlazeFilterIconButton(
-            count: _filters.activeCount,
-            onTap: () => _showFilterSheet(context),
-          ),
-        ],
-      ),
+      ],
+      onSelect: (v) {
+        if (v == PresetSortMode.manual) {
+          // Leaving multi-select on while switching into the drag-ordered mode
+          // would strand the selection bar (a long press drags there instead).
+          ref.read(presetSelectionProvider.notifier).clear();
+          // Picking the mode is the only moment the drag gesture needs
+          // explaining, so it is a toast rather than a permanent chip.
+          if (mounted && current != PresetSortMode.manual) {
+            GlazeToast.show(this.context, 'preset_drag_hint'.tr());
+          }
+        }
+        unawaited(
+          ref.read(presetSortProvider.notifier).setMode(v as PresetSortMode),
+        );
+      },
     );
   }
 
@@ -571,6 +685,9 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
       isFeatured: isFeaturedPreset(preset.id),
       hasImage: preset.imagePath != null && preset.imagePath!.isNotEmpty,
       canDelete: true,
+      onSelect: () => ref
+          .read(presetSelectionProvider.notifier)
+          .start(preset.id, PresetKind.normal),
       onRename: () => showPresetRename(
         context,
         currentName: preset.name,
@@ -631,6 +748,9 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
     showStudioPresetOptions(
       context,
       preset: preset,
+      onSelect: () => ref
+          .read(presetSelectionProvider.notifier)
+          .start(preset.id, PresetKind.agentic),
       onRename: () => showStudioPresetRename(
         context,
         preset: preset,
@@ -785,6 +905,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
     Object? lastError;
     var unreadable = 0;
     var adjusted = 0;
+    var importedAgentic = false;
 
     for (final picked in result.files) {
       try {
@@ -814,6 +935,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
             imported: decoded.preset,
             name: decoded.preset.name,
           );
+          importedAgentic = true;
           imported.add(decoded.preset.name);
         } else {
           final preset = parseSillyTavernPreset(json, picked.name);
@@ -824,6 +946,11 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
         lastError = e;
       }
     }
+
+    // The plain list refreshes itself (`notifier.add` invalidates it), but the
+    // agentic list is a plain FutureProvider the workflow service knows nothing
+    // about — without this the imported presets only appeared after a restart.
+    if (importedAgentic) ref.invalidate(studioPresetListProvider);
 
     if (!ctx.mounted) return;
 
@@ -1029,7 +1156,10 @@ class _PsCard extends ConsumerWidget {
   final bool selectionMode;
   final bool isSelected;
   final VoidCallback onTap;
-  final VoidCallback onLongPress;
+
+  /// Null while the list is drag-ordered — the drag listener owns the long
+  /// press there.
+  final VoidCallback? onLongPress;
   final VoidCallback onMenu;
   final VoidCallback? onConnections;
   final VoidCallback? onEdit;
@@ -1040,8 +1170,8 @@ class _PsCard extends ConsumerWidget {
     required this.selectionMode,
     required this.isSelected,
     required this.onTap,
-    required this.onLongPress,
     required this.onMenu,
+    this.onLongPress,
     this.onConnections,
     this.onEdit,
   });
@@ -1248,7 +1378,7 @@ class _PsCard extends ConsumerWidget {
               const SizedBox(height: 4),
               Row(
                 children: [
-                  _SmallBadge(
+                  PresetSmallBadge(
                     icon: Icons.description,
                     label: '${item.tokens}',
                     foreground: secondaryText,
@@ -1335,13 +1465,13 @@ class _PsCard extends ConsumerWidget {
               const SizedBox(height: 4),
               Row(
                 children: [
-                  _SmallBadge(
+                  PresetSmallBadge(
                     icon: Icons.memory,
                     label: '${item.tokens}',
                     foreground: context.cs.onSurfaceVariant,
                   ),
                   const SizedBox(width: 8),
-                  _SmallBadge(
+                  PresetSmallBadge(
                     icon: Icons.bolt,
                     label: 'studio_requests_per_turn'.tr(
                       args: ['${studioPresetRequestCount(sp)}'],
@@ -1426,53 +1556,6 @@ class _SelectionCheck extends StatelessWidget {
             : Icons.radio_button_unchecked_rounded,
         size: 22,
         color: selected ? context.cs.primary : idle,
-      ),
-    );
-  }
-}
-
-class _SmallBadge extends StatelessWidget {
-  final IconData icon;
-  final String label;
-
-  /// Overrides the icon/label colour (set when the badge sits on a cover).
-  final Color? foreground;
-
-  /// Over a cover the near-transparent black pill disappears, so a light
-  /// scrim is used instead.
-  final bool onCover;
-  const _SmallBadge({
-    required this.icon,
-    required this.label,
-    this.foreground,
-    this.onCover = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final color = foreground ?? context.cs.onSurfaceVariant;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: onCover
-            ? Colors.black.withValues(alpha: 0.35)
-            : Colors.black.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 12, color: color),
-          const SizedBox(width: 4),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.w700,
-              color: color,
-            ),
-          ),
-        ],
       ),
     );
   }
