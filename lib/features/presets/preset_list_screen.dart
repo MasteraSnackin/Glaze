@@ -371,19 +371,14 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
           sliver: SliverToBoxAdapter(
             child: KeyedSubtree(
               key: _headerKey,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (folderId == null)
-                    PresetFoldersSection(
+              child: folderId == null
+                  ? PresetFoldersSection(
                       onOpenFolder: (id) {
                         ref.read(presetSelectionProvider.notifier).clear();
                         setState(() => _currentFolderId = id);
                       },
-                    ),
-                  if (manual && items.isNotEmpty) const _DragHintChip(),
-                ],
-              ),
+                    )
+                  : const SizedBox.shrink(),
             ),
           ),
         ),
@@ -603,10 +598,15 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
           ),
       ],
       onSelect: (v) {
-        // Leaving multi-select on while switching into the drag-ordered mode
-        // would strand the selection bar (long press no longer selects there).
         if (v == PresetSortMode.manual) {
+          // Leaving multi-select on while switching into the drag-ordered mode
+          // would strand the selection bar (a long press drags there instead).
           ref.read(presetSelectionProvider.notifier).clear();
+          // Picking the mode is the only moment the drag gesture needs
+          // explaining, so it is a toast rather than a permanent chip.
+          if (mounted && current != PresetSortMode.manual) {
+            GlazeToast.show(this.context, 'preset_drag_hint'.tr());
+          }
         }
         unawaited(
           ref.read(presetSortProvider.notifier).setMode(v as PresetSortMode),
@@ -1140,54 +1140,6 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
           onTap: () => Navigator.of(context, rootNavigator: true).pop(),
         ),
       ],
-    );
-  }
-}
-
-/// Chip shown above the rows while the list is manually ordered, telling the
-/// user that a row has to be held before it can be dragged.
-class _DragHintChip extends StatelessWidget {
-  const _DragHintChip();
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Center(
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(
-            color: context.cs.primary.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: context.cs.primary.withValues(alpha: 0.24),
-            ),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                Icons.drag_indicator_rounded,
-                size: 16,
-                color: context.cs.primary,
-              ),
-              const SizedBox(width: 6),
-              Flexible(
-                child: Text(
-                  'preset_drag_hint'.tr(),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: context.cs.primary,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
     );
   }
 }
