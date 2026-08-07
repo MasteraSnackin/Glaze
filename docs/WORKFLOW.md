@@ -34,7 +34,7 @@ git checkout -b feat/xxx
 git push -u origin feat/xxx
 ```
 
-Open the PR against `hydall/Glaze:nightly`, not a fork's branch. Use the **GitHub MCP tools** (`mcp__plugin_github_github__create_pull_request`) or the GitHub web UI. Do **not** use the `gh` CLI — GitHub operations go through GitHub MCP (project + global convention).
+Open the PR against `hydall/Glaze:nightly`, not a fork's branch. Use whatever is at hand: the `gh` CLI (`gh pr create --base nightly`), the GitHub MCP tools when they are connected, or the web UI.
 
 ## PR title and body
 
