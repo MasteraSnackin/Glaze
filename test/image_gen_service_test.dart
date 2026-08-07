@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/features/image_gen/services/image_gen_service.dart';
+import 'package:glaze_flutter/features/image_gen/services/image_prompt_builder.dart';
 import 'package:glaze_flutter/features/image_gen/services/image_tag_markup.dart';
 import 'package:glaze_flutter/features/image_gen/image_gen_models.dart';
 import 'package:glaze_flutter/core/services/image_storage_service.dart';
@@ -417,7 +418,7 @@ void main() {
     });
 
     test(
-      'enabled check: processMessageImages returns text unchanged when disabled',
+      'enabled check: processMessageImages settles HTML tags when disabled',
       () async {
         const html =
             """<img data-iig-instruction='{"prompt":"test"}' src="[IMG:GEN]">""";
@@ -428,7 +429,9 @@ void main() {
           llmApiKey: '',
           llmModel: '',
         );
-        expect(result, html);
+        expect(result, contains('[IMG:ERROR:'));
+        expect(result, contains('Image generation disabled'));
+        expect(result, isNot(contains('data-iig-instruction')));
       },
     );
 

@@ -1063,13 +1063,36 @@ feature-local adapters to `SyncService`.
 ## 8. Image Generation
 
 ### Files
-- `image_gen_service.dart` — orchestrates: dispatches to provider adapters, saves images
+- `image_gen_service.dart` — orchestrates: builds the prompt, collects references, saves images
+- `image_gen_dispatcher.dart` — routes a prepared request to the provider adapter of the active API type
+- `image_prompt_builder.dart` — `[STYLE: …]` block, reference descriptions, reference instruction
+- `reference_matcher.dart` — alias / word-boundary matching of the reference library against a prompt
+- `image_reference_collector.dart` — avatars + matched references + context images, clipped per model
 - `image_tag_markup.dart` — pure `[IMG:GEN]`/`[IMG:RESULT]`/`[IMG:ERROR]` tag text transforms (extracted from ImageGenService)
 - `image_gen_provider.dart` — manages settings + generation state
 - `image_gen_models.dart` — Freezed data models for image generation
+- `image_gen_constants.dart` — per-provider model / ratio / resolution tables (re-exported by the models file)
+- `image_gen_capabilities.dart` — model classification: reference limits, allowed ratios and sizes, quality spelling
+- `image_gen_settings_codec.dart` — settings JSON + migration off the per-provider reference lists
+- `image_style_io.dart` — style-library JSON export / import
 - `image_gen_http.dart` — HTTP client for image generation APIs
-- Provider adapters: `routmy_image_provider.dart`, `openai_image_provider.dart`, `gemini_image_provider.dart`, `naistera_image_provider.dart`
+- Provider adapters: `routmy_image_provider.dart`, `openai_image_provider.dart` (also serves Electron Hub),
+  `gemini_image_provider.dart`, `naistera_image_provider.dart`, `openrouter_image_provider.dart`,
+  `a1111_image_provider.dart`
 - UI: `widgets/image_gen_sheet.dart`, `widgets/image_content_renderer.dart`
+
+### Reference handling
+
+One reference library (`ImageGenSettings.references`) is shared by every
+provider. Per request the collector takes the character avatar, the persona
+avatar, the entries whose aliases match the prompt (or that are set to
+`always`), then the recent generated images used as context — and clips the
+result to what the active model accepts (`providerMaxReferences`). Providers
+that cannot take references at all (AUTOMATIC1111, `dall-e-3`, Naistera
+`novelai` / `grok-pro`) report 0 and the reference UI is hidden.
+
+Protocol and capability tables are ported from
+[sillyimages](https://github.com/0xl0cal/sillyimages).
 
 ---
 

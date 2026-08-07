@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 
 import 'image_gen_http.dart';
+import 'image_prompt_builder.dart';
 
 class GeminiImageProvider {
   final ImageGenHttp _http = ImageGenHttp();
@@ -13,15 +14,20 @@ class GeminiImageProvider {
     required String model,
     required String prompt,
     required String aspectRatio,
-    required String imageSize,
+    required String? imageSize,
     List<Map<String, String>>? referenceImages,
     CancelToken? cancelToken,
   }) async {
     final url = _generationUrl(endpoint, model);
     final parts = <Map<String, dynamic>>[];
+    var index = 0;
     for (final reference in referenceImages ?? const <Map<String, String>>[]) {
       final image = reference['image'];
       if (image == null || image.isEmpty) continue;
+      index++;
+      // `IMAGE_1: red-haired mage` tells the model who the next picture shows.
+      final label = geminiImageLabel(index, reference['description']);
+      if (label.isNotEmpty) parts.add({'text': label});
       parts.add({
         'inlineData': {
           'mimeType': reference['mime'] ?? _mimeFromImage(image),
@@ -40,7 +46,8 @@ class GeminiImageProvider {
         ],
         'generationConfig': {
           'responseModalities': ['TEXT', 'IMAGE'],
-          'imageConfig': {'aspectRatio': aspectRatio, 'imageSize': imageSize},
+          // Gemini 2.5 Flash Image rejects imageSize — the caller passes null.
+          'imageConfig': {'aspectRatio': aspectRatio, 'imageSize': ?imageSize},
         },
       },
       cancelToken: cancelToken,

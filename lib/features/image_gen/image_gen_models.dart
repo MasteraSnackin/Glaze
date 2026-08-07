@@ -1,18 +1,112 @@
 import 'package:freezed_annotation/freezed_annotation.dart';
 
+import 'image_gen_constants.dart';
+
+export 'image_gen_constants.dart';
+
 part 'image_gen_models.freezed.dart';
 
-enum ImageGenApiType { openai, gemini, naistera, routmy, ruRoutmy }
+enum ImageGenApiType {
+  openai,
+  gemini,
+  naistera,
+  routmy,
+  ruRoutmy,
+  openrouter,
+  electronhub,
+  a1111,
+}
 
-const routmyMaxInjectedReferenceImages = 10;
+extension ImageGenApiTypeLabel on ImageGenApiType {
+  /// Provider name shown in the settings sheet.
+  String get label => switch (this) {
+    ImageGenApiType.openai => 'OpenAI',
+    ImageGenApiType.gemini => 'Gemini',
+    ImageGenApiType.naistera => 'Naistera',
+    ImageGenApiType.routmy => 'rout.my',
+    ImageGenApiType.ruRoutmy => 'RU-rout.my',
+    ImageGenApiType.openrouter => 'OpenRouter',
+    ImageGenApiType.electronhub => 'Electron Hub',
+    ImageGenApiType.a1111 => 'AUTOMATIC1111 / Forge',
+  };
+}
 
+/// One entry of the shared reference library: an image plus the trigger names
+/// that pull it into a prompt.
+///
+/// [name] is a comma-separated alias list. [description] is sent to the
+/// provider next to the image when `sendRefDescriptions` is on, so the model
+/// knows *who* the picture shows.
 @freezed
 abstract class ReferenceImage with _$ReferenceImage {
   const factory ReferenceImage({
     required String name,
     required String imageData,
     @Default('match') String matchMode,
+    @Default('') String description,
+    @Default(true) bool enabled,
   }) = _ReferenceImage;
+}
+
+/// A named prompt style. The active style replaces whatever `style` the model
+/// wrote into the image tag; with no active style the tag's own style wins.
+@freezed
+abstract class ImageStyle with _$ImageStyle {
+  const factory ImageStyle({
+    required String id,
+    required String name,
+    @Default('') String value,
+  }) = _ImageStyle;
+}
+
+@freezed
+abstract class OpenRouterImageSettings with _$OpenRouterImageSettings {
+  const factory OpenRouterImageSettings({
+    @Default('') String apiKey,
+    @Default('') String endpoint,
+    @Default('google/gemini-2.5-flash-image') String model,
+    @Default('1:1') String aspectRatio,
+    @Default('1K') String imageSize,
+  }) = _OpenRouterImageSettings;
+}
+
+@freezed
+abstract class ElectronHubImageSettings with _$ElectronHubImageSettings {
+  const factory ElectronHubImageSettings({
+    @Default('') String apiKey,
+    @Default('') String endpoint,
+    @Default('gpt-image-1') String model,
+    @Default('1024x1024') String size,
+    @Default('standard') String quality,
+  }) = _ElectronHubImageSettings;
+}
+
+/// AUTOMATIC1111 / Forge / reForge `txt2img` parameters.
+@freezed
+abstract class A1111ImageSettings with _$A1111ImageSettings {
+  const factory A1111ImageSettings({
+    @Default('') String endpoint,
+    @Default('') String apiKey,
+    @Default('') String model,
+    @Default(512) int width,
+    @Default(512) int height,
+    @Default(20) int steps,
+    @Default(7.0) double cfgScale,
+    @Default('Euler a') String sampler,
+    @Default('Automatic') String scheduler,
+    @Default(-1) int seed,
+    @Default(1) int clipSkip,
+    @Default('') String promptPrefix,
+    @Default('') String negativePrompt,
+    @Default('') String vae,
+    @Default(false) bool restoreFaces,
+    @Default(false) bool enableHr,
+    @Default('') String hrUpscaler,
+    @Default(2.0) double hrScale,
+    @Default(0.7) double denoisingStrength,
+    @Default(0) int hrSecondPassSteps,
+    @Default(false) bool adetailerFace,
+  }) = _A1111ImageSettings;
 }
 
 @freezed
@@ -31,106 +125,50 @@ abstract class ImageGenSettings with _$ImageGenSettings {
     @Default('') String naisteraApiKey,
     @Default('grok') String naisteraModel,
     @Default('1:1') String naisteraAspectRatio,
-    @Default(false) bool naisteraSendCharAvatar,
-    @Default(false) bool naisteraSendUserAvatar,
     @Default('') String routmyApiKey,
     @Default('google/gemini-3.1-flash-image-preview') String routmyModel,
     @Default('1:1') String routmyAspectRatio,
     @Default('1K') String routmyImageSize,
     @Default('standard') String routmyQuality,
-    @Default(false) bool routmySendCharAvatar,
-    @Default(false) bool routmySendUserAvatar,
-    @Default([]) List<ReferenceImage> additionalReferences,
-    @Default([]) List<ReferenceImage> routmyAdditionalRefs,
-    @Default(false) bool imageContextEnabled,
-    @Default(1) int imageContextCount,
     @Default('') String ruRoutmyApiKey,
     @Default('google/gemini-3.1-flash-image-preview') String ruRoutmyModel,
     @Default('1:1') String ruRoutmyAspectRatio,
     @Default('1K') String ruRoutmyImageSize,
     @Default('standard') String ruRoutmyQuality,
-    @Default(false) bool ruRoutmySendCharAvatar,
-    @Default(false) bool ruRoutmySendUserAvatar,
+    @Default(OpenRouterImageSettings()) OpenRouterImageSettings openrouter,
+    @Default(ElectronHubImageSettings()) ElectronHubImageSettings electronhub,
+    @Default(A1111ImageSettings()) A1111ImageSettings a1111,
+    // Reference handling — shared by every provider that accepts references.
+    @Default(false) bool sendCharAvatar,
+    @Default(false) bool sendUserAvatar,
+    @Default([]) List<ReferenceImage> references,
+    @Default(true) bool sendRefDescriptions,
+    @Default(true) bool refInstructionEnabled,
+    @Default('') String refInstruction,
+    @Default(false) bool imageContextEnabled,
+    @Default(1) int imageContextCount,
+    // Style library. An empty [activeStyleId] means "no style" — the style
+    // written by the model into the image tag is used as-is.
+    @Default([]) List<ImageStyle> styles,
+    @Default('') String activeStyleId,
   }) = _ImageGenSettings;
-}
 
-class RoutMyConstants {
-  static const String baseUrl = 'https://api.rout.my';
+  const ImageGenSettings._();
 
-  static const models = [
-    ('google/gemini-3.1-flash-image-preview', 'Gemini 3.1 Flash Image'),
-    ('google/gemini-3.1-flash-lite-image', 'Gemini 3.1 Flash Lite Image'),
-    ('google/gemini-3-pro-image', 'Gemini 3 Pro Image'),
-    ('google/gemini-omni-flash-preview', 'Gemini Omni Flash'),
-    ('openai/gpt-image-1.5', 'GPT Image 1.5'),
-    ('openai/gpt-image-2', 'GPT Image 2'),
-    ('meta/muse-spark-1.1', 'Muse Spark 1.1'),
-    ('bytedance/seedream-5.0-pro', 'Seedream 5.0 Pro'),
-  ];
+  /// Effective critical instruction sent with reference images, or an empty
+  /// string when the user switched it off.
+  String get effectiveRefInstruction {
+    if (!refInstructionEnabled) return '';
+    final raw = refInstruction.trim();
+    return raw.isEmpty ? defaultReferenceInstruction : raw;
+  }
 
-  // Models that generate images via /v1/chat/completions with modalities:[image,text].
-  // openai/gpt-image-* are NOT here — rout.my rejects them on chat completions
-  // ("not a language model"). They go through /v1/images/edits (with refs) or
-  // /v1/images/generations (without refs).
-  static const chatImageModels = {
-    'google/gemini-3.1-flash-image-preview',
-    'google/gemini-3.1-flash-lite-image',
-    'google/gemini-3-pro-image',
-    'google/gemini-omni-flash-preview',
-  };
-
-  static const aspectRatios = [
-    '1:1',
-    '2:3',
-    '3:2',
-    '3:4',
-    '4:3',
-    '4:5',
-    '5:4',
-    '9:16',
-    '16:9',
-    '21:9',
-  ];
-
-  static const imageSizes = ['1K', '2K', '4K'];
-  static const seedreamImageSizes = ['1K', '2K'];
-}
-
-class RuRoutMyConstants {
-  static const String baseUrl = 'https://ru-api.rout.my';
-
-  static const models = RoutMyConstants.models;
-  static const aspectRatios = RoutMyConstants.aspectRatios;
-  static const imageSizes = RoutMyConstants.imageSizes;
-}
-
-class NaisteraConstants {
-  static const models = [
-    ('grok', 'Grok'),
-    ('grok-pro', 'Grok Pro'),
-    ('nano banana', 'Nano Banana'),
-    ('novelai', 'NovelAI'),
-  ];
-
-  static const aspectRatios = ['1:1', '16:9', '9:16', '3:2', '2:3'];
-
-  static const noRefModels = {'grok-pro', 'novelai'};
-}
-
-class OpenAIConstants {
-  static const sizes = ['1024x1024', '1792x1024', '1024x1792', '512x512'];
-  static const qualities = ['standard', 'hd'];
-}
-
-class GeminiConstants {
-  static const aspectRatios = [
-    '1:1',
-    '9:16',
-    '16:9',
-    '3:4',
-    '4:3',
-    '2:3',
-    '3:2',
-  ];
-  static const imageSizes = ['1K', '2K', '4K'];
+  /// Active style, or null when "no style" is selected.
+  ImageStyle? get activeStyle {
+    if (activeStyleId.isEmpty) return null;
+    for (final style in styles) {
+      if (style.id == activeStyleId) return style;
+    }
+    return null;
+  }
 }
