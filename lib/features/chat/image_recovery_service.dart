@@ -198,9 +198,11 @@ class ImageRecoveryService {
     return text;
   }
 
-  static String resetImgTagsToGen(String text) {
-    var result = text;
-    result = result.replaceAllMapped(ImgGenPatterns.imgErrorRegex, (m) {
+  /// Turns only the failed blocks back into pending tags, leaving the images
+  /// that did arrive in place. This is what the error card's regenerate button
+  /// runs: retrying one block must not throw away its finished siblings.
+  static String resetImgErrorTagsToGen(String text) {
+    return text.replaceAllMapped(ImgGenPatterns.imgErrorRegex, (m) {
       final data = m.group(1) ?? '';
       String instruction = '';
       try {
@@ -212,6 +214,10 @@ class ImageRecoveryService {
       }
       return '[IMG:GEN]';
     });
+  }
+
+  static String resetImgTagsToGen(String text) {
+    var result = resetImgErrorTagsToGen(text);
     result = result.replaceAllMapped(ImgGenPatterns.imgResultRegex, (m) {
       final raw = m.group(1) ?? '';
       final pipeIdx = raw.indexOf('|');
@@ -324,7 +330,26 @@ class ImageRecoveryService {
     }
   }
 
-  Future<void> retryImageGenerationForMessage(String messageId) async {
+  /// Regenerates the image blocks of [messageId].
+  ///
+  /// [blockIndex] narrows the work to a single image — the block the user
+  /// tapped — leaving every other image of the message alone. Without it,
+  /// [failedOnly] still restricts the reset to the blocks that failed, and
+  /// with neither the whole message is generated again.
+  Future<void> retryImageGenerationForMessage(
+    String messageId, {
+    bool failedOnly = false,
+    int? blockIndex,
+  }) async {
+    String reset(String content) {
+      if (blockIndex != null) {
+        return ImageTagMarkup.resetImageBlockAt(content, blockIndex);
+      }
+      return failedOnly
+          ? resetImgErrorTagsToGen(content)
+          : resetImgTagsToGen(content);
+    }
+
     var current = _getState().value;
     if (current == null || current.session == null || current.isGenerating) {
       return;
@@ -354,7 +379,7 @@ class ImageRecoveryService {
     final msg = current.messages[messageIndex];
     if (msg.role != 'assistant') return;
 
-    var resetContent = resetImgTagsToGen(msg.content);
+    final resetContent = reset(msg.content);
     if (resetContent == msg.content) return;
 
     final resetSession = await _ref
@@ -365,7 +390,7 @@ class ImageRecoveryService {
           updatedAt: currentTimestampSeconds(),
           mutate: (message) {
             if (message.role != 'assistant') return null;
-            final content = resetImgTagsToGen(message.content);
+            final content = reset(message.content);
             if (content == message.content) return null;
             return ImageGenProcessor.appendImageRegenerationSwipe(
               message,
@@ -427,7 +452,18 @@ class ImageRecoveryService {
     }
   }
 
-  Future<void> findImageOnDisk(String messageId, String instruction) async {
+  /// Attaches an orphaned file from the generated folder to a block that has
+  /// no image. [blockIndex] targets the block the user tapped; without it the
+  /// first block still waiting for an image is used.
+  Future<void> findImageOnDisk(
+    String messageId,
+    String instruction, {
+    int? blockIndex,
+  }) async {
+    String attach(String content, String path) => blockIndex != null
+        ? ImageTagMarkup.replaceImageBlockWithResult(content, blockIndex, path)
+        : replaceFirstImgErrorOrGen(content, path);
+
     final current = _getState().value;
     if (current == null || current.session == null) return;
 
@@ -503,9 +539,7 @@ class ImageRecoveryService {
 
     final foundPath = bestMatch.path;
 
-    var updatedContent = msg.content;
-    updatedContent = replaceFirstImgErrorOrGen(updatedContent, foundPath);
-
+    final updatedContent = attach(msg.content, foundPath);
     if (updatedContent == msg.content) return;
 
     final sessionId = current.session!.id;
@@ -516,10 +550,7 @@ class ImageRecoveryService {
           messageId: messageId,
           updatedAt: currentTimestampSeconds(),
           mutate: (message) {
-            final content = replaceFirstImgErrorOrGen(
-              message.content,
-              foundPath,
-            );
+            final content = attach(message.content, foundPath);
             if (content == message.content) return null;
             return ImageGenProcessor.replaceImageContentAt(
               message,

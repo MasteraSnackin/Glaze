@@ -288,11 +288,23 @@ class ChatBridgeController {
   void Function(String id)? onToggleImageHidden;
   void Function(List<String> ids)? onSelectionChange;
   void Function(String id)? onInjectClick;
-  void Function(String instruction, String messageId)? onImgRetry;
-  void Function(String instruction, String messageId)? onImgEnableRetry;
-  void Function(String instruction, String messageId)? onImgFind;
-  void Function(String instruction, String messageId)? onImgRegen;
-  void Function(String src, String instruction, String messageId)? onImgOptions;
+  // `blockIndex` addresses one image block of the message; null when the tap
+  // did not come from an image gen block.
+  void Function(String instruction, String messageId, int? blockIndex)?
+  onImgRetry;
+  void Function(String instruction, String messageId, int? blockIndex)?
+  onImgEnableRetry;
+  void Function(String instruction, String messageId, int? blockIndex)?
+  onImgFind;
+  void Function(String instruction, String messageId, int? blockIndex)?
+  onImgRegen;
+  void Function(
+    String src,
+    String instruction,
+    String messageId,
+    int? blockIndex,
+  )?
+  onImgOptions;
   void Function()? onImgCancel;
   void Function()? onStop;
   void Function(String messageId)? onExtBlocksRunAll;
@@ -459,6 +471,7 @@ class ChatBridgeController {
             data['src'] as String? ?? '',
             data['instruction'] as String? ?? '',
             data['messageId'] as String? ?? '',
+            _blockIndex(data['imgIndex']),
           );
         case 'onPanelEvent':
           final panelId = data['panelId'] as String? ?? '';
@@ -518,22 +531,30 @@ class ChatBridgeController {
     }
   }
 
+  /// Reads the optional image-block position sent alongside an image action.
+  /// The webview sends -1 for elements that are not image gen blocks.
+  static int? _blockIndex(dynamic raw) {
+    final value = raw is num ? raw.toInt() : int.tryParse('$raw');
+    return value != null && value >= 0 ? value : null;
+  }
+
   void _dispatchImageAction(String name, HandlerSpec spec, List<dynamic> args) {
     if (args.length < 2) return;
     final instr = args[0] as String? ?? '';
     final msgId = args[1] as String? ?? '';
+    final blockIndex = args.length > 2 ? _blockIndex(args[2]) : null;
     if (spec.debugPrint != null) {
       debugPrint(spec.debugPrint!.replaceAll('\$args', args.toString()));
     }
     switch (name) {
       case 'onImgRetry':
-        onImgRetry?.call(instr, msgId);
+        onImgRetry?.call(instr, msgId, blockIndex);
       case 'onImgEnableRetry':
-        onImgEnableRetry?.call(instr, msgId);
+        onImgEnableRetry?.call(instr, msgId, blockIndex);
       case 'onImgFind':
-        onImgFind?.call(instr, msgId);
+        onImgFind?.call(instr, msgId, blockIndex);
       case 'onImgRegen':
-        onImgRegen?.call(instr, msgId);
+        onImgRegen?.call(instr, msgId, blockIndex);
       case 'onExtBlockStop':
         onExtBlockStop?.call(instr, msgId);
       case 'onExtBlockRegen':

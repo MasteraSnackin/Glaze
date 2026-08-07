@@ -17,9 +17,18 @@ typedef GuidedSwipeCallback = void Function(String id, String guidanceText);
 typedef EditSaveCallback = void Function(String id, String text);
 typedef EditCancelCallback = void Function(String id);
 typedef EditFocusCallback = void Function(String id, bool focused);
-typedef ImgActionCallback = void Function(String instruction, String messageId);
+/// [blockIndex] is the position of the tapped image inside its message, or
+/// null when the element carries no image-gen block (markdown images) — the
+/// handler then falls back to acting on the whole message.
+typedef ImgActionCallback =
+    void Function(String instruction, String messageId, int? blockIndex);
 typedef ImgOptionsCallback =
-    void Function(String src, String instruction, String messageId);
+    void Function(
+      String src,
+      String instruction,
+      String messageId,
+      int? blockIndex,
+    );
 typedef ImgVoidCallback = void Function();
 typedef HeaderScrollCallback = void Function(bool hidden);
 typedef ScrollToBottomVisibilityCallback = void Function(bool visible);

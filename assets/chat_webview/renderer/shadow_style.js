@@ -217,6 +217,27 @@ export const SHADOW_STYLE = `
     cursor: pointer;
   }
   .glaze-message .imggen-error-retry:active { background: rgba(255,59,48,0.2); }
+  /* Same actions menu as a finished image, on the block that has no image. */
+  .glaze-message .imggen-error-options {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border-radius: 12px;
+    color: rgba(255,59,48,0.95);
+    background: rgba(255,59,48,0.1);
+    border: 1px solid rgba(255,59,48,0.3);
+    cursor: pointer;
+  }
+  .glaze-message .imggen-error-options:active { background: rgba(255,59,48,0.2); }
+  .glaze-message .imggen-error-options svg {
+    width: 14px;
+    height: 14px;
+    fill: rgba(255,59,48,0.95);
+    pointer-events: none;
+  }
 
   /* ── Imagen: result ── */
   .glaze-message .imggen-result-wrapper {

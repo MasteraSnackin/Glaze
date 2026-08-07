@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
 import 'package:glaze_flutter/features/chat/chat_state.dart';
+import 'package:glaze_flutter/features/chat/image_recovery_service.dart';
 import 'package:glaze_flutter/features/chat/services/image_gen_processor.dart';
 
 void main() {
@@ -177,6 +178,28 @@ void main() {
         ),
       );
       expect(stored.content, '[IMG:RESULT:/new.png]');
+    });
+  });
+
+  group('regenerating a failed block', () {
+    const text =
+        '[IMG:RESULT:/kept.png|{"prompt":"kept"}] '
+        '[IMG:ERROR:{"error":"HTTP 502","instruction":"{\\"prompt\\":\\"lost\\"}"}]';
+
+    test('resets only the failed block and keeps the finished image', () {
+      final result = ImageRecoveryService.resetImgErrorTagsToGen(text);
+
+      expect(result, contains('[IMG:RESULT:/kept.png|{"prompt":"kept"}]'));
+      expect(result, contains('[IMG:GEN:{"prompt":"lost"}]'));
+      expect(result, isNot(contains('[IMG:ERROR:')));
+    });
+
+    test('a full retry still resets every block', () {
+      final result = ImageRecoveryService.resetImgTagsToGen(text);
+
+      expect(result, isNot(contains('[IMG:RESULT:')));
+      expect(result, contains('[IMG:GEN:{"prompt":"kept"}]'));
+      expect(result, contains('[IMG:GEN:{"prompt":"lost"}]'));
     });
   });
 }

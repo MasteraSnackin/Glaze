@@ -113,6 +113,10 @@ abstract class A1111ImageSettings with _$A1111ImageSettings {
 abstract class ImageGenSettings with _$ImageGenSettings {
   const factory ImageGenSettings({
     @Default(false) bool enabled,
+    /// Fire every image tag of a message at the same time. Off by default:
+    /// the images of one message are generated one at a time, each finished
+    /// from start to end before the next one starts.
+    @Default(false) bool concurrentGeneration,
     @Default(ImageGenApiType.openai) ImageGenApiType apiType,
     @Default(true) bool useSameEndpoint,
     @Default('') String customEndpoint,

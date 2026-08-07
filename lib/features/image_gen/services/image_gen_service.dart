@@ -50,76 +50,123 @@ class ImageGenService {
     if (instructions.isEmpty) return text;
 
     String currentText = text;
+    // A tag is "resolved" once it carries a result or an error token, which
+    // takes it out of the pending set the next replacement indexes into.
+    final resolved = List<bool>.filled(instructions.length, false);
 
-    for (int i = 0; i < instructions.length; i++) {
+    // Writes an outcome into the tag its instruction came from. Only that one
+    // tag is rewritten: a failure leaves the block in place as a retryable
+    // error card instead of dropping it, and the tags of the still-running
+    // images stay pending.
+    void applyOutcome(int index, _ImageOutcome outcome) {
+      var pendingIndex = 0;
+      for (var i = 0; i < index; i++) {
+        if (!resolved[i]) pendingIndex++;
+      }
+      final updated = outcome.error == null
+          ? ImageTagMarkup.replaceTagWithResult(
+              currentText,
+              pendingIndex,
+              outcome.imagePath!,
+            )
+          : ImageTagMarkup.replaceTagWithError(
+              currentText,
+              pendingIndex,
+              outcome.error!,
+            );
+      resolved[index] = true;
+      if (updated == currentText) return;
+      currentText = updated;
+      onUpdate?.call(currentText);
+    }
+
+    Future<_ImageOutcome> run(Map<String, dynamic> instruction) => _runOne(
+      instruction: instruction,
+      settings: settings,
+      llmEndpoint: llmEndpoint,
+      llmApiKey: llmApiKey,
+      llmModel: llmModel,
+      character: character,
+      persona: persona,
+      recentImageContexts: recentImageContexts,
+      cancelToken: cancelToken,
+    );
+
+    if (settings.concurrentGeneration) {
+      // Every request is already in flight; awaiting them in order only fixes
+      // the order the finished images are written back in.
+      final inFlight = instructions.map(run).toList();
+      for (var i = 0; i < inFlight.length; i++) {
+        final outcome = await inFlight[i];
+        if (outcome.cancelled) continue;
+        applyOutcome(i, outcome);
+        if (outcome.error != null) onError?.call(outcome.error!);
+      }
+      return currentText;
+    }
+
+    for (var i = 0; i < instructions.length; i++) {
       if (cancelToken?.isCancelled == true) break;
-
-      final instruction = instructions[i];
-      final rawPrompt = instruction['prompt'] as String? ?? '';
-
-      if (rawPrompt.isEmpty) {
-        currentText = ImageTagMarkup.replaceTagWithError(
-          currentText,
-          0,
-          'Image prompt is empty',
-        );
-        onUpdate?.call(currentText);
-        onError?.call('Image prompt is empty');
-        continue;
-      }
-
-      final prompt = rawPrompt.replaceFirst(RegExp(r'^SCENE_PROMPT:\s*'), '');
-
-      try {
-        final imageBytes = await generateImage(
-          settings: settings,
-          prompt: prompt,
-          tagStyle: instruction['style'] as String?,
-          llmEndpoint: llmEndpoint,
-          llmApiKey: llmApiKey,
-          llmModel: llmModel,
-          character: character,
-          persona: persona,
-          recentImageContexts: recentImageContexts,
-          instructionAspectRatio: instruction['aspect_ratio'] as String?,
-          instructionImageSize: instruction['image_size'] as String?,
-          cancelToken: cancelToken,
-        );
-        if (cancelToken?.isCancelled == true) break;
-
-        final filename = 'imggen_${DateTime.now().microsecondsSinceEpoch}.png';
-        final savedPath = await _saveGeneratedImage(filename, imageBytes);
-        if (cancelToken?.isCancelled == true) break;
-
-        currentText = ImageTagMarkup.replaceTagWithResult(
-          currentText,
-          0,
-          savedPath,
-        );
-        onUpdate?.call(currentText);
-      } on DioException catch (e) {
-        if (CancelToken.isCancel(e)) break;
-        final errorMsg = _formatError(e);
-        currentText = ImageTagMarkup.replaceTagWithError(
-          currentText,
-          0,
-          errorMsg,
-        );
-        onUpdate?.call(currentText);
-        onError?.call(errorMsg);
-      } catch (e) {
-        final errorMsg = _formatErrorString(e.toString());
-        currentText = ImageTagMarkup.replaceTagWithError(
-          currentText,
-          0,
-          errorMsg,
-        );
-        onUpdate?.call(currentText);
-        onError?.call(errorMsg);
-      }
+      final outcome = await run(instructions[i]);
+      if (outcome.cancelled) break;
+      applyOutcome(i, outcome);
+      if (outcome.error != null) onError?.call(outcome.error!);
     }
 
     return currentText;
+  }
+
+  /// Generates and persists the image for a single instruction.
+  ///
+  /// Never throws: every failure comes back as [_ImageOutcome.failure] so the
+  /// caller can turn it into an error card and keep going.
+  Future<_ImageOutcome> _runOne({
+    required Map<String, dynamic> instruction,
+    required ImageGenSettings settings,
+    required String llmEndpoint,
+    required String llmApiKey,
+    required String llmModel,
+    Character? character,
+    Persona? persona,
+    List<String>? recentImageContexts,
+    CancelToken? cancelToken,
+  }) async {
+    final rawPrompt = instruction['prompt'] as String? ?? '';
+    if (rawPrompt.isEmpty) {
+      return _ImageOutcome.failure('Image prompt is empty');
+    }
+
+    final prompt = rawPrompt.replaceFirst(RegExp(r'^SCENE_PROMPT:\s*'), '');
+
+    try {
+      final imageBytes = await generateImage(
+        settings: settings,
+        prompt: prompt,
+        tagStyle: instruction['style'] as String?,
+        llmEndpoint: llmEndpoint,
+        llmApiKey: llmApiKey,
+        llmModel: llmModel,
+        character: character,
+        persona: persona,
+        recentImageContexts: recentImageContexts,
+        instructionAspectRatio: instruction['aspect_ratio'] as String?,
+        instructionImageSize: instruction['image_size'] as String?,
+        cancelToken: cancelToken,
+      );
+      if (cancelToken?.isCancelled == true) return _ImageOutcome.cancelled();
+      if (imageBytes.isEmpty) {
+        return _ImageOutcome.failure('Provider returned no image data');
+      }
+
+      final savedPath = await _saveGeneratedImage(imageBytes);
+      if (cancelToken?.isCancelled == true) return _ImageOutcome.cancelled();
+      return _ImageOutcome.success(savedPath);
+    } on DioException catch (e) {
+      if (CancelToken.isCancel(e)) return _ImageOutcome.cancelled();
+      return _ImageOutcome.failure(_formatError(e));
+    } catch (e) {
+      return _ImageOutcome.failure(_formatErrorString(e.toString()));
+    }
   }
 
   /// Generates a single image for [prompt].
@@ -206,17 +253,35 @@ class ImageGenService {
     return msg;
   }
 
-  Future<String> _saveGeneratedImage(String filename, Uint8List bytes) async {
+  Future<String> _saveGeneratedImage(Uint8List bytes) async {
     final dir = Directory(p.join(_imageStorage.baseDir, 'generated'));
     if (!await dir.exists()) {
       await dir.create(recursive: true);
     }
     final extension = imageExtensionForBytes(bytes);
-    final path = p.join(
-      dir.path,
-      '${p.basenameWithoutExtension(filename)}.$extension',
-    );
+    // Concurrent generations can land inside the same microsecond, so the
+    // counter — not the clock alone — is what keeps the names unique.
+    final name = 'imggen_${DateTime.now().microsecondsSinceEpoch}_$_saveSeq';
+    _saveSeq++;
+    final path = p.join(dir.path, '$name.$extension');
     await File(path).writeAsBytes(bytes);
     return path;
   }
+
+  static int _saveSeq = 0;
+}
+
+/// Result of one image request: a saved file, a message for the error card, or
+/// a cancellation that leaves the tag pending for the caller to resolve.
+class _ImageOutcome {
+  const _ImageOutcome._({this.imagePath, this.error, this.cancelled = false});
+
+  factory _ImageOutcome.success(String imagePath) =>
+      _ImageOutcome._(imagePath: imagePath);
+  factory _ImageOutcome.failure(String error) => _ImageOutcome._(error: error);
+  factory _ImageOutcome.cancelled() => const _ImageOutcome._(cancelled: true);
+
+  final String? imagePath;
+  final String? error;
+  final bool cancelled;
 }

@@ -742,7 +742,9 @@ class InteractionDispatch {
     let instr = '';
     try { instr = decodeURIComponent(el.dataset.instruction || ''); }
     catch (_) { instr = el.dataset.instruction || ''; }
-    return { instr, messageId };
+    const raw = parseInt(el.dataset.imgIndex, 10);
+    const imgIndex = Number.isInteger(raw) && raw >= 0 ? raw : -1;
+    return { instr, messageId, imgIndex };
   }
 
   get _actionMap() {
@@ -801,20 +803,20 @@ class InteractionDispatch {
         }
       },
       'img-retry': (e, el) => {
-        const { instr, messageId } = this._extractImgInstruction(el, e.composedPath());
-        bridge._sendToFlutter('onImgRetry', [instr, messageId]);
+        const { instr, messageId, imgIndex } = this._extractImgInstruction(el, e.composedPath());
+        bridge._sendToFlutter('onImgRetry', [instr, messageId, imgIndex]);
       },
       'img-enable-retry': (e, el) => {
-        const { instr, messageId } = this._extractImgInstruction(el, e.composedPath());
-        bridge._sendToFlutter('onImgEnableRetry', [instr, messageId]);
+        const { instr, messageId, imgIndex } = this._extractImgInstruction(el, e.composedPath());
+        bridge._sendToFlutter('onImgEnableRetry', [instr, messageId, imgIndex]);
       },
       'img-find': (e, el) => {
-        const { instr, messageId } = this._extractImgInstruction(el, e.composedPath());
-        bridge._sendToFlutter('onImgFind', [instr, messageId]);
+        const { instr, messageId, imgIndex } = this._extractImgInstruction(el, e.composedPath());
+        bridge._sendToFlutter('onImgFind', [instr, messageId, imgIndex]);
       },
       'img-regen': (e, el) => {
-        const { instr, messageId } = this._extractImgInstruction(el, e.composedPath());
-        bridge._sendToFlutter('onImgRegen', [instr, messageId]);
+        const { instr, messageId, imgIndex } = this._extractImgInstruction(el, e.composedPath());
+        bridge._sendToFlutter('onImgRegen', [instr, messageId, imgIndex]);
       },
       'img-stop': (e, el) => bridge._sendToFlutter('onImgCancel', []),
       'image-click': (e, el) => {
