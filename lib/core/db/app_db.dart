@@ -1283,7 +1283,6 @@ class AppDatabase extends _$AppDatabase {
       }
       if (from < 66) {
         await purgeRetiredAgenticMicroMemory();
-        await _replaceLegacyWriteLoopPrompts();
       }
       if (from < 67) {
         // Studio preset is now a global singleton stored in SharedPreferences
@@ -2746,8 +2745,6 @@ class AppDatabase extends _$AppDatabase {
   }
 
   /// Historical no-op kept for migrations that already call it.
-  Future<void> _replaceLegacyWriteLoopPrompts() async {}
-
   /// Removes only the retired default write-loop seed from every stored preset.
   /// Matches by canonical id only — never by title, so a user-authored block
   /// with a similar name is never touched. Skips rows that have no matching

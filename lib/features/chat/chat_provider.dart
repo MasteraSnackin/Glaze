@@ -72,6 +72,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
 
   final String arg;
   bool _buildComplete = false;
+  bool _sendInFlight = false;
 
   /// Reflects the active session's generation state into
   /// [generatingSessionsProvider]. Called on every state transition; membership
@@ -333,6 +334,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     String? imageDataUrl,
   }) async {
     if (!ref.mounted) return;
+    if (_sendInFlight) return;
     if (ref.read(editingMessageIdProvider(arg)) != null) return;
     final current = state.value;
     if (current == null ||
@@ -342,148 +344,157 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       return;
     }
     if (_isMemoryDraftActive(current)) return;
-
-    final userMsg = ChatMessage(
-      id: generateId(),
-      role: 'user',
-      content: text,
-      timestamp: DateTime.now().millisecondsSinceEpoch,
-      tokens: estimateTokens(text),
-      imagePath: imageDataUrl,
-    );
-
-    final acceptedAssistant = current.messages.reversed
-        .where((message) => message.role == 'assistant')
-        .firstOrNull;
-    final expectedAcceptedVariation = acceptedAssistant == null
-        ? null
-        : LorebookUseGenerationIdentity(
-            sessionId: current.session!.id,
-            messageId: acceptedAssistant.id,
-            swipeId: acceptedAssistant.swipeId,
-            agentSwipeId: acceptedAssistant.agentSwipeId,
-          );
-
-    // Show the user bubble and the typing indicator on the same frame as the
-    // tap. Session persistence and the ledger commit add asynchronous round
-    // trips, so publishing state only after them made both appear a beat late
-    // on long chats. The writes below reconcile this optimistic session with
-    // the persisted one.
-    final optimisticSession = current.session!.copyWith(
-      messages: [...current.messages, userMsg],
-      draft: '',
-      updatedAt: currentTimestampSeconds(),
-    );
-    state = AsyncData(
-      current.copyWith(
-        session: optimisticSession,
-        isGenerating: true,
-        generationStartTime: DateTime.now(),
-      ),
-    );
-    await _yieldToFrame();
-    if (!ref.mounted) return;
-
-    final updatedSession = expectedAcceptedVariation == null
-        ? await ref
-              .read(chatRepoProvider)
-              .appendUserMessageAndClearDraft(
-                sessionId: current.session!.id,
-                message: userMsg,
-                updatedAt: currentTimestampSeconds(),
-              )
-        : await ref
-              .read(chatRepoProvider)
-              .appendUserMessageAndAcceptCurrentVariation(
-                sessionId: current.session!.id,
-                message: userMsg,
-                expectedPrecedingAssistant: expectedAcceptedVariation,
-                updatedAt: currentTimestampSeconds(),
-              );
-    if (!ref.mounted) return;
-    if (updatedSession == null) {
-      // The session row is gone — roll the optimistic append back.
-      state = AsyncData(current);
-      return;
-    }
-    // Commit the exact visible green/blue swipe, never whichever Ledger call
-    // happened to finish most recently.
-    final snapshotRepo = ref.read(trackerSnapshotRepoProvider);
-    final committedSnapshot = acceptedAssistant == null
-        ? null
-        : await snapshotRepo.getByAnchor(
-            sessionId: current.session!.id,
-            messageId: acceptedAssistant.id,
-            swipeId: acceptedAssistant.swipeId,
-            agentSwipeId: acceptedAssistant.agentSwipeId,
-          );
-    if (committedSnapshot != null) {
-      await snapshotRepo.commit(
-        sessionId: committedSnapshot.sessionId,
-        messageId: committedSnapshot.messageId,
-        swipeId: committedSnapshot.swipeId,
-        agentSwipeId: committedSnapshot.agentSwipeId,
-      );
-      await ref
-          .read(characterKnowledgeFactRepoProvider)
-          .activateAnchor(
-            sessionId: current.session!.id,
-            messageId: committedSnapshot.messageId,
-            swipeId: committedSnapshot.swipeId,
-            agentSwipeId: committedSnapshot.agentSwipeId,
-          );
-    }
-    if (!ref.mounted) return;
-    ChatSessionService.updateCache(updatedSession);
-    _invalidateHistory();
-    final afterWrite = state.value;
-    // Stop was pressed (or the session changed) while the writes were in
-    // flight — the user message is persisted, but this generation is off.
-    if (afterWrite == null ||
-        !afterWrite.isGenerating ||
-        afterWrite.session?.id != updatedSession.id) {
-      return;
-    }
-    state = AsyncData(afterWrite.copyWith(session: updatedSession));
-
-    // Dispatch `afterUser` extension blocks. This is fire-and-forget — the
-    // generation pipeline starts immediately, the post-gen service runs
-    // the chain in the background and persists its own InfoBlocks.
-    unawaited(_dispatchAfterUserBlocks(updatedSession));
+    _sendInFlight = true;
 
     try {
-      final charRepo = ref.read(characterRepoProvider);
-      final character = await charRepo.getById(arg);
-      if (!ref.mounted) return;
-      if (character != null) {
-        final talkativeness = character.extensions['talkativeness'];
-        if (talkativeness is num && talkativeness < 1.0) {
-          final roll = DateTime.now().microsecond % 100 / 100.0;
-          if (roll > talkativeness) {
-            _abortHandler.clearStreaming();
-            state = AsyncData(
-              current.copyWith(session: updatedSession, isGenerating: false),
+      final userMsg = ChatMessage(
+        id: generateId(),
+        role: 'user',
+        content: text,
+        timestamp: DateTime.now().millisecondsSinceEpoch,
+        tokens: estimateTokens(text),
+        imagePath: imageDataUrl,
+      );
+
+      final acceptedAssistant = current.messages.reversed
+          .where((message) => message.role == 'assistant')
+          .firstOrNull;
+      final expectedAcceptedVariation = acceptedAssistant == null
+          ? null
+          : LorebookUseGenerationIdentity(
+              sessionId: current.session!.id,
+              messageId: acceptedAssistant.id,
+              swipeId: acceptedAssistant.swipeId,
+              agentSwipeId: acceptedAssistant.agentSwipeId,
             );
-            return;
+
+      // Show the user bubble immediately, but do not publish the generation
+      // state (and therefore the assistant placeholder) until the user message
+      // has been durably appended. This preserves the visual and durable causal
+      // order even when a long chat takes time to encode and persist.
+      final optimisticSession = current.session!.copyWith(
+        messages: [...current.messages, userMsg],
+        draft: '',
+        updatedAt: currentTimestampSeconds(),
+      );
+      state = AsyncData(current.copyWith(session: optimisticSession));
+      await _yieldToFrame();
+      if (!ref.mounted) return;
+
+      final updatedSession = expectedAcceptedVariation == null
+          ? await ref
+                .read(chatRepoProvider)
+                .appendUserMessageAndClearDraft(
+                  sessionId: current.session!.id,
+                  message: userMsg,
+                  updatedAt: currentTimestampSeconds(),
+                )
+          : await ref
+                .read(chatRepoProvider)
+                .appendUserMessageAndAcceptCurrentVariation(
+                  sessionId: current.session!.id,
+                  message: userMsg,
+                  expectedPrecedingAssistant: expectedAcceptedVariation,
+                  updatedAt: currentTimestampSeconds(),
+                );
+      if (!ref.mounted) return;
+      if (updatedSession == null) {
+        // The session row is gone — roll the optimistic append back.
+        state = AsyncData(current);
+        return;
+      }
+      // Commit the exact visible green/blue swipe, never whichever Ledger call
+      // happened to finish most recently.
+      final snapshotRepo = ref.read(trackerSnapshotRepoProvider);
+      final committedSnapshot = acceptedAssistant == null
+          ? null
+          : await snapshotRepo.getByAnchor(
+              sessionId: current.session!.id,
+              messageId: acceptedAssistant.id,
+              swipeId: acceptedAssistant.swipeId,
+              agentSwipeId: acceptedAssistant.agentSwipeId,
+            );
+      if (committedSnapshot != null) {
+        await snapshotRepo.commit(
+          sessionId: committedSnapshot.sessionId,
+          messageId: committedSnapshot.messageId,
+          swipeId: committedSnapshot.swipeId,
+          agentSwipeId: committedSnapshot.agentSwipeId,
+        );
+        await ref
+            .read(characterKnowledgeFactRepoProvider)
+            .activateAnchor(
+              sessionId: current.session!.id,
+              messageId: committedSnapshot.messageId,
+              swipeId: committedSnapshot.swipeId,
+              agentSwipeId: committedSnapshot.agentSwipeId,
+            );
+      }
+      if (!ref.mounted) return;
+      ChatSessionService.updateCache(updatedSession);
+      _invalidateHistory();
+      final afterWrite = state.value;
+      // The session may have changed, or another operation (regenerate/continue)
+      // may have started generating while the durable append was in flight —
+      // bail out in either case.
+      if (afterWrite == null ||
+          afterWrite.isGenerating ||
+          afterWrite.session?.id != updatedSession.id) {
+        return;
+      }
+      state = AsyncData(
+        afterWrite.copyWith(
+          session: updatedSession,
+          isGenerating: true,
+          generationStartTime: DateTime.now(),
+        ),
+      );
+
+      // Dispatch `afterUser` extension blocks. This is fire-and-forget — the
+      // generation pipeline starts immediately, the post-gen service runs
+      // the chain in the background and persists its own InfoBlocks.
+      unawaited(_dispatchAfterUserBlocks(updatedSession));
+
+      try {
+        final charRepo = ref.read(characterRepoProvider);
+        final character = await charRepo.getById(arg);
+        if (!ref.mounted) return;
+        if (character != null) {
+          final talkativeness = character.extensions['talkativeness'];
+          if (talkativeness is num && talkativeness < 1.0) {
+            final roll = DateTime.now().microsecond % 100 / 100.0;
+            if (roll > talkativeness) {
+              _abortHandler.clearStreaming();
+              state = AsyncData(
+                current.copyWith(session: updatedSession, isGenerating: false),
+              );
+              return;
+            }
           }
         }
-      }
 
-      await _runGeneration(updatedSession, current, guidanceText: guidanceText);
-    } catch (e, st) {
-      debugPrint('[ChatNotifier] send setup failed: $e\n$st');
-      if (!ref.mounted) return;
-      final latest = state.value;
-      if (latest?.session?.id == updatedSession.id) {
-        state = AsyncData(
-          latest!.copyWith(
-            isGenerating: false,
-            isGeneratingImage: false,
-            isPostGenRunning: false,
-            error: e.toString(),
-          ),
+        await _runGeneration(
+          updatedSession,
+          current,
+          guidanceText: guidanceText,
         );
+      } catch (e, st) {
+        debugPrint('[ChatNotifier] send setup failed: $e\n$st');
+        if (!ref.mounted) return;
+        final latest = state.value;
+        if (latest?.session?.id == updatedSession.id) {
+          state = AsyncData(
+            latest!.copyWith(
+              isGenerating: false,
+              isGeneratingImage: false,
+              isPostGenRunning: false,
+              error: e.toString(),
+            ),
+          );
+        }
       }
+    } finally {
+      _sendInFlight = false;
     }
   }
 

@@ -8,14 +8,15 @@ Architecture: `docs/ARCHITECTURE.md`. Workflow (git, PRs, Trello): `docs/WORKFLO
 
 ## Commands
 
-Flutter SDK is at `Z:\GlazeProject\flutter`. The agent's shell may not have `flutter` on PATH. Try `flutter` first; if it fails with "not recognized", fall back to the full path.
+Flutter and Dart must be available on `PATH`. Alternatively, set
+`FLUTTER_ROOT` to the local Flutter SDK directory.
 
 ```powershell
 # Preferred — try PATH first:
 flutter analyze
 
-# Fallback if flutter is not on PATH:
-& "Z:\GlazeProject\flutter\bin\flutter.bat" <subcommand>
+# Optional PowerShell fallback when FLUTTER_ROOT is set:
+& "$env:FLUTTER_ROOT\bin\flutter.bat" <subcommand>
 ```
 
 Full examples:
@@ -28,12 +29,12 @@ flutter test test/bar_test.dart          # Run single test file
 flutter build windows                    # Production build
 dart run build_runner build              # Regenerate after editing freezed/drift models
 
-# Same commands via full path (fallback if flutter not on PATH):
-& "Z:\GlazeProject\flutter\bin\flutter.bat" analyze
-& "Z:\GlazeProject\flutter\bin\flutter.bat" test
-& "Z:\GlazeProject\flutter\bin\flutter.bat" test test/bar_test.dart
-& "Z:\GlazeProject\flutter\bin\flutter.bat" build windows
-& "Z:\GlazeProject\flutter\bin\dart.bat" run build_runner build
+# Same commands via FLUTTER_ROOT (fallback if Flutter is not on PATH):
+& "$env:FLUTTER_ROOT\bin\flutter.bat" analyze
+& "$env:FLUTTER_ROOT\bin\flutter.bat" test
+& "$env:FLUTTER_ROOT\bin\flutter.bat" test test/bar_test.dart
+& "$env:FLUTTER_ROOT\bin\flutter.bat" build windows
+& "$env:FLUTTER_ROOT\bin\dart.bat" run build_runner build
 ```
 
 For `flutter run` (dev server), see below — the agent cannot run it.
@@ -47,7 +48,7 @@ Only run one-shot, non-interactive commands:
 - `flutter test` (non-watch, one-shot)
 - `dart run build_runner build` when required
 
-(Fall back to the full `& "Z:\GlazeProject\flutter\bin\flutter.bat"` path if `flutter` is not on PATH.)
+(Fall back to `& "$env:FLUTTER_ROOT\bin\flutter.bat"` if `flutter` is not on PATH.)
 
 If you need to verify runtime behavior or hot-reload changes, ask the user to run `flutter run -d <platform>` in a separate terminal and report back. The agent cannot drive or observe a live Flutter session.
 

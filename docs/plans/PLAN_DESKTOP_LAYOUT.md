@@ -209,8 +209,7 @@ lib/features/chat_history/chat_history_list.dart   (extracted list body)
 ## Verification
 
 - I cannot run the GUI (`flutter run` is blocked); after each phase I run
-  `flutter analyze` (full path fallback `& "Z:\GlazeProject\flutter\bin\flutter.bat"` if not on
-  PATH — note: memory says Flutter is actually on PATH at `F:\General\FlutterSDK`) and
+  `flutter analyze` (or use `FLUTTER_ROOT` if Flutter is not on `PATH`) and
   `flutter test`, then ask you to run `flutter run -d windows` and confirm:
   1. Wide window → 3-column layout, bottom nav gone; narrow (<768) → original mobile layout.
   2. Drag handles resize; dragging below threshold collapses to icon strip; widths survive restart.

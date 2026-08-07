@@ -78,6 +78,7 @@ class _MemoryGenerationSettingsSheetState
   bool _fetchingModels = false;
 
   late String _generationModel;
+  late String _apiConfigId;
 
   @override
   void initState() {
@@ -131,8 +132,11 @@ class _MemoryGenerationSettingsSheetState
     _queryRecentTurns = s.queryRecentTurns;
     _queryMaxChars = s.queryMaxChars;
     // Load the generation model from PipelineSettings.
-    _generationModel =
-        ref.read(pipelineSettingsProvider).memoryBookApi.generationModel;
+    _generationModel = ref
+        .read(pipelineSettingsProvider)
+        .memoryBookApi
+        .generationModel;
+    _apiConfigId = ref.read(pipelineSettingsProvider).memoryBookApi.apiConfigId;
   }
 
   @override
@@ -274,6 +278,8 @@ class _MemoryGenerationSettingsSheetState
             _promptPresetSelector(),
             const SizedBox(height: 12),
             _sectionLabel('tab_api'.tr()),
+            _buildConnectionSelector(),
+            const SizedBox(height: 8),
             _buildModelSelector(),
             const SizedBox(height: 12),
             _sectionLabel('search'.tr()),
@@ -1028,12 +1034,13 @@ class _MemoryGenerationSettingsSheetState
   }
 
   /// Model dropdown for the Memory Generation LLM. Fetches models from the
-  /// active chat API endpoint on open. Writes the selection to
+  /// selected Memory Books API endpoint on open. Writes the selection to
   /// PipelineSettings.memoryBookApi.generationModel.
   Widget _buildModelSelector() {
     final models = <String>{
       ..._fetchedModels,
-      if (_generationModel.isNotEmpty && !_fetchedModels.contains(_generationModel))
+      if (_generationModel.isNotEmpty &&
+          !_fetchedModels.contains(_generationModel))
         _generationModel,
     }.toList()..sort();
 
@@ -1044,7 +1051,8 @@ class _MemoryGenerationSettingsSheetState
           children: [
             Expanded(
               child: DropdownButtonFormField<String>(
-                initialValue: models.contains(_generationModel) ||
+                initialValue:
+                    models.contains(_generationModel) ||
                         _generationModel.isEmpty
                     ? _generationModel
                     : null,
@@ -1108,8 +1116,62 @@ class _MemoryGenerationSettingsSheetState
     );
   }
 
+  Widget _buildConnectionSelector() {
+    final configs = ref.watch(apiListProvider).value ?? const [];
+    final selectedExists = configs.any((config) => config.id == _apiConfigId);
+    final value = _apiConfigId.isEmpty || selectedExists ? _apiConfigId : '';
+    return DropdownButtonFormField<String>(
+      initialValue: value,
+      isExpanded: true,
+      decoration: InputDecoration(
+        labelText: 'memory_books_generation_connection'.tr(),
+        border: const OutlineInputBorder(),
+        isDense: true,
+      ),
+      items: [
+        DropdownMenuItem(
+          value: '',
+          child: Text('studio_slot_use_chat_api'.tr()),
+        ),
+        ...configs.map(
+          (config) => DropdownMenuItem(
+            value: config.id,
+            child: Text(
+              config.name.isNotEmpty ? config.name : config.model,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ),
+      ],
+      onChanged: (id) async {
+        final selectedId = id ?? '';
+        setState(() {
+          _apiConfigId = selectedId;
+          _generationModel = '';
+          _fetchedModels = const [];
+        });
+        final pipeline = ref.read(pipelineSettingsProvider);
+        await ref
+            .read(pipelineSettingsProvider.notifier)
+            .save(
+              pipeline.copyWith(
+                memoryBookApi: pipeline.memoryBookApi.copyWith(
+                  apiConfigId: selectedId,
+                  generationSource: 'current',
+                  generationModel: '',
+                ),
+              ),
+            );
+      },
+    );
+  }
+
   Future<void> _fetchModels() async {
-    final config = ref.read(activeApiConfigProvider);
+    await ref.read(apiListProvider.future);
+    final configs = ref.read(apiListProvider).value ?? const [];
+    final config = _apiConfigId.isEmpty
+        ? ref.read(activeApiConfigProvider)
+        : configs.where((item) => item.id == _apiConfigId).firstOrNull;
     if (config == null) {
       if (mounted) GlazeToast.show(context, 'settings_no_api_configs'.tr());
       return;

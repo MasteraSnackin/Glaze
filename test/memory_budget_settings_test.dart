@@ -81,7 +81,10 @@ void main() {
 
       // Before load(), state is defaults (proves load() is what restores it).
       expect(
-        container2.read(pipelineSettingsProvider).cleaner.postCleanerBannedWords,
+        container2
+            .read(pipelineSettingsProvider)
+            .cleaner
+            .postCleanerBannedWords,
         '',
       );
 
@@ -149,11 +152,10 @@ void main() {
         .read(pipelineSettingsProvider.notifier)
         .save(
           const PipelineSettings(
-            memoryPipeline: MemoryPipelineSettings(
-              auxTimeoutMs: 4500,
-            ),
+            memoryPipeline: MemoryPipelineSettings(auxTimeoutMs: 4500),
             memoryBookApi: MemoryBookApiSettings(
               generationSource: 'custom',
+              apiConfigId: 'memory-api',
               generationModel: 'mem-mini',
               generationEndpoint: 'https://mem.example/v1',
               generationApiKey: 'mem-key',
@@ -187,6 +189,7 @@ void main() {
     expect(pipelineMp['auxTimeoutMs'], 4500);
     final pipelineMb = pipelineJson['memoryBookApi'] as Map<String, dynamic>;
     expect(pipelineMb['generationSource'], 'custom');
+    expect(pipelineMb['apiConfigId'], 'memory-api');
     expect(pipelineMb['generationModel'], 'mem-mini');
     expect(pipelineMb['generationEndpoint'], 'https://mem.example/v1');
     expect(pipelineMb['generationApiKey'], 'mem-key');
@@ -224,9 +227,7 @@ void main() {
         .read(pipelineSettingsProvider.notifier)
         .save(
           const PipelineSettings(
-            memoryPipeline: MemoryPipelineSettings(
-              auxTimeoutMs: 4500,
-            ),
+            memoryPipeline: MemoryPipelineSettings(auxTimeoutMs: 4500),
           ),
         );
 

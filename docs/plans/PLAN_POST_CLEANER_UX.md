@@ -2,13 +2,13 @@
 
 **Branch:** `plan/continuity-post-cleaner` (current). **Commit each phase separately on this branch.** No new branches, no PR yet — just sequential commits.
 
-**Repo:** `Z:\GlazeProject\glaze_flutter`. Flutter 3.44 + Riverpod 2 + Drift + freezed. Read `CLAUDE.md` first.
+**Repo:** project root. Flutter 3.44 + Riverpod 2 + Drift + freezed. Read `CLAUDE.md` first.
 
-**Commands** (flutter may not be on PATH — fall back to full path):
+**Commands** (Flutter and Dart must be on `PATH`, or configure `FLUTTER_ROOT`):
 ```powershell
-& "Z:\GlazeProject\flutter\bin\flutter.bat" analyze
-& "Z:\GlazeProject\flutter\bin\flutter.bat" test
-& "Z:\GlazeProject\flutter\bin\dart.bat" run build_runner build   # after editing pipeline_settings.dart (freezed)
+flutter analyze
+flutter test
+dart run build_runner build   # after editing pipeline_settings.dart (freezed)
 ```
 
 After editing `assets/chat_webview/**`, the **user** must HOT RESTART (press `R`), not hot reload. The agent cannot run `flutter run`.

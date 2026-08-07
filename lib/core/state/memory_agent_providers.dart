@@ -10,7 +10,6 @@ import '../llm/memory_provenance.dart';
 import '../llm/memory_cadence_service.dart';
 import '../llm/memory_post_turn_service.dart';
 import '../llm/memory_agentic_service.dart';
-import '../llm/memory_dedup_service.dart';
 import '../llm/memory_studio_service.dart';
 import '../llm/post_cleaner_service.dart';
 import '../llm/prompt/ledger_tracker_loader.dart';
@@ -114,21 +113,5 @@ final studioLedgerServiceProvider = Provider<StudioLedgerService>((ref) {
     characterRepo: ref.read(characterRepoProvider),
     chatRepo: ref.read(chatRepoProvider),
     canonContextLoader: ref.read(effectiveCanonContextLoaderProvider),
-  );
-});
-
-/// Memory dedup service. Cosine pre-filter + batch LLM call to merge/drop/keep
-/// near-duplicate memory entries. Runs on-demand (UI button) or automatically
-/// after generation (delayed, fire-and-forget).
-final memoryDedupServiceProvider = Provider<MemoryDedupService>((ref) {
-  return MemoryDedupService(
-    llm: const AuxLlmClient(),
-    embeddingRepo: ref.read(embeddingRepoProvider),
-    bookRepo: ref.read(memoryBookRepoProvider),
-    loadApiConfigs: () async {
-      await ref.read(apiListProvider.future);
-      return ref.read(apiListProvider).value ?? const <ApiConfig>[];
-    },
-    activeApiConfig: () => ref.read(activeApiConfigProvider),
   );
 });

@@ -11,7 +11,6 @@ class MemoryBooksToolbar extends StatelessWidget {
   final VoidCallback onOpenSettings;
   final VoidCallback onScanChat;
   final VoidCallback onAddEntry;
-  final VoidCallback onDedup;
   final bool isReindexing;
   final VoidCallback onReindex;
   final VoidCallback onDeleteIndexes;
@@ -21,7 +20,6 @@ class MemoryBooksToolbar extends StatelessWidget {
     required this.onOpenSettings,
     required this.onScanChat,
     required this.onAddEntry,
-    required this.onDedup,
     required this.isReindexing,
     required this.onReindex,
     required this.onDeleteIndexes,
@@ -72,14 +70,6 @@ class MemoryBooksToolbar extends StatelessWidget {
                       ? 'btn_indexing'.tr()
                       : 'memory_books_btn_reindex'.tr(),
                   onTap: isReindexing ? null : onReindex,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: MemoryActionTile(
-                  icon: Icons.auto_fix_high_rounded,
-                  label: 'memory_books_btn_dedup'.tr(),
-                  onTap: onDedup,
                 ),
               ),
               const SizedBox(width: 8),

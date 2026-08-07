@@ -137,8 +137,8 @@
 - `reasoning_stripper.dart` — still exists, was used by shard synthesizer (deleted); check if anything else uses it
 - `studio_build_llm_client.dart` — still exists, was used by decomposition + cleaner rules extractor (both deleted); check if anything else uses it
 - `beauty_shard_instruction.dart` — still exists, has `beautyShardTrackerFallbackPrompt` const; now seeded in DB
-- Flutter SDK at `Z:\GlazeProject\flutter\bin\flutter.bat`
-- `build_runner` command: `& "Z:\GlazeProject\flutter\bin\dart.bat" run build_runner build --delete-conflicting-outputs`
+- Flutter SDK is resolved through `PATH` or `FLUTTER_ROOT`.
+- `build_runner` command: `dart run build_runner build --delete-conflicting-outputs`
 
 ## Relevant Files
 - `lib/core/db/tables.dart`: `StudioPresetRows` table added (line ~390)
