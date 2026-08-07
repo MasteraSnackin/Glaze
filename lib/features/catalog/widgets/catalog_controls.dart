@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 
 import '../../../shared/theme/app_colors.dart';
-import '../../../shared/widgets/glass_surface.dart';
 import '../../../shared/widgets/list_controls.dart';
 import '../catalog_models.dart';
 import '../catalog_provider.dart';
@@ -156,7 +155,7 @@ class CatalogControls extends ConsumerWidget {
           ),
         ),
         const SizedBox(width: 8),
-        _SortIconChip(
+        GlazeSortIconChip(
           icon: _currentSortIcon(),
           tooltip: _currentSortLabel(),
           onTap: () => showGlazePickerSheet(
@@ -198,47 +197,3 @@ class _SettingsGearButton extends StatelessWidget {
   }
 }
 
-class _SortIconChip extends StatelessWidget {
-  final IconData icon;
-  final String tooltip;
-  final VoidCallback onTap;
-
-  const _SortIconChip({
-    required this.icon,
-    required this.tooltip,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: tooltip,
-      child: GestureDetector(
-        onTap: onTap,
-        child: SizedBox(
-          height: 32,
-          child: GlassSurface(
-            borderRadius: BorderRadius.circular(16),
-            tint: context.cs.surface,
-            border: Border.all(color: context.cs.primary.withValues(alpha: 0.18)),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(icon, size: 18, color: context.cs.primary),
-                  const SizedBox(width: 2),
-                  Icon(
-                    Icons.keyboard_arrow_down_rounded,
-                    size: 18,
-                    color: context.cs.primary,
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}

@@ -58,7 +58,7 @@ class StudioPresetWorkflowService {
 
     final now = _clock();
     final preset = source.copyWith(
-      id: 'studio_$now',
+      id: await _freeId(now),
       name: trimmedName,
       blocks: [...source.blocks],
       agentEnabled: {...source.agentEnabled},
@@ -76,11 +76,24 @@ class StudioPresetWorkflowService {
 
     final now = _clock();
     final preset = imported.copyWith(
-      id: 'studio_$now',
+      id: await _freeId(now),
       name: trimmedName,
       updatedAt: now,
     );
     return _persistAndSelect(preset);
+  }
+
+  /// Id for a new preset, derived from the clock but guaranteed not to collide
+  /// with an existing one. The clock ticks in seconds, so importing several
+  /// files in one go used to hand every preset the same id — each `put`
+  /// overwrote the previous one and only the last import survived.
+  Future<String> _freeId(int seconds) async {
+    final taken = {for (final preset in await _store.getAll()) preset.id};
+    var stamp = seconds;
+    while (taken.contains('studio_$stamp')) {
+      stamp++;
+    }
+    return 'studio_$stamp';
   }
 
   Future<List<StudioPreset>> deletePreset(String presetId) async {

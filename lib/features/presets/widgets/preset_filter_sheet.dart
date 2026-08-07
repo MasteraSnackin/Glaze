@@ -95,6 +95,8 @@ class _PresetFilterSheetState extends State<PresetFilterSheet> {
   Widget build(BuildContext context) {
     return FilterSheet(
       title: 'catalog_filters'.tr(),
+      // One range row — the sheet only needs the height that row occupies.
+      fitContent: true,
       sections: [
         FilterRangeSection(
           title: 'catalog_token_range'.tr(),

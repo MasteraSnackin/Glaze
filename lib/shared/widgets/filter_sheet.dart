@@ -95,19 +95,34 @@ class FilterSheet extends StatelessWidget {
   final String title;
   final List<FilterSection> sections;
 
-  const FilterSheet({super.key, required this.title, required this.sections});
+  /// Sizes the sheet to its sections instead of opening at the standard sheet
+  /// height. Use it for short filter sets (a single range row, say), where the
+  /// default height is mostly empty space.
+  final bool fitContent;
+
+  const FilterSheet({
+    super.key,
+    required this.title,
+    required this.sections,
+    this.fitContent = false,
+  });
 
   @override
   Widget build(BuildContext context) {
     return SheetView(
       title: title,
       showHandle: true,
+      fitContent: fitContent,
       bodyPadding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+      // A fitted sheet gives its body unbounded height, so the list has to
+      // shrink-wrap; the trailing spacer only exists to keep the last section
+      // clear of the sheet's bottom edge on the scrollable variant.
       body: ListView(
+        shrinkWrap: fitContent,
         children: [
           const SizedBox(height: 16),
           for (final section in sections) ..._buildSection(section),
-          const SizedBox(height: 40),
+          SizedBox(height: fitContent ? 8 : 40),
         ],
       ),
     );

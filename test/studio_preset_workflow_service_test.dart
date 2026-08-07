@@ -51,7 +51,7 @@ void main() {
     });
 
     test(
-      'import normalizes identity only and duplicate timestamp overwrites',
+      'import normalizes identity and keeps presets landing in the same second',
       () async {
         final store = _MemoryStudioPresetStore();
         var activeId = 'default';
@@ -86,11 +86,25 @@ void main() {
 
         expect(firstResult!.preset.id, 'studio_200');
         expect(firstResult.preset.name, 'Imported');
-      expect(firstResult.preset.agentEnabled, {'final': false});
-      expect(secondResult!.presets, hasLength(1));
-        expect(secondResult.presets.single.name, 'Replacement');
-      expect(secondResult.presets.single.blocks.single.id, 'second');
-      expect(activeId, 'studio_200');
+        expect(firstResult.preset.agentEnabled, {'final': false});
+        // The clock only ticks in seconds, so importing several files at once
+        // hands them all the same stamp — the id has to step past the taken one
+        // instead of overwriting the preset already stored under it.
+        expect(secondResult!.preset.id, 'studio_201');
+        expect(secondResult.presets, hasLength(2));
+        expect(secondResult.presets.map((preset) => preset.name), [
+          'Imported',
+          'Replacement',
+        ]);
+        expect(
+          secondResult.presets
+              .firstWhere((preset) => preset.name == 'Replacement')
+              .blocks
+              .single
+              .id,
+          'second',
+        );
+        expect(activeId, 'studio_201');
       },
     );
 
