@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -11,6 +10,7 @@ import '../../../core/models/api_config.dart';
 import '../../../core/utils/platform_paths.dart';
 import '../../character_gallery/gallery_image_picker.dart';
 import '../../settings/api_list_provider.dart';
+import '../../settings/widgets/connection_status.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/help_tip.dart';
@@ -43,9 +43,8 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
   final ImageGenConnectionService _connectionService =
       ImageGenConnectionService();
   final ScrollController _scrollController = ScrollController();
-  Timer? _connectionDebounce;
   int _connectionEpoch = 0;
-  String _connectionStatus = 'idle';
+  ApiConnectionStatus _connectionStatus = ApiConnectionStatus.idle;
   String _connectionError = '';
   String _modelFetchError = '';
 
@@ -54,32 +53,24 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
     super.initState();
     _settings =
         ref.read(imageGenSettingsProvider).value ?? const ImageGenSettings();
-    if (_settings.enabled) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _scheduleConnectionCheck(_settings, immediate: true);
-      });
-    }
   }
 
   void _update(ImageGenSettings s) {
-    final wasEnabled = _settings.enabled;
     final connectionChanged = _hasConnectionChanged(_settings, s);
     _settings = s;
     ref.read(imageGenSettingsProvider.notifier).save(s);
-    if (!s.enabled) {
-      _connectionDebounce?.cancel();
+    // Nothing is probed automatically — but a verdict about the old endpoint
+    // must not linger once the connection settings change under it.
+    if (!s.enabled || connectionChanged) {
       _connectionEpoch++;
-      _connectionStatus = 'idle';
+      _connectionStatus = ApiConnectionStatus.idle;
       _connectionError = '';
-    } else if (!wasEnabled || connectionChanged) {
-      _scheduleConnectionCheck(s);
     }
     if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
-    _connectionDebounce?.cancel();
     _connectionService.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -100,22 +91,14 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
       before.a1111.endpoint != after.a1111.endpoint ||
       before.a1111.apiKey != after.a1111.apiKey;
 
-  void _scheduleConnectionCheck(
-    ImageGenSettings settings, {
-    bool immediate = false,
-  }) {
+  /// Probes the provider. Only ever runs from a tap on the status badge — the
+  /// sheet never reaches out on its own.
+  Future<void> _checkConnection() async {
+    final settings = _settings;
+    if (!settings.enabled) return;
     final epoch = ++_connectionEpoch;
-    _connectionDebounce?.cancel();
-    _connectionDebounce = Timer(
-      immediate ? Duration.zero : const Duration(milliseconds: 900),
-      () => _checkConnection(settings, epoch),
-    );
-  }
-
-  Future<void> _checkConnection(ImageGenSettings settings, int epoch) async {
-    if (!mounted || epoch != _connectionEpoch || !settings.enabled) return;
     setState(() {
-      _connectionStatus = 'connecting';
+      _connectionStatus = ApiConnectionStatus.connecting;
       _connectionError = '';
     });
     final apiConfig = ref.read(activeApiConfigProvider);
@@ -126,11 +109,11 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
         llmApiKey: apiConfig?.apiKey ?? '',
       );
       if (!mounted || epoch != _connectionEpoch) return;
-      setState(() => _connectionStatus = 'connected');
+      setState(() => _connectionStatus = ApiConnectionStatus.connected);
     } catch (error) {
       if (!mounted || epoch != _connectionEpoch) return;
       setState(() {
-        _connectionStatus = 'failed';
+        _connectionStatus = ApiConnectionStatus.failed;
         _connectionError = error.toString().replaceFirst('Bad state: ', '');
       });
     }
@@ -228,17 +211,18 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
         ),
         child: Column(
           children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+              child: ConnectionStatus(
+                status: _connectionStatus,
+                errorMessage: _connectionError,
+                onRetry: _checkConnection,
+                child: _buildPresetSelector(s.apiType),
+              ),
+            ),
             MenuGroup(
               header: 'imggen_connection'.tr(),
-              items: [
-                MenuSelectorItem(
-                  label: 'imggen_api_type'.tr(),
-                  currentValue: s.apiType.label,
-                  onTap: _openApiTypeSelector,
-                ),
-                _buildConnectionStatus(s),
-                ..._buildConnectionFields(s),
-              ],
+              items: _buildConnectionFields(s),
             ),
             MenuGroup(header: 'Model', items: _buildModelFields(s)),
             if (_modelFetchError.isNotEmpty)
@@ -338,49 +322,38 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
     );
   }
 
-  Widget _buildConnectionStatus(ImageGenSettings settings) {
-    final (
-      IconData icon,
-      Color color,
-      String label,
-    ) = switch (_connectionStatus) {
-      'connecting' => (
-        Icons.sync,
-        context.cs.primary,
-        'imggen_conn_checking'.tr(),
-      ),
-      'connected' => (
-        Icons.check_circle_outline,
-        Colors.green,
-        'imggen_conn_ok'.tr(),
-      ),
-      'failed' => (Icons.error_outline, Colors.red, _connectionError),
-      _ => (
-        Icons.cloud_outlined,
-        context.cs.onSurfaceVariant,
-        'imggen_conn_unchecked'.tr(),
-      ),
-    };
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 4, 8, 4),
-      child: Row(
-        children: [
-          Icon(icon, size: 16, color: color),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              label,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 12, color: color),
+  /// The API-type pill. Sits left of the connection-status badge, mirroring
+  /// the preset pill in the API settings screen.
+  Widget _buildPresetSelector(ImageGenApiType selected) {
+    return InkWell(
+      onTap: _openApiTypeSelector,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        decoration: BoxDecoration(
+          color: context.cs.primary.withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: context.cs.primary.withValues(alpha: 0.2)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              selected.label,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: context.cs.primary,
+              ),
             ),
-          ),
-          TextButton(
-            onPressed: () =>
-                _scheduleConnectionCheck(settings, immediate: true),
-            child: Text('imggen_conn_check'.tr()),
-          ),
-        ],
+            const SizedBox(width: 4),
+            Icon(
+              Icons.keyboard_arrow_down_rounded,
+              size: 20,
+              color: context.cs.primary,
+            ),
+          ],
+        ),
       ),
     );
   }
