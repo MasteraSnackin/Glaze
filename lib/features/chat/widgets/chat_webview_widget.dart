@@ -26,6 +26,7 @@ import 'chat_webview_initializer.dart';
 import 'chat_webview_panel_refresher.dart';
 import 'chat_webview_surface.dart';
 import 'chat_webview_sync_dispatcher.dart';
+import 'message_scripts_prompt_sheet.dart';
 import 'webview_callbacks.dart';
 
 const String _kStreamingId = '__streaming__';
@@ -603,6 +604,10 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     bridge.onStop = callbacks.onStop;
     bridge.onLinkClick = callbacks.onLinkClick;
     bridge.onLoadMore = callbacks.onLoadMore;
+    bridge.onMessageScriptBlocked = () {
+      if (!mounted) return;
+      unawaited(maybeShowMessageScriptsPrompt(context, ref));
+    };
 
     final extBlocks = ChatWebViewExtBlockCallbacks(
       ref: ref,

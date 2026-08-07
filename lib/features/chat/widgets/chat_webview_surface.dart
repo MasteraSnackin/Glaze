@@ -17,6 +17,7 @@ import '../bridge/chat_webview_settings.dart';
 import '../../settings/app_settings_provider.dart';
 import 'chat_webview_callbacks.dart';
 import 'chat_webview_ext_block_callbacks.dart';
+import 'message_scripts_prompt_sheet.dart';
 import 'webview_callbacks.dart';
 
 /// `InAppWebView` widget with the chat-specific settings, the
@@ -248,6 +249,11 @@ class ChatWebViewSurface extends ConsumerWidget {
                 bridge.onStop = callbacks.onStop;
                 bridge.onLinkClick = callbacks.onLinkClick;
                 bridge.onLoadMore = callbacks.onLoadMore;
+                bridge.onMessageScriptBlocked = () {
+                  if (!isMounted()) return;
+                  // ignore: use_build_context_synchronously
+                  unawaited(maybeShowMessageScriptsPrompt(context, ref));
+                };
                 if (!isMounted()) return;
 
                 // The ext-block callbacks run after `await` paths. The
