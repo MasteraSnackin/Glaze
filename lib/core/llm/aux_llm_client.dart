@@ -207,7 +207,14 @@ class AuxLlmClient {
   /// Builds a descriptive exception from a non-ok [AuxCallOutcome] so the
   /// caller's `catch` block can fall back to the original text with a useful
   /// error message.
+  ///
+  /// The last attempt's own exception is preferred when there is one: a
+  /// [DioException] still carries the provider's response body, which
+  /// `formatError()` renders as `HTTP 400: <provider message>` instead of the
+  /// generic status text a reconstructed exception would produce.
   Object _descriptiveError(AuxCallOutcome outcome) {
+    final original = outcome.lastError;
+    if (original != null) return original;
     if (outcome.attempts.isEmpty) return Exception('Aux call failed');
     final last = outcome.attempts.last;
     if (last.status == 'timeout') {

@@ -24,11 +24,19 @@ class AuxCallOutcome {
   /// Total elapsed millis across all attempts.
   final int totalElapsedMs;
 
+  /// The exception thrown by the last failed attempt, verbatim. Kept so callers
+  /// can rethrow it instead of a reconstructed stand-in — a [DioException]
+  /// still carries the provider's response body, which `formatError()` turns
+  /// into "HTTP 401: Invalid API key" rather than a generic status message.
+  /// Null when the call succeeded or was cancelled before any attempt ran.
+  final Object? lastError;
+
   const AuxCallOutcome({
     required this.status,
     this.text,
     this.attempts = const [],
     this.totalElapsedMs = 0,
+    this.lastError,
   });
 
   bool get isOk => status == AgentOperationStatus.ok;
@@ -96,6 +104,7 @@ class AuxRetryRunner {
   }) async {
     final sw = Stopwatch()..start();
     final attemptsLog = <AgentOperationAttempt>[];
+    Object? lastError;
     for (var i = 0; i < policy.maxAttempts; i++) {
       if (cancelToken?.isCancelled ?? false) {
         attemptsLog.add(_logCancelled(i, sw.elapsedMilliseconds));
@@ -147,16 +156,23 @@ class AuxRetryRunner {
         return _finishOk(text, attemptsLog, sw.elapsedMilliseconds);
       } catch (e) {
         attemptSw.stop();
+        lastError = e;
         attemptsLog.add(_logError(i, e, attemptSw.elapsedMilliseconds));
         if (cancelToken?.isCancelled ?? false) {
           return _finish(
             AgentOperationStatus.aborted,
             attemptsLog,
             sw.elapsedMilliseconds,
+            lastError: e,
           );
         }
         if (!policy.shouldRetry(e, i)) {
-          return _finish(_statusFor(e), attemptsLog, sw.elapsedMilliseconds);
+          return _finish(
+            _statusFor(e),
+            attemptsLog,
+            sw.elapsedMilliseconds,
+            lastError: e,
+          );
         }
       }
     }
@@ -164,6 +180,7 @@ class AuxRetryRunner {
       AgentOperationStatus.error,
       attemptsLog,
       sw.elapsedMilliseconds,
+      lastError: lastError,
     );
   }
 
@@ -183,12 +200,14 @@ class AuxRetryRunner {
   static AuxCallOutcome _finish(
     AgentOperationStatus status,
     List<AgentOperationAttempt> attempts,
-    int totalMs,
-  ) {
+    int totalMs, {
+    Object? lastError,
+  }) {
     return AuxCallOutcome(
       status: status,
       attempts: List.unmodifiable(attempts),
       totalElapsedMs: totalMs,
+      lastError: lastError,
     );
   }
 

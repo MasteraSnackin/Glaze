@@ -43,9 +43,8 @@ import 'magic_drawer_models.dart';
 import '../services/magic_drawer_layout_service.dart';
 import '../services/magic_drawer_stats_service.dart';
 import 'magic_drawer_widgets.dart';
-import 'memory_books_sheet.dart';
+import 'memory_sheet.dart';
 import 'prompt_inspector_sheet.dart';
-import 'summary_sheet.dart';
 import '../state/token_breakdown_cache.dart';
 import '../../glossary/glossary_sheet.dart';
 import '../../extensions/models/extension_preset.dart';
@@ -91,8 +90,8 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
       category: MagicDrawerCategory.tools,
     ),
     MagicDrawerItemDef(
-      id: 'summary',
-      label: 'summary_title'.tr(),
+      id: 'memory',
+      label: 'Memory',
       icon: Icons.subject,
       category: MagicDrawerCategory.session,
     ),
@@ -113,12 +112,6 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
       label: 'label_lorebooks'.tr(),
       icon: Icons.library_books,
       category: MagicDrawerCategory.library,
-    ),
-    MagicDrawerItemDef(
-      id: 'memory-books',
-      label: 'magic_memory_books'.tr(),
-      icon: Icons.add_box,
-      category: MagicDrawerCategory.session,
     ),
     MagicDrawerItemDef(
       id: 'regex',
@@ -351,17 +344,16 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
             : _loadingTokens
             ? 'Calculating...'
             : null,
-      'summary' =>
+      'memory' =>
         _stats.summaryChars > 0
-            ? '${_stats.summaryChars} chars'
-            : 'Not generated',
+            ? '${_stats.summaryChars} chars • ${_stats.memoryEntryCount} entries'
+            : '${_stats.memoryEntryCount} entries',
       'sessions' => '${_stats.sessionCount} sessions',
       'char-card' =>
         _stats.characterTokens > 0
             ? '${_stats.characterTokens} tokens'
             : _stats.character?.name,
       'lorebooks' => '${_stats.lorebookEntryCount} entries',
-      'memory-books' => '${_stats.memoryEntryCount} entries',
       'regex' => '${_stats.regexCount} scripts',
       'api' =>
         _stats.apiConfig?.name.isNotEmpty == true
@@ -459,8 +451,8 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
         case 'inspector':
           await showPromptInspectorSheet(context, widget.charId);
           break;
-        case 'summary':
-          await showSummarySheet(context, widget.charId);
+        case 'memory':
+          await showMemorySheet(context, widget.charId);
           break;
         case 'sessions':
           await _showSessionsSheet();
@@ -488,9 +480,6 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
             isScrollControlled: true,
             builder: (_) => const LorebookListScreen(),
           );
-          break;
-        case 'memory-books':
-          await _showMemoryBooks();
           break;
         case 'regex':
           await showModalBottomSheet<void>(
@@ -588,20 +577,6 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
       backgroundColor: context.cs.surfaceContainerHigh,
       isScrollControlled: true,
       builder: (_) => const ExtBlocksSettingsSheet(),
-    );
-  }
-
-  Future<void> _showMemoryBooks() async {
-    final chatState = ref.read(chatProvider(widget.charId)).value;
-    final session = chatState?.session;
-    if (session == null) return;
-    await GlazeBottomSheet.show<void>(
-      context,
-      child: MemoryBooksSheet(
-        sessionId: session.id,
-        charId: widget.charId,
-        messages: session.messages,
-      ),
     );
   }
 

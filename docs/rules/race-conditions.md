@@ -104,7 +104,7 @@ Verify: after pressing Stop, the network tab shows the request was actually term
 | Stale completion writes to new generation's state | Callback didn't check `_activeGenId` | Guard exists in `ChatGenerationService` callbacks via `isAborted()` |
 | Stop button doesn't close TCP connection | `CancelToken` not passed to `Dio` | Ensure `CancelToken` reaches `SseClient` |
 | Read-mutate-write in DB | A previously read full row is written after another mutation | Use the narrowest repository mutation API; publish only its durable return (see `docs/rules/database.md`) |
-| Two memory drafts start for same draft ID | No in-flight ID tracking in generator | Tracked in widget: `memory_books_sheet.dart._generatingDrafts` map |
+| Two memory drafts start for same draft ID | No in-flight ID tracking in generator | Tracked in widget: `memory_books_tab.dart._generatingDrafts` map |
 | `apiListProvider` null on cold start | Sync provider read before async load | `await ref.read(apiListProvider.future)` first; also used by `MemoryDraftGenerator` |
 | Image retry state corruption | A late retry could overwrite newer chat state | ✅ **Fixed** — operation generation IDs plus targeted `mutateMessage` and durable-state publication |
 | Chat ↔ memory draft mutual exclusion | Neither side checks the other | ✅ **Fixed** — `memory_active_drafts_provider` enforces mutex in both directions; `glaze.triggerGeneration` reuses the same mutex via `GenerationDispatcher` (INV-M3, INV-M4, INV-JS3) |

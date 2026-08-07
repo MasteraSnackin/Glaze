@@ -12,7 +12,8 @@ Full formal invariants with code references: `docs/INVARIANTS.md`
 |------|-------------|-----------|-------|
 | Chat | `ChatState.isGenerating` per `charId` | Yes (SSE) | `AbortHandler`: `CancelToken` + `_activeGenId` |
 | Image gen | `AbortHandler._imgGenCancelToken` + `isGeneratingImage` | No (one-shot) | Separate cancel token from text SSE |
-| Summary | Widget-local in `summary_sheet.dart` | No | Widget-scoped `CancelToken` |
+| Summary (manual) | Widget-local in `summary_tab.dart` | No | Not abortable (INV-S2) |
+| Summary (auto) | `AutoSummaryStage`, from `PostGenCoordinator` | No | Not abortable (INV-S2) |
 | Memory draft | `MemoryBookController` | No | Per-draft `CancelToken`; mutex via `memory_active_drafts_provider` |
 | Ext blocks | `ExtensionPostGenService._extensionBlocksCancelToken` | No (per-block LLM call) | `cancelBlocks()` — independent of chat cancel token (INV-EG5) |
 | JS extension (`glaze.generateText`) | `ActiveApiConfigProvider` (active or connection-profile slot) | No (one-shot, 55 s timeout) | Per-call `CancelToken` from the bridge handler |

@@ -469,7 +469,8 @@ a dependency-direction boundary, not a claim that prompt collection is pure.
 |------|-------------|-----------|-------|
 | Chat | `ChatState.isGenerating` per `charId` | Yes (SSE) | `AbortHandler`: `CancelToken` + `_activeGenId` |
 | Image gen | `ChatState.isGeneratingImage` + `_imgGenCancelToken` | No (one-shot) | `_imgGenCancelToken` in `ChatNotifier` |
-| Summary | Widget-local in `summary_sheet.dart` | No | Widget-scoped `CancelToken` |
+| Summary (manual) | Widget-local in `summary_tab.dart` | No | Not abortable (INV-S2) |
+| Summary (auto) | `AutoSummaryStage`, from `PostGenCoordinator` | No | Not abortable (INV-S2) |
 | Memory draft | `MemoryDraftGenerationController` (delegated by `MemoryBookController`) | No | Per-draft `CancelToken`; mutex via `memory_active_drafts_provider` |
 
 ### Reasoning / Thinking

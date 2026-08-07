@@ -1,38 +1,44 @@
-import 'dart:convert';
-import 'dart:typed_data';
-
 import 'package:dio/dio.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/db/repositories/summary_repo.dart';
+import 'package:glaze_flutter/core/llm/aux_llm_client.dart';
+import 'package:glaze_flutter/core/llm/macro_engine.dart';
 import 'package:glaze_flutter/core/llm/summary_service.dart';
+import 'package:glaze_flutter/core/llm/transport/llm_protocol.dart';
 import 'package:glaze_flutter/core/models/api_config.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
 
-class _RecordingAdapter implements HttpClientAdapter {
-  RequestOptions? request;
+/// Captures the aux call instead of hitting the network. Subclassing (rather
+/// than stubbing Dio) is what keeps the protocol assertion meaningful: the
+/// service is expected to hand its [AuxApiConfig] to [AuxLlmClient], which is
+/// the layer that owns per-protocol URL/auth/body shape.
+class _RecordingAuxLlmClient extends AuxLlmClient {
+  static const response = '  generated summary  ';
+
+  AuxApiConfig? config;
+  String? prompt;
+  int? maxTokens;
+  double? temperature;
+  int? timeoutMs;
 
   @override
-  Future<ResponseBody> fetch(
-    RequestOptions options,
-    Stream<Uint8List>? requestStream,
-    Future<void>? cancelFuture,
-  ) async {
-    request = options;
-    return ResponseBody.fromBytes(
-      utf8.encode(
-        '{"choices":[{"message":{"content":"  generated summary  "}}]}',
-      ),
-      200,
-      headers: {
-        Headers.contentTypeHeader: ['application/json'],
-      },
-    );
+  Future<String> callOnce({
+    required AuxApiConfig config,
+    required String prompt,
+    required int maxTokens,
+    required double temperature,
+    required int timeoutMs,
+    CancelToken? cancelToken,
+  }) async {
+    this.config = config;
+    this.prompt = prompt;
+    this.maxTokens = maxTokens;
+    this.temperature = temperature;
+    this.timeoutMs = timeoutMs;
+    return response;
   }
-
-  @override
-  void close({bool force = false}) {}
 }
 
 void main() {
@@ -74,9 +80,8 @@ void main() {
   test(
     'generates with filtered history and persists the trimmed response',
     () async {
-      final adapter = _RecordingAdapter();
-      final dio = Dio()..httpClientAdapter = adapter;
-      final service = SummaryService(repo, dio);
+      final llm = _RecordingAuxLlmClient();
+      final service = SummaryService(repo, llm: llm);
       const history = [
         ChatMessage(id: '1', role: 'user', content: 'Hello'),
         ChatMessage(id: '2', role: 'system', content: 'Ignored'),
@@ -96,27 +101,120 @@ void main() {
       );
 
       expect(result, 'generated summary');
-      expect(
-        adapter.request?.uri.toString(),
-        'https://example.com/v1/chat/completions',
-      );
-      expect(adapter.request?.headers['Authorization'], 'Bearer secret');
-      final data = adapter.request?.data as Map<String, dynamic>;
-      final messages = data['messages'] as List<dynamic>;
-      final prompt = (messages.single as Map<String, dynamic>)['content'];
-      expect(prompt, contains('User: Hello'));
-      expect(prompt, contains('Character: Hi there'));
-      expect(prompt, isNot(contains('Ignored')));
+      expect(llm.prompt, contains('User: Hello'));
+      expect(llm.prompt, contains('Character: Hi there'));
+      expect(llm.prompt, isNot(contains('Ignored')));
       expect(await service.getSummaryContent('session'), 'generated summary');
       expect(await service.getSummaryMessageCount('session'), history.length);
       expect((await repo.get('session'))?.prompt, 'Context:\n{{history}}');
     },
   );
 
+  test('routes the call through the config protocol, not always OpenAI', () async {
+    final llm = _RecordingAuxLlmClient();
+    final service = SummaryService(repo, llm: llm);
+
+    await service.generateSummary(
+      sessionId: 'session',
+      history: const [ChatMessage(id: '1', role: 'user', content: 'Hi')],
+      apiConfig: const ApiConfig(
+        id: 'api',
+        endpoint: 'https://api.anthropic.com',
+        apiKey: 'secret',
+        model: 'claude-sonnet-4',
+        protocol: LlmProtocol.anthropic,
+        maxTokens: 4096,
+        firstChunkTimeoutMs: 12000,
+      ),
+    );
+
+    expect(llm.config?.protocol, LlmProtocol.anthropic);
+    expect(llm.config?.endpoint, 'https://api.anthropic.com');
+    expect(llm.config?.apiKey, 'secret');
+    expect(llm.config?.model, 'claude-sonnet-4');
+    expect(llm.maxTokens, 4096);
+    expect(llm.timeoutMs, 12000);
+  });
+
+  test('expands macros in the prompt but never in the transcript', () async {
+    final llm = _RecordingAuxLlmClient();
+    final service = SummaryService(repo, llm: llm);
+    const template = 'Recap {{char}} for {{user}}.\n{{history}}\nDone.';
+
+    await service.generateSummary(
+      sessionId: 'session',
+      history: const [
+        // The transcript itself must stay untouched, macros and all.
+        ChatMessage(id: '1', role: 'user', content: 'Say {{char}} out loud'),
+      ],
+      apiConfig: const ApiConfig(
+        id: 'api',
+        endpoint: 'https://example.com/v1',
+        apiKey: 'secret',
+        model: 'model',
+      ),
+      customPrompt: template,
+      macroContext: const MacroContext(
+        charName: 'Alice',
+        userName: 'Bob',
+        charId: 'char',
+        sessionId: 'session',
+      ),
+    );
+
+    expect(llm.prompt, startsWith('Recap Alice for Bob.'));
+    expect(llm.prompt, contains('User: Say {{char}} out loud'));
+    expect(llm.prompt, endsWith('Done.'));
+    // The template is persisted unexpanded so it stays reusable.
+    expect((await repo.get('session'))?.prompt, template);
+  });
+
+  test('falls back to the built-in prompt for a blank template', () async {
+    final llm = _RecordingAuxLlmClient();
+    final service = SummaryService(repo, llm: llm);
+
+    await service.generateSummary(
+      sessionId: 'session',
+      history: const [ChatMessage(id: '1', role: 'user', content: 'Hi')],
+      apiConfig: const ApiConfig(
+        id: 'api',
+        endpoint: 'https://example.com/v1',
+        apiKey: 'secret',
+        model: 'model',
+      ),
+      customPrompt: '   ',
+    );
+
+    expect(llm.prompt, startsWith(defaultSummaryPrompt));
+    expect(llm.prompt, contains('User: Hi'));
+  });
+
+  test('accepts an OpenRouter config with no endpoint', () async {
+    final llm = _RecordingAuxLlmClient();
+    final service = SummaryService(repo, llm: llm);
+
+    // OpenRouter's transport hardcodes its base URL, so configs legitimately
+    // carry an empty endpoint. The old implementation rejected them.
+    await service.generateSummary(
+      sessionId: 'session',
+      history: const [ChatMessage(id: '1', role: 'user', content: 'Hi')],
+      apiConfig: const ApiConfig(
+        id: 'api',
+        apiKey: 'secret',
+        model: 'anthropic/claude-sonnet-4',
+        protocol: LlmProtocol.openrouter,
+      ),
+    );
+
+    expect(llm.config?.protocol, LlmProtocol.openrouter);
+    expect(await service.getSummaryContent('session'), 'generated summary');
+  });
+
   test(
     'rejects incomplete API configuration before making a request',
     () async {
-      final service = SummaryService(repo);
+      final llm = _RecordingAuxLlmClient();
+      final service = SummaryService(repo, llm: llm);
 
       await expectLater(
         service.generateSummary(
@@ -137,6 +235,7 @@ void main() {
         ),
         throwsA(isA<Exception>()),
       );
+      expect(llm.prompt, isNull);
     },
   );
 

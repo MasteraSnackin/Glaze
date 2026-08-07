@@ -12,6 +12,7 @@ import '../../../../core/state/db_provider.dart';
 import '../../../../core/llm/studio_turn_config_snapshot.dart';
 import '../../chat_generation_service.dart';
 import '../../chat_state.dart';
+import 'auto_summary_stage.dart';
 import 'chat_embed_stage.dart';
 import 'cleaner_stage.dart';
 import 'ext_blocks_stage.dart';
@@ -31,6 +32,7 @@ import 'sync_notification_stage.dart';
 ///   5. Image tags — on canonical text, after cleaner
 ///   6. Embed (parallel fire-and-forget)
 ///   7. Auto-create drafts (parallel fire-and-forget)
+///   8. Auto-summary (parallel fire-and-forget)
 ///
 /// Studio OFF:
 ///   2. Sync + notification (immediate, awaited)
@@ -38,11 +40,13 @@ import 'sync_notification_stage.dart';
 ///   4. Ext blocks (immediate, agentSwipeId=-1)
 ///   5. Embed (parallel fire-and-forget)
 ///   6. Auto-create drafts (parallel fire-and-forget)
+///   7. Auto-summary (parallel fire-and-forget)
 class PostGenCoordinator {
   final StageContext ctx;
   final SyncNotificationStage syncStage;
   final ChatEmbedStage embedStage;
   final MemoryDraftStage draftStage;
+  final AutoSummaryStage autoSummaryStage;
   final ImageTagStage imageTagStage;
   final ExtBlocksStage extBlocksStage;
   final LedgerStage ledgerStage;
@@ -52,6 +56,7 @@ class PostGenCoordinator {
     : syncStage = SyncNotificationStage(ctx),
       embedStage = ChatEmbedStage(ctx),
       draftStage = MemoryDraftStage(ctx),
+      autoSummaryStage = AutoSummaryStage(ctx),
       imageTagStage = ImageTagStage(ctx),
       extBlocksStage = ExtBlocksStage(ctx),
       ledgerStage = LedgerStage(ctx),
@@ -151,6 +156,10 @@ class PostGenCoordinator {
       'chat embedding',
     );
     _runInBackground(draftStage.run(result.session), 'memory auto-draft');
+    _runInBackground(
+      autoSummaryStage.run(result.session),
+      'auto-summary',
+    );
 
     // Determine Studio status before acquiring the foreground post-gen hold.
     // A disabled/no-op ordinary path must not retain that hold.
