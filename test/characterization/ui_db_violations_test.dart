@@ -5,13 +5,16 @@ void main() {
   group('UI→DB violations fixed (Phase 2.5)', () {
     final widgetFiles = <String>[
       'lib/features/chat/widgets/magic_drawer.dart',
-      'lib/features/chat/widgets/summary_sheet.dart',
+      // summary_sheet.dart and memory_books_sheet.dart became the two tabs of
+      // the unified Memory sheet.
+      'lib/features/chat/widgets/memory_sheet.dart',
+      'lib/features/chat/widgets/summary_tab.dart',
       'lib/features/chat/widgets/authors_note_sheet.dart',
       'lib/features/chat/widgets/chat_stats_sheet.dart',
       'lib/features/chat/widgets/lorebook_coverage_sheet.dart',
       // context_info_sheet.dart and chat_dialogs.dart were deleted in 0565341;
       // they are intentionally absent from this list.
-      'lib/features/chat/widgets/memory_books_sheet.dart',
+      'lib/features/chat/widgets/memory_books_tab.dart',
       'lib/features/regex/regex_sheet.dart',
       'lib/features/personas/persona_list_screen.dart',
       'lib/features/personas/persona_connections_sheet.dart',
@@ -72,8 +75,8 @@ void main() {
       }
     });
 
-    test('total widget files count is 15', () {
-      expect(widgetFiles.length, 15);
+    test('total widget files count is 16', () {
+      expect(widgetFiles.length, 16);
     });
 
     test('no .put() calls on repos in widget code', () async {

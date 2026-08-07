@@ -6,10 +6,38 @@ import '../../features/presets/preset_list_provider.dart';
 import '../llm/summary_service.dart';
 import '../models/preset.dart';
 import 'db_provider.dart';
+import 'shared_prefs_provider.dart';
 
 final summaryServiceProvider = Provider<SummaryService>((ref) {
   return SummaryService(ref.watch(summaryRepoProvider));
 });
+
+/// How many new messages must accumulate before the summary is regenerated on
+/// its own. `0` disables auto-generation. Global, not per chat.
+final summaryAutoIntervalProvider =
+    AsyncNotifierProvider<SummaryAutoIntervalNotifier, int>(
+      SummaryAutoIntervalNotifier.new,
+    );
+
+class SummaryAutoIntervalNotifier extends AsyncNotifier<int> {
+  static const prefsKey = 'summaryAutoInterval';
+
+  @override
+  Future<int> build() async {
+    final prefs = await ref.read(sharedPreferencesProvider.future);
+    final value = prefs.get(prefsKey);
+    if (value is int) return value < 0 ? 0 : value;
+    if (value is String) return int.tryParse(value)?.clamp(0, 9999) ?? 0;
+    return 0;
+  }
+
+  Future<void> set(int interval) async {
+    final normalized = interval < 0 ? 0 : interval;
+    final prefs = await ref.read(sharedPreferencesProvider.future);
+    await prefs.setInt(prefsKey, normalized);
+    state = AsyncData(normalized);
+  }
+}
 
 /// Bumped whenever a session's summary is written (manual edit or generation).
 /// UI that reads summary content off the repo watches this to refetch, since

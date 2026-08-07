@@ -5,19 +5,17 @@ import 'package:path/path.dart' as p;
 // ignore: depend_on_referenced_packages
 import 'package:path_provider/path_provider.dart';
 
-import '../settings/api_list_provider.dart';
-
 import '../../core/models/chat_message.dart';
 import '../../core/services/chat_import_export.dart';
 import '../../core/services/file_export_service.dart';
 import '../../core/state/db_provider.dart';
-import '../../core/state/summary_providers.dart';
 import '../../core/utils/time_helpers.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import '../chat_history/chat_history_provider.dart';
 import 'chat_session_service.dart';
 import 'chat_provider.dart';
+import 'services/summary_generation_service.dart';
 
 final chatActionsServiceProvider = Provider<ChatActionsService>((ref) {
   return ChatActionsService(ref);
@@ -46,18 +44,9 @@ class ChatActionsService {
       throw StateError('No active chat session');
     }
 
-    await _ref.read(apiListProvider.future);
-    final apiConfig = _ref.read(activeApiConfigProvider);
-    if (apiConfig == null) {
-      throw StateError('No API config found');
-    }
-
-    final summaryService = _ref.read(summaryServiceProvider);
-    return summaryService.generateSummary(
-      sessionId: chatState.session!.id,
-      history: chatState.session!.messages,
-      apiConfig: apiConfig,
-    );
+    return _ref
+        .read(summaryGenerationServiceProvider)
+        .generate(charId: charId, session: chatState.session!);
   }
 
   Future<String> exportChat(String charId) async {

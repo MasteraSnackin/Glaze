@@ -31,7 +31,7 @@ import '../../core/state/summary_providers.dart';
 import '../chat/chat_provider.dart';
 import '../settings/app_settings_provider.dart';
 import '../chat/widgets/authors_note_sheet.dart';
-import '../chat/widgets/summary_sheet.dart';
+import '../chat/widgets/memory_sheet.dart';
 import '../regex/regex_sheet.dart';
 
 /// Standalone screen wrapper around [PresetEditorBody].
@@ -1254,12 +1254,6 @@ class _SummaryBlockEditor extends ConsumerWidget {
             ),
             showIf: (item) => item['insertionMode'] == 'depth',
           ),
-          GenericEditorField(
-            key: 'prefix',
-            label: 'label_prefix'.tr(),
-            type: 'text',
-            placeholder: 'Summary: ',
-          ),
         ],
       ),
     ];
@@ -1277,7 +1271,7 @@ class _SummaryBlockEditor extends ConsumerWidget {
             charId: charId,
             content: content,
             hint: 'hint_summary_needs_chat'.tr(),
-            onEdit: () => showSummarySheet(context, charId!),
+            onEdit: () => showMemorySheet(context, charId!),
           ),
           GenericEditor(
             item: block.toJson(),

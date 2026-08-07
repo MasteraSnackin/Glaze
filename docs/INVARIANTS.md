@@ -96,12 +96,23 @@ Cancelled image tags are replaced with `[IMG:ERROR:...]`.
 
 ### INV-S1: Summary is always non-streaming
 
-`SummaryService.generateSummary()` uses `_dio.post()` (plain HTTP POST). No SSE.
+`SummaryService.generateSummary()` goes through `AuxLlmClient.callOnce()`, which
+calls the protocol's `ChatTransport` with `stream: false`. No SSE. The protocol
+comes from `ApiConfig.protocol` — the summary must never hardcode one provider's
+wire format.
 
 ### INV-S2: Summary does not create generation registry entries
 
 Summary generation does not touch `ChatState.isGenerating` or any `charId`-keyed
-generation guard. It has no `CancelToken` — once started, it cannot be aborted.
+generation guard. Neither the manual run (`summary_tab.dart`) nor the automatic
+one (`AutoSummaryStage`) passes a `CancelToken`, so once started it cannot be
+aborted.
+
+### INV-S4: Auto-summary only fires on a bot turn
+
+`AutoSummaryStage` runs from `PostGenCoordinator` (post-assistant-turn only) and
+additionally requires `session.messages.last` to be a non-error assistant /
+character message. A user message must never trigger it.
 
 ### INV-S3: Summary does not mutate chat messages
 

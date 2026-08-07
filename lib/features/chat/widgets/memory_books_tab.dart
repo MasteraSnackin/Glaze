@@ -17,12 +17,14 @@ import '../../memory/utils/memory_swipe_filter.dart';
 import 'memory_entry_editor_sheet.dart';
 import 'memory_generation_settings_sheet.dart';
 
-class MemoryBooksSheet extends ConsumerStatefulWidget {
+/// Memory Books tab of the Memory sheet. Expects a bounded height from its
+/// host (the [NestedScrollView] below cannot lay out unbounded).
+class MemoryBooksTab extends ConsumerStatefulWidget {
   final String sessionId;
   final String charId;
   final List<ChatMessage> messages;
 
-  const MemoryBooksSheet({
+  const MemoryBooksTab({
     super.key,
     required this.sessionId,
     required this.charId,
@@ -30,10 +32,10 @@ class MemoryBooksSheet extends ConsumerStatefulWidget {
   });
 
   @override
-  ConsumerState<MemoryBooksSheet> createState() => _MemoryBooksSheetState();
+  ConsumerState<MemoryBooksTab> createState() => _MemoryBooksTabState();
 }
 
-class _MemoryBooksSheetState extends ConsumerState<MemoryBooksSheet> {
+class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
   late final MemoryBookController _ctrl;
   Timer? _elapsedTimer;
   bool _hideUnselectedMemories = false;
@@ -95,15 +97,7 @@ class _MemoryBooksSheetState extends ConsumerState<MemoryBooksSheet> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    // GlazeBottomSheet wraps `child` in a SingleChildScrollView, which gives
-    // an UNBOUNDED height constraint. This sheet uses a Column with an
-    // Expanded TabBarView, which needs a bounded height — without it the
-    // RenderFlex collapses and only the drag handle shows. Pin the sheet to a
-    // fraction of the screen so the tab content has a real height to lay out in.
-    final screenH = MediaQuery.of(context).size.height;
-    return SizedBox(height: screenH * 0.85, child: _buildBody(context));
-  }
+  Widget build(BuildContext context) => _buildBody(context);
 
   Widget _buildBody(BuildContext context) {
     if (_ctrl.loading) {
@@ -158,9 +152,14 @@ class _MemoryBooksSheetState extends ConsumerState<MemoryBooksSheet> {
           return [
             SliverToBoxAdapter(
               child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 8,
+                // The host sheet reports its header height as MediaQuery top
+                // padding; without consuming it the overview card hides behind
+                // the sheet header.
+                padding: EdgeInsets.fromLTRB(
+                  16,
+                  MediaQuery.paddingOf(context).top + 8,
+                  16,
+                  8,
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1291,7 +1290,7 @@ class _MemoryBooksSheetState extends ConsumerState<MemoryBooksSheet> {
   }
 }
 
-/// Pinned sliver header for the TabBar inside [MemoryBooksSheet]'s
+/// Pinned sliver header for the TabBar inside [MemoryBooksTab]'s
 /// NestedScrollView. Keeps the tab bar visible while the header scrolls away.
 class _PinnedTabBarDelegate extends SliverPersistentHeaderDelegate {
   final TabBar tabBar;
