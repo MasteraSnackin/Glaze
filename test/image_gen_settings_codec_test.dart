@@ -89,6 +89,24 @@ void main() {
       expect(restored.references, isEmpty);
     });
 
+    test('round-trips the concurrent-generation toggle', () {
+      const settings = ImageGenSettings(concurrentGeneration: true);
+      final restored = ImageGenSettingsCodec.fromJson(
+        ImageGenSettingsCodec.toJson(settings),
+      );
+
+      expect(restored.concurrentGeneration, isTrue);
+    });
+
+    test('settings saved before the toggle existed stay sequential', () {
+      expect(
+        ImageGenSettingsCodec.fromJson({
+          'enabled': true,
+        }).concurrentGeneration,
+        isFalse,
+      );
+    });
+
     test('unknown api types fall back to openai', () {
       expect(
         ImageGenSettingsCodec.fromJson({'apiType': 'nope'}).apiType,

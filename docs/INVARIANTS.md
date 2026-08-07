@@ -90,6 +90,20 @@ state (separate from `isGenerating`).
 Both `abortGeneration()` and `cancelImageGeneration()` clear the flag.
 Cancelled image tags are replaced with `[IMG:ERROR:...]`.
 
+### INV-IG4: One image at a time unless the user opts out
+
+`ImageGenService.processMessageImages()` walks the image tags of a message in
+document order and awaits each generation from start to end before starting the
+next. `ImageGenSettings.concurrentGeneration` (off by default) is the only way
+to fire them together; even then the results are written back in tag order.
+
+### INV-IG5: A pending image tag is only ever replaced by its own outcome
+
+Every rewrite goes through `ImageTagMarkup.scanPendingTags()` and touches the
+span of a single tag. An image that fails, is cancelled, or is refused becomes
+`[IMG:ERROR:...]` carrying its original instruction — a block is never dropped
+from the message, so the UI can always offer a regenerate action for it.
+
 ---
 
 ## 3. Summary Generation Invariants

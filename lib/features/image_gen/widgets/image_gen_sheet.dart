@@ -234,6 +234,18 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
                 ),
               ),
             MenuGroup(
+              header: 'imggen_generation'.tr(),
+              items: [
+                MenuSwitchItem(
+                  label: 'imggen_concurrent'.tr(),
+                  description: 'imggen_concurrent_desc'.tr(),
+                  value: s.concurrentGeneration,
+                  onChanged: (v) =>
+                      _update(s.copyWith(concurrentGeneration: v)),
+                ),
+              ],
+            ),
+            MenuGroup(
               header: 'imggen_styles'.tr(),
               items: [
                 MenuSelectorItem(

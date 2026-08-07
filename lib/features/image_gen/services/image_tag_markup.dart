@@ -2,123 +2,109 @@ import 'dart:convert';
 
 import '../../../core/constants/image_gen_patterns.dart';
 
+/// One pending image tag located in a message: the span it occupies and the
+/// raw instruction payload it carries.
+class PendingImageTag {
+  const PendingImageTag(this.start, this.end, this.payload);
+
+  /// Offset of the first character of the tag inside the scanned text.
+  final int start;
+
+  /// Offset just past the last character of the tag.
+  final int end;
+
+  /// Raw instruction payload — the `data-iig-instruction` attribute value or
+  /// whatever follows `[IMG:GEN:`. Empty when the tag carries no instruction.
+  final String payload;
+}
+
 /// Pure text transformations for `[IMG:GEN]` / `[IMG:RESULT:]` / `[IMG:ERROR]`
 /// image-gen tag markup. Has no dependency on image generation, file I/O, or
 /// network — only on [ImgGenPatterns] and JSON encoding.
+///
+/// Every operation is anchored on [scanPendingTags], a single document-ordered
+/// pass over the four tag spellings. Resolving one tag rewrites only that tag's
+/// span, so the other pending tags of the same message survive untouched —
+/// a message with several images keeps every block until its own image lands.
 class ImageTagMarkup {
   ImageTagMarkup._();
 
-  static bool hasImageGenTags(String text) {
-    if (ImgGenPatterns.htmlIigTagRegex.hasMatch(text) ||
-        ImgGenPatterns.htmlIigTagDoubleRegex.hasMatch(text)) {
-      return true;
+  /// Pending image tags in document order, deduplicated across the spellings
+  /// that can match the same `<img>` element.
+  ///
+  /// HTML forms win over the bare `[IMG:GEN…]` they wrap, so an
+  /// `<img data-iig-instruction='…' src="[IMG:GEN]">` counts once and is
+  /// replaced as a whole element.
+  static List<PendingImageTag> scanPendingTags(String text) {
+    if (!text.contains('[IMG:GEN') && !text.contains('data-iig-instruction')) {
+      return const [];
     }
-    final stripped = ImgGenPatterns.stripHtmlImgTags(text);
-    return ImgGenPatterns.imgGenRegex.hasMatch(stripped);
+
+    final tags = <PendingImageTag>[];
+    bool overlapsExisting(int start, int end) =>
+        tags.any((tag) => start < tag.end && tag.start < end);
+
+    void collect(RegExp pattern, String? Function(RegExpMatch) payloadOf) {
+      for (final match in pattern.allMatches(text)) {
+        if (overlapsExisting(match.start, match.end)) continue;
+        tags.add(
+          PendingImageTag(match.start, match.end, payloadOf(match) ?? ''),
+        );
+      }
+    }
+
+    collect(ImgGenPatterns.htmlIigTagRegex, (m) => m.group(1));
+    collect(ImgGenPatterns.htmlIigTagDoubleRegex, (m) => m.group(1));
+    // `<img src="[IMG:GEN:…]">` without the instruction attribute: the payload
+    // lives in the src, but the whole element is what gets replaced.
+    collect(
+      ImgGenPatterns.imgSrcGenRegex,
+      (m) => ImgGenPatterns.imgGenRegex.firstMatch(m.group(0)!)?.group(1),
+    );
+    collect(ImgGenPatterns.imgGenRegex, (m) => m.group(1));
+
+    tags.sort((a, b) => a.start.compareTo(b.start));
+    return tags;
   }
 
-  static List<Map<String, dynamic>> extractImageGenInstructions(String text) {
-    final results = <Map<String, dynamic>>[];
+  static bool hasImageGenTags(String text) => scanPendingTags(text).isNotEmpty;
 
-    for (final m in ImgGenPatterns.htmlIigTagRegex.allMatches(text)) {
-      final payload = m.group(1);
-      if (payload == null || payload.isEmpty) continue;
-      try {
-        results.add(jsonDecode(payload) as Map<String, dynamic>);
-      } catch (_) {
-        results.add(<String, dynamic>{'prompt': payload});
-      }
-    }
+  /// How many image tags of [text] are still waiting for their image.
+  static int pendingImageGenTagCount(String text) =>
+      scanPendingTags(text).length;
 
-    for (final m in ImgGenPatterns.htmlIigTagDoubleRegex.allMatches(text)) {
-      final payload = m.group(1);
-      if (payload == null || payload.isEmpty) continue;
-      try {
-        results.add(jsonDecode(payload) as Map<String, dynamic>);
-      } catch (_) {
-        results.add(<String, dynamic>{'prompt': payload});
-      }
-    }
+  static List<Map<String, dynamic>> extractImageGenInstructions(String text) =>
+      scanPendingTags(text).map(_decodeInstruction).toList();
 
-    final stripped = ImgGenPatterns.stripHtmlImgTags(text);
-    for (final m in ImgGenPatterns.imgGenRegex.allMatches(stripped)) {
-      final payload = m.group(1);
-      if (payload == null || payload.isEmpty) {
-        results.add(<String, dynamic>{'prompt': ''});
-        continue;
-      }
-      try {
-        results.add(jsonDecode(payload) as Map<String, dynamic>);
-      } catch (_) {
-        results.add(<String, dynamic>{'prompt': payload});
-      }
-    }
-
-    return results;
+  static Map<String, dynamic> _decodeInstruction(PendingImageTag tag) {
+    if (tag.payload.isEmpty) return <String, dynamic>{'prompt': ''};
+    try {
+      final decoded = jsonDecode(tag.payload);
+      if (decoded is Map<String, dynamic>) return decoded;
+    } catch (_) {}
+    return <String, dynamic>{'prompt': tag.payload};
   }
 
   static String replaceTagWithResult(String text, int index, String imagePath) {
-    final instructions = extractImageGenInstructions(text);
-    final instruction = index < instructions.length
-        ? instructions[index]
-        : null;
-    final instrJson = instruction != null && instruction.isNotEmpty
-        ? jsonEncode(instruction)
-        : '';
+    final tags = scanPendingTags(text);
+    if (index < 0 || index >= tags.length) return text;
+    final tag = tags[index];
+    final instruction = _decodeInstruction(tag);
+    final instrJson = instruction.isNotEmpty ? jsonEncode(instruction) : '';
     final payload = instrJson.isNotEmpty ? '$imagePath|$instrJson' : imagePath;
-    int count = 0;
-    var result = text.replaceAllMapped(ImgGenPatterns.htmlIigTagRegex, (m) {
-      if (count++ == index) return '[IMG:RESULT:$payload]';
-      return m.group(0)!;
-    });
-    result = result.replaceAllMapped(ImgGenPatterns.htmlIigTagDoubleRegex, (m) {
-      if (count++ == index) return '[IMG:RESULT:$payload]';
-      return m.group(0)!;
-    });
-    result = result.replaceAllMapped(ImgGenPatterns.imgSrcGenRegex, (m) {
-      if (count++ == index) return '[IMG:RESULT:$payload]';
-      return m.group(0)!;
-    });
-    final stripped = ImgGenPatterns.stripHtmlImgTags(result);
-    final needStrip = stripped != result;
-    result = result.replaceAllMapped(ImgGenPatterns.imgGenRegex, (m) {
-      if (count++ == index) return '[IMG:RESULT:$payload]';
-      return m.group(0)!;
-    });
-    if (count <= index) return text;
-    return needStrip ? ImgGenPatterns.stripHtmlImgTags(result) : result;
+    return text.replaceRange(tag.start, tag.end, '[IMG:RESULT:$payload]');
   }
 
   static String replaceTagWithError(String text, int index, String error) {
-    final instructions = extractImageGenInstructions(text);
-    final instructionJson = index < instructions.length
-        ? jsonEncode(instructions[index])
-        : '';
+    final tags = scanPendingTags(text);
+    if (index < 0 || index >= tags.length) return text;
+    final tag = tags[index];
+    final instructionJson = jsonEncode(_decodeInstruction(tag));
     final encoded = jsonEncode({
       'error': error,
       if (instructionJson.isNotEmpty) 'instruction': instructionJson,
     });
-    int count = 0;
-    var result = text.replaceAllMapped(ImgGenPatterns.htmlIigTagRegex, (m) {
-      if (count++ == index) return '[IMG:ERROR:$encoded]';
-      return m.group(0)!;
-    });
-    result = result.replaceAllMapped(ImgGenPatterns.htmlIigTagDoubleRegex, (m) {
-      if (count++ == index) return '[IMG:ERROR:$encoded]';
-      return m.group(0)!;
-    });
-    result = result.replaceAllMapped(ImgGenPatterns.imgSrcGenRegex, (m) {
-      if (count++ == index) return '[IMG:ERROR:$encoded]';
-      return m.group(0)!;
-    });
-    final stripped = ImgGenPatterns.stripHtmlImgTags(result);
-    final needStrip = stripped != result;
-    result = result.replaceAllMapped(ImgGenPatterns.imgGenRegex, (m) {
-      if (count++ == index) return '[IMG:ERROR:$encoded]';
-      return m.group(0)!;
-    });
-    if (count <= index) return text;
-    return needStrip ? ImgGenPatterns.stripHtmlImgTags(result) : result;
+    return text.replaceRange(tag.start, tag.end, '[IMG:ERROR:$encoded]');
   }
 
   /// Resolves every pending image tag to a retryable disabled-state error.

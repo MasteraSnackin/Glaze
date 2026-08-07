@@ -189,10 +189,16 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   Future<void> findImageOnDisk(String messageId, String instruction) async =>
       _imageRecoverySvc.findImageOnDisk(messageId, instruction);
   final Set<String> _queuedImageRetries = <String>{};
-  Future<void> retryImageGenerationForMessage(String messageId) async {
+  Future<void> retryImageGenerationForMessage(
+    String messageId, {
+    bool failedOnly = false,
+  }) async {
     if (!_queuedImageRetries.add(messageId)) return;
     try {
-      await _imageRecoverySvc.retryImageGenerationForMessage(messageId);
+      await _imageRecoverySvc.retryImageGenerationForMessage(
+        messageId,
+        failedOnly: failedOnly,
+      );
     } finally {
       _queuedImageRetries.remove(messageId);
     }

@@ -198,9 +198,11 @@ class ImageRecoveryService {
     return text;
   }
 
-  static String resetImgTagsToGen(String text) {
-    var result = text;
-    result = result.replaceAllMapped(ImgGenPatterns.imgErrorRegex, (m) {
+  /// Turns only the failed blocks back into pending tags, leaving the images
+  /// that did arrive in place. This is what the error card's regenerate button
+  /// runs: retrying one block must not throw away its finished siblings.
+  static String resetImgErrorTagsToGen(String text) {
+    return text.replaceAllMapped(ImgGenPatterns.imgErrorRegex, (m) {
       final data = m.group(1) ?? '';
       String instruction = '';
       try {
@@ -212,6 +214,10 @@ class ImageRecoveryService {
       }
       return '[IMG:GEN]';
     });
+  }
+
+  static String resetImgTagsToGen(String text) {
+    var result = resetImgErrorTagsToGen(text);
     result = result.replaceAllMapped(ImgGenPatterns.imgResultRegex, (m) {
       final raw = m.group(1) ?? '';
       final pipeIdx = raw.indexOf('|');
@@ -324,7 +330,19 @@ class ImageRecoveryService {
     }
   }
 
-  Future<void> retryImageGenerationForMessage(String messageId) async {
+  /// Regenerates the image tags of [messageId].
+  ///
+  /// With [failedOnly] the finished images are kept and only the error blocks
+  /// go back to pending — the behaviour behind the regenerate button of an
+  /// error card. Without it every image of the message is generated again.
+  Future<void> retryImageGenerationForMessage(
+    String messageId, {
+    bool failedOnly = false,
+  }) async {
+    String reset(String content) => failedOnly
+        ? resetImgErrorTagsToGen(content)
+        : resetImgTagsToGen(content);
+
     var current = _getState().value;
     if (current == null || current.session == null || current.isGenerating) {
       return;
@@ -354,7 +372,7 @@ class ImageRecoveryService {
     final msg = current.messages[messageIndex];
     if (msg.role != 'assistant') return;
 
-    var resetContent = resetImgTagsToGen(msg.content);
+    final resetContent = reset(msg.content);
     if (resetContent == msg.content) return;
 
     final resetSession = await _ref
@@ -365,7 +383,7 @@ class ImageRecoveryService {
           updatedAt: currentTimestampSeconds(),
           mutate: (message) {
             if (message.role != 'assistant') return null;
-            final content = resetImgTagsToGen(message.content);
+            final content = reset(message.content);
             if (content == message.content) return null;
             return ImageGenProcessor.appendImageRegenerationSwipe(
               message,

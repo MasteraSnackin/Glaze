@@ -401,7 +401,7 @@ export class Formatter {
         if (errorMsg === 'Image generation disabled') {
           return `<div class="imggen-error imggen-disabled" data-instruction="${encInstr}"><span class="imggen-error-icon">🖼</span><span class="imggen-error-msg">Image generation disabled</span><div class="imggen-error-actions"><button class="imggen-error-retry" type="button" data-action="img-enable-retry" data-instruction="${encInstr}">Enable and generate</button></div></div>`;
         }
-        return `<div class="imggen-error" data-instruction="${encInstr}"><span class="imggen-error-icon">⚠</span><span class="imggen-error-msg">${this._escapeHtml(errorMsg)}</span><div class="imggen-error-actions"><button class="imggen-error-retry" type="button" data-action="img-retry" data-instruction="${encInstr}">↻ Retry</button><button class="imggen-error-retry imggen-error-find" type="button" data-action="img-find" data-instruction="${encInstr}">Find on disk</button></div></div>`;
+        return `<div class="imggen-error" data-instruction="${encInstr}"><span class="imggen-error-icon">⚠</span><span class="imggen-error-msg">${this._escapeHtml(errorMsg)}</span><div class="imggen-error-actions"><button class="imggen-error-retry" type="button" data-action="img-retry" data-instruction="${encInstr}">↻ Regenerate</button><button class="imggen-error-retry imggen-error-find" type="button" data-action="img-find" data-instruction="${encInstr}">Find on disk</button></div></div>`;
       }
       return '';
     });

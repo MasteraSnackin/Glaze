@@ -192,6 +192,56 @@ void main() {
       expect(result, contains('[IMG:RESULT:/img1.png|'));
       expect(result, contains('[IMG:GEN:{"prompt":"second"}]'));
     });
+
+    test('resolving one HTML tag keeps the other pending blocks', () {
+      const html =
+          """<img data-iig-instruction='{"prompt":"first"}' src="[IMG:GEN]">"""
+          """<i>caption</i>"""
+          """<img data-iig-instruction='{"prompt":"second"}' src="[IMG:GEN]">""";
+
+      final result = ImageTagMarkup.replaceTagWithResult(html, 0, '/img1.png');
+
+      expect(result, contains('[IMG:RESULT:/img1.png|'));
+      expect(result, contains('caption'));
+      expect(result, contains(r'{"prompt":"second"}'));
+      expect(ImageTagMarkup.pendingImageGenTagCount(result), 1);
+    });
+
+    test('a failing HTML tag stays a retryable block, not a deletion', () {
+      const html =
+          """<img data-iig-instruction='{"prompt":"first"}' src="[IMG:GEN]">"""
+          """<img data-iig-instruction='{"prompt":"second"}' src="[IMG:GEN]">""";
+
+      final failed = ImageTagMarkup.replaceTagWithError(html, 0, 'HTTP 502');
+      expect(failed, contains('[IMG:ERROR:'));
+      expect(failed, contains(r'{\"prompt\":\"first\"}'));
+      expect(ImageTagMarkup.pendingImageGenTagCount(failed), 1);
+
+      // The surviving block is still the second one, and it resolves next.
+      final settled = ImageTagMarkup.replaceTagWithResult(
+        failed,
+        0,
+        '/img2.png',
+      );
+      expect(settled, contains('[IMG:RESULT:/img2.png|'));
+      expect(settled, contains(r'{"prompt":"second"}'));
+      expect(ImageTagMarkup.pendingImageGenTagCount(settled), 0);
+    });
+
+    test('scans mixed HTML and bare tags in document order', () {
+      const text =
+          """[IMG:GEN:{"prompt":"one"}] """
+          """<img data-iig-instruction='{"prompt":"two"}' src="[IMG:GEN]"> """
+          """[IMG:GEN:{"prompt":"three"}]""";
+
+      final instructions = ImageTagMarkup.extractImageGenInstructions(text);
+      expect(instructions.map((i) => i['prompt']), [
+        'one',
+        'two',
+        'three',
+      ]);
+      expect(ImageTagMarkup.pendingImageGenTagCount(text), 3);
+    });
   });
 
   group('replaceTagWithError', () {
@@ -357,6 +407,97 @@ void main() {
     test('disabled by default', () {
       const settings = ImageGenSettings();
       expect(settings.enabled, isFalse);
+    });
+
+    test('images are generated one at a time by default', () {
+      const settings = ImageGenSettings();
+      expect(settings.concurrentGeneration, isFalse);
+    });
+  });
+
+  group('generation order', () {
+    // Answers 404 after a short delay and records how many requests were being
+    // served at the same moment.
+    Future<(HttpServer, int Function())> startProbeServer() async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      var inFlight = 0;
+      var maxInFlight = 0;
+      server.listen((request) async {
+        inFlight++;
+        if (inFlight > maxInFlight) maxInFlight = inFlight;
+        await request.drain<void>();
+        await Future<void>.delayed(const Duration(milliseconds: 120));
+        request.response.statusCode = HttpStatus.notFound;
+        await request.response.close();
+        inFlight--;
+      });
+      return (server, () => maxInFlight);
+    }
+
+    ImageGenSettings settingsFor(HttpServer server, {required bool parallel}) =>
+        ImageGenSettings(
+          enabled: true,
+          concurrentGeneration: parallel,
+          useSameEndpoint: false,
+          customEndpoint: 'http://${server.address.address}:${server.port}',
+          customApiKey: 'test-key',
+        );
+
+    const threeTags =
+        '[IMG:GEN:{"prompt":"one"}] '
+        '[IMG:GEN:{"prompt":"two"}] '
+        '[IMG:GEN:{"prompt":"three"}]';
+
+    test('off — each image is requested only after the previous one', () async {
+      final (server, maxInFlight) = await startProbeServer();
+      addTearDown(() => server.close(force: true));
+
+      final result = await service.processMessageImages(
+        text: threeTags,
+        settings: settingsFor(server, parallel: false),
+        llmEndpoint: '',
+        llmApiKey: '',
+        llmModel: '',
+      );
+
+      expect(maxInFlight(), 1);
+      expect(ImageTagMarkup.hasImageGenTags(result), isFalse);
+      expect('[IMG:ERROR:'.allMatches(result), hasLength(3));
+    });
+
+    test('on — the images of a message are requested together', () async {
+      final (server, maxInFlight) = await startProbeServer();
+      addTearDown(() => server.close(force: true));
+
+      final result = await service.processMessageImages(
+        text: threeTags,
+        settings: settingsFor(server, parallel: true),
+        llmEndpoint: '',
+        llmApiKey: '',
+        llmModel: '',
+      );
+
+      expect(maxInFlight(), greaterThan(1));
+      expect(ImageTagMarkup.hasImageGenTags(result), isFalse);
+      expect('[IMG:ERROR:'.allMatches(result), hasLength(3));
+    });
+
+    test('every failure keeps its own block and instruction', () async {
+      final (server, _) = await startProbeServer();
+      addTearDown(() => server.close(force: true));
+
+      final result = await service.processMessageImages(
+        text: threeTags,
+        settings: settingsFor(server, parallel: false),
+        llmEndpoint: '',
+        llmApiKey: '',
+        llmModel: '',
+      );
+
+      for (final prompt in ['one', 'two', 'three']) {
+        expect(result, contains('\\"prompt\\":\\"$prompt\\"'));
+      }
+      expect(ImageTagMarkup.resetErrorTags(result), threeTags);
     });
   });
 

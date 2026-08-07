@@ -1499,7 +1499,10 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                           onImgRetry: (instruction, messageId) {
                             ref
                                 .read(chatProvider(widget.charId).notifier)
-                                .retryImageGenerationForMessage(messageId);
+                                .retryImageGenerationForMessage(
+                                  messageId,
+                                  failedOnly: true,
+                                );
                           },
                           onImgEnableRetry: (instruction, messageId) async {
                             await ref
@@ -1508,7 +1511,10 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                             if (!mounted) return;
                             await ref
                                 .read(chatProvider(widget.charId).notifier)
-                                .retryImageGenerationForMessage(messageId);
+                                .retryImageGenerationForMessage(
+                                  messageId,
+                                  failedOnly: true,
+                                );
                           },
                           onImgFind: (instruction, messageId) {
                             ref
