@@ -1,23 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/llm/aux_llm_client.dart' show AuxApiConfig;
-import '../../../core/llm/macro_engine.dart';
 import '../../../core/llm/studio_ledger_service.dart';
-import '../../../core/llm/studio_ledger_reconciliation.dart';
-import '../../../core/llm/studio_slot_resolver.dart';
-import '../../../core/db/repositories/tracker_repo.dart';
 import '../../../core/models/agent_operation_record.dart';
 import '../../../core/models/chat_message.dart';
 import '../../../core/models/tracker.dart';
-import '../../../core/services/generation_notification_service.dart';
-import '../../../core/services/post_gen_foreground_guard.dart';
-import '../../../core/state/active_studio_preset_provider.dart';
 import '../../../core/state/db_provider.dart';
-import '../../../core/state/memory_agent_providers.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_toast.dart';
-import '../../settings/api_list_provider.dart';
+import '../services/manual_studio_ledger_service.dart';
 import '../state/agent_operations_log_provider.dart';
 import 'agentic_operations_log_dialog.dart'
     show AgenticSessionScope, OperationTile;
@@ -222,96 +213,12 @@ class _AgenticLastTurnTabState extends ConsumerState<AgenticLastTurnTab> {
   Future<void> _rerunLedger(String sessionId, ChatMessage target) async {
     if (_runningLedger) return;
     setState(() => _runningLedger = true);
-    // Capture provider-owned dependencies synchronously. From this point on the
-    // operation is independent of the Agent Ops widget lifecycle.
-    final chatRepo = ref.read(chatRepoProvider);
-    final studioConfigRepo = ref.read(studioConfigRepoProvider);
-    final pipeline = ref.read(pipelineSettingsProvider);
-    final apiConfigsFuture = ref.read(apiListProvider.future);
-    final activeApiConfig = ref.read(activeApiConfigProvider);
-    final ledgerService = ref.read(studioLedgerServiceProvider);
-    final trackerRepo = ref.read(trackerRepoProvider);
-    final presetRepo = ref.read(studioPresetRepoProvider);
-    final characterRepo = ref.read(characterRepoProvider);
+    final service = ref.read(manualStudioLedgerServiceProvider);
     try {
-      final session = await chatRepo.getById(sessionId);
-      if (session == null) throw StateError('Session not found');
-      final studioConfig = await studioConfigRepo.getBySessionId(sessionId);
-      final recentHistory = _recentHistoryText(
-        session.messages,
-        maxMessages: 10,
-        upToMessageId: target.id,
-      );
-      final startedAt = DateTime.now().millisecondsSinceEpoch;
-      final apiConfigs = await apiConfigsFuture;
-      final AuxApiConfig ledgerConfig;
-      try {
-        ledgerConfig = StudioSlotResolver.resolve(
-          apiConfigs: apiConfigs,
-          apiConfigId: studioConfig?.cleanerApiConfigId ?? '',
-          fallback: activeApiConfig,
-          errorLabel: 'ledger-rerun',
-          modelOverride: pipeline.cleaner.postCleanerModel,
-          extraRequestParameterOverrides:
-              pipeline.cleaner.postCleanerExtraRequestParameters,
-        );
-      } catch (e) {
-        if (mounted) {
-          GlazeToast.showWithoutContext(
-            'Studio Ledger rerun failed: $e',
-            duration: 4000,
-            isError: true,
-          );
-        }
-        return;
-      }
-      final studioPreset = await presetRepo.getById(
-        await ref.read(activeStudioPresetProvider.future),
-      );
-      final character = await characterRepo.getById(session.characterId);
-      final macroCtx = MacroContext(
-        charName: character?.name ?? '',
-        charDescription: character?.description,
-        charScenario: character?.scenario,
-        charPersonality: character?.personality,
-        charMesExample: character?.mesExample,
-        userName: 'User',
-        macroName: character?.macroName,
-        charId: session.characterId,
-        sessionId: sessionId,
-      );
-
-      final result = await runWithPostGenForeground(
-        onStarted: GenerationNotificationService.instance.onPostGenStarted,
-        action: () => ledgerService.run(
-          sessionId: sessionId,
-          settings: pipeline,
-          config: ledgerConfig,
-          finalAssistantText: target.content,
-          recentHistoryText: recentHistory,
-          messageId: target.id,
-          swipeId: target.swipeId,
-          agentSwipeId: target.agentSwipeId,
-          forceEnabled: true,
-          ledgerBlocks: studioPreset?.blocks ?? const [],
-          macroCtx: macroCtx,
-          commitSnapshot: true,
-        ),
-        onFinished: GenerationNotificationService.instance.onPostGenFinished,
-      );
-      await trackerRepo.upsertValue(
-        sessionId,
-        '_ledger_diag:studio_ledger',
-        'turn=${target.id} • manual rerun, ${result.status} '
-            '(ops=${result.opsApplied})'
-            '${result.error == null ? '' : ': ${result.error}'}',
-        scope: 'ledger_diagnostic',
-        provenance:
-            'message=${target.id}|swipe=${target.swipeId}|'
-            'agentSwipe=${target.agentSwipeId}|manual=1',
-      );
+      final outcome = await service.rerun(sessionId: sessionId, target: target);
       if (!mounted) return;
-      _appendLedgerRecord(sessionId, target, result, startedAt);
+      final result = outcome.result;
+      _appendLedgerRecord(sessionId, target, result, outcome.startedAtMs);
       if (mounted) {
         GlazeToast.show(
           context,
@@ -321,6 +228,14 @@ class _AgenticLastTurnTabState extends ConsumerState<AgenticLastTurnTab> {
           isError: result.status != 'ok',
           duration: 4000,
           position: ToastPosition.top,
+        );
+      }
+    } on ManualStudioLedgerConfigException catch (e) {
+      if (mounted) {
+        GlazeToast.showWithoutContext(
+          'Studio Ledger rerun failed: $e',
+          duration: 4000,
+          isError: true,
         );
       }
     } catch (e) {
@@ -349,112 +264,16 @@ class _AgenticLastTurnTabState extends ConsumerState<AgenticLastTurnTab> {
   Future<void> _runReconciliation(String sessionId) async {
     if (_runningReconciliation) return;
     setState(() => _runningReconciliation = true);
-    final chatRepo = ref.read(chatRepoProvider);
-    final studioConfigRepo = ref.read(studioConfigRepoProvider);
-    final snapshotRepo = ref.read(trackerSnapshotRepoProvider);
-    final pipeline = ref.read(pipelineSettingsProvider);
-    final apiConfigsFuture = ref.read(apiListProvider.future);
-    final activeApiConfig = ref.read(activeApiConfigProvider);
-    final ledgerService = ref.read(studioLedgerServiceProvider);
-    final trackerRepo = ref.read(trackerRepoProvider);
-    final presetRepo = ref.read(studioPresetRepoProvider);
-    final characterRepo = ref.read(characterRepoProvider);
+    final service = ref.read(manualStudioLedgerServiceProvider);
     try {
-      final session = await chatRepo.getById(sessionId);
-      if (session == null) throw StateError('Session not found');
-      final snapshots = await snapshotRepo.getBySessionId(sessionId);
-      final committedAnchors = snapshots
-          .where((snapshot) => snapshot.committed)
-          .map(
-            (snapshot) =>
-                '${snapshot.messageId}\u001f${snapshot.swipeId}\u001f'
-                '${snapshot.agentSwipeId}',
-          )
-          .toSet();
-      final endpoint = session.messages.reversed.where((message) {
-        final anchor =
-            '${message.id}\u001f${message.swipeId}\u001f${message.agentSwipeId}';
-        return message.role == 'assistant' &&
-            !message.isError &&
-            !message.isTyping &&
-            !message.isHidden &&
-            message.content.trim().isNotEmpty &&
-            committedAnchors.contains(anchor);
-      }).firstOrNull;
-      if (endpoint == null) {
-        throw StateError('No committed Ledger snapshot to reconcile');
-      }
-      final plan = const LedgerReconciliationPlanner().planForEndpoint(
-        messages: session.messages,
-        endAssistantMessageId: endpoint.id,
-      );
-      if (plan == null) {
-        throw StateError(
-          'No reviewable messages end at the committed snapshot',
-        );
-      }
-
-      final studioConfig = await studioConfigRepo.getBySessionId(sessionId);
-      final apiConfigs = await apiConfigsFuture;
-      final ledgerConfig = StudioSlotResolver.resolve(
-        apiConfigs: apiConfigs,
-        apiConfigId: studioConfig?.cleanerApiConfigId ?? '',
-        fallback: activeApiConfig,
-        errorLabel: 'ledger-reconciliation-manual',
-        modelOverride: pipeline.cleaner.postCleanerModel,
-        extraRequestParameterOverrides:
-            pipeline.cleaner.postCleanerExtraRequestParameters,
-      );
-      final studioPreset = await presetRepo.getById(
-        await ref.read(activeStudioPresetProvider.future),
-      );
-      final character = await characterRepo.getById(session.characterId);
-      final macroCtx = MacroContext(
-        charName: character?.name ?? '',
-        charDescription: character?.description,
-        charScenario: character?.scenario,
-        charPersonality: character?.personality,
-        charMesExample: character?.mesExample,
-        userName: 'User',
-        macroName: character?.macroName,
-        charId: session.characterId,
-        sessionId: sessionId,
-      );
-      final startedAt = DateTime.now().millisecondsSinceEpoch;
-      await _writeReconciliationDiagnostic(
-        trackerRepo: trackerRepo,
-        sessionId: sessionId,
-        trigger: endpoint,
-        plan: plan,
-        result: LedgerRunResult(status: 'running', model: ledgerConfig.model),
-        manual: true,
-      );
-      final result = await runWithPostGenForeground(
-        onStarted: GenerationNotificationService.instance.onPostGenStarted,
-        action: () => ledgerService.reconcile(
-          sessionId: sessionId,
-          settings: pipeline,
-          config: ledgerConfig,
-          plan: plan,
-          ledgerBlocks: studioPreset?.blocks ?? const [],
-          macroCtx: macroCtx,
-        ),
-        onFinished: GenerationNotificationService.instance.onPostGenFinished,
-      );
-      await _writeReconciliationDiagnostic(
-        trackerRepo: trackerRepo,
-        sessionId: sessionId,
-        trigger: endpoint,
-        plan: plan,
-        result: result,
-        manual: true,
-      );
+      final outcome = await service.reconcile(sessionId);
       if (!mounted) return;
+      final result = outcome.result;
       _appendLedgerRecord(
         sessionId,
-        endpoint,
+        outcome.target,
         result,
-        startedAt,
+        outcome.startedAtMs,
         reconciliation: true,
       );
       GlazeToast.show(
@@ -522,62 +341,6 @@ class _AgenticLastTurnTabState extends ConsumerState<AgenticLastTurnTab> {
           ),
         );
   }
-}
-
-Future<void> _writeReconciliationDiagnostic({
-  required TrackerRepo trackerRepo,
-  required String sessionId,
-  required ChatMessage trigger,
-  required LedgerReconciliationPlan plan,
-  required LedgerRunResult result,
-  required bool manual,
-}) {
-  final attempts = result.attempts.isEmpty
-      ? 'none'
-      : result.attempts
-            .map(
-              (attempt) =>
-                  '${attempt.attempt}:${attempt.status}'
-                  '/http=${attempt.statusCode}/ms=${attempt.elapsedMs}'
-                  '${attempt.error == null ? '' : '/error=${attempt.error}'}',
-            )
-            .join(',');
-  return trackerRepo.upsertValue(
-    sessionId,
-    '_ledger_diag:studio_ledger_reconciliation',
-    'trigger=${trigger.id} • range=${plan.startMessageId}..${plan.endMessage.id} '
-        '• status=${result.status} • ops=${result.opsApplied} '
-        '• elapsedMs=${result.elapsedMs} • model=${result.model ?? 'unknown'} '
-        '• attempts=$attempts${manual ? ' • manual=1' : ''}'
-        '${result.error == null ? '' : ' • error=${result.error}'}',
-    scope: 'ledger_diagnostic',
-    provenance:
-        'message=${trigger.id}|swipe=${trigger.swipeId}|'
-        'agentSwipe=${trigger.agentSwipeId}|range=${plan.startMessageId}..'
-        '${plan.endMessage.id}${manual ? '|manual=1' : ''}',
-  );
-}
-
-String _recentHistoryText(
-  List<ChatMessage> messages, {
-  int maxMessages = 10,
-  String? upToMessageId,
-}) {
-  var source = messages;
-  if (upToMessageId != null) {
-    final idx = messages.indexWhere((m) => m.id == upToMessageId);
-    if (idx >= 0) source = messages.sublist(0, idx + 1);
-  }
-  final start = source.length > maxMessages ? source.length - maxMessages : 0;
-  final lines = <String>[];
-  for (final msg in source.sublist(start)) {
-    if (msg.isError || msg.isTyping) continue;
-    final content = msg.content.trim();
-    if (content.isEmpty) continue;
-    final role = msg.role == 'assistant' ? 'Assistant' : 'User';
-    lines.add('$role: $content');
-  }
-  return lines.join('\n\n');
 }
 
 AgentOperationStatus _ledgerStatusToOp(String status) {

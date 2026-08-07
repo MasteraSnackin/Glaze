@@ -17,7 +17,14 @@ void main() {
     test('merges a current image update onto live chat state', () {
       final originalSession = session('session-1', '[IMG:GEN]');
       final liveState = ChatState(
-        session: originalSession,
+        session: originalSession.copyWith(
+          messages: [
+            ...originalSession.messages,
+            const ChatMessage(id: 'tail', role: 'user', content: 'new tail'),
+          ],
+          draft: 'new draft',
+          sessionVars: const {'concurrent': 'keep'},
+        ),
         isGenerating: true,
         isGeneratingImage: true,
         isPostGenRunning: true,
@@ -33,14 +40,15 @@ void main() {
         liveState: liveState,
         update: imageUpdate,
         sessionId: 'session-1',
+        targetMessageId: 'assistant',
         ownsOperation: true,
       );
 
       expect(merged, isNotNull);
-      expect(
-        merged!.messages.single.content,
-        '[IMG:RESULT:/images/result.png]',
-      );
+      expect(merged!.messages.first.content, '[IMG:RESULT:/images/result.png]');
+      expect(merged.messages.last.id, 'tail');
+      expect(merged.session?.draft, 'new draft');
+      expect(merged.session?.sessionVars, {'concurrent': 'keep'});
       expect(merged.isGenerating, isTrue);
       expect(merged.isPostGenRunning, isTrue);
       expect(merged.error, 'unrelated live state');
@@ -62,6 +70,7 @@ void main() {
         liveState: liveState,
         update: staleUpdate,
         sessionId: 'session-1',
+        targetMessageId: 'assistant',
         ownsOperation: false,
       );
 
@@ -84,6 +93,7 @@ void main() {
         liveState: liveState,
         update: staleUpdate,
         sessionId: 'old-session',
+        targetMessageId: 'assistant',
         ownsOperation: true,
       );
 

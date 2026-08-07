@@ -1,12 +1,15 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/models/chat_message.dart';
+import '../../../core/db/repositories/chat_repo.dart';
 import '../../../core/services/generation_notification_service.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../core/utils/time_helpers.dart';
+import '../../../core/state/studio_turn_config_resolver.dart';
 import '../../chat_history/chat_history_provider.dart';
 import '../abort_handler.dart';
 import '../chat_generation_service.dart';
@@ -98,6 +101,12 @@ class GenerationPipeline {
     final notifService = GenerationNotificationService.instance;
 
     try {
+      final studioTurnConfig = await ctx.ref
+          .read(studioTurnConfigResolverProvider)
+          .resolve(session.id);
+      if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) {
+        return null;
+      }
       final charRepo = ctx.ref.read(characterRepoProvider);
       final character = await charRepo.getById(ctx.charId);
       if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) {
@@ -109,7 +118,7 @@ class GenerationPipeline {
       }
 
       final service = ctx.ref.read(chatGenerationServiceProvider);
-      final result = await service.generate(
+      var result = await service.generate(
         session: session,
         saveSession: saveSession,
         charId: ctx.charId,
@@ -127,6 +136,7 @@ class GenerationPipeline {
         previousSwipesMeta: previousSwipesMeta,
         guidanceText: guidanceText,
         regenTargetId: regenTargetId,
+        studioTurnConfig: studioTurnConfig,
       );
 
       if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) {
@@ -142,11 +152,20 @@ class GenerationPipeline {
         return null;
       }
 
-      await ctx.ref.read(chatRepoProvider).put(result.session!);
+      final durableSession = await _commitGenerationResult(
+        baseSession: saveSession ?? session,
+        generatedSession: result.session!,
+        regenTargetId: regenTargetId,
+      );
+      if (durableSession == null) {
+        await notifService.onGenerationAborted();
+        return null;
+      }
+      result = result.copyWith(session: durableSession);
       if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) {
         return null;
       }
-      ChatSessionService.updateCache(result.session!);
+      ChatSessionService.updateCache(durableSession);
       ctx.ref.invalidate(chatHistoryProvider);
 
       final generationErrored =
@@ -175,12 +194,16 @@ class GenerationPipeline {
           regenMsg != null &&
           !regenMsg.isError &&
           !regenMsg.isTyping;
-      final regenOutcome = _regenResolver.resolve(
+      final regenOutcome = await _regenResolver.resolve(
         result: result,
         regenTargetId: regenTargetId,
         saveSession: saveSession,
         session: session,
+        genId: genId,
       );
+      if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) {
+        return null;
+      }
       if (regenOutcome != null) {
         // INV-EG1: extensions + image tags must run after successful regen too.
         if (regenSucceeded && result.session != null) {
@@ -198,6 +221,7 @@ class GenerationPipeline {
             service: service,
             notifService: notifService,
             regenTargetId: regenTargetId,
+            studioTurnConfig: studioTurnConfig,
           );
           // Post-gen finished — clear isPostGenRunning (unless a newer
           // generation has taken over, in which case leave its state
@@ -218,15 +242,32 @@ class GenerationPipeline {
       if (regenTargetId == null &&
           result.session?.messages.length == session.messages.length &&
           ctx.abortHandler.restorationMessage != null) {
-        final restoredMessages = [
-          ...session.messages,
-          ctx.abortHandler.restorationMessage!,
-        ];
-        final restoredSession = session.copyWith(
-          messages: restoredMessages,
-          updatedAt: currentTimestampSeconds(),
-        );
-        await ctx.ref.read(chatRepoProvider).put(restoredSession);
+        final restoration = ctx.abortHandler.restorationMessage!;
+        var restoredSession = await ctx.ref
+            .read(chatRepoProvider)
+            .mutateSession(
+              sessionId: session.id,
+              updatedAt: currentTimestampSeconds(),
+              mutate: (latest) {
+                if (!ctx.abortHandler.isCurrentGen(genId)) return null;
+                return _restoreAfterError(
+                  latest: latest,
+                  expected: session,
+                  restoration: restoration,
+                  regenTargetId: null,
+                );
+              },
+            );
+        restoredSession ??= await ctx.ref
+            .read(chatRepoProvider)
+            .getById(session.id);
+        if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) {
+          return null;
+        }
+        if (restoredSession == null) {
+          await notifService.onGenerationAborted();
+          return null;
+        }
         ChatSessionService.updateCache(restoredSession);
         ctx.ref.invalidate(chatHistoryProvider);
         ctx.abortHandler.restorationMessage = null;
@@ -268,6 +309,7 @@ class GenerationPipeline {
         service: service,
         notifService: notifService,
         regenTargetId: regenTargetId,
+        studioTurnConfig: studioTurnConfig,
       );
       // Post-gen finished — clear isPostGenRunning (unless a newer
       // generation has taken over, in which case leave its state
@@ -287,6 +329,76 @@ class GenerationPipeline {
       await _handlePipelineError(e, genId, notifService);
       return null;
     }
+  }
+
+  Future<ChatSession?> _commitGenerationResult({
+    required ChatSession baseSession,
+    required ChatSession generatedSession,
+    required String? regenTargetId,
+  }) {
+    return ctx.ref
+        .read(chatRepoProvider)
+        .mutateSession(
+          sessionId: generatedSession.id,
+          updatedAt: generatedSession.updatedAt,
+          mutate: (latest) {
+            final messages = List<ChatMessage>.from(latest.messages);
+            if (regenTargetId != null) {
+              final baseIndex = baseSession.messages.indexWhere(
+                (message) => message.id == regenTargetId,
+              );
+              final generatedIndex = generatedSession.messages.indexWhere(
+                (message) => message.id == regenTargetId,
+              );
+              final latestIndex = messages.indexWhere(
+                (message) => message.id == regenTargetId,
+              );
+              if (baseIndex < 0 || generatedIndex < 0 || latestIndex < 0) {
+                return null;
+              }
+              final base = baseSession.messages[baseIndex];
+              final current = messages[latestIndex];
+              if (!_sameGenerationAnchor(base, current)) return null;
+              messages[latestIndex] = generatedSession.messages[generatedIndex]
+                  .copyWith(
+                    isHidden: current.isHidden,
+                    imageHidden: current.imageHidden,
+                  );
+            } else {
+              if (generatedSession.messages.length !=
+                  baseSession.messages.length + 1) {
+                return null;
+              }
+              final expectedTail = baseSession.messages.lastOrNull?.id;
+              final currentTail = messages.lastOrNull?.id;
+              if (expectedTail != currentTail) return null;
+              messages.add(generatedSession.messages.last);
+            }
+
+            return latest.copyWith(
+              messages: messages,
+              sessionVars: ChatRepo.applySessionVarDelta(
+                latest.sessionVars,
+                baseSession.sessionVars,
+                generatedSession.sessionVars,
+              ),
+            );
+          },
+        );
+  }
+
+  static bool _sameGenerationAnchor(ChatMessage expected, ChatMessage current) {
+    return expected.content == current.content &&
+        expected.swipeId == current.swipeId &&
+        expected.agentSwipeId == current.agentSwipeId &&
+        jsonEncode(expected.swipes) == jsonEncode(current.swipes) &&
+        jsonEncode(expected.swipesMeta) == jsonEncode(current.swipesMeta) &&
+        jsonEncode(
+              expected.agentSwipes.map((swipe) => swipe.toJson()).toList(),
+            ) ==
+            jsonEncode(
+              current.agentSwipes.map((swipe) => swipe.toJson()).toList(),
+            );
   }
 
   /// Re-run the POST-cleaner against an existing assistant message.
@@ -312,28 +424,59 @@ class GenerationPipeline {
     if (current != null && (current.isGenerating || current.isPostGenRunning)) {
       final restoration = ctx.abortHandler.restorationMessage;
       if (restoration != null) {
-        final msgs = <ChatMessage>[
-          ...(current.session?.messages ?? const <ChatMessage>[]),
-          restoration,
-        ];
-        final restored = current.session?.copyWith(
-          messages: msgs,
-          updatedAt: currentTimestampSeconds(),
-        );
-        if (restored != null) {
-          // ignore: unawaited_futures
-          ctx.ref.read(chatRepoProvider).put(restored).catchError((Object err) {
+        final session = current.session;
+        ChatSession? durableSession;
+        Object? persistenceError;
+        if (session != null) {
+          try {
+            durableSession = await ctx.ref
+                .read(chatRepoProvider)
+                .mutateSession(
+                  sessionId: session.id,
+                  updatedAt: currentTimestampSeconds(),
+                  mutate: (latest) {
+                    if (!ctx.abortHandler.isCurrentGen(genId)) return null;
+                    return _restoreAfterError(
+                      latest: latest,
+                      expected: session,
+                      restoration: restoration,
+                      regenTargetId: current.regenTargetId,
+                    );
+                  },
+                );
+            durableSession ??= await ctx.ref
+                .read(chatRepoProvider)
+                .getById(session.id);
+          } catch (err) {
+            persistenceError = err;
             debugPrint('[GenerationPipeline] failed to persist restored: $err');
-          });
-          ChatSessionService.updateCache(restored);
+            try {
+              durableSession = await ctx.ref
+                  .read(chatRepoProvider)
+                  .getById(session.id);
+            } catch (reloadError) {
+              debugPrint(
+                '[GenerationPipeline] failed to reload current session: '
+                '$reloadError',
+              );
+            }
+          }
+        }
+        if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) return;
+        if (durableSession != null) {
+          ChatSessionService.updateCache(durableSession);
+          ctx.ref.invalidate(chatHistoryProvider);
         }
         ctx.setState(
           AsyncData(
             current.copyWith(
-              session: restored ?? current.session,
+              session: durableSession ?? current.session,
               isGenerating: false,
               isPostGenRunning: false,
-              error: e.toString(),
+              error: persistenceError == null
+                  ? e.toString()
+                  : '$e\nFailed to restore the previous response: '
+                        '$persistenceError',
             ),
           ),
         );
@@ -351,5 +494,42 @@ class GenerationPipeline {
       ctx.abortHandler.restorationMessage = null;
     }
     await notifService.onGenerationAborted();
+  }
+
+  static ChatSession? _restoreAfterError({
+    required ChatSession latest,
+    required ChatSession expected,
+    required ChatMessage restoration,
+    required String? regenTargetId,
+  }) {
+    if (regenTargetId != null) {
+      final expectedIndex = expected.messages.indexWhere(
+        (message) => message.id == regenTargetId,
+      );
+      final latestIndex = latest.messages.indexWhere(
+        (message) => message.id == regenTargetId,
+      );
+      if (latestIndex < 0) return null;
+      final current = latest.messages[latestIndex];
+      if (_sameGenerationAnchor(restoration, current)) return latest;
+      if (expectedIndex < 0 ||
+          !_sameGenerationAnchor(expected.messages[expectedIndex], current)) {
+        return null;
+      }
+      final messages = [...latest.messages];
+      messages[latestIndex] = restoration.copyWith(
+        isHidden: current.isHidden,
+        imageHidden: current.imageHidden,
+      );
+      return latest.copyWith(messages: messages);
+    }
+
+    if (latest.messages.any((message) => message.id == restoration.id)) {
+      return latest;
+    }
+    if (latest.messages.lastOrNull?.id != expected.messages.lastOrNull?.id) {
+      return null;
+    }
+    return latest.copyWith(messages: [...latest.messages, restoration]);
   }
 }

@@ -6,17 +6,23 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/llm/transport/chat_transport_request.dart';
 import '../../../core/llm/transport/transport_factory.dart';
+import '../../../core/llm/history_assembler.dart';
 import '../../../core/models/api_config.dart';
 import '../../../core/models/chat_message.dart';
 import '../../../core/models/character.dart';
+import '../../../core/models/persona.dart';
+import '../../../core/llm/prompt/main_model_context_snapshot.dart';
 import '../../../core/state/db_provider.dart';
 import '../../settings/api_list_provider.dart';
 import '../models/block_config.dart';
 import '../models/info_block.dart';
+import '../models/extension_context_policy.dart';
 import 'block_content_extractor.dart';
-import 'ext_blocks_prompt_injection.dart';
 import 'block_context_builder.dart';
+import 'ext_blocks_prompt_injection.dart';
 import 'macro_expander.dart';
+import 'extension_context_assembler.dart';
+import 'runtime_prompt_injection_service.dart';
 
 final infoBlockServiceProvider = Provider<InfoBlockService>(
   (ref) => InfoBlockService(ref),
@@ -39,22 +45,14 @@ class InfoBlockService {
     required String? persona,
     String? personaPrompt,
     required String? previousOutput,
+    ExtensionContextPolicy contextPolicy = const ExtensionContextPolicy(),
+    MainModelContextSnapshot? mainModelContextSnapshot,
+    Persona? personaModel,
     int swipeId = 0,
     CancelToken? cancelToken,
     void Function(String partial)? onStreamUpdate,
   }) async {
     if (cancelToken?.isCancelled == true) return (content: null, error: null);
-
-    final messagesWithInject = await _ref
-        .read(extBlocksPromptInjectionProvider)
-        .injectIntoHistory(sessionId: sessionId, messages: messages);
-
-    // Context is scoped to [messageId] — not the end of the session.
-    final contextMessages = buildContextMessages(
-      messages: messagesWithInject,
-      anchorMessageId: messageId,
-      count: blockConfig.contextMessageCount,
-    );
 
     // Pull this block's own prior outputs (same name, earlier messages) so the
     // model can continue/update the existing state instead of regenerating from
@@ -78,15 +76,71 @@ class InfoBlockService {
       character: character,
       persona: persona,
     );
-    final userContent = _buildUserMessage(
+    final supplementalContent = _buildSupplementalMessage(
       blockConfig: blockConfig,
       character: character,
       persona: persona,
-      personaPrompt: personaPrompt,
-      contextMessages: contextMessages,
       previousOutput: previousOutput,
       previousBlocks: previousBlocks,
     );
+    final canUseSnapshot = contextPolicy.useMainModelContext
+        ? mainModelContextSnapshot != null
+        : mainModelContextSnapshot?.filterablePromptMessages != null;
+    final needsReconstructedHistory =
+        contextPolicy.legacyPromptSemantics || !canUseSnapshot;
+    final contextMessages = needsReconstructedHistory
+        ? await _ref
+              .read(extBlocksPromptInjectionProvider)
+              .injectIntoHistory(sessionId: sessionId, messages: messages)
+        : messages;
+    final legacyContextMessages = contextPolicy.legacyPromptSemantics
+        ? buildContextMessages(
+            messages: contextMessages,
+            anchorMessageId: messageId,
+            count: blockConfig.contextMessageCount,
+          )
+        : const <ChatMessage>[];
+    final runtimePromptMessages =
+        contextPolicy.includeRuntimePrompts && needsReconstructedHistory
+        ? _ref
+              .read(runtimePromptInjectionProvider.notifier)
+              .bySession(sessionId)
+              .map((injection) => injection.toPromptMessage())
+              .toList()
+        : const <PromptMessage>[];
+    final assembly = const ExtensionContextAssembler().assemble(
+      policy: contextPolicy,
+      blockConfig: blockConfig,
+      chatMessages: contextMessages,
+      anchorMessageId: messageId,
+      character: character,
+      persona:
+          personaModel ??
+          (persona == null
+              ? null
+              : Persona(id: '', name: persona, prompt: personaPrompt)),
+      systemInstruction: systemContent,
+      supplementalInstruction: supplementalContent,
+      legacyUserContent: contextPolicy.legacyPromptSemantics
+          ? InfoBlockService.buildLegacyUserMessage(
+              blockConfig: blockConfig,
+              character: character,
+              persona: persona,
+              personaPrompt: personaModel?.prompt ?? personaPrompt,
+              contextMessages: legacyContextMessages,
+              previousOutput: previousOutput,
+              previousBlocks: previousBlocks,
+            )
+          : null,
+      runtimePromptMessages: runtimePromptMessages,
+      mainContextSnapshot: mainModelContextSnapshot,
+    );
+    if (assembly.reconstructed && contextPolicy.useMainModelContext) {
+      debugPrint(
+        '[InfoBlockService] main context snapshot unavailable; '
+        'using reconstructed context for "${blockConfig.name}"',
+      );
+    }
 
     // Resolve API config.
     final apiConfigId = blockConfig.apiConfigId;
@@ -114,8 +168,7 @@ class InfoBlockService {
       rawResponse = await _callLLM(
         apiConfig: apiConfig,
         blockConfig: blockConfig,
-        systemContent: systemContent,
-        userContent: userContent,
+        requestMessages: assembly.messages,
         cancelToken: cancelToken,
         onStreamUpdate: onStreamUpdate,
       );
@@ -196,7 +249,8 @@ class InfoBlockService {
     final previousMessageIds = previousMessages.map((m) => m.id).toList();
     if (previousMessageIds.isEmpty) return const [];
     final messageOrder = {
-      for (var i = 0; i < previousMessageIds.length; i++) previousMessageIds[i]: i,
+      for (var i = 0; i < previousMessageIds.length; i++)
+        previousMessageIds[i]: i,
     };
     final swipeByMessageId = {
       for (final message in previousMessages) message.id: message.swipeId,
@@ -205,23 +259,27 @@ class InfoBlockService {
     final repo = _ref.read(infoBlocksRepoProvider);
     final blocks = await repo.getBySessionId(sessionId);
 
-    final filtered = blocks
-        .where((b) =>
-            b.blockName == blockConfig.name &&
-            b.content.trim().isNotEmpty &&
-            messageOrder.containsKey(b.messageId) &&
-            b.swipeId == swipeByMessageId[b.messageId] &&
-            !(b.messageId == currentMessageId && b.swipeId == currentSwipeId))
-        .toList()
-      ..sort((a, b) {
-        final byMessage = messageOrder[a.messageId]!.compareTo(
-          messageOrder[b.messageId]!,
-        );
-        if (byMessage != 0) return byMessage;
-        final bySwipe = a.swipeId.compareTo(b.swipeId);
-        if (bySwipe != 0) return bySwipe;
-        return a.createdAt.compareTo(b.createdAt);
-      });
+    final filtered =
+        blocks
+            .where(
+              (b) =>
+                  b.blockName == blockConfig.name &&
+                  b.content.trim().isNotEmpty &&
+                  messageOrder.containsKey(b.messageId) &&
+                  b.swipeId == swipeByMessageId[b.messageId] &&
+                  !(b.messageId == currentMessageId &&
+                      b.swipeId == currentSwipeId),
+            )
+            .toList()
+          ..sort((a, b) {
+            final byMessage = messageOrder[a.messageId]!.compareTo(
+              messageOrder[b.messageId]!,
+            );
+            if (byMessage != 0) return byMessage;
+            final bySwipe = a.swipeId.compareTo(b.swipeId);
+            if (bySwipe != 0) return bySwipe;
+            return a.createdAt.compareTo(b.createdAt);
+          });
 
     final latestPerMessage = <String, InfoBlock>{};
     for (final block in filtered) {
@@ -299,12 +357,10 @@ class InfoBlockService {
   /// Builds the user message: the conversation context, character, persona,
   /// and optional chained block output. The model is meant to fill in the
   /// template based on this material.
-  String _buildUserMessage({
+  String _buildSupplementalMessage({
     required BlockConfig blockConfig,
     required Character? character,
     required String? persona,
-    String? personaPrompt,
-    required List<ChatMessage> contextMessages,
     required String? previousOutput,
     List<InfoBlock> previousBlocks = const [],
   }) {
@@ -334,39 +390,83 @@ class InfoBlockService {
       buffer.writeln();
     }
 
-    if (character != null) {
-      buffer.writeln('Character: ${character.name}');
-      if (character.description != null && character.description!.isNotEmpty) {
-        buffer.writeln('Description: ${character.description}');
-      }
-      buffer.writeln();
-    }
-
-    if (persona != null && persona.isNotEmpty) {
-      buffer.writeln('User Persona: $persona');
-      final profile = personaPrompt?.trim();
-      if (profile != null && profile.isNotEmpty) {
-        buffer.writeln('Persona profile:');
-        buffer.writeln(profile);
-      }
-      buffer.writeln();
-    }
-
-    if (contextMessages.isNotEmpty) {
-      buffer.writeln('Recent conversation:');
-      for (final msg in contextMessages) {
-        final role = msg.role == 'user' ? 'USER' : 'ASSISTANT';
-        buffer.writeln('$role: ${msg.content}');
-      }
-      buffer.writeln();
-    }
-
     if (previousOutput != null && previousOutput.isNotEmpty) {
       buffer.writeln('Output from previous block in chain:');
       buffer.writeln(previousOutput);
       buffer.writeln();
     }
 
+    return buffer.toString().trimRight();
+  }
+
+  @visibleForTesting
+  static String buildLegacyUserMessage({
+    required BlockConfig blockConfig,
+    required Character? character,
+    required String? persona,
+    String? personaPrompt,
+    required List<ChatMessage> contextMessages,
+    required String? previousOutput,
+    List<InfoBlock> previousBlocks = const [],
+  }) {
+    final buffer = StringBuffer();
+
+    if (blockConfig.contextSystemPrompt.isNotEmpty) {
+      buffer
+        ..writeln(
+          expand(
+            blockConfig.contextSystemPrompt,
+            MacroContext(character: character, persona: persona),
+          ),
+        )
+        ..writeln();
+    }
+    if (previousBlocks.isNotEmpty) {
+      final label = blockConfig.name.trim().isEmpty
+          ? 'this block'
+          : '"${blockConfig.name}"';
+      buffer.writeln(
+        'Previous outputs of $label (oldest first). Continue and update the '
+        'latest state instead of starting over:',
+      );
+      for (var i = 0; i < previousBlocks.length; i++) {
+        buffer
+          ..writeln('--- #${i + 1} ---')
+          ..writeln(previousBlocks[i].content.trim());
+      }
+      buffer.writeln();
+    }
+    if (character != null) {
+      buffer.writeln('Character: ${character.name}');
+      if ((character.description ?? '').isNotEmpty) {
+        buffer.writeln('Description: ${character.description}');
+      }
+      buffer.writeln();
+    }
+    if (persona != null && persona.isNotEmpty) {
+      buffer.writeln('User Persona: $persona');
+      final profile = personaPrompt?.trim();
+      if (profile != null && profile.isNotEmpty) {
+        buffer
+          ..writeln('Persona profile:')
+          ..writeln(profile);
+      }
+      buffer.writeln();
+    }
+    if (contextMessages.isNotEmpty) {
+      buffer.writeln('Recent conversation:');
+      for (final message in contextMessages) {
+        final role = message.role == 'user' ? 'USER' : 'ASSISTANT';
+        buffer.writeln('$role: ${message.content}');
+      }
+      buffer.writeln();
+    }
+    if (previousOutput != null && previousOutput.isNotEmpty) {
+      buffer
+        ..writeln('Output from previous block in chain:')
+        ..writeln(previousOutput)
+        ..writeln();
+    }
     return buffer.toString().trimRight();
   }
 
@@ -377,16 +477,10 @@ class InfoBlockService {
   Future<String?> _callLLM({
     required ApiConfig apiConfig,
     required BlockConfig blockConfig,
-    required String systemContent,
-    required String userContent,
+    required List<Map<String, dynamic>> requestMessages,
     CancelToken? cancelToken,
     void Function(String accumulated)? onStreamUpdate,
   }) async {
-    final messages = <Map<String, dynamic>>[
-      {'role': 'system', 'content': systemContent},
-      {'role': 'user', 'content': userContent},
-    ];
-
     final useStream = onStreamUpdate != null;
 
     try {
@@ -395,33 +489,13 @@ class InfoBlockService {
       final buffer = StringBuffer();
 
       await transport.stream(
-        request: ChatTransportRequest(
-          endpoint: apiConfig.endpoint,
-          apiKey: apiConfig.apiKey,
+        request: ChatTransportRequest.fromApiConfig(
+          apiConfig,
           model: blockConfig.model.isNotEmpty
               ? blockConfig.model
               : apiConfig.model,
-          messages: messages,
-          maxTokens: apiConfig.maxTokens,
-          temperature: apiConfig.temperature,
-          topP: apiConfig.topP,
-          topK: apiConfig.topK,
-          frequencyPenalty: apiConfig.frequencyPenalty,
-          presencePenalty: apiConfig.presencePenalty,
+          messages: requestMessages,
           stream: useStream,
-          requestReasoning: apiConfig.requestReasoning,
-          reasoningEffort: apiConfig.reasoningEffort,
-          omitTemperature: apiConfig.omitTemperature,
-          omitTopP: apiConfig.omitTopP,
-          omitTopK: apiConfig.omitTopK,
-          omitFrequencyPenalty: apiConfig.omitFrequencyPenalty,
-          omitPresencePenalty: apiConfig.omitPresencePenalty,
-          omitReasoning: apiConfig.omitReasoning,
-          omitReasoningEffort: apiConfig.omitReasoningEffort,
-          showNativeReasoning: apiConfig.showNativeReasoning,
-          cacheControlTtl: apiConfig.cacheControlTtl,
-          cacheBreakpointMode: apiConfig.cacheBreakpointMode,
-          sessionIdMode: apiConfig.sessionIdMode,
         ),
         cancelToken: cancelToken,
         onUpdate: useStream

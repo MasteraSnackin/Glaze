@@ -16,6 +16,7 @@ void main() {
       'batterySaver': bool,
       'hideTooltips': bool,
       'disableSwipeRegeneration': bool,
+      'allowMessageScripts': bool,
       'language': String,
       'virtualKeyboardSend': bool,
       'tokenizerHidePercent': double,
@@ -81,7 +82,7 @@ void main() {
     });
 
     test('all expected SharedPrefs keys are covered', () {
-      expect(expectedKeys.length, 15);
+      expect(expectedKeys.length, 16);
     });
 
     test('legacy string values are accepted', () async {
@@ -92,6 +93,7 @@ void main() {
         'tokenizerHistoryFillThreshold': '90',
         'gz_force_mobile_layout': '0',
         'addBlockAtTop': 'true',
+        'allowMessageScripts': 'true',
       });
       final container = ProviderContainer();
       addTearDown(container.dispose);
@@ -104,6 +106,34 @@ void main() {
       expect(settings.tokenizerHistoryFillThreshold, 90);
       expect(settings.forceMobileLayout, isFalse);
       expect(settings.addBlockAtTop, isTrue);
+      expect(settings.allowMessageScripts, isTrue);
+    });
+
+    test(
+      'message scripts are disabled when the preference is absent',
+      () async {
+        SharedPreferences.setMockInitialValues({});
+        final container = ProviderContainer();
+        addTearDown(container.dispose);
+
+        final settings = await container.read(appSettingsProvider.future);
+
+        expect(settings.allowMessageScripts, isFalse);
+      },
+    );
+
+    test('message script preference persists explicitly', () async {
+      SharedPreferences.setMockInitialValues({});
+      final container = ProviderContainer();
+      addTearDown(container.dispose);
+      final settings = await container.read(appSettingsProvider.future);
+
+      await container
+          .read(appSettingsProvider.notifier)
+          .save(settings.copyWith(allowMessageScripts: true));
+
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getBool('allowMessageScripts'), isTrue);
     });
 
     test('unsupported saved language falls back to English', () async {

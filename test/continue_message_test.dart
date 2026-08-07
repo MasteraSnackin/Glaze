@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/core/models/chat_message.dart';
+import 'package:glaze_flutter/core/llm/studio_turn_config_snapshot.dart';
 import 'package:glaze_flutter/core/state/db_provider.dart';
 import 'package:glaze_flutter/features/chat/chat_generation_service.dart';
 import 'package:glaze_flutter/features/chat/chat_provider.dart';
@@ -37,6 +38,7 @@ class _HookGenerationService extends ChatGenerationService {
     List<Map<String, dynamic>>? previousSwipesMeta,
     String? guidanceText,
     String? regenTargetId,
+    StudioTurnConfigSnapshot? studioTurnConfig,
   }) async {
     calls++;
     return _onGenerate(session);
@@ -87,29 +89,37 @@ void main() {
 
   test('continuation marks the message it extends while streaming', () async {
     String? targetDuringGeneration;
-    final notifier = await setUpChat(const [
-      ChatMessage(id: 'm1', role: 'user', content: 'Hi', timestamp: 1),
-      ChatMessage(id: 'm2', role: 'assistant', content: 'First', timestamp: 2),
-    ], (session) async {
-      targetDuringGeneration = container
-          .read(chatProvider('c1'))
-          .requireValue
-          .continuationTargetId;
-      return ChatState(
-        session: session.copyWith(
-          messages: [
-            ...session.messages,
-            const ChatMessage(
-              id: 'gen',
-              role: 'assistant',
-              content: 'Second',
-              timestamp: 3,
-            ),
-          ],
+    final notifier = await setUpChat(
+      const [
+        ChatMessage(id: 'm1', role: 'user', content: 'Hi', timestamp: 1),
+        ChatMessage(
+          id: 'm2',
+          role: 'assistant',
+          content: 'First',
+          timestamp: 2,
         ),
-        isGenerating: false,
-      );
-    });
+      ],
+      (session) async {
+        targetDuringGeneration = container
+            .read(chatProvider('c1'))
+            .requireValue
+            .continuationTargetId;
+        return ChatState(
+          session: session.copyWith(
+            messages: [
+              ...session.messages,
+              const ChatMessage(
+                id: 'gen',
+                role: 'assistant',
+                content: 'Second',
+                timestamp: 3,
+              ),
+            ],
+          ),
+          isGenerating: false,
+        );
+      },
+    );
 
     await notifier.continueMessage();
 
@@ -141,19 +151,24 @@ void main() {
 
   test('aborting a continuation merges the partial text in place', () async {
     late ChatNotifier notifier;
-    notifier = await setUpChat(const [
-      ChatMessage(id: 'm1', role: 'assistant', content: 'First', timestamp: 1),
-    ], (session) async {
-      container.read(streamingStateProvider('c1').notifier).state =
-          const StreamingState(text: 'Half a sen');
-      notifier.abortGeneration();
-      return ChatState(session: session, isGenerating: false);
-    });
+    notifier = await setUpChat(
+      const [
+        ChatMessage(
+          id: 'm1',
+          role: 'assistant',
+          content: 'First',
+          timestamp: 1,
+        ),
+      ],
+      (session) async {
+        container.read(streamingStateProvider('c1').notifier).state =
+            const StreamingState(text: 'Half a sen');
+        await notifier.abortGeneration();
+        return ChatState(session: session, isGenerating: false);
+      },
+    );
 
     await notifier.continueMessage();
-    // The abort defers its restore/persist work to a microtask.
-    await Future<void>.delayed(Duration.zero);
-
     final state = container.read(chatProvider('c1')).requireValue;
     expect(state.messages, hasLength(1));
     expect(state.messages.single.id, 'm1');

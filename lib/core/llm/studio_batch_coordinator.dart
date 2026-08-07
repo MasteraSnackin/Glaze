@@ -9,6 +9,7 @@ import 'studio_agent_executor.dart';
 import 'studio_context_bucketizer.dart';
 import 'studio_message_builder.dart';
 import 'tracker_batcher.dart';
+import 'studio_turn_config_snapshot.dart';
 
 /// Runs a batch group of Studio chat-time trackers: builds the batched
 /// system prompt + per-agent task text, fires a single LLM request, parses
@@ -53,6 +54,7 @@ class StudioBatchCoordinator {
     required CancelToken cancelToken,
     required int batchContextSize,
     String? apiConfigId,
+    StudioTurnConfigSnapshot? turnConfig,
   }) async {
     final context = _bucketizer.bucketize(
       promptResult,
@@ -137,6 +139,7 @@ class StudioBatchCoordinator {
           isFinalResponse: false,
           cancelToken: cancelToken,
           preResolvedConfig: group.resolved,
+          turnConfig: turnConfig,
         );
         final parsed = batcher.parseBatchResponse(result.text, group);
         if (_allOk(parsed)) {
@@ -191,6 +194,7 @@ class StudioBatchCoordinator {
     required String sessionId,
     required CancelToken cancelToken,
     String? apiConfigId,
+    StudioTurnConfigSnapshot? turnConfig,
   }) async {
     if (agents.isEmpty) return const [];
     final batcher = _batcher;
@@ -209,6 +213,7 @@ class StudioBatchCoordinator {
             sessionId: sessionId,
             cancelToken: cancelToken,
             apiConfigId: apiConfigId,
+            turnConfig: turnConfig,
             onIntermediateUpdate: null,
           );
           return TrackerBatchResult(

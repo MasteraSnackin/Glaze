@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,7 +9,15 @@ import '../../shared/theme/app_colors.dart';
 import '../../shared/utils/avatar_image.dart';
 import '../../shared/widgets/glass_surface.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
-import '../../core/state/character_provider.dart' show avatarVersionProvider;
+import '../../core/models/character.dart';
+import '../../core/state/character_provider.dart'
+    show
+        avatarVersionProvider,
+        characterSessionCountsProvider,
+        charactersProvider,
+        revealHiddenCharactersProvider;
+import '../../shared/utils/variant_label.dart';
+import '../../shared/widgets/variation_chip.dart';
 import '../chat/chat_actions_service.dart';
 import '../chat/chat_provider.dart';
 import '../chat/generating_sessions_provider.dart';
@@ -46,7 +56,9 @@ class ChatHistoryList extends ConsumerStatefulWidget {
 }
 
 class _ChatHistoryListState extends ConsumerState<ChatHistoryList> {
-  final Set<String> _expandedCharIds = {};
+  /// Expanded groups, keyed by variation group id (a character and all of its
+  /// variations expand together).
+  final Set<String> _expandedGroupIds = {};
 
   /// Avatar paths already warmed so we don't re-precache on every rebuild.
   final Set<String> _precachedAvatars = {};
@@ -57,10 +69,11 @@ class _ChatHistoryListState extends ConsumerState<ChatHistoryList> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       for (final s in sessions) {
-        final path = s.avatarPath;
-        if (path == null || path.isEmpty) continue;
-        if (!_precachedAvatars.add(path)) continue;
-        precacheGlazeAvatar(context, path);
+        for (final path in [s.avatarPath, s.groupAvatarPath]) {
+          if (path == null || path.isEmpty) continue;
+          if (!_precachedAvatars.add(path)) continue;
+          precacheGlazeAvatar(context, path);
+        }
       }
     });
   }
@@ -71,9 +84,8 @@ class _ChatHistoryListState extends ConsumerState<ChatHistoryList> {
     final settingsAsync = ref.watch(appSettingsProvider);
 
     return sessionsAsync.when(
-      loading: () => Center(
-        child: CircularProgressIndicator(color: context.cs.primary),
-      ),
+      loading: () =>
+          Center(child: CircularProgressIndicator(color: context.cs.primary)),
       error: (e, _) => Center(child: Text('${'title_error'.tr()}: $e')),
       data: (list) {
         _precacheAvatars(list);
@@ -85,6 +97,7 @@ class _ChatHistoryListState extends ConsumerState<ChatHistoryList> {
               .where(
                 (s) =>
                     s.characterName.toLowerCase().contains(q) ||
+                    (s.variantName?.toLowerCase().contains(q) ?? false) ||
                     (s.sessionName?.toLowerCase().contains(q) ?? false) ||
                     s.lastMessage.toLowerCase().contains(q),
               )
@@ -101,7 +114,10 @@ class _ChatHistoryListState extends ConsumerState<ChatHistoryList> {
 
         return ListView.builder(
           controller: widget.controller,
-          padding: EdgeInsets.only(top: widget.topPadding, bottom: widget.bottomPadding),
+          padding: EdgeInsets.only(
+            top: widget.topPadding,
+            bottom: widget.bottomPadding,
+          ),
           itemCount: filtered.length + 1,
           itemBuilder: (_, i) {
             if (i == 0) return _buildCountHeader(filtered.length);
@@ -120,38 +136,41 @@ class _ChatHistoryListState extends ConsumerState<ChatHistoryList> {
     return Padding(
       padding: EdgeInsets.only(top: widget.topPadding),
       child: Center(
-      child: widget.collapsed
-          ? Icon(
-              Icons.chat_bubble_outline,
-              size: 24,
-              color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
-            )
-          : Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  Icons.chat_bubble_outline,
-                  size: 48,
-                  color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  'no_dialogs'.tr(),
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: context.cs.onSurfaceVariant,
+        child: widget.collapsed
+            ? Icon(
+                Icons.chat_bubble_outline,
+                size: 24,
+                color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
+              )
+            : Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.chat_bubble_outline,
+                    size: 48,
+                    color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
                   ),
-                ),
-              ],
-            ),
+                  const SizedBox(height: 12),
+                  Text(
+                    'no_dialogs'.tr(),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: context.cs.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
       ),
     );
   }
 
   Widget _buildGroupedList(List<ChatSessionInfo> sessions) {
+    // Keyed by variation group, not character id: variations are separate
+    // character rows, so grouping by id scattered one character's variations
+    // across the list as several look-alike entries with the same avatar.
     final groupsMap = <String, List<ChatSessionInfo>>{};
     for (final s in sessions) {
-      groupsMap.putIfAbsent(s.characterId, () => []).add(s);
+      groupsMap.putIfAbsent(s.variantGroupId, () => []).add(s);
     }
 
     final sortedGroups = groupsMap.entries.toList()
@@ -163,24 +182,27 @@ class _ChatHistoryListState extends ConsumerState<ChatHistoryList> {
 
     return ListView.builder(
       controller: widget.controller,
-      padding: EdgeInsets.only(top: widget.topPadding, bottom: 20),
+      padding: EdgeInsets.only(
+        top: widget.topPadding,
+        bottom: widget.bottomPadding,
+      ),
       itemCount: sortedGroups.length + 1,
       itemBuilder: (_, i) {
         if (i == 0) return _buildCountHeader(sessions.length);
         final entry = sortedGroups[i - 1];
-        final charId = entry.key;
+        final groupId = entry.key;
         final group = [...entry.value]
           ..sort((a, b) => b.lastMessageTime.compareTo(a.lastMessageTime));
-        final isExpanded = _expandedCharIds.contains(charId);
+        final isExpanded = _expandedGroupIds.contains(groupId);
         return _ChatHistoryGroupSection(
           sessions: group,
           isExpanded: isExpanded,
           onTap: () {
             setState(() {
               if (isExpanded) {
-                _expandedCharIds.remove(charId);
+                _expandedGroupIds.remove(groupId);
               } else {
-                _expandedCharIds.add(charId);
+                _expandedGroupIds.add(groupId);
               }
             });
           },
@@ -195,10 +217,7 @@ class _ChatHistoryListState extends ConsumerState<ChatHistoryList> {
       padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
       child: Text(
         '$count ${'count_chats'.plural(count)}',
-        style: TextStyle(
-          fontSize: 11,
-          color: context.cs.onSurfaceVariant,
-        ),
+        style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant),
       ),
     );
   }
@@ -405,8 +424,8 @@ class _SessionTileState extends ConsumerState<_SessionTile>
     final Widget tile = widget.collapsed
         ? _buildCollapsedTile(context, ref, generating, unread)
         : widget.isGrouped
-            ? _buildGroupedTile(context, ref, generating, unread)
-            : _buildFullTile(context, ref, generating, unread);
+        ? _buildGroupedTile(context, ref, generating, unread)
+        : _buildFullTile(context, ref, generating, unread);
 
     return FadeTransition(
       opacity: _fadeAnim,
@@ -425,7 +444,7 @@ class _SessionTileState extends ConsumerState<_SessionTile>
       onTap: () =>
           context.go('/chat/${info.characterId}?session=${info.sessionIndex}'),
       child: Tooltip(
-        message: info.characterName,
+        message: info.fullCharacterName,
         preferBelow: false,
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 4),
@@ -506,6 +525,13 @@ class _SessionTileState extends ConsumerState<_SessionTile>
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ),
+                            // Outside the Flexible on purpose: the character
+                            // name gives way to the ellipsis first, the chip
+                            // that identifies the variation always survives.
+                            if (info.variantName != null) ...[
+                              const SizedBox(width: 6),
+                              VariationChip(name: info.variantName!),
+                            ],
                           ],
                         ),
                       ),
@@ -517,9 +543,11 @@ class _SessionTileState extends ConsumerState<_SessionTile>
                   Text(
                     info.sessionName?.isNotEmpty == true
                         ? info.sessionName!
-                        : 'session_name'.tr(namedArgs: {
-                            'id': (info.sessionIndex + 1).toString(),
-                          }),
+                        : 'session_name'.tr(
+                            namedArgs: {
+                              'id': (info.sessionIndex + 1).toString(),
+                            },
+                          ),
                     style: TextStyle(
                       fontSize: 12,
                       color: context.cs.onSurfaceVariant,
@@ -557,9 +585,8 @@ class _SessionTileState extends ConsumerState<_SessionTile>
   ) {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
-      onTap: () => context.go(
-        '/chat/${info.characterId}?session=${info.sessionIndex}',
-      ),
+      onTap: () =>
+          context.go('/chat/${info.characterId}?session=${info.sessionIndex}'),
       onLongPress: () => _showSessionActions(context, ref),
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -580,9 +607,11 @@ class _SessionTileState extends ConsumerState<_SessionTile>
                         child: Text(
                           info.sessionName?.isNotEmpty == true
                               ? info.sessionName!
-                              : 'session_name'.tr(namedArgs: {
-                                  'id': (info.sessionIndex + 1).toString(),
-                                }),
+                              : 'session_name'.tr(
+                                  namedArgs: {
+                                    'id': (info.sessionIndex + 1).toString(),
+                                  },
+                                ),
                           style: TextStyle(
                             fontWeight: unread
                                 ? FontWeight.w700
@@ -594,6 +623,12 @@ class _SessionTileState extends ConsumerState<_SessionTile>
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
+                      // Inside a group the rows are sessions of possibly
+                      // different variations, so each one names its own.
+                      if (info.variantName != null) ...[
+                        const SizedBox(width: 6),
+                        VariationChip(name: info.variantName!),
+                      ],
                     ],
                   ),
                 ),
@@ -628,8 +663,9 @@ class _SessionTileState extends ConsumerState<_SessionTile>
   void _showRenameDialog(BuildContext context, WidgetRef ref) {
     final currentName = info.sessionName?.isNotEmpty == true
         ? info.sessionName!
-        : 'session_name'
-            .tr(namedArgs: {'id': (info.sessionIndex + 1).toString()});
+        : 'session_name'.tr(
+            namedArgs: {'id': (info.sessionIndex + 1).toString()},
+          );
     GlazeBottomSheet.show<void>(
       context,
       title: 'Rename Session',
@@ -657,7 +693,7 @@ class _SessionTileState extends ConsumerState<_SessionTile>
       bigInfo: BottomSheetBigInfo(
         icon: Icons.delete_outline,
         description:
-            '${'action_delete_session'.tr()} \u2014 ${info.characterName}? ${'chat_clear_confirm'.tr()}',
+            '${'action_delete_session'.tr()} \u2014 ${info.fullCharacterName}? ${'chat_clear_confirm'.tr()}',
       ),
       items: [
         BottomSheetItem(
@@ -863,7 +899,9 @@ class _GroupHeader extends ConsumerWidget {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        'count_sessions_format'.plural(sessions.length),
+                        _subtitle(),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           fontSize: 12,
                           color: context.cs.onSurfaceVariant,
@@ -903,13 +941,27 @@ class _GroupHeader extends ConsumerWidget {
     );
   }
 
+  /// "N sessions", plus "· K variations" when the group spans more than one —
+  /// the collapsed header is the only place that can say the group is not just
+  /// a pile of sessions of one character.
+  String _subtitle() {
+    final sessionsLine = 'count_sessions_format'.plural(sessions.length);
+    final variantCount = _variantCount();
+    if (variantCount < 2) return sessionsLine;
+    return '$sessionsLine · ${'variations_count'.plural(variantCount)}';
+  }
+
+  /// Distinct variations represented among this group's sessions.
+  int _variantCount() => sessions.map((s) => s.characterId).toSet().length;
+
   Widget _buildAvatar(
     BuildContext context,
     WidgetRef ref,
     ChatSessionInfo info,
   ) {
     ref.watch(avatarVersionProvider);
-    final image = glazeAvatarImage(info.avatarPath);
+    // The group's face is the original's, not the last-used variation's.
+    final image = glazeAvatarImage(info.groupAvatarPath ?? info.avatarPath);
     if (image != null) {
       return ClipOval(
         child: SizedBox.square(
@@ -963,35 +1015,104 @@ class _GroupHeader extends ConsumerWidget {
     );
   }
 
-  void _showGroupActions(
+  Future<void> _showGroupActions(
     BuildContext context,
     WidgetRef ref,
     ChatSessionInfo info,
-  ) {
-    GlazeBottomSheet.show<String>(
+  ) async {
+    // The group can span several variations. "Edit character" targets the most
+    // recently used one, so name it; "New session" asks instead (see below).
+    // Both read the group from the library, not from this group's sessions, so
+    // a variation you have not chatted with yet still counts.
+    final variants = _groupVariants(ref, info.variantGroupId);
+    final spansVariations = variants.length > 1;
+    final variantHint = spansVariations
+        ? (info.variantName ?? 'variation_original'.tr())
+        : info.variantName;
+    final rootNav = Navigator.of(context, rootNavigator: true);
+    final result = await GlazeBottomSheet.show<String>(
       context,
       title: info.characterName,
       items: [
         BottomSheetItem(
           icon: Icons.add_comment_outlined,
           label: 'action_new_session'.tr(),
-          onTap: () => Navigator.of(context, rootNavigator: true).pop('new'),
+          hint: spansVariations ? 'variation_pick_title'.tr() : null,
+          onTap: () => rootNav.pop('new'),
         ),
         BottomSheetItem(
           icon: Icons.edit_note_rounded,
-          label: 'Edit Character',
-          onTap: () => Navigator.of(context, rootNavigator: true).pop('edit'),
+          label: 'action_edit_character'.tr(),
+          hint: variantHint,
+          onTap: () => rootNav.pop('edit'),
         ),
       ],
-    ).then((result) {
-      if (!context.mounted) return;
-      if (result == 'new') {
-        ref.read(chatProvider(info.characterId).notifier).createNewSession();
-        context.go('/chat/${info.characterId}');
-      } else if (result == 'edit') {
-        context.push('/character/${info.characterId}/edit');
-      }
-    });
+    );
+    if (result == null || !context.mounted) return;
+    if (result == 'edit') {
+      unawaited(context.push('/character/${info.characterId}/edit'));
+      return;
+    }
+
+    // A new session belongs to exactly one variation and can never be moved
+    // between them, so when the group has several, ask which one instead of
+    // silently taking the most recently used.
+    final charId = await _resolveNewSessionCharacter(
+      context,
+      ref,
+      info,
+      variants,
+    );
+    if (charId == null || !context.mounted) return;
+    await ref.read(chatProvider(charId).notifier).createNewSession();
+    if (!context.mounted) return;
+    context.go('/chat/$charId');
+  }
+
+  /// The character a new session should be created for: the group's only
+  /// variation, or the one the user picks. Null when the picker is dismissed.
+  Future<String?> _resolveNewSessionCharacter(
+    BuildContext context,
+    WidgetRef ref,
+    ChatSessionInfo info,
+    List<Character> variants,
+  ) async {
+    if (variants.length < 2) return info.characterId;
+
+    final sessionCounts =
+        ref.read(characterSessionCountsProvider).value ?? const <String, int>{};
+    final rootNav = Navigator.of(context, rootNavigator: true);
+    return GlazeBottomSheet.show<String>(
+      context,
+      title: 'variation_pick_title'.tr(),
+      items: [
+        for (final variant in variants)
+          BottomSheetItem(
+            icon: Icons.person_outline_rounded,
+            label: variantLabel(variant),
+            hint: variantPickerHint(sessionCounts[variant.id] ?? 0),
+            onTap: () => rootNav.pop(variant.id),
+          ),
+      ],
+    );
+  }
+
+  /// Every variation of [groupId], cover first.
+  ///
+  /// Read from the library rather than from this group's sessions, so a
+  /// variation you have never chatted with — the one most likely to be the
+  /// point of starting a new session — is offered too.
+  List<Character> _groupVariants(WidgetRef ref, String groupId) {
+    final all = ref.read(charactersProvider).value ?? const <Character>[];
+    final revealHidden = ref.read(revealHiddenCharactersProvider);
+    return all
+        .where(
+          (c) =>
+              (c.variantGroupId.isEmpty ? c.id : c.variantGroupId) == groupId &&
+              (revealHidden || !c.hidden),
+        )
+        .toList()
+      ..sort((a, b) => a.variantOrder.compareTo(b.variantOrder));
   }
 }
 
@@ -1043,9 +1164,8 @@ class _GeneratingPreview extends StatelessWidget {
 /// 0→5px across the first 75% of the cycle, then 5px→0.
 class _WritingPencil extends StatefulWidget {
   final Color color;
-  final double size;
 
-  const _WritingPencil({required this.color, this.size = 14});
+  const _WritingPencil({required this.color});
 
   @override
   State<_WritingPencil> createState() => _WritingPencilState();
@@ -1062,14 +1182,18 @@ class _WritingPencilState extends State<_WritingPencil>
     // 0% → 75%: slide right 0 → 5px in 1px steps, each 15% of the cycle.
     for (int i = 0; i < 5; i++)
       TweenSequenceItem(
-        tween: Tween<double>(begin: i.toDouble(), end: (i + 1).toDouble())
-            .chain(CurveTween(curve: Curves.easeInOut)),
+        tween: Tween<double>(
+          begin: i.toDouble(),
+          end: (i + 1).toDouble(),
+        ).chain(CurveTween(curve: Curves.easeInOut)),
         weight: 15,
       ),
     // 75% → 100%: snap back 5px → 0.
     TweenSequenceItem(
-      tween: Tween<double>(begin: 5, end: 0)
-          .chain(CurveTween(curve: Curves.easeInOut)),
+      tween: Tween<double>(
+        begin: 5,
+        end: 0,
+      ).chain(CurveTween(curve: Curves.easeInOut)),
       weight: 25,
     ),
   ]).animate(_controller);
@@ -1084,13 +1208,11 @@ class _WritingPencilState extends State<_WritingPencil>
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: _dx,
-      builder: (context, child) => Transform.translate(
-        offset: Offset(_dx.value, 0),
-        child: child,
-      ),
+      builder: (context, child) =>
+          Transform.translate(offset: Offset(_dx.value, 0), child: child),
       child: Icon(
         Icons.edit,
-        size: widget.size,
+        size: 14,
         color: widget.color.withValues(alpha: 0.7),
       ),
     );
@@ -1129,9 +1251,7 @@ class _StatusBadge extends StatelessWidget {
 
 String formatTimeAgo(int epochMs) {
   final now = DateTime.now();
-  final diff = now.difference(
-    DateTime.fromMillisecondsSinceEpoch(epochMs),
-  );
+  final diff = now.difference(DateTime.fromMillisecondsSinceEpoch(epochMs));
   if (diff.inMinutes < 1) return 'now';
   if (diff.inHours < 1) return '${diff.inMinutes}m';
   if (diff.inDays < 1) return '${diff.inHours}h';

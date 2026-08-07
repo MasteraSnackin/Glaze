@@ -78,6 +78,7 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     final db = AppDatabase.forTesting(NativeDatabase.memory());
     addTearDown(db.close);
+    BlockConfig? savedBlock;
     await tester.pumpWidget(
       ProviderScope(
         overrides: [appDbProvider.overrideWithValue(db)],
@@ -89,8 +90,10 @@ void main() {
                   context: context,
                   isScrollControlled: true,
                   backgroundColor: Colors.transparent,
-                  builder: (_) =>
-                      BlockEditDialog(block: preset.blocks.first, onSave: (_) {}),
+                  builder: (_) => BlockEditDialog(
+                    block: preset.blocks.first,
+                    onSave: (block) => savedBlock = block,
+                  ),
                 ),
                 child: const Text('Open'),
               ),
@@ -106,6 +109,62 @@ void main() {
     expect(find.text('block_edit_title'), findsOneWidget);
     expect(find.text('block_edit_name_label'), findsOneWidget);
     expect(find.text('block_type_infoblock'), findsOneWidget);
-    expect(find.text('btn_save'), findsWidgets);
+    expect(find.text('Контекст блока'), findsOneWidget);
+    expect(
+      find.text('Передавать тот же контекст, что и в основную модель'),
+      findsOneWidget,
+    );
+    expect(find.text('Настроить контекст блока'), findsOneWidget);
+
+    await tester.tap(
+      find.text('Передавать тот же контекст, что и в основную модель'),
+    );
+    await tester.tap(find.widgetWithText(FilledButton, 'btn_save'));
+    await tester.pumpAndSettle();
+
+    expect(savedBlock!.contextPolicy.useMainModelContext, isTrue);
+    expect(savedBlock!.contextPolicy.legacyPromptSemantics, isFalse);
+  });
+
+  testWidgets('BlockEditDialog keeps numeric input across rebuilds', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(800, 3200);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    SharedPreferences.setMockInitialValues({});
+    final db = AppDatabase.forTesting(NativeDatabase.memory());
+    addTearDown(db.close);
+    BlockConfig? savedBlock;
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [appDbProvider.overrideWithValue(db)],
+        child: MaterialApp(
+          home: Scaffold(
+            body: BlockEditDialog(
+              block: preset.blocks.first.copyWith(contextMessageCount: 5),
+              onSave: (block) => savedBlock = block,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final contextField = find.widgetWithText(
+      TextField,
+      'block_context_count_label',
+    );
+    await tester.enterText(contextField, '17');
+    await tester.tap(find.byType(SwitchListTile).first);
+    await tester.pump();
+
+    expect(tester.widget<TextField>(contextField).controller!.text, '17');
+
+    await tester.tap(find.widgetWithText(FilledButton, 'btn_save').last);
+    await tester.pump();
+    expect(savedBlock?.contextMessageCount, 17);
   });
 }

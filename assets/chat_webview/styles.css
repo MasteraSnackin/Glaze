@@ -944,6 +944,9 @@
   -webkit-backdrop-filter: blur(var(--element-blur, 12px));
   border: 1px solid rgba(255, 255, 255, 0.1);
   transition: all 0.2s ease;
+  -webkit-tap-highlight-color: transparent;
+  tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
 }
 .edit-btn:active {
   transform: scale(0.9);

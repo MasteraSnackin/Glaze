@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -6,29 +7,163 @@ import 'package:glaze_flutter/core/models/chat_message.dart';
 import 'package:glaze_flutter/features/chat/bridge/chat_bridge_controller.dart';
 import 'package:glaze_flutter/features/chat/bridge/chat_overlay_blur_region.dart';
 import 'package:glaze_flutter/features/chat/widgets/chat_message_sync.dart';
+import 'package:glaze_flutter/features/chat/widgets/chat_streaming_bridge_sync.dart';
 import 'package:glaze_flutter/features/chat/widgets/chat_webview_sync_dispatcher.dart';
 
 void main() {
   group('ChatMessageSync', () {
-    test('appends persisted user message while virtual placeholder exists', () {
-      final bridge = _FakeBridge();
+    test(
+      'appends persisted user message while virtual placeholder exists',
+      () async {
+        final bridge = _FakeBridge();
+        final greeting = _assistant('a1');
+        final user = _user('u1');
+
+        await const ChatMessageSync().sync(
+          bridge: bridge,
+          oldMsgs: [greeting],
+          newMsgs: [greeting, user],
+          visibleStartIndex: 0,
+          isGenerating: true,
+          sessionSwitching: false,
+        );
+
+        expect(bridge.appendedMessages, [user]);
+      },
+    );
+
+    test('does not complete until persisted user append completes', () async {
+      final appendCompleter = Completer<void>();
+      final bridge = _FakeBridge()..appendMessagesCompleter = appendCompleter;
       final greeting = _assistant('a1');
       final user = _user('u1');
+      var completed = false;
 
-      const ChatMessageSync().sync(
-        bridge: bridge,
-        oldMsgs: [greeting],
-        newMsgs: [greeting, user],
-        visibleStartIndex: 0,
-        isGenerating: true,
-        sessionSwitching: false,
+      final sync = const ChatMessageSync()
+          .sync(
+            bridge: bridge,
+            oldMsgs: [greeting],
+            newMsgs: [greeting, user],
+            visibleStartIndex: 0,
+            isGenerating: true,
+            sessionSwitching: false,
+          )
+          .then((_) => completed = true);
+
+      await Future<void>.delayed(Duration.zero);
+      expect(bridge.appendedMessages, [user]);
+      expect(completed, isFalse);
+
+      appendCompleter.complete();
+      await sync;
+      expect(completed, isTrue);
+    });
+
+    test('appends streaming placeholder after persisted user append', () async {
+      final userAppend = Completer<void>();
+      final calls = <String>[];
+
+      final result = appendStreamingPlaceholderAfterMessageSync(
+        messageSync: () async {
+          calls.add('user:start');
+          await userAppend.future;
+          calls.add('user:done');
+        }(),
+        isCurrent: () => true,
+        appendPlaceholder: () async {
+          calls.add('placeholder');
+        },
       );
 
-      expect(bridge.appendedMessages, [user]);
+      await Future<void>.delayed(Duration.zero);
+      expect(calls, ['user:start']);
+
+      userAppend.complete();
+      expect(await result, isTrue);
+      expect(calls, ['user:start', 'user:done', 'placeholder']);
     });
+
+    test('skips streaming placeholder when generation becomes stale', () async {
+      final userAppend = Completer<void>();
+      var current = true;
+      var placeholderCalls = 0;
+
+      final result = appendStreamingPlaceholderAfterMessageSync(
+        messageSync: userAppend.future,
+        isCurrent: () => current,
+        appendPlaceholder: () async => placeholderCalls++,
+      );
+
+      current = false;
+      userAppend.complete();
+
+      expect(await result, isFalse);
+      expect(placeholderCalls, 0);
+    });
+
+    test(
+      'reports stale when generation stops during placeholder append',
+      () async {
+        final placeholderAppend = Completer<void>();
+        var current = true;
+
+        final result = appendStreamingPlaceholderAfterMessageSync(
+          messageSync: Future<void>.value(),
+          isCurrent: () => current,
+          appendPlaceholder: () => placeholderAppend.future,
+        );
+
+        await Future<void>.delayed(Duration.zero);
+        current = false;
+        placeholderAppend.complete();
+
+        expect(await result, isFalse);
+      },
+    );
   });
 
   group('ChatWebViewSyncDispatcher', () {
+    test('serializes persisted and streaming message mutations', () async {
+      final state = ChatWebViewSyncState();
+      final firstMutation = Completer<void>();
+      final calls = <String>[];
+
+      final first = state.enqueueMessageMutation(() async {
+        calls.add('user:start');
+        await firstMutation.future;
+        calls.add('user:done');
+      });
+      final second = state.enqueueMessageMutation(() async {
+        calls.add('assistant');
+      });
+
+      await Future<void>.delayed(Duration.zero);
+      expect(calls, ['user:start']);
+
+      firstMutation.complete();
+      await Future.wait([first, second]);
+      expect(calls, ['user:start', 'user:done', 'assistant']);
+      expect(state.messageMutationPending, isNull);
+    });
+
+    test('continues message mutation queue after a failed operation', () async {
+      final state = ChatWebViewSyncState();
+      final calls = <String>[];
+
+      final failed = state.enqueueMessageMutation(() async {
+        calls.add('failed');
+        throw StateError('bridge failed');
+      });
+      final recovered = state.enqueueMessageMutation(() async {
+        calls.add('recovered');
+      });
+
+      await expectLater(failed, throwsStateError);
+      await recovered;
+      expect(calls, ['failed', 'recovered']);
+      expect(state.messageMutationPending, isNull);
+    });
+
     test(
       'does not skip just-sent user message after stale streaming flag',
       () async {
@@ -57,6 +192,48 @@ void main() {
         expect(syncState.streamingSent, isFalse);
       },
     );
+
+    test('session switch invalidates a delayed streaming delta', () async {
+      final bridge = _FakeBridge();
+      final delayedAppend = Completer<void>();
+      bridge.appendMessageCompleter = delayedAppend;
+      final syncState = ChatWebViewSyncState()..wasGenerating = true;
+      final dispatcher = ChatWebViewSyncDispatcher(state: syncState);
+      final capturedEpoch = syncState.streamEpoch;
+
+      final delayedDelta = pushStreamingMessageOwned(
+        bridge: bridge,
+        message: _assistant('__streaming__'),
+        syncState: syncState,
+        epoch: capturedEpoch,
+        isCurrent: () => true,
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(bridge.appendedMessages, [_assistant('__streaming__')]);
+
+      final result = dispatcher.dispatch(
+        bridge: _FakeBridge(),
+        old: _fields(isGenerating: true, messages: [_assistant('old')]),
+        current: _fields(
+          charId: 'c2',
+          sessionId: 's2',
+          isGenerating: false,
+          messages: [_assistant('new')],
+        ),
+        oldMessages: [_assistant('old')],
+        newMessages: [_assistant('new')],
+        streamingId: '__streaming__',
+        onSyncExtBlockPanels: () async {},
+        appendMessage: (_) async {},
+        buildStreamingPlaceholder: () => _assistant('__streaming__'),
+      );
+
+      expect(result.sessionSwitched, isTrue);
+      delayedAppend.complete();
+      await delayedDelta;
+      expect(syncState.streamingSent, isFalse);
+      expect(syncState.streamEpoch, isNot(capturedEpoch));
+    });
 
     test(
       'refreshes last assistant controls on stream-to-post-gen transition',
@@ -255,13 +432,15 @@ ChatMessage _user(String id) =>
 ChatWebViewWidgetFields _fields({
   required bool isGenerating,
   required List<ChatMessage> messages,
+  String charId = 'c1',
+  String? sessionId = 's1',
   bool isPostGenRunning = false,
   String? continuationTargetId,
   List<ChatOverlayBlurRegion> blurRegions = const [],
 }) => ChatWebViewWidgetFields(
   continuationTargetId: continuationTargetId,
   blurRegions: blurRegions,
-  charId: 'c1',
+  charId: charId,
   charName: 'Character',
   charColor: null,
   personaName: null,
@@ -303,7 +482,7 @@ ChatWebViewWidgetFields _fields({
   studioEnabled: false,
   memoryEntries: const [],
   memoryDrafts: const [],
-  sessionId: 's1',
+  sessionId: sessionId,
   isGenerating: isGenerating,
   isGeneratingImage: false,
   isPostGenRunning: isPostGenRunning,
@@ -329,6 +508,8 @@ class _FakeBridge implements ChatBridgeController {
   final List<ChatMessage> appendedMessages = [];
   final List<bool> updatedIsLast = [];
   final List<String?> lastMessageIds = [];
+  Completer<void>? appendMessagesCompleter;
+  Completer<void>? appendMessageCompleter;
 
   @override
   Future<void> setOverlayBlurRegions(
@@ -351,6 +532,13 @@ class _FakeBridge implements ChatBridgeController {
     int startIndex = 0,
   }) async {
     appendedMessages.addAll(messages);
+    await appendMessagesCompleter?.future;
+  }
+
+  @override
+  Future<void> appendMessage(ChatMessage message) async {
+    appendedMessages.add(message);
+    await appendMessageCompleter?.future;
   }
 
   @override

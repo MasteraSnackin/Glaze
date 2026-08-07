@@ -46,6 +46,7 @@ abstract class StudioAgentSettings with _$StudioAgentSettings {
     // default (0.8). Negative = use the agent's own temperature.
     @Default(1.0) double studioFinalTemperature,
     @Default(false) bool studioFinalRequestReasoning,
+    @Default(false) bool studioFinalUseResponsesApi,
     @Default('auto') String studioFinalReasoningEffort,
     @Default(false) bool studioFinalOmitTemperature,
     @Default(false) bool studioFinalOmitTopP,
@@ -84,6 +85,7 @@ abstract class StudioAgentSettings with _$StudioAgentSettings {
     // per-agent default (0.3). Negative = use the agent's own temperature.
     @Default(0.5) double studioTrackerTemperature,
     @Default(false) bool studioTrackerRequestReasoning,
+    @Default(false) bool studioTrackerUseResponsesApi,
     @Default('auto') String studioTrackerReasoningEffort,
     @Default(false) bool studioTrackerOmitTemperature,
     @Default(false) bool studioTrackerOmitTopP,

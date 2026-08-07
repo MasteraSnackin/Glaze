@@ -3,13 +3,13 @@ library;
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../models/api_config.dart';
 import '../../features/settings/api_list_provider.dart';
-import '../state/db_provider.dart';
-import 'embedding_service.dart';
-import 'embedding_request_gate.dart';
-import 'lorebook_embedding_service.dart';
-import 'lorebook_vector_search.dart';
+import '../llm/embedding_request_gate.dart';
+import '../llm/embedding_service.dart';
+import '../llm/lorebook_embedding_service.dart';
+import '../llm/lorebook_vector_search.dart';
+import '../models/api_config.dart';
+import 'db_provider.dart';
 
 final embeddingConfigProvider = Provider<EmbeddingConfig>((ref) {
   final chatConfig = ref.watch(activeApiConfigProvider);

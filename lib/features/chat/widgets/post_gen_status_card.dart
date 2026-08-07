@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../state/post_gen_status_provider.dart';
+import 'chat_status_card_shell.dart';
 
 /// Floating card shown at the top of the chat while post-generation tasks
 /// (Ledger and extension blocks) are running. Auto-dismisses 2.5s after
@@ -107,47 +108,11 @@ class _PostGenStatusCardState extends ConsumerState<PostGenStatusCard> {
         return const SizedBox.shrink();
     }
 
-    return Material(
-      color: Colors.transparent,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: cs.surface.withValues(alpha: 0.92),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: accent.withValues(alpha: 0.35)),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.22),
-              blurRadius: 18,
-              offset: const Offset(0, 8),
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            if (showSpinner)
-              SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(strokeWidth: 2, color: accent),
-              )
-            else
-              Icon(icon, size: 18, color: accent),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: cs.onSurface,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
+    return ChatStatusCardShell(
+      label: label,
+      icon: icon,
+      accent: accent,
+      showSpinner: showSpinner,
     );
   }
 

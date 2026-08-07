@@ -49,12 +49,6 @@ export class InteractionDispatch {
       return;
     }
 
-    const stopBtn = e.target.closest('.stop-btn');
-    if (stopBtn) {
-      bridge._sendToFlutter('onStop', []);
-      return;
-    }
-
     const regenBtn = e.target.closest('.msg-regenerate');
     if (regenBtn) {
       const id = regenBtn.dataset.messageId;

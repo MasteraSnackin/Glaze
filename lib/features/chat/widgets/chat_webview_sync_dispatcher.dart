@@ -10,13 +10,45 @@ import 'chat_message_sync.dart'
 
 /// Mutable per-frame state owned by the [ChatWebViewSyncDispatcher].
 /// Lifted out of the widget so the dispatcher can be tested in
-/// isolation. All three fields are written from `didUpdateWidget`
+/// isolation. These fields are written from `didUpdateWidget`
 /// and read by other lifecycle hooks (e.g. the streaming
 /// `ref.listen` in `build`).
 class ChatWebViewSyncState {
   bool wasGenerating = false;
   bool streamingSent = false;
   bool regenStreamingSent = false;
+
+  /// Tail of the ordered message-list mutation queue. Persisted diffs,
+  /// placeholders, and streaming deltas must share one queue because mapping a
+  /// message can await image resolution before it reaches JavaScript.
+  Future<void>? messageMutationPending;
+
+  Future<void> enqueueMessageMutation(Future<void> Function() mutation) {
+    final previous = messageMutationPending;
+    late final Future<void> operation;
+    operation = () async {
+      try {
+        if (previous != null) {
+          try {
+            await previous;
+          } catch (_) {
+            // A failed bridge call must not permanently poison the queue.
+          }
+        }
+        await mutation();
+      } finally {
+        if (identical(messageMutationPending, operation)) {
+          messageMutationPending = null;
+        }
+      }
+    }();
+    messageMutationPending = operation;
+    return operation;
+  }
+
+  /// Invalidates async streaming work when generation or session ownership
+  /// changes. Callers capture the value and re-check it after every await.
+  int streamEpoch = 0;
 }
 
 /// Per-field diff dispatch for [ChatWebViewWidget.didUpdateWidget].
@@ -74,6 +106,7 @@ class ChatWebViewSyncDispatcher {
       // record the rising edge of `wasGenerating` so the post-switch
       // `didUpdateWidget` doesn't re-inject the placeholder.
       state.wasGenerating = current.isGenerating;
+      state.streamEpoch++;
       return const ChatWebViewSyncResult(
         runMessageSync: false,
         appendPlaceholder: false,
@@ -111,11 +144,13 @@ class ChatWebViewSyncDispatcher {
     // incorrectly skip the just-appended persisted user message as if it were
     // the virtual streaming placeholder.
     if (!state.wasGenerating && current.isGenerating) {
+      state.streamEpoch++;
       state.streamingSent = false;
       state.regenStreamingSent = false;
     }
 
     if (state.wasGenerating && !current.isGenerating) {
+      state.streamEpoch++;
       if (!state.regenStreamingSent) {
         bridge.removeMessage(streamingId);
       }
@@ -135,7 +170,9 @@ class ChatWebViewSyncDispatcher {
     // that one as typing instead of appending a placeholder. The streaming
     // listener then grows it in place (see ChatWebViewBuildListeners).
     final continuationId = current.continuationTargetId;
-    if (!state.wasGenerating && current.isGenerating && continuationId != null) {
+    if (!state.wasGenerating &&
+        current.isGenerating &&
+        continuationId != null) {
       final target = current.messages.firstWhereOrNull(
         (m) => m.id == continuationId,
       );

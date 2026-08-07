@@ -9,12 +9,13 @@ import 'dart:convert';
 import '../../../core/llm/history_assembler.dart';
 import '../../../core/llm/prompt_builder.dart';
 import '../../../core/llm/prompt_isolate.dart';
-import '../../../core/llm/prompt_payload_builder.dart';
+import '../providers/prompt_build_providers.dart';
 import '../../../core/llm/transport/anthropic_chat_transport.dart';
 import '../../../core/llm/transport/chat_transport_request.dart';
 import '../../../core/llm/transport/gemini_chat_transport.dart';
 import '../../../core/llm/transport/llm_protocol.dart';
 import '../../../core/llm/transport/openai_chat_transport.dart';
+import '../../../core/llm/transport/openai_responses_transport.dart';
 import '../../../core/llm/transport/openrouter_chat_transport.dart';
 import '../../../core/llm/tokenizer.dart';
 import '../../../core/models/api_config.dart';
@@ -293,7 +294,9 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
                   ],
                   SliverToBoxAdapter(
                     child: _SectionTitle(
-                      'Messages (${_previewMessages.length})',
+                      'label_messages_count'.tr(
+                        args: ['${_previewMessages.length}'],
+                      ),
                     ),
                   ),
                   SliverToBoxAdapter(
@@ -425,7 +428,7 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
     // config to keep it visible across every protocol.
     final model = _apiConfig?.model;
     if (model != null && model.isNotEmpty) {
-      items.add(_ParamItem(label: 'model', value: model));
+      items.add(_ParamItem(label: 'label_model'.tr(), value: model));
     }
 
     void add(String label, dynamic value) {
@@ -547,6 +550,7 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
         presencePenalty: cfg.presencePenalty,
         stream: cfg.stream,
         requestReasoning: cfg.requestReasoning,
+        useResponsesApi: cfg.useResponsesApi,
         reasoningEffort: cfg.reasoningEffort,
         omitTemperature: cfg.omitTemperature,
         omitTopP: cfg.omitTopP,
@@ -571,7 +575,10 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
         LlmProtocol.openrouter => OpenAiChatTransport.buildBody(
           OpenRouterChatTransport.buildRouterRequest(request),
         ),
-        _ => OpenAiChatTransport.buildBody(request),
+        _ =>
+          cfg.useResponsesApi
+              ? OpenAiResponsesTransport.buildBody(request)
+              : OpenAiChatTransport.buildBody(request),
       };
     } catch (_) {
       return null;

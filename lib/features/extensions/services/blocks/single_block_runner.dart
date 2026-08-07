@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import '../../../../core/models/character.dart';
 import '../../../../core/models/chat_message.dart';
 import '../../../../core/models/persona.dart';
+import '../../../../core/llm/prompt/main_model_context_snapshot.dart';
 import '../../models/block_config.dart';
 import '../../models/extension_preset.dart';
 import '../../models/info_block.dart';
@@ -36,6 +37,7 @@ class SingleBlockRunner {
     required String? previousOutput,
     required CancelToken cancelToken,
     String? reuseBlockId,
+    MainModelContextSnapshot? mainModelContextSnapshot,
   }) async {
     if (cancelToken.isCancelled) return null;
 
@@ -78,6 +80,7 @@ class SingleBlockRunner {
       cancelToken: cancelToken,
       placeholderId: placeholderId,
       placeholder: placeholder,
+      mainModelContextSnapshot: mainModelContextSnapshot,
     );
 
     try {

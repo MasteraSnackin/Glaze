@@ -83,7 +83,23 @@ class ChatMessageEmbeddingService {
         ),
       );
     }
-    await _deleteStaleChunks(sessionId, chunks.length);
+    final existingRows = await _repo.getBySource('chat_message', sessionId);
+    final existingByEntryId = {
+      for (final row in existingRows) row.entryId: row,
+    };
+    final currentEntryIds = {
+      for (final chunk in chunks) '${sessionId}_${chunk.index}',
+    };
+    final staleEntryIds = existingByEntryId.keys
+        .where((entryId) => !currentEntryIds.contains(entryId))
+        .toList();
+    if (staleEntryIds.isNotEmpty) {
+      await _repo.deleteBySourceAndEntryIds(
+        'chat_message',
+        sessionId,
+        staleEntryIds,
+      );
+    }
     if (chunks.isEmpty) return;
 
     for (final chunk in chunks) {
@@ -91,7 +107,7 @@ class ChatMessageEmbeddingService {
       final textHash = computeHash(chunk.text);
 
       try {
-        final existing = await _repo.getByEntryId(entryId);
+        final existing = existingByEntryId[entryId];
         if (existing != null &&
             existing.textHash == textHash &&
             _repo.hasUsableVectors(existing) &&
@@ -180,19 +196,6 @@ class ChatMessageEmbeddingService {
   /// "clear all vector data" admin action if one is added later.
   Future<void> deleteAllChatMessageIndexes() async {
     await _repo.deleteBySourceType('chat_message');
-  }
-
-  Future<void> _deleteStaleChunks(String sessionId, int chunkCount) async {
-    final rows = await _repo.getBySourceId(sessionId);
-    final currentEntryIds = {
-      for (var index = 0; index < chunkCount; index++) '${sessionId}_$index',
-    };
-    for (final row in rows) {
-      if (row.sourceType != 'chat_message') continue;
-      if (!currentEntryIds.contains(row.entryId)) {
-        await _repo.deleteByEntryId(row.entryId);
-      }
-    }
   }
 
   String _formatChunk(List<ChatMessage> slice) {

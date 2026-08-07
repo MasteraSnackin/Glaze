@@ -58,7 +58,9 @@ export class PanelHost {
         id: data.id,
         method: data.method,
         params: data.params || {},
-        context: data.context || {},
+        // Panel identity belongs to the host, never to caller supplied options
+        // or panel-controlled context.
+        context: { ...(data.context || {}), panelId: panel.panelId, messageId: panel.messageId },
       });
       panel.iframe.contentWindow.postMessage(
         { type: 'glaze:response', id: data.id, ok: true, result },
@@ -71,6 +73,7 @@ export class PanelHost {
           id: data.id,
           ok: false,
           error: {
+            code: error && error.code,
             message: String(error && error.message ? error.message : error),
           },
         },
@@ -109,7 +112,7 @@ export class PanelHost {
     iframe.style.width = '100%';
     iframe.style.height = placeholderHeight + 'px';
     iframe.style.background = 'transparent';
-    iframe.srcdoc = this._buildSrcdoc(html, options);
+    iframe.srcdoc = this._buildSrcdoc(html, options, panelId, messageId);
 
     host.appendChild(iframe);
 
@@ -143,12 +146,12 @@ export class PanelHost {
     return panelId;
   }
 
-  _buildSrcdoc(html, options) {
+  _buildSrcdoc(html, options, panelId, messageId) {
     const sdk = JSON.stringify(window.__glazeSdkSource || '');
     const userHtml = String(html == null ? '' : html);
     const context = JSON.stringify({
-      messageId: options.messageId || '',
-      panelId: options.panelId || '',
+      messageId,
+      panelId,
       title: options.title || '',
     });
     const bootstrap = `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>

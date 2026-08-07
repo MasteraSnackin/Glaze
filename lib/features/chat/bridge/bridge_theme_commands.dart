@@ -20,14 +20,17 @@ class ThemeBridgeCommands {
     if (src == null || src.isEmpty) {
       return _host.evalJs('window.bridge?.setBackgroundImage(null, 0, 1)');
     }
-    String url;
+    String? url;
     if (src.startsWith('data:') ||
         src.startsWith('http://') ||
         src.startsWith('https://') ||
         src.startsWith('file://')) {
-      url = _host.resolveLocalFileUrl(src) ?? src;
+      url = _host.resolveLocalFileUrl(src);
     } else {
-      url = _host.resolveLocalFileUrl(src) ?? Uri.file(src).toString();
+      url = _host.resolveLocalFileUrl(src);
+    }
+    if (url == null) {
+      return _host.evalJs('window.bridge?.setBackgroundImage(null, 0, 1)');
     }
     // Pass through JSON encoder — data URIs can be megabytes long and
     // may contain characters that the lightweight escape helper doesn't

@@ -5,6 +5,7 @@ import '../../models/extra_request_parameter.dart';
 const _reservedRequestKeys = {
   'model',
   'messages',
+  'input',
   'contents',
   'system',
   'systemInstruction',

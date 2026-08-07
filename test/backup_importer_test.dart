@@ -989,6 +989,40 @@ void main() {
       expect(jsonDecode(row.read<String>('blocks_json')), equals(blocks));
     });
 
+    test('restores info blocks with the reserved order column', () async {
+      final archive = buildGlzArchive();
+      archive.addFile(
+        ArchiveFile.bytes(
+          'tables/info_blocks.jsonl',
+          utf8.encode(
+            '${jsonEncode({
+              'id': 'block-1',
+              'session_id': 'session-1',
+              'message_id': 'message-1',
+              'swipe_id': 0,
+              'agent_swipe_id': -1,
+              'block_id': 'summary',
+              'block_name': 'Summary',
+              'block_type': 'info',
+              'content': 'Restored content',
+              'created_at': 42,
+              'order': 7,
+              'status': 'done',
+            })}\n',
+          ),
+        ),
+      );
+
+      await writeAndImport(archive, db, imageStorage);
+
+      final row = await db.customSelect(
+        'SELECT "order", content FROM info_blocks WHERE id = ?',
+        variables: [drift.Variable.withString('block-1')],
+      ).getSingle();
+      expect(row.read<int>('order'), 7);
+      expect(row.read<String>('content'), 'Restored content');
+    });
+
     test('silently skips missing preferences.json (v2 backups)', () async {
       // Archive has no preferences.json — should not throw.
       await expectLater(

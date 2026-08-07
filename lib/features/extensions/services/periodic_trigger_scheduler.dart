@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/services/generation_notification_service.dart';
 import '../models/block_config.dart';
 import '../models/extension_preset.dart';
 import '../providers/extension_presets_provider.dart';
@@ -150,6 +151,8 @@ class PeriodicTriggerScheduler with WidgetsBindingObserver {
 
   Future<void> _tick(BlockConfig block) async {
     try {
+      final authority = GenerationNotificationService.instance.activeChatContext;
+      if (authority == null) return;
       final post = _ref.read(extensionPostGenServiceProvider);
       // `runJsBlock` is the existing entry point — it handles headless /
       // visual fallback and the cancel token. We don't need a
@@ -157,9 +160,12 @@ class PeriodicTriggerScheduler with WidgetsBindingObserver {
       // fire-and-forget.
       unawaited(
         post.runJsBlock(
-          charId: _ref.read(extensionsSettingsProvider).activePresetId ?? '',
+          charId: authority.charId,
+          sessionId: authority.sessionId,
           block: block,
           contextMessages: const [],
+          isAuthorized: () => GenerationNotificationService.instance
+              .isCurrentActiveChatContext(authority),
         ),
       );
     } catch (e) {
@@ -178,6 +184,9 @@ class PeriodicTriggerScheduler with WidgetsBindingObserver {
 
   /// Visible for tests.
   int get activeTimerCount => _timers.length;
+
+  @visibleForTesting
+  Future<void> debugTick(BlockConfig block) => _tick(block);
 
   void dispose() {
     if (_isLifecycleListener) {

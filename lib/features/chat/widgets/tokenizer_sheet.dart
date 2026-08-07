@@ -1,9 +1,10 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/llm/context_calculator.dart';
 import '../../../core/llm/prompt_isolate.dart';
-import '../../../core/llm/prompt_payload_builder.dart';
+import '../providers/prompt_build_providers.dart';
 import '../../../core/models/api_config.dart';
 import '../../../features/settings/api_list_provider.dart';
 import '../../../features/settings/app_settings_provider.dart';
@@ -202,7 +203,7 @@ class _TokenizerSheetState extends ConsumerState<TokenizerSheet> {
         : bd == null
         ? Center(
             child: Text(
-              'No data',
+              'label_no_data'.tr(),
               style: TextStyle(color: context.cs.onSurfaceVariant),
             ),
           )
@@ -244,7 +245,7 @@ class _TokenizerSheetState extends ConsumerState<TokenizerSheet> {
     }
 
     return SheetView(
-      title: _showSettings ? 'Context Settings' : 'Context',
+      title: _showSettings ? 'context_settings_title'.tr() : 'tab_context'.tr(),
       showBack: true,
       fitContent: true,
       onBack: () => _showSettings
@@ -255,7 +256,7 @@ class _TokenizerSheetState extends ConsumerState<TokenizerSheet> {
           : [
               SheetViewAction(
                 icon: const Icon(Icons.refresh, size: 20),
-                tooltip: 'Recalculate',
+                tooltip: 'action_recalculate'.tr(),
                 onPressed: _loading ? () {} : _calculate,
               ),
             ],
@@ -323,7 +324,9 @@ class _TokenizerSheetState extends ConsumerState<TokenizerSheet> {
                     ),
                   ),
                   child: Text(
-                    hideCount > 0 ? 'Hide top $hideCount' : 'Hide top messages',
+                    hideCount > 0
+                        ? 'tokenizer_hide_top_n'.tr(args: ['$hideCount'])
+                        : 'label_hide_top_messages'.tr(),
                     style: const TextStyle(
                       fontWeight: FontWeight.w600,
                       color: Colors.white,
@@ -350,9 +353,9 @@ class _TokenizerSheetState extends ConsumerState<TokenizerSheet> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                   ),
-                  child: const Text(
-                    'Settings',
-                    style: TextStyle(fontWeight: FontWeight.w600),
+                  child: Text(
+                    'title_settings'.tr(),
+                    style: const TextStyle(fontWeight: FontWeight.w600),
                   ),
                 ),
               ),
@@ -378,20 +381,19 @@ class _TokenizerSheetState extends ConsumerState<TokenizerSheet> {
   void _confirmHide(BuildContext context, int count) async {
     final confirmed = await GlazeBottomSheet.show<bool>(
       context,
-      title: 'Hide Messages',
+      title: 'tokenizer_hide_messages_title'.tr(),
       bigInfo: BottomSheetBigInfo(
         icon: Icons.visibility_off_outlined,
-        description:
-            'Hide the top $count visible message${count > 1 ? 's' : ''} from prompt? They will still be visible in chat (dimmed) but excluded from generation.',
+        description: 'tokenizer_hide_confirm_desc'.tr(args: ['$count']),
       ),
       items: [
         BottomSheetItem(
-          label: 'Hide $count',
+          label: '${'action_hide_msg'.tr()} $count',
           centered: true,
           onTap: () => Navigator.of(context, rootNavigator: true).pop(true),
         ),
         BottomSheetItem(
-          label: 'Cancel',
+          label: 'btn_cancel'.tr(),
           centered: true,
           onTap: () => Navigator.of(context, rootNavigator: true).pop(false),
         ),
@@ -414,12 +416,12 @@ class _TokenizerSheetState extends ConsumerState<TokenizerSheet> {
         ).add(EdgeInsets.only(top: MediaQuery.paddingOf(context).top)),
         children: [
           SettingsSlider(
-            label: 'History fill threshold',
+            label: 'tokenizer_history_fill_threshold_label'.tr(),
             value: _historyFillThreshold,
             min: 1,
             max: 100,
             unit: '%',
-            description: 'Warn when history fills this % of its budget',
+            description: 'tokenizer_history_fill_threshold_desc'.tr(),
             onChanged: (v) {
               setState(() => _historyFillThreshold = v);
               _saveSettings();
@@ -427,12 +429,12 @@ class _TokenizerSheetState extends ConsumerState<TokenizerSheet> {
           ),
           const SizedBox(height: 16),
           SettingsSlider(
-            label: 'Hide top messages',
+            label: 'label_hide_top_messages'.tr(),
             value: _hidePercent,
             min: 1,
             max: 95,
             unit: '%',
-            description: 'What % of visible messages the Hide button will hide',
+            description: 'tokenizer_hide_percent_desc'.tr(),
             onChanged: (v) {
               setState(() => _hidePercent = v);
               _saveSettings();
@@ -443,4 +445,3 @@ class _TokenizerSheetState extends ConsumerState<TokenizerSheet> {
     );
   }
 }
-

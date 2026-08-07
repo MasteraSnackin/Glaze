@@ -99,6 +99,32 @@ final characterVariantsProvider = StreamProvider.autoDispose
       return ref.read(characterRepoProvider).watchVariants(groupId);
     });
 
+/// Group-level facts (variation count, group-wide favorite) for every variation
+/// group in the library, keyed by group id.
+///
+/// The grid renders one card per group, so a card needs these to show a
+/// variation badge and to reflect a favorite that lives on a non-cover
+/// variation. Watch it with `.select()` on the single group a widget cares
+/// about — the map identity changes on every character write.
+final variantGroupStatsProvider = StreamProvider<Map<String, VariantGroupStats>>(
+  (ref) => ref.read(characterRepoProvider).watchVariantGroupStats(),
+);
+
+/// [VariantGroupStats] for one group, falling back to a lone unfavorited
+/// character while the stream is still loading.
+VariantGroupStats variantGroupStatsOf(WidgetRef ref, String groupId) =>
+    ref.watch(
+      variantGroupStatsProvider.select(
+        (stats) => stats.value?[groupId] ?? VariantGroupStats.single,
+      ),
+    );
+
+/// Chat-session counts per character id — the "N chats" line that tells two
+/// otherwise identical variations apart in the variations sheet.
+final characterSessionCountsProvider = StreamProvider.autoDispose<Map<String, int>>(
+  (ref) => ref.read(chatRepoProvider).watchSessionCountsByCharacter(),
+);
+
 final infiniteCharactersProvider =
     AsyncNotifierProvider.family<
       InfiniteCharactersNotifier,
@@ -313,6 +339,11 @@ class CharactersNotifier extends AsyncNotifier<List<Character>> {
     final groupId = source.variantGroupId.isEmpty
         ? source.id
         : source.variantGroupId;
+    // A character created before the variation columns existed still has an
+    // empty `variant_group_id` in the DB. Stamp it now, otherwise the source and
+    // its new variation land in two different groups and both keep order 0 —
+    // which shows the same character twice in the library grid.
+    await repo.normalizeGroupId(groupId);
     final newId = generateId();
     final order = await repo.nextVariantOrder(groupId);
 
@@ -353,6 +384,22 @@ class CharactersNotifier extends AsyncNotifier<List<Character>> {
     ref.invalidateSelf();
   }
 
+  /// Favorites or unfavorites a character's whole variation group.
+  ///
+  /// The library card stands for the group and reads as favorited when *any*
+  /// variation is, so the toggle has to clear/set the flag group-wide — writing
+  /// only the cover made "remove from favorites" look like a no-op whenever the
+  /// favorite sat on another variation.
+  Future<void> setGroupFav(String charId, bool fav) async {
+    final repo = ref.read(characterRepoProvider);
+    final char = await repo.getById(charId);
+    final groupId = (char == null || char.variantGroupId.isEmpty)
+        ? charId
+        : char.variantGroupId;
+    await repo.setGroupFav(groupId, fav);
+    ref.invalidateSelf();
+  }
+
   /// Hides or reveals a character's whole variation group. Resolves the group
   /// from [charId] so callers can pass any member (including a standalone card).
   Future<void> setHidden(String charId, bool hidden) async {
@@ -362,11 +409,6 @@ class CharactersNotifier extends AsyncNotifier<List<Character>> {
         ? charId
         : char.variantGroupId;
     await repo.setHidden(groupId, hidden);
-    ref.invalidateSelf();
-  }
-
-  Future<void> reorderVariants(String groupId, List<String> orderedIds) async {
-    await ref.read(characterRepoProvider).reorderVariants(groupId, orderedIds);
     ref.invalidateSelf();
   }
 
@@ -396,61 +438,45 @@ class CharactersNotifier extends AsyncNotifier<List<Character>> {
   Future<void> removeMany(Set<String> ids) async {
     if (ids.isEmpty) return;
     final repo = ref.read(characterRepoProvider);
-    final chatRepo = ref.read(chatRepoProvider);
-    final lorebookRepo = ref.read(lorebookRepoProvider);
-    final embeddingRepo = ref.read(embeddingRepoProvider);
-
     final characters = <Character>[];
     for (final id in ids) {
       final character = await repo.getById(id);
       if (character != null) characters.add(character);
     }
 
-    await chatRepo.transaction(() async {
-      for (final id in ids) {
-        final deletedSessionIds = await chatRepo.deleteByCharacterId(id);
-        for (final sid in deletedSessionIds) {
-          final studioConfig = await ref
-              .read(studioConfigRepoProvider)
-              .getBySessionId(sid);
-          await ref.read(studioConfigRepoProvider).deleteBySessionId(sid);
-          await SyncDeletionTracker.record('chat', sid);
-          await SyncDeletionTracker.record('memory_book', sid);
-          await SyncDeletionTracker.record('tracker_value', sid);
-          await SyncDeletionTracker.record('tracker_snapshot', sid);
-          final studioProfileId = studioConfig?.profileId ?? '';
-          if (studioConfig != null &&
-              (studioProfileId.isEmpty || studioProfileId == sid)) {
-            await SyncDeletionTracker.record('studio_config', sid);
-          }
-        }
+    final result = await ref
+        .read(characterDeletionRepoProvider)
+        .deleteCharacters(ids);
 
-        final lorebooks =
-            await lorebookRepo.getByScopeAndTarget('character', id);
-        for (final lb in lorebooks) {
-          await lorebookRepo.delete(lb.id);
-          await embeddingRepo.deleteBySourceId(lb.id);
-          await SyncDeletionTracker.record('lorebooks', lb.id);
-        }
-
-        final activations = ref.read(lorebookActivationsProvider);
-        if (activations.character.containsKey(id)) {
-          final charMap = <String, List<String>>{};
-          for (final e in activations.character.entries) {
-            if (e.key != id) charMap[e.key] = List<String>.from(e.value);
-          }
-          final cleaned = LorebookActivations(
-            character: charMap,
-            chat: activations.chat,
-          );
-          ref.read(lorebookActivationsProvider.notifier).state = cleaned;
-          await saveLorebookActivations(cleaned);
-        }
-
-        await repo.delete(id);
-        await SyncDeletionTracker.record('character', id);
+    for (final sid in result.sessionIds) {
+      await SyncDeletionTracker.record('chat', sid);
+      await SyncDeletionTracker.record('memory_book', sid);
+      await SyncDeletionTracker.record('tracker_value', sid);
+      await SyncDeletionTracker.record('tracker_snapshot', sid);
+      if (result.studioConfigSessionIds.contains(sid)) {
+        await SyncDeletionTracker.record('studio_config', sid);
       }
-    });
+    }
+    for (final lorebookId in result.lorebookIds) {
+      await SyncDeletionTracker.record('lorebooks', lorebookId);
+    }
+    for (final id in result.characterIds) {
+      await SyncDeletionTracker.record('character', id);
+    }
+
+    final activations = ref.read(lorebookActivationsProvider);
+    if (result.characterIds.any(activations.character.containsKey)) {
+      final cleaned = LorebookActivations(
+        character: {
+          for (final entry in activations.character.entries)
+            if (!result.characterIds.contains(entry.key))
+              entry.key: List<String>.from(entry.value),
+        },
+        chat: activations.chat,
+      );
+      ref.read(lorebookActivationsProvider.notifier).state = cleaned;
+      await saveLorebookActivations(cleaned);
+    }
 
     for (final character in characters) {
       await _cleanupFiles(character);

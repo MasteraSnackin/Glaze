@@ -15,6 +15,7 @@ class AuxApiConfig {
   final String apiKey;
   final String model;
   final String protocol;
+  final bool useResponsesApi;
   final List<ExtraRequestParameter> extraRequestParameters;
 
   const AuxApiConfig({
@@ -22,6 +23,7 @@ class AuxApiConfig {
     required this.apiKey,
     required this.model,
     required this.protocol,
+    this.useResponsesApi = false,
     this.extraRequestParameters = const [],
   });
 }
@@ -264,6 +266,7 @@ class AuxLlmClient {
           topP: 1.0,
           stream: false,
           requestReasoning: requestReasoning,
+          useResponsesApi: config.useResponsesApi,
           omitReasoning: omitReasoning,
           omitReasoningEffort: omitReasoningEffort,
           extraRequestParameters: config.extraRequestParameters,
@@ -332,6 +335,7 @@ class AuxLlmClient {
           topP: 1.0,
           stream: true,
           requestReasoning: requestReasoning,
+          useResponsesApi: config.useResponsesApi,
           omitReasoning: omitReasoning,
           omitReasoningEffort: omitReasoningEffort,
           extraRequestParameters: config.extraRequestParameters,

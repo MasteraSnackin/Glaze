@@ -7,13 +7,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/debug/perf_debug.dart';
 import '../bridge/chat_bridge_controller.dart';
 import '../bridge/chat_bridge_registry.dart';
 import '../bridge/chat_webview_bridge_host.dart';
 import '../bridge/chat_webview_environment.dart';
 import '../bridge/chat_webview_keep_alive.dart';
 import '../bridge/chat_webview_settings.dart';
-import '../../extensions/services/js_engine_service.dart';
+import '../../settings/app_settings_provider.dart';
 import 'chat_webview_callbacks.dart';
 import 'chat_webview_ext_block_callbacks.dart';
 import 'webview_callbacks.dart';
@@ -155,6 +156,14 @@ class ChatWebViewSurface extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final webViewEnvironment = chatWebViewEnvironment;
+    ref.listen<AsyncValue<AppSettings>>(appSettingsProvider, (previous, next) {
+      final oldValue = previous?.value?.allowMessageScripts ?? false;
+      final newValue = next.value?.allowMessageScripts ?? false;
+      if (oldValue == newValue) return;
+      ref
+          .read(chatBridgeRegistryProvider(charId))
+          ?.evalJs('window.bridge?.setAllowMessageScripts($newValue)');
+    });
     return Stack(
       children: [
         // Background behind the transparent WebView.
@@ -178,28 +187,26 @@ class ChatWebViewSurface extends ConsumerWidget {
               initialUrlRequest: chatWebViewInitialUrlRequest(),
               initialSettings: chatWebViewInAppSettings(),
               onWebViewCreated: (controller) async {
+                PerfDebug.chatWebViewSurfaceCreated();
                 final jsBridgeService = await bridgeHost.buildJsBridgeService();
                 if (!isMounted()) return;
                 final bridge = ChatBridgeController(
                   controller,
-                  jsBridgeService: jsBridgeService,
+                  jsBridgeService,
+                );
+                final allowMessageScripts =
+                    ref.read(appSettingsProvider).value?.allowMessageScripts ??
+                    false;
+                await bridge.evalJs(
+                  'window.bridge?.setAllowMessageScripts('
+                  '$allowMessageScripts)',
                 );
                 // Register bridge in the registry so services can access it.
                 ref.read(chatBridgeRegistryProvider(charId).notifier).state =
                     bridge;
                 onBridgeReady(bridge);
+                PerfDebug.chatWebViewBridgeReady();
 
-                // Kick off the singleton headless engine. Failure is
-                // non-fatal — the visual bridge above remains the fallback
-                // for jsRunner blocks and for background scripts.
-                unawaited(
-                  JsEngineService.instance.init(
-                    host: JsEngineBridgeHost(
-                      bridge: jsBridgeService,
-                      currentCharIdProvider: () => charId,
-                    ),
-                  ),
-                );
                 // Do not call clearAll() here — it races with _initWebViewOnce
                 // (shows #loading-screen via JS) and broke UseVirtualScroll on
                 // keep-alive re-attach. Initializer.setMessages resets the DOM.
@@ -267,12 +274,19 @@ class ChatWebViewSurface extends ConsumerWidget {
                 }
               },
               onLoadStop: (controller, url) async {
+                PerfDebug.chatWebViewLoadStopped();
                 // The init path is also wired through onWebViewCreated. When
                 // load stop wins the race, run init here.
+                await ref
+                    .read(chatBridgeRegistryProvider(charId))
+                    ?.evalJs(
+                      'window.bridge?.setAllowMessageScripts('
+                      '${ref.read(appSettingsProvider).value?.allowMessageScripts ?? false})',
+                    );
                 await onInitWebView();
               },
               shouldOverrideUrlLoading: (controller, request) async {
-                return NavigationActionPolicy.CANCEL;
+                return chatWebViewNavigationPolicy(request.request.url);
               },
             ),
           ),

@@ -19,72 +19,75 @@ class ExtBlocksSettingsSheet extends ConsumerWidget {
     final settings = ref.watch(extensionsSettingsProvider);
     final presets = ref.watch(extensionPresetsProvider);
     final activePreset = settings.activePresetId != null
-        ? presets
-            .where((p) => p.id == settings.activePresetId)
-            .firstOrNull
+        ? presets.where((p) => p.id == settings.activePresetId).firstOrNull
         : null;
 
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Container(
-                width: 32,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: context.cs.outlineVariant.withValues(alpha: 0.4),
-                  borderRadius: BorderRadius.circular(2),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 32,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: context.cs.outlineVariant.withValues(alpha: 0.4),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'Ext Blocks',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-                color: context.cs.onSurface,
+              const SizedBox(height: 12),
+              Text(
+                'Ext Blocks',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: context.cs.onSurface,
+                ),
               ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Выберите пресет расширений для текущего чата',
-              style: TextStyle(
-                fontSize: 13,
-                color: context.cs.onSurfaceVariant,
+              const SizedBox(height: 4),
+              Text(
+                'Выберите пресет расширений для текущего чата',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: context.cs.onSurfaceVariant,
+                ),
               ),
-            ),
-            const SizedBox(height: 16),
-            _SelectorTile(
-              icon: Icons.tune_outlined,
-              label: 'Активный пресет',
-              value: activePreset?.name ?? 'Не выбран',
-              onTap: () => _showPresetSelector(context, ref, settings, presets),
-            ),
-            const SizedBox(height: 8),
-            if (activePreset != null) ...[
-              _ActionTile(
-                icon: Icons.edit_outlined,
-                label: 'Редактировать пресет',
-                onTap: () {
-                  Navigator.pop(context);
-                  context.push('/extensions/preset-editor/${activePreset.id}');
-                },
+              const SizedBox(height: 16),
+              _SelectorTile(
+                icon: Icons.tune_outlined,
+                label: 'Активный пресет',
+                value: activePreset?.name ?? 'Не выбран',
+                onTap: () =>
+                    _showPresetSelector(context, ref, settings, presets),
               ),
               const SizedBox(height: 8),
-              _BlocksList(preset: activePreset),
+              if (activePreset != null) ...[
+                _ActionTile(
+                  icon: Icons.edit_outlined,
+                  label: 'Редактировать пресет',
+                  onTap: () {
+                    Navigator.pop(context);
+                    context.push(
+                      '/extensions/preset-editor/${activePreset.id}',
+                    );
+                  },
+                ),
+                const SizedBox(height: 8),
+                _BlocksList(preset: activePreset),
+              ],
+              const SizedBox(height: 8),
+              _ActionTile(
+                icon: Icons.add_circle_outline,
+                label: 'Создать пресет',
+                onTap: () => _createPreset(context, ref),
+              ),
             ],
-            const SizedBox(height: 8),
-            _ActionTile(
-              icon: Icons.add_circle_outline,
-              label: 'Создать пресет',
-              onTap: () => _createPreset(context, ref),
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -124,26 +127,26 @@ class ExtBlocksSettingsSheet extends ConsumerWidget {
               : context.cs.onSurfaceVariant,
           onTap: () {
             Navigator.pop(context);
-            ref
-                .read(extensionsSettingsProvider.notifier)
-                .selectPreset(null);
+            ref.read(extensionsSettingsProvider.notifier).selectPreset(null);
           },
         ),
-        ...presets.map((preset) => BottomSheetItem(
-              label: preset.name,
-              icon: activeId == preset.id
-                  ? Icons.radio_button_checked
-                  : Icons.radio_button_off,
-              iconColor: activeId == preset.id
-                  ? context.cs.primary
-                  : context.cs.onSurfaceVariant,
-              onTap: () {
-                Navigator.pop(context);
-                ref
-                    .read(extensionsSettingsProvider.notifier)
-                    .selectPreset(preset.id);
-              },
-            )),
+        ...presets.map(
+          (preset) => BottomSheetItem(
+            label: preset.name,
+            icon: activeId == preset.id
+                ? Icons.radio_button_checked
+                : Icons.radio_button_off,
+            iconColor: activeId == preset.id
+                ? context.cs.primary
+                : context.cs.onSurfaceVariant,
+            onTap: () {
+              Navigator.pop(context);
+              ref
+                  .read(extensionsSettingsProvider.notifier)
+                  .selectPreset(preset.id);
+            },
+          ),
+        ),
       ],
     );
   }
@@ -183,10 +186,7 @@ class _SelectorTile extends StatelessWidget {
               Expanded(
                 child: Text(
                   label,
-                  style: TextStyle(
-                    fontSize: 15,
-                    color: context.cs.onSurface,
-                  ),
+                  style: TextStyle(fontSize: 15, color: context.cs.onSurface),
                 ),
               ),
               Text(
@@ -242,10 +242,7 @@ class _ActionTile extends StatelessWidget {
               Expanded(
                 child: Text(
                   label,
-                  style: TextStyle(
-                    fontSize: 15,
-                    color: context.cs.onSurface,
-                  ),
+                  style: TextStyle(fontSize: 15, color: context.cs.onSurface),
                 ),
               ),
               Icon(

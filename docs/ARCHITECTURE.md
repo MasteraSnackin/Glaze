@@ -10,7 +10,7 @@ Related docs:
 
 ## 0. Architecture Overview
 
-### Target Layer Order (dependency direction ↓)
+### Target Layer Order (dependency direction down)
 
 ```
 UI (screens/widgets)
@@ -20,8 +20,16 @@ UI (screens/widgets)
       → Repos (Drift DB abstraction)
 ```
 
-A layer may only import from its own level or below. Never upward.
-UI → Providers → Services → Repos/Models. No circular imports.
+Pure/core service implementations must not import feature modules. Dependencies
+that cross feature boundaries are passed as constructor values or callbacks and
+wired in Riverpod composition modules. Shared core-only composition belongs in
+`core/state`; composition that reads feature-owned providers belongs under the
+owning feature's `providers/` directory.
+
+Some older `core/state -> features` imports remain as composition exceptions;
+do not extend that pattern. Architecture tests pin critical boundaries such as
+feature-free LLM implementations, provider-free Studio DTOs, and neutral sync
+ports. No circular imports.
 
 ### Key Rules
 
@@ -41,7 +49,7 @@ lib/
 │   ├── constants/
 │   │   └── image_gen_patterns.dart     # IMG-tag regex constants
 │   ├── db/
-│   │   ├── app_db.dart                 # AppDatabase singleton (18 tables, schema v58)
+│   │   ├── app_db.dart                 # AppDatabase singleton (26 tables, schema v81)
 │   │   ├── tables.dart                 # Drift table class definitions
 │   │   └── repositories/              # One repo per table (CRUD only)
 │   │       ├── api_config_repo.dart
@@ -75,9 +83,9 @@ lib/
 │   │   ├── prompt_block_resolver.dart # Maps preset block ID → resolved text
 │   │   ├── prompt_regex_applicator.dart # Pure: applies preset+global regex scripts to final messages
 │   │   ├── prompt_inputs.dart         # Freezed value object: inputs for isolate build
-│   │   ├── prompt_inputs_collector.dart # Reads Riverpod state, assembles PromptInputs (no async work)
+│   │   ├── prompt_inputs_collector.dart # Core collector with injected feature adapters
 │   │   ├── prompt_payload_assembler.dart # Pure: PromptInputs → PromptPayload (no Riverpod)
-│   │   ├── prompt_payload_builder.dart # Riverpod-aware: assembles PromptPayload (vector/memory async)
+│   │   ├── prompt_payload_builder.dart # Assembles PromptPayload (vector/memory async)
 │   │   ├── prompt_isolate.dart        # Spawns isolate; delegates to prompt_worker
 │   │   ├── prompt_worker.dart         # Top-level entry: buildPrompt() inside isolate
 │   │   ├── prompt_worker_codec.dart   # Isolate boundary JSON codec (serialize/deserialize payload+result)
@@ -86,7 +94,6 @@ lib/
 │   │   ├── fallback_prompt_builder.dart # Minimal prompt when no preset configured
 │   │   ├── lorebook_scanner.dart      # Keyword scan: sticky/cooldown/probability/recursion
 │   │   ├── lorebook_merger.dart       # Merges keyword + vector results, deduplicates
-│   │   ├── lorebook_providers.dart    # Riverpod providers for vector search/embedding
 │   │   ├── lorebook_coverage.dart     # Diagnostic: full coverage report per entry/key
 │   │   ├── lorebook_vector_search.dart # Cosine search + hybrid boost
 │   │   ├── lorebook_embedding_service.dart # Indexes lorebook entries into embedding store
@@ -230,6 +237,7 @@ lib/
 │       ├── active_selection_provider.dart # Active preset/persona/globalVars/regexes
 │       ├── active_regex_provider.dart     # Active regex scripts for prompt build
 │       ├── character_provider.dart   # CharactersNotifier (watchAll reactive stream)
+│       ├── lorebook_embedding_provider.dart # Vector search/embedding composition
 │       ├── lorebook_provider.dart    # LorebooksNotifier + settings/activations
 │       ├── global_regex_provider.dart # GlobalRegexNotifier
 │       ├── memory_settings_provider.dart # MemoryGlobalSettings + notifier
@@ -441,6 +449,18 @@ post-gen, or pipeline sync notification. See `docs/INVARIANTS.md` INV-CM2.
 **Talkativeness:** `sendMessage()` may skip generation when
 `character.extensions['talkativeness']` rolls above the configured threshold.
 
+### Prompt composition boundary
+
+`PromptInputsCollector` and `PromptPayloadBuilder` do not import feature modules
+or declare Riverpod providers. Feature-owned adaptation lives in
+`features/chat/providers/prompt_build_providers.dart`: API-list initialization
+and active API lookup, ExtBlocks history injection, runtime prompt injection,
+and vector-search diagnostics. Adapters read current state when invoked rather
+than capturing it when the provider is built. Runtime injections are converted
+to a detached, immutable `List<RuntimePromptBlock>` before entering core prompt
+code. The two core orchestrators still receive `Ref` for core providers; this is
+a dependency-direction boundary, not a claim that prompt collection is pure.
+
 ### Request Types
 
 | Type | State owner | Streaming | Abort |
@@ -494,6 +514,14 @@ the maintainer's working Loom presets as repository assets. Updating the app
 therefore cannot silently replace a user's calibrated preset. Old seed block
 data remains private to historical DB migrations only, so upgrades from older
 schemas continue to work.
+
+At the start of a normal generation,
+`StudioTurnConfigResolver.resolve(sessionId)` captures one immutable
+`StudioTurnConfigSnapshot`: topology-gated agents, the selected Studio preset,
+pipeline settings, an immutable API-config list, and the active API fallback.
+The same snapshot is passed through prompt construction, tracker/final-agent
+execution, POST-cleaner, and Ledger. Changes made while a turn is running apply
+to later turns only. A separate manual action may resolve a fresh snapshot.
 
 #### Execution topologies
 
@@ -567,6 +595,13 @@ owns Beauty derivation itself. The POST-cleaner enable switch controls automatic
 cleaner/audit calls, not whether the independent Studio topology exists.
 
 #### POST-cleaner swipe lifecycle (UX phase, "swipe-first streaming")
+
+Every automatic or manual cleaner run first acquires a `CleanerRunLease` from
+`CleanerRunRegistry`, keyed by `(sessionId, messageId)`. A newer same-key run
+cancels the previous lease and waits for its cleanup before it may mutate the
+message; superseded queued runs do not start. Different keys may run
+concurrently. Only the globally latest lease may publish shared cleaner UI,
+streaming, and cancel-token state.
 
 The cleaned swipe is **pre-created at cleaner start** (empty content, tracker
 snapshot cloned from the parent `'final'`) so the blue sub-swipe switcher is
@@ -726,7 +761,12 @@ finishes.
 
 ### Session variables on abort/error
 
-`pendingSessionVars` from the isolate are written to the DB **only** on the success path (`SavedMessageWriter.writeAssistant`). Error/regen-error paths keep the pre-generation `sessionVars`. See `docs/INVARIANTS.md` INV-C5.
+`pendingSessionVars` from the isolate reach the DB **only** on a successful
+commit. `SavedMessageWriter` carries the generated values;
+`GenerationPipeline._commitGenerationResult` applies their delta to the latest
+durable session through `ChatRepo.mutateSession`. Continuation uses the same
+delta rule. Abort and error paths do not apply it. See `docs/INVARIANTS.md`
+INV-C5.
 
 ---
 
@@ -735,7 +775,7 @@ finishes.
 ### Files
 - `lorebook_scanner.dart` — keyword scan: sticky/cooldown/probability/character-filter/recursion
 - `lorebook_merger.dart` — merges keyword + vector results, deduplicates by entry ID
-- `lorebook_providers.dart` — Riverpod providers for vector search and embedding
+- `core/state/lorebook_embedding_provider.dart` — Riverpod composition for vector search and embedding
 - `lorebook_coverage.dart` — diagnostic full coverage report
 - `lorebook_vector_search.dart` — cosine similarity, hybrid boost (name/key/hint overlap)
 - `lorebook_embedding_service.dart` — indexes lorebook entries (hash-based dirty check)
@@ -926,14 +966,14 @@ canonical tracker state.
 
 **File:** `lib/core/db/app_db.dart` + `lib/core/db/repositories/`
 
-### Tables (22 total, schema v58)
+### Tables (26 total, schema v81)
 
 | Table | Repo | Notes |
 |-------|------|-------|
 | `Characters` | `character_repo.dart` | watchAll(); v18 `picksHash`, v19 `createdAt`, v13 `extensionsJson`, v32 `tokenCount`, v33 `variantGroupId`/`variantName`/`variantOrder`, v34 `hidden`. `updateExtensionsJson` is the atomic read-modify-write helper for the JS `character` variable scope. |
 | `CharacterFolders` | `character_folder_repo.dart` | v31; local character folders (composite PK `{folderId, charId}`) |
 | `CharacterFolderMembers` | `character_folder_repo.dart` | v31; folder membership (composite PK + 2 indexes) |
-| `ChatSessions` | `chat_repo.dart` | Largest repo (~250 lines); patch via `patchChatData`. `updateSessionVarsJson` is the atomic helper for the JS `chat` variable scope. |
+| `ChatSessions` | `chat_repo.dart` | JSON-backed messages plus session metadata. Mutate through narrow transactional APIs (`mutateMessage`, `mutateMessages`, `mutateSession`, draft/swipe/variable helpers); `put` is for authoritative whole-row creation/replacement. |
 | `Presets` | `preset_repo.dart` | JSON blob per preset |
 | `ApiConfigs` | `api_config_repo.dart` | v21: `cacheControlTtl`; v23: `protocol`; v24: `topK`/`frequencyPenalty`/`presencePenalty`; v25: `cacheBreakpointMode`/`sessionIdMode` |
 | `Personas` | `persona_repo.dart` | |
@@ -948,9 +988,14 @@ canonical tracker state.
 | `StudioConfigRows` | `studio_config_repo.dart` | v36; reusable Studio profiles, v42 adds `profileId`/`profileName` for session-to-profile binding, v43 `builderPromptTemplate`, v44 `maxFinalHistoryMessages`, v46 `routingMode` |
 | `TrackerRows` | `tracker_repo.dart` | v45; lightweight key-value canonical session state (e.g. `world:location`). Composite PK `{sessionId, name}`. Studio Ledger is the sole automatic writer; snapshots provide lifecycle-safe rollback. |
 | `TrackerSnapshots` | `tracker_snapshot_repo.dart` | v50; per-agent-swipe immutable snapshots of all trackers (mirrors Marinara-Engine's `game_state_snapshots`). Composite PK `{sessionId, messageId, swipeId, agentSwipeId}`; `trackersJson`, `committed`, `createdAt`. See INV-TS1–7 in `docs/INVARIANTS.md`. |
+| `LedgerReconciliationCheckpoints` / `LedgerReconciliationCleanupJournals` | reconciliation repos | Reconciliation progress and reversible cleanup provenance. |
+| `CharacterKnowledgeFactRows` / `CharacterSessionBaselineRows` | knowledge/baseline repos | Provenance-backed character facts and immutable per-session card baseline. |
+| `StudioPresetRows` | `studio_preset_repo.dart` | User-owned Studio prompt presets and execution topology. |
 
 ### Write Rule
-**Never** do `getChat → mutate → saveChat`. Use `patchChatData` to serialize reads.
+**Never** commit a mutation with `getChat -> copyWith -> put`. Use the narrowest
+transactional repository mutation API. Publish only the durable session returned
+by that API to cache/state; on conflict or failure, reload before publication.
 See `docs/rules/database.md`.
 
 ---
@@ -968,8 +1013,11 @@ All service implementations live under `lib/features/cloud_sync/services/`.
 - `sync_conflict.dart` — winner = newer `updatedAt`
 - `sync_queue.dart` — serial queue preventing duplicate uploads
 - `sync_config.dart` / `sync_models.dart` — configuration and data models
-- `sync_provider.dart` — Riverpod provider for sync state
-- `sync_repo_interfaces.dart` — abstract repo interfaces for sync
+- `sync_provider.dart` — Riverpod composition root for sync state and stores
+- `core/application/sync_repo_interfaces.dart` — neutral core-entity store ports
+- `core/application/*_deletion_store.dart` — neutral lifecycle deletion ports
+- `shared/application/sync_theme_store.dart` — neutral theme store port
+- `features/cloud_sync/sync_repo_interfaces.dart` — feature-owned extension and manifest ports
 - `cloud_adapter.dart` — abstract adapter interface for cloud providers
 - `dropbox/dropbox_adapter.dart` + `dropbox_auth.dart` — OAuth2 PKCE + API v2
 - `gdrive/gdrive_adapter.dart` + `gdrive_auth.dart` + `gdrive_files.dart` + `gdrive_folders.dart`
@@ -978,7 +1026,16 @@ All service implementations live under `lib/features/cloud_sync/services/`.
 - `widgets/sync_sheet.dart` — Sync UI sheet
 
 ### What Is Synced
-Characters, sessions, presets, API configs, personas, lorebooks, theme presets, Studio profiles, active preset, selected app settings, extension presets/settings, info-block rows, and tracker snapshots (Phase 9 — per-session collection pattern, same as info blocks). **Not synced:** generation state, UI state, embedding vectors, debug traces, and live `tracker_rows` (the local materialization restored from committed tracker snapshots).
+Characters, sessions, personas, presets, API configs, lorebooks, MemoryBooks,
+themes, extension presets/settings, InfoBlocks, Studio configs and presets,
+summaries, character folders, tracker snapshots, live tracker values, character
+knowledge, compatible Memory Graph collections, selected global local-storage
+settings, and supported binary assets. **Not synced:** embedding vectors,
+generation state, transient UI state, and debug traces.
+
+Core repositories implement the neutral ports and must not import
+`features/cloud_sync`; `sync_provider.dart` supplies those repositories and the
+feature-local adapters to `SyncService`.
 
 ---
 
@@ -993,9 +1050,10 @@ Characters, sessions, presets, API configs, personas, lorebooks, theme presets, 
 - `shared/theme/app_theme.dart` — `AppTheme` builder: generates `ThemeData` + `ColorScheme` from preset
 
 ### `updatePreset(ThemePreset preset)` flow
-1. `ThemeNotifier.updatePreset()` → saves to `ThemePresetStorage`
-2. Rebuilds `ThemeData` from new preset
-3. `ThemeFontNotifier` detects font change → reloads font family
+1. `ThemeNotifier.updatePreset()` updates preview state immediately.
+2. Persistence is debounced and serialized; rapid edits coalesce to the latest
+   preset list, and `flushPersistence()` provides an explicit durable barrier.
+3. `ThemeFontNotifier` detects font change and reloads the font family.
 
 ---
 
@@ -1014,16 +1072,14 @@ Characters, sessions, presets, API configs, personas, lorebooks, theme presets, 
 
 ## 9. Extensions (Info Blocks + JS Bridge SDK)
 
-The extensions feature ships two surfaces that share a single Dart-side
-`JsBridgeService`:
+The extensions feature supports the Chat WebView bridge and sandboxed panels
+that relay through it. Each visual chat owns its fully wired `JsBridgeService`:
 
 1. **Post-generation block chain** — preset-driven infoblock / imageGen /
    jsRunner / interactive blocks that run after the assistant message
    is saved on the normal/regen path.
 2. **JS Bridge SDK** (`window.glaze`) — extension authors can call
-   `glaze.*` from sandboxed iframes (interactive panels) or from a
-   headless `InAppWebView` that runs in the background even when no
-   chat is open.
+   `glaze.*` from the Chat WebView or sandboxed interactive panels.
 
 Formal invariants: `docs/INVARIANTS.md` INV-EG1–INV-EG8 and
 INV-JS1–INV-JS6.
@@ -1051,7 +1107,7 @@ per block via `InfoBlocksRepository.updateStatus()`.
 |---|---|---|
 | `infoblock` | `blocks/infoblock_handler.dart` | Calls `InfoBlockService`; injects last N results into prompt context |
 | `imageGen` | `blocks/image_gen_block_handler.dart` | Reads `[img gen:…]` tag, calls `ImageGenService`, saves via `ImageStorageService`; result stored as `[IMG:RESULT:<path>]` |
-| `jsRunner` | `blocks/js_runner_block_handler.dart` | Runs JS via `JsBlockExecutor`: headless `JsEngineService` preferred, visual bridge fallback. Periodic ticks only ever run here. |
+| `jsRunner` | `blocks/js_runner_block_handler.dart` | Runs JS through the Chat WebView via `JsBlockExecutor`; absent bridges produce a bounded unavailable error. |
 | `interactive` | `blocks/interactive_block_handler.dart` | LLM → strip code-fence → sandboxed iframe island under the assistant message. JS inside the panel has access to `window.glaze.*` |
 
 ### Block triggers
@@ -1060,7 +1116,7 @@ per block via `InfoBlocksRepository.updateStatus()`.
 |---|---|---|
 | `afterAssistant` | `PostGenCoordinator`: background when Studio is off; `CleanerStage` after canonical swipe selection when Studio is on | all block types |
 | `afterUser` | `ChatNotifier.sendMessage` (fire-and-forget `unawaited(_dispatchAfterUserBlocks(...))`) | all block types |
-| `periodic` | `PeriodicTriggerScheduler` (`Timer.periodic(block.periodicIntervalSeconds)`) | `jsRunner` only — headless engine preferred, visual bridge fallback |
+| `periodic` | `PeriodicTriggerScheduler` (`Timer.periodic(block.periodicIntervalSeconds)`) | `jsRunner` only — no supported bridge runtime is available without the Chat WebView |
 
 The chain filter is enforced by `BlockProcessor` and `SingleBlockRunner`, with
 `ExtensionPostGenService` kept as the public entrypoint. The same chain is reused
@@ -1105,9 +1161,12 @@ independent of the chat text-generation token (INV-EG5).
 ### Capability permissions
 
 Each extension preset carries a `PresetPermissions` freezed model with
-19 capability toggles (default-deny except `showToast`). Every bridge
-method enforces its capability via `JsBridgeService._requireCapability`,
-which delegates to an injected `PermissionCheck` function — production
+19 capability toggles (default-deny except `showToast`). The immutable
+`JsBridgeMethodRegistry` is the canonical public method set and records each
+method's capability resolver plus Chat WebView host availability.
+`JsBridgeService.dispatch` rejects unregistered methods, enforces the registered
+capability through the injected `PermissionCheck`, and then selects the
+registered operation. Supported-profile tests consume the registry's host sets. Production
 wiring in `ChatWebViewWidget` reads `activePresetPermissionsProvider`.
 
 | Capability | Bridge method |
@@ -1176,21 +1235,15 @@ returns the `Source` subclass (or `null` for built-in cues).
 
 User-authored JS runs in a `<iframe sandbox="allow-scripts">` (without
 `allow-same-origin`) — null origin, no access to `window.parent`,
-`window.flutter_inappwebview`, or any API keys. Two execution paths:
+`window.flutter_inappwebview`, or any API keys. The supported execution path is:
 
 * **Visual WebView** — `ChatBridgeController.runJsBlock()` is used
   when the chat is open; the script is forwarded into the chat
   WebView's `assets/chat_webview/bridge/chat_bridge_controller.js`
   `runSandboxedScript()` path.
-* **Headless engine** — `JsEngineService` is a singleton
-  `HeadlessInAppWebView` that loads `assets/chat_webview/headless.html`
-  (also `sandbox="allow-scripts"`) and shares the same
-  `JsBridgeService` instance as the visual WebView. Preferred for
-  background / periodic ticks. Throws `HeadlessUnavailableError` when
-  not ready; callers fall back to the visual bridge.
-
-Both paths use `Window.headlessBridge.runSandboxedScript(script, contextJson)`
-and the same `JsBridgeService.dispatch` for `glaze.*` calls.
+The retained headless engine assets are not a supported bridge profile or
+fallback runtime. JS block runners never retry a script in another runtime;
+when the Chat WebView is absent they return an explicit unavailable outcome.
 
 ### Dart files
 
@@ -1200,17 +1253,18 @@ and the same `JsBridgeService.dispatch` for `glaze.*` calls.
 * `blocks/block_status_tracker.dart` — placeholder/status/error/dedupe lifecycle
 * `blocks/block_panel_updater.dart` — shared panel update/throttling plumbing
 * `blocks/image_pixel_renderer.dart` — image bytes → persisted file/result token
-* `blocks/js_block_executor.dart` — message-bound `jsRunner` execution + headless/visual fallback persistence
-* `blocks/periodic_js_block_runner.dart` — periodic headless/visual fallback execution
+* `blocks/js_block_executor.dart` — message-bound `jsRunner` execution through the Chat WebView
+* `blocks/periodic_js_block_runner.dart` — periodic JS-runner integration (not a supported bridge profile)
 * `blocks/image_only_rerunner.dart` — manual image-only rerun validation/status update flow
 * `blocks/*_block_handler.dart` — concrete `infoblock`, `imageGen`, `jsRunner`, `interactive` handlers
 * `info_block_service.dart` — LLM call + prompt assembly for `infoblock` type
 * `info_block_injector.dart` — inserts stored `InfoBlock` outputs into the prompt context
 * `js_bridge_service.dart` — compatibility export for `js_bridge/js_bridge_service.dart`
 * `js_bridge/js_bridge_service.dart` — pure dispatcher: `{ method, params, context }` → `{ ok, result/error }`; no Riverpod
+* `js_bridge/js_bridge_method_registry.dart` — immutable canonical method set with operation, capability resolver, and supported-host metadata
 * `js_bridge/handlers/*_handler.dart` — variables, generation, prompt injection, audio, commands, toast
 * `js_bridge/capability_resolver.dart` + `permission_gate.dart` — method/scope capability mapping and default-deny enforcement
-* `js_engine_service.dart` — singleton headless engine + `JsEngineBridgeHost` (optional `currentCharIdProvider` for `triggerGeneration` in headless mode)
+* `js_engine_service.dart` — retained unused headless-engine compatibility implementation
 * `panel_host_service.dart` — singleton panel registry + resize/event broadcast streams
 * `audio_bridge_service.dart` — `SystemSound` + `audioplayers` routing
 * `command_registry.dart` — `/trigger` / `/getvar` / `/setvar` / `/inject` / `/toast` registry; `buildWiredCommandRegistry(WiredCommandDeps)` is the production default
@@ -1238,7 +1292,7 @@ Active chat WebView JS is loaded as ES modules from `assets/chat_webview/index.h
 * `assets/chat_webview/bridge/index.js` — imports `Formatter` and `Renderer`, creates `window.bridge`, registers scaled wheel handling and `onWebViewReady`
 * `assets/chat_webview/bridge/chat_bridge_controller.js` — main JS bridge facade, Flutter transport, message list API, ext-block panel, sandbox runner
 * `assets/chat_webview/bridge/panel_host.js` — sandboxed interactive iframe lifecycle and `glaze:*` relay
-* `assets/chat_webview/headless.html` — headless engine host
+* `assets/chat_webview/headless.html` — retained unused headless-engine asset
 
 Legacy single-file paths (`bridge.js`, `renderer.js`, `formatter.js`) are
 compatibility markers only; `bridge.legacy.js` is the retained pre-module bridge
@@ -1289,15 +1343,25 @@ Resolved (kept for history; details in git / PR notes):
 - **magic_drawer_stats_service** — moved to `features/chat/services/`.
 - **prompt_payload_builder split** — `prompt_inputs_collector` + `prompt_payload_assembler`.
 - **chat_provider decomposition** — controllers + `generation_pipeline` + `saved_message_writer` (~420 lines; further splits possible).
-- **lorebook_vector_search providers** — extracted to `lorebook_providers.dart`.
+- **lorebook_vector_search providers** — moved to `core/state/lorebook_embedding_provider.dart`.
 - **Chat ↔ memory draft mutex** — `memory_active_drafts_provider` + `MemoryBookController` (INV-M3/INV-M4).
-- **Session vars on abort/error** — only success path persists isolate vars (INV-C5).
+- **Session vars on abort/error** — only a successful guarded commit applies the
+  isolate variable delta (INV-C5).
 - **Memory injection token budget** — `memory_budget.dart` + INV-PS4.
-- **JS extensions MVP** — `window.glaze` SDK, headless `JsEngineService`, capability permissions, periodic/afterUser triggers, interactive panels, audioplayers-backed audio, big/medium/small connection profiles, wired `CommandRegistry`, lifecycle-paused periodic scheduler. Current module boundaries are documented in § 9.
+- **JS extensions MVP** — `window.glaze` SDK, Chat WebView bridge, capability permissions, periodic/afterUser triggers, interactive panels, audioplayers-backed audio, big/medium/small connection profiles, wired `CommandRegistry`, lifecycle-paused periodic scheduler. Current module boundaries are documented in § 9.
 - **`sync_engine.dart` decomposition** — `SyncBinaryAssetSyncer` (avatar/gallery push/pull) + `sync_image_stripper.dart` extracted; `saveLorebookActivations` injected as callback (removed provider-layer import from service).
 - **`prompt_builder.dart` decomposition** — regex application extracted to `prompt_regex_applicator.dart`; deferred-memory finalization extracted to `_finalizeDeferredMemory()`.
 - **`image_gen_service.dart` decomposition** — `[IMG:*]` tag-markup text transforms extracted to `image_tag_markup.dart` (`ImageTagMarkup`).
 - **`memory_injection_service.dart` arch fix** — removed `Ref` dependency; `MemoryGlobalSettings` injected via callback.
 - **`prompt_worker.dart` decomposition** — isolate-boundary JSON codec extracted to `prompt_worker_codec.dart`.
 - **Triplicated memory formatting helpers** — `_formatMemoryItems` / `_formatMemoryRange` deduplicated to `memory_formatting.dart`.
-- **Studio decomposition (Phases 1-11)** — 11-phase decomposition of Studio services: data classes and specialists extracted from `prompt_builder.dart`, `prompt_payload_builder.dart`, `post_cleaner_service.dart`, `memory_studio_service.dart`, `studio_message_builder.dart`, `memory_injection_service.dart`, `memory_excerpt_selector.dart`, `studio_ledger_service.dart`, `agent_runner.dart`, `stream_generation_service.dart` into `prompt/`, `cleaner/`, `studio/`, `memory/`, `ledger/`, `shared/` subdirectories. Constructor injection sweep removed `Ref` from 11 services (only `memory_studio_service.dart` retains `Ref` as root orchestrator; `prompt_inputs_collector.dart` + `prompt_payload_builder.dart` deferred — 15+ provider reads). `AuxLlmClient` promoted to `const` constructor (no `Ref`). `StudioFinalRunResult` merged into `AgentRunResult` (identical 3-field shape). `ModelFetcher.fetchModelIds()` deduplicates `fetchModels` parsing. UI decomposition extracted business logic + distinct sub-screens from `studio_settings_sheet.dart`, `agentic_operations_log_dialog.dart`, `memory_books_sheet.dart` per `CODE_STYLE.md` ("large UI files are acceptable — extract business logic, not private widgets").
+- **Studio decomposition (Phases 1-11)** — data classes and specialists were
+  extracted from the large Studio/chat services into `prompt/`, `cleaner/`,
+  `studio/`, `memory/`, `ledger/`, and `shared/` subdirectories. `AgentRunner`,
+  `TrackerBatcher`, summary, embedding rebuild, and turn-config composition now
+  live behind state/provider boundaries. `MemoryStudioService`,
+  `PromptInputsCollector`, and `PromptPayloadBuilder` still receive `Ref` for
+  core provider access, while feature adapters are injected. `AuxLlmClient` has
+  a `const` constructor, and `StudioFinalRunResult` was merged into
+  `AgentRunResult`. UI decomposition follows `CODE_STYLE.md`: extract business
+  logic and distinct screens, not arbitrary private widgets.

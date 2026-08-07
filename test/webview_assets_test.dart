@@ -9,6 +9,8 @@
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:glaze_flutter/features/extensions/services/js_bridge_service.dart';
+
 String _asset(String name) =>
     File('assets/chat_webview/$name').readAsStringSync();
 
@@ -33,6 +35,7 @@ void main() {
   late String genTimerJs;
   late String interactionDispatchJs;
   late String panelHostJs;
+  late String htmlSanitizerJs;
   late String selectionManagerJs;
   late String swipeHandlerJs;
   late String glazeSdkJs;
@@ -58,6 +61,7 @@ void main() {
     genTimerJs = _bridgeAsset('gen_timer.js');
     interactionDispatchJs = _bridgeAsset('interaction_dispatch.js');
     panelHostJs = _bridgeAsset('panel_host.js');
+    htmlSanitizerJs = _bridgeAsset('html_sanitizer.js');
     selectionManagerJs = _bridgeAsset('selection_manager.js');
     swipeHandlerJs = _bridgeAsset('swipe_gesture_handler.js');
     glazeSdkJs = _asset('glaze_sdk.js');
@@ -94,18 +98,7 @@ void main() {
     });
 
     test('SDK exposes expected window.glaze methods', () {
-      for (final method in [
-        'getVariables',
-        'setVariables',
-        'deleteVariable',
-        'executeCommand',
-        'triggerGeneration',
-        'injectPrompt',
-        'uninjectPrompt',
-        'generateText',
-        'showToast',
-        'playAudio',
-      ]) {
+      for (final method in JsBridgeMethodRegistry.methods.map((e) => e.name)) {
         expect(glazeSdkJs, contains('$method('));
       }
     });
@@ -121,6 +114,135 @@ void main() {
         );
       },
     );
+
+    test(
+      'panel relay preserves authoritative context and bridge error codes',
+      () {
+        expect(panelHostJs, contains('panelId: panel.panelId'));
+        expect(panelHostJs, contains('messageId: panel.messageId'));
+        expect(panelHostJs, contains('code: error && error.code'));
+        expect(
+          panelHostJs,
+          contains('_buildSrcdoc(html, options, panelId, messageId)'),
+        );
+        expect(panelHostJs, contains("sandbox = 'allow-scripts'"));
+        expect(panelHostJs, isNot(contains('allow-same-origin')));
+      },
+    );
+  });
+
+  group('message script execution policy', () {
+    test('renderer defaults message scripts to disabled', () {
+      expect(rendererMessageJs, contains('this.allowMessageScripts = false'));
+      expect(rendererJs, contains('allowMessageScripts = false'));
+    });
+
+    test('disabled path removes scripts before returning', () {
+      final marker = 'export function executeInlineScripts';
+      final body = _extractBlockBody(rendererJs, rendererJs.indexOf(marker));
+      expect(body, contains('if (!allowMessageScripts)'));
+      expect(body, contains('script.remove()'));
+      expect(
+        body.indexOf('script.remove()'),
+        lessThan(body.indexOf('new Function(src)()')),
+      );
+    });
+
+    test('disabled path sanitizes active HTML before innerHTML insertion', () {
+      expect(
+        rendererJs,
+        contains(
+          "import { sanitizeMessageHtml } from '../bridge/html_sanitizer.js'",
+        ),
+      );
+      final writeBlock = _extractWriteShadowContent(rendererJs);
+      final sanitize = writeBlock.indexOf('sanitizeMessageHtml(formatted)');
+      final insertion = writeBlock.indexOf('root.innerHTML =');
+      expect(sanitize, isNonNegative);
+      expect(insertion, isNonNegative);
+      expect(writeBlock, contains('allowMessageScripts'));
+    });
+
+    test('search re-render sanitizes active HTML before insertion', () {
+      expect(
+        rendererMessageJs,
+        contains(
+          "import { sanitizeMessageHtml } from '../bridge/html_sanitizer.js'",
+        ),
+      );
+      final searchBlock = _extractBlockBody(
+        rendererMessageJs,
+        rendererMessageJs.indexOf('setSearch(query, activeIndex = -1'),
+      );
+      final sanitize = searchBlock.indexOf('sanitizeMessageHtml(highlighted)');
+      final insertion = searchBlock.indexOf('root.innerHTML =');
+      expect(sanitize, isNonNegative);
+      expect(insertion, isNonNegative);
+      expect(searchBlock, contains('this.allowMessageScripts'));
+    });
+
+    test('app bridge changes only the message renderer policy', () {
+      expect(bridgeControllerJs, contains('setAllowMessageScripts(enabled)'));
+      expect(
+        bridgeControllerJs,
+        contains('this.renderer.allowMessageScripts = enabled === true'),
+      );
+      expect(headlessHtml, contains('runSandboxedScript'));
+    });
+  });
+
+  group('ordinary ExtBlocks HTML sanitizer', () {
+    test('controller sanitizes every ExtBlock innerHTML insertion', () {
+      expect(
+        bridgeControllerJs,
+        contains("import { sanitizeExtBlockHtml } from './html_sanitizer.js'"),
+      );
+      expect(
+        RegExp(r'\.innerHTML\s*=(?!\s*sanitizeExtBlockHtml)').allMatches(
+          _extractBlockBody(
+            bridgeControllerJs,
+            bridgeControllerJs.indexOf('_fillExtBlockBody(body, block) {'),
+          ),
+        ),
+        isEmpty,
+      );
+    });
+
+    test('sanitizer blocks active content and dangerous attributes', () {
+      for (final token in [
+        "'script'",
+        "'iframe'",
+        "'object'",
+        "'embed'",
+        "'form'",
+        "'math'",
+        "'foreignobject'",
+        "'animate'",
+        "'use'",
+        "'feimage'",
+        "'meta'",
+        "'link'",
+        "'base'",
+        "'style'",
+        "name.startsWith('on')",
+        "name === 'srcdoc'",
+        "compact.startsWith('javascript:')",
+        'SAFE_IMAGE_DATA_URL',
+        'hasUnsafeCssUrl',
+        'isSafeDataUrl',
+        'EXT_BLOCK_STYLE_PROPERTIES',
+        'UNSAFE_CSS',
+      ]) {
+        expect(htmlSanitizerJs, contains(token));
+      }
+    });
+
+    test('generated image result markup remains supported', () {
+      expect(bridgeControllerJs, contains('_renderExtBlockImageHtml'));
+      expect(bridgeControllerJs, contains('data-action="image-click"'));
+      expect(bridgeControllerJs, contains('data-action="img-download"'));
+      expect(htmlSanitizerJs, contains("'style'"));
+    });
   });
 
   group('bridge ES module layout', () {
@@ -888,17 +1010,19 @@ void main() {
       expect(bridgeControllerJs, contains('new GenTimer('));
     });
 
-    test('setGenerating delegates to generation activity reconciliation', () {
+    test('setGenerating delegates to generation timer reconciliation', () {
       final marker = 'setGenerating(value) {';
       final idx = bridgeControllerJs.indexOf(marker);
       expect(idx, isNot(-1));
       final body = _extractBlockBody(bridgeControllerJs, idx);
-      expect(body, contains('this._syncGenerationActivity()'));
+      expect(body, contains('this._syncGenerationTimer()'));
     });
 
     test('upward scroll restores a hidden header during generation', () {
       final marker = 'if (this.isGenerating) {';
-      final idx = bridgeControllerJs.indexOf(marker);
+      final updateHeaderIdx = bridgeControllerJs.indexOf('const updateHeader = () => {');
+      expect(updateHeaderIdx, isNot(-1));
+      final idx = bridgeControllerJs.indexOf(marker, updateHeaderIdx);
       expect(idx, isNot(-1));
       final body = _extractBlockBody(bridgeControllerJs, idx);
       expect(body, contains('st < this._headerLastTop - 3'));
@@ -932,13 +1056,19 @@ void main() {
       expect(body, contains('Date.now() < this._headerRebaselineUntil'));
     });
 
-    test('post-gen activity keeps the generation timer active separately', () {
+    test('post-gen activity does not keep the generation timer running', () {
       expect(bridgeControllerJs, contains('setPostGenRunning(value)'));
-      final marker = '_syncGenerationActivity() {';
+      final postGenIdx = bridgeControllerJs.indexOf('setPostGenRunning(value) {');
+      expect(postGenIdx, isNot(-1));
+      final postGenBody = _extractBlockBody(bridgeControllerJs, postGenIdx);
+      expect(postGenBody, isNot(contains('_syncGenerationTimer')));
+
+      final marker = '_syncGenerationTimer() {';
       final idx = bridgeControllerJs.indexOf(marker);
       expect(idx, isNot(-1));
       final body = _extractBlockBody(bridgeControllerJs, idx);
-      expect(body, contains('this.isGenerating || this.isPostGenRunning'));
+      expect(body, contains('this.isGenerating'));
+      expect(body, isNot(contains('this.isPostGenRunning')));
       expect(body, contains('this._genTimer.start()'));
       expect(body, contains('this._genTimer.stop()'));
     });

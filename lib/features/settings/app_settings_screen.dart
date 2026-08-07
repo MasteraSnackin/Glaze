@@ -31,7 +31,9 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
     final bottomPad = ref.watch(navHeightProvider) + 20;
 
     return GlazeScaffold(
-      title: _currentScreen == 'main' ? 'section_settings'.tr() : 'menu_interface_settings'.tr(),
+      title: _currentScreen == 'main'
+          ? 'section_settings'.tr()
+          : 'menu_interface_settings'.tr(),
       useShellHeader: true,
       headerBranchIndex: 3,
       extendBodyBehindHeader: true,
@@ -103,15 +105,21 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
             MenuItem(
               icon: Icons.settings_outlined,
               label: 'menu_interface_settings'.tr(),
-              trailing: const Icon(Icons.chevron_right,
-                  size: 20, color: Color(0xFF99A2AD)),
+              trailing: const Icon(
+                Icons.chevron_right,
+                size: 20,
+                color: Color(0xFF99A2AD),
+              ),
               onTap: () => setState(() => _currentScreen = 'interface'),
             ),
             MenuItem(
               icon: Icons.science_outlined,
               label: 'experimental_features_title'.tr(),
-              trailing: const Icon(Icons.chevron_right,
-                  size: 20, color: Color(0xFF99A2AD)),
+              trailing: const Icon(
+                Icons.chevron_right,
+                size: 20,
+                color: Color(0xFF99A2AD),
+              ),
               onTap: () => context.push('/extensions'),
             ),
           ],
@@ -200,7 +208,8 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
             ),
             MenuItem(
               label: 'menu_chat_layout'.tr(),
-              value: ref.watch(themeProvider).activePreset.chatLayout == 'bubble'
+              value:
+                  ref.watch(themeProvider).activePreset.chatLayout == 'bubble'
                   ? 'layout_bubble'.tr()
                   : 'layout_default'.tr(),
               onTap: () => _showLayoutPicker(context, ref),
@@ -211,6 +220,37 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
               value: s.disableSwipeRegeneration,
               onChanged: (v) =>
                   notifier.save(s.copyWith(disableSwipeRegeneration: v)),
+            ),
+            MenuSwitchItem(
+              label: 'menu_allow_message_scripts'.tr(),
+              description: 'desc_allow_message_scripts'.tr(),
+              value: s.allowMessageScripts,
+              onChanged: (v) async {
+                if (!v) {
+                  await notifier.save(s.copyWith(allowMessageScripts: false));
+                  return;
+                }
+                final confirmed = await showDialog<bool>(
+                  context: context,
+                  builder: (dialogContext) => AlertDialog(
+                    title: Text('message_scripts_warning_title'.tr()),
+                    content: Text('message_scripts_warning_desc'.tr()),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.of(dialogContext).pop(false),
+                        child: Text('action_cancel'.tr()),
+                      ),
+                      FilledButton(
+                        onPressed: () => Navigator.of(dialogContext).pop(true),
+                        child: Text('message_scripts_enable_action'.tr()),
+                      ),
+                    ],
+                  ),
+                );
+                if (confirmed == true && context.mounted) {
+                  await notifier.save(s.copyWith(allowMessageScripts: true));
+                }
+              },
             ),
             MenuSwitchItem(
               label: 'menu_virtual_keyboard_send'.tr(),
@@ -295,18 +335,21 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
       context,
       title: 'theme_title'.tr(),
       items: ThemeMode.values
-          .map((mode) => BottomSheetItem(
-                label: _themeModeLabel(mode),
-                icon: mode == current
-                    ? Icons.radio_button_checked
-                    : Icons.radio_button_off,
-                iconColor:
-                    mode == current ? context.cs.primary : context.cs.onSurfaceVariant,
-                onTap: () {
-                  Navigator.of(context, rootNavigator: true).pop();
-                  ref.read(themeProvider.notifier).setMode(mode);
-                },
-              ))
+          .map(
+            (mode) => BottomSheetItem(
+              label: _themeModeLabel(mode),
+              icon: mode == current
+                  ? Icons.radio_button_checked
+                  : Icons.radio_button_off,
+              iconColor: mode == current
+                  ? context.cs.primary
+                  : context.cs.onSurfaceVariant,
+              onTap: () {
+                Navigator.of(context, rootNavigator: true).pop();
+                ref.read(themeProvider.notifier).setMode(mode);
+              },
+            ),
+          )
           .toList(),
     );
   }
@@ -321,11 +364,14 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
           icon: s.language == 'en'
               ? Icons.radio_button_checked
               : Icons.radio_button_off,
-          iconColor:
-              s.language == 'en' ? context.cs.primary : context.cs.onSurfaceVariant,
+          iconColor: s.language == 'en'
+              ? context.cs.primary
+              : context.cs.onSurfaceVariant,
           onTap: () {
             Navigator.of(context, rootNavigator: true).pop();
-            ref.read(appSettingsProvider.notifier).save(s.copyWith(language: 'en'));
+            ref
+                .read(appSettingsProvider.notifier)
+                .save(s.copyWith(language: 'en'));
           },
         ),
         BottomSheetItem(
@@ -333,11 +379,14 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
           icon: s.language == 'ru'
               ? Icons.radio_button_checked
               : Icons.radio_button_off,
-          iconColor:
-              s.language == 'ru' ? context.cs.primary : context.cs.onSurfaceVariant,
+          iconColor: s.language == 'ru'
+              ? context.cs.primary
+              : context.cs.onSurfaceVariant,
           onTap: () {
             Navigator.of(context, rootNavigator: true).pop();
-            ref.read(appSettingsProvider.notifier).save(s.copyWith(language: 'ru'));
+            ref
+                .read(appSettingsProvider.notifier)
+                .save(s.copyWith(language: 'ru'));
           },
         ),
       ],

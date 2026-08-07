@@ -307,16 +307,18 @@ void main() {
     await repo.copyForSessionBranch(
       fromSessionId: 'char_0',
       toSessionId: 'char_1',
+      messageIds: const {'m1', 'm2'},
     );
 
     final copied = await repo.getBySessionId('char_1');
     expect(copied, isNotNull);
     expect(copied!.id, 'memorybook_char_1');
     expect(copied.sessionId, 'char_1');
+    expect(copied.entries.single.id, 'mem_1@char_1');
     expect(copied.entries.single.content, 'important fact');
-    expect(copied.pendingDrafts.single.id, 'draft_1');
+    expect(copied.pendingDrafts.single.id, 'draft_1@char_1');
     expect(copied.settings.batchSize, 7);
-    expect(copied.lastProcessedMessageCount, 12);
+    expect(copied.lastProcessedMessageCount, 0);
   });
 
   test('legacy memory entries recover messageRange from range title', () {

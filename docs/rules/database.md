@@ -24,9 +24,10 @@ allowed only inside the repo for the table it owns.
 
 ## Atomic read-mutate-write for chat sessions
 
-`ChatRepo.put()` is a direct write. When you need to **read + modify + write** a session
-(e.g. append a message, patch a field), you must do it atomically inside a Drift
-`transaction()` to prevent concurrent writes from interleaving:
+`ChatRepo.put()` is a full-row write for authoritative creation, import, or
+replacement. It must not commit a mutation derived from a previously read
+`ChatSession`: that snapshot may overwrite newer messages, drafts, variables, or
+metadata.
 
 ```dart
 // NEVER:
@@ -34,17 +35,21 @@ final session = await chatRepo.getByCharacterId(charId);
 session.messages.add(newMsg);
 await chatRepo.put(session); // race: another write may have happened between read and write
 
-// ALWAYS (inside a transaction or via a dedicated repo method):
-await db.transaction(() async {
-  final session = await chatRepo.getByCharacterId(charId);
-  final updated = session.copyWith(messages: [...session.messages, newMsg]);
-  await chatRepo.put(updated);
-});
+// ALWAYS: mutate the latest durable row inside the repository.
+final durable = await chatRepo.mutateMessage(
+  sessionId: sessionId,
+  messageId: messageId,
+  updatedAt: now,
+  mutate: (latest) => latest.copyWith(isHidden: true),
+);
 ```
 
-Prefer adding a dedicated repo method (e.g. `appendMessage`) that encapsulates
-the transaction rather than doing it ad hoc in a service. Dedicated atomic
-methods on `ChatRepo` include `appendSwipeToMessage`,
+Services/providers must not open an ad hoc transaction merely to perform
+`get -> copyWith -> put`. Prefer the narrowest repository method:
+`mutateMessage`, `mutateMessages`, `mutateAuthorsNote`, `renameSession`, draft
+and session-variable methods, or swipe-specific methods. Use `mutateSession`
+only when several session fields must change atomically. Other dedicated methods
+include `appendSwipeToMessage`,
 `appendAgentSwipe({kind: 'cleaned' | 'final'})` (nested blue sub-swipe +
 `_syncAgentSwipesToMeta`), `updateAgentSwipeContent` / `removeAgentSwipe`
 (in-place swipe editers used by the swipe-first cleaner flow — re-sync
@@ -58,8 +63,13 @@ When finalizing a generation, persist data to DB **before** clearing reactive st
 If you clear `ChatState.isGenerating = false` first and the DB write fails, data is lost.
 
 Order:
-1. `chatRepo.put(finalSession)`
-2. `state = state.copyWith(isGenerating: false, ...)`
+1. Await the targeted repository mutation.
+2. Receive the exact durable `ChatSession` returned by the repository (or reload
+   after a conflict/failure).
+3. Publish that durable session to `ChatSessionService` cache/state.
+4. Set `isGenerating` / post-generation state to settled.
+
+Never cache an optimistic, generated, restoration, or pre-write snapshot.
 
 ---
 
@@ -69,7 +79,7 @@ All schema changes go in `AppDatabase.migration` in `app_db.dart`.
 Bump the schema version and add a `from → to` migration step.
 Never modify existing column types without a migration.
 
-Current version: **77**
+Current version: **81**
 
 Migration history:
 - v18: added `characters.picksHash`
@@ -114,6 +124,14 @@ Migration history:
 - v71: removed the retired `durableFacts` contract from the default Ledger prompt.
 - v73: added `ledger_reconciliation_checkpoints` for reconciliation cadence and deduplication.
 - v77: added `ledger_reconciliation_cleanup_journals` for reversible knowledge cleanup when deleting reconciled history.
+- v78: versioned upgrade action initializes the
+  `gz_disabled_third_party_providers` SharedPreferences key when absent (no
+  Drift table change).
+- v79: added `api_configs.reasoningHistoryCount`; existing rows are backfilled
+  from `includeLastReasoning`.
+- v80: added `api_configs.useResponsesApi`.
+- v81: added composite index `idx_embeddings_source_type_id` on
+  `(source_type, source_id)`.
 
 ---
 
@@ -174,53 +192,45 @@ Schema: `{ entryId, sourceType, sourceId, vectorsBlob (BLOB), textHash, retrieva
 
 - Vectors stored as binary float32 BLOB via `vectorListToBytes()` free function in `vector_math.dart` (not a method on `EmbeddingRepo`).
 - `textHash` used for dirty-check: if hash matches stored hash, skip re-embedding.
-- `sourceType`: `'lorebook_entry'` | `'memory_entry'`
+- `sourceType`: `'lorebook_entry'` | `'memory_entry'` | `'chat_message'`
 - `entryId` namespaced as `lorebookId_entryId` to prevent cross-lorebook collisions.
 - `retrievalHintsJson` is JSON text (not BLOB).
 - `errorJson` stores embedding error details (classification via `EmbeddingErrorLabel`).
 
 ---
 
-## Deletion cascades
+## Deletion and clear lifecycles
 
-### `CharacterRepo.delete(charId)` (inside DB transaction, defensive)
+`SessionDeletionQueries` is the canonical DB-only session cascade.
+`SessionDeletionRepo.deleteSession` wraps it for one session;
+`ChatRepo.deleteByCharacterId` applies it to every character session; and
+`CharacterDeletionRepo.deleteCharacters` composes the complete character
+cascade in one transaction.
 
-1. Gets session IDs for the character
-2. Deletes `MemoryBookRows` by session IDs
-3. Deletes `TrackerRows` by session IDs (agentic memory trackers)
-4. Deletes `TrackerSnapshots` by session IDs (Phase 1 tracker-snapshot rollback system — cascade alongside `TrackerRows` so legacy and snapshot stores are cleaned together)
-5. Deletes `ChatSummaries` by session IDs
-6. Deletes `ChatSessions` by character ID
-7. Deletes `Characters` by charId
+The session cascade removes MemoryBook state, Memory Catalog/Graph rows, live
+trackers and snapshots, reconciliation checkpoints/journals, character
+knowledge, summaries, InfoBlocks, chat/message-memory embeddings, session
+baseline, Studio config, chat-scoped lorebooks and their embeddings, and the
+chat row. Character deletion additionally removes character-scoped lorebooks
+and embeddings, folder memberships, character rows, and promotes a remaining
+variation representative when required.
 
-This path is used by direct repo callers (e.g. sync engine). It is idempotent.
+`CharactersNotifier.removeMany` performs sync tombstones, preference cleanup,
+and filesystem cleanup only after the DB transaction commits. Remote sync
+deletion uses the same neutral deletion stores without creating local
+tombstones.
 
-**Does NOT delete:**
-- `Embeddings` — done separately in `CharactersNotifier.remove()`
-- `Lorebooks` — character-scoped lorebooks deleted separately in `CharactersNotifier.remove()`
+**Clear chat is not delete session.** `SessionDeletionRepo.clearSession`
+transactionally replaces messages and clears message-derived runtime state,
+while retaining session identity/settings, baseline, Studio config, chat
+bindings, and the MemoryBook settings row (entries/drafts are reset). In-chat
+clear rebuilds its greeting, resets the branch stamp, and counts deleted
+messages; history-list clear supplies an empty replacement without those
+options.
 
-### `chatRepo.deleteByCharacterId(characterId)` (preferred path for bulk character-scoped cleanup)
-
-Deletes in order:
-1. `MemoryBookRows` for all sessions of the character
-2. `TrackerRows` for all sessions of the character (agentic memory trackers)
-3. `TrackerSnapshots` for all sessions of the character (Phase 1 cascade — `trackerSnapshotRepoProvider.deleteBySessionId` per session)
-4. `ChatSummaries` for all sessions of the character
-5. `ChatSessions` for the character
-
-Returns the list of deleted session IDs (for sync-deletion tracking).
-
-### `CharactersNotifier.remove(id)` (provider-level, wraps repo + extra cleanup)
-
-1. Deletes character-scoped lorebooks (`lorebookRepo.getByScopeAndTarget('character', id)`)
-2. Deletes embeddings for those lorebooks (`embeddingRepo.deleteBySourceId(lorebookId)`)
-3. Cleans stale IDs from `lorebookActivations` SharedPreferences map
-4. Calls `chatRepo.deleteByCharacterId(id)` — fully cleans `MemoryBookRows`, `ChatSummaries`, and `ChatSessions` for the character (see above)
-5. Calls `repo.delete(id)` — deletes the `Characters` row (its internal defensive cleanup of per-session rows is a no-op after step 4, since sessions are already gone)
-
-This order guarantees no orphan `MemoryBookRows` or `ChatSummaries` rows after character deletion.
-
-When adding a new table with per-character or per-session data, add its deletion to the appropriate cascade path (`deleteByCharacterId` for session-scoped data, or `CharactersNotifier.remove` for character-scoped auxiliary data).
+When adding session- or character-owned storage, update the shared lifecycle
+queries and their full-cascade/clear/rollback tests rather than adding a new
+provider-level deletion list.
 
 ---
 
@@ -307,15 +317,16 @@ fall back to `trackerRepoProvider.getBySessionId` when no snapshot exists
 |-------------|-------------|--------|
 | Delete a message | `ChatRepo.deleteMessage` → `trackerSnapshotRepo.deleteForMessage` + `trackerRepo.replaceForSession` + `memoryBookRepo.deleteForMessage` | All snapshots at that `messageId` are dropped; the preceding committed snapshot becomes the latest. The live `tracker_rows` store is restored from it, so Tracker values and Studio state reflect the prior accepted message. MemoryBook items whose `messageIds` contains the deleted `messageId` are also dropped. |
 | Delete a session | `chat_history_provider.deleteSession` → `deleteBySessionId` + `SyncDeletionTracker.record('tracker_snapshot', sessionId)` | All snapshots for the session are dropped; cloud sync deletion is tracked. |
-| Clear chat | `chat_session_service.clearChat` → `deleteBySessionId` (both paths) | Same as delete-session. |
-| Delete by character | `chatRepo.deleteByCharacterId` → cascade `deleteBySessionId` per session | All snapshots for all of the character's sessions are dropped. |
+| Clear chat | `SessionDeletionRepo.clearSession` | Replaces messages and purges message-derived runtime rows, including snapshots, while preserving the session, baseline, Studio config, bindings, and MemoryBook settings. |
+| Delete by character | `CharacterDeletionRepo.deleteCharacters` → shared session cascade | All snapshots and other session-owned rows for all character sessions are dropped atomically. |
 | Swipe removal | `trackerSnapshotRepo.shiftSwipeIdsAfterRemoval` | Re-keys snapshots whose `swipeId` > removed id, preserving continuity. |
 | Branch session | `chat_session_service.branchSession` → `copyForSessionBranch` | Copies snapshots for sliced message IDs to the new session ID. |
 
 ### Cloud sync coverage (Phase 9)
 
-`tracker_snapshots` is in the backup whitelist (`backup_exporter.dart`,
-backup `_schemaVersion` 5) and has full cloud sync coverage via
+`tracker_snapshots` entered the backup format at v5 and remains in the current
+backup whitelist (`backup_exporter.dart`, backup schema v10). It has full cloud
+sync coverage via
 `SyncTrackerSnapshotStore` + `TrackerSnapshotSyncStore` adapter. Sync
 follows the InfoBlock per-session collection pattern: one entry per
 session, payload `{__trackerSnapshots:true, items:[...]}`. Deletes are
@@ -335,3 +346,26 @@ tracked via `SyncDeletionTracker.record('tracker_snapshot', sessionId)`.
 - **Never** drop the sentinel anchor `(messageId='')` via
   `deleteForMessage`. Only `deleteBySessionId` / `deleteByCharacterId`
   may drop it.
+
+---
+
+## Session branch policy
+
+`ChatSessionService.branchSession` creates the branch, copies DB state,
+reconstructs live tracker rows, and updates the character's current session in
+one Drift transaction. Session baseline and
+Studio configuration are copied as settings. Provenance-backed state is copied
+only when its complete source range is retained: tracker snapshots, character
+knowledge facts, reconciliation checkpoints, cleanup journals (copied with the
+fact provenance operation), completed
+InfoBlocks, and MemoryBook entries/drafts with non-empty `messageIds`.
+
+Live tracker rows are reconstructed from the latest copied snapshot. Generated
+summary content is reset while its enabled/prompt settings are retained.
+MemoryBook settings are retained, but unprovenanced entries and drafts are
+reset; retained items receive branch-local IDs. Memory Catalog, Memory Graph
+(entity/salience/cadence/consolidation), and memory embeddings are not copied:
+they are derived indexes and must rebuild from the branch's retained MemoryBook
+and chat history. Preference bindings live in SharedPreferences and are copied
+only after the database transaction commits and are best-effort follow-up
+state; they cannot roll back the durable branch.

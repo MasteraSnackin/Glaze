@@ -9,6 +9,7 @@ import '../../core/state/active_selection_provider.dart';
 import '../../core/state/lorebook_provider.dart';
 import '../../core/state/shared_prefs_provider.dart';
 import '../../core/utils/time_helpers.dart';
+import '../../core/utils/sync_deletion_tracker.dart';
 import '../../core/state/db_provider.dart';
 import 'initial_message_builder.dart';
 
@@ -217,74 +218,101 @@ class ChatSessionService {
     int messageIndex,
   ) async {
     final repo = _ref.read(chatRepoProvider);
-    final nextIndex = await _nextSessionIndex(charId);
-    final session = ChatSession(
-      id: '${charId}_$nextIndex',
-      characterId: charId,
-      sessionIndex: nextIndex,
-      messages: current.messages.sublist(0, messageIndex + 1),
-      // Stamp the branch time (ms, to match message timestamps) so the WebView
-      // can render a "Branched on …" separator at the top of the new session.
-      // Overrides any inherited marker from the parent — this is the new
-      // session's own branch point.
-      sessionVars: {
-        ...current.sessionVars,
-        'branchedAt': DateTime.now().millisecondsSinceEpoch.toString(),
-      },
-      // Carry the chat-scoped author's note and summary into the branch —
-      // both are session state that the user set for this conversation and
-      // expects to continue in the fork.
-      authorsNote: current.authorsNote,
-      summary: current.summary,
-      updatedAt: currentTimestampSeconds(),
-    );
-    await repo.put(session);
-    // Carry chat-scoped connections (persona / preset / lorebook activations)
-    // keyed by the parent session id onto the new session id. Without this the
-    // branch loses its bound persona, preset and enabled lorebooks and silently
-    // falls back to character/global defaults.
-    _copyChatConnections(fromSessionId: current.id, toSessionId: session.id);
-    await _ref
-        .read(memoryBookRepoProvider)
-        .copyForSessionBranch(
-          fromSessionId: current.id,
-          toSessionId: session.id,
-        );
-    await _ref
-        .read(studioConfigRepoProvider)
-        .copyForSessionBranch(
-          fromSessionId: current.id,
-          toSessionId: session.id,
-        );
-    // Copy tracker snapshots for the sliced message range into the new
-    // sessionId. Messages are not re-id'd on branch, so the sessionId prefix
-    // in the snapshot PK isolates each branch's rows (no cross-session
-    // aliasing). Without this, a branched session would lose all tracker
-    // provenance — the read path (getLatestCommitted) would find no snapshots
-    // and fall back to an empty tracker list.
-    final branchedMessageIds = session.messages.map((m) => m.id).toSet();
-    await _ref
-        .read(trackerSnapshotRepoProvider)
-        .copyForSessionBranch(
-          fromSessionId: current.id,
-          toSessionId: session.id,
-          messageIds: branchedMessageIds,
-        );
-    await _ref
-        .read(characterKnowledgeFactRepoProvider)
-        .copyForSessionBranch(
-          fromSessionId: current.id,
-          toSessionId: session.id,
-          messageIds: branchedMessageIds,
-        );
-    await _ref
-        .read(ledgerReconciliationCheckpointRepoProvider)
-        .copyForSessionBranch(
-          fromSessionId: current.id,
-          toSessionId: session.id,
-          messageIds: branchedMessageIds,
-        );
-    await saveCurrentSessionIndex(charId, nextIndex);
+    final session = await repo.transaction(() async {
+      final nextIndex = await _nextSessionIndex(charId);
+      final branch = ChatSession(
+        id: '${charId}_$nextIndex',
+        characterId: charId,
+        sessionIndex: nextIndex,
+        messages: current.messages.sublist(0, messageIndex + 1),
+        sessionVars: {
+          ...current.sessionVars,
+          'branchedAt': DateTime.now().millisecondsSinceEpoch.toString(),
+        },
+        authorsNote: current.authorsNote,
+        updatedAt: currentTimestampSeconds(),
+      );
+      final messageIds = branch.messages.map((message) => message.id).toSet();
+      await repo.put(branch);
+      await _ref
+          .read(characterSessionBaselineRepoProvider)
+          .copyForSessionBranch(
+            fromSessionId: current.id,
+            toSessionId: branch.id,
+          );
+      await _ref
+          .read(memoryBookRepoProvider)
+          .copyForSessionBranch(
+            fromSessionId: current.id,
+            toSessionId: branch.id,
+            messageIds: messageIds,
+          );
+      await _ref
+          .read(studioConfigRepoProvider)
+          .copyForSessionBranch(
+            fromSessionId: current.id,
+            toSessionId: branch.id,
+          );
+      await _ref
+          .read(trackerSnapshotRepoProvider)
+          .copyForSessionBranch(
+            fromSessionId: current.id,
+            toSessionId: branch.id,
+            messageIds: messageIds,
+          );
+      final latestSnapshot = await _ref
+          .read(trackerSnapshotRepoProvider)
+          .getLatest(branch.id);
+      if (latestSnapshot != null) {
+        await _ref
+            .read(trackerRepoProvider)
+            .replaceForSession(branch.id, latestSnapshot.trackers);
+      }
+      await _ref
+          .read(characterKnowledgeFactRepoProvider)
+          .copyForSessionBranch(
+            fromSessionId: current.id,
+            toSessionId: branch.id,
+            messageIds: messageIds,
+          );
+      await _ref
+          .read(ledgerReconciliationCheckpointRepoProvider)
+          .copyForSessionBranch(
+            fromSessionId: current.id,
+            toSessionId: branch.id,
+            messageIds: messageIds,
+          );
+      await _ref
+          .read(infoBlocksRepoProvider)
+          .copyForSessionBranch(
+            fromSessionId: current.id,
+            toSessionId: branch.id,
+            messageIds: messageIds,
+          );
+      await _ref
+          .read(summaryRepoProvider)
+          .copySettingsForSessionBranch(
+            fromSessionId: current.id,
+            toSessionId: branch.id,
+          );
+      final character = await _ref.read(characterRepoProvider).getById(charId);
+      if (character == null) {
+        throw StateError('Character $charId not found');
+      }
+      await _ref
+          .read(characterRepoProvider)
+          .put(character.copyWith(currentSessionIndex: nextIndex));
+      return (await repo.getById(branch.id))!;
+    });
+
+    // These bindings live in SharedPreferences and cannot join the DB
+    // transaction. Copy them only after the durable branch has committed.
+    try {
+      _copyChatConnections(fromSessionId: current.id, toSessionId: session.id);
+    } catch (error) {
+      debugPrint('[ChatSessionService] branch preference copy error: $error');
+    }
+    updateCache(session);
     return session;
   }
 
@@ -297,9 +325,7 @@ class ChatSessionService {
     required String fromSessionId,
     required String toSessionId,
   }) {
-    final personaId = _ref
-        .read(personaConnectionsProvider)
-        .chat[fromSessionId];
+    final personaId = _ref.read(personaConnectionsProvider).chat[fromSessionId];
     if (personaId != null) {
       setPersonaConnectionRef(_ref, 'chat', toSessionId, personaId);
     }
@@ -342,39 +368,18 @@ class ChatSessionService {
       persona: persona,
       sessionId: session.id,
     );
-    // Drop the branch stamp so a cleared session reads as freshly created
-    // ("Created on …" from the new greeting) rather than keeping a stale
-    // "Branched on …" marker.
-    //
-    // Clearing removes every existing message, so fold them into the persisted
-    // deleted-messages counter for the statistics sheet. This is a message
-    // deletion, not a chat deletion (the session survives, reset to a fresh
-    // greeting), so it is included in the "Deleted" count.
-    final clearedVars = Map<String, String>.from(session.sessionVars)
-      ..remove('branchedAt')
-      ..[ChatSessionX.deletedMessagesVarKey] =
-          (session.deletedMessageCount + session.messages.length).toString();
-    final clearedSession = session.copyWith(
-      messages: initialMessages,
-      sessionVars: clearedVars,
-    );
-    await _ref.read(chatRepoProvider).put(clearedSession);
-    // Wipe tracker snapshots so stale state from before the clear does not
-    // leak into the fresh chat.
-    await _ref.read(trackerSnapshotRepoProvider).deleteBySessionId(session.id);
-    await _ref
-        .read(characterKnowledgeFactRepoProvider)
-        .deleteBySessionId(session.id);
-    await _ref
-        .read(ledgerReconciliationCheckpointRepoProvider)
-        .deleteBySessionId(session.id);
-    // Also wipe the live `tracker_rows` store. Without this, the UI
-    // ("Tracker values" tab) falls back to
-    // `trackerRepo.getBySessionId` when no snapshot is found and shows the
-    // pre-clear trackers. Both stores are session-scoped and must be cleared
-    // together.
-    await _ref.read(trackerRepoProvider).clearForSession(session.id);
+    final clearedSession = await _ref
+        .read(sessionDeletionRepoProvider)
+        .clearSession(
+          sessionId: session.id,
+          replacementMessages: initialMessages,
+          resetBranchStamp: true,
+          countDeletedMessages: true,
+        );
+    if (clearedSession == null) return session;
     updateCache(clearedSession);
+    _ref.invalidate(memoryBookProvider(session.id));
+    await SyncDeletionTracker.recordSessionRuntimeClear(session.id);
     return clearedSession;
   }
 

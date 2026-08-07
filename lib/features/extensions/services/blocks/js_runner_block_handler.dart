@@ -78,6 +78,9 @@ class JsRunnerBlockHandler implements BlockHandler {
       character: context.character,
       persona: context.persona?.name,
       previousOutput: context.previousOutput,
+      contextPolicy: blockConfig.contextPolicy,
+      mainModelContextSnapshot: context.mainModelContextSnapshot,
+      personaModel: context.persona,
       swipeId: context.swipeId,
       cancelToken: context.cancelToken,
       onStreamUpdate: makeStreamHandler(

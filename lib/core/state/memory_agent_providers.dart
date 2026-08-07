@@ -1,7 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../features/chat/chat_session_service.dart';
 import '../../features/chat_history/chat_history_provider.dart';
 import '../../features/settings/api_list_provider.dart';
+import '../llm/agent_runner.dart';
 import '../llm/aux_llm_client.dart';
 import '../llm/memory_graph_builder.dart';
 import '../llm/memory_provenance.dart';
@@ -13,6 +15,8 @@ import '../llm/memory_studio_service.dart';
 import '../llm/post_cleaner_service.dart';
 import '../llm/prompt/ledger_tracker_loader.dart';
 import '../llm/studio_ledger_service.dart';
+import '../llm/studio/agent_config_resolver.dart';
+import '../llm/tracker_batcher.dart';
 import '../models/api_config.dart';
 import 'db_provider.dart';
 
@@ -50,8 +54,36 @@ final memoryAgenticServiceProvider = Provider<MemoryAgenticService>((ref) {
 });
 
 /// Studio Mode pipeline service. Tracker-around-generator model.
+final agentRunnerProvider = Provider<AgentRunner>((ref) {
+  return AgentRunner(
+    configResolver: AgentConfigResolver(
+      loadApiConfigs: () async {
+        await ref.read(apiListProvider.future);
+        return ref.read(apiListProvider).value ?? const <ApiConfig>[];
+      },
+      readActiveApiConfig: () => ref.read(activeApiConfigProvider),
+      readPipelineSettings: () => ref.read(pipelineSettingsProvider),
+      readRunApiConfigId: (sessionId) async {
+        final config = await ref
+            .read(studioConfigRepoProvider)
+            .getBySessionId(sessionId);
+        return config?.runApiConfigId ?? '';
+      },
+    ),
+    readPipelineSettings: () => ref.read(pipelineSettingsProvider),
+  );
+});
+
+final trackerBatcherProvider = Provider<TrackerBatcher>((ref) {
+  return TrackerBatcher(ref.read(agentRunnerProvider));
+});
+
 final memoryStudioServiceProvider = Provider<MemoryStudioService>((ref) {
-  return MemoryStudioService(ref);
+  return MemoryStudioService(
+    ref,
+    ref.read(agentRunnerProvider),
+    ref.read(trackerBatcherProvider),
+  );
 });
 
 /// POST-cleaner service (Stage 4). Rewrites the final assistant message
@@ -61,6 +93,7 @@ final postCleanerServiceProvider = Provider<PostCleanerService>((ref) {
     llm: const AuxLlmClient(),
     chatRepo: ref.read(chatRepoProvider),
     snapshotRepo: ref.read(trackerSnapshotRepoProvider),
+    onSessionUpdated: ChatSessionService.updateCache,
     invalidateChatHistory: () => ref.invalidate(chatHistoryProvider),
   );
 });

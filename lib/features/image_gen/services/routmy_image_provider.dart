@@ -74,13 +74,22 @@ class RoutmyImageProvider {
   }) async {
     final url = '$baseUrl/v1/images/generations';
     final normalizedQuality = _normalizeQuality(quality);
+    final isSeedreamModel = model == 'bytedance/seedream-5.0-pro';
+    final normalizedImageSize =
+        isSeedreamModel &&
+            !RoutMyConstants.seedreamImageSizes.contains(imageSize)
+        ? '2K'
+        : imageSize;
 
     final body = <String, dynamic>{
       'model': model,
       'prompt': prompt,
       'n': 1,
-      'image_config': {'aspect_ratio': aspectRatio, 'image_size': imageSize},
-      'quality': ?normalizedQuality,
+      'image_config': {
+        'aspect_ratio': aspectRatio,
+        'image_size': normalizedImageSize,
+      },
+      if (!isSeedreamModel) 'quality': ?normalizedQuality,
     };
 
     final validRefs = referenceImages
@@ -210,19 +219,69 @@ class RoutmyImageProvider {
     CancelToken? cancelToken,
   }) async {
     final data = json['data'] as List?;
-    if (data == null || data.isEmpty) {
-      throw Exception('No image data in response');
+    if (data != null) {
+      for (final item in data) {
+        if (item is! Map) continue;
+        final imageObj = Map<String, dynamic>.from(item);
+        final b64 = imageObj['b64_json'] as String?;
+        if (b64 != null && b64.isNotEmpty) {
+          return ImageGenHttp.base64ToBytes(_base64Payload(b64));
+        }
+        final imgUrl = imageObj['url'] as String?;
+        if (imgUrl != null && imgUrl.isNotEmpty) {
+          return _downloadImage(imgUrl, cancelToken: cancelToken);
+        }
+      }
     }
-    final imageObj = data.first as Map<String, dynamic>;
-    final b64 = imageObj['b64_json'] as String?;
-    if (b64 != null && b64.isNotEmpty) {
-      return ImageGenHttp.base64ToBytes(b64);
-    }
-    final imgUrl = imageObj['url'] as String?;
-    if (imgUrl != null && imgUrl.isNotEmpty) {
-      return _downloadImage(imgUrl, cancelToken: cancelToken);
+    _throwIfAsyncTask(json);
+    if (data != null) {
+      for (final item in data) {
+        if (item is Map) _throwIfAsyncTask(Map<String, dynamic>.from(item));
+      }
     }
     throw Exception('No image in response');
+  }
+
+  void _throwIfAsyncTask(Map<String, dynamic> json) {
+    final status = json['status'];
+    final id = json['task_id'] ?? json['id'];
+    final object = json['object'];
+    final isTask =
+        status != null &&
+        (id != null || object == 'image.generation.task') &&
+        json['url'] == null &&
+        json['b64_json'] == null;
+    if (!isTask) return;
+
+    final safeStatus = _safeTaskValue(status, maxLength: 40);
+    final safeId = _safeTaskValue(id, maxLength: 120);
+    throw Exception(
+      'rout.my returned an asynchronous image task '
+      '(status=$safeStatus, id=$safeId), but no polling endpoint is documented',
+    );
+  }
+
+  String _safeTaskValue(Object? value, {required int maxLength}) {
+    if (value == null) return 'unknown';
+    if (value is! String && value is! num && value is! bool) return 'unknown';
+    final sanitized = value.toString().replaceAll(
+      RegExp(r'[^A-Za-z0-9._:\-]'),
+      '_',
+    );
+    return sanitized.length <= maxLength
+        ? sanitized
+        : '${sanitized.substring(0, maxLength)}...';
+  }
+
+  String _base64Payload(String value) {
+    final normalized = value.trim();
+    if (!normalized.toLowerCase().startsWith('data:')) return normalized;
+    final comma = normalized.indexOf(',');
+    if (comma == -1 ||
+        !normalized.substring(0, comma).toLowerCase().contains(';base64')) {
+      throw Exception('Invalid base64 image data URI');
+    }
+    return normalized.substring(comma + 1);
   }
 
   Future<Uint8List> _generateChat({
@@ -307,13 +366,24 @@ class RoutmyImageProvider {
     String url, {
     CancelToken? cancelToken,
   }) async {
-    if (url.startsWith('data:')) {
+    if (url.toLowerCase().startsWith('data:')) {
       final commaIdx = url.indexOf(',');
       if (commaIdx == -1) throw Exception('Invalid data URL');
-      final b64 = url.substring(commaIdx + 1);
-      return ImageGenHttp.base64ToBytes(b64);
+      return ImageGenHttp.base64ToBytes(_base64Payload(url));
     }
-    final response = await _http.getRaw(url, cancelToken: cancelToken);
-    return response.data!;
+    try {
+      final response = await _http.getRaw(url, cancelToken: cancelToken);
+      final bytes = response.data;
+      if (bytes == null || bytes.isEmpty) {
+        throw Exception('rout.my image download returned an empty response');
+      }
+      return bytes;
+    } on DioException catch (error) {
+      if (CancelToken.isCancel(error)) rethrow;
+      final status = error.response?.statusCode;
+      throw Exception(
+        'rout.my image download failed${status == null ? '' : ' (HTTP $status)'}',
+      );
+    }
   }
 }

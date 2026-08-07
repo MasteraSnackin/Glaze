@@ -1623,7 +1623,7 @@ class _CardBackState extends State<_CardBack> {
                         opacity: anim,
                         child: SizeTransition(
                           sizeFactor: anim,
-                          axisAlignment: -1,
+                          alignment: Alignment.topCenter,
                           child: child,
                         ),
                       ),

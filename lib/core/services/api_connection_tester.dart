@@ -30,6 +30,7 @@ class ApiConnectionTester {
     required String apiKey,
     required String model,
     String protocol = LlmProtocol.openai,
+    bool useResponsesApi = false,
   }) async {
     try {
       final effectiveProtocol = _normalizedProtocol(protocol);
@@ -55,6 +56,7 @@ class ApiConnectionTester {
             frequencyPenalty: 0.0,
             presencePenalty: 0.0,
             stream: false,
+            useResponsesApi: useResponsesApi,
           ),
           onComplete: (text, _, {rawResponseJson}) => responseText = text,
           onError: (e) => throw e,

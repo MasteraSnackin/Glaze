@@ -950,7 +950,7 @@ class Bridge {
           type: 'glaze:response',
           id: data.id,
           ok: false,
-          error: { message: String(error && error.message ? error.message : error) },
+          error: { code: error && error.code, message: String(error && error.message ? error.message : error) },
         }, '*');
       }
     });
@@ -963,7 +963,9 @@ class Bridge {
     const response = await window.flutter_inappwebview.callHandler('glazeBridge', request);
     if (response && response.ok === false) {
       const error = response.error || {};
-      throw new Error(error.message || 'Glaze bridge error');
+      const bridgeError = new Error(error.message || 'Glaze bridge error');
+      bridgeError.code = error.code;
+      throw bridgeError;
     }
     return response && Object.prototype.hasOwnProperty.call(response, 'result')
       ? response.result
@@ -2054,7 +2056,7 @@ class PanelHost {
         id: data.id,
         method: data.method,
         params: data.params || {},
-        context: data.context || {},
+        context: { ...(data.context || {}), panelId: panel.panelId, messageId: panel.messageId },
       });
       panel.iframe.contentWindow.postMessage(
         { type: 'glaze:response', id: data.id, ok: true, result },
@@ -2067,6 +2069,7 @@ class PanelHost {
           id: data.id,
           ok: false,
           error: {
+            code: error && error.code,
             message: String(error && error.message ? error.message : error),
           },
         },
@@ -2105,7 +2108,7 @@ class PanelHost {
     iframe.style.width = '100%';
     iframe.style.height = placeholderHeight + 'px';
     iframe.style.background = 'transparent';
-    iframe.srcdoc = this._buildSrcdoc(html, options);
+    iframe.srcdoc = this._buildSrcdoc(html, options, panelId, messageId);
 
     host.appendChild(iframe);
 
@@ -2139,12 +2142,12 @@ class PanelHost {
     return panelId;
   }
 
-  _buildSrcdoc(html, options) {
+  _buildSrcdoc(html, options, panelId, messageId) {
     const sdk = JSON.stringify(window.__glazeSdkSource || '');
     const userHtml = String(html == null ? '' : html);
     const context = JSON.stringify({
-      messageId: options.messageId || '',
-      panelId: options.panelId || '',
+      messageId,
+      panelId,
       title: options.title || '',
     });
     const bootstrap = `<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:glaze_flutter/core/llm/agent_runner.dart';
 import 'package:glaze_flutter/core/llm/memory_studio_service.dart';
 import 'package:glaze_flutter/core/llm/studio/agent_config_resolver.dart';
+import 'package:glaze_flutter/core/llm/studio_turn_config_snapshot.dart';
 import 'package:glaze_flutter/core/llm/tracker_batcher.dart';
 import 'package:glaze_flutter/core/models/api_config.dart';
 import 'package:glaze_flutter/core/models/pipeline_settings.dart';
@@ -34,6 +35,7 @@ class _FakeAgentRunner extends AgentRunner {
     String sessionId, {
     bool isFinalResponse = false,
     String? apiConfigId,
+    StudioTurnConfigSnapshot? turnConfig,
   }) async {
     return ResolvedAgentConfig(
       endpoint: 'https://test',

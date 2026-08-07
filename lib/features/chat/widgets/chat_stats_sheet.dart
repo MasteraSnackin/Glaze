@@ -5,7 +5,6 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/state/character_provider.dart';
 import '../../../core/utils/platform_paths.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../core/services/model_usage_service.dart';
@@ -106,7 +105,13 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
   }
 
   Future<void> _initData() async {
-    _allCharacters = ref.read(charactersProvider).value ?? [];
+    // Read characters straight from the DB for the same reason as the sessions
+    // below: `charactersProvider` is an AsyncNotifier, so a plain `read` on a
+    // sheet opened before it was warmed returns `AsyncLoading` (no value) and
+    // the list would stay empty for the sheet's whole lifetime — the character
+    // picker then shows "—" and the chat picker falls back to raw character ids.
+    _allCharacters = await ref.read(characterRepoProvider).getAll();
+    if (!mounted) return;
     // Read sessions straight from the DB rather than the cached provider: the
     // cache is not invalidated on message edits/deletions (counts would lag),
     // and a plain repo future reliably completes so the initial compute — and
@@ -124,16 +129,25 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
     // seed defaults from the last-interacted chat so every tab shows data
     // immediately instead of waiting for the user to pick a character/chat.
     if (_selectedCharId == null || _selectedCharId!.isEmpty) {
-      _selectedCharId = _allSessions.isNotEmpty
-          ? _allSessions.first.characterId
-          : (_allCharacters.isNotEmpty ? _allCharacters.first.id : null);
+      // Skip sessions whose character no longer exists — seeding the picker with
+      // an orphaned id would leave the Character tab without a name or avatar.
+      final knownIds = _allCharacters.map((c) => c.id).toSet();
+      _selectedCharId = _allSessions
+              .where((s) => knownIds.contains(s.characterId))
+              .firstOrNull
+              ?.characterId ??
+          (_allCharacters.isNotEmpty ? _allCharacters.first.id : null);
     }
     String? currentSessionId;
     if (widget.initialCharId.isNotEmpty) {
-      currentSessionId =
-          ref.read(chatProvider(widget.initialCharId)).value?.session?.id;
+      currentSessionId = ref
+          .read(chatProvider(widget.initialCharId))
+          .value
+          ?.session
+          ?.id;
     }
-    _selectedSessionId = currentSessionId ??
+    _selectedSessionId =
+        currentSessionId ??
         (_allSessions.isNotEmpty ? _allSessions.first.id : null);
 
     await _calculateStats();
@@ -210,7 +224,9 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
       for (final msg in session.messages) {
         final int tokens = (msg.tokens?.toInt()) ?? (msg.content.length ~/ 4);
         final int chars = msg.content.length.toInt();
-        final int regens = msg.swipes.length > 1 ? (msg.swipes.length - 1).toInt() : 0;
+        final int regens = msg.swipes.length > 1
+            ? (msg.swipes.length - 1).toInt()
+            : 0;
         final ts = msg.timestamp;
 
         // General
@@ -305,7 +321,6 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
     }
   }
 
-
   Widget _buildHero(_StatsData stats) {
     return Container(
       decoration: BoxDecoration(
@@ -376,14 +391,17 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
                   ),
                 ),
                 Container(
-                    width: 1,
-                    height: 28,
-                    color: Colors.white.withValues(alpha: 0.2)),
+                  width: 1,
+                  height: 28,
+                  color: Colors.white.withValues(alpha: 0.2),
+                ),
                 Expanded(
                   child: Column(
                     children: [
                       RollingNumber(
-                        value: _loading ? '...' : _formatNumber(stats.characters),
+                        value: _loading
+                            ? '...'
+                            : _formatNumber(stats.characters),
                         style: const TextStyle(
                           fontSize: 18,
                           fontWeight: FontWeight.w600,
@@ -405,7 +423,7 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
                 ),
               ],
             ),
-          )
+          ),
         ],
       ),
     );
@@ -485,8 +503,11 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
             child: Row(
               children: [
-                Icon(Icons.leaderboard_outlined,
-                    size: 18, color: context.cs.primary),
+                Icon(
+                  Icons.leaderboard_outlined,
+                  size: 18,
+                  color: context.cs.primary,
+                ),
                 const SizedBox(width: 8),
                 Text(
                   'Top Models',
@@ -572,8 +593,9 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
                     value: fraction.clamp(0.0, 1.0),
                     minHeight: 4,
                     backgroundColor: Colors.white.withValues(alpha: 0.06),
-                    valueColor:
-                        AlwaysStoppedAnimation<Color>(context.cs.primary),
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      context.cs.primary,
+                    ),
                   ),
                 ),
               ],
@@ -594,10 +616,14 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
     );
   }
 
-  /// Human label for a chat/session in the chat picker: "<character> · <chat>".
+  /// Human label for a chat/session in the chat picker: `<character> · <chat>`.
   String _sessionLabel(ChatSession s) {
     final char = _allCharacters.where((c) => c.id == s.characterId).firstOrNull;
-    final charName = char?.name ?? s.characterId;
+    // Never fall back to the raw character id — an orphaned session shows a
+    // readable placeholder instead of a bare timestamp-looking number.
+    final charName = (char?.name.trim().isNotEmpty ?? false)
+        ? char!.name
+        : 'Unknown character';
     final name = s.sessionVars['sessionName']?.trim();
     final chatName = (name != null && name.isNotEmpty)
         ? name
@@ -611,9 +637,7 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
         .firstOrNull;
     final selectedChar = selected == null
         ? null
-        : _allCharacters
-              .where((c) => c.id == selected.characterId)
-              .firstOrNull;
+        : _allCharacters.where((c) => c.id == selected.characterId).firstOrNull;
     final label = selected == null ? '—' : _sessionLabel(selected);
     final charColor = selectedChar?.color ?? '#66ccff';
     final parsedColor = Color(int.parse(charColor.replaceFirst('#', '0xFF')));
@@ -832,9 +856,12 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
                   clipBehavior: Clip.antiAlias,
                   child: selectedChar?.avatarPath != null
                       ? Image.file(
-                          File(resolveGlazeFilePath(selectedChar!.avatarPath!)!),
+                          File(
+                            resolveGlazeFilePath(selectedChar!.avatarPath!)!,
+                          ),
                           fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) => _buildInitials(charName),
+                          errorBuilder: (context, error, stackTrace) =>
+                              _buildInitials(charName),
                         )
                       : _buildInitials(charName),
                 ),
@@ -872,76 +899,100 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
             ),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(14),
-              child: ListView.separated(
-                shrinkWrap: true,
-                padding: EdgeInsets.zero,
-                itemCount: _allCharacters.length,
-                separatorBuilder: (context, index) => Container(
-                  height: 0.5,
-                  color: Colors.white.withValues(alpha: 0.06),
-                ),
-                itemBuilder: (context, index) {
-                  final char = _allCharacters[index];
-                  final active = char.id == _selectedCharId;
-                  final cColor = Color(
-                      int.parse((char.color ?? '#66ccff').replaceFirst('#', '0xFF')));
-                  return InkWell(
-                    onTap: () {
-                      setState(() {
-                        _selectedCharId = char.id;
-                        _showCharDropdown = false;
-                      });
-                      unawaited(_calculateStats());
-                    },
-                    child: Container(
-                      color: active
-                          ? context.cs.primary.withValues(alpha: 0.08)
-                          : Colors.transparent,
+              child: _allCharacters.isEmpty
+                  ? Padding(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 14, vertical: 10),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 32,
-                            height: 32,
-                            decoration: BoxDecoration(
-                              color: cColor,
-                              shape: BoxShape.circle,
-                            ),
-                            clipBehavior: Clip.antiAlias,
-                            child: char.avatarPath != null
-                                ? Image.file(
-                                    File(resolveGlazeFilePath(char.avatarPath!)!),
-                                    fit: BoxFit.cover,
-                                    errorBuilder: (context, error, stackTrace) =>
-                                        _buildInitials(char.name),
-                                  )
-                                : _buildInitials(char.name),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              char.name,
-                              style: TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.w500,
-                                color: context.cs.onSurface,
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          if (active)
-                            Icon(
-                              Icons.check,
-                              color: context.cs.primary,
-                              size: 20,
-                            ),
-                        ],
+                        horizontal: 14,
+                        vertical: 14,
                       ),
+                      child: Text(
+                        _loading ? '...' : 'No characters yet',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: context.cs.onSurfaceVariant,
+                        ),
+                      ),
+                    )
+                  : ListView.separated(
+                      shrinkWrap: true,
+                      padding: EdgeInsets.zero,
+                      itemCount: _allCharacters.length,
+                      separatorBuilder: (context, index) => Container(
+                        height: 0.5,
+                        color: Colors.white.withValues(alpha: 0.06),
+                      ),
+                      itemBuilder: (context, index) {
+                        final char = _allCharacters[index];
+                        final active = char.id == _selectedCharId;
+                        final cColor = Color(
+                          int.parse(
+                            (char.color ?? '#66ccff').replaceFirst('#', '0xFF'),
+                          ),
+                        );
+                        return InkWell(
+                          onTap: () {
+                            setState(() {
+                              _selectedCharId = char.id;
+                              _showCharDropdown = false;
+                            });
+                            unawaited(_calculateStats());
+                          },
+                          child: Container(
+                            color: active
+                                ? context.cs.primary.withValues(alpha: 0.08)
+                                : Colors.transparent,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 10,
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 32,
+                                  height: 32,
+                                  decoration: BoxDecoration(
+                                    color: cColor,
+                                    shape: BoxShape.circle,
+                                  ),
+                                  clipBehavior: Clip.antiAlias,
+                                  child: char.avatarPath != null
+                                      ? Image.file(
+                                          File(
+                                            resolveGlazeFilePath(
+                                              char.avatarPath!,
+                                            )!,
+                                          ),
+                                          fit: BoxFit.cover,
+                                          errorBuilder:
+                                              (context, error, stackTrace) =>
+                                                  _buildInitials(char.name),
+                                        )
+                                      : _buildInitials(char.name),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    char.name,
+                                    style: TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.w500,
+                                      color: context.cs.onSurface,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                if (active)
+                                  Icon(
+                                    Icons.check,
+                                    color: context.cs.primary,
+                                    size: 20,
+                                  ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
                     ),
-                  );
-                },
-              ),
             ),
           ),
           crossFadeState: _showCharDropdown
@@ -982,10 +1033,14 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
             GlazeTabItem(label: 'Character', icon: Icons.person),
             GlazeTabItem(label: 'General', icon: Icons.public),
           ],
-          activeIndex: _currentTab == 'chat' ? 0 : (_currentTab == 'char' ? 1 : 2),
+          activeIndex: _currentTab == 'chat'
+              ? 0
+              : (_currentTab == 'char' ? 1 : 2),
           onChanged: (index) {
             setState(() {
-              _currentTab = index == 0 ? 'chat' : (index == 1 ? 'char' : 'general');
+              _currentTab = index == 0
+                  ? 'chat'
+                  : (index == 1 ? 'char' : 'general');
             });
           },
         ),
@@ -995,74 +1050,82 @@ class _ChatStatsSheetState extends ConsumerState<ChatStatsSheet> {
           index: _currentTab == 'chat' ? 0 : (_currentTab == 'char' ? 1 : 2),
           length: 3,
           onChanged: (index) => setState(() {
-            _currentTab = index == 0 ? 'chat' : (index == 1 ? 'char' : 'general');
+            _currentTab = index == 0
+                ? 'chat'
+                : (index == 1 ? 'char' : 'general');
           }),
           child: TabSlideSwitcher(
-          index: _currentTab == 'chat' ? 0 : (_currentTab == 'char' ? 1 : 2),
-          child: ListView(
-          shrinkWrap: true,
-          padding: EdgeInsets.fromLTRB(
-            16,
-            MediaQuery.of(context).padding.top + 12,
-            16,
-            MediaQuery.of(context).padding.bottom + 24,
-          ),
-          children: [
-            if (_currentTab == 'chat') ...[
-              _buildChatPicker(),
-              const SizedBox(height: 12),
-            ],
-            if (_currentTab == 'char') ...[
-              _buildCharPicker(),
-              const SizedBox(height: 12),
-            ],
-            _buildHero(stats),
-            const SizedBox(height: 12),
-            Container(
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.05),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-                borderRadius: BorderRadius.circular(16),
+            index: _currentTab == 'chat' ? 0 : (_currentTab == 'char' ? 1 : 2),
+            child: ListView(
+              shrinkWrap: true,
+              padding: EdgeInsets.fromLTRB(
+                16,
+                MediaQuery.of(context).padding.top + 12,
+                16,
+                MediaQuery.of(context).padding.bottom + 24,
               ),
-              child: Column(
-                children: [
-                  _buildStatItem(
-                    icon: Icons.refresh,
-                    color: const Color(0xFF4CAF50),
-                    label: 'Regenerations',
-                    value: _loading ? '...' : _formatNumber(stats.regenerations),
-                  ),
-                  _buildSeparator(),
-                  _buildStatItem(
-                    icon: Icons.delete_outline,
-                    color: const Color(0xFFF44336),
-                    label: 'Deleted',
-                    value: _loading ? '...' : _formatNumber(stats.deleted),
-                  ),
-                  _buildSeparator(),
-                  _buildStatItem(
-                    icon: Icons.access_time,
-                    color: const Color(0xFF2196F3),
-                    label: _currentTab == 'general' ? 'App Time' : 'Time Spent',
-                    value: _loading ? '...' : _formatTime(stats.timeSpent),
-                  ),
-                  _buildSeparator(),
-                  _buildStatItem(
-                    icon: Icons.history,
-                    color: const Color(0xFFFF9800),
-                    label: 'stats_first_msg'.tr(),
-                    value: _loading ? '...' : stats.firstMessage,
-                    isDate: true,
-                  ),
+              children: [
+                if (_currentTab == 'chat') ...[
+                  _buildChatPicker(),
+                  const SizedBox(height: 12),
                 ],
-              ),
+                if (_currentTab == 'char') ...[
+                  _buildCharPicker(),
+                  const SizedBox(height: 12),
+                ],
+                _buildHero(stats),
+                const SizedBox(height: 12),
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.05),
+                    border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.08),
+                    ),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Column(
+                    children: [
+                      _buildStatItem(
+                        icon: Icons.refresh,
+                        color: const Color(0xFF4CAF50),
+                        label: 'Regenerations',
+                        value: _loading
+                            ? '...'
+                            : _formatNumber(stats.regenerations),
+                      ),
+                      _buildSeparator(),
+                      _buildStatItem(
+                        icon: Icons.delete_outline,
+                        color: const Color(0xFFF44336),
+                        label: 'Deleted',
+                        value: _loading ? '...' : _formatNumber(stats.deleted),
+                      ),
+                      _buildSeparator(),
+                      _buildStatItem(
+                        icon: Icons.access_time,
+                        color: const Color(0xFF2196F3),
+                        label: _currentTab == 'general'
+                            ? 'App Time'
+                            : 'Time Spent',
+                        value: _loading ? '...' : _formatTime(stats.timeSpent),
+                      ),
+                      _buildSeparator(),
+                      _buildStatItem(
+                        icon: Icons.history,
+                        color: const Color(0xFFFF9800),
+                        label: 'stats_first_msg'.tr(),
+                        value: _loading ? '...' : stats.firstMessage,
+                        isDate: true,
+                      ),
+                    ],
+                  ),
+                ),
+                if (_currentTab == 'general') ...[
+                  const SizedBox(height: 12),
+                  _buildTopModels(),
+                ],
+              ],
             ),
-            if (_currentTab == 'general') ...[
-              const SizedBox(height: 12),
-              _buildTopModels(),
-            ],
-          ],
-          ),
           ),
         ),
       ),

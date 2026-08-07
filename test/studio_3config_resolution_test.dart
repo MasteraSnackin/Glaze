@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/llm/agent_runner.dart';
+import 'package:glaze_flutter/core/llm/studio_slot_resolver.dart';
 import 'package:glaze_flutter/core/llm/studio/agent_config_resolver.dart';
 import 'package:glaze_flutter/core/llm/studio_api_config_resolver.dart';
 import 'package:glaze_flutter/core/models/api_config.dart';
@@ -13,6 +14,7 @@ import 'package:glaze_flutter/core/models/pipeline_settings.dart';
 import 'package:glaze_flutter/core/models/studio_agent_settings.dart';
 import 'package:glaze_flutter/core/models/studio_config.dart';
 import 'package:glaze_flutter/core/state/db_provider.dart';
+import 'package:glaze_flutter/core/state/memory_agent_providers.dart';
 import 'package:glaze_flutter/features/settings/api_list_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -166,6 +168,34 @@ void main() {
         modelOverride: 'override-model',
       );
       expect(resolved.model, 'override-model');
+    });
+  });
+
+  group('Responses API routing', () {
+    test('resolved agent config inherits the API preset toggle', () {
+      final resolved = ResolvedAgentConfig.fromApiConfig(
+        const ApiConfig(id: 'api', useResponsesApi: true),
+      );
+
+      expect(resolved.useResponsesApi, isTrue);
+    });
+
+    test('auxiliary Studio slot can override the API preset toggle', () {
+      final resolved = StudioSlotResolver.resolve(
+        apiConfigs: const [
+          ApiConfig(
+            id: 'api',
+            endpoint: 'https://example.test/v1',
+            apiKey: 'key',
+            model: 'model',
+            useResponsesApi: true,
+          ),
+        ],
+        apiConfigId: 'api',
+        useResponsesApi: false,
+      );
+
+      expect(resolved.useResponsesApi, isFalse);
     });
   });
 

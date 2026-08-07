@@ -1,4 +1,5 @@
 import '../../core/llm/prompt_builder.dart' show PromptPayload;
+import '../../core/llm/prompt/main_model_context_snapshot.dart';
 import '../../core/models/chat_message.dart';
 
 class ChatState {
@@ -33,6 +34,7 @@ class ChatState {
   /// POST-cleaner's auditor can inspect the exact context the final agent saw
   /// without re-querying memory/lorebooks. Null on fallback/early-abort paths.
   final PromptPayload? promptPayload;
+  final MainModelContextSnapshot? mainModelContextSnapshot;
 
   static const int initialPageSize = 20;
   static const int olderPageSize = 20;
@@ -50,6 +52,7 @@ class ChatState {
     this.regenTargetId,
     this.continuationTargetId,
     this.promptPayload,
+    this.mainModelContextSnapshot,
   });
 
   bool get hasMoreOlder => visibleStartIndex > 0;
@@ -77,6 +80,7 @@ class ChatState {
     Object? regenTargetId = _unset,
     Object? continuationTargetId = _unset,
     PromptPayload? promptPayload,
+    MainModelContextSnapshot? mainModelContextSnapshot,
   }) {
     return ChatState(
       session: session ?? this.session,
@@ -95,6 +99,8 @@ class ChatState {
           ? this.continuationTargetId
           : continuationTargetId as String?,
       promptPayload: promptPayload ?? this.promptPayload,
+      mainModelContextSnapshot:
+          mainModelContextSnapshot ?? this.mainModelContextSnapshot,
     );
   }
 }

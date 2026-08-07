@@ -18,6 +18,8 @@ import '../../../core/models/lorebook.dart';
 import '../../../core/models/api_config.dart';
 import '../../../core/models/preset.dart';
 import '../../../core/models/studio_config.dart';
+import '../../../core/application/session_deletion_store.dart';
+import '../../../core/application/character_deletion_store.dart';
 import '../../../shared/theme/theme_preset.dart';
 import '../sync_repo_interfaces.dart';
 import '../../../features/extensions/models/extension_preset.dart';
@@ -56,6 +58,8 @@ class SyncEngine {
   final SyncCharacterFolderStore? _characterFolderStore;
   final SyncMemoryGraphStore? _memoryGraphStore;
   final SyncCharacterKnowledgeStore? _characterKnowledgeStore;
+  final SessionDeletionStore _sessionDeletionStore;
+  final CharacterDeletionStore _characterDeletionStore;
   final Future<void> Function(LorebookActivations) _saveLorebookActivations;
   final SyncQueue _queue = SyncQueue();
   late final SyncBinaryAssetSyncer _binarySyncer;
@@ -85,6 +89,8 @@ class SyncEngine {
     this._characterFolderStore,
     this._memoryGraphStore,
     this._characterKnowledgeStore,
+    this._sessionDeletionStore,
+    this._characterDeletionStore,
     this._saveLorebookActivations,
   ) {
     _binarySyncer = SyncBinaryAssetSyncer(
@@ -1163,13 +1169,13 @@ class SyncEngine {
     try {
       switch (type) {
         case 'character':
-          await _characterRepo.delete(id);
+          await _characterDeletionStore.deleteCharacters({id});
           break;
         case 'persona':
           await _personaRepo.delete(id);
           break;
         case 'chat':
-          await _chatRepo.delete(id);
+          await _sessionDeletionStore.deleteSession(id);
           break;
         case 'memory_book':
           await _memoryBookRepo.deleteBySessionId(id);

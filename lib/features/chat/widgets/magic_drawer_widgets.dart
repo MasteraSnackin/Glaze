@@ -336,6 +336,50 @@ class MagicDrawerAddList extends StatelessWidget {
   }
 }
 
+/// Lays out fixed-width cells left-to-right in rows of [columns], like
+/// [Wrap], but stretches every cell in a row to match the tallest cell in
+/// that row so cards with a status line and cards without one stay level.
+class MagicCardGrid extends StatelessWidget {
+  final List<Widget> cells;
+  final int columns;
+  final double spacing;
+  final double runSpacing;
+
+  const MagicCardGrid({
+    super.key,
+    required this.cells,
+    required this.columns,
+    this.spacing = 6,
+    this.runSpacing = 8,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final rows = <Widget>[];
+    for (var i = 0; i < cells.length; i += columns) {
+      final rowCells = cells.skip(i).take(columns).toList();
+      if (rows.isNotEmpty) rows.add(SizedBox(height: runSpacing));
+      rows.add(
+        IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (var j = 0; j < rowCells.length; j++) ...[
+                if (j > 0) SizedBox(width: spacing),
+                rowCells[j],
+              ],
+            ],
+          ),
+        ),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: rows,
+    );
+  }
+}
+
 class AddMagicCard extends StatelessWidget {
   final VoidCallback onTap;
 

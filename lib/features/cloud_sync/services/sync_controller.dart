@@ -246,6 +246,10 @@ class SyncController {
   Future<String?> resolveConflict(SyncConflict conflict, String choice) async {
     final service = _ref.read(syncServiceProvider).value;
     if (service == null) return null;
+    final conflictsNotifier = _ref.read(syncConflictsProvider.notifier);
+    final errorNotifier = _ref.read(syncLastErrorProvider.notifier);
+    final statusNotifier = _ref.read(syncStatusProvider.notifier);
+    final progressNotifier = _ref.read(syncProgressProvider.notifier);
 
     // Optimistically remove from UI immediately — the user should not wait
     // for a manifest-rewrite before seeing the conflict row disappear.
@@ -253,26 +257,27 @@ class SyncController {
         .read(syncConflictsProvider)
         .where((c) => c.key != conflict.key)
         .toList();
-    _ref.read(syncConflictsProvider.notifier).state = optimistic;
+    conflictsNotifier.state = optimistic;
 
     try {
       await service.resolveConflict(conflict, choice);
       // Sync provider state with service truth (in case of partial failure).
-      _ref.read(syncConflictsProvider.notifier).state = List.from(
-        service.conflicts,
-      );
+      conflictsNotifier.state = List.from(service.conflicts);
 
       if (service.conflicts.isEmpty) {
-        return await _applyPendingPullAndFinalize(service);
+        return await _applyPendingPullAndFinalize(
+          service,
+          setStatus: (value) => statusNotifier.state = value,
+          setProgress: (value) => progressNotifier.state = value,
+          setError: (value) => errorNotifier.state = value,
+        );
       }
       return null;
     } catch (e) {
       // Roll back optimistic removal on error.
-      _ref.read(syncConflictsProvider.notifier).state = List.from(
-        service.conflicts,
-      );
-      _ref.read(syncLastErrorProvider.notifier).state = e.toString();
-      _ref.read(syncStatusProvider.notifier).state = service.status;
+      conflictsNotifier.state = List.from(service.conflicts);
+      errorNotifier.state = e.toString();
+      statusNotifier.state = service.status;
       return 'Could not resolve conflict: $e';
     }
   }
@@ -280,42 +285,52 @@ class SyncController {
   Future<String?> resolveAllConflicts(String choice) async {
     final service = _ref.read(syncServiceProvider).value;
     if (service == null) return null;
+    final conflictsNotifier = _ref.read(syncConflictsProvider.notifier);
+    final errorNotifier = _ref.read(syncLastErrorProvider.notifier);
+    final statusNotifier = _ref.read(syncStatusProvider.notifier);
+    final progressNotifier = _ref.read(syncProgressProvider.notifier);
     // Optimistically clear all conflict rows immediately.
-    _ref.read(syncConflictsProvider.notifier).state = [];
+    conflictsNotifier.state = [];
     try {
       await service.resolveAllConflicts(choice);
-      _ref.read(syncConflictsProvider.notifier).state = List.from(
-        service.conflicts,
+      conflictsNotifier.state = List.from(service.conflicts);
+      return await _applyPendingPullAndFinalize(
+        service,
+        setStatus: (value) => statusNotifier.state = value,
+        setProgress: (value) => progressNotifier.state = value,
+        setError: (value) => errorNotifier.state = value,
       );
-      return await _applyPendingPullAndFinalize(service);
     } catch (e) {
-      _ref.read(syncLastErrorProvider.notifier).state = e.toString();
-      _ref.read(syncConflictsProvider.notifier).state = List.from(
-        service.conflicts,
-      );
-      _ref.read(syncStatusProvider.notifier).state = service.status;
+      errorNotifier.state = e.toString();
+      conflictsNotifier.state = List.from(service.conflicts);
+      statusNotifier.state = service.status;
       return 'Could not resolve conflicts: $e';
     }
   }
 
   /// Called after all conflicts are resolved. Applies the pending pull,
   /// shows progress, invalidates data providers, and returns a toast message.
-  Future<String?> _applyPendingPullAndFinalize(SyncService service) async {
-    _ref.read(syncStatusProvider.notifier).state = SyncStatus.syncing;
+  Future<String?> _applyPendingPullAndFinalize(
+    SyncService service, {
+    required void Function(SyncStatus value) setStatus,
+    required void Function(SyncProgress? value) setProgress,
+    required void Function(String? value) setError,
+  }) async {
+    setStatus(SyncStatus.syncing);
     try {
       await service.applyPendingPullAfterResolve(
         onProgress: (p) {
-          _ref.read(syncProgressProvider.notifier).state = p;
+          setProgress(p);
         },
       );
-      invalidateDataProviders();
+      if (isMounted()) invalidateDataProviders();
       return 'Sync complete';
     } catch (e) {
-      _ref.read(syncLastErrorProvider.notifier).state = e.toString();
+      setError(e.toString());
       return 'Sync failed: $e';
     } finally {
-      _ref.read(syncStatusProvider.notifier).state = service.status;
-      _ref.read(syncProgressProvider.notifier).state = null;
+      setStatus(service.status);
+      setProgress(null);
     }
   }
 

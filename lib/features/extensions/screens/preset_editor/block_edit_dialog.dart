@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../../shared/widgets/sheet_view.dart';
 import '../../models/block_config.dart';
+import '../../models/extension_context_policy.dart';
+import '../../widgets/extension_context_policy_editor.dart';
 import 'widgets/api_config_selector.dart';
 import 'widgets/block_trigger_picker.dart';
 import 'widgets/block_type_picker.dart';
@@ -31,6 +33,9 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
   late TextEditingController _injectPrefixController;
   late TextEditingController _staticHtmlController;
   late TextEditingController _minHeightController;
+  late TextEditingController _injectLastNController;
+  late TextEditingController _contextMessageCountController;
+  late TextEditingController _previousBlocksCountController;
   late BlockType _type;
   late BlockTrigger _trigger;
   late bool _inject;
@@ -41,6 +46,7 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
   late bool _streamToPanel;
   late bool _useStaticHtml;
   late bool _manualOnly;
+  late ExtensionContextPolicy _contextPolicy;
   bool _fetchingModels = false;
 
   @override
@@ -64,6 +70,15 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
     _injectPrefixController = TextEditingController(text: b.injectPrefix);
     _staticHtmlController = TextEditingController(text: b.script);
     _minHeightController = TextEditingController(text: '120');
+    _injectLastNController = TextEditingController(
+      text: b.injectLastN.toString(),
+    );
+    _contextMessageCountController = TextEditingController(
+      text: b.contextMessageCount.toString(),
+    );
+    _previousBlocksCountController = TextEditingController(
+      text: b.previousBlocksCount.toString(),
+    );
     _type = b.type;
     _trigger = b.trigger;
     _inject = b.inject;
@@ -73,6 +88,7 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
     _previousBlocksCount = b.previousBlocksCount;
     _streamToPanel = b.streamToPanel;
     _manualOnly = b.manualOnly;
+    _contextPolicy = b.contextPolicy;
     _useStaticHtml =
         b.type == BlockType.interactive && b.script.trim().isNotEmpty;
   }
@@ -106,6 +122,7 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
       contextMessageCount: usesLlm ? _contextMessageCount : 0,
       previousBlocksCount: usesLlm ? _previousBlocksCount : 0,
       contextSystemPrompt: usesLlm ? _contextSystemPromptController.text : '',
+      contextPolicy: _contextPolicy,
       streamToPanel: usesLlm ? _streamToPanel : false,
       manualOnly: _manualOnly,
       script: isInteractive
@@ -123,6 +140,7 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
       }
       if (type == BlockType.jsRunner && _contextMessageCount == 0) {
         _contextMessageCount = 10;
+        _contextMessageCountController.text = '10';
       }
     });
   }
@@ -179,6 +197,9 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
     _injectPrefixController.dispose();
     _staticHtmlController.dispose();
     _minHeightController.dispose();
+    _injectLastNController.dispose();
+    _contextMessageCountController.dispose();
+    _previousBlocksCountController.dispose();
     super.dispose();
   }
 
@@ -198,121 +219,132 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
       body: Material(
         type: MaterialType.transparency,
         child: ListView(
-            children: [
+          children: [
+            const SizedBox(height: 8),
+            TextField(
+              controller: _nameController,
+              decoration: InputDecoration(
+                labelText: 'block_edit_name_label'.tr(),
+              ),
+            ),
+            const SizedBox(height: 16),
+            BlockTypePicker(selected: _type, onChanged: _onTypeChanged),
+            const SizedBox(height: 16),
+            BlockTriggerPicker(
+              selected: _trigger,
+              onChanged: (v) => setState(() => _trigger = v),
+            ),
+            const SizedBox(height: 4),
+            SwitchListTile(
+              title: Text('block_manual_only_title'.tr()),
+              subtitle: Text('block_manual_only_sub'.tr()),
+              value: _manualOnly,
+              onChanged: (v) => setState(() => _manualOnly = v),
+              contentPadding: EdgeInsets.zero,
+            ),
+            if (_type == BlockType.infoblock ||
+                _type == BlockType.imageGen ||
+                _type == BlockType.jsRunner) ...[
               const SizedBox(height: 8),
-              TextField(
-                controller: _nameController,
-                decoration: InputDecoration(
-                  labelText: 'block_edit_name_label'.tr(),
-                ),
+              _DependsOnPreviousSwitch(
+                type: _type,
+                value: _dependsOnPrevious,
+                onChanged: (v) => setState(() => _dependsOnPrevious = v),
               ),
-              const SizedBox(height: 16),
-              BlockTypePicker(selected: _type, onChanged: _onTypeChanged),
-              const SizedBox(height: 16),
-              BlockTriggerPicker(
-                selected: _trigger,
-                onChanged: (v) => setState(() => _trigger = v),
-              ),
-              const SizedBox(height: 4),
-              SwitchListTile(
-                title: Text('block_manual_only_title'.tr()),
-                subtitle: Text('block_manual_only_sub'.tr()),
-                value: _manualOnly,
-                onChanged: (v) => setState(() => _manualOnly = v),
-                contentPadding: EdgeInsets.zero,
-              ),
-              if (_type == BlockType.infoblock ||
-                  _type == BlockType.imageGen ||
-                  _type == BlockType.jsRunner) ...[
-                const SizedBox(height: 8),
-                _DependsOnPreviousSwitch(
-                  type: _type,
-                  value: _dependsOnPrevious,
-                  onChanged: (v) => setState(() => _dependsOnPrevious = v),
-                ),
-              ],
-              if (_type == BlockType.infoblock) ...[
-                const SizedBox(height: 16),
-                _InfoblockInjectFields(
-                  inject: _inject,
-                  injectPrefixController: _injectPrefixController,
-                  onInjectChanged: (v) {
-                    _onInjectChanged(v);
-                  },
-                  onLastNChanged: (v) => _injectLastN = v,
-                  initialLastN: _injectLastN,
-                ),
-              ],
-              if (_usesStandardLlmFields) ...[
-                const SizedBox(height: 16),
-                _PromptFields(type: _type, controller: _promptController),
-              ],
-              if (_type == BlockType.infoblock) ...[
-                const SizedBox(height: 8),
-                _TemplateField(controller: _templateController),
-              ],
-              if (_usesStandardLlmFields) ...[
-                const SizedBox(height: 16),
-                _LlmOptionsFields(
-                  type: _type,
-                  apiConfigController: _apiConfigController,
-                  modelController: _modelController,
-                  contextSystemPromptController: _contextSystemPromptController,
-                  contextMessageCount: _contextMessageCount,
-                  previousBlocksCount: _previousBlocksCount,
-                  streamToPanel: _streamToPanel,
-                  fetchingModels: _fetchingModels,
-                  onContextMessageCountChanged: (v) => _contextMessageCount = v,
-                  onPreviousBlocksCountChanged: (v) => _previousBlocksCount = v,
-                  onStreamToPanelChanged: (v) =>
-                      setState(() => _streamToPanel = v),
-                  onApiChanged: (id) {
-                    setState(() {
-                      _apiConfigController.text = id ?? '';
-                      _modelController.clear();
-                    });
-                  },
-                  onFetchStart: () => setState(() => _fetchingModels = true),
-                  onFetchEnd: () => setState(() => _fetchingModels = false),
-                ),
-              ],
-              if (_type == BlockType.imageGen) const _ImageGenHelpText(),
-              if (_type == BlockType.jsRunner) const _JsRunnerHelpText(),
-              if (_type == BlockType.interactive) ...[
-                const SizedBox(height: 16),
-                _InteractiveFields(
-                  useStaticHtml: _useStaticHtml,
-                  staticHtmlController: _staticHtmlController,
-                  promptController: _promptController,
-                  minHeightController: _minHeightController,
-                  dependsOnPrevious: _dependsOnPrevious,
-                  contextMessageCount: _contextMessageCount,
-                  contextSystemPromptController: _contextSystemPromptController,
-                  apiConfigController: _apiConfigController,
-                  modelController: _modelController,
-                  fetchingModels: _fetchingModels,
-                  streamToPanel: _streamToPanel,
-                  onUseStaticHtmlChanged: (v) =>
-                      setState(() => _useStaticHtml = v),
-                  onMinHeightChanged: (_) {},
-                  onDependsOnPreviousChanged: (v) =>
-                      setState(() => _dependsOnPrevious = v),
-                  onContextMessageCountChanged: (v) => _contextMessageCount = v,
-                  onApiChanged: (id) {
-                    setState(() {
-                      _apiConfigController.text = id ?? '';
-                      _modelController.clear();
-                    });
-                  },
-                  onFetchStart: () => setState(() => _fetchingModels = true),
-                  onFetchEnd: () => setState(() => _fetchingModels = false),
-                  onStreamToPanelChanged: (v) =>
-                      setState(() => _streamToPanel = v),
-                ),
-              ],
-              const SizedBox(height: 16),
-              FilledButton(onPressed: _save, child: Text('btn_save'.tr())),
             ],
+            if (_type == BlockType.infoblock) ...[
+              const SizedBox(height: 16),
+              _InfoblockInjectFields(
+                inject: _inject,
+                injectPrefixController: _injectPrefixController,
+                injectLastNController: _injectLastNController,
+                onInjectChanged: (v) {
+                  _onInjectChanged(v);
+                },
+                onLastNChanged: (v) => _injectLastN = v,
+              ),
+            ],
+            if (_usesStandardLlmFields) ...[
+              const SizedBox(height: 16),
+              _PromptFields(type: _type, controller: _promptController),
+            ],
+            if (_type == BlockType.infoblock) ...[
+              const SizedBox(height: 8),
+              _TemplateField(controller: _templateController),
+            ],
+            if (_usesLlm) ...[
+              const SizedBox(height: 16),
+              SectionLabel('Контекст блока'),
+              ExtensionContextPolicyEditor(
+                policy: _contextPolicy,
+                onChanged: (policy) => setState(() => _contextPolicy = policy),
+              ),
+            ],
+            if (_usesStandardLlmFields) ...[
+              const SizedBox(height: 16),
+              _LlmOptionsFields(
+                type: _type,
+                apiConfigController: _apiConfigController,
+                modelController: _modelController,
+                contextSystemPromptController: _contextSystemPromptController,
+                contextMessageCountController: _contextMessageCountController,
+                previousBlocksCountController: _previousBlocksCountController,
+                contextMessageCount: _contextMessageCount,
+                previousBlocksCount: _previousBlocksCount,
+                streamToPanel: _streamToPanel,
+                fetchingModels: _fetchingModels,
+                onContextMessageCountChanged: (v) => _contextMessageCount = v,
+                onPreviousBlocksCountChanged: (v) => _previousBlocksCount = v,
+                onStreamToPanelChanged: (v) =>
+                    setState(() => _streamToPanel = v),
+                onApiChanged: (id) {
+                  setState(() {
+                    _apiConfigController.text = id ?? '';
+                    _modelController.clear();
+                  });
+                },
+                onFetchStart: () => setState(() => _fetchingModels = true),
+                onFetchEnd: () => setState(() => _fetchingModels = false),
+              ),
+            ],
+            if (_type == BlockType.imageGen) const _ImageGenHelpText(),
+            if (_type == BlockType.jsRunner) const _JsRunnerHelpText(),
+            if (_type == BlockType.interactive) ...[
+              const SizedBox(height: 16),
+              _InteractiveFields(
+                useStaticHtml: _useStaticHtml,
+                staticHtmlController: _staticHtmlController,
+                promptController: _promptController,
+                minHeightController: _minHeightController,
+                dependsOnPrevious: _dependsOnPrevious,
+                contextMessageCount: _contextMessageCount,
+                contextMessageCountController: _contextMessageCountController,
+                contextSystemPromptController: _contextSystemPromptController,
+                apiConfigController: _apiConfigController,
+                modelController: _modelController,
+                fetchingModels: _fetchingModels,
+                streamToPanel: _streamToPanel,
+                onUseStaticHtmlChanged: (v) =>
+                    setState(() => _useStaticHtml = v),
+                onMinHeightChanged: (_) {},
+                onDependsOnPreviousChanged: (v) =>
+                    setState(() => _dependsOnPrevious = v),
+                onContextMessageCountChanged: (v) => _contextMessageCount = v,
+                onApiChanged: (id) {
+                  setState(() {
+                    _apiConfigController.text = id ?? '';
+                    _modelController.clear();
+                  });
+                },
+                onFetchStart: () => setState(() => _fetchingModels = true),
+                onFetchEnd: () => setState(() => _fetchingModels = false),
+                onStreamToPanelChanged: (v) =>
+                    setState(() => _streamToPanel = v),
+              ),
+            ],
+            const SizedBox(height: 16),
+            FilledButton(onPressed: _save, child: Text('btn_save'.tr())),
+          ],
         ),
       ),
     );
@@ -322,6 +354,10 @@ class _BlockEditDialogState extends ConsumerState<BlockEditDialog> {
       _type == BlockType.infoblock ||
       _type == BlockType.imageGen ||
       _type == BlockType.jsRunner;
+
+  bool get _usesLlm =>
+      _usesStandardLlmFields ||
+      (_type == BlockType.interactive && !_useStaticHtml);
 }
 
 class _DependsOnPreviousSwitch extends StatelessWidget {
@@ -357,16 +393,16 @@ class _InfoblockInjectFields extends StatelessWidget {
   const _InfoblockInjectFields({
     required this.inject,
     required this.injectPrefixController,
+    required this.injectLastNController,
     required this.onInjectChanged,
     required this.onLastNChanged,
-    required this.initialLastN,
   });
 
   final bool inject;
   final TextEditingController injectPrefixController;
+  final TextEditingController injectLastNController;
   final ValueChanged<bool> onInjectChanged;
   final ValueChanged<int> onLastNChanged;
-  final int initialLastN;
 
   @override
   Widget build(BuildContext context) {
@@ -382,13 +418,13 @@ class _InfoblockInjectFields extends StatelessWidget {
         if (inject) ...[
           const SizedBox(height: 8),
           TextField(
-            controller: TextEditingController(text: initialLastN.toString()),
+            controller: injectLastNController,
             decoration: InputDecoration(
               labelText: 'block_inject_last_n_label'.tr(),
               helperText: 'block_inject_last_n_helper'.tr(),
             ),
             keyboardType: TextInputType.number,
-            onChanged: (v) => onLastNChanged(int.tryParse(v) ?? initialLastN),
+            onChanged: (v) => onLastNChanged(int.tryParse(v) ?? 0),
           ),
           const SizedBox(height: 8),
           TextField(
@@ -478,6 +514,8 @@ class _LlmOptionsFields extends StatelessWidget {
     required this.apiConfigController,
     required this.modelController,
     required this.contextSystemPromptController,
+    required this.contextMessageCountController,
+    required this.previousBlocksCountController,
     required this.contextMessageCount,
     required this.previousBlocksCount,
     required this.streamToPanel,
@@ -494,6 +532,8 @@ class _LlmOptionsFields extends StatelessWidget {
   final TextEditingController apiConfigController;
   final TextEditingController modelController;
   final TextEditingController contextSystemPromptController;
+  final TextEditingController contextMessageCountController;
+  final TextEditingController previousBlocksCountController;
   final int contextMessageCount;
   final int previousBlocksCount;
   final bool streamToPanel;
@@ -511,6 +551,7 @@ class _LlmOptionsFields extends StatelessWidget {
       children: [
         SectionLabel('block_chat_context_section'.tr()),
         _ContextMessageCountField(
+          controller: contextMessageCountController,
           value: contextMessageCount,
           onChanged: onContextMessageCountChanged,
           fullHelper: true,
@@ -519,6 +560,7 @@ class _LlmOptionsFields extends StatelessWidget {
         _ContextSystemPromptField(controller: contextSystemPromptController),
         const SizedBox(height: 8),
         _PreviousBlocksCountField(
+          controller: previousBlocksCountController,
           value: previousBlocksCount,
           onChanged: onPreviousBlocksCountChanged,
         ),
@@ -565,6 +607,7 @@ class _InteractiveFields extends StatelessWidget {
     required this.minHeightController,
     required this.dependsOnPrevious,
     required this.contextMessageCount,
+    required this.contextMessageCountController,
     required this.contextSystemPromptController,
     required this.apiConfigController,
     required this.modelController,
@@ -586,6 +629,7 @@ class _InteractiveFields extends StatelessWidget {
   final TextEditingController minHeightController;
   final bool dependsOnPrevious;
   final int contextMessageCount;
+  final TextEditingController contextMessageCountController;
   final TextEditingController contextSystemPromptController;
   final TextEditingController apiConfigController;
   final TextEditingController modelController;
@@ -668,6 +712,7 @@ class _InteractiveFields extends StatelessWidget {
           const SizedBox(height: 16),
           SectionLabel('block_chat_context_section'.tr()),
           _ContextMessageCountField(
+            controller: contextMessageCountController,
             value: contextMessageCount,
             onChanged: onContextMessageCountChanged,
             fullHelper: false,
@@ -705,11 +750,13 @@ class _InteractiveFields extends StatelessWidget {
 
 class _ContextMessageCountField extends StatelessWidget {
   const _ContextMessageCountField({
+    required this.controller,
     required this.value,
     required this.onChanged,
     required this.fullHelper,
   });
 
+  final TextEditingController controller;
   final int value;
   final ValueChanged<int> onChanged;
   final bool fullHelper;
@@ -724,7 +771,7 @@ class _ContextMessageCountField extends StatelessWidget {
             : 'block_context_count_helper'.tr(),
       ),
       keyboardType: const TextInputType.numberWithOptions(signed: true),
-      controller: TextEditingController(text: value.toString()),
+      controller: controller,
       onChanged: (v) => onChanged(int.tryParse(v) ?? value),
     );
   }
@@ -732,10 +779,12 @@ class _ContextMessageCountField extends StatelessWidget {
 
 class _PreviousBlocksCountField extends StatelessWidget {
   const _PreviousBlocksCountField({
+    required this.controller,
     required this.value,
     required this.onChanged,
   });
 
+  final TextEditingController controller;
   final int value;
   final ValueChanged<int> onChanged;
 
@@ -747,7 +796,7 @@ class _PreviousBlocksCountField extends StatelessWidget {
         helperText: 'block_previous_blocks_helper'.tr(),
       ),
       keyboardType: TextInputType.number,
-      controller: TextEditingController(text: value.toString()),
+      controller: controller,
       onChanged: (v) => onChanged(int.tryParse(v) ?? value),
     );
   }

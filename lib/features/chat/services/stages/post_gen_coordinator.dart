@@ -5,9 +5,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/models/character.dart';
 import '../../../../core/models/chat_message.dart';
+import '../../../../core/llm/prompt/main_model_context_snapshot.dart';
 import '../../../../core/services/generation_notification_service.dart';
 import '../../../image_gen/services/image_tag_markup.dart';
 import '../../../../core/state/db_provider.dart';
+import '../../../../core/llm/studio_turn_config_snapshot.dart';
 import '../../chat_generation_service.dart';
 import '../../chat_state.dart';
 import 'chat_embed_stage.dart';
@@ -100,6 +102,7 @@ class PostGenCoordinator {
   void _launchExtensionBlocksInBackground({
     required ChatSession session,
     required Character? character,
+    required MainModelContextSnapshot? mainModelContextSnapshot,
   }) {
     if (character == null) return;
     _runInBackground(
@@ -107,6 +110,7 @@ class PostGenCoordinator {
         session: session,
         character: character,
         agentSwipeId: -1,
+        mainModelContextSnapshot: mainModelContextSnapshot,
       ),
       'extension blocks',
     );
@@ -119,6 +123,7 @@ class PostGenCoordinator {
     required ChatGenerationService service,
     required GenerationNotificationService notifService,
     String? regenTargetId,
+    StudioTurnConfigSnapshot? studioTurnConfig,
   }) async {
     if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) return;
     if (result.session == null) return;
@@ -149,18 +154,7 @@ class PostGenCoordinator {
 
     // Determine Studio status before acquiring the foreground post-gen hold.
     // A disabled/no-op ordinary path must not retain that hold.
-    var studioEnabled = false;
-    try {
-      final studioConfig = await ctx.ref
-          .read(studioConfigRepoProvider)
-          .getBySessionId(sessionId);
-      studioEnabled = studioConfig?.enabled == true &&
-          ctx.ref.read(studioFeatureEnabledProvider);
-    } catch (e) {
-      debugPrint(
-        '[PostGenCoordinator] StudioConfig load failed session=$sessionId: $e',
-      );
-    }
+    final studioEnabled = studioTurnConfig?.enabled == true;
     if (!ctx.ref.mounted || !ctx.abortHandler.isCurrentGen(genId)) return;
 
     if (!studioEnabled) {
@@ -170,6 +164,7 @@ class PostGenCoordinator {
       _launchExtensionBlocksInBackground(
         session: result.session!,
         character: character,
+        mainModelContextSnapshot: result.mainModelContextSnapshot,
       );
       if (!_hasForegroundImageWork(result.session!)) return;
       if (!_beginForegroundPostGen(sessionId: sessionId, genId: genId)) return;
@@ -198,7 +193,9 @@ class PostGenCoordinator {
         messages: result.session!.messages,
         genId: genId,
         promptPayload: result.promptPayload,
+        mainModelContextSnapshot: result.mainModelContextSnapshot,
         character: character,
+        studioTurnConfig: studioTurnConfig,
       );
       postGenFutures.add(cleanerTask);
 

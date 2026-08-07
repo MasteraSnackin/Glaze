@@ -35,6 +35,9 @@ import 'chat_overlay_blur_region.dart';
 /// Inbound callbacks (JS -> Dart) are exposed as nullable function
 /// properties on the host and registered via [setupHandlers].
 class ChatBridgeController {
+  static Set<String> get supportedExtensionMethods =>
+      JsBridgeMethodRegistry.methodsFor(JsBridgeHostProfile.visual);
+
   final InAppWebViewController _controller;
   final JsBridgeService _jsBridgeService;
   final Map<String, Completer<dynamic>> _pendingRequests = {};
@@ -71,8 +74,7 @@ class ChatBridgeController {
   late final LayoutBridgeCommands layout = LayoutBridgeCommands(this);
   late final MemoryBridgeCommands memory = MemoryBridgeCommands(this);
 
-  ChatBridgeController(this._controller, {JsBridgeService? jsBridgeService})
-    : _jsBridgeService = jsBridgeService ?? JsBridgeService() {
+  ChatBridgeController(this._controller, this._jsBridgeService) {
     setupHandlers();
   }
 
@@ -88,6 +90,7 @@ class ChatBridgeController {
   List<PresetRegex> get displayRegexes => _displayRegexes;
   Character? get regexCharacter => _regexCharacter;
   Persona? get regexPersona => _regexPersona;
+  JsBridgeService get extensionBridgeService => _jsBridgeService;
 
   List<TriggeredEntry> triggeredRegexesFor(String messageId) =>
       _triggeredRegexesByMessageId[messageId] ?? const [];
@@ -187,8 +190,8 @@ class ChatBridgeController {
       (match) {
         final path = match.group(1) ?? '';
         final suffix = match.group(2) ?? '';
-        final resolved = resolveLocalFileUrl(path) ?? path;
-        return '[IMG:RESULT:$resolved$suffix]';
+        final resolved = resolveLocalFileUrl(path);
+        return resolved == null ? '' : '[IMG:RESULT:$resolved$suffix]';
       },
     );
   }
@@ -204,17 +207,7 @@ class ChatBridgeController {
   }
 
   void setAvatarUrl(String? path, {required bool isChar}) {
-    String? url;
-    if (path != null && path.isNotEmpty) {
-      if (path.startsWith('data:') ||
-          path.startsWith('http://') ||
-          path.startsWith('https://') ||
-          path.startsWith('file://')) {
-        url = resolveLocalFileUrl(path) ?? path;
-      } else {
-        url = resolveLocalFileUrl(path) ?? Uri.file(path).toString();
-      }
-    }
+    final url = path == null || path.isEmpty ? null : resolveLocalFileUrl(path);
     if (isChar) {
       _charAvatarUrl = url;
     } else {

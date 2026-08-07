@@ -14,4 +14,11 @@ class SyncDeletionTracker {
     list.add({'type': type, 'id': id});
     await prefs.setString(_key, jsonEncode(list));
   }
+
+  static Future<void> recordSessionRuntimeClear(String sessionId) async {
+    final prefs = await SharedPreferences.getInstance();
+    await record('tracker_value', sessionId, prefs);
+    await record('tracker_snapshot', sessionId, prefs);
+    await record('info_block', sessionId, prefs);
+  }
 }

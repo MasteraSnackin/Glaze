@@ -33,12 +33,14 @@ void main() {
       }
     });
 
-    // Documented exception. chat_stats_sheet.dart reads sessions straight from
-    // chatRepoProvider on purpose — see the comment at its _initData(): the
-    // cached provider is not invalidated on message edits/deletions, so the
-    // stats counts would lag, and a plain repo future is guaranteed to complete
-    // where the provider may stay unresolved. Deliberate, so the rule below
-    // skips it rather than the rule being deleted for everyone else.
+    // Documented exception. chat_stats_sheet.dart reads sessions and characters
+    // straight from chatRepoProvider/characterRepoProvider on purpose — see the
+    // comments at its _initData(): the cached session provider is not
+    // invalidated on message edits/deletions, so the stats counts would lag,
+    // and a plain repo future is guaranteed to complete where the (async)
+    // providers may stay unresolved and hand the sheet an empty list.
+    // Deliberate, so the rule below skips it rather than the rule being deleted
+    // for everyone else.
     final directRepoExceptions = <String>{
       'lib/features/chat/widgets/chat_stats_sheet.dart',
     };
