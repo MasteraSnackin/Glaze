@@ -932,6 +932,35 @@ if (messageData.isEditing) classes.push('editing');
 
   resetDateTracking() { this._lastTimestamps = { date: null, idx: -1 }; }
 
+  /**
+   * Re-writes every message body (and reasoning block) from the raw text kept
+   * on the section's dataset. Used when `allowMessageScripts` flips, so the
+   * messages already on screen pick up the new policy instead of waiting for
+   * the next content update.
+   */
+  rerenderMessageBodies() {
+    // `virtualList.items` also covers messages the list has not mounted, so a
+    // scroll back up does not reveal content rendered under the old policy.
+    const items = (window.bridge && window.bridge.virtualList)
+      ? window.bridge.virtualList.items.map(it => it.el)
+      : document.querySelectorAll('.message-section');
+
+    items.forEach(section => {
+      if (!section) return;
+      const isUser = section.classList.contains('user');
+
+      const reasoningHost = section.querySelector('.msg-reasoning-inner .message-content');
+      if (reasoningHost) {
+        this._writeShadowContent(reasoningHost, section.dataset.reasoning || '', isUser, false);
+      }
+
+      const bodyHost = section.querySelector('.msg-body .message-content');
+      if (bodyHost) {
+        this._writeShadowContent(bodyHost, section.dataset.rawText || '', isUser, false);
+      }
+    });
+  }
+
   _applySearchHighlight(html, globalState) {
     if (!this.searchQuery) return html;
     const escapedQuery = this.searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

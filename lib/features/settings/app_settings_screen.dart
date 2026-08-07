@@ -11,6 +11,7 @@ import '../../shared/theme/theme_provider.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/glaze_scaffold.dart';
 import '../../shared/widgets/menu_group.dart';
+import '../chat/widgets/message_scripts_prompt_sheet.dart';
 import 'app_settings_provider.dart';
 import 'widgets/chat_layout_picker.dart';
 
@@ -227,6 +228,12 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
               value: s.allowMessageScripts,
               onChanged: (v) async {
                 if (!v) {
+                  // Flipping the switch by hand is an explicit answer, so the
+                  // in-chat "a script was found" offer stays quiet afterwards.
+                  // Recorded *before* the save: saving re-renders the chat
+                  // under the new policy, which is what makes the WebView
+                  // report the scripts it blocks.
+                  await markMessageScriptsChoiceMade(ref);
                   await notifier.save(s.copyWith(allowMessageScripts: false));
                   return;
                 }
@@ -248,6 +255,7 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
                   ),
                 );
                 if (confirmed == true && context.mounted) {
+                  await markMessageScriptsChoiceMade(ref);
                   await notifier.save(s.copyWith(allowMessageScripts: true));
                 }
               },

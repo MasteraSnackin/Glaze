@@ -257,6 +257,10 @@ class ChatBridgeController {
   void Function()? onLoadMore;
   void Function(bool hidden)? onHeaderScroll;
   void Function(bool visible)? onScrollToBottomVisibility;
+  /// A rendered message carried a `<script>` while message script execution is
+  /// off. Fired at most once per WebView load so the app can offer to enable
+  /// execution.
+  void Function()? onMessageScriptBlocked;
   void Function(String url)? onLinkClick;
   void Function(String url)? onImageClick;
   void Function(String src)? onImgDownload;
@@ -375,6 +379,8 @@ class ChatBridgeController {
         onStop?.call();
       case 'onImgCancel':
         onImgCancel?.call();
+      case 'onMessageScriptBlocked':
+        onMessageScriptBlocked?.call();
     }
   }
 

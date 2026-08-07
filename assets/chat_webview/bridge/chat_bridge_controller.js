@@ -45,6 +45,9 @@ export class Bridge {
     this._personaAvatarUrl = null;
     this.batterySaver = false;
     this.disableSwipeRegeneration = false;
+    // One "a message tried to run JS" report per WebView load — see
+    // notifyMessageScriptBlocked().
+    this._messageScriptBlockedNotified = false;
     renderer.selectionManager = this._selectionManager;
     this._swipeHandler = new SwipeGestureHandler(
       (name, args) => this._sendToFlutter(name, args),
@@ -1107,7 +1110,25 @@ export class Bridge {
   }
 
   setAllowMessageScripts(enabled) {
+    const previous = this.renderer.allowMessageScripts;
     this.renderer.allowMessageScripts = enabled === true;
+    // Apply the new policy to what is already on screen: enabling runs the
+    // scripts of the messages the user is looking at, disabling re-inserts
+    // their sanitized form.
+    if (this.renderer.allowMessageScripts !== previous) {
+      this.renderer.rerenderMessageBodies();
+    }
+  }
+
+  /**
+   * Called by the renderer when a message carried a `<script>` while message
+   * script execution is off. Reported to Flutter once per WebView load — the
+   * app then offers to enable execution, and its answer is persisted there.
+   */
+  notifyMessageScriptBlocked() {
+    if (this._messageScriptBlockedNotified) return;
+    this._messageScriptBlockedNotified = true;
+    this._sendToFlutter('onMessageScriptBlocked', []);
   }
 
   /* ---------- Inline edit (toggle into .msg-body) ---------- */

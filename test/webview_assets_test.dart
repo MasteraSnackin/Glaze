@@ -191,6 +191,43 @@ void main() {
       );
       expect(headlessHtml, contains('runSandboxedScript'));
     });
+
+    test('blocked scripts are detected before the sanitizer strips them', () {
+      final writeBlock = _extractWriteShadowContent(rendererJs);
+      final detect = writeBlock.indexOf('SCRIPT_TAG.test(formatted)');
+      final sanitize = writeBlock.indexOf('sanitizeMessageHtml(formatted)');
+      expect(detect, isNonNegative);
+      expect(detect, lessThan(sanitize));
+      expect(writeBlock, contains('!allowMessageScripts'));
+      expect(rendererJs, contains('notifyMessageScriptBlocked()'));
+      expect(
+        rendererJs,
+        contains('window.bridge?.notifyMessageScriptBlocked?.()'),
+      );
+    });
+
+    test('bridge reports a blocked script to Flutter once per load', () {
+      expect(bridgeControllerJs, contains('notifyMessageScriptBlocked()'));
+      expect(
+        bridgeControllerJs,
+        contains('this._messageScriptBlockedNotified = false'),
+      );
+      final body = _extractBlockBody(
+        bridgeControllerJs,
+        bridgeControllerJs.indexOf('notifyMessageScriptBlocked() {'),
+      );
+      expect(body, contains('if (this._messageScriptBlockedNotified) return'));
+      expect(body, contains("_sendToFlutter('onMessageScriptBlocked', [])"));
+    });
+
+    test('flipping the policy re-renders the messages already on screen', () {
+      final body = _extractBlockBody(
+        bridgeControllerJs,
+        bridgeControllerJs.indexOf('setAllowMessageScripts(enabled)'),
+      );
+      expect(body, contains('this.renderer.rerenderMessageBodies()'));
+      expect(rendererMessageJs, contains('rerenderMessageBodies()'));
+    });
   });
 
   group('ordinary ExtBlocks HTML sanitizer', () {
