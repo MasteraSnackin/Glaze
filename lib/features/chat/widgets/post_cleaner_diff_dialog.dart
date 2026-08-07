@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/models/chat_message.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/glaze_spinner.dart';
 import 'post_cleaner_line_diff.dart';
 
 /// Side-by-side diff viewer for POST-cleaner results.
@@ -208,7 +209,7 @@ class _PostCleanerDiffDialogState extends ConsumerState<PostCleanerDiffDialog> {
 
   Widget _buildBody(BuildContext context) {
     if (_loading) {
-      return const Center(child: CircularProgressIndicator());
+      return const Center(child: GlazeSpinner());
     }
     if (_error != null) {
       return Center(

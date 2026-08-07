@@ -8,6 +8,7 @@ import '../../../core/models/character.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glass_surface.dart';
+import '../../../shared/widgets/glaze_spinner.dart';
 import '../../settings/app_settings_provider.dart';
 import '../character_detail_screen.dart';
 import '../character_sort.dart';
@@ -188,10 +189,7 @@ class CharacterGrid extends StatelessWidget {
                     child: SizedBox(
                       width: 22,
                       height: 22,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: context.cs.primary,
-                      ),
+                      child: GlazeSpinner(color: context.cs.primary),
                     ),
                   )
                 : null,

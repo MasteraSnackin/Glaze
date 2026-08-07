@@ -14,6 +14,7 @@ import '../../core/models/extra_request_parameter.dart';
 import '../../core/state/shared_prefs_provider.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/glaze_tab_bar.dart';
 import '../../shared/widgets/swipe_tab_switcher.dart';
 import '../../shared/widgets/tab_slide_switcher.dart';
@@ -409,7 +410,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       // own pill animation while the content swipes beneath it.
       headerBottom: list.isEmpty ? null : _buildTabBar(),
       body: asyncList.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
+        loading: () => const Center(child: GlazeSpinner()),
         error: (e, _) => Center(child: Text('${'title_error'.tr()}: $e')),
         data: (list) => list.isEmpty
             ? _buildEmptyState()
@@ -611,7 +612,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
                   child: SizedBox(
                     width: 18,
                     height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
+                    child: GlazeSpinner(),
                   ),
                 )
               : IconButton(
@@ -1020,7 +1021,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
                     ? const SizedBox(
                         width: 16,
                         height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
+                        child: GlazeSpinner(),
                       )
                     : const Icon(Icons.wifi_find_rounded),
                 label: Text(

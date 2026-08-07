@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:glaze_flutter/features/chat/state/post_gen_status_provider.dart';
 import 'package:glaze_flutter/features/chat/widgets/post_gen_status_card.dart';
+import 'package:glaze_flutter/shared/widgets/glaze_spinner.dart';
 
 void main() {
   testWidgets('shows a distinct Ledger reconciliation running badge', (
@@ -28,6 +29,6 @@ void main() {
     );
 
     expect(find.text('Ledger reconciliation running...'), findsOneWidget);
-    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    expect(find.byType(GlazeSpinner), findsOneWidget);
   });
 }

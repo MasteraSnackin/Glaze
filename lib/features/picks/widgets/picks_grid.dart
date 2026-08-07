@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/state/character_provider.dart';
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/glaze_spinner.dart';
 import '../picks_models.dart';
 import '../picks_provider.dart';
 import 'picks_detail_launcher.dart';
@@ -41,7 +42,7 @@ class PicksGrid extends ConsumerWidget {
             SliverToBoxAdapter(child: SizedBox(height: topPadding)),
           if (tabBar != null) SliverToBoxAdapter(child: tabBar!),
           const SliverFillRemaining(
-            child: Center(child: CircularProgressIndicator()),
+            child: Center(child: GlazeSpinner()),
           ),
         ],
       ),

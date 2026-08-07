@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/models/tracker.dart';
 import '../../../core/state/memory_agent_providers.dart';
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/glaze_spinner.dart';
 import '../services/agentic_tracker_values_service.dart';
 import 'agentic_operations_log_dialog.dart' show AgenticSessionScope;
 
@@ -91,7 +92,7 @@ class _AgenticTrackerValuesTabState
   @override
   Widget build(BuildContext context) {
     if (!_loaded) {
-      return const Center(child: CircularProgressIndicator());
+      return const Center(child: GlazeSpinner());
     }
     final trackers = _trackers ?? const <Tracker>[];
     // Precompute lock/override key sets so tiles can show badges and decide

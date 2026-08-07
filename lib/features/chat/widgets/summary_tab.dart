@@ -8,6 +8,7 @@ import '../../../core/state/preset_resolution.dart';
 import '../../../core/state/summary_providers.dart';
 import '../../../shared/widgets/generic_editor.dart';
 import '../../../shared/widgets/glaze_error_block.dart';
+import '../../../shared/widgets/glaze_spinner.dart';
 import '../../presets/preset_list_provider.dart';
 import '../chat_provider.dart';
 import '../services/summary_generation_service.dart';
@@ -338,7 +339,7 @@ class _SummaryTabState extends ConsumerState<SummaryTab> {
                 ? const SizedBox(
                     width: 16,
                     height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
+                    child: GlazeSpinner(),
                   )
                 : const Icon(Icons.auto_awesome, size: 18),
             label: Text(

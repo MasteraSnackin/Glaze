@@ -10,6 +10,7 @@ import '../../shared/theme/app_colors.dart';
 import '../../shared/theme/theme_provider.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/glaze_scaffold.dart';
+import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/menu_group.dart';
 import '../chat/widgets/message_scripts_prompt_sheet.dart';
 import 'app_settings_provider.dart';
@@ -47,7 +48,7 @@ class _AppSettingsScreenState extends ConsumerState<AppSettingsScreen> {
       },
       showBackground: false,
       body: settingsAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
+        loading: () => const Center(child: GlazeSpinner()),
         error: (e, _) => Center(child: Text('${'title_error'.tr()}: $e')),
         data: (s) => AnimatedSwitcher(
           duration: const Duration(milliseconds: 200),

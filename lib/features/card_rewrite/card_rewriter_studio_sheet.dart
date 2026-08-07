@@ -14,6 +14,7 @@ import '../../core/state/card_rewriter_providers.dart';
 import '../../core/state/pipeline_settings_provider.dart';
 import '../../shared/utils/time_formatter.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import '../settings/api_list_provider.dart';
 
@@ -275,7 +276,7 @@ class _CardRewriterStudioSheetState
             icon: _running
                 ? const SizedBox.square(
                     dimension: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
+                    child: GlazeSpinner(),
                   )
                 : const Icon(Icons.auto_fix_high_outlined),
             label: Text(_running ? 'Preparing proposal...' : 'Run now'),
@@ -286,7 +287,7 @@ class _CardRewriterStudioSheetState
           jobs.when(
             loading: () => const Padding(
               padding: EdgeInsets.all(12),
-              child: Center(child: CircularProgressIndicator()),
+              child: Center(child: GlazeSpinner()),
             ),
             error: (_, _) => const Text('Could not load rewrite history.'),
             data: (items) {

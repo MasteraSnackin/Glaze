@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../../shared/widgets/glaze_spinner.dart';
 import '../../../shared/widgets/menu_group.dart';
 import '../image_gen_models.dart';
 
@@ -66,7 +67,7 @@ class ImageGenFetchButton extends StatelessWidget {
         child: SizedBox(
           width: 18,
           height: 18,
-          child: CircularProgressIndicator(strokeWidth: 2),
+          child: GlazeSpinner(),
         ),
       );
     }

@@ -12,6 +12,7 @@ import '../../core/state/db_provider.dart';
 import '../../core/utils/id_generator.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/folder_name_dialog.dart';
 import '../settings/app_settings_provider.dart';
@@ -509,7 +510,7 @@ class StudioPresetEditorBodyState
   @override
   Widget build(BuildContext context) {
     if (_loading) {
-      return const Center(child: CircularProgressIndicator());
+      return const Center(child: GlazeSpinner());
     }
     final preset = _preset;
     if (preset == null) {

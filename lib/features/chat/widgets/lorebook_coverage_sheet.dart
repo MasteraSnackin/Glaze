@@ -11,6 +11,7 @@ import '../../../core/state/lorebook_embedding_provider.dart';
 import '../../../core/state/lorebook_provider.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_filter_chip_bar.dart';
+import '../../../shared/widgets/glaze_spinner.dart';
 import '../../../shared/widgets/sheet_view.dart';
 import '../chat_provider.dart';
 
@@ -144,7 +145,7 @@ class _CoveragePanelState extends ConsumerState<CoveragePanel> {
   @override
   Widget build(BuildContext context) {
     final body = _loading
-        ? const Center(child: CircularProgressIndicator())
+        ? const Center(child: GlazeSpinner())
         : _result == null
         ? Center(
             child: Text(

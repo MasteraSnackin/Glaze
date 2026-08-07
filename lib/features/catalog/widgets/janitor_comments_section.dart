@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/utils/time_formatter.dart';
+import '../../../shared/widgets/glaze_spinner.dart';
 import '../services/janitor_provider.dart';
 
 const _kSurface = Color(0x0DFFFFFF);
@@ -62,10 +63,7 @@ class JanitorCommentsView extends StatelessWidget {
           child: SizedBox(
             width: 22,
             height: 22,
-            child: CircularProgressIndicator(
-              strokeWidth: 2.4,
-              color: context.cs.primary,
-            ),
+            child: GlazeSpinner(color: context.cs.primary),
           ),
         ),
       );

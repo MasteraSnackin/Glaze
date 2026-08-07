@@ -12,6 +12,7 @@ import '../../core/utils/platform_paths.dart';
 import '../../core/state/active_selection_provider.dart';
 import '../../core/state/db_provider.dart';
 import '../../core/state/shared_prefs_provider.dart';
+import '../../shared/widgets/glaze_spinner.dart';
 import 'persona_connections_sheet.dart';
 import 'persona_list_provider.dart';
 import '../../core/utils/id_generator.dart';
@@ -63,7 +64,7 @@ class PersonaListScreen extends ConsumerWidget {
         ),
       ],
       body: personas.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
+        loading: () => const Center(child: GlazeSpinner()),
         error: (e, _) => Center(child: Text("${'title_error'.tr()}: $e")),
         data: (list) => list.isEmpty
             ? Center(

@@ -12,6 +12,7 @@ import '../../core/services/update_check_coordinator.dart';
 import '../../core/state/dev_mode_provider.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glaze_scaffold.dart';
+import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/menu_group.dart';
 import '../settings/app_settings_provider.dart';
@@ -270,10 +271,7 @@ class _UpdatesSectionState extends State<_UpdatesSection> {
                       ? SizedBox(
                           width: 18,
                           height: 18,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: cs.primary,
-                          ),
+                          child: GlazeSpinner(color: cs.primary),
                         )
                       : Icon(
                           Icons.refresh_rounded,

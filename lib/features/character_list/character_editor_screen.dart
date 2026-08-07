@@ -14,6 +14,7 @@ import '../../core/utils/id_generator.dart';
 import '../../core/utils/time_helpers.dart';
 import '../../core/state/lorebook_provider.dart';
 import '../../shared/theme/app_colors.dart';
+import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/sheet_view.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
 import '../../shared/widgets/glaze_toast.dart';
@@ -292,7 +293,7 @@ class _CharacterEditorScreenState extends ConsumerState<CharacterEditorScreen> {
     if (_loading) {
       return SheetView(
         title: "${'action_edit'.tr()} ${'sheet_title_char_options'.tr()}",
-        body: const Center(child: CircularProgressIndicator()),
+        body: const Center(child: GlazeSpinner()),
       );
     }
 

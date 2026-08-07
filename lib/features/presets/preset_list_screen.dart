@@ -19,6 +19,7 @@ import '../../core/state/db_provider.dart';
 import '../../core/state/active_studio_preset_provider.dart';
 import '../../core/state/preset_folder_provider.dart';
 import '../../core/utils/time_helpers.dart';
+import '../../shared/widgets/glaze_spinner.dart';
 import '../studio/studio_preset_stats.dart';
 import '../studio/studio_preset_workflow_provider.dart';
 import '../studio/widgets/studio_preset_options_sheet.dart';
@@ -240,7 +241,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
               // A save from the editor invalidates the list; keep the rows on
               // screen instead of flashing a spinner while it reloads.
               skipLoadingOnReload: true,
-              loading: () => const Center(child: CircularProgressIndicator()),
+              loading: () => const Center(child: GlazeSpinner()),
               error: (e, _) => Center(child: Text('${'title_error'.tr()}: $e')),
               // The inner Builder reads the MediaQuery padding SheetView
               // overrides for its body (header inset + nav bar), which the

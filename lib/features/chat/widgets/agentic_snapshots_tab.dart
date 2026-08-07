@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/models/tracker.dart';
 import '../../../core/models/tracker_snapshot.dart';
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/glaze_spinner.dart';
 import '../services/agentic_snapshots_service.dart';
 import 'agentic_operations_log_dialog.dart' show AgenticSessionScope;
 
@@ -55,7 +56,7 @@ class _AgenticSnapshotsTabState extends ConsumerState<AgenticSnapshotsTab> {
   @override
   Widget build(BuildContext context) {
     if (!_loaded) {
-      return const Center(child: CircularProgressIndicator());
+      return const Center(child: GlazeSpinner());
     }
     final snapshots = _snapshots ?? const <TrackerSnapshot>[];
     return Column(

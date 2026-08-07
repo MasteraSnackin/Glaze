@@ -20,6 +20,7 @@ import '../catalog/widgets/janitor_extract_sheet.dart';
 import '../catalog/widgets/third_party_providers_screen.dart';
 import '../cloud_sync/widgets/sync_sheet.dart';
 import '../dev/menu_group_demo_screen.dart';
+import '../dev/spinner_demo_screen.dart';
 import '../lorebooks/lorebook_connections_sheet.dart';
 import '../personas/persona_connections_sheet.dart';
 import '../personas/persona_list_provider.dart';
@@ -185,6 +186,13 @@ class _MenuScreenState extends ConsumerState<MenuScreen> with ShellHeaderMixin {
                         label: 'menu_menu_group_demo'.tr(),
                         onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
                           builder: (_) => const MenuGroupDemoScreen(),
+                        )),
+                      ),
+                      MenuItem(
+                        icon: Icons.refresh_rounded,
+                        label: 'menu_spinner_demo'.tr(),
+                        onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+                          builder: (_) => const SpinnerDemoScreen(),
                         )),
                       ),
                       const MenuSubHeader('Connections sheets'),

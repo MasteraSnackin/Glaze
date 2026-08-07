@@ -9,6 +9,7 @@ import 'dart:convert';
 import '../../../core/llm/history_assembler.dart';
 import '../../../core/llm/prompt_builder.dart';
 import '../../../core/llm/prompt_isolate.dart';
+import '../../../shared/widgets/glaze_spinner.dart';
 import '../providers/prompt_build_providers.dart';
 import '../../../core/llm/transport/anthropic_chat_transport.dart';
 import '../../../core/llm/transport/chat_transport_request.dart';
@@ -258,7 +259,7 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
 
             if (_dataTabIndex == 0) {
               if (_loading) {
-                return const Center(child: CircularProgressIndicator());
+                return const Center(child: GlazeSpinner());
               }
               if (_result == null) {
                 return Center(

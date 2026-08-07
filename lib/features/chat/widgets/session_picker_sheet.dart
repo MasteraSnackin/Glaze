@@ -7,6 +7,7 @@ import '../../../core/state/chat_session_ops_provider.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/utils/time_formatter.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../../shared/widgets/glaze_spinner.dart';
 import '../../chat_history/chat_history_provider.dart';
 import '../chat_actions_service.dart';
 import '../chat_provider.dart';
@@ -162,7 +163,7 @@ class _SessionPickerListState extends ConsumerState<SessionPickerList> {
       return const Center(
         child: Padding(
           padding: EdgeInsets.all(32.0),
-          child: CircularProgressIndicator(),
+          child: GlazeSpinner(),
         ),
       );
     }

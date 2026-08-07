@@ -10,6 +10,7 @@ import '../../../core/state/character_provider.dart';
 import '../../../core/utils/platform_paths.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glaze_error_dialog.dart';
+import '../../../shared/widgets/glaze_spinner.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../gallery_provider.dart';
 
@@ -48,7 +49,7 @@ class CharacterGalleryView extends ConsumerWidget {
         .when(
           loading: () => const Padding(
             padding: EdgeInsets.all(32),
-            child: Center(child: CircularProgressIndicator()),
+            child: Center(child: GlazeSpinner()),
           ),
           error: (e, _) => Padding(
             padding: const EdgeInsets.all(32),

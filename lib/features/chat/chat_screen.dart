@@ -18,6 +18,7 @@ import 'package:share_plus/share_plus.dart';
 import '../../core/debug/perf_debug.dart';
 import '../../core/utils/image_src.dart';
 import '../../core/utils/platform_paths.dart';
+import '../../shared/widgets/glaze_spinner.dart';
 import 'editing_message_provider.dart';
 
 import '../../core/state/character_provider.dart';
@@ -393,7 +394,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                 ),
               ],
         body: chatStateAsync.when(
-          loading: () => const Center(child: CircularProgressIndicator()),
+          loading: () => const Center(child: GlazeSpinner()),
           error: (e, _) => Center(child: Text('${'title_error'.tr()}: $e')),
           data: (state) {
             // The index comparison only gates the INITIAL navigation to a
@@ -418,7 +419,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
             // until restart. Keep the body mounted and overlay the spinner so
             // the WebView's own `_applySessionSwitch` handles the transition.
             if (awaitingTargetSession && !_everBuiltBody) {
-              return const Center(child: CircularProgressIndicator());
+              return const Center(child: GlazeSpinner());
             }
             _everBuiltBody = true;
             return Stack(
@@ -438,7 +439,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                 if (awaitingTargetSession)
                   const Positioned.fill(
                     child: IgnorePointer(
-                      child: Center(child: CircularProgressIndicator()),
+                      child: Center(child: GlazeSpinner()),
                     ),
                   ),
               ],

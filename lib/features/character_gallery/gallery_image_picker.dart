@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/models/gallery_entry.dart';
 import '../../core/utils/platform_paths.dart';
+import '../../shared/widgets/glaze_spinner.dart';
 import 'gallery_provider.dart';
 
 Future<GalleryEntry?> showCharacterGalleryImagePicker(
@@ -52,7 +53,7 @@ class _GalleryImagePicker extends ConsumerWidget {
           ),
           Expanded(
             child: gallery.when(
-              loading: () => const Center(child: CircularProgressIndicator()),
+              loading: () => const Center(child: GlazeSpinner()),
               error: (error, _) => Center(child: Text(error.toString())),
               data: (entries) {
                 if (entries.isEmpty) {

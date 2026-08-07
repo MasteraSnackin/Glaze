@@ -17,6 +17,7 @@ import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glass_surface.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
+import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/menu_group.dart';
 import '../../shared/widgets/sheet_view.dart';
@@ -1084,7 +1085,7 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
     if (!_loaded) {
       final list = ref.watch(lorebooksProvider).value;
       if (list == null) {
-        return const Scaffold(body: Center(child: CircularProgressIndicator()));
+        return const Scaffold(body: Center(child: GlazeSpinner()));
       }
       final lb = _findLorebook(list);
       if (lb == null) {
