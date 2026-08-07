@@ -37,7 +37,7 @@ class ThemePresetStorage implements SyncThemePresetStore, ThemePresetStore {
     try {
       final list = jsonDecode(raw) as List;
       final presets = list
-          .map((e) => ThemePreset.fromJson(e as Map<String, dynamic>))
+          .map((e) => themePresetFromStoredJson(e as Map<String, dynamic>))
           .toList();
       return _withBuiltins(presets);
     } catch (_) {
@@ -122,7 +122,7 @@ class ThemePresetStorage implements SyncThemePresetStore, ThemePresetStore {
     stripped['id'] = id;
     stripped['name'] = name;
 
-    return ThemePreset.fromJson(stripped);
+    return themePresetFromStoredJson(stripped);
   }
 
   Archive? _tryDecodeArchive(Uint8List bytes) {
@@ -187,9 +187,11 @@ class ThemePresetStorage implements SyncThemePresetStore, ThemePresetStore {
         '#7996CE';
     final bgImage =
         _resolveBackgroundImage(background['image'] as String?, archive);
+    // Tavo stores image visibility; Glaze darkens the background instead.
     final bgOpacity = _asDouble(background['imageOpacity']) ??
         _opacityFromArgb(bgColorInt) ??
         0.85;
+    final bgDim = (1.0 - bgOpacity).clamp(0.0, 1.0).toDouble();
     final bgBlur = _asDouble(background['blur']) ?? 0;
     final elementBlur = _firstNonNullDouble([
           _asDouble(console['blur']),
@@ -241,7 +243,7 @@ class ThemePresetStorage implements SyncThemePresetStore, ThemePresetStore {
       author: 'Tavo',
       themeMode: themeMode,
       accentColor: accent,
-      bgOpacity: bgOpacity.clamp(0.0, 1.0).toDouble(),
+      bgDim: bgDim,
       bgBlur: bgBlur,
       elementOpacity: elementOpacity.clamp(0.0, 1.0).toDouble(),
       elementBlur: elementBlur,
@@ -453,7 +455,7 @@ final _defaultPreset = ThemePreset(
   id: 'default',
   name: 'Default',
   accentColor: '#7996CE',
-  bgOpacity: 0.85,
+  bgDim: 0.15,
   elementOpacity: 0.8,
   elementBlur: 12,
   chatLayout: 'default',
@@ -474,7 +476,7 @@ final _materialYouPreset = ThemePreset(
   id: kMaterialYouPresetId,
   name: 'Material You',
   accentColor: '#7996CE',
-  bgOpacity: 0.85,
+  bgDim: 0.15,
   elementOpacity: 0.8,
   elementBlur: 12,
   chatLayout: 'default',

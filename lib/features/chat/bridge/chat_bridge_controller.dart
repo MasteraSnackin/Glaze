@@ -629,8 +629,8 @@ class ChatBridgeController {
   // Theme
   Future<void> setBackgroundNoise(double opacity, double intensity) =>
       theme.setBackgroundNoise(opacity, intensity);
-  Future<void> setBackgroundImage(String? src, int blur, double opacity) =>
-      theme.setBackgroundImage(src, blur, opacity);
+  Future<void> setBackgroundImage(String? src, int blur) =>
+      theme.setBackgroundImage(src, blur);
   Future<void> setChatFont({
     String? fontName,
     String? fontDataUrl,

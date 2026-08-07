@@ -448,7 +448,6 @@ ChatWebViewWidgetFields _fields({
   personaAvatarPath: null,
   bgImagePath: null,
   bgBlur: 0,
-  bgOpacity: 1,
   bgDim: 0,
   bgNoiseOpacity: 0,
   bgNoiseIntensity: 0,

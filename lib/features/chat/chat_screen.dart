@@ -1058,7 +1058,6 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
     _blurSafeTop = MediaQuery.paddingOf(context).top;
 
     final bgBlur = preset.bgBlur > 0 ? preset.bgBlur : 0.0;
-    final bgOpacity = preset.bgOpacity.clamp(0.0, 1.0);
     final fontStyle = batteryAware(
       ref,
       batterySaverMode,
@@ -1294,10 +1293,9 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                         personaAvatarPath: effectivePersona?.avatarPath,
                         bgImagePath: bgPath,
                         bgBlur: bgBlur,
-                        bgOpacity: bgOpacity,
                         bgNoiseOpacity: preset.bgNoiseOpacity,
                         bgNoiseIntensity: preset.bgNoiseIntensity,
-                        bgDim: preset.bgDim,
+                        bgDim: preset.bgDim.clamp(0.0, 1.0),
                         chatBgMode: preset.chatBgMode,
                         chatBgColor: preset.chatBgColorParsed,
                         chatFontName: fontStyle.fontFamily,

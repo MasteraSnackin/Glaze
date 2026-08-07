@@ -1174,7 +1174,7 @@ class SyncEngine {
     } else {
       items = [data];
     }
-    final presets = items.map((j) => ThemePreset.fromJson(j)).toList();
+    final presets = items.map((j) => themePresetFromStoredJson(j)).toList();
     await _themePresetRepo.putAll(presets);
   }
 
