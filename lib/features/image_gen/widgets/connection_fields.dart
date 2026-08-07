@@ -1,6 +1,7 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
+import '../../../shared/widgets/menu_group.dart';
 import '../image_gen_models.dart';
 import 'rows.dart' as rows;
 
@@ -156,7 +157,7 @@ List<Widget> buildOpenaiConnectionFields(
   ValueChanged<ImageGenSettings> onUpdate,
 ) {
   return [
-    rows.ImageGenCheckboxRow(
+    MenuSwitchItem(
       label: 'settings_use_llm_api'.tr(),
       description: 'settings_use_llm_api_desc'.tr(),
       value: s.useSameEndpoint,

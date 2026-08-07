@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../shared/widgets/menu_group.dart';
 import '../image_gen_models.dart';
 import 'model_fields.dart';
 import 'rows.dart' as rows;
@@ -31,9 +32,9 @@ List<Widget> buildA1111ModelFields(
         onPressed: onFetchModels,
       ),
     ),
-    rows.ImageGenSelectorRow(
+    MenuSelectorItem(
       label: 'Resolution',
-      value: '${config.width}x${config.height}',
+      currentValue: '${config.width}x${config.height}',
       onTap: () => showOptions<(String, int, int, String)>(
         title: 'Resolution',
         items: A1111Constants.resolutionPresets,
@@ -44,9 +45,9 @@ List<Widget> buildA1111ModelFields(
             update(config.copyWith(width: preset.$2, height: preset.$3)),
       ),
     ),
-    rows.ImageGenSelectorRow(
+    MenuSelectorItem(
       label: 'Sampler',
-      value: config.sampler,
+      currentValue: config.sampler,
       onTap: () => showOptions<String>(
         title: 'Sampler',
         items: A1111Constants.samplers,
@@ -55,9 +56,9 @@ List<Widget> buildA1111ModelFields(
         onSelected: (v) => update(config.copyWith(sampler: v)),
       ),
     ),
-    rows.ImageGenSelectorRow(
+    MenuSelectorItem(
       label: 'Scheduler',
-      value: config.scheduler,
+      currentValue: config.scheduler,
       onTap: () => showOptions<String>(
         title: 'Scheduler',
         items: A1111Constants.schedulers,
@@ -112,18 +113,18 @@ List<Widget> buildA1111ModelFields(
       hint: 'Automatic',
       onChanged: (v) => update(config.copyWith(vae: v)),
     ),
-    rows.ImageGenCheckboxRow(
+    MenuSwitchItem(
       label: 'Restore faces',
       value: config.restoreFaces,
       onChanged: (v) => update(config.copyWith(restoreFaces: v)),
     ),
-    rows.ImageGenCheckboxRow(
+    MenuSwitchItem(
       label: 'ADetailer (face)',
       description: 'Runs the face_yolov8n ADetailer pass after generation',
       value: config.adetailerFace,
       onChanged: (v) => update(config.copyWith(adetailerFace: v)),
     ),
-    rows.ImageGenCheckboxRow(
+    MenuSwitchItem(
       label: 'Hires. fix',
       value: config.enableHr,
       onChanged: (v) => update(config.copyWith(enableHr: v)),

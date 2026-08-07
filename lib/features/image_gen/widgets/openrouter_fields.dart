@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../shared/widgets/menu_group.dart';
 import '../image_gen_capabilities.dart';
 import '../image_gen_models.dart';
 import 'model_fields.dart';
@@ -32,9 +33,9 @@ List<Widget> buildOpenRouterModelFields(
         onPressed: onFetchModels,
       ),
     ),
-    rows.ImageGenSelectorRow(
+    MenuSelectorItem(
       label: 'Aspect Ratio',
-      value: config.aspectRatio,
+      currentValue: config.aspectRatio,
       onTap: () => showOptions<String>(
         title: 'Aspect Ratio',
         items: caps.aspectRatios,
@@ -45,9 +46,9 @@ List<Widget> buildOpenRouterModelFields(
       ),
     ),
     if (caps.imageSizes != null)
-      rows.ImageGenSelectorRow(
+      MenuSelectorItem(
         label: 'Resolution',
-        value: config.imageSize,
+        currentValue: config.imageSize,
         onTap: () => showOptions<String>(
           title: 'Resolution',
           items: caps.imageSizes!,
@@ -84,9 +85,9 @@ List<Widget> buildElectronHubModelFields(
         onPressed: onFetchModels,
       ),
     ),
-    rows.ImageGenSelectorRow(
+    MenuSelectorItem(
       label: 'Image Size',
-      value: config.size,
+      currentValue: config.size,
       onTap: () => showOptions<String>(
         title: 'Image Size',
         items: ElectronHubConstants.sizes,
@@ -96,9 +97,9 @@ List<Widget> buildElectronHubModelFields(
             onUpdate(s.copyWith(electronhub: config.copyWith(size: v))),
       ),
     ),
-    rows.ImageGenSelectorRow(
+    MenuSelectorItem(
       label: 'Quality',
-      value: config.quality == 'hd' ? 'HD' : 'Standard',
+      currentValue: config.quality == 'hd' ? 'HD' : 'Standard',
       onTap: () => showOptions<String>(
         title: 'Quality',
         items: ElectronHubConstants.qualities,

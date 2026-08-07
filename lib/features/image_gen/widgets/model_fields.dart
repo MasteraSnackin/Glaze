@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/menu_group.dart';
 import '../image_gen_models.dart';
 import 'rows.dart' as rows;
 
@@ -23,9 +23,9 @@ List<Widget> buildNaisteraModelFields(
   ShowOptionsCallback showOptions,
 ) {
   return [
-    rows.ImageGenSelectorRow(
+    MenuSelectorItem(
       label: 'Model',
-      value: NaisteraConstants.models
+      currentValue: NaisteraConstants.models
           .firstWhere(
             (e) => e.$1 == s.naisteraModel,
             orElse: () => (s.naisteraModel, s.naisteraModel),
@@ -40,9 +40,9 @@ List<Widget> buildNaisteraModelFields(
         onSelected: (v) => onUpdate(s.copyWith(naisteraModel: v)),
       ),
     ),
-    rows.ImageGenSelectorRow(
+    MenuSelectorItem(
       label: 'Aspect Ratio',
-      value: s.naisteraAspectRatio,
+      currentValue: s.naisteraAspectRatio,
       onTap: () => showOptions<String>(
         title: 'Aspect Ratio',
         items: NaisteraConstants.aspectRatios,
@@ -81,9 +81,9 @@ List<Widget> buildRoutmyModelFields(
       : imageSizes;
 
   return [
-    rows.ImageGenSelectorRow(
+    MenuSelectorItem(
       label: 'Model',
-      value: constantsModels
+      currentValue: constantsModels
           .firstWhere((e) => e.$1 == model, orElse: () => (model, model))
           .$2,
       onTap: () => showOptions<String>(
@@ -107,9 +107,9 @@ List<Widget> buildRoutmyModelFields(
         },
       ),
     ),
-    rows.ImageGenSelectorRow(
+    MenuSelectorItem(
       label: 'Aspect Ratio',
-      value: aspect,
+      currentValue: aspect,
       onTap: () => showOptions<String>(
         title: 'Aspect Ratio',
         items: aspectRatios,
@@ -120,9 +120,9 @@ List<Widget> buildRoutmyModelFields(
             : onUpdate(s.copyWith(routmyAspectRatio: v)),
       ),
     ),
-    rows.ImageGenSelectorRow(
+    MenuSelectorItem(
       label: 'Resolution',
-      value: size,
+      currentValue: size,
       onTap: () => showOptions<String>(
         title: 'Resolution',
         items: availableImageSizes,
@@ -134,9 +134,9 @@ List<Widget> buildRoutmyModelFields(
       ),
     ),
     if (model != 'bytedance/seedream-5.0-pro')
-      rows.ImageGenSelectorRow(
+      MenuSelectorItem(
         label: 'Quality',
-        value: quality == 'hd' ? 'HD' : 'Standard',
+        currentValue: quality == 'hd' ? 'HD' : 'Standard',
         onTap: () => showOptions<String>(
           title: 'Quality',
           items: ['standard', 'hd'],
@@ -154,7 +154,6 @@ List<Widget> buildRoutmyModelFields(
 /// suffix is rendered inline — the spinner is bound to [isFetching]
 /// and the refresh icon calls [onFetchModels].
 List<Widget> buildOpenaiModelFields(
-  BuildContext context,
   ImageGenSettings s, {
   required bool isFetching,
   required VoidCallback onFetchModels,
@@ -167,32 +166,14 @@ List<Widget> buildOpenaiModelFields(
       value: s.customModel,
       hint: 'dall-e-3',
       onChanged: (v) => onUpdate(s.copyWith(customModel: v)),
-      suffix: InkWell(
-        onTap: onFetchModels,
-        borderRadius: BorderRadius.circular(8),
-        child: Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            color: context.cs.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: Colors.black12),
-          ),
-          child: isFetching
-              ? const Center(
-                  child: SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                )
-              : Icon(Icons.refresh, size: 18, color: context.cs.primary),
-        ),
+      suffix: rows.ImageGenFetchButton(
+        isFetching: isFetching,
+        onPressed: onFetchModels,
       ),
     ),
-    rows.ImageGenSelectorRow(
+    MenuSelectorItem(
       label: 'Image Size',
-      value: s.openaiSize,
+      currentValue: s.openaiSize,
       onTap: () => showOptions<String>(
         title: 'Image Size',
         items: OpenAIConstants.sizes,
@@ -201,9 +182,9 @@ List<Widget> buildOpenaiModelFields(
         onSelected: (v) => onUpdate(s.copyWith(openaiSize: v)),
       ),
     ),
-    rows.ImageGenSelectorRow(
+    MenuSelectorItem(
       label: 'Quality',
-      value: s.openaiQuality == 'hd' ? 'HD' : 'Standard',
+      currentValue: s.openaiQuality == 'hd' ? 'HD' : 'Standard',
       onTap: () => showOptions<String>(
         title: 'Quality',
         items: OpenAIConstants.qualities,
@@ -230,9 +211,9 @@ List<Widget> buildGeminiModelFields(
       hint: 'imagen-3.0-generate-002',
       onChanged: (v) => onUpdate(s.copyWith(customModel: v)),
     ),
-    rows.ImageGenSelectorRow(
+    MenuSelectorItem(
       label: 'Aspect Ratio',
-      value: s.geminiAspectRatio,
+      currentValue: s.geminiAspectRatio,
       onTap: () => showOptions<String>(
         title: 'Aspect Ratio',
         items: GeminiConstants.aspectRatios,
@@ -241,9 +222,9 @@ List<Widget> buildGeminiModelFields(
         onSelected: (v) => onUpdate(s.copyWith(geminiAspectRatio: v)),
       ),
     ),
-    rows.ImageGenSelectorRow(
+    MenuSelectorItem(
       label: 'Resolution',
-      value: s.geminiImageSize,
+      currentValue: s.geminiImageSize,
       onTap: () => showOptions<String>(
         title: 'Resolution',
         items: GeminiConstants.imageSizes,

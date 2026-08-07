@@ -12,7 +12,9 @@ import '../../../core/utils/platform_paths.dart';
 import '../../character_gallery/gallery_image_picker.dart';
 import '../../settings/api_list_provider.dart';
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/help_tip.dart';
+import '../../../shared/widgets/menu_group.dart';
 import '../../../shared/widgets/sheet_view.dart';
 import '../image_gen_capabilities.dart';
 import '../image_gen_models.dart';
@@ -141,65 +143,19 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
     required bool Function(T) isSelected,
     required void Function(T) onSelected,
   }) {
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (context) => Container(
-        decoration: BoxDecoration(
-          color: context.cs.surface,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        child: Material(
-          type: MaterialType.transparency,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-              Flexible(
-                child: ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: items.length,
-                  itemBuilder: (context, i) {
-                    final item = items[i];
-                    final selected = isSelected(item);
-                    return ListTile(
-                      title: Text(labelBuilder(item)),
-                      trailing: selected
-                          ? Text(
-                              'Active',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: context.cs.primary,
-                              ),
-                            )
-                          : null,
-                      onTap: () {
-                        Navigator.pop(context);
-                        onSelected(item);
-                      },
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+    rows.showImageGenOptions<T>(
+      context,
+      title: title,
+      items: items,
+      labelBuilder: labelBuilder,
+      isSelected: isSelected,
+      onSelected: onSelected,
     );
   }
 
   void _openApiTypeSelector() {
     _showOptions<ImageGenApiType>(
-      title: 'API Type',
+      title: 'imggen_api_type'.tr(),
       items: ImageGenApiType.values,
       labelBuilder: (t) => t.label,
       isSelected: (t) => _settings.apiType == t,
@@ -272,36 +228,33 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
         ),
         child: Column(
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: _buildPresetSelector(s.apiType),
-              ),
+            MenuGroup(
+              header: 'imggen_connection'.tr(),
+              items: [
+                MenuSelectorItem(
+                  label: 'imggen_api_type'.tr(),
+                  currentValue: s.apiType.label,
+                  onTap: _openApiTypeSelector,
+                ),
+                _buildConnectionStatus(s),
+                ..._buildConnectionFields(s),
+              ],
             ),
-            _buildConnectionStatus(s),
-            rows.ImageGenMenuGroup(
-              title: 'Connection',
-              children: _buildConnectionFields(s),
-            ),
-            rows.ImageGenMenuGroup(
-              title: 'Model',
-              children: _buildModelFields(s),
-            ),
+            MenuGroup(header: 'Model', items: _buildModelFields(s)),
             if (_modelFetchError.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
                 child: Text(
                   _modelFetchError,
                   style: const TextStyle(color: Colors.red, fontSize: 12),
                 ),
               ),
-            rows.ImageGenMenuGroup(
-              title: 'imggen_styles'.tr(),
-              children: [
-                rows.ImageGenSelectorRow(
+            MenuGroup(
+              header: 'imggen_styles'.tr(),
+              items: [
+                MenuSelectorItem(
                   label: 'imggen_style_active'.tr(),
-                  value: s.activeStyle?.name ?? 'imggen_style_none'.tr(),
+                  currentValue: s.activeStyle?.name ?? 'imggen_style_none'.tr(),
                   onTap: _openStyleLibrary,
                 ),
               ],
@@ -335,10 +288,10 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
                 pickImage: _pickReferenceImage,
               ),
             if (providerMaxReferences(s) > 0)
-              rows.ImageGenMenuGroup(
-                title: 'Image Context',
-                children: [
-                  rows.ImageGenCheckboxRow(
+              MenuGroup(
+                header: 'Image Context',
+                items: [
+                  MenuSwitchItem(
                     label: 'Send previous images as context',
                     description: 'imggen_image_context_desc'.tr(),
                     value: s.imageContextEnabled,
@@ -346,9 +299,9 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
                         _update(s.copyWith(imageContextEnabled: v)),
                   ),
                   if (s.imageContextEnabled)
-                    rows.ImageGenSelectorRow(
+                    MenuSelectorItem(
                       label: 'Context image count',
-                      value: s.imageContextCount.toString(),
+                      currentValue: s.imageContextCount.toString(),
                       onTap: () {
                         _showOptions<int>(
                           title: 'Context image count',
@@ -362,28 +315,13 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
                     ),
                 ],
               ),
-            Container(
-              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: context.cs.surfaceContainerHighest.withValues(
-                  alpha: 0.8,
-                ),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'AI must include image tags to trigger generation:',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: context.cs.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
+            MenuGroup(
+              header: 'imggen_tag_hint_title'.tr(),
+              description: 'imggen_tag_hint_desc'.tr(),
+              items: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                  child: SelectableText(
                     '[IMG:GEN:{"prompt":"...","style":"anime"}]',
                     style: TextStyle(
                       fontSize: 11,
@@ -391,43 +329,8 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
                       color: context.cs.primary,
                     ),
                   ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildPresetSelector(ImageGenApiType selected) {
-    final name = selected.label;
-    return InkWell(
-      onTap: _openApiTypeSelector,
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-        decoration: BoxDecoration(
-          color: context.cs.primary.withValues(alpha: 0.15),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: context.cs.primary.withValues(alpha: 0.2)),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              name,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: context.cs.primary,
-              ),
-            ),
-            const SizedBox(width: 4),
-            Icon(
-              Icons.keyboard_arrow_down,
-              size: 20,
-              color: context.cs.primary,
+                ),
+              ],
             ),
           ],
         ),
@@ -444,22 +347,30 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
       'connecting' => (
         Icons.sync,
         context.cs.primary,
-        'Checking connection...',
+        'imggen_conn_checking'.tr(),
       ),
-      'connected' => (Icons.check_circle_outline, Colors.green, 'Connected'),
+      'connected' => (
+        Icons.check_circle_outline,
+        Colors.green,
+        'imggen_conn_ok'.tr(),
+      ),
       'failed' => (Icons.error_outline, Colors.red, _connectionError),
-      _ => (Icons.cloud_outlined, context.cs.onSurfaceVariant, 'Not checked'),
+      _ => (
+        Icons.cloud_outlined,
+        context.cs.onSurfaceVariant,
+        'imggen_conn_unchecked'.tr(),
+      ),
     };
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      padding: const EdgeInsets.fromLTRB(16, 4, 8, 4),
       child: Row(
         children: [
           Icon(icon, size: 16, color: color),
-          const SizedBox(width: 6),
+          const SizedBox(width: 8),
           Expanded(
             child: Text(
               label,
-              maxLines: 1,
+              maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(fontSize: 12, color: color),
             ),
@@ -467,7 +378,7 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
           TextButton(
             onPressed: () =>
                 _scheduleConnectionCheck(settings, immediate: true),
-            child: const Text('Check'),
+            child: Text('imggen_conn_check'.tr()),
           ),
         ],
       ),
@@ -525,7 +436,6 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
         );
       case ImageGenApiType.openai:
         return buildOpenaiModelFields(
-          context,
           s,
           isFetching: _isFetchingModels,
           onFetchModels: _onFetchModels,
@@ -663,34 +573,23 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
   }
 
   Future<String?> _pickReferenceImage() async {
-    final source = await showModalBottomSheet<String>(
-      context: context,
-      useRootNavigator: true,
-      backgroundColor: context.cs.surface,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const ListTile(
-              title: Text(
-                'Choose reference image',
-                style: TextStyle(fontWeight: FontWeight.w600),
-              ),
-            ),
-            ListTile(
-              leading: const Icon(Icons.folder_open),
-              title: const Text('From device'),
-              onTap: () => Navigator.pop(context, 'device'),
-            ),
-            if (widget.charId != null)
-              ListTile(
-                leading: const Icon(Icons.photo_library_outlined),
-                title: const Text('From card gallery'),
-                onTap: () => Navigator.pop(context, 'gallery'),
-              ),
-          ],
+    final source = await GlazeBottomSheet.show<String>(
+      context,
+      title: 'imggen_ref_pick_title'.tr(),
+      items: [
+        BottomSheetItem(
+          icon: Icons.folder_open,
+          label: 'imggen_ref_pick_device'.tr(),
+          onTap: () => Navigator.of(context, rootNavigator: true).pop('device'),
         ),
-      ),
+        if (widget.charId != null)
+          BottomSheetItem(
+            icon: Icons.photo_library_outlined,
+            label: 'imggen_ref_pick_gallery'.tr(),
+            onTap: () =>
+                Navigator.of(context, rootNavigator: true).pop('gallery'),
+          ),
+      ],
     );
     if (!mounted || source == null) return null;
 
