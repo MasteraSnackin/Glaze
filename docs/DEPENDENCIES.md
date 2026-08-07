@@ -1,17 +1,17 @@
 # Dependency Upgrade Plan
 
 Актуально для ветки `feat/freezed-3x-migration` после восстановления Robocopy-corruption и `dart pub cache repair`.
-Flutter SDK: `Z:\GlazeProject\flutter`. Dart/Flutter версии см. в локальном SDK и `pubspec.lock`.
+Flutter SDK задаётся через `PATH` или `FLUTTER_ROOT`. Dart/Flutter версии см. в локальном SDK и `pubspec.lock`.
 
 ## Текущий baseline
 
 Перед дальнейшими dependency upgrades baseline должен оставаться зелёным:
 
 ```powershell
-& "Z:\GlazeProject\flutter\bin\flutter.bat" pub get
-& "Z:\GlazeProject\flutter\bin\dart.bat" run build_runner build
-& "Z:\GlazeProject\flutter\bin\flutter.bat" analyze
-& "Z:\GlazeProject\flutter\bin\flutter.bat" test
+flutter pub get
+dart run build_runner build
+flutter analyze
+flutter test
 ```
 
 Последняя проверка после `dart pub cache repair`:
@@ -28,15 +28,15 @@ Flutter SDK: `Z:\GlazeProject\flutter`. Dart/Flutter версии см. в ло�
 Если снова появляются странные ошибки пакетов или codegen, сначала восстановить Pub cache:
 
 ```powershell
-& "Z:\GlazeProject\flutter\bin\dart.bat" pub cache repair
-& "Z:\GlazeProject\flutter\bin\flutter.bat" pub get
+dart pub cache repair
+flutter pub get
 ```
 
 Жёсткий вариант только при повторной corruption cache:
 
 ```powershell
-Remove-Item -LiteralPath "Z:\Pub\Cache\hosted" -Recurse -Force
-& "Z:\GlazeProject\flutter\bin\flutter.bat" pub get
+Remove-Item -LiteralPath "$env:PUB_CACHE\hosted" -Recurse -Force
+flutter pub get
 ```
 
 ## Текущие ключевые версии
@@ -104,7 +104,7 @@ were removed on 2026-07-16. A Windows release build passes with
 Команда-кандидат:
 
 ```powershell
-& "Z:\GlazeProject\flutter\bin\flutter.bat" pub upgrade image
+flutter pub upgrade image
 ```
 
 Не форсировать транзитивные test/analyzer пакеты вручную без причины.
@@ -136,9 +136,9 @@ Status: done. Upgraded to `17.3.0`; `flutter analyze`, `test/navigation_smoke_te
 Verification for this batch:
 
 ```powershell
-& "Z:\GlazeProject\flutter\bin\flutter.bat" analyze
-& "Z:\GlazeProject\flutter\bin\flutter.bat" test test/navigation_smoke_test.dart
-& "Z:\GlazeProject\flutter\bin\flutter.bat" test
+flutter analyze
+flutter test test/navigation_smoke_test.dart
+flutter test
 ```
 
 ### 3. `flutter_riverpod` 2.6.1 -> 3.x
@@ -168,10 +168,10 @@ rg "AsyncNotifierProvider|StateNotifierProvider|StateProvider|FutureProvider|Pro
 Verification for this batch:
 
 ```powershell
-& "Z:\GlazeProject\flutter\bin\flutter.bat" analyze
-& "Z:\GlazeProject\flutter\bin\flutter.bat" test test/navigation_smoke_test.dart
-& "Z:\GlazeProject\flutter\bin\flutter.bat" test test/trigger_generation_test.dart
-& "Z:\GlazeProject\flutter\bin\flutter.bat" test
+flutter analyze
+flutter test test/navigation_smoke_test.dart
+flutter test test/trigger_generation_test.dart
+flutter test
 ```
 
 ### 4. Platform/Runtime Major Packages
@@ -220,10 +220,10 @@ Before opening or updating the PR:
 
 ```powershell
 git status --short --branch
-& "Z:\GlazeProject\flutter\bin\flutter.bat" pub get
-& "Z:\GlazeProject\flutter\bin\dart.bat" run build_runner build
-& "Z:\GlazeProject\flutter\bin\flutter.bat" analyze
-& "Z:\GlazeProject\flutter\bin\flutter.bat" test
-& "Z:\GlazeProject\flutter\bin\flutter.bat" build windows
-& "Z:\GlazeProject\flutter\bin\flutter.bat" pub outdated
+flutter pub get
+dart run build_runner build
+flutter analyze
+flutter test
+flutter build windows
+flutter pub outdated
 ```

@@ -16,7 +16,6 @@ import '../../../shared/widgets/glaze_toast.dart';
 import '../../../shared/widgets/swipe_tab_switcher.dart';
 import '../../../shared/widgets/tab_slide_switcher.dart';
 import '../../memory/controllers/memory_book_controller.dart';
-import '../../memory/utils/memory_swipe_filter.dart';
 import 'memory/memory_books_controls.dart';
 import 'memory/memory_books_overview.dart';
 import 'memory/memory_books_toolbar.dart';
@@ -58,7 +57,6 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
 
   late final MemoryBookController _ctrl;
   Timer? _elapsedTimer;
-  bool _hideUnselectedMemories = false;
   Map<String, String> _embeddingStatuses = {};
   int _tabIndex = _tabApproved;
 
@@ -145,30 +143,6 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
         .where((d) => d.source != 'studio_ledger')
         .toList();
 
-    // Swipe filter: when enabled, only entries injected via triggeredMemories
-    // for the current swipes — or whose source message is currently visible —
-    // are listed. The three selection sets are resolved once per build, not
-    // once per entry.
-    final selectedMemoryIds = MemorySwipeFilter.selectedSwipeMemoryIds(
-      widget.messages,
-    );
-    final selectedSourceMessageIds =
-        MemorySwipeFilter.selectedSwipeSourceMessageIds(widget.messages);
-    final selectedSourceKeys = MemorySwipeFilter.selectedSwipeSourceKeys(
-      widget.messages,
-    );
-    final visibleEntries = curatedEntries
-        .where(
-          (e) => MemorySwipeFilter.entryMatches(
-            e,
-            hideUnselected: _hideUnselectedMemories,
-            selectedMemoryIds: selectedMemoryIds,
-            selectedSourceMessageIds: selectedSourceMessageIds,
-            selectedSourceKeys: selectedSourceKeys,
-          ),
-        )
-        .toList();
-
     final draftsNeedingGen = _ctrl.draftsNeedingGeneration;
     final isGenerating = _ctrl.isGenerating;
 
@@ -192,12 +166,7 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
             settingsSummary: _ctrl.settingsSummary,
             searchTypeLabel: _ctrl.searchTypeLabel,
             onCycleSearchType: _cycleSearchType,
-            onlySelectedSwipes: _hideUnselectedMemories,
-            onOnlySelectedSwipesChanged: (v) =>
-                setState(() => _hideUnselectedMemories = v),
-            activeCount: book.entries
-                .where((e) => e.status == 'active')
-                .length,
+            activeCount: book.entries.where((e) => e.status == 'active').length,
             needsRebuildCount: book.entries
                 .where((e) => e.status == 'needs_rebuild')
                 .length,
@@ -207,7 +176,6 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
             onOpenSettings: _openSettings,
             onScanChat: _scanChat,
             onAddEntry: _addEntry,
-            onDedup: _dedupMemories,
             isReindexing: _ctrl.isReindexing,
             onReindex: _reindexAll,
             onDeleteIndexes: _deleteAllMemoryIndexes,
@@ -224,7 +192,7 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
               tabs: [
                 GlazeTabItem(
                   label: 'memory_books_tab_approved'.tr(
-                    args: ['${visibleEntries.length}'],
+                    args: ['${curatedEntries.length}'],
                   ),
                   icon: Icons.check_circle_outline_rounded,
                 ),
@@ -244,7 +212,7 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: _tabIndex == _tabApproved
-                  ? _buildApprovedTab(visibleEntries)
+                  ? _buildApprovedTab(curatedEntries)
                   : _buildDraftsTab(scanDrafts),
             ),
           ),
@@ -528,19 +496,5 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
       await _ctrl.editDraft(draft, result);
       if (mounted) setState(() {});
     }
-  }
-
-  void _dedupMemories() async {
-    Set<String>? entryIds;
-    if (_hideUnselectedMemories) {
-      entryIds = MemorySwipeFilter.selectedSwipeMemoryIds(widget.messages);
-    }
-
-    GlazeToast.show(context, 'memory_books_dedup_running'.tr());
-
-    final toastText = await _ctrl.runDedup(entryIds: entryIds);
-
-    if (!mounted) return;
-    GlazeToast.show(context, toastText);
   }
 }

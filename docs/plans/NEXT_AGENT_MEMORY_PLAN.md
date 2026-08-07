@@ -41,7 +41,7 @@ Important:
 - `LlmRequestDump.enabled` must remain `false`.
 - Generated `.freezed.dart` / `.g.dart` files are gitignored.
 - After changing freezed/drift models, run:
-  `& "Z:\GlazeProject\flutter\bin\dart.bat" run build_runner build`
+  `dart run build_runner build`
 
 ## Main Findings
 
@@ -141,7 +141,7 @@ Task: read-only audit of the user's current DB, with no LLM calls and no DB writ
 
 DB:
 
-- `C:\Users\Даниил\AppData\Roaming\glaze\glaze.db`
+- `$env:APPDATA\glaze\glaze.db`
 
 Goals:
 
@@ -177,7 +177,7 @@ Rules:
 
 - Do not use LLM calls.
 - Do not write to DB.
-- If a temp script is needed, prefer `C:\Users\1678~1\AppData\Local\Temp\opencode`.
+- If a temp script is needed, prefer `$env:TEMP\opencode`.
 - Do not commit temp scripts unless explicitly asked.
 
 ## Priority 4: Stronger Write-Time Duplicate Prevention
@@ -219,12 +219,12 @@ Lumiverse:
 
 ## Commands
 
-Use Flutter SDK path:
+Use Flutter and Dart from `PATH`:
 
-- Analyze: `& "Z:\GlazeProject\flutter\bin\flutter.bat" analyze <files>`
-- Tests: `& "Z:\GlazeProject\flutter\bin\flutter.bat" test <tests>`
-- Format: `& "Z:\GlazeProject\flutter\bin\dart.bat" format <files>`
-- Build runner if model changes: `& "Z:\GlazeProject\flutter\bin\dart.bat" run build_runner build --delete-conflicting-outputs`
+- Analyze: `flutter analyze <files>`
+- Tests: `flutter test <tests>`
+- Format: `dart format <files>`
+- Build runner if model changes: `dart run build_runner build --delete-conflicting-outputs`
 
 Do not run:
 

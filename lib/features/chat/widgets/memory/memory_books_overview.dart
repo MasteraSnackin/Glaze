@@ -17,8 +17,6 @@ class MemoryBooksOverview extends StatelessWidget {
   final String settingsSummary;
   final String searchTypeLabel;
   final VoidCallback onCycleSearchType;
-  final bool onlySelectedSwipes;
-  final ValueChanged<bool> onOnlySelectedSwipesChanged;
   final int activeCount;
   final int needsRebuildCount;
   final int draftCount;
@@ -30,8 +28,6 @@ class MemoryBooksOverview extends StatelessWidget {
     required this.settingsSummary,
     required this.searchTypeLabel,
     required this.onCycleSearchType,
-    required this.onlySelectedSwipes,
-    required this.onOnlySelectedSwipesChanged,
     required this.activeCount,
     required this.needsRebuildCount,
     required this.draftCount,
@@ -53,12 +49,6 @@ class MemoryBooksOverview extends StatelessWidget {
               currentValue: searchTypeLabel,
               onTap: onCycleSearchType,
             ),
-            MenuSwitchItem(
-              label: 'memory_books_only_selected_swipes'.tr(),
-              description: 'memory_books_only_selected_swipes_desc'.tr(),
-              value: onlySelectedSwipes,
-              onChanged: onOnlySelectedSwipesChanged,
-            ),
           ],
         ),
         Padding(
@@ -72,7 +62,9 @@ class MemoryBooksOverview extends StatelessWidget {
   Widget _buildHero(BuildContext context) {
     // The session id is a uuid; show only the leading block so the subtitle
     // stays a glanceable identifier instead of wrapping onto two lines.
-    final shortId = sessionId.length > 8 ? sessionId.substring(0, 8) : sessionId;
+    final shortId = sessionId.length > 8
+        ? sessionId.substring(0, 8)
+        : sessionId;
     return GlassSurface(
       borderRadius: BorderRadius.circular(20),
       border: Border.all(color: context.cs.outlineVariant),

@@ -18,8 +18,7 @@ part 'pipeline_settings.g.dart';
 /// - [cleaner] — POST-cleaner (anti-cliche rewrite + continuity/character
 ///   audit + prose-guardian style overrides).
 /// - [ledger] — Studio Ledger cadence, temperature, and token limits.
-/// - [memoryPipeline] — Memory dedup threshold, auxiliary LLM fallback config
-///   (`aux*`), and consolidation LLM config.
+/// - [memoryPipeline] — shared auxiliary LLM fallback configuration.
 /// - [memoryBookApi] — MemoryBook draft-generation LLM (model/endpoint/key).
 /// - [cardRewriter] — review-only card-evolution enablement and dedicated LLM.
 ///

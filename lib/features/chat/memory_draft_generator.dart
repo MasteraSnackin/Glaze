@@ -4,6 +4,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/llm/transport/chat_transport_request.dart';
+import '../../core/llm/memory_book_api_config_resolver.dart';
 import '../../core/llm/transport/llm_protocol.dart';
 import '../../core/llm/transport/transport_factory.dart';
 import '../../core/models/memory_book.dart';
@@ -27,7 +28,10 @@ class MemoryDraftGenerator {
     final customPrompts = MemoryPromptPreset.fromJsonList(
       _ref.read(memoryGlobalSettingsProvider).customPrompts,
     );
-    final template = MemoryPromptPresets.resolve(settings.promptPreset, customPrompts);
+    final template = MemoryPromptPresets.resolve(
+      settings.promptPreset,
+      customPrompts,
+    );
     var prompt = template.replaceAll('{{history}}', historyText);
     if (!template.contains('{{history}}')) {
       prompt = '$prompt\n\n$historyText';
@@ -47,7 +51,10 @@ class MemoryDraftGenerator {
       protocol = LlmProtocol.openai;
     } else {
       await _ref.read(apiListProvider.future);
-      final chatConfig = _ref.read(activeApiConfigProvider);
+      final chatConfig = MemoryBookApiConfigResolver(
+        apiConfigs: _ref.read(apiListProvider).value ?? const [],
+        activeConfig: _ref.read(activeApiConfigProvider),
+      ).resolve(pipeline.memoryBookApi);
       if (chatConfig == null) {
         throw Exception('No chat API config available');
       }
@@ -65,7 +72,9 @@ class MemoryDraftGenerator {
       throw Exception('API not configured for memory generation');
     }
 
-    final maxTokens = (pipeline.memoryBookApi.generationMaxTokens != null && pipeline.memoryBookApi.generationMaxTokens! > 0)
+    final maxTokens =
+        (pipeline.memoryBookApi.generationMaxTokens != null &&
+            pipeline.memoryBookApi.generationMaxTokens! > 0)
         ? pipeline.memoryBookApi.generationMaxTokens!
         : 25000;
     final temperature = pipeline.memoryBookApi.generationTemperature ?? 0.4;
@@ -104,7 +113,10 @@ class MemoryDraftGenerator {
     String content = raw;
     List<String> keys = [];
 
-    final memoryMatch = RegExp(r'Memory:\s*(.*?)(?=\nKeys:|$)', dotAll: true).firstMatch(raw);
+    final memoryMatch = RegExp(
+      r'Memory:\s*(.*?)(?=\nKeys:|$)',
+      dotAll: true,
+    ).firstMatch(raw);
     final keysMatch = RegExp(r'Keys:\s*(.*?)$', dotAll: true).firstMatch(raw);
 
     if (memoryMatch != null) {
