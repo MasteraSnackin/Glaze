@@ -50,6 +50,14 @@ class BottomSheetSessionItem {
   final String time;
   final String preview;
   final bool isActive;
+
+  /// Session has a reply the user has not seen. Renders the same leading dot
+  /// and bolder title the chat list uses.
+  final bool unread;
+
+  /// A reply is streaming into this session right now. Replaces [preview] with
+  /// the chat list's "typing" line.
+  final bool generating;
   final VoidCallback onTap;
   final VoidCallback onMore;
 
@@ -59,6 +67,8 @@ class BottomSheetSessionItem {
     required this.time,
     required this.preview,
     this.isActive = false,
+    this.unread = false,
+    this.generating = false,
     required this.onTap,
     required this.onMore,
   });
@@ -858,12 +868,25 @@ class GlazeSessionRow extends StatelessWidget {
                   children: [
                     Row(
                       children: [
+                        if (item.unread) ...[
+                          Container(
+                            width: 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              color: context.cs.primary,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                        ],
                         Flexible(
                           child: Text(
                             item.title,
                             style: TextStyle(
                               fontSize: 15,
-                              fontWeight: FontWeight.w600,
+                              fontWeight: item.unread
+                                  ? FontWeight.w700
+                                  : FontWeight.w600,
                               color: context.cs.onSurface,
                             ),
                             overflow: TextOverflow.ellipsis,
@@ -913,15 +936,39 @@ class GlazeSessionRow extends StatelessWidget {
                       ],
                     ),
                     const SizedBox(height: 3),
-                    Text(
-                      item.preview,
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: context.cs.onSurfaceVariant,
+                    if (item.generating)
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.edit,
+                            size: 13,
+                            color: context.cs.onSurfaceVariant.withValues(
+                              alpha: 0.7,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            'model_typing'.tr(),
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontStyle: FontStyle.italic,
+                              color: context.cs.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      )
+                    else
+                      Text(
+                        item.preview,
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: item.unread
+                              ? context.cs.onSurface
+                              : context.cs.onSurfaceVariant,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
                   ],
                 ),
               ),

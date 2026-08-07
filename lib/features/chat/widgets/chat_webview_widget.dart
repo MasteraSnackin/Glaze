@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/debug/perf_debug.dart';
@@ -485,8 +486,8 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     required String phase,
   }) {
     debugPrint('[ChatWebView] $phase failed: $e\n$st');
+    _setSessionSwitching(false);
     if (!mounted) return;
-    setState(() => _sessionSwitching = false);
     if (_bridgeFailureNotified) return;
     _bridgeFailureNotified = true;
     GlazeErrorDialog.show(context, e, prefix: 'Chat view failed to load');
@@ -521,7 +522,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     final bridge = _bridge;
     if (bridge == null || !_ready) return;
     try {
-      if (mounted) setState(() => _sessionSwitching = true);
+      _setSessionSwitching(true);
       // Same reasoning as on open: the replace below jumps the list, which the
       // header tracker would otherwise read as the user scrolling down.
       await _showChatHeader(bridge);
@@ -536,7 +537,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       unawaited(_syncExtBlockPanels());
       await _bridgeOp(bridge.scrollToBottom(), label: 'scrollToBottom');
     } finally {
-      if (mounted) setState(() => _sessionSwitching = false);
+      _setSessionSwitching(false);
     }
   }
 
@@ -685,30 +686,29 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
 
   Future<void> _applySessionSwitch(ChatWebViewWidget old) async {
     final bridge = _bridge;
-    if (bridge == null) return;
+    // `didUpdateWidget` raises the cover synchronously before calling this, and
+    // the cover both hides the surface and swallows every touch on it. Any exit
+    // that leaves it up is indistinguishable from a hung chat, so the two early
+    // returns below have to lower it themselves — only the deferred path may
+    // keep it up, and the init it waits on is bounded by `_kWebViewInitTimeout`.
+    if (bridge == null) {
+      _setSessionSwitching(false);
+      return;
+    }
     if (!_ready) {
       _deferredSwitchFrom = old;
       return;
     }
 
-    // A streaming append may already be crossing the platform channel. The
-    // dispatcher invalidated its epoch synchronously; wait for the call to
-    // settle before replacing the DOM so a late old-session bubble cannot land
-    // after the new session's setMessages.
-    final pendingMessageMutation = _syncState.messageMutationPending;
-    if (pendingMessageMutation != null) {
-      try {
-        await pendingMessageMutation;
-      } catch (_) {}
-    }
-
-    // Drop any interactive panels from the previous session before clearing
-    // the WebView DOM. JS-side `clearAll()` also closes panels, but the
-    // Dart-side registry has to be reset so the next `openPanel` call can
-    // bind fresh handlers on the (potentially new) bridge.
-    unawaited(PanelHostService.instance.disposeAll(charId: old.charId));
     try {
-      if (mounted) setState(() => _sessionSwitching = true);
+      await _awaitPendingMessageMutation();
+
+      // Drop any interactive panels from the previous session before clearing
+      // the WebView DOM. JS-side `clearAll()` also closes panels, but the
+      // Dart-side registry has to be reset so the next `openPanel` call can
+      // bind fresh handlers on the (potentially new) bridge.
+      unawaited(PanelHostService.instance.disposeAll(charId: old.charId));
+      _setSessionSwitching(true);
       // Same reasoning as on open: the replace below jumps the list, which the
       // header tracker would otherwise read as the user scrolling down.
       await _showChatHeader(bridge);
@@ -768,11 +768,54 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       unawaited(_syncExtBlockPanels());
       await _bridgeOp(bridge.scrollToBottom(), label: 'scrollToBottom');
     } finally {
-      if (mounted) setState(() => _sessionSwitching = false);
+      _setSessionSwitching(false);
     }
     _syncState.wasGenerating = widget.isGenerating;
     _syncState.streamingSent = false;
     _syncState.regenStreamingSent = false;
+  }
+
+  /// Raises/lowers the switch cover, from anywhere.
+  ///
+  /// `_applySessionSwitch` can reach this synchronously out of
+  /// `didUpdateWidget` (its early returns run before the first await), and
+  /// `setState` during the build phase is an assertion failure. The field is
+  /// written either way — the build that is already running reads the new
+  /// value — and only the rebuild is deferred.
+  void _setSessionSwitching(bool value) {
+    if (_sessionSwitching == value) return;
+    _sessionSwitching = value;
+    if (!mounted) return;
+    if (WidgetsBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      return;
+    }
+    setState(() {});
+  }
+
+  /// Waits for the queued message-list mutations to reach the WebView before
+  /// the DOM is replaced, so a late bubble from the old session cannot land
+  /// after the new session's `setMessages`.
+  ///
+  /// Bounded: the queue is a chain of platform-channel calls, and one that
+  /// never settles (a WebView torn down mid-delete, a frozen backgrounded page)
+  /// would otherwise park this method forever with the cover up — a chat that
+  /// is blank and eats every tap. Giving up on the wait only risks the ordering
+  /// this await protects; the full `clearAll` + `setMessages` below still
+  /// rebuilds the DOM from the current session.
+  Future<void> _awaitPendingMessageMutation() async {
+    final pending = _syncState.messageMutationPending;
+    if (pending == null) return;
+    try {
+      await pending.timeout(_kBridgeOpTimeout);
+    } on TimeoutException {
+      debugPrint(
+        '[ChatWebView] pending message mutation did not settle in '
+        '${_kBridgeOpTimeout.inSeconds}s — switching session anyway',
+      );
+    } catch (_) {
+      // The queue reports its own failures; this wait only needs it to finish.
+    }
   }
 
   ChatWebViewWidgetFields _fieldsFor(ChatWebViewWidget w) {

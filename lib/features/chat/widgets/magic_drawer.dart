@@ -10,17 +10,13 @@ import 'package:go_router/go_router.dart';
 
 import '../../../core/platform/haptics.dart';
 import '../../../core/services/chat_import_export.dart';
-import '../../../core/models/chat_message.dart';
 import '../../../core/state/lorebook_provider.dart';
 import '../../../features/settings/app_settings_provider.dart';
 import '../../../core/state/active_selection_provider.dart';
 import '../../../core/state/active_studio_preset_provider.dart';
-import '../../../core/state/chat_session_ops_provider.dart';
 import '../../../core/state/preset_resolution.dart';
 import '../../../core/state/studio_feature_provider.dart';
 import '../../../core/state/summary_providers.dart';
-import '../../../features/chat_history/chat_history_provider.dart';
-import '../../../shared/utils/time_formatter.dart';
 import '../../../shared/theme/app_colors.dart';
 
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
@@ -45,6 +41,7 @@ import '../services/magic_drawer_stats_service.dart';
 import 'magic_drawer_widgets.dart';
 import 'memory_sheet.dart';
 import 'prompt_inspector_sheet.dart';
+import 'session_picker_sheet.dart';
 import '../state/magic_drawer_stats_cache.dart';
 import '../state/token_breakdown_cache.dart';
 import '../../glossary/glossary_sheet.dart';
@@ -620,115 +617,25 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
     if (currentSession == null) return;
 
     if (!mounted) return;
-    await GlazeBottomSheet.show<void>(
-      context,
-      title: 'history_title'.tr(),
-      headerAction: IconButton(
-        icon: Icon(Icons.add, color: context.cs.primary),
-        onPressed: _showSessionAddMenu,
-      ),
-      child: _SessionsSheetContent(
-        charId: widget.charId,
-        onSessionActions: _showSessionActions,
-      ),
-    );
-  }
-
-  void _showSessionAddMenu() {
-    GlazeBottomSheet.show<String>(
-      context,
-      title: 'action_new_session'.tr(),
-      items: [
-        BottomSheetItem(
-          icon: Icons.add_circle_outline,
-          label: 'action_new_session'.tr(),
-          onTap: () => Navigator.of(context, rootNavigator: true).pop('new'),
-        ),
-        BottomSheetItem(
-          icon: Icons.file_download,
-          label: 'Import Chat',
-          onTap: () => Navigator.of(context, rootNavigator: true).pop('import'),
-        ),
-      ],
-    ).then((result) async {
-      if (!mounted) return;
-      if (result == 'new') {
-        Navigator.of(context, rootNavigator: true).pop(); // Pops Sessions Sheet
+    // The same picker the character catalog opens — see
+    // `showSessionPickerSheet`. Only what a pick does differs: here it switches
+    // the open chat in place instead of routing to it.
+    final result = await showSessionPickerSheet(context, charId: widget.charId);
+    if (result == null || !mounted) return;
+    switch (result.action) {
+      case SessionPickerAction.open:
+        final target = result.session!.sessionIndex;
+        final current =
+            ref.read(chatProvider(widget.charId)).value?.session?.sessionIndex;
+        if (target == current) return;
+        await ref
+            .read(chatProvider(widget.charId).notifier)
+            .switchSession(target);
+      case SessionPickerAction.newSession:
         await ref.read(chatProvider(widget.charId).notifier).newSession();
-      } else if (result == 'import') {
+      case SessionPickerAction.importChat:
         await _importChat();
-      }
-    });
-  }
-
-  void _showSessionActions(String sessionId) {
-    GlazeBottomSheet.show<String>(
-      context,
-      title: 'Session',
-      items: [
-        BottomSheetItem(
-          icon: Icons.upload_file,
-          label: 'action_export_chat'.tr(),
-          onTap: () => Navigator.of(context, rootNavigator: true).pop('export'),
-        ),
-        BottomSheetItem(
-          icon: Icons.drive_file_rename_outline,
-          label: 'action_rename'.tr(),
-          onTap: () => Navigator.of(context, rootNavigator: true).pop('rename'),
-        ),
-        BottomSheetItem(
-          icon: Icons.delete_outline,
-          label: 'action_delete'.tr(),
-          isDestructive: true,
-          onTap: () => Navigator.of(context, rootNavigator: true).pop('delete'),
-        ),
-      ],
-    ).then((result) async {
-      if (!mounted) return;
-      switch (result) {
-        case 'export':
-          await ref
-              .read(chatActionsServiceProvider)
-              .exportSessionUI(
-                context,
-                charId: widget.charId,
-                sessionId: sessionId,
-              );
-        case 'rename':
-          await _showRenameDialog(sessionId);
-        case 'delete':
-          await ref.read(chatHistoryProvider.notifier).deleteSession(sessionId);
-          ref.invalidate(chatProvider(widget.charId));
-      }
-    });
-  }
-
-  Future<void> _showRenameDialog(String sessionId) async {
-    final session = await ref
-        .read(chatSessionOpsProvider.notifier)
-        .getSession(sessionId);
-    if (!mounted || session == null) return;
-    final currentName = session.sessionVars['sessionName']?.isNotEmpty == true
-        ? session.sessionVars['sessionName']!
-        : 'Session #${session.sessionIndex + 1}';
-    await GlazeBottomSheet.show<void>(
-      context,
-      title: 'Rename Session',
-      input: BottomSheetInput(
-        placeholder: 'Session name',
-        value: currentName,
-        confirmLabel: 'action_rename'.tr(),
-        onConfirm: (val) async {
-          Navigator.of(context, rootNavigator: true).pop();
-          if (val.trim().isNotEmpty) {
-            await ref
-                .read(chatHistoryProvider.notifier)
-                .renameSession(sessionId, val.trim());
-            ref.invalidate(chatProvider(widget.charId));
-          }
-        },
-      ),
-    );
+    }
   }
 
   Future<void> _importChat() async {
@@ -761,8 +668,9 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
       final count = saveResult.count;
       final sessionIndex = saveResult.sessionIndex;
       if (count > 0 && sessionIndex != null) {
-        // Pop the sessions sheet if import succeeds
-        Navigator.of(context, rootNavigator: true).pop();
+        // The sessions sheet has already resolved and closed itself by the
+        // time this runs (`showSessionPickerSheet` pops with the picked
+        // action), so there is nothing left here to pop.
         context.go('/chat/${widget.charId}?session=$sessionIndex');
       }
       GlazeToast.show(
@@ -940,121 +848,6 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
             : null,
       ),
       content: scrollable,
-    );
-  }
-}
-
-class _SessionsSheetContent extends ConsumerStatefulWidget {
-  final String charId;
-  final void Function(String) onSessionActions;
-
-  const _SessionsSheetContent({
-    required this.charId,
-    required this.onSessionActions,
-  });
-
-  @override
-  ConsumerState<_SessionsSheetContent> createState() =>
-      _SessionsSheetContentState();
-}
-
-class _SessionsSheetContentState extends ConsumerState<_SessionsSheetContent> {
-  List<ChatSession> _sessions = [];
-  bool _loading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    final sessions = await ref
-        .read(chatProvider(widget.charId).notifier)
-        .getSessions();
-    // Most-recent activity first — branch/creation counts as activity, so a
-    // freshly branched or created chat sorts to the top even before any
-    // message is sent.
-    sessions.sort((a, b) => b.lastActivityMs.compareTo(a.lastActivityMs));
-    if (mounted) {
-      setState(() {
-        _sessions = sessions;
-        _loading = false;
-      });
-    }
-  }
-
-  /// Preview line for a session: the origin event ("Created on …" /
-  /// "Branched on …") while it is the most recent thing to have happened,
-  /// otherwise the last message content.
-  String _sessionPreview(ChatSession session) {
-    final origin = session.originEvent;
-    final lastTs = session.messages.isNotEmpty
-        ? session.messages.last.timestamp
-        : null;
-    if (origin != null && (lastTs == null || origin.timestampMs >= lastTs)) {
-      final kind = origin.kind == ChatOriginKind.branched
-          ? 'branched'
-          : 'created';
-      return formatOriginPreview(kind, origin.timestampMs);
-    }
-    return session.messages.lastOrNull?.content ?? 'No messages yet';
-  }
-
-  String _formatRelativeTime(int updatedAtSeconds) {
-    return formatRelativeTimeFromSeconds(updatedAtSeconds);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    ref.listen(chatProvider(widget.charId), (prev, next) {
-      _load();
-    });
-
-    if (_loading) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(32.0),
-          child: CircularProgressIndicator(),
-        ),
-      );
-    }
-
-    final currentSession = ref
-        .watch(chatProvider(widget.charId))
-        .value
-        ?.session;
-    final currentSessionId = currentSession?.id;
-
-    return GlazeSessionList(
-      items: _sessions
-          .map(
-            (session) => BottomSheetSessionItem(
-              title: session.sessionVars['sessionName']?.isNotEmpty == true
-                  ? session.sessionVars['sessionName']!
-                  : 'session_name'.tr(
-                      namedArgs: {'id': (session.sessionIndex + 1).toString()},
-                    ),
-              count: session.messages.length,
-              time: session.lastActivityMs == 0
-                  ? ''
-                  : _formatRelativeTime(session.lastActivityMs ~/ 1000),
-              preview: _sessionPreview(session),
-              isActive: session.id == currentSessionId,
-              onTap: () {
-                Navigator.of(context).pop();
-                if (session.sessionIndex != currentSession?.sessionIndex) {
-                  ref
-                      .read(chatProvider(widget.charId).notifier)
-                      .switchSession(session.sessionIndex);
-                }
-              },
-              onMore: () {
-                widget.onSessionActions(session.id);
-              },
-            ),
-          )
-          .toList(),
     );
   }
 }
