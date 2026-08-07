@@ -4,151 +4,50 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../../shared/widgets/menu_group.dart';
 import '../image_gen_models.dart';
 
-/// Reusable form-row widgets used by the image generation settings
-/// sheet. Extracted from image_gen_sheet.dart (which was 1091 lines
-/// after the build flow grew four parallel api-type branches).
-/// These rows are api-agnostic — they take a value, an onChange
-/// callback, and render consistently across all branches.
+/// Image-gen specific rows.
+///
+/// Everything with a shared Glaze counterpart — group container, selector,
+/// switch, text field — is built from `shared/widgets/menu_group.dart` at the
+/// call site now. What is left here has no counterpart: the single-select
+/// dropdown helper, the model-fetch suffix button, a controller-owning text
+/// field wrapper (the field builders are plain functions and cannot own a
+/// [TextEditingController]), and the reference-library row.
 
-class ImageGenMenuGroup extends StatelessWidget {
-  final String title;
-  final Widget? trailing;
-  final List<Widget> children;
-
-  const ImageGenMenuGroup({
-    super.key,
-    required this.title,
-    this.trailing,
-    required this.children,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  title,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: context.cs.onSurfaceVariant,
-                  ),
-                ),
-              ),
-              ?trailing,
-            ],
-          ),
+/// Single-select dropdown used by every image-gen picker.
+///
+/// Renders the shared [GlazeBottomSheet] list with a check mark on the current
+/// value, so all image-gen dropdowns match the rest of the app.
+void showImageGenOptions<T>(
+  BuildContext context, {
+  required String title,
+  required List<T> items,
+  required String Function(T) labelBuilder,
+  required bool Function(T) isSelected,
+  required void Function(T) onSelected,
+}) {
+  GlazeBottomSheet.show<void>(
+    context,
+    title: title,
+    items: [
+      for (final item in items)
+        BottomSheetItem(
+          label: labelBuilder(item),
+          icon: isSelected(item) ? Icons.check : null,
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            onSelected(item);
+          },
         ),
-        ...children,
-        const SizedBox(height: 16),
-      ],
-    );
-  }
+    ],
+  );
 }
 
-class ImageGenSelectorRow extends StatelessWidget {
-  final String label;
-  final String value;
-  final VoidCallback onTap;
-
-  const ImageGenSelectorRow({
-    super.key,
-    required this.label,
-    required this.value,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        child: Row(
-          children: [
-            Expanded(child: Text(label, style: const TextStyle(fontSize: 14))),
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  value,
-                  style: TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                    color: context.cs.primary,
-                  ),
-                ),
-                Icon(
-                  Icons.keyboard_arrow_down,
-                  size: 22,
-                  color: context.cs.primary,
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class ImageGenCheckboxRow extends StatelessWidget {
-  final String label;
-  final String? description;
-  final bool value;
-  final ValueChanged<bool> onChanged;
-
-  const ImageGenCheckboxRow({
-    super.key,
-    required this.label,
-    this.description,
-    required this.value,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(label, style: const TextStyle(fontSize: 14)),
-                if (description != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: Text(
-                      description!,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: context.cs.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 16),
-          Switch(value: value, onChanged: onChanged),
-        ],
-      ),
-    );
-  }
-}
-
-/// Refresh button rendered as the suffix of a model text field; shows a
-/// spinner while the model list is being fetched.
+/// Refresh button rendered as the suffix of a model field; shows a spinner
+/// while the model list is being fetched.
 class ImageGenFetchButton extends StatelessWidget {
   final bool isFetching;
   final VoidCallback onPressed;
@@ -161,31 +60,26 @@ class ImageGenFetchButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onPressed,
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        width: 40,
-        height: 40,
-        decoration: BoxDecoration(
-          color: context.cs.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.black12),
+    if (isFetching) {
+      return const Padding(
+        padding: EdgeInsets.all(12),
+        child: SizedBox(
+          width: 18,
+          height: 18,
+          child: CircularProgressIndicator(strokeWidth: 2),
         ),
-        child: isFetching
-            ? const Center(
-                child: SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-              )
-            : Icon(Icons.refresh, size: 18, color: context.cs.primary),
-      ),
+      );
+    }
+    return IconButton(
+      icon: Icon(Icons.refresh, size: 20, color: context.cs.onSurfaceVariant),
+      tooltip: 'settings_fetch_models'.tr(),
+      onPressed: onPressed,
     );
   }
 }
 
+/// [MenuFieldItem] that owns its controller, for the api-type field builders
+/// which hand over a plain value + `onChanged` instead of a controller.
 class ImageGenTextFieldItem extends StatefulWidget {
   final String label;
   final String value;
@@ -193,6 +87,7 @@ class ImageGenTextFieldItem extends StatefulWidget {
   final String? hint;
   final ValueChanged<String> onChanged;
   final Widget? suffix;
+
   const ImageGenTextFieldItem({
     super.key,
     required this.label,
@@ -202,13 +97,14 @@ class ImageGenTextFieldItem extends StatefulWidget {
     required this.onChanged,
     this.suffix,
   });
+
   @override
   State<ImageGenTextFieldItem> createState() => _ImageGenTextFieldItemState();
 }
 
 class _ImageGenTextFieldItemState extends State<ImageGenTextFieldItem> {
   late final _controller = TextEditingController(text: widget.value);
-  bool _obscure = true;
+  bool _obscured = true;
 
   @override
   void didUpdateWidget(covariant ImageGenTextFieldItem oldWidget) {
@@ -225,52 +121,29 @@ class _ImageGenTextFieldItemState extends State<ImageGenTextFieldItem> {
   }
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(widget.label, style: const TextStyle(fontSize: 14)),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            Expanded(
-              child: TextField(
-                controller: _controller,
-                obscureText: widget.obscure && _obscure,
-                style: const TextStyle(fontSize: 14),
-                decoration: InputDecoration(
-                  hintText: widget.hint,
-                  isDense: true,
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 10,
-                  ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  suffixIcon: widget.obscure
-                      ? IconButton(
-                          icon: Icon(
-                            _obscure ? Icons.visibility_off : Icons.visibility,
-                            size: 18,
-                          ),
-                          onPressed: () => setState(() => _obscure = !_obscure),
-                        )
-                      : null,
-                ),
-                onChanged: widget.onChanged,
-              ),
-            ),
-            if (widget.suffix != null) ...[
-              const SizedBox(width: 8),
-              widget.suffix!,
-            ],
-          ],
-        ),
-      ],
-    ),
-  );
+  Widget build(BuildContext context) {
+    return MenuFieldItem(
+      label: widget.label,
+      controller: _controller,
+      placeholder: widget.hint,
+      obscure: widget.obscure && _obscured,
+      onChanged: widget.onChanged,
+      suffix: widget.suffix ?? (widget.obscure ? _revealButton(context) : null),
+    );
+  }
+
+  Widget _revealButton(BuildContext context) {
+    return IconButton(
+      icon: Icon(
+        _obscured
+            ? Icons.visibility_outlined
+            : Icons.visibility_off_outlined,
+        size: 20,
+        color: context.cs.onSurfaceVariant,
+      ),
+      onPressed: () => setState(() => _obscured = !_obscured),
+    );
+  }
 }
 
 class ImageGenReferenceRow extends StatefulWidget {
@@ -352,6 +225,21 @@ class _ImageGenReferenceRowState extends State<ImageGenReferenceRow> {
     );
   }
 
+  void _openMatchModePicker(BuildContext context) {
+    showImageGenOptions<String>(
+      context,
+      title: 'imggen_match_mode'.tr(),
+      items: const ['match', 'always'],
+      labelBuilder: (mode) => mode == 'always'
+          ? 'imggen_match_mode_always'.tr()
+          : 'imggen_match_mode_match'.tr(),
+      isSelected: (mode) =>
+          (widget.refItem.matchMode.isEmpty ? 'match' : widget.refItem.matchMode) ==
+          mode,
+      onSelected: widget.onMatchModeChanged,
+    );
+  }
+
   Widget _topRow(BuildContext context) {
     return Opacity(
       opacity: widget.refItem.enabled ? 1 : 0.5,
@@ -369,7 +257,7 @@ class _ImageGenReferenceRowState extends State<ImageGenReferenceRow> {
                 border: Border.all(
                   color: widget.refItem.imageData.isNotEmpty
                       ? context.cs.primary
-                      : Colors.black12,
+                      : context.cs.outlineVariant,
                 ),
               ),
               clipBehavior: Clip.antiAlias,
@@ -393,76 +281,13 @@ class _ImageGenReferenceRowState extends State<ImageGenReferenceRow> {
             ),
           ),
           InkWell(
-            onTap: () {
-              showModalBottomSheet<void>(
-                context: context,
-                backgroundColor: Colors.transparent,
-                builder: (context) => Container(
-                  decoration: BoxDecoration(
-                    color: context.cs.surface,
-                    borderRadius: const BorderRadius.vertical(
-                      top: Radius.circular(20),
-                    ),
-                  ),
-                  child: Material(
-                    type: MaterialType.transparency,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Padding(
-                          padding: const EdgeInsets.all(16),
-                          child: Text(
-                            'imggen_match_mode'.tr(),
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                        ListTile(
-                          title: Text('imggen_match_mode_match'.tr()),
-                          trailing: widget.refItem.matchMode == 'match'
-                              ? Text(
-                                  'label_active'.tr(),
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: context.cs.primary,
-                                  ),
-                                )
-                              : null,
-                          onTap: () {
-                            widget.onMatchModeChanged('match');
-                            Navigator.pop(context);
-                          },
-                        ),
-                        ListTile(
-                          title: Text('imggen_match_mode_always'.tr()),
-                          trailing: widget.refItem.matchMode == 'always'
-                              ? Text(
-                                  'label_active'.tr(),
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: context.cs.primary,
-                                  ),
-                                )
-                              : null,
-                          onTap: () {
-                            widget.onMatchModeChanged('always');
-                            Navigator.pop(context);
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              );
-            },
+            onTap: () => _openMatchModePicker(context),
             child: Row(
               children: [
                 Text(
-                  widget.refItem.matchMode.isEmpty
-                      ? 'imggen_match_mode_match'.tr()
-                      : widget.refItem.matchMode,
+                  widget.refItem.matchMode == 'always'
+                      ? 'imggen_match_mode_always'.tr()
+                      : 'imggen_match_mode_match'.tr(),
                   style: TextStyle(
                     fontSize: 13,
                     color: context.cs.primary,
@@ -470,7 +295,7 @@ class _ImageGenReferenceRowState extends State<ImageGenReferenceRow> {
                   ),
                 ),
                 Icon(
-                  Icons.keyboard_arrow_down,
+                  Icons.keyboard_arrow_down_rounded,
                   size: 18,
                   color: context.cs.primary,
                 ),
@@ -481,9 +306,21 @@ class _ImageGenReferenceRowState extends State<ImageGenReferenceRow> {
           Switch(
             value: widget.refItem.enabled,
             onChanged: widget.onEnabledChanged,
+            activeThumbColor: context.cs.primary,
+            activeTrackColor: context.cs.primary.withValues(alpha: 0.5),
+            trackOutlineColor: WidgetStateProperty.resolveWith(
+              (states) => states.contains(WidgetState.selected)
+                  ? Colors.transparent
+                  : context.cs.outlineVariant,
+            ),
+            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
           ),
           IconButton(
-            icon: const Icon(Icons.close, size: 18, color: Colors.grey),
+            icon: Icon(
+              Icons.close,
+              size: 18,
+              color: context.cs.onSurfaceVariant,
+            ),
             onPressed: widget.onRemove,
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(),

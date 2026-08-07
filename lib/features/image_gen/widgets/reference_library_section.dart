@@ -2,6 +2,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/menu_group.dart';
 import '../image_gen_models.dart';
 import 'rows.dart' as rows;
 
@@ -27,28 +28,28 @@ List<Widget> buildReferenceSections({
   }
 
   return [
-    rows.ImageGenMenuGroup(
-      title: 'imggen_refs'.tr(),
-      children: [
-        rows.ImageGenCheckboxRow(
+    MenuGroup(
+      header: 'imggen_refs'.tr(),
+      items: [
+        MenuSwitchItem(
           label: 'imggen_send_char_avatar'.tr(),
           description: 'imggen_send_char_avatar_desc'.tr(),
           value: settings.sendCharAvatar,
           onChanged: (v) => onUpdate(settings.copyWith(sendCharAvatar: v)),
         ),
-        rows.ImageGenCheckboxRow(
+        MenuSwitchItem(
           label: 'imggen_send_user_avatar'.tr(),
           description: 'imggen_send_user_avatar_desc'.tr(),
           value: settings.sendUserAvatar,
           onChanged: (v) => onUpdate(settings.copyWith(sendUserAvatar: v)),
         ),
-        rows.ImageGenCheckboxRow(
+        MenuSwitchItem(
           label: 'imggen_send_ref_descriptions'.tr(),
           description: 'imggen_send_ref_descriptions_desc'.tr(),
           value: settings.sendRefDescriptions,
           onChanged: (v) => onUpdate(settings.copyWith(sendRefDescriptions: v)),
         ),
-        rows.ImageGenCheckboxRow(
+        MenuSwitchItem(
           label: 'imggen_ref_instruction'.tr(),
           description: 'imggen_ref_instruction_desc'.tr(),
           value: settings.refInstructionEnabled,
@@ -64,13 +65,16 @@ List<Widget> buildReferenceSections({
           ),
       ],
     ),
-    rows.ImageGenMenuGroup(
-      title: 'imggen_additional_refs'.tr(),
-      trailing: Text(
-        '${references.length}',
-        style: TextStyle(fontSize: 13, color: context.cs.onSurfaceVariant),
+    MenuGroup(
+      header: 'imggen_additional_refs'.tr(),
+      headerTrailing: Padding(
+        padding: const EdgeInsets.only(right: 8),
+        child: Text(
+          '${references.length}',
+          style: TextStyle(fontSize: 13, color: context.cs.onSurfaceVariant),
+        ),
       ),
-      children: [
+      items: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
           child: Text(

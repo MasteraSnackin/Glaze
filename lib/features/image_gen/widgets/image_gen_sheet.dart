@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -11,8 +10,11 @@ import '../../../core/models/api_config.dart';
 import '../../../core/utils/platform_paths.dart';
 import '../../character_gallery/gallery_image_picker.dart';
 import '../../settings/api_list_provider.dart';
+import '../../settings/widgets/connection_status.dart';
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/help_tip.dart';
+import '../../../shared/widgets/menu_group.dart';
 import '../../../shared/widgets/sheet_view.dart';
 import '../image_gen_capabilities.dart';
 import '../image_gen_models.dart';
@@ -41,9 +43,8 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
   final ImageGenConnectionService _connectionService =
       ImageGenConnectionService();
   final ScrollController _scrollController = ScrollController();
-  Timer? _connectionDebounce;
   int _connectionEpoch = 0;
-  String _connectionStatus = 'idle';
+  ApiConnectionStatus _connectionStatus = ApiConnectionStatus.idle;
   String _connectionError = '';
   String _modelFetchError = '';
 
@@ -52,32 +53,24 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
     super.initState();
     _settings =
         ref.read(imageGenSettingsProvider).value ?? const ImageGenSettings();
-    if (_settings.enabled) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _scheduleConnectionCheck(_settings, immediate: true);
-      });
-    }
   }
 
   void _update(ImageGenSettings s) {
-    final wasEnabled = _settings.enabled;
     final connectionChanged = _hasConnectionChanged(_settings, s);
     _settings = s;
     ref.read(imageGenSettingsProvider.notifier).save(s);
-    if (!s.enabled) {
-      _connectionDebounce?.cancel();
+    // Nothing is probed automatically — but a verdict about the old endpoint
+    // must not linger once the connection settings change under it.
+    if (!s.enabled || connectionChanged) {
       _connectionEpoch++;
-      _connectionStatus = 'idle';
+      _connectionStatus = ApiConnectionStatus.idle;
       _connectionError = '';
-    } else if (!wasEnabled || connectionChanged) {
-      _scheduleConnectionCheck(s);
     }
     if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
-    _connectionDebounce?.cancel();
     _connectionService.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -98,22 +91,14 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
       before.a1111.endpoint != after.a1111.endpoint ||
       before.a1111.apiKey != after.a1111.apiKey;
 
-  void _scheduleConnectionCheck(
-    ImageGenSettings settings, {
-    bool immediate = false,
-  }) {
+  /// Probes the provider. Only ever runs from a tap on the status badge — the
+  /// sheet never reaches out on its own.
+  Future<void> _checkConnection() async {
+    final settings = _settings;
+    if (!settings.enabled) return;
     final epoch = ++_connectionEpoch;
-    _connectionDebounce?.cancel();
-    _connectionDebounce = Timer(
-      immediate ? Duration.zero : const Duration(milliseconds: 900),
-      () => _checkConnection(settings, epoch),
-    );
-  }
-
-  Future<void> _checkConnection(ImageGenSettings settings, int epoch) async {
-    if (!mounted || epoch != _connectionEpoch || !settings.enabled) return;
     setState(() {
-      _connectionStatus = 'connecting';
+      _connectionStatus = ApiConnectionStatus.connecting;
       _connectionError = '';
     });
     final apiConfig = ref.read(activeApiConfigProvider);
@@ -124,11 +109,11 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
         llmApiKey: apiConfig?.apiKey ?? '',
       );
       if (!mounted || epoch != _connectionEpoch) return;
-      setState(() => _connectionStatus = 'connected');
+      setState(() => _connectionStatus = ApiConnectionStatus.connected);
     } catch (error) {
       if (!mounted || epoch != _connectionEpoch) return;
       setState(() {
-        _connectionStatus = 'failed';
+        _connectionStatus = ApiConnectionStatus.failed;
         _connectionError = error.toString().replaceFirst('Bad state: ', '');
       });
     }
@@ -141,65 +126,19 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
     required bool Function(T) isSelected,
     required void Function(T) onSelected,
   }) {
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (context) => Container(
-        decoration: BoxDecoration(
-          color: context.cs.surface,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        child: Material(
-          type: MaterialType.transparency,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-              Flexible(
-                child: ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: items.length,
-                  itemBuilder: (context, i) {
-                    final item = items[i];
-                    final selected = isSelected(item);
-                    return ListTile(
-                      title: Text(labelBuilder(item)),
-                      trailing: selected
-                          ? Text(
-                              'Active',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: context.cs.primary,
-                              ),
-                            )
-                          : null,
-                      onTap: () {
-                        Navigator.pop(context);
-                        onSelected(item);
-                      },
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+    rows.showImageGenOptions<T>(
+      context,
+      title: title,
+      items: items,
+      labelBuilder: labelBuilder,
+      isSelected: isSelected,
+      onSelected: onSelected,
     );
   }
 
   void _openApiTypeSelector() {
     _showOptions<ImageGenApiType>(
-      title: 'API Type',
+      title: 'imggen_api_type'.tr(),
       items: ImageGenApiType.values,
       labelBuilder: (t) => t.label,
       isSelected: (t) => _settings.apiType == t,
@@ -273,35 +212,33 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
         child: Column(
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-              child: Align(
-                alignment: Alignment.centerLeft,
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+              child: ConnectionStatus(
+                status: _connectionStatus,
+                errorMessage: _connectionError,
+                onRetry: _checkConnection,
                 child: _buildPresetSelector(s.apiType),
               ),
             ),
-            _buildConnectionStatus(s),
-            rows.ImageGenMenuGroup(
-              title: 'Connection',
-              children: _buildConnectionFields(s),
+            MenuGroup(
+              header: 'imggen_connection'.tr(),
+              items: _buildConnectionFields(s),
             ),
-            rows.ImageGenMenuGroup(
-              title: 'Model',
-              children: _buildModelFields(s),
-            ),
+            MenuGroup(header: 'Model', items: _buildModelFields(s)),
             if (_modelFetchError.isNotEmpty)
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
                 child: Text(
                   _modelFetchError,
                   style: const TextStyle(color: Colors.red, fontSize: 12),
                 ),
               ),
-            rows.ImageGenMenuGroup(
-              title: 'imggen_styles'.tr(),
-              children: [
-                rows.ImageGenSelectorRow(
+            MenuGroup(
+              header: 'imggen_styles'.tr(),
+              items: [
+                MenuSelectorItem(
                   label: 'imggen_style_active'.tr(),
-                  value: s.activeStyle?.name ?? 'imggen_style_none'.tr(),
+                  currentValue: s.activeStyle?.name ?? 'imggen_style_none'.tr(),
                   onTap: _openStyleLibrary,
                 ),
               ],
@@ -335,10 +272,10 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
                 pickImage: _pickReferenceImage,
               ),
             if (providerMaxReferences(s) > 0)
-              rows.ImageGenMenuGroup(
-                title: 'Image Context',
-                children: [
-                  rows.ImageGenCheckboxRow(
+              MenuGroup(
+                header: 'Image Context',
+                items: [
+                  MenuSwitchItem(
                     label: 'Send previous images as context',
                     description: 'imggen_image_context_desc'.tr(),
                     value: s.imageContextEnabled,
@@ -346,9 +283,9 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
                         _update(s.copyWith(imageContextEnabled: v)),
                   ),
                   if (s.imageContextEnabled)
-                    rows.ImageGenSelectorRow(
+                    MenuSelectorItem(
                       label: 'Context image count',
-                      value: s.imageContextCount.toString(),
+                      currentValue: s.imageContextCount.toString(),
                       onTap: () {
                         _showOptions<int>(
                           title: 'Context image count',
@@ -362,28 +299,13 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
                     ),
                 ],
               ),
-            Container(
-              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: context.cs.surfaceContainerHighest.withValues(
-                  alpha: 0.8,
-                ),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: Colors.black.withValues(alpha: 0.06)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'AI must include image tags to trigger generation:',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: context.cs.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
+            MenuGroup(
+              header: 'imggen_tag_hint_title'.tr(),
+              description: 'imggen_tag_hint_desc'.tr(),
+              items: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                  child: SelectableText(
                     '[IMG:GEN:{"prompt":"...","style":"anime"}]',
                     style: TextStyle(
                       fontSize: 11,
@@ -391,8 +313,8 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
                       color: context.cs.primary,
                     ),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ],
         ),
@@ -400,8 +322,9 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
     );
   }
 
+  /// The API-type pill. Sits left of the connection-status badge, mirroring
+  /// the preset pill in the API settings screen.
   Widget _buildPresetSelector(ImageGenApiType selected) {
-    final name = selected.label;
     return InkWell(
       onTap: _openApiTypeSelector,
       borderRadius: BorderRadius.circular(16),
@@ -416,7 +339,7 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              name,
+              selected.label,
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
@@ -425,51 +348,12 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
             ),
             const SizedBox(width: 4),
             Icon(
-              Icons.keyboard_arrow_down,
+              Icons.keyboard_arrow_down_rounded,
               size: 20,
               color: context.cs.primary,
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _buildConnectionStatus(ImageGenSettings settings) {
-    final (
-      IconData icon,
-      Color color,
-      String label,
-    ) = switch (_connectionStatus) {
-      'connecting' => (
-        Icons.sync,
-        context.cs.primary,
-        'Checking connection...',
-      ),
-      'connected' => (Icons.check_circle_outline, Colors.green, 'Connected'),
-      'failed' => (Icons.error_outline, Colors.red, _connectionError),
-      _ => (Icons.cloud_outlined, context.cs.onSurfaceVariant, 'Not checked'),
-    };
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-      child: Row(
-        children: [
-          Icon(icon, size: 16, color: color),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 12, color: color),
-            ),
-          ),
-          TextButton(
-            onPressed: () =>
-                _scheduleConnectionCheck(settings, immediate: true),
-            child: const Text('Check'),
-          ),
-        ],
       ),
     );
   }
@@ -525,7 +409,6 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
         );
       case ImageGenApiType.openai:
         return buildOpenaiModelFields(
-          context,
           s,
           isFetching: _isFetchingModels,
           onFetchModels: _onFetchModels,
@@ -663,34 +546,23 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
   }
 
   Future<String?> _pickReferenceImage() async {
-    final source = await showModalBottomSheet<String>(
-      context: context,
-      useRootNavigator: true,
-      backgroundColor: context.cs.surface,
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const ListTile(
-              title: Text(
-                'Choose reference image',
-                style: TextStyle(fontWeight: FontWeight.w600),
-              ),
-            ),
-            ListTile(
-              leading: const Icon(Icons.folder_open),
-              title: const Text('From device'),
-              onTap: () => Navigator.pop(context, 'device'),
-            ),
-            if (widget.charId != null)
-              ListTile(
-                leading: const Icon(Icons.photo_library_outlined),
-                title: const Text('From card gallery'),
-                onTap: () => Navigator.pop(context, 'gallery'),
-              ),
-          ],
+    final source = await GlazeBottomSheet.show<String>(
+      context,
+      title: 'imggen_ref_pick_title'.tr(),
+      items: [
+        BottomSheetItem(
+          icon: Icons.folder_open,
+          label: 'imggen_ref_pick_device'.tr(),
+          onTap: () => Navigator.of(context, rootNavigator: true).pop('device'),
         ),
-      ),
+        if (widget.charId != null)
+          BottomSheetItem(
+            icon: Icons.photo_library_outlined,
+            label: 'imggen_ref_pick_gallery'.tr(),
+            onTap: () =>
+                Navigator.of(context, rootNavigator: true).pop('gallery'),
+          ),
+      ],
     );
     if (!mounted || source == null) return null;
 
