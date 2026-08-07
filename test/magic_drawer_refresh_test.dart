@@ -9,7 +9,11 @@ void main() {
         'lib/features/chat/services/magic_drawer_stats_service.dart',
       ).readAsStringSync();
 
-      expect(source, contains('final apiListFuture = _ref.read(apiListProvider.future);'));
+      // The API list is warmed through its provider and the active config is
+      // read from activeApiConfigProvider — never straight from the repo.
+      // Matched loosely: computeStats starts the read as one of a batch of
+      // parallel futures, so the exact call formatting is not the contract.
+      expect(source, contains('_ref.read(apiListProvider.future)'));
       expect(source, contains('await apiListFuture;'));
       expect(source, contains('_ref.read(activeApiConfigProvider)'));
       expect(source, isNot(contains('apiConfigRepoProvider')));
