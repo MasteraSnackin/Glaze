@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../shared/theme/app_colors.dart';
+import '../../shared/utils/time_formatter.dart';
 import '../../shared/utils/avatar_image.dart';
 import '../../shared/widgets/glass_surface.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
@@ -657,7 +658,7 @@ class _SessionTileState extends ConsumerState<_SessionTile>
 
   String _formatTime() {
     if (info.lastMessageTime == 0) return '';
-    return formatTimeAgo(info.lastMessageTime);
+    return formatSessionTimeAgo(info.lastMessageTime);
   }
 
   void _showRenameDialog(BuildContext context, WidgetRef ref) {
@@ -1249,12 +1250,3 @@ class _StatusBadge extends StatelessWidget {
   }
 }
 
-String formatTimeAgo(int epochMs) {
-  final now = DateTime.now();
-  final diff = now.difference(DateTime.fromMillisecondsSinceEpoch(epochMs));
-  if (diff.inMinutes < 1) return 'now';
-  if (diff.inHours < 1) return '${diff.inMinutes}m';
-  if (diff.inDays < 1) return '${diff.inHours}h';
-  if (diff.inDays < 7) return '${diff.inDays}d';
-  return '${diff.inDays ~/ 7}w';
-}

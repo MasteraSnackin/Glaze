@@ -32,6 +32,7 @@ import 'controllers/chat_draft_controller.dart';
 import 'services/continuation_message_merger.dart';
 import 'services/generation_pipeline.dart';
 import 'services/impersonation_service.dart';
+import 'state/chat_session_write_queue.dart';
 import 'utils/message_preview.dart';
 import '../extensions/services/extension_post_gen_service.dart';
 
@@ -215,6 +216,15 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   );
 
   // Controllers
+  //
+  // Message deletion, variation switches and edits all write the same session
+  // row, and every one of them re-reads the durable row inside its own
+  // transaction. One queue shared by all of them keeps those writes in UI
+  // order — otherwise a swipe committed while a delete is still in flight
+  // reads the pre-delete message list and writes it straight back, which is
+  // how deleted messages reappeared on the next variation switch.
+  final ChatSessionWriteQueue _sessionWrites = ChatSessionWriteQueue();
+
   late final _messageOpsCtrl = ChatMessageOpsController(
     ref: ref,
     charId: arg,
@@ -223,6 +233,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     },
     getState: () => state,
     invalidateHistory: _invalidateHistory,
+    writes: _sessionWrites,
   );
 
   late final _swipeCtrl = ChatSwipeController(
@@ -233,6 +244,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     },
     getState: () => state,
     invalidateHistory: _invalidateHistory,
+    writes: _sessionWrites,
   );
 
   late final _sessionCtrl = ChatSessionController(

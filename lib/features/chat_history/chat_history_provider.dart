@@ -9,6 +9,7 @@ import '../../core/state/character_provider.dart'
 import '../../core/state/db_provider.dart';
 import '../../core/utils/sync_deletion_tracker.dart';
 import '../../shared/utils/time_formatter.dart';
+import '../chat/chat_provider.dart';
 import '../chat/chat_session_service.dart';
 import '../extensions/state/message_variables_notifier.dart';
 
@@ -86,6 +87,27 @@ class ChatSessionInfo {
   );
 }
 
+/// Preview line and sort key for one session row.
+///
+/// While the origin event (branch/creation) is the most recent thing to have
+/// happened, it *is* the preview: a freshly branched or created chat rises to
+/// the top with a "Branched on …" / "Created on …" line instead of a stale
+/// copied message.
+///
+/// Shared so the chat list and the session pickers cannot drift apart — they
+/// are the same list of the same rows, just scoped differently.
+({String preview, int time}) sessionPreviewAndTime(SessionMetadata m) {
+  if (m.originKind != null &&
+      m.originTimestamp > 0 &&
+      m.originTimestamp >= m.lastMessageTimestamp) {
+    return (
+      preview: formatOriginPreview(m.originKind!, m.originTimestamp),
+      time: m.originTimestamp,
+    );
+  }
+  return (preview: m.lastMessageContent, time: m.lastMessageTimestamp);
+}
+
 final chatHistoryProvider =
     AsyncNotifierProvider<ChatHistoryNotifier, List<ChatSessionInfo>>(
       ChatHistoryNotifier.new,
@@ -152,18 +174,9 @@ class ChatHistoryNotifier extends AsyncNotifier<List<ChatSessionInfo>> {
       final variantGroupId = (char == null || char.variantGroupId.isEmpty)
           ? m.characterId
           : char.variantGroupId;
-      // While the origin event (branch/creation) is the most recent thing to
-      // have happened, surface it as the preview and sort key so a freshly
-      // branched or created chat rises to the top with a "Branched on …" /
-      // "Created on …" line instead of a stale copied message.
-      var lastMessage = m.lastMessageContent;
-      var lastMessageTime = m.lastMessageTimestamp;
-      if (m.originKind != null &&
-          m.originTimestamp > 0 &&
-          m.originTimestamp >= m.lastMessageTimestamp) {
-        lastMessage = formatOriginPreview(m.originKind!, m.originTimestamp);
-        lastMessageTime = m.originTimestamp;
-      }
+      final row = sessionPreviewAndTime(m);
+      final lastMessage = row.preview;
+      final lastMessageTime = row.time;
       result.add(
         ChatSessionInfo(
           sessionId: m.sessionId,
@@ -223,8 +236,15 @@ class ChatHistoryNotifier extends AsyncNotifier<List<ChatSessionInfo>> {
     final studioConfig = await ref
         .read(studioConfigRepoProvider)
         .getBySessionId(sessionId);
+    final charId = _characterIdOf(sessionId);
     await ref.read(sessionDeletionRepoProvider).deleteSession(sessionId);
     ChatSessionService.clearCache();
+    // The chat screen may still be bound to the row that just went away. Left
+    // alone it keeps serving the deleted session, and its next write recreates
+    // the row it was deleted from (`commitDeleteMessages` ends in a full
+    // `ChatRepo.put`). Rebuilding picks the next surviving session, or a fresh
+    // one when this was the last.
+    if (charId != null) ref.invalidate(chatProvider(charId));
     await SyncDeletionTracker.record('chat', sessionId);
     await SyncDeletionTracker.record('memory_book', sessionId);
     await SyncDeletionTracker.record('tracker_value', sessionId);
@@ -232,6 +252,20 @@ class ChatHistoryNotifier extends AsyncNotifier<List<ChatSessionInfo>> {
     if (studioConfig != null) {
       await SyncDeletionTracker.record('studio_config', sessionId);
     }
+  }
+
+  /// Character a session belongs to. Read from the loaded list when possible;
+  /// otherwise derived from the id, which is always `${charId}_$sessionIndex`
+  /// (character ids never end in `_<digits>`). Null when neither resolves.
+  String? _characterIdOf(String sessionId) {
+    for (final info in state.value ?? const <ChatSessionInfo>[]) {
+      if (info.sessionId == sessionId) return info.characterId;
+    }
+    final separator = sessionId.lastIndexOf('_');
+    if (separator <= 0) return null;
+    final suffix = sessionId.substring(separator + 1);
+    if (suffix.isEmpty || int.tryParse(suffix) == null) return null;
+    return sessionId.substring(0, separator);
   }
 
   Future<void> clearChat(String sessionId) async {

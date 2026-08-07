@@ -20,6 +20,15 @@ class ChatSessionService {
   static final Map<String, ChatSession> _cache = {};
   static final List<String> _cacheAccessOrder = [];
 
+  /// Bumped by every eviction. Reads that started before an eviction (the
+  /// fire-and-forget [_prefetchAdjacent] pass) must not publish their result
+  /// afterwards: a prefetch of the session the user is about to delete lands
+  /// after [clearCache] and puts the deleted row straight back in the cache.
+  /// Session ids are `${charId}_$index` and a freed index is handed to the
+  /// next new chat, so that stale entry is served as "the new chat" — which is
+  /// exactly the deleted chat opening again.
+  static int _cacheEpoch = 0;
+
   static int get cacheSize => _cache.length;
 
   ChatSessionService(this._ref);
@@ -39,6 +48,7 @@ class ChatSessionService {
   }
 
   static void clearCache({String? charId}) {
+    _cacheEpoch++;
     if (charId == null) {
       _cache.clear();
       _cacheAccessOrder.clear();
@@ -83,6 +93,10 @@ class ChatSessionService {
       messages: initialMessages,
     );
     await repo.put(session);
+    // Publish the durable row: `_0` is the most recycled id there is, and a
+    // cache entry left over from a deleted session under the same id would be
+    // served to the next `switchToSession`.
+    updateCache(session);
     return session;
   }
 
@@ -98,7 +112,15 @@ class ChatSessionService {
 
     final sessions = await repo.getByCharacterId(charId);
     if (sessions.isEmpty) return null;
-    return sessions.first;
+    // The recorded index points at a session that is gone — the usual cause is
+    // deleting the chat you were in. Pick the most recent survivor (row order
+    // is not guaranteed, so choose explicitly) and repair the record, or every
+    // later `switchToSession(currentIdx)` keeps missing and throwing.
+    final fallback = sessions.reduce(
+      (a, b) => b.lastActivityMs > a.lastActivityMs ? b : a,
+    );
+    await saveCurrentSessionIndex(charId, fallback.sessionIndex);
+    return fallback;
   }
 
   Future<ChatSession> switchToSession(String charId, int sessionIndex) async {
@@ -139,34 +161,30 @@ class ChatSessionService {
   void _prefetchAdjacent(String charId, int currentIdx) {
     if (!_ref.mounted) return;
     final repo = _ref.read(chatRepoProvider);
+    // Snapshotted before the reads start; a deletion between now and the reply
+    // bumps it and the result is dropped instead of resurrecting a row that no
+    // longer exists.
+    final epoch = _cacheEpoch;
     () async {
       try {
         final futures = <Future<void>>[];
 
+        void publish(String key, ChatSession? session) {
+          if (session == null || epoch != _cacheEpoch) return;
+          _cache[key] = session;
+          _touchCacheKey(key);
+        }
+
         if (currentIdx > 0) {
           final prevKey = '${charId}_${currentIdx - 1}';
           if (!_cache.containsKey(prevKey)) {
-            futures.add(
-              repo.getById(prevKey).then((s) {
-                if (s != null) {
-                  _cache[prevKey] = s;
-                  _touchCacheKey(prevKey);
-                }
-              }),
-            );
+            futures.add(repo.getById(prevKey).then((s) => publish(prevKey, s)));
           }
         }
 
         final nextKey = '${charId}_${currentIdx + 1}';
         if (!_cache.containsKey(nextKey)) {
-          futures.add(
-            repo.getById(nextKey).then((s) {
-              if (s != null) {
-                _cache[nextKey] = s;
-                _touchCacheKey(nextKey);
-              }
-            }),
-          );
+          futures.add(repo.getById(nextKey).then((s) => publish(nextKey, s)));
         }
 
         if (futures.isNotEmpty) await Future.wait(futures);
@@ -208,6 +226,10 @@ class ChatSessionService {
       updatedAt: currentTimestampSeconds(),
     );
     await repo.put(session);
+    // Post-commit publication. Without it a cache entry left behind by a
+    // deleted session under the same (recycled) id survives, and the next
+    // switch to this index serves the deleted chat instead of this one.
+    updateCache(session);
     await saveCurrentSessionIndex(charId, nextIndex);
     return session;
   }
@@ -428,11 +450,30 @@ class ChatSessionService {
     }
   }
 
+  /// The index a new session gets. Session ids are `${charId}_$index`, so an
+  /// index handed out twice means two different chats share an id — the second
+  /// one inherits whatever the first left behind (cache entries, and the
+  /// pending `SyncDeletionTracker` record that would delete it again on the
+  /// next sync).
+  ///
+  /// Deleting the highest-numbered session frees its index, so the surviving
+  /// rows alone are not a safe high-water mark. `currentSessionIndex` is the
+  /// character's durable record of the last index that existed, which closes
+  /// the common case: deleting the chat you are in and immediately starting a
+  /// new one.
   Future<int> _nextSessionIndex(String charId) async {
     final repo = _ref.read(chatRepoProvider);
     final sessions = await repo.getByCharacterId(charId);
+    // No sessions at all → start over at 0, the index `createInitialSession`
+    // uses. `currentSessionIndex` defaults to 0 and so cannot tell "never had
+    // a chat" from "was on chat #1"; it is only a usable high-water mark while
+    // at least one session survives.
     if (sessions.isEmpty) return 0;
-    return sessions.map((s) => s.sessionIndex).reduce((a, b) => a > b ? a : b) +
-        1;
+    final character = await _ref.read(characterRepoProvider).getById(charId);
+    final lastKnownIndex = character?.currentSessionIndex ?? 0;
+    final maxExisting = sessions
+        .map((s) => s.sessionIndex)
+        .reduce((a, b) => a > b ? a : b);
+    return (maxExisting > lastKnownIndex ? maxExisting : lastKnownIndex) + 1;
   }
 }
