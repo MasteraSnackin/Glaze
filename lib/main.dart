@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app.dart';
 import 'core/debug/perf_debug.dart';
+import 'core/services/dev_mode_flag_migration.dart';
 import 'core/services/windows_preferences_migration.dart';
 
 final appRestartKey = GlobalKey();
@@ -21,6 +22,20 @@ Future<void> main() async {
         stack: stackTrace,
         library: 'startup',
         context: ErrorDescription('Windows preferences migration failed'),
+      ),
+    );
+  }
+  // After the Windows migration: that one rewrites the preferences file on
+  // disk, so it has to land before SharedPreferences is first opened here.
+  try {
+    await resetLegacyDevModeFlag();
+  } catch (error, stackTrace) {
+    FlutterError.reportError(
+      FlutterErrorDetails(
+        exception: error,
+        stack: stackTrace,
+        library: 'startup',
+        context: ErrorDescription('dev mode flag reset failed'),
       ),
     );
   }
