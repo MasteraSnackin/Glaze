@@ -779,36 +779,47 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
   /// Uses [GlazeBottomSheet] so the sheet matches every other action sheet in
   /// the app (glass surface, handle bar, haptics) instead of a bare Material
   /// `showModalBottomSheet`.
+  /// Actions for one image of a message. [blockIndex] is the position of that
+  /// image inside the message, so regenerating or recovering it leaves the
+  /// other images alone; a failed block opens the same sheet without the
+  /// view/save entries it has no file for.
   void _showImageOptionsSheet(
     String src,
     String instruction,
     String messageId,
+    int? blockIndex,
   ) {
     final messages = widget.state.messages;
     final idx = messageId.isEmpty
         ? -1
         : messages.indexWhere((m) => m.id == messageId);
+    final hasImage = src.isNotEmpty;
+    // Markdown images carry no block index — they are not generated, so the
+    // generation actions do not apply to them.
+    final isGenBlock = idx >= 0 && blockIndex != null;
 
     GlazeBottomSheet.show<void>(
       context,
       items: [
-        BottomSheetItem(
-          icon: Icons.fullscreen,
-          label: 'imggen_expand_image'.tr(),
-          onTap: () {
-            Navigator.of(context, rootNavigator: true).pop();
-            _showImageViewer(context, src);
-          },
-        ),
-        BottomSheetItem(
-          icon: Icons.save_alt,
-          label: 'action_save_image'.tr(),
-          onTap: () {
-            Navigator.of(context, rootNavigator: true).pop();
-            _downloadImage(src);
-          },
-        ),
-        if (idx >= 0)
+        if (hasImage)
+          BottomSheetItem(
+            icon: Icons.fullscreen,
+            label: 'imggen_expand_image'.tr(),
+            onTap: () {
+              Navigator.of(context, rootNavigator: true).pop();
+              _showImageViewer(context, src);
+            },
+          ),
+        if (hasImage)
+          BottomSheetItem(
+            icon: Icons.save_alt,
+            label: 'action_save_image'.tr(),
+            onTap: () {
+              Navigator.of(context, rootNavigator: true).pop();
+              _downloadImage(src);
+            },
+          ),
+        if (isGenBlock)
           BottomSheetItem(
             icon: Icons.refresh,
             label: 'action_regenerate'.tr(),
@@ -816,7 +827,25 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
               Navigator.of(context, rootNavigator: true).pop();
               ref
                   .read(chatProvider(widget.charId).notifier)
-                  .retryImageGenerationForMessage(messageId);
+                  .retryImageGenerationForMessage(
+                    messageId,
+                    blockIndex: blockIndex,
+                  );
+            },
+          ),
+        if (isGenBlock && !hasImage)
+          BottomSheetItem(
+            icon: Icons.search,
+            label: 'imggen_find_on_disk'.tr(),
+            onTap: () {
+              Navigator.of(context, rootNavigator: true).pop();
+              ref
+                  .read(chatProvider(widget.charId).notifier)
+                  .findImageOnDisk(
+                    messageId,
+                    instruction,
+                    blockIndex: blockIndex,
+                  );
             },
           ),
       ],
@@ -1496,35 +1525,45 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                           },
                         ),
                         imageGenActions: ImageGenCallbacks(
-                          onImgRetry: (instruction, messageId) {
+                          onImgRetry: (instruction, messageId, blockIndex) {
                             ref
                                 .read(chatProvider(widget.charId).notifier)
                                 .retryImageGenerationForMessage(
                                   messageId,
                                   failedOnly: true,
+                                  blockIndex: blockIndex,
                                 );
                           },
-                          onImgEnableRetry: (instruction, messageId) async {
-                            await ref
-                                .read(imageGenSettingsProvider.notifier)
-                                .updateEnabled(true);
-                            if (!mounted) return;
-                            await ref
+                          onImgEnableRetry:
+                              (instruction, messageId, blockIndex) async {
+                                await ref
+                                    .read(imageGenSettingsProvider.notifier)
+                                    .updateEnabled(true);
+                                if (!mounted) return;
+                                await ref
+                                    .read(chatProvider(widget.charId).notifier)
+                                    .retryImageGenerationForMessage(
+                                      messageId,
+                                      failedOnly: true,
+                                      blockIndex: blockIndex,
+                                    );
+                              },
+                          onImgFind: (instruction, messageId, blockIndex) {
+                            ref
+                                .read(chatProvider(widget.charId).notifier)
+                                .findImageOnDisk(
+                                  messageId,
+                                  instruction,
+                                  blockIndex: blockIndex,
+                                );
+                          },
+                          onImgRegen: (instruction, messageId, blockIndex) {
+                            ref
                                 .read(chatProvider(widget.charId).notifier)
                                 .retryImageGenerationForMessage(
                                   messageId,
-                                  failedOnly: true,
+                                  blockIndex: blockIndex,
                                 );
-                          },
-                          onImgFind: (instruction, messageId) {
-                            ref
-                                .read(chatProvider(widget.charId).notifier)
-                                .findImageOnDisk(messageId, instruction);
-                          },
-                          onImgRegen: (instruction, messageId) {
-                            ref
-                                .read(chatProvider(widget.charId).notifier)
-                                .retryImageGenerationForMessage(messageId);
                           },
                           onImgCancel: () {
                             ref

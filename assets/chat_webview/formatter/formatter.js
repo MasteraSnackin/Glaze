@@ -376,18 +376,26 @@ export class Formatter {
     });
 
     // 19. Restore image gen blocks (Imagen UI ported from Glaze ShadowContent.vue)
+    //
+    // The placeholders sit where their tags were, so this pass walks the blocks
+    // in document order — the same order ImageTagMarkup.scanImageBlocks() sees
+    // on the Dart side. `data-img-index` carries that position back with every
+    // tap, which is what makes an action apply to one image and not the whole
+    // message.
+    let imgBlockIndex = 0;
     html = html.replace(/\x01IG_BLOCK_(\d+)\x01/g, (_, i) => {
       const block = imgBlocks[parseInt(i)];
+      const at = imgBlockIndex++;
       if (block.type === 'result') {
         const src = this._imageSrc(block.path);
         const encInstr = encodeURIComponent(block.instruction || '');
-        return `<span class="imggen-result-wrapper"><img src="${src}" class="imggen-result" loading="lazy" data-action="image-click" data-src="${src}"><button class="imggen-options-btn" type="button" data-action="img-options" data-src="${src}" data-instruction="${encInstr}" title="Options">${OPTIONS_SVG}</button></span>`;
+        return `<span class="imggen-result-wrapper"><img src="${src}" class="imggen-result" loading="lazy" data-action="image-click" data-src="${src}"><button class="imggen-options-btn" type="button" data-action="img-options" data-src="${src}" data-instruction="${encInstr}" data-img-index="${at}" title="Options">${OPTIONS_SVG}</button></span>`;
       }
       if (block.type === 'gen') {
         const start = Date.now();
         const prompt = this._escapeHtml(this._imgPrompt(block.instruction));
         const promptEl = prompt ? `<div class="imggen-loading-prompt">${prompt}</div>` : '';
-        return `<div class="imggen-loading" data-start="${start}"><span class="imggen-loading-hint">Generating image…</span><span class="imggen-loading-timer" data-start="${start}">0.0s</span><button class="imggen-stop-btn" type="button" data-action="img-stop" title="Stop image generation">⏹</button>${promptEl}</div>`;
+        return `<div class="imggen-loading" data-start="${start}" data-img-index="${at}"><span class="imggen-loading-hint">Generating image…</span><span class="imggen-loading-timer" data-start="${start}">0.0s</span><button class="imggen-stop-btn" type="button" data-action="img-stop" title="Stop image generation">⏹</button>${promptEl}</div>`;
       }
       if (block.type === 'error') {
         let errorMsg = 'Unknown error';
@@ -399,9 +407,9 @@ export class Formatter {
         } catch(_) {}
         const encInstr = encodeURIComponent(instruction);
         if (errorMsg === 'Image generation disabled') {
-          return `<div class="imggen-error imggen-disabled" data-instruction="${encInstr}"><span class="imggen-error-icon">🖼</span><span class="imggen-error-msg">Image generation disabled</span><div class="imggen-error-actions"><button class="imggen-error-retry" type="button" data-action="img-enable-retry" data-instruction="${encInstr}">Enable and generate</button></div></div>`;
+          return `<div class="imggen-error imggen-disabled" data-instruction="${encInstr}" data-img-index="${at}"><span class="imggen-error-icon">🖼</span><span class="imggen-error-msg">Image generation disabled</span><div class="imggen-error-actions"><button class="imggen-error-retry" type="button" data-action="img-enable-retry" data-instruction="${encInstr}" data-img-index="${at}">Enable and generate</button></div></div>`;
         }
-        return `<div class="imggen-error" data-instruction="${encInstr}"><span class="imggen-error-icon">⚠</span><span class="imggen-error-msg">${this._escapeHtml(errorMsg)}</span><div class="imggen-error-actions"><button class="imggen-error-retry" type="button" data-action="img-retry" data-instruction="${encInstr}">↻ Regenerate</button><button class="imggen-error-retry imggen-error-find" type="button" data-action="img-find" data-instruction="${encInstr}">Find on disk</button></div></div>`;
+        return `<div class="imggen-error" data-instruction="${encInstr}" data-img-index="${at}"><span class="imggen-error-icon">⚠</span><span class="imggen-error-msg">${this._escapeHtml(errorMsg)}</span><div class="imggen-error-actions"><button class="imggen-error-retry" type="button" data-action="img-retry" data-instruction="${encInstr}" data-img-index="${at}">↻ Regenerate</button><button class="imggen-error-options" type="button" data-action="img-options" data-instruction="${encInstr}" data-img-index="${at}" title="Options">${OPTIONS_SVG}</button></div></div>`;
       }
       return '';
     });

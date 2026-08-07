@@ -18,6 +18,46 @@ class PendingImageTag {
   final String payload;
 }
 
+/// State of one image block inside a message.
+enum ImageBlockKind {
+  /// `[IMG:GEN…]` — still waiting for its image.
+  pending,
+
+  /// `[IMG:RESULT:…]` — the image arrived and is on disk.
+  result,
+
+  /// `[IMG:ERROR:…]` — the image did not arrive; the block offers a retry.
+  error,
+}
+
+/// One image block of a message, whatever state it is in. Its position in
+/// [ImageTagMarkup.scanImageBlocks] is the index the chat webview tags each
+/// rendered block with, so a per-image action addresses exactly this block.
+class ImageBlock {
+  const ImageBlock({
+    required this.start,
+    required this.end,
+    required this.kind,
+    required this.instruction,
+    this.imagePath = '',
+  });
+
+  final int start;
+  final int end;
+  final ImageBlockKind kind;
+
+  /// Instruction JSON carried by the block, or empty when it has none.
+  final String instruction;
+
+  /// Saved file of a finished block; empty for the other kinds.
+  final String imagePath;
+
+  /// The block written back as a pending tag, prompt included, so a
+  /// regeneration does not have to ask the model for the prompt again.
+  String get asPendingTag =>
+      instruction.isEmpty ? '[IMG:GEN]' : '[IMG:GEN:$instruction]';
+}
+
 /// Pure text transformations for `[IMG:GEN]` / `[IMG:RESULT:]` / `[IMG:ERROR]`
 /// image-gen tag markup. Has no dependency on image generation, file I/O, or
 /// network — only on [ImgGenPatterns] and JSON encoding.
@@ -145,6 +185,90 @@ class ImageTagMarkup {
       return '[IMG:GEN]';
     });
     return result;
+  }
+
+  /// Every image block of [text] in document order, whatever state it is in.
+  ///
+  /// This is the numbering the chat webview renders against, so a block index
+  /// coming back from a tap addresses exactly one image of the message.
+  static List<ImageBlock> scanImageBlocks(String text) {
+    final blocks = <ImageBlock>[
+      for (final tag in scanPendingTags(text))
+        ImageBlock(
+          start: tag.start,
+          end: tag.end,
+          kind: ImageBlockKind.pending,
+          instruction: tag.payload,
+        ),
+    ];
+
+    // A resolved token can never sit inside a pending tag; the guard just keeps
+    // a tag whose payload happens to quote one from being counted twice.
+    bool insidePendingTag(RegExpMatch match) => blocks.any(
+      (block) => match.start < block.end && block.start < match.end,
+    );
+
+    for (final match in ImgGenPatterns.imgResultRegex.allMatches(text)) {
+      if (insidePendingTag(match)) continue;
+      final raw = match.group(1) ?? '';
+      final pipeIdx = raw.indexOf('|');
+      blocks.add(
+        ImageBlock(
+          start: match.start,
+          end: match.end,
+          kind: ImageBlockKind.result,
+          instruction: pipeIdx != -1 ? raw.substring(pipeIdx + 1) : '',
+          imagePath: normalizeImageResultPayload(raw),
+        ),
+      );
+    }
+
+    for (final match in ImgGenPatterns.imgErrorRegex.allMatches(text)) {
+      if (insidePendingTag(match)) continue;
+      var instruction = '';
+      try {
+        final parsed = jsonDecode(match.group(1) ?? '');
+        if (parsed is Map) instruction = parsed['instruction'] as String? ?? '';
+      } catch (_) {}
+      blocks.add(
+        ImageBlock(
+          start: match.start,
+          end: match.end,
+          kind: ImageBlockKind.error,
+          instruction: instruction,
+        ),
+      );
+    }
+
+    blocks.sort((a, b) => a.start.compareTo(b.start));
+    return blocks;
+  }
+
+  /// Sends the [index]-th image block back to pending, keeping its prompt.
+  ///
+  /// Returns [text] unchanged when the index addresses nothing or the block is
+  /// already waiting for its image — the caller reads that as "nothing to do".
+  static String resetImageBlockAt(String text, int index) {
+    final blocks = scanImageBlocks(text);
+    if (index < 0 || index >= blocks.length) return text;
+    final block = blocks[index];
+    if (block.kind == ImageBlockKind.pending) return text;
+    return text.replaceRange(block.start, block.end, block.asPendingTag);
+  }
+
+  /// Points the [index]-th image block at [imagePath], keeping its prompt.
+  static String replaceImageBlockWithResult(
+    String text,
+    int index,
+    String imagePath,
+  ) {
+    final blocks = scanImageBlocks(text);
+    if (index < 0 || index >= blocks.length) return text;
+    final block = blocks[index];
+    final payload = block.instruction.isEmpty
+        ? imagePath
+        : '$imagePath|${block.instruction}';
+    return text.replaceRange(block.start, block.end, '[IMG:RESULT:$payload]');
   }
 
   static List<String> extractImageResultPaths(String text) {

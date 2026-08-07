@@ -186,21 +186,33 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   void cancelImageGeneration() => _abortHandler.cancelImageGeneration();
   Future<void> retryImageGeneration() async =>
       _imageRecoverySvc.retryImageGeneration();
-  Future<void> findImageOnDisk(String messageId, String instruction) async =>
-      _imageRecoverySvc.findImageOnDisk(messageId, instruction);
+  Future<void> findImageOnDisk(
+    String messageId,
+    String instruction, {
+    int? blockIndex,
+  }) async => _imageRecoverySvc.findImageOnDisk(
+    messageId,
+    instruction,
+    blockIndex: blockIndex,
+  );
   final Set<String> _queuedImageRetries = <String>{};
   Future<void> retryImageGenerationForMessage(
     String messageId, {
     bool failedOnly = false,
+    int? blockIndex,
   }) async {
-    if (!_queuedImageRetries.add(messageId)) return;
+    // Per-image retries of the same message are distinct jobs, so the guard
+    // keys on the block too — only a repeated tap on one block is dropped.
+    final queueKey = '$messageId#${blockIndex ?? 'all'}';
+    if (!_queuedImageRetries.add(queueKey)) return;
     try {
       await _imageRecoverySvc.retryImageGenerationForMessage(
         messageId,
         failedOnly: failedOnly,
+        blockIndex: blockIndex,
       );
     } finally {
-      _queuedImageRetries.remove(messageId);
+      _queuedImageRetries.remove(queueKey);
     }
   }
 

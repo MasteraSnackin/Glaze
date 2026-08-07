@@ -165,13 +165,18 @@ export class InteractionDispatch {
     };
   }
 
+  // `imgIndex` is the position of the block inside its message, stamped by the
+  // formatter. -1 means "not an image gen block" (markdown images) and tells
+  // Flutter to fall back to the whole-message behaviour.
   _extractImgInstruction(el, path) {
     const sec = path.find(e => e.dataset?.messageId);
     const messageId = sec ? sec.dataset.messageId : '';
     let instr = '';
     try { instr = decodeURIComponent(el.dataset.instruction || ''); }
     catch (_) { instr = el.dataset.instruction || ''; }
-    return { instr, messageId };
+    const raw = parseInt(el.dataset.imgIndex, 10);
+    const imgIndex = Number.isInteger(raw) && raw >= 0 ? raw : -1;
+    return { instr, messageId, imgIndex };
   }
 
   get _actionMap() {
@@ -269,31 +274,29 @@ export class InteractionDispatch {
         }
       },
       'img-retry': (e, el) => {
-        const { instr, messageId } = this._extractImgInstruction(el, e.composedPath());
-        bridge._sendToFlutter('onImgRetry', [instr, messageId]);
+        const { instr, messageId, imgIndex } = this._extractImgInstruction(el, e.composedPath());
+        bridge._sendToFlutter('onImgRetry', [instr, messageId, imgIndex]);
       },
       'img-enable-retry': (e, el) => {
-        const { instr, messageId } = this._extractImgInstruction(el, e.composedPath());
-        bridge._sendToFlutter('onImgEnableRetry', [instr, messageId]);
+        const { instr, messageId, imgIndex } = this._extractImgInstruction(el, e.composedPath());
+        bridge._sendToFlutter('onImgEnableRetry', [instr, messageId, imgIndex]);
       },
       'img-find': (e, el) => {
-        const { instr, messageId } = this._extractImgInstruction(el, e.composedPath());
-        bridge._sendToFlutter('onImgFind', [instr, messageId]);
+        const { instr, messageId, imgIndex } = this._extractImgInstruction(el, e.composedPath());
+        bridge._sendToFlutter('onImgFind', [instr, messageId, imgIndex]);
       },
       'img-regen': (e, el) => {
-        const { instr, messageId } = this._extractImgInstruction(el, e.composedPath());
-        bridge._sendToFlutter('onImgRegen', [instr, messageId]);
+        const { instr, messageId, imgIndex } = this._extractImgInstruction(el, e.composedPath());
+        bridge._sendToFlutter('onImgRegen', [instr, messageId, imgIndex]);
       },
       'img-stop': (e, el) => bridge._sendToFlutter('onImgCancel', []),
       'img-options': (e, el) => {
-        const { messageId } = this._extractImgInstruction(el, e.composedPath());
-        let instruction = '';
-        try { instruction = decodeURIComponent(el.dataset.instruction || ''); }
-        catch (_) { instruction = el.dataset.instruction || ''; }
+        const { instr, messageId, imgIndex } = this._extractImgInstruction(el, e.composedPath());
         bridge._sendToFlutter('onImgOptions', [JSON.stringify({
           src: el.dataset.src || '',
-          instruction,
+          instruction: instr,
           messageId,
+          imgIndex,
         })]);
       },
       'image-click': (e, el) => {

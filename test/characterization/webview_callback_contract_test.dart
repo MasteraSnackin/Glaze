@@ -201,8 +201,10 @@ void main() {
     );
 
     test(
-      'image callbacks (retry/enable/find/regen) have (String, String) signature',
+      'image callbacks (retry/enable/find/regen) carry the tapped block index',
       () {
+        // Whitespace-normalized so the assertion survives reformatting.
+        final source = bridgeControllerSource.replaceAll(RegExp(r'\s+'), ' ');
         for (final name in [
           'onImgRetry',
           'onImgEnableRetry',
@@ -210,12 +212,14 @@ void main() {
           'onImgRegen',
         ]) {
           expect(
-            bridgeControllerSource,
+            source,
             contains(
-              'void Function(String instruction, String messageId)? $name;',
+              'void Function(String instruction, String messageId, '
+              'int? blockIndex)? $name;',
             ),
             reason:
-                '$name must accept (String instruction, String messageId) parameters',
+                '$name must accept (String instruction, String messageId, '
+                'int? blockIndex) so an action applies to one image',
           );
         }
       },

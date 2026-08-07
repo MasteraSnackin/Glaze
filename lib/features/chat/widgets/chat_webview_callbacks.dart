@@ -119,24 +119,29 @@ class ChatWebViewCallbacks {
     messageActions.onInjectClick?.call(id);
   }
 
-  void onImgRetry(String instruction, String messageId) {
-    imageGenActions.onImgRetry?.call(instruction, messageId);
+  void onImgRetry(String instruction, String messageId, int? blockIndex) {
+    imageGenActions.onImgRetry?.call(instruction, messageId, blockIndex);
   }
 
-  void onImgEnableRetry(String instruction, String messageId) {
-    imageGenActions.onImgEnableRetry?.call(instruction, messageId);
+  void onImgEnableRetry(String instruction, String messageId, int? blockIndex) {
+    imageGenActions.onImgEnableRetry?.call(instruction, messageId, blockIndex);
   }
 
-  void onImgFind(String instruction, String messageId) {
-    imageGenActions.onImgFind?.call(instruction, messageId);
+  void onImgFind(String instruction, String messageId, int? blockIndex) {
+    imageGenActions.onImgFind?.call(instruction, messageId, blockIndex);
   }
 
-  void onImgRegen(String instruction, String messageId) {
-    imageGenActions.onImgRegen?.call(instruction, messageId);
+  void onImgRegen(String instruction, String messageId, int? blockIndex) {
+    imageGenActions.onImgRegen?.call(instruction, messageId, blockIndex);
   }
 
-  void onImgOptions(String src, String instruction, String messageId) {
-    imageGenActions.onImgOptions?.call(src, instruction, messageId);
+  void onImgOptions(
+    String src,
+    String instruction,
+    String messageId,
+    int? blockIndex,
+  ) {
+    imageGenActions.onImgOptions?.call(src, instruction, messageId, blockIndex);
   }
 
   void onImgCancel() {

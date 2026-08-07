@@ -415,6 +415,78 @@ void main() {
     });
   });
 
+  group('per-image blocks', () {
+    // Result, error and pending, in that document order. This is the numbering
+    // the webview stamps onto each rendered block as data-img-index.
+    const message =
+        '[IMG:RESULT:/one.png|{"prompt":"one"}] text '
+        '[IMG:ERROR:{"error":"boom","instruction":"{\\"prompt\\":\\"two\\"}"}] '
+        '[IMG:GEN:{"prompt":"three"}]';
+
+    test('scans every block once, in document order', () {
+      final blocks = ImageTagMarkup.scanImageBlocks(message);
+
+      expect(blocks.map((b) => b.kind), [
+        ImageBlockKind.result,
+        ImageBlockKind.error,
+        ImageBlockKind.pending,
+      ]);
+      expect(blocks[0].imagePath, '/one.png');
+      expect(blocks[1].asPendingTag, '[IMG:GEN:{"prompt":"two"}]');
+      expect(blocks[2].asPendingTag, '[IMG:GEN:{"prompt":"three"}]');
+    });
+
+    test('resetting the failed block leaves the finished image alone', () {
+      final result = ImageTagMarkup.resetImageBlockAt(message, 1);
+
+      expect(result, contains('[IMG:RESULT:/one.png|{"prompt":"one"}]'));
+      expect(result, contains('[IMG:GEN:{"prompt":"two"}]'));
+      expect(result, isNot(contains('[IMG:ERROR:')));
+      expect(result, contains('[IMG:GEN:{"prompt":"three"}]'));
+    });
+
+    test('rerolling a finished image only touches that image', () {
+      final result = ImageTagMarkup.resetImageBlockAt(message, 0);
+
+      expect(result, startsWith('[IMG:GEN:{"prompt":"one"}]'));
+      expect(result, contains('[IMG:ERROR:'));
+      expect(ImageTagMarkup.pendingImageGenTagCount(result), 2);
+    });
+
+    test('a block already waiting for its image is left as it is', () {
+      expect(ImageTagMarkup.resetImageBlockAt(message, 2), message);
+    });
+
+    test('an index outside the message changes nothing', () {
+      expect(ImageTagMarkup.resetImageBlockAt(message, 3), message);
+      expect(ImageTagMarkup.resetImageBlockAt(message, -1), message);
+    });
+
+    test('a recovered file is attached to the addressed block', () {
+      final result = ImageTagMarkup.replaceImageBlockWithResult(
+        message,
+        1,
+        '/found.png',
+      );
+
+      expect(result, contains('[IMG:RESULT:/found.png|{"prompt":"two"}]'));
+      expect(result, contains('[IMG:RESULT:/one.png|{"prompt":"one"}]'));
+      expect(result, contains('[IMG:GEN:{"prompt":"three"}]'));
+    });
+
+    test('block numbering survives HTML tags that have not resolved yet', () {
+      const mixed =
+          '[IMG:RESULT:/one.png|{"prompt":"one"}]'
+          """<img data-iig-instruction='{"prompt":"two"}' src="[IMG:GEN]">""";
+
+      final blocks = ImageTagMarkup.scanImageBlocks(mixed);
+      expect(blocks.map((b) => b.kind), [
+        ImageBlockKind.result,
+        ImageBlockKind.pending,
+      ]);
+    });
+  });
+
   group('generation order', () {
     // Answers 404 after a short delay and records how many requests were being
     // served at the same moment.

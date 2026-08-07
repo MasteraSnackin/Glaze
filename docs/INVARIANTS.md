@@ -104,6 +104,18 @@ span of a single tag. An image that fails, is cancelled, or is refused becomes
 `[IMG:ERROR:...]` carrying its original instruction — a block is never dropped
 from the message, so the UI can always offer a regenerate action for it.
 
+### INV-IG6: Image actions address one block, by document position
+
+`ImageTagMarkup.scanImageBlocks()` numbers every image block of a message —
+pending, finished and failed alike — in document order. The chat formatter
+stamps that same position on each rendered block as `data-img-index`, the
+webview sends it back with `onImgRetry` / `onImgFind` / `onImgRegen` /
+`onImgOptions`, and `ImageRecoveryService` resolves it through
+`resetImageBlockAt()` / `replaceImageBlockWithResult()`. A reroll therefore
+regenerates the tapped image only and leaves the other images of the message
+untouched. A missing index (markdown images) disables the generation actions
+rather than falling back to the whole message.
+
 ---
 
 ## 3. Summary Generation Invariants
