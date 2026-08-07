@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/platform/haptics.dart';
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../chat_provider.dart';
 import '../quick_replies_provider.dart';
 import 'drawer_panel_scaffold.dart';
@@ -66,126 +67,28 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
   }
 
   Future<void> _showEditSheet({QuickReply? existing}) async {
-    final labelCtrl = TextEditingController(text: existing?.label ?? '');
-    final textCtrl = TextEditingController(text: existing?.text ?? '');
-    final isNew = existing == null;
-    await showModalBottomSheet<void>(
-      context: context,
-      useRootNavigator: true,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (sheetCtx) {
-        return Padding(
-          padding: EdgeInsets.only(
-            bottom: MediaQuery.viewInsetsOf(sheetCtx).bottom,
-          ),
-          child: Container(
-            decoration: BoxDecoration(
-              color: context.cs.surfaceContainerHigh,
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(20),
-              ),
-            ),
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Center(
-                  child: Container(
-                    width: 32,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: context.cs.outlineVariant.withValues(alpha: 0.4),
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  isNew ? 'action_create_new'.tr() : 'action_edit'.tr(),
-                  style: TextStyle(
-                    fontSize: 17,
-                    fontWeight: FontWeight.w700,
-                    color: context.cs.onSurface,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: labelCtrl,
-                  autofocus: isNew,
-                  decoration: InputDecoration(
-                    labelText: 'label_block_name'.tr(),
-                    hintText: 'placeholder_block_name'.tr(),
-                    border: const OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: textCtrl,
-                  maxLines: 4,
-                  minLines: 2,
-                  decoration: InputDecoration(
-                    labelText: 'label_content'.tr(),
-                    hintText: 'placeholder_prompt_text'.tr(),
-                    border: const OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 20),
-                Row(
-                  children: [
-                    if (!isNew)
-                      TextButton.icon(
-                        onPressed: () async {
-                          Navigator.of(sheetCtx).pop();
-                          await _remove(existing.id);
-                        },
-                        icon: const Icon(
-                          Icons.delete_outline,
-                          color: Colors.redAccent,
-                        ),
-                        label: Text(
-                          'btn_delete'.tr(),
-                          style: const TextStyle(color: Colors.redAccent),
-                        ),
-                      ),
-                    const Spacer(),
-                    TextButton(
-                      onPressed: () => Navigator.of(sheetCtx).pop(),
-                      child: Text('btn_cancel'.tr()),
-                    ),
-                    const SizedBox(width: 8),
-                    FilledButton(
-                      onPressed: () async {
-                        final label = labelCtrl.text.trim();
-                        final text = textCtrl.text;
-                        if (label.isEmpty) return;
-                        Navigator.of(sheetCtx).pop();
-                        final notifier = ref.read(
-                          quickRepliesProvider.notifier,
-                        );
-                        if (isNew) {
-                          await notifier.add(label, text);
-                        } else {
-                          await notifier.edit(
-                            existing.id,
-                            label: label,
-                            text: text,
-                          );
-                        }
-                      },
-                      child: Text(isNew ? 'action_add'.tr() : 'btn_save'.tr()),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        );
-      },
+    final reply = existing;
+    final isNew = reply == null;
+    // Uses the shared Glaze sheet (glass surface + handle + header) instead of
+    // a bare Material sheet, which rendered as a plain light slab.
+    await GlazeBottomSheet.show<void>(
+      context,
+      title: isNew ? 'action_create_new'.tr() : 'action_edit'.tr(),
+      child: _QuickReplyEditForm(
+        initialLabel: reply?.label ?? '',
+        initialText: reply?.text ?? '',
+        isNew: isNew,
+        onSubmit: (label, text) async {
+          final notifier = ref.read(quickRepliesProvider.notifier);
+          if (isNew) {
+            await notifier.add(label, text);
+          } else {
+            await notifier.edit(reply.id, label: label, text: text);
+          }
+        },
+        onDelete: isNew ? null : () => _remove(reply.id),
+      ),
     );
-    labelCtrl.dispose();
-    textCtrl.dispose();
   }
 
   String _previewText(QuickReply reply) {
@@ -327,6 +230,128 @@ class _QuickRepliesPanelState extends ConsumerState<QuickRepliesPanel> {
         onToggleEditing: _toggleEditing,
       ),
       content: content,
+    );
+  }
+}
+
+/// Add / edit form for a single quick reply, hosted inside a
+/// [GlazeBottomSheet]. Owns its text controllers so the sheet can be dismissed
+/// (and the form disposed) without the caller having to keep them alive.
+class _QuickReplyEditForm extends StatefulWidget {
+  final String initialLabel;
+  final String initialText;
+  final bool isNew;
+  final Future<void> Function(String label, String text) onSubmit;
+  final Future<void> Function()? onDelete;
+
+  const _QuickReplyEditForm({
+    required this.initialLabel,
+    required this.initialText,
+    required this.isNew,
+    required this.onSubmit,
+    this.onDelete,
+  });
+
+  @override
+  State<_QuickReplyEditForm> createState() => _QuickReplyEditFormState();
+}
+
+class _QuickReplyEditFormState extends State<_QuickReplyEditForm> {
+  late final TextEditingController _labelCtrl;
+  late final TextEditingController _textCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _labelCtrl = TextEditingController(text: widget.initialLabel);
+    _textCtrl = TextEditingController(text: widget.initialText);
+  }
+
+  @override
+  void dispose() {
+    _labelCtrl.dispose();
+    _textCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final label = _labelCtrl.text.trim();
+    if (label.isEmpty) return;
+    final text = _textCtrl.text;
+    // Captured before the pop — this State is disposed by the time the write
+    // completes, so `widget` must not be touched afterwards.
+    final onSubmit = widget.onSubmit;
+    Navigator.of(context).pop();
+    await onSubmit(label, text);
+  }
+
+  Future<void> _delete() async {
+    final onDelete = widget.onDelete;
+    if (onDelete == null) return;
+    Navigator.of(context).pop();
+    await onDelete();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          TextField(
+            controller: _labelCtrl,
+            autofocus: widget.isNew,
+            textInputAction: TextInputAction.next,
+            decoration: InputDecoration(
+              labelText: 'label_block_name'.tr(),
+              hintText: 'placeholder_block_name'.tr(),
+              border: const OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _textCtrl,
+            maxLines: 4,
+            minLines: 2,
+            decoration: InputDecoration(
+              labelText: 'label_content'.tr(),
+              hintText: 'placeholder_prompt_text'.tr(),
+              border: const OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              if (widget.onDelete != null)
+                TextButton.icon(
+                  onPressed: _delete,
+                  icon: const Icon(
+                    Icons.delete_outline,
+                    color: Colors.redAccent,
+                  ),
+                  label: Text(
+                    'btn_delete'.tr(),
+                    style: const TextStyle(color: Colors.redAccent),
+                  ),
+                ),
+              const Spacer(),
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: Text('btn_cancel'.tr()),
+              ),
+              const SizedBox(width: 8),
+              FilledButton(
+                onPressed: _submit,
+                child: Text(
+                  widget.isNew ? 'action_add'.tr() : 'btn_save'.tr(),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }
