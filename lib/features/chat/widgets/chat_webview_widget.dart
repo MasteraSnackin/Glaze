@@ -46,7 +46,6 @@ class ChatWebViewWidget extends ConsumerStatefulWidget {
   final String? personaAvatarPath;
   final String? bgImagePath;
   final double bgBlur;
-  final double bgOpacity;
   final double bgNoiseOpacity;
   final double bgNoiseIntensity;
   final double bgDim;
@@ -135,7 +134,6 @@ class ChatWebViewWidget extends ConsumerStatefulWidget {
     this.personaAvatarPath,
     this.bgImagePath,
     this.bgBlur = 0.0,
-    this.bgOpacity = 1.0,
     this.bgNoiseOpacity = 0.0,
     this.bgNoiseIntensity = 1.0,
     this.bgDim = 0.0,
@@ -404,7 +402,6 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
           greetingTotal: widget.greetingTotal,
           bgImagePath: widget.bgImagePath,
           bgBlur: widget.bgBlur,
-          bgOpacity: widget.bgOpacity,
           bgNoiseOpacity: widget.bgNoiseOpacity,
           bgNoiseIntensity: widget.bgNoiseIntensity,
           chatFontName: widget.chatFontName,
@@ -828,7 +825,6 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       personaAvatarPath: w.personaAvatarPath,
       bgImagePath: w.bgImagePath,
       bgBlur: w.bgBlur,
-      bgOpacity: w.bgOpacity,
       bgDim: w.bgDim,
       bgNoiseOpacity: w.bgNoiseOpacity,
       bgNoiseIntensity: w.bgNoiseIntensity,
@@ -1080,7 +1076,6 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       sessionSwitching: _sessionSwitching,
       refreshPanel: _refreshExtBlocksPanel,
       bgImageBytes: bgImageBytes,
-      bgOpacity: widget.bgOpacity,
       bgBlur: widget.bgBlur,
       bgDim: widget.bgDim,
       chatBgMode: widget.chatBgMode,

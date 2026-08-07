@@ -472,16 +472,14 @@ class _GeneralTab extends StatelessWidget {
             if (preset.hasBgImage) ...[
               _SliderRow(
                 label: 'theme_dimming'.tr(),
-                // Slider reads as dimming amount (0 = no dim, 1 = full dim)
-                // but `bgOpacity` stores image visibility (1 - dimming).
-                value: 1.0 - preset.bgOpacity,
+                // 0 = untouched image, 1 = fully black overlay.
+                value: preset.bgDim,
                 min: 0,
                 max: 1,
                 divisions: 20,
                 unit: '%',
                 displayMultiplier: 100,
-                onChanged: (v) =>
-                    onUpdate((p) => p.copyWith(bgOpacity: 1.0 - v)),
+                onChanged: (v) => onUpdate((p) => p.copyWith(bgDim: v)),
               ),
               _SliderRow(
                 label: 'theme_bg_blur'.tr(),

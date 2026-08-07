@@ -269,6 +269,36 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
     final batterySaver = appSettings?.batterySaver ?? false;
     _drawerCtrl.setBatterySaverMode(batterySaver);
 
+    // Does the chat body paint a background *image* of its own? When it does,
+    // the scaffold's [GlazeBackground] underneath is dead work: the WebView's
+    // #bg-layer holds the visible copy and `ChatWebViewSurface._background`
+    // already covers the whole body with an opaque base + the same image, so
+    // the scaffold's copy decodes and paints a full-screen image nobody sees.
+    //
+    // Only the image case is dropped. Without one the WebView paints no
+    // background at all (#bg-layer goes `display: none`), so the colour comes
+    // from Flutter alone and the cheap scaffold layer stays as the safety net
+    // — as it does for the loading/error branches below, which render instead
+    // of the chat body and would otherwise sit on nothing.
+    final chatBg = batteryAware(
+      ref,
+      batterySaver,
+      themeProvider.select(
+        (t) => (
+          mode: t.activePreset.chatBgMode,
+          hasGlobalImage: t.activePreset.hasBgImage,
+          hasCustomImage: t.activePreset.hasChatBgImage,
+        ),
+      ),
+    );
+    final avatarPath = character?.avatarPath;
+    final bodyPaintsBgImage = switch (chatBg.mode) {
+      'color' => false,
+      'custom' => chatBg.hasCustomImage,
+      'avatar' => avatarPath != null && avatarPath.isNotEmpty,
+      _ => chatBg.hasGlobalImage,
+    };
+
     final keyboardHeight = MediaQuery.viewInsetsOf(context).bottom;
     _drawerCtrl.handleKeyboardFrame(keyboardHeight);
 
@@ -297,6 +327,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
       // second `PopScope` would fire alongside `onBack` and still navigate away
       // even after we dismissed an overlay. All back handling lives in `onBack`.
       child: GlazeScaffold(
+        // `_everBuiltBody` / `hasError`: the spinner and error branches below
+        // render instead of the chat body, so they still need the scaffold's
+        // background to sit on.
+        showBackground:
+            !(bodyPaintsBgImage && _everBuiltBody && !chatStateAsync.hasError),
         extendBodyBehindHeader: true,
         resizeToAvoidBottomInset: false,
         // The body is a full-screen chat WebView; the header's glass blur is
@@ -1058,7 +1093,6 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
     _blurSafeTop = MediaQuery.paddingOf(context).top;
 
     final bgBlur = preset.bgBlur > 0 ? preset.bgBlur : 0.0;
-    final bgOpacity = preset.bgOpacity.clamp(0.0, 1.0);
     final fontStyle = batteryAware(
       ref,
       batterySaverMode,
@@ -1294,10 +1328,9 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                         personaAvatarPath: effectivePersona?.avatarPath,
                         bgImagePath: bgPath,
                         bgBlur: bgBlur,
-                        bgOpacity: bgOpacity,
                         bgNoiseOpacity: preset.bgNoiseOpacity,
                         bgNoiseIntensity: preset.bgNoiseIntensity,
-                        bgDim: preset.bgDim,
+                        bgDim: preset.bgDim.clamp(0.0, 1.0),
                         chatBgMode: preset.chatBgMode,
                         chatBgColor: preset.chatBgColorParsed,
                         chatFontName: fontStyle.fontFamily,

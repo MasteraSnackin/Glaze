@@ -49,7 +49,6 @@ class ChatWebViewSurface extends ConsumerWidget {
     required this.sessionSwitching,
     required this.refreshPanel,
     required this.bgImageBytes,
-    required this.bgOpacity,
     required this.bgBlur,
     required this.bgDim,
     required this.chatBgMode,
@@ -72,7 +71,6 @@ class ChatWebViewSurface extends ConsumerWidget {
   final bool sessionSwitching;
   final Future<void> Function(String sessionId, String messageId) refreshPanel;
   final Uint8List? bgImageBytes;
-  final double bgOpacity;
   final double bgBlur;
   final double bgDim;
 
@@ -135,19 +133,19 @@ class ChatWebViewSurface extends ConsumerWidget {
       children: [
         ColoredBox(color: base),
         if (image != null) ...[
-          Opacity(
-            opacity: bgOpacity,
-            child: bgBlur > 0
-                ? ImageFiltered(
-                    imageFilter: ui.ImageFilter.blur(
-                      sigmaX: bgBlur,
-                      sigmaY: bgBlur,
-                      tileMode: TileMode.clamp,
-                    ),
-                    child: image,
-                  )
-                : image,
-          ),
+          if (bgBlur > 0)
+            ImageFiltered(
+              imageFilter: ui.ImageFilter.blur(
+                sigmaX: bgBlur,
+                sigmaY: bgBlur,
+                tileMode: TileMode.clamp,
+              ),
+              child: image,
+            )
+          else
+            image,
+          // Darkening only — the image itself stays opaque so the theme
+          // surface under it never bleeds through.
           if (bgDim > 0)
             Container(color: Colors.black.withValues(alpha: bgDim)),
         ],

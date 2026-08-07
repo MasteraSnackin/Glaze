@@ -1494,7 +1494,7 @@ class Bridge {
     this._editController.stopEdit(messageId);
   }
 
-  setBackgroundImage(url, blur, opacity) {
+  setBackgroundImage(url, blur) {
     // Background is handled by Flutter layer behind the transparent WebView.
   }
 

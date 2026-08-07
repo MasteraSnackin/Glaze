@@ -1173,7 +1173,7 @@ export class Bridge {
     this._editController.stopEdit(messageId);
   }
 
-  setBackgroundImage(url, blur, opacity) {
+  setBackgroundImage(url, blur) {
     // Duplicate the app background inside the WebView so its own
     // backdrop-filter blur regions have real pixels to sample — CSS
     // backdrop-filter can't see the natively-composited Flutter layer
@@ -1201,8 +1201,10 @@ export class Bridge {
       document.body.insertBefore(bg, document.body.firstChild);
     }
     bg.style.display = 'block';
-    const op = opacity == null ? 1 : Math.max(0, Math.min(1, Number(opacity)));
-    bg.style.opacity = op;
+    // The layer stays fully opaque: darkening is the `--bg-dim` overlay in
+    // #bg-layer::after. Fading the layer itself would let the transparent
+    // WebView show the Flutter background painted behind it.
+    bg.style.opacity = '';
 
     const b = Math.max(0, Number(blur) || 0);
     if (b <= 0) {

@@ -28,30 +28,41 @@ class GlazeBackground extends ConsumerWidget {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          if (bytes != null)
+          if (bytes != null) ...[
             Positioned.fill(
-              child: Opacity(
-                opacity: preset.bgOpacity.clamp(0.0, 1.0),
-                child: !batterySaver && preset.bgBlur > 0
-                    ? ImageFiltered(
-                        imageFilter: ImageFilter.blur(
-                          sigmaX: preset.bgBlur,
-                          sigmaY: preset.bgBlur,
-                          tileMode: TileMode.clamp,
-                        ),
-                        child: Image.memory(
-                          bytes,
-                          fit: BoxFit.cover,
-                          gaplessPlayback: true,
-                        ),
-                      )
-                    : Image.memory(
+              child: !batterySaver && preset.bgBlur > 0
+                  ? ImageFiltered(
+                      imageFilter: ImageFilter.blur(
+                        sigmaX: preset.bgBlur,
+                        sigmaY: preset.bgBlur,
+                        tileMode: TileMode.clamp,
+                      ),
+                      child: Image.memory(
                         bytes,
                         fit: BoxFit.cover,
                         gaplessPlayback: true,
                       ),
-              ),
+                    )
+                  : Image.memory(
+                      bytes,
+                      fit: BoxFit.cover,
+                      gaplessPlayback: true,
+                    ),
             ),
+            // Darken the image with a black overlay instead of fading it out:
+            // a translucent image would let [base] (and, in the chat, the
+            // Flutter surface behind the transparent WebView) bleed through.
+            if (preset.bgDim > 0)
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: ColoredBox(
+                    color: Colors.black.withValues(
+                      alpha: preset.bgDim.clamp(0.0, 1.0),
+                    ),
+                  ),
+                ),
+              ),
+          ],
           if (!batterySaver && preset.bgNoiseOpacity > 0)
             Positioned.fill(
               child: IgnorePointer(

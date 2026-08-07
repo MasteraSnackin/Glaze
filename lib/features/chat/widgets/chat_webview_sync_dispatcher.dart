@@ -248,13 +248,8 @@ class ChatWebViewSyncDispatcher {
   }) {
     if (current.bgImagePath != old.bgImagePath ||
         current.bgBlur != old.bgBlur ||
-        current.bgOpacity != old.bgOpacity ||
         current.bgDim != old.bgDim) {
-      bridge.setBackgroundImage(
-        current.bgImagePath,
-        current.bgBlur.toInt(),
-        current.bgOpacity,
-      );
+      bridge.setBackgroundImage(current.bgImagePath, current.bgBlur.toInt());
       bridge.applyTheme({'bg-dim': current.bgDim.toStringAsFixed(2)});
     }
   }
@@ -498,7 +493,6 @@ class ChatWebViewWidgetFields {
     required this.personaAvatarPath,
     required this.bgImagePath,
     required this.bgBlur,
-    required this.bgOpacity,
     required this.bgDim,
     required this.bgNoiseOpacity,
     required this.bgNoiseIntensity,
@@ -553,7 +547,6 @@ class ChatWebViewWidgetFields {
   final String? personaAvatarPath;
   final String? bgImagePath;
   final double bgBlur;
-  final double bgOpacity;
   final double bgDim;
   final double bgNoiseOpacity;
   final double bgNoiseIntensity;
