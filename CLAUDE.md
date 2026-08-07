@@ -188,7 +188,6 @@ When editing files matching a pattern below, READ the corresponding rule file FI
 - Mutate state directly — use immutable patterns with freezed
 - Forget `ref.watch` select for streaming UI (causes full rebuild per chunk)
 - Commit directly to `nightly`, `staging` or `stable` — always use a feature branch
-- Use the `gh` CLI — GitHub operations go through GitHub MCP tools
 - Bypass `_requireCapability` in the JS bridge — every `glaze.*` method must enforce the matching capability (default-deny)
 - Run user JS in a same-origin iframe — panel/sandbox scripts go in `sandbox="allow-scripts"` (no `allow-same-origin`)
 - Read-modify-write a `ChatSession` / `Character` from outside the dedicated atomic repo methods (chat/character variable scopes)
