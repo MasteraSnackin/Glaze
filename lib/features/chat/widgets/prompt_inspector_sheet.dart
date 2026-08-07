@@ -1,6 +1,7 @@
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
+import '../../../shared/widgets/glaze_tab_bar.dart';
 import '../../../shared/widgets/sheet_view.dart';
 import 'tokenizer_sheet.dart';
 import 'prompt_preview_screen.dart';
@@ -60,25 +61,17 @@ class _PromptInspectorSheetState extends State<PromptInspectorSheet> {
       showBack: true,
       startExpanded: true,
       onBack: () => Navigator.of(context).maybePop(),
-      tabs: [
-        SheetViewTab(
-          id: PromptInspectorSheet._tabContext,
-          label: 'tab_context'.tr(),
-          icon: Icons.segment,
-        ),
-        SheetViewTab(
-          id: PromptInspectorSheet._tabPreview,
-          label: 'tab_request'.tr(),
-          icon: Icons.visibility,
-        ),
-        SheetViewTab(
-          id: PromptInspectorSheet._tabCoverage,
-          label: 'tab_coverage'.tr(),
-          icon: Icons.search,
-        ),
-      ],
-      activeTabId: _activeTabId,
-      onTabSelected: (id) => setState(() => _activeTabId = id),
+      // Glaze's segmented control instead of SheetView's plain tab pills, so
+      // the inspector matches the tab strip used by the rest of the app.
+      headerBottom: GlazeTabBar(
+        tabs: [
+          GlazeTabItem(label: 'tab_context'.tr(), icon: Icons.segment),
+          GlazeTabItem(label: 'tab_request'.tr(), icon: Icons.visibility),
+          GlazeTabItem(label: 'tab_coverage'.tr(), icon: Icons.search),
+        ],
+        activeIndex: _activeIndex,
+        onChanged: (i) => setState(() => _activeTabId = _order[i]),
+      ),
       body: body,
     );
   }
