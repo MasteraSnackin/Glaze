@@ -18,6 +18,8 @@ import 'manual_rewrite_service.dart';
 
 const _writerMaxTokens = 20000;
 
+enum AutomatedCardEvolutionStage { observation, cardRewriter }
+
 /// Dedicated review-only automation lane. Claim and final commit are repository
 /// operations; the only work between them is shared-context prompt assembly and
 /// two bounded, cancellable writer calls.
@@ -51,19 +53,26 @@ class AutomatedCardEvolutionService {
   final Map<String, CancelToken> _tokens = {};
   final Map<String, Future<CardEvolutionFinalizeOutcome>> _inFlight = {};
 
-  Future<CardEvolutionFinalizeOutcome> runOneBatch(String sessionId) {
+  Future<CardEvolutionFinalizeOutcome> runOneBatch(
+    String sessionId, {
+    void Function(AutomatedCardEvolutionStage stage)? onStage,
+  }) {
     if (isEnabled?.call() == false) {
       return Future.value(const CardEvolutionFinalizeOutcome('disabled'));
     }
     final active = _inFlight[sessionId];
     if (active != null) return active;
-    final future = _run(sessionId);
+    final future = _run(sessionId, onStage: onStage);
     _inFlight[sessionId] = future;
     return future.whenComplete(() => _inFlight.remove(sessionId));
   }
 
-  Future<CardEvolutionFinalizeOutcome> _run(String sessionId) async {
-    await _maybeRunObservationPass(sessionId);
+  Future<CardEvolutionFinalizeOutcome> _run(
+    String sessionId, {
+    void Function(AutomatedCardEvolutionStage stage)? onStage,
+  }) async {
+    await _maybeRunObservationPass(sessionId, onStage: onStage);
+    onStage?.call(AutomatedCardEvolutionStage.cardRewriter);
     final owner = 'evolution-owner-${generateId()}';
     final now = currentTimestampSeconds();
     final claimed = await repo.claim(
@@ -256,11 +265,15 @@ class AutomatedCardEvolutionService {
   /// Runs the observation pass when the cadence gate is active (every 2nd
   /// successful reconciliation). Failures are non-blocking: the card writer
   /// continues without validated targets.
-  Future<void> _maybeRunObservationPass(String sessionId) async {
+  Future<void> _maybeRunObservationPass(
+    String sessionId, {
+    void Function(AutomatedCardEvolutionStage stage)? onStage,
+  }) async {
     try {
       final count = await repo.countSuccessfulReconciliations(sessionId);
       if (count == 0 || count % 2 != 0) return;
       final runOrdinal = count ~/ 2;
+      onStage?.call(AutomatedCardEvolutionStage.observation);
       await _runObservationPass(sessionId, runOrdinal);
       await _checkPromotionsAndExpiry(sessionId, runOrdinal);
     } catch (_) {
