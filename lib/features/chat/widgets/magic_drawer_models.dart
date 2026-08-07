@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../../../core/models/api_config.dart';
 import '../../../core/models/character.dart';
 import '../../../core/models/chat_message.dart';
-import '../../../core/models/lorebook.dart';
 import '../../../core/models/persona.dart';
 import '../../../core/models/preset.dart';
 
@@ -60,7 +59,6 @@ class MagicDrawerStats {
   final int vectorLoreTokens;
   final int keywordLoreTokens;
   final bool imageGenEnabled;
-  final List<Lorebook> lorebooks;
   final String? summaryContent;
   final String? memoryContent;
   final String? memoryMacroContent;
@@ -93,7 +91,6 @@ class MagicDrawerStats {
     this.vectorLoreTokens = 0,
     this.keywordLoreTokens = 0,
     this.imageGenEnabled = false,
-    this.lorebooks = const [],
     this.summaryContent,
     this.memoryContent,
     this.memoryMacroContent,
@@ -138,13 +135,14 @@ class MagicDrawerStats {
       vectorLoreTokens: vectorLoreTokens ?? this.vectorLoreTokens,
       keywordLoreTokens: keywordLoreTokens ?? this.keywordLoreTokens,
       imageGenEnabled: imageGenEnabled,
-      lorebooks: lorebooks,
       summaryContent: summaryContent,
       memoryContent: memoryContent,
       memoryMacroContent: memoryMacroContent,
       memoryInjectionTarget: memoryInjectionTarget,
       memoryCoverage: memoryCoverage,
       triggeredMemories: triggeredMemories,
+      extBlocksEnabled: extBlocksEnabled,
+      extBlocksActivePresetName: extBlocksActivePresetName,
     );
   }
 }

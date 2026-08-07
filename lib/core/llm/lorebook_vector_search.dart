@@ -6,6 +6,7 @@ import '../utils/cast_helpers.dart';
 import 'package:dio/dio.dart';
 import 'embedding_service.dart';
 import 'embedding_types.dart';
+import 'lorebook_activation.dart';
 import 'lorebook_embedding_service.dart';
 import 'vector_math.dart';
 
@@ -42,32 +43,13 @@ class LorebookVectorSearch {
   }) async {
     if (settings.searchType == 'keyword') return [];
 
-    final charId = character?.id;
-    final activeLorebooks = lorebooks.where((lb) {
-      if (lb.enabled) return true;
-      if (charId != null &&
-          activations?.character[charId]?.contains(lb.id) == true) {
-        return true;
-      }
-      if (chatId != null &&
-          activations?.chat[chatId]?.contains(lb.id) == true) {
-        return true;
-      }
-      if (charId != null &&
-          lb.activationScope == 'character' &&
-          lb.activationTargetId == charId) {
-        return true;
-      }
-      if (chatId != null &&
-          lb.activationScope == 'chat' &&
-          lb.activationTargetId == chatId) {
-        return true;
-      }
-      if (charWorld != null && charWorld.isNotEmpty && lb.name == charWorld) {
-        return true;
-      }
-      return false;
-    }).toList();
+    final activeLorebooks = activeLorebooksFor(
+      lorebooks: lorebooks,
+      charId: character?.id,
+      charWorld: charWorld,
+      chatId: chatId,
+      activations: activations,
+    );
 
     activeLorebooks.removeWhere((lb) {
       final lbSettings = lb.settings;

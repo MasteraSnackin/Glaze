@@ -4,6 +4,7 @@ import '../models/character.dart';
 import '../models/chat_message.dart';
 import '../models/lorebook.dart';
 import 'glaze_matcher.dart';
+import 'lorebook_activation.dart';
 
 final _rng = Random();
 
@@ -67,33 +68,13 @@ List<ScannedEntry> scanLorebooks({
 }) {
   if (globalSettings.searchType == 'vector') return [];
 
-  final charId = char?.id;
-  final charWorld = char?.world;
-
-  final activeLorebooks = lorebooks.where((lb) {
-    if (lb.enabled) return true;
-    if (charId != null &&
-        activations.character[charId]?.contains(lb.id) == true) {
-      return true;
-    }
-    if (chatId != null && activations.chat[chatId]?.contains(lb.id) == true) {
-      return true;
-    }
-    if (charId != null &&
-        lb.activationScope == 'character' &&
-        lb.activationTargetId == charId) {
-      return true;
-    }
-    if (chatId != null &&
-        lb.activationScope == 'chat' &&
-        lb.activationTargetId == chatId) {
-      return true;
-    }
-    if (charWorld != null && charWorld.isNotEmpty && lb.name == charWorld) {
-      return true;
-    }
-    return false;
-  }).toList();
+  final activeLorebooks = activeLorebooksFor(
+    lorebooks: lorebooks,
+    charId: char?.id,
+    charWorld: char?.world,
+    chatId: chatId,
+    activations: activations,
+  );
 
   if (activeLorebooks.isEmpty) return [];
 

@@ -45,6 +45,7 @@ import '../services/magic_drawer_stats_service.dart';
 import 'magic_drawer_widgets.dart';
 import 'memory_sheet.dart';
 import 'prompt_inspector_sheet.dart';
+import '../state/magic_drawer_stats_cache.dart';
 import '../state/token_breakdown_cache.dart';
 import '../../glossary/glossary_sheet.dart';
 import '../../extensions/models/extension_preset.dart';
@@ -190,6 +191,20 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
   @override
   void initState() {
     super.initState();
+    // Stale-while-revalidate. The panel is destroyed on every drawer close, so
+    // without a cache each open would sit behind the spinner until a full
+    // layout read and stats recomputation finished. Paint the previous
+    // snapshot right away instead; _loadDrawer() refreshes it underneath.
+    final cachedLayout = ref.read(magicDrawerLayoutCacheProvider);
+    if (cachedLayout != null) {
+      _itemIds.addAll(cachedLayout.itemIds);
+      _deletedIds.addAll(cachedLayout.deletedIds);
+    }
+    final cachedStats = ref.read(magicDrawerStatsCacheProvider(widget.charId));
+    if (cachedStats != null) _stats = cachedStats;
+    // The spinner is now only for the first open of an app run, when there is
+    // genuinely nothing to show.
+    _loading = cachedLayout == null || cachedStats == null;
     _loadDrawer();
   }
 
@@ -224,10 +239,21 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
     _itemIds
       ..clear()
       ..addAll(layout.itemIds);
+    if (mounted) _cacheLayout();
   }
 
   Future<void> _saveLayout() async {
+    _cacheLayout();
     await MagicDrawerLayoutService(ref).saveLayout(_itemIds, _deletedIds);
+  }
+
+  /// Keeps the app-scoped layout cache in step with the local lists, so the
+  /// next open starts from the order the user is looking at right now.
+  void _cacheLayout() {
+    ref.read(magicDrawerLayoutCacheProvider.notifier).state = (
+      itemIds: List<String>.unmodifiable(_itemIds),
+      deletedIds: Set<String>.unmodifiable(_deletedIds),
+    );
   }
 
   Future<void> _loadStats() async {
@@ -235,7 +261,14 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
     final stats = await MagicDrawerStatsService(
       ref,
     ).computeStats(widget.charId);
-    if (request == _statsRequest) _stats = stats;
+    if (request != _statsRequest) return;
+    _stats = stats;
+    // The drawer can be closed mid-load, which disposes this state and with it
+    // `ref` — only touch the cache while still mounted.
+    if (mounted) {
+      ref.read(magicDrawerStatsCacheProvider(widget.charId).notifier).state =
+          stats;
+    }
   }
 
   void _scheduleTokenStats() {
@@ -261,6 +294,8 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
       return;
     }
     if (!mounted || request != _statsRequest) return;
+    ref.read(magicDrawerStatsCacheProvider(widget.charId).notifier).state =
+        updated;
     setState(() {
       _stats = updated;
       _loadingTokens = false;

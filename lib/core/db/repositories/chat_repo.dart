@@ -51,6 +51,20 @@ class ChatRepo implements SyncChatStore {
     return rows.map(_toMetadata).toList();
   }
 
+  /// How many chat sessions one character has, aggregated in SQL.
+  ///
+  /// The Quick Access session card needs the number and nothing else;
+  /// [getByCharacterId] would decode every message of every session just to
+  /// read `.length` off the result.
+  Future<int> countByCharacterId(String charId) async {
+    final countExpr = _db.chatSessions.sessionId.count();
+    final query = _db.selectOnly(_db.chatSessions)
+      ..addColumns([countExpr])
+      ..where(_db.chatSessions.characterId.equals(charId));
+    final row = await query.getSingleOrNull();
+    return row?.read(countExpr) ?? 0;
+  }
+
   /// Number of chat sessions per character id, aggregated in SQL.
   ///
   /// Feeds the variations sheet, where "how many chats does this variation
