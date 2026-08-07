@@ -95,6 +95,7 @@ flutter analyze 2>&1 | Tee-Object -FilePath analyze_full.txt -Encoding UTF8; Get
 ## Code Conventions
 
 ### Flutter Widgets
+- **Build on the Glaze UI kit** (`lib/shared/widgets/`) — `GlazeScaffold`, `SheetView` / `GlazeBottomSheet`, `GlazeTabBar`, `GlassSurface`, `MenuGroup`, `GlazeToast`… Reach for bare Material only when the kit has no equivalent. What-instead-of-what table: `docs/UI_KIT.md`
 - **ConsumerWidget / ConsumerStatefulWidget** for anything that reads Riverpod
 - **StatelessWidget / StatefulWidget** for pure UI with no state
 - Keep widgets small — extract sub-widgets when > 200 lines
@@ -164,6 +165,7 @@ When editing files matching a pattern below, READ the corresponding rule file FI
 | Custom `==...==` markdown markers, message rendering | `docs/markdown-markers.md` |
 | Windows/build failures, dependency overrides | `docs/BUILD_NOTES.md` |
 | Class/file organization, decomposition | `docs/CODE_STYLE.md` |
+| Any screen, sheet or dialog — which widget to reach for | `docs/UI_KIT.md` |
 | JS extension bridge (`glaze.*`), panel iframe, headless engine, capability permissions, periodic/afterUser triggers, `executeCommand`, audio, connection profiles | `docs/ARCHITECTURE.md` § 9 + `docs/INVARIANTS.md` (INV-EG1–8, INV-JS1–6) |
 | Variable storage (`chat` / `character` / `global` / `message` scopes) | `docs/rules/database.md` (atomic repo methods) |
 | Build channels, dev-mode / watermark defaults, `--dart-define` wiring | `docs/RELEASE_CHANNELS.md` |
@@ -187,6 +189,7 @@ When editing files matching a pattern below, READ the corresponding rule file FI
 - Store API keys in plain text in Drift
 - Mutate state directly — use immutable patterns with freezed
 - Forget `ref.watch` select for streaming UI (causes full rebuild per chunk)
+- Build a screen or sheet on bare Material (`TabBar`, `Card`, `OutlinedButton`, `Chip`, `SnackBar`, `AlertDialog`…) when `lib/shared/widgets/` has the Glaze equivalent — check `docs/UI_KIT.md` first
 - Commit directly to `nightly`, `staging` or `stable` — always use a feature branch
 - Bypass `_requireCapability` in the JS bridge — every `glaze.*` method must enforce the matching capability (default-deny)
 - Run user JS in a same-origin iframe — panel/sandbox scripts go in `sandbox="allow-scripts"` (no `allow-same-origin`)
