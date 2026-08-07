@@ -9,6 +9,7 @@ import '../../core/state/character_provider.dart';
 import '../../core/state/chat_session_ops_provider.dart';
 import '../../shared/widgets/connection_sheet_widgets.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/help_tip.dart';
 import '../../shared/widgets/sheet_view.dart';
 import '../../shared/widgets/glaze_toast.dart';
@@ -40,7 +41,7 @@ class _PresetConnectionsSheetState
         .toList();
 
     return presetsAsync.when(
-      loading: () => const Center(child: CircularProgressIndicator()),
+      loading: () => const Center(child: GlazeSpinner()),
       error: (error, stack) => Center(child: Text("${'title_error'.tr()}: $error")),
       data: (presets) {
         final preset = presets.where((p) => p.id == widget.presetId).firstOrNull

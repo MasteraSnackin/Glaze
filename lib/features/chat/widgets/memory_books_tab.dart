@@ -11,6 +11,7 @@ import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glass_surface.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glaze_error_dialog.dart';
+import '../../../shared/widgets/glaze_spinner.dart';
 import '../../../shared/widgets/glaze_tab_bar.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../../../shared/widgets/swipe_tab_switcher.dart';
@@ -132,7 +133,7 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
   Widget build(BuildContext context) {
     final book = _ctrl.book;
     final loading = _ctrl.loading || book == null;
-    if (loading) return const Center(child: CircularProgressIndicator());
+    if (loading) return const Center(child: GlazeSpinner());
 
     // Studio Ledger entries (`source == 'studio_ledger'`) are legacy and
     // excluded from the UI — they were removed from the injection pipeline.

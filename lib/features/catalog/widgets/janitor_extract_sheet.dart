@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/glaze_spinner.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../../../core/llm/tokenizer.dart';
 import '../services/janitor_extractor.dart';
@@ -169,8 +170,7 @@ class _JanitorExtractSheetState extends ConsumerState<_JanitorExtractSheet> {
                     SizedBox(
                       width: 18,
                       height: 18,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: cs.primary),
+                      child: GlazeSpinner(color: cs.primary),
                     ),
                     const SizedBox(width: 12),
                     Expanded(

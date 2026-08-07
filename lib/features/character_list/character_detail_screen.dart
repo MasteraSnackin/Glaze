@@ -15,6 +15,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/models/character.dart';
 import '../../core/services/chat_import_export.dart';
+import '../../shared/widgets/glaze_spinner.dart';
 import '../catalog/services/janitor_provider.dart';
 import '../catalog/services/janitor_public_lorebook.dart';
 import '../catalog/widgets/janitor_comments_section.dart';
@@ -147,7 +148,7 @@ class _CharacterDetailSheetLauncherState
   Widget build(BuildContext context) {
     return const Scaffold(
       backgroundColor: Colors.transparent,
-      body: Center(child: CircularProgressIndicator()),
+      body: Center(child: GlazeSpinner()),
     );
   }
 }
@@ -734,7 +735,7 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
     Character? char,
   ) {
     if (!widget.isPreview && charactersAsync.isLoading && char == null) {
-      return const Center(child: CircularProgressIndicator());
+      return const Center(child: GlazeSpinner());
     }
     if (char == null) {
       return Center(
@@ -956,10 +957,7 @@ class _ImportFab extends StatelessWidget {
               const SizedBox(
                 width: 18,
                 height: 18,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2.5,
-                  color: Colors.white,
-                ),
+                child: GlazeSpinner(color: Colors.white),
               )
             else
               const Icon(Icons.download_rounded, color: Colors.white, size: 20),

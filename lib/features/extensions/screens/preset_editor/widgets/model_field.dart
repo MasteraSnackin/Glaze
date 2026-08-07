@@ -5,6 +5,7 @@ import '../../../../../core/llm/sse_client.dart';
 import '../../../../../core/models/api_config.dart';
 import '../../../../../shared/theme/app_colors.dart';
 import '../../../../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../../../../shared/widgets/glaze_spinner.dart';
 import '../../../../../shared/widgets/glaze_toast.dart';
 import '../../../../settings/api_list_provider.dart';
 
@@ -124,10 +125,7 @@ class ModelField extends ConsumerWidget {
               ? SizedBox(
                   width: 16,
                   height: 16,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: context.cs.primary,
-                  ),
+                  child: GlazeSpinner(color: context.cs.primary),
                 )
               : Icon(
                   Icons.download_rounded,

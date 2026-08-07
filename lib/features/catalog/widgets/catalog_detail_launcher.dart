@@ -6,6 +6,7 @@ import '../../../core/models/character.dart';
 import '../../../core/utils/error_format.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_error_dialog.dart';
+import '../../../shared/widgets/glaze_spinner.dart';
 import '../../character_list/character_detail_screen.dart';
 import '../../settings/app_settings_provider.dart';
 import '../catalog_models.dart';
@@ -244,7 +245,7 @@ class _LoadingView extends StatelessWidget {
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       child: Center(
-        child: CircularProgressIndicator(color: context.cs.primary),
+        child: GlazeSpinner(color: context.cs.primary),
       ),
     );
   }

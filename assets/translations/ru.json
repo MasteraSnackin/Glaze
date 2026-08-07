@@ -1785,6 +1785,7 @@
   "studio_hint": "Мульти-агентный конвейер: отслеживает состояние, чистит ответы и управляет памятью после каждого хода.",
   "menu_hide_build_date_watermark": "Скрыть водяной знак даты сборки",
   "menu_menu_group_demo": "Демо MenuGroup",
+  "menu_spinner_demo": "Демо спиннера",
   "menu_menu_title": "Меню",
   "menu_test_error_dialog": "Тест диалога ошибки",
   "regex_depth_range": "Диапазон глубины",

@@ -11,6 +11,7 @@ import '../../../core/services/file_export_service.dart';
 import '../../../core/state/lorebook_provider.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../../shared/widgets/glaze_spinner.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../../settings/app_settings_provider.dart';
 import '../janitor_account_provider.dart';
@@ -503,10 +504,7 @@ class _JanitorLorebooksTabState extends ConsumerState<JanitorLorebooksTab> {
               SizedBox(
                 width: 14,
                 height: 14,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: cs.primary,
-                ),
+                child: GlazeSpinner(color: cs.primary),
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -599,10 +597,7 @@ class _JanitorLorebooksTabState extends ConsumerState<JanitorLorebooksTab> {
                             const SizedBox(
                               width: 14,
                               height: 14,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
+                              child: GlazeSpinner(color: Colors.white),
                             ),
                             const SizedBox(width: 8),
                             Text('Building… ${_elapsed}s'),
@@ -793,7 +788,7 @@ class _PublicSection extends StatelessWidget {
           SizedBox(
             width: 16,
             height: 16,
-            child: CircularProgressIndicator(strokeWidth: 2, color: cs.primary),
+            child: GlazeSpinner(color: cs.primary),
           ),
           const SizedBox(width: 12),
           Text(
@@ -918,10 +913,7 @@ class _PublicRow extends StatelessWidget {
               child: SizedBox(
                 width: 18,
                 height: 18,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: cs.primary,
-                ),
+                child: GlazeSpinner(color: cs.primary),
               ),
             )
           else
@@ -1027,10 +1019,7 @@ class _RebuildAllButton extends StatelessWidget {
             ? const SizedBox(
                 width: 16,
                 height: 16,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: Colors.white,
-                ),
+                child: GlazeSpinner(color: Colors.white),
               )
             : const Icon(Icons.auto_fix_high_rounded, size: 18),
         label: Text(

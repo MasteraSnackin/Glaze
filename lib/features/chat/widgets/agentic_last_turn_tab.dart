@@ -7,6 +7,7 @@ import '../../../core/models/chat_message.dart';
 import '../../../core/models/tracker.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/glaze_spinner.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../services/manual_studio_ledger_service.dart';
 import '../state/agent_operations_log_provider.dart';
@@ -82,9 +83,7 @@ class _AgenticLastTurnTabState extends ConsumerState<AgenticLastTurnTab> {
                             ? const SizedBox(
                                 width: 14,
                                 height: 14,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
+                                child: GlazeSpinner(),
                               )
                             : const Icon(Icons.rule_folder_outlined, size: 16),
                         label: const Text('Run reconciliation'),
@@ -100,9 +99,7 @@ class _AgenticLastTurnTabState extends ConsumerState<AgenticLastTurnTab> {
                             ? const SizedBox(
                                 width: 14,
                                 height: 14,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
+                                child: GlazeSpinner(),
                               )
                             : const Icon(Icons.replay_outlined, size: 16),
                         label: const Text('Rerun Studio Ledger'),

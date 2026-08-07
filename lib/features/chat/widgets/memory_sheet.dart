@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/state/summary_providers.dart';
+import '../../../shared/widgets/glaze_spinner.dart';
 import '../../../shared/widgets/glaze_tab_bar.dart';
 import '../../../shared/widgets/sheet_view.dart';
 import '../chat_provider.dart';
@@ -105,7 +106,7 @@ class _MemorySheetState extends ConsumerState<MemorySheet> {
           _summaryToggle(session.id),
       ],
       body: session == null || tab == null
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(child: GlazeSpinner())
           : IndexedStack(
               index: tab.index,
               sizing: StackFit.expand,

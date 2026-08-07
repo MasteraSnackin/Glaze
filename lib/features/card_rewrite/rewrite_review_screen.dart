@@ -11,6 +11,7 @@ import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glass_surface.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/glaze_scaffold.dart';
+import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import 'rewrite_review_provider.dart';
 import 'widgets/rewrite_operation_card.dart';
@@ -44,7 +45,7 @@ class RewriteReviewScreen extends ConsumerWidget {
       title: 'rewrite_title'.tr(),
       onBack: () => context.go(backLocation),
       body: snapshot.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
+        loading: () => const Center(child: GlazeSpinner()),
         error: (_, _) => _MessageState(
           icon: Icons.error_outline,
           text: 'rewrite_load_failed'.tr(),

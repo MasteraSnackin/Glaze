@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/glaze_spinner.dart';
 import '../../../shared/widgets/top_edge_blur.dart';
 
 /// Shared shell for bottom slide-up panels (Magic Drawer, Quick Replies).
@@ -61,7 +62,7 @@ class DrawerPanelScaffold extends StatelessWidget {
             const Positioned.fill(
               child: ColoredBox(
                 color: Color(0x22000000),
-                child: Center(child: CircularProgressIndicator()),
+                child: Center(child: GlazeSpinner()),
               ),
             ),
         ],

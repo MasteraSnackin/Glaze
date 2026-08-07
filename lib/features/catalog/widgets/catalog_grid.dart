@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../../shared/widgets/glaze_spinner.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../../chat/bridge/chat_webview_environment.dart';
 import '../../settings/app_settings_provider.dart';
@@ -273,10 +274,7 @@ class CatalogGrid extends ConsumerWidget {
                   child: SizedBox(
                     width: 28,
                     height: 28,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2.5,
-                      color: context.cs.primary,
-                    ),
+                    child: GlazeSpinner(color: context.cs.primary),
                   ),
                 ),
               ),

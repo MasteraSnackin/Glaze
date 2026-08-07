@@ -10,6 +10,7 @@ import 'package:go_router/go_router.dart';
 import '../../../core/services/character_import_persistence_coordinator.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/glaze_spinner.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../../character_list/character_import_persistence_provider.dart';
 import '../../settings/app_settings_provider.dart';
@@ -85,10 +86,7 @@ class _ImportUrlDialogState extends ConsumerState<ImportUrlDialog> {
                 SizedBox(
                   width: 20,
                   height: 20,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: context.cs.primary,
-                  ),
+                  child: GlazeSpinner(color: context.cs.primary),
                 ),
                 const SizedBox(width: 12),
                 Expanded(

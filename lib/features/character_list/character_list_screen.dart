@@ -24,6 +24,7 @@ import '../../shared/shell/shell_header_provider.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glass_surface.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/glaze_tab_bar.dart';
 import '../../shared/widgets/swipe_tab_switcher.dart';
 import '../../shared/widgets/tab_slide_switcher.dart';
@@ -569,7 +570,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
 
     return infinite.when(
       loading: () =>
-          Center(child: CircularProgressIndicator(color: context.cs.primary)),
+          Center(child: GlazeSpinner(color: context.cs.primary)),
       error: (e, _) => Center(
         child: Text(
           '${'title_error'.tr()}: $e',
@@ -678,7 +679,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
     final chars = ref.watch(charactersProvider);
     return chars.when(
       loading: () =>
-          Center(child: CircularProgressIndicator(color: context.cs.primary)),
+          Center(child: GlazeSpinner(color: context.cs.primary)),
       error: (e, _) => Center(
         child: Text(
           '${'title_error'.tr()}: $e',
@@ -763,7 +764,7 @@ class _CharacterListScreenState extends ConsumerState<CharacterListScreen>
     final chars = ref.watch(charactersProvider);
     return chars.when(
       loading: () =>
-          Center(child: CircularProgressIndicator(color: context.cs.primary)),
+          Center(child: GlazeSpinner(color: context.cs.primary)),
       error: (e, _) => Center(
         child: Text(
           '${'title_error'.tr()}: $e',

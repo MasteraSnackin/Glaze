@@ -14,6 +14,7 @@ import '../../../shared/shell/shell_header_provider.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_error_dialog.dart';
 import '../../../shared/widgets/glaze_toast.dart';
+import '../../shared/widgets/glaze_spinner.dart';
 
 class EmbeddingSettingsScreen extends ConsumerStatefulWidget {
   const EmbeddingSettingsScreen({super.key});
@@ -246,7 +247,7 @@ class _EmbeddingSettingsScreenState
                         ? const SizedBox(
                             width: 16,
                             height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
+                            child: GlazeSpinner(),
                           )
                         : const Icon(Icons.wifi_tethering, size: 18),
                     label: Text(

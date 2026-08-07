@@ -11,6 +11,7 @@ import '../../../core/state/memory_settings_provider.dart';
 import '../../../core/state/pipeline_settings_provider.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../../shared/widgets/glaze_spinner.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../../settings/api_list_provider.dart';
 import 'custom_prompt_manager_sheet.dart';
@@ -1106,7 +1107,7 @@ class _MemoryGenerationSettingsSheetState
                   ? const SizedBox(
                       width: 18,
                       height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
+                      child: GlazeSpinner(),
                     )
                   : const Icon(Icons.refresh, size: 18),
             ),

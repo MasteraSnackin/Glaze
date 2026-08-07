@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../../shared/widgets/glaze_spinner.dart';
 import '../../chat/bridge/chat_webview_environment.dart';
 import '../catalog_provider.dart';
 import '../janitor_account_provider.dart';
@@ -225,7 +226,7 @@ class _Header extends StatelessWidget {
               child: SizedBox(
                 width: 18,
                 height: 18,
-                child: CircularProgressIndicator(strokeWidth: 2),
+                child: GlazeSpinner(),
               ),
             )
           else

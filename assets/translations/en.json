@@ -1749,6 +1749,7 @@
   "studio_hint": "Multi-agent pipeline that tracks state, cleans replies, and manages memory after each turn.",
   "menu_hide_build_date_watermark": "Hide build date watermark",
   "menu_menu_group_demo": "MenuGroup Demo",
+  "menu_spinner_demo": "Spinner Demo",
   "menu_test_error_dialog": "Test Error Dialog",
   "tools_api_subtitle": "Endpoints & models",
   "tools_lorebooks_subtitle": "World info",

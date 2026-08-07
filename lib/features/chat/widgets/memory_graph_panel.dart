@@ -5,6 +5,7 @@ import '../../../core/models/memory_graph.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../core/state/memory_agent_providers.dart';
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/glaze_spinner.dart';
 
 class MemoryGraphPanel extends ConsumerStatefulWidget {
   final String sessionId;
@@ -55,7 +56,7 @@ class _MemoryGraphPanelState extends ConsumerState<MemoryGraphPanel>
                       child: SizedBox(
                         width: 16,
                         height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
+                        child: GlazeSpinner(),
                       ),
                     ),
                   FilledButton.tonalIcon(
@@ -94,7 +95,7 @@ class _MemoryGraphPanelState extends ConsumerState<MemoryGraphPanel>
           .getBySessionId(widget.sessionId),
       builder: (context, snapshot) {
         if (!snapshot.hasData) {
-          return const Center(child: CircularProgressIndicator());
+          return const Center(child: GlazeSpinner());
         }
         final entities = _mergeEntities(snapshot.data!);
         if (entities.isEmpty) {

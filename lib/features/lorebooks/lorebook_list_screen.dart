@@ -17,6 +17,7 @@ import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glass_surface.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
+import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/help_tip.dart';
 import '../../shared/widgets/menu_group.dart';
@@ -126,7 +127,7 @@ class LorebookListScreen extends ConsumerWidget {
             ],
           ),
         ),
-        loading: () => const Center(child: CircularProgressIndicator()),
+        loading: () => const Center(child: GlazeSpinner()),
         error: (e, _) => Center(child: Text('${'title_error'.tr()}: $e')),
       ),
     );

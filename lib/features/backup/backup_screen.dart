@@ -9,6 +9,7 @@ import '../../core/services/backup/backup_cancel.dart';
 import '../../core/services/onboarding_service.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
+import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/glaze_toast.dart';
 import '../../shared/widgets/sheet_view.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
@@ -387,10 +388,7 @@ class _BsButton extends StatelessWidget {
                   SizedBox(
                     width: 22,
                     height: 22,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2.4,
-                      valueColor: AlwaysStoppedAnimation<Color>(fg),
-                    ),
+                    child: GlazeSpinner(color: fg),
                   )
                 else
                   Icon(icon, size: 22, color: fg),
@@ -512,10 +510,7 @@ class _ProgressView extends StatelessWidget {
               child: SizedBox(
                 width: 48,
                 height: 48,
-                child: CircularProgressIndicator(
-                  strokeWidth: 3,
-                  valueColor: AlwaysStoppedAnimation<Color>(accent),
-                ),
+                child: GlazeSpinner(color: accent),
               ),
             ),
           ),

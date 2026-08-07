@@ -8,6 +8,7 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/debug/perf_debug.dart';
+import '../../../shared/widgets/glaze_spinner.dart';
 import '../bridge/chat_bridge_controller.dart';
 import '../bridge/chat_bridge_registry.dart';
 import '../bridge/chat_webview_bridge_host.dart';
@@ -305,7 +306,7 @@ class ChatWebViewSurface extends ConsumerWidget {
         if (sessionSwitching)
           Positioned.fill(child: IgnorePointer(child: _background(context))),
         if (sessionSwitching)
-          const Center(child: CircularProgressIndicator(strokeWidth: 3)),
+          const Center(child: GlazeSpinner()),
         if (bottomInset > 0)
           Positioned.fill(
             child: IgnorePointer(

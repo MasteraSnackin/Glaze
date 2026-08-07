@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/llm/context_calculator.dart';
 import '../../../core/llm/prompt_isolate.dart';
+import '../../../shared/widgets/glaze_spinner.dart';
 import '../providers/prompt_build_providers.dart';
 import '../../../core/models/api_config.dart';
 import '../../../features/settings/api_list_provider.dart';
@@ -199,7 +200,7 @@ class _TokenizerSheetState extends ConsumerState<TokenizerSheet> {
     final nearLimit = historyFill >= _historyFillThreshold;
 
     final body = _loading
-        ? const Center(child: CircularProgressIndicator())
+        ? const Center(child: GlazeSpinner())
         : bd == null
         ? Center(
             child: Text(

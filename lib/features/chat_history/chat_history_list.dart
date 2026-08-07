@@ -18,6 +18,7 @@ import '../../core/state/character_provider.dart'
         charactersProvider,
         revealHiddenCharactersProvider;
 import '../../shared/utils/variant_label.dart';
+import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/variation_chip.dart';
 import '../chat/chat_actions_service.dart';
 import '../chat/chat_provider.dart';
@@ -86,7 +87,7 @@ class _ChatHistoryListState extends ConsumerState<ChatHistoryList> {
 
     return sessionsAsync.when(
       loading: () =>
-          Center(child: CircularProgressIndicator(color: context.cs.primary)),
+          Center(child: GlazeSpinner(color: context.cs.primary)),
       error: (e, _) => Center(child: Text('${'title_error'.tr()}: $e')),
       data: (list) {
         _precacheAvatars(list);

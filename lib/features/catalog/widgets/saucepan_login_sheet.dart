@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../../shared/widgets/glaze_spinner.dart';
 import '../../../shared/widgets/glaze_toast.dart';
 import '../saucepan_account_provider.dart';
 
@@ -199,7 +200,7 @@ class _SaucepanLoginFormState extends ConsumerState<_SaucepanLoginForm> {
                 width: 18,
                 height: 18,
                 child:
-                    CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    GlazeSpinner(color: Colors.white),
               )
             : Text(label,
                 style:

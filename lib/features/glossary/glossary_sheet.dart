@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/glossary/glossary_models.dart';
 import '../../core/glossary/glossary_provider.dart';
 import '../../shared/theme/app_colors.dart';
+import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/sheet_view.dart';
 import '../../shared/widgets/glass_surface.dart';
 import '../settings/app_settings_provider.dart';
@@ -211,7 +212,7 @@ class _GlossarySheetState extends ConsumerState<GlossarySheet> {
     return asyncCats.when(
       loading: () => SheetView(
         title: _safeTr('menu_glossary', fallback: 'Glossary'),
-        body: const Center(child: CircularProgressIndicator()),
+        body: const Center(child: GlazeSpinner()),
       ),
       error: (e, _) => SheetView(
         title: _safeTr('menu_glossary', fallback: 'Glossary'),
