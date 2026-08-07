@@ -7,18 +7,34 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/models/chat_message.dart';
 import '../../../core/models/memory_book.dart';
 import '../../../core/state/db_provider.dart';
-import '../../../core/state/memory_settings_provider.dart';
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/glass_surface.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glaze_error_dialog.dart';
+import '../../../shared/widgets/glaze_tab_bar.dart';
 import '../../../shared/widgets/glaze_toast.dart';
+import '../../../shared/widgets/swipe_tab_switcher.dart';
+import '../../../shared/widgets/tab_slide_switcher.dart';
 import '../../memory/controllers/memory_book_controller.dart';
 import '../../memory/utils/memory_swipe_filter.dart';
+import 'memory/memory_books_controls.dart';
+import 'memory/memory_books_overview.dart';
+import 'memory/memory_books_toolbar.dart';
+import 'memory/memory_draft_card.dart';
+import 'memory/memory_entry_card.dart';
+import 'memory/memory_tab_store.dart';
 import 'memory_entry_editor_sheet.dart';
 import 'memory_generation_settings_sheet.dart';
 
-/// Memory Books tab of the Memory sheet. Expects a bounded height from its
-/// host (the [NestedScrollView] below cannot lay out unbounded).
+const Color _kDanger = Color(0xFFFF5252);
+
+/// Memory Books tab of the Memory sheet.
+///
+/// Built entirely from Glaze surfaces — [GlazeTabBar] for the
+/// approved/drafts segmented control, [GlassSurface] tiles and [MenuGroup]
+/// rows for the controls — replacing the Material
+/// `DefaultTabController` / `TabBar` / `NestedScrollView` / `OutlinedButton`
+/// stack this used to be. Expects a bounded height from its host.
 class MemoryBooksTab extends ConsumerStatefulWidget {
   final String sessionId;
   final String charId;
@@ -36,10 +52,15 @@ class MemoryBooksTab extends ConsumerStatefulWidget {
 }
 
 class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
+  static const int _tabCount = 2;
+  static const int _tabApproved = 0;
+  static const MemoryTabStore _tabStore = MemoryTabStore.memoryBooks;
+
   late final MemoryBookController _ctrl;
   Timer? _elapsedTimer;
   bool _hideUnselectedMemories = false;
   Map<String, String> _embeddingStatuses = {};
+  int _tabIndex = _tabApproved;
 
   @override
   void initState() {
@@ -49,11 +70,14 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
   }
 
   Future<void> _load() async {
-    await _ctrl.load();
-    if (mounted) {
-      unawaited(_loadEmbeddingStatuses());
-      setState(() {});
-    }
+    // Both reads are independent, so the prefs round-trip runs alongside the
+    // book load instead of delaying it.
+    final bookLoad = _ctrl.load();
+    final storedTab = await _tabStore.load(_tabCount);
+    await bookLoad;
+    if (!mounted) return;
+    unawaited(_loadEmbeddingStatuses());
+    setState(() => _tabIndex = storedTab);
   }
 
   Future<void> _loadEmbeddingStatuses() async {
@@ -96,37 +120,35 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
     }
   }
 
+  /// Switching sub-tabs also persists the choice, so reopening the sheet comes
+  /// up on the list that was last in use.
+  void _setTab(int index) {
+    if (index == _tabIndex) return;
+    setState(() => _tabIndex = index);
+    unawaited(_tabStore.save(index));
+  }
+
+  // ─── Build ───────────────────────────────────────────────────────
+
   @override
-  Widget build(BuildContext context) => _buildBody(context);
+  Widget build(BuildContext context) {
+    final book = _ctrl.book;
+    final loading = _ctrl.loading || book == null;
+    if (loading) return const Center(child: CircularProgressIndicator());
 
-  Widget _buildBody(BuildContext context) {
-    if (_ctrl.loading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
-    final settings = _ctrl.globalSettings;
-    final book = _ctrl.book!;
-    final entries = book.entries;
-    final pendingDrafts = book.pendingDrafts;
-    final activeCount = entries.where((e) => e.status == 'active').length;
-    final needsRebuildCount = entries
-        .where((e) => e.status == 'needs_rebuild')
-        .length;
-    final draftsNeedingGen = _ctrl.draftsNeedingGeneration;
-    final isGenerating = _ctrl.isGenerating;
-
-    final scanDrafts = pendingDrafts
-        .where((d) => d.source != 'studio_ledger')
-        .toList();
     // Studio Ledger entries (`source == 'studio_ledger'`) are legacy and
     // excluded from the UI — they were removed from the injection pipeline.
-    final curatedEntries = entries
+    final curatedEntries = book.entries
         .where((e) => e.source != 'studio_ledger')
         .toList();
+    final scanDrafts = book.pendingDrafts
+        .where((d) => d.source != 'studio_ledger')
+        .toList();
 
-    // Swipe filter: when enabled, only show entries that were injected via
-    // triggeredMemories for the current swipes, or entries whose source
-    // message is currently visible.
+    // Swipe filter: when enabled, only entries injected via triggeredMemories
+    // for the current swipes — or whose source message is currently visible —
+    // are listed. The three selection sets are resolved once per build, not
+    // once per entry.
     final selectedMemoryIds = MemorySwipeFilter.selectedSwipeMemoryIds(
       widget.messages,
     );
@@ -135,508 +157,95 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
     final selectedSourceKeys = MemorySwipeFilter.selectedSwipeSourceKeys(
       widget.messages,
     );
-
-    bool filterFn(MemoryEntry e) => MemorySwipeFilter.entryMatches(
-      e,
-      hideUnselected: _hideUnselectedMemories,
-      selectedMemoryIds: selectedMemoryIds,
-      selectedSourceMessageIds: selectedSourceMessageIds,
-      selectedSourceKeys: selectedSourceKeys,
-    );
-
-    final filteredCurated = curatedEntries.where(filterFn).toList();
-    return DefaultTabController(
-      length: 2,
-      child: NestedScrollView(
-        headerSliverBuilder: (context, innerBoxIsScrolled) {
-          return [
-            SliverToBoxAdapter(
-              child: Padding(
-                // The host sheet reports its header height as MediaQuery top
-                // padding; without consuming it the overview card hides behind
-                // the sheet header.
-                padding: EdgeInsets.fromLTRB(
-                  16,
-                  MediaQuery.paddingOf(context).top + 8,
-                  16,
-                  8,
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _buildOverview(settings),
-                    const SizedBox(height: 12),
-                    _buildSearchTypeSelector(settings),
-                    const SizedBox(height: 12),
-                    _buildStatusSummary(
-                      activeCount,
-                      needsRebuildCount,
-                      pendingDrafts.length,
-                    ),
-                    const SizedBox(height: 12),
-                    _buildActionButtons(),
-                    if (draftsNeedingGen.isNotEmpty || isGenerating) ...[
-                      const SizedBox(height: 12),
-                      _buildBatchActions(draftsNeedingGen, isGenerating),
-                    ],
-                  ],
-                ),
-              ),
-            ),
-            SliverPersistentHeader(
-              pinned: true,
-              delegate: _PinnedTabBarDelegate(
-                TabBar(
-                  tabs: [
-                    Tab(
-                      text: 'memory_books_tab_approved'.tr(
-                        args: [filteredCurated.length.toString()],
-                      ),
-                    ),
-                    Tab(
-                      text: 'memory_books_tab_scan_drafts'.tr(
-                        args: [scanDrafts.length.toString()],
-                      ),
-                    ),
-                  ],
-                  tabAlignment: TabAlignment.fill,
-                ),
-              ),
-            ),
-          ];
-        },
-        body: TabBarView(
-          children: [
-            _buildApprovedTab(filteredCurated),
-            _buildScanDraftsTab(scanDrafts),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildApprovedTab(List<MemoryEntry> curatedEntries) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (curatedEntries.isEmpty)
-            Text(
-              'memory_books_empty_approved'.tr(),
-              style: TextStyle(
-                fontSize: 13,
-                color: context.cs.onSurfaceVariant,
-              ),
-            )
-          else
-            _buildApprovedSection(curatedEntries),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildScanDraftsTab(List<MemoryDraft> scanDrafts) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (scanDrafts.isEmpty)
-            Text(
-              'memory_books_empty_scan_drafts'.tr(),
-              style: TextStyle(
-                fontSize: 13,
-                color: context.cs.onSurfaceVariant,
-              ),
-            )
-          else ...[
-            _buildPendingDraftsSection(scanDrafts),
-          ],
-        ],
-      ),
-    );
-  }
-
-  // ─── Overview ────────────────────────────────────────────────────
-
-  Widget _buildOverview(MemoryGlobalSettings settings) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'magic_memory_books'.tr(),
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                        color: context.cs.onSurface,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      '${'memory_books_session'.tr()} ${widget.sessionId.substring(0, 8)}...',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: context.cs.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 4,
-                ),
-                decoration: BoxDecoration(
-                  color: context.cs.primary.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  _ctrl.searchModelLabel,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: context.cs.primary,
-                  ),
-                ),
-              ),
-            ],
+    final visibleEntries = curatedEntries
+        .where(
+          (e) => MemorySwipeFilter.entryMatches(
+            e,
+            hideUnselected: _hideUnselectedMemories,
+            selectedMemoryIds: selectedMemoryIds,
+            selectedSourceMessageIds: selectedSourceMessageIds,
+            selectedSourceKeys: selectedSourceKeys,
           ),
-          const SizedBox(height: 8),
-          Text(
-            _ctrl.settingsSummary,
-            style: TextStyle(fontSize: 12, color: context.cs.onSurfaceVariant),
-          ),
-        ],
-      ),
-    );
-  }
+        )
+        .toList();
 
-  // ─── Search type ─────────────────────────────────────────────────
+    final draftsNeedingGen = _ctrl.draftsNeedingGeneration;
+    final isGenerating = _ctrl.isGenerating;
 
-  Widget _buildSearchTypeSelector(MemoryGlobalSettings settings) {
-    return GestureDetector(
-      onTap: () async {
-        await _ctrl.cycleSearchType();
-        if (mounted) setState(() {});
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.05),
-          borderRadius: BorderRadius.circular(12),
+    return SwipeTabSwitcher(
+      index: _tabIndex,
+      length: _tabCount,
+      onChanged: _setTab,
+      child: ListView(
+        // The host sheet reports its header height as MediaQuery top padding;
+        // without consuming it the overview card hides behind the sheet header.
+        padding: EdgeInsets.fromLTRB(
+          0,
+          MediaQuery.paddingOf(context).top + 12,
+          0,
+          MediaQuery.paddingOf(context).bottom + 24,
         ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(
-              'label_search_type'.tr(),
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: context.cs.onSurface,
-              ),
+        children: [
+          MemoryBooksOverview(
+            sessionId: widget.sessionId,
+            modelLabel: _ctrl.searchModelLabel,
+            settingsSummary: _ctrl.settingsSummary,
+            searchTypeLabel: _ctrl.searchTypeLabel,
+            onCycleSearchType: _cycleSearchType,
+            onlySelectedSwipes: _hideUnselectedMemories,
+            onOnlySelectedSwipesChanged: (v) =>
+                setState(() => _hideUnselectedMemories = v),
+            activeCount: book.entries
+                .where((e) => e.status == 'active')
+                .length,
+            needsRebuildCount: book.entries
+                .where((e) => e.status == 'needs_rebuild')
+                .length,
+            draftCount: book.pendingDrafts.length,
+          ),
+          MemoryBooksToolbar(
+            onOpenSettings: _openSettings,
+            onScanChat: _scanChat,
+            onAddEntry: _addEntry,
+            onDedup: _dedupMemories,
+            isReindexing: _ctrl.isReindexing,
+            onReindex: _reindexAll,
+            onDeleteIndexes: _deleteAllMemoryIndexes,
+          ),
+          if (draftsNeedingGen.isNotEmpty || isGenerating)
+            MemoryBatchPanel(
+              pendingCount: draftsNeedingGen.length,
+              isGenerating: isGenerating,
+              onGenerateBatch: _batchGenerate,
             ),
-            Row(
-              children: [
-                Text(
-                  _ctrl.searchTypeLabel,
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: context.cs.onSurfaceVariant,
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: GlazeTabBar(
+              tabs: [
+                GlazeTabItem(
+                  label: 'memory_books_tab_approved'.tr(
+                    args: ['${visibleEntries.length}'],
                   ),
+                  icon: Icons.check_circle_outline_rounded,
                 ),
-                const SizedBox(width: 4),
-                Icon(
-                  Icons.arrow_drop_down,
-                  size: 20,
-                  color: context.cs.onSurfaceVariant,
+                GlazeTabItem(
+                  label: 'memory_books_tab_scan_drafts'.tr(
+                    args: ['${scanDrafts.length}'],
+                  ),
+                  icon: Icons.drafts_outlined,
                 ),
               ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ─── Status summary ──────────────────────────────────────────────
-
-  Widget _buildStatusSummary(int active, int needsRebuild, int drafts) {
-    return Row(
-      children: [
-        Expanded(
-          child: _statusCard(
-            '$active',
-            'memory_books_status_active'.tr(),
-            Colors.green,
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: _statusCard(
-            '$needsRebuild',
-            'memory_books_entry_needs_rebuild'.tr(),
-            Colors.orange,
-          ),
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: _statusCard(
-            '$drafts',
-            'memory_books_status_drafts'.tr(),
-            Colors.amber,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _statusCard(String value, String label, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
-      ),
-      child: Column(
-        children: [
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.w700,
-              color: context.cs.onSurface,
+              activeIndex: _tabIndex,
+              onChanged: _setTab,
             ),
           ),
-          Text(
-            label,
-            style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ─── Action buttons ──────────────────────────────────────────────
-
-  Widget _buildActionButtons() {
-    return Column(
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: _openSettings,
-                icon: Icon(
-                  Icons.settings,
-                  size: 16,
-                  color: context.cs.onSurfaceVariant,
-                ),
-                label: Text(
-                  'title_settings'.tr(),
-                  style: TextStyle(color: context.cs.onSurface),
-                ),
-                style: OutlinedButton.styleFrom(
-                  side: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: _scanChat,
-                icon: Icon(
-                  Icons.search,
-                  size: 16,
-                  color: context.cs.onSurfaceVariant,
-                ),
-                label: Text(
-                  'memory_books_btn_scan_chat'.tr(),
-                  style: TextStyle(color: context.cs.onSurface),
-                ),
-                style: OutlinedButton.styleFrom(
-                  side: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: FilledButton.icon(
-                onPressed: _addEntry,
-                icon: const Icon(Icons.add, size: 16),
-                label: Text('action_add'.tr()),
-                style: FilledButton.styleFrom(
-                  backgroundColor: context.cs.primary,
-                  foregroundColor: Colors.black,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: _ctrl.isReindexing ? null : _reindexAll,
-                icon: Icon(
-                  Icons.storage,
-                  size: 16,
-                  color: context.cs.onSurfaceVariant,
-                ),
-                label: Text(
-                  _ctrl.isReindexing
-                      ? 'btn_indexing'.tr()
-                      : 'memory_books_btn_reindex'.tr(),
-                  style: TextStyle(color: context.cs.onSurface),
-                ),
-                style: OutlinedButton.styleFrom(
-                  side: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: _ctrl.isReindexing ? null : _deleteAllMemoryIndexes,
-                icon: Icon(
-                  Icons.delete_sweep,
-                  size: 16,
-                  color: Colors.redAccent.withValues(alpha: 0.7),
-                ),
-                label: Text(
-                  'action_delete_indexes'.tr(),
-                  style: TextStyle(color: context.cs.onSurfaceVariant),
-                ),
-                style: OutlinedButton.styleFrom(
-                  side: BorderSide(
-                    color: Colors.redAccent.withValues(alpha: 0.2),
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            Expanded(
-              child: OutlinedButton.icon(
-                onPressed: _dedupMemories,
-                icon: Icon(
-                  Icons.auto_fix_high,
-                  size: 16,
-                  color: context.cs.onSurfaceVariant,
-                ),
-                label: Text(
-                  'Dedup',
-                  style: TextStyle(color: context.cs.onSurface),
-                ),
-                style: OutlinedButton.styleFrom(
-                  side: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: FilterChip(
-                label: Text(
-                  'Only selected swipes',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: _hideUnselectedMemories
-                        ? context.cs.primary
-                        : context.cs.onSurfaceVariant,
-                  ),
-                ),
-                selected: _hideUnselectedMemories,
-                onSelected: (v) => setState(() => _hideUnselectedMemories = v),
-                showCheckmark: false,
-                avatar: Icon(
-                  Icons.visibility_off,
-                  size: 14,
-                  color: _hideUnselectedMemories
-                      ? context.cs.primary
-                      : context.cs.onSurfaceVariant,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget _buildBatchActions(List<MemoryDraft> needsGen, bool isGenerating) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.03),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: context.cs.primary.withValues(alpha: 0.2)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            isGenerating
-                ? 'memory_books_badge_generating'.tr()
-                : '${needsGen.length} ${'memory_books_needs_generation'.tr()}',
-            style: TextStyle(fontSize: 14, color: context.cs.onSurfaceVariant),
-          ),
-          const SizedBox(height: 8),
-          FilledButton(
-            onPressed: needsGen.isNotEmpty ? _batchGenerate : null,
-            style: FilledButton.styleFrom(
-              backgroundColor: context.cs.primary,
-              foregroundColor: Colors.black,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            child: Text(
-              isGenerating
-                  ? 'memory_books_btn_generate_remaining'.tr()
-                  : 'memory_books_btn_generate_batch'.tr(),
+          TabSlideSwitcher(
+            index: _tabIndex,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: _tabIndex == _tabApproved
+                  ? _buildApprovedTab(visibleEntries)
+                  : _buildDraftsTab(scanDrafts),
             ),
           ),
         ],
@@ -644,446 +253,92 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
     );
   }
 
-  // ─── Pending Drafts section ──────────────────────────────────────
-
-  Widget _buildPendingDraftsSection(List<MemoryDraft> drafts) {
+  Widget _buildApprovedTab(List<MemoryEntry> entries) {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          children: [
-            Text(
-              'memory_books_section_pending'.tr(),
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-                color: context.cs.onSurface,
-              ),
-            ),
-            const Spacer(),
-            if (drafts.length > 1)
-              TextButton(
-                onPressed: _deleteAllDrafts,
-                style: TextButton.styleFrom(foregroundColor: Colors.redAccent),
-                child: Text(
-                  'memory_books_delete_all_pending'.tr(),
-                  style: const TextStyle(fontSize: 12),
-                ),
-              ),
-            const SizedBox(width: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.05),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Text(
-                '${drafts.length}',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: context.cs.onSurfaceVariant,
-                ),
-              ),
-            ),
-          ],
+        MemorySectionHeader(
+          title: 'memory_books_section_approved'.tr(),
+          count: entries.length,
         ),
-        const SizedBox(height: 8),
-        ...drafts.map((draft) => _buildDraftCard(draft)),
-      ],
-    );
-  }
-
-  Widget _buildDraftCard(MemoryDraft draft) {
-    final isGen = _ctrl.generatingDrafts[draft.id] == true;
-    final needsGen =
-        draft.content.isEmpty &&
-        (draft.status == 'pending_generation' ||
-            draft.status == 'needs_regeneration');
-    final needsRegen = draft.status == 'needs_regeneration';
-    final hasContent = draft.content.isNotEmpty;
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: isGen
-            ? Colors.amber.withValues(alpha: 0.05)
-            : Colors.white.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(12),
-        border: isGen
-            ? Border.all(color: Colors.amber.withValues(alpha: 0.4))
-            : needsRegen
-            ? Border.all(color: Colors.redAccent.withValues(alpha: 0.3))
-            : Border.all(color: Colors.white.withValues(alpha: 0.1)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      draft.title.isNotEmpty
-                          ? draft.title
-                          : 'memory_books_untitled_draft'.tr(),
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: context.cs.onSurface,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      _draftStatusLabel(draft, isGen),
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: _draftStatusColor(draft, isGen),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              _draftStatusBadge(draft, isGen),
-            ],
-          ),
-          if (draft.content.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Text(
-              draft.content.length > 180
-                  ? '${draft.content.substring(0, 180)}...'
-                  : draft.content,
-              style: TextStyle(
-                fontSize: 13,
-                color: context.cs.onSurfaceVariant,
-              ),
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ],
-          if (draft.error != null && needsRegen) ...[
-            const SizedBox(height: 4),
-            Text(
-              draft.error!,
-              style: const TextStyle(fontSize: 11, color: Colors.redAccent),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ],
-          const SizedBox(height: 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              if (isGen)
-                _actionBtn(
-                  'memory_books_btn_stop'.tr(),
-                  Colors.amber,
-                  () => _cancelDraft(draft.id),
-                )
-              else if (needsGen || needsRegen)
-                _actionBtn(
-                  'memory_books_btn_generate'.tr(),
-                  Colors.amber,
-                  () => _generateDraft(draft.id),
-                )
-              else if (hasContent)
-                _actionBtn(
-                  'memory_books_btn_approve'.tr(),
-                  Colors.green,
-                  () => _approveDraft(draft.id),
-                ),
-              const SizedBox(width: 6),
-              if (hasContent && !isGen)
-                _actionBtn(
-                  'action_edit'.tr(),
-                  context.cs.primary,
-                  () => _editDraft(draft),
-                ),
-              const SizedBox(width: 6),
-              _actionBtn(
-                'btn_delete'.tr(),
-                Colors.redAccent,
-                () => _deleteDraft(draft.id),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _actionBtn(String label, Color color, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.1),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: color,
-          ),
-        ),
-      ),
-    );
-  }
-
-  String _draftStatusLabel(MemoryDraft draft, bool isGen) {
-    if (isGen) {
-      final start = _ctrl.genStartTimes[draft.id];
-      if (start != null) {
-        final elapsed =
-            DateTime.now().difference(start).inMilliseconds / 1000.0;
-        return "${'memory_books_generating_elapsed'.tr()} ${elapsed.toStringAsFixed(1)}s";
-      }
-      return 'memory_books_generating_elapsed'.tr();
-    }
-    if (draft.status == 'needs_regeneration') {
-      return 'memory_books_badge_needs_regen'.tr();
-    }
-    if (draft.content.isEmpty && draft.status == 'pending_generation') {
-      return 'memory_books_needs_generation'.tr();
-    }
-    if (draft.content.isNotEmpty) return 'memory_books_pending_approval'.tr();
-    return draft.status;
-  }
-
-  Color _draftStatusColor(MemoryDraft draft, bool isGen) {
-    if (isGen) return Colors.amber;
-    if (draft.status == 'needs_regeneration') return Colors.redAccent;
-    if (draft.content.isEmpty) return Colors.amber;
-    return context.cs.onSurfaceVariant;
-  }
-
-  Widget _draftStatusBadge(MemoryDraft draft, bool isGen) {
-    final (String label, Color color) = isGen
-        ? ('memory_books_badge_generating'.tr(), Colors.amber)
-        : draft.status == 'needs_regeneration'
-        ? ('memory_books_badge_needs_regen'.tr(), Colors.redAccent)
-        : draft.content.isEmpty && draft.status == 'pending_generation'
-        ? ('memory_books_badge_needs_gen'.tr(), Colors.amber)
-        : ('memory_books_badge_draft'.tr(), Colors.cyan);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w600,
-          color: color,
-        ),
-      ),
-    );
-  }
-
-  // ─── Approved section ────────────────────────────────────────────
-
-  Widget _buildApprovedSection(List<MemoryEntry> entries) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Text(
-              'memory_books_section_approved'.tr(),
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w700,
-                color: context.cs.onSurface,
-              ),
-            ),
-            const Spacer(),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.05),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Text(
-                '${entries.length}',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: context.cs.onSurfaceVariant,
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
         if (entries.isEmpty)
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.03),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Center(
-              child: Text(
-                'memory_books_no_entries'.tr(),
-                style: TextStyle(
-                  fontSize: 13,
-                  color: context.cs.onSurfaceVariant,
-                ),
-              ),
-            ),
-          )
+          _buildEmpty('memory_books_empty_approved'.tr())
         else
-          ...entries.map((entry) => _buildEntryCard(entry)),
+          ...entries.map(
+            (entry) => MemoryEntryCard(
+              key: ValueKey(entry.id),
+              entry: entry,
+              embeddingStatus: _embeddingStatuses[entry.id],
+              onEdit: () => _editEntry(entry),
+              onDelete: () => _deleteEntry(entry.id),
+            ),
+          ),
       ],
     );
   }
 
-  Widget _buildEntryCard(MemoryEntry entry) {
-    final isActive = entry.status == 'active';
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: isActive
-            ? Colors.white.withValues(alpha: 0.05)
-            : Colors.white.withValues(alpha: 0.02),
-        borderRadius: BorderRadius.circular(12),
-        border: entry.status == 'needs_rebuild'
-            ? Border.all(color: Colors.orange.withValues(alpha: 0.3))
-            : Border.all(color: Colors.white.withValues(alpha: 0.1)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      entry.title.isNotEmpty
-                          ? entry.title
-                          : 'memory_books_untitled_memory'.tr(),
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: isActive
-                            ? context.cs.onSurface
-                            : context.cs.onSurfaceVariant,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      '${entry.status == "needs_rebuild" ? "memory_books_entry_needs_rebuild".tr() : "memory_books_entry_active".tr()} • ${entry.messageIds.length} msgs • ${entry.keys.take(3).join(", ")}',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: context.cs.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              _entryStatusBadge(entry),
-            ],
-          ),
-          if (entry.content.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Text(
-              entry.content.length > 180
-                  ? '${entry.content.substring(0, 180)}...'
-                  : entry.content,
-              style: TextStyle(
-                fontSize: 13,
-                color: context.cs.onSurfaceVariant,
-              ),
-              maxLines: 3,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ],
-          const SizedBox(height: 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              _actionBtn(
-                'action_edit'.tr(),
-                context.cs.primary,
-                () => _editEntry(entry),
-              ),
-              const SizedBox(width: 6),
-              _actionBtn(
-                'btn_delete'.tr(),
-                Colors.redAccent,
-                () => _deleteEntry(entry.id),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _entryStatusBadge(MemoryEntry entry) {
-    final isActive = entry.status == 'active';
-    final embStatus = _embeddingStatuses[entry.id];
-    return Row(
-      mainAxisSize: MainAxisSize.min,
+  Widget _buildDraftsTab(List<MemoryDraft> drafts) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (embStatus == 'indexed')
-          _badge('idx', Colors.cyan)
-        else if (embStatus == 'error')
-          _badge('!', Colors.orange)
-        else if (embStatus == 'none')
-          _badge('○', Colors.grey),
-        const SizedBox(width: 4),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          decoration: BoxDecoration(
-            color: (isActive ? Colors.green : Colors.orange).withValues(
-              alpha: 0.1,
-            ),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Text(
-            isActive ? 'ACTIVE' : 'REBUILD',
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: isActive ? Colors.green : Colors.orange,
-            ),
-          ),
+        MemorySectionHeader(
+          title: 'memory_books_section_pending'.tr(),
+          count: drafts.length,
+          action: drafts.length > 1
+              ? MemoryActionChip(
+                  label: 'memory_books_delete_all_pending'.tr(),
+                  color: _kDanger,
+                  onTap: _deleteAllDrafts,
+                )
+              : null,
         ),
+        if (drafts.isEmpty)
+          _buildEmpty('memory_books_empty_scan_drafts'.tr())
+        else
+          ...drafts.map(
+            (draft) => MemoryDraftCard(
+              key: ValueKey(draft.id),
+              draft: draft,
+              isGenerating: _ctrl.generatingDrafts[draft.id] == true,
+              generatingSince: _ctrl.genStartTimes[draft.id],
+              onGenerate: () => _generateDraft(draft.id),
+              onCancel: () => _cancelDraft(draft.id),
+              onApprove: () => _approveDraft(draft.id),
+              onEdit: () => _editDraft(draft),
+              onDelete: () => _deleteDraft(draft.id),
+            ),
+          ),
       ],
     );
   }
 
-  Widget _badge(String label, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(6),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 10,
-          fontWeight: FontWeight.w700,
-          color: color,
+  Widget _buildEmpty(String message) {
+    return GlassSurface(
+      borderRadius: BorderRadius.circular(16),
+      border: Border.all(color: context.cs.outlineVariant),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Center(
+          child: Text(
+            message,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 13,
+              height: 1.4,
+              color: context.cs.onSurfaceVariant,
+            ),
+          ),
         ),
       ),
     );
   }
 
   // ─── Actions delegating to controller ────────────────────────────
+
+  void _cycleSearchType() async {
+    await _ctrl.cycleSearchType();
+    if (mounted) setState(() {});
+  }
 
   void _scanChat() async {
     final msg = await _ctrl.scanChat();
@@ -1281,41 +536,11 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
       entryIds = MemorySwipeFilter.selectedSwipeMemoryIds(widget.messages);
     }
 
-    GlazeToast.show(context, 'Deduplicating memories...');
+    GlazeToast.show(context, 'memory_books_dedup_running'.tr());
 
     final toastText = await _ctrl.runDedup(entryIds: entryIds);
 
     if (!mounted) return;
     GlazeToast.show(context, toastText);
   }
-}
-
-/// Pinned sliver header for the TabBar inside [MemoryBooksTab]'s
-/// NestedScrollView. Keeps the tab bar visible while the header scrolls away.
-class _PinnedTabBarDelegate extends SliverPersistentHeaderDelegate {
-  final TabBar tabBar;
-
-  _PinnedTabBarDelegate(this.tabBar);
-
-  @override
-  double get minExtent => tabBar.preferredSize.height;
-
-  @override
-  double get maxExtent => tabBar.preferredSize.height;
-
-  @override
-  Widget build(
-    BuildContext context,
-    double shrinkOffset,
-    bool overlapsContent,
-  ) {
-    return Container(
-      color: Theme.of(context).scaffoldBackgroundColor.withValues(alpha: 0.95),
-      child: tabBar,
-    );
-  }
-
-  @override
-  bool shouldRebuild(_PinnedTabBarDelegate oldDelegate) =>
-      tabBar != oldDelegate.tabBar;
 }
