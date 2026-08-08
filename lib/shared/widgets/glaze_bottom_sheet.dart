@@ -87,6 +87,12 @@ class BottomSheetCardItem {
   final VoidCallback? onLongPress;
   final List<BottomSheetAction> actions;
 
+  /// Stable identity of the row, used as its key while the list is
+  /// drag-ordered — labels can repeat, and a row must keep its widget (and its
+  /// press state) as it moves. Required by [BottomSheetCards.onReorder], and
+  /// ignored otherwise.
+  final String? id;
+
   const BottomSheetCardItem({
     required this.label,
     this.sublabel,
@@ -99,7 +105,36 @@ class BottomSheetCardItem {
     required this.onTap,
     this.onLongPress,
     this.actions = const [],
+    this.id,
   });
+}
+
+/// The card list of a sheet built from live state — see [BottomSheetCards].
+typedef BottomSheetCardsBuilder =
+    BottomSheetCards Function(BuildContext context, WidgetRef ref);
+
+/// A card list rebuilt on every sheet rebuild, so the sheet can follow state
+/// that changes while it is open (rows added, reordered, renamed) instead of
+/// showing the snapshot it was opened with.
+///
+/// The builder runs inside the sheet's own `ConsumerState`, so anything it
+/// watches on [WidgetRef] rebuilds the list in place.
+class BottomSheetCards {
+  final List<BottomSheetCardItem> items;
+
+  /// Non-null turns the list into a drag-ordered one: a long press lifts a row
+  /// and the callback reports where it landed. Indices are final positions —
+  /// the lift out of `oldIndex` is already accounted for.
+  ///
+  /// Rows are not filtered while dragging is on: a search mask and drag indices
+  /// describe different lists, so a reorderable sheet is never searchable.
+  final ReorderCallback? onReorder;
+
+  BottomSheetCards({required this.items, this.onReorder})
+    : assert(
+        onReorder == null || items.every((i) => i.id != null),
+        'Drag-ordered card rows need an id to key them by.',
+      );
 }
 
 class BottomSheetBigInfo {
@@ -152,6 +187,7 @@ class GlazeBottomSheet {
     List<BottomSheetItem>? itemsAsCards,
     List<BottomSheetSessionItem>? sessionItems,
     List<BottomSheetCardItem>? cardItems,
+    BottomSheetCardsBuilder? cardsBuilder,
     BottomSheetBigInfo? bigInfo,
     BottomSheetInput? input,
     Widget? child,
@@ -189,6 +225,10 @@ class GlazeBottomSheet {
       'scrollToIndex is only supported for materialized items.',
     );
     assert(
+      cardsBuilder == null || (cardItems == null && itemBuilder == null),
+      'cardsBuilder replaces cardItems — pass one or the other.',
+    );
+    assert(
       !searchable || itemBuilder == null,
       'Search filters materialized lists only — a lazy builder has no labels '
       'to match against.',
@@ -211,6 +251,7 @@ class GlazeBottomSheet {
         itemsAsCards: itemsAsCards,
         sessionItems: sessionItems,
         cardItems: cardItems,
+        cardsBuilder: cardsBuilder,
         bigInfo: bigInfo,
         input: input,
         locked: locked,
@@ -275,6 +316,7 @@ class _GlazeBottomSheetContent extends ConsumerStatefulWidget {
   final List<BottomSheetItem>? itemsAsCards;
   final List<BottomSheetSessionItem>? sessionItems;
   final List<BottomSheetCardItem>? cardItems;
+  final BottomSheetCardsBuilder? cardsBuilder;
   final BottomSheetBigInfo? bigInfo;
   final BottomSheetInput? input;
   final Widget? child;
@@ -293,6 +335,7 @@ class _GlazeBottomSheetContent extends ConsumerStatefulWidget {
     this.itemsAsCards,
     this.sessionItems,
     this.cardItems,
+    this.cardsBuilder,
     this.bigInfo,
     this.input,
     this.child,
@@ -465,6 +508,10 @@ class _GlazeBottomSheetContentState
     // Battery saver drops the reveal animation: filtered rows are simply not
     // built, so typing costs a plain rebuild with no per-row controllers.
     final animateFilter = widget.searchable && !batterySaver;
+    // Built inside this build, so whatever the builder watches on `ref` keeps
+    // the rows in step with the state behind them while the sheet is open.
+    final cards = widget.cardsBuilder?.call(context, ref);
+    final cardItems = cards?.items ?? widget.cardItems;
     final itemsVisible = _visibility(widget.items, (i) => [i.label, i.hint]);
     final cardsVisible = _visibility(
       widget.itemsAsCards,
@@ -475,7 +522,7 @@ class _GlazeBottomSheetContentState
       (i) => [i.title, i.preview],
     );
     final cardItemsVisible = _visibility(
-      widget.cardItems,
+      cardItems,
       (i) => [i.label, i.sublabel, i.badge],
     );
     final noResults =
@@ -571,12 +618,13 @@ class _GlazeBottomSheetContentState
                                         visible: sessionsVisible,
                                         animateFilter: animateFilter,
                                       ),
-                                    if (widget.cardItems != null &&
-                                        widget.cardItems!.isNotEmpty)
+                                    if (cardItems != null &&
+                                        cardItems.isNotEmpty)
                                       _CardList(
-                                        items: widget.cardItems!,
+                                        items: cardItems,
                                         visible: cardItemsVisible,
                                         animateFilter: animateFilter,
+                                        onReorder: cards?.onReorder,
                                       ),
                                     if (widget.searchable)
                                       _SheetReveal(
@@ -1423,10 +1471,14 @@ class _CardList extends StatelessWidget {
   final List<bool>? visible;
   final bool animateFilter;
 
+  /// Set by [BottomSheetCards.onReorder] — see there.
+  final ReorderCallback? onReorder;
+
   const _CardList({
     required this.items,
     this.visible,
     this.animateFilter = false,
+    this.onReorder,
   });
 
   @override
@@ -1436,18 +1488,45 @@ class _CardList extends StatelessWidget {
       animate: animateFilter,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-        child: Column(
-          children: [
-            for (int i = 0; i < items.length; i++)
-              _SheetReveal(
-                visible: visible == null || visible![i],
-                animate: animateFilter,
-                child: Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: _CardRow(item: items[i]),
-                ),
+        child: onReorder != null
+            ? _buildReorderable()
+            : Column(
+                children: [
+                  for (int i = 0; i < items.length; i++)
+                    _SheetReveal(
+                      visible: visible == null || visible![i],
+                      animate: animateFilter,
+                      child: Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: _CardRow(item: items[i]),
+                      ),
+                    ),
+                ],
               ),
-          ],
+      ),
+    );
+  }
+
+  /// The drag-ordered list. It sits inside the sheet's own scroll view, so it
+  /// shrink-wraps its rows and leaves the scrolling to the sheet; a row is
+  /// lifted by a long press, the same gesture the Presets list uses.
+  ///
+  /// Rows are built unfiltered here — a reorderable sheet is never searchable
+  /// (see [BottomSheetCards.onReorder]).
+  Widget _buildReorderable() {
+    return ReorderableListView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      padding: EdgeInsets.zero,
+      buildDefaultDragHandles: false,
+      itemCount: items.length,
+      onReorderItem: onReorder!,
+      itemBuilder: (_, i) => ReorderableDelayedDragStartListener(
+        key: ValueKey(items[i].id!),
+        index: i,
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: _CardRow(item: items[i]),
         ),
       ),
     );

@@ -16,6 +16,7 @@ import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/glaze_tab_bar.dart';
+import '../../shared/widgets/list_controls.dart';
 import '../../shared/widgets/swipe_tab_switcher.dart';
 import '../../shared/widgets/tab_slide_switcher.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
@@ -24,6 +25,7 @@ import '../../shared/widgets/sheet_view.dart';
 import 'api_config_draft.dart';
 import '../studio/widgets/studio_slots_tab.dart';
 import 'api_list_provider.dart';
+import 'api_preset_sort.dart';
 import 'widgets/connection_status.dart';
 import '../../shared/widgets/menu_group.dart';
 import '../../shared/widgets/extra_request_parameters_editor.dart';
@@ -475,7 +477,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     String activeName,
   ) {
     return GestureDetector(
-      onTap: list.isEmpty ? null : () => _showPresetSheet(context, list),
+      onTap: list.isEmpty ? null : _showPresetSheet,
       child: Container(
         height: 32,
         padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -525,7 +527,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
           ),
           const SizedBox(height: 12),
           FilledButton.tonal(
-            onPressed: () => _createNewPreset([]),
+            onPressed: _createNewPreset,
             child: Text('settings_add_api_config'.tr()),
           ),
         ],
@@ -1038,91 +1040,173 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
 
   // ── Sheet actions ─────────────────────────────────────────────────────────────
 
-  Future<void> _showPresetSheet(
-    BuildContext context,
-    List<ApiConfig> list,
-  ) async {
-    final activeId =
-        ref.read(activeApiPresetIdProvider) ??
-        (list.isNotEmpty ? list.first.id : null);
+  /// The presets sheet. Its rows are built from the providers on every rebuild
+  /// (`cardsBuilder`), so changing the sort mode — or dragging a row in the
+  /// manual mode — reorders the open sheet in place instead of reopening it.
+  Future<void> _showPresetSheet() async {
     await GlazeBottomSheet.show<void>(
       context,
       title: 'settings_api_configs_title'.tr(),
-      headerAction: IconButton(
-        icon: Icon(Icons.add_circle_outline_rounded, color: context.cs.primary),
-        tooltip: 'settings_new_config_tooltip'.tr(),
-        onPressed: () {
-          Navigator.of(context, rootNavigator: true).pop();
-          _createNewPreset(list);
-        },
-      ),
-      cardItems: list.map((config) {
-        final isActive = config.id == activeId;
-        final name = config.name.isNotEmpty
-            ? config.name
-            : config.model.isNotEmpty
-            ? config.model
-            : 'unnamed_entry'.tr();
-
-        String? faviconUrl;
-        if (config.endpoint.isNotEmpty) {
-          try {
-            final uri = Uri.parse(config.endpoint);
-            if (uri.host.isNotEmpty &&
-                !uri.host.contains('127.0.0.1') &&
-                !uri.host.contains('localhost')) {
-              faviconUrl =
-                  'https://www.google.com/s2/favicons?domain=${uri.host}&sz=128';
-            }
-          } catch (_) {}
-        }
-
-        return BottomSheetCardItem(
-          label: name,
-          sublabel: config.endpoint.isNotEmpty
-              ? config.endpoint
-                    .replaceAll(RegExp(r'https?://'), '')
-                    .split('/')
-                    .first
-              : null,
-          icon: isActive
-              ? Icons.radio_button_checked_rounded
-              : Icons.radio_button_unchecked_rounded,
-          faviconUrl: faviconUrl,
-          isActive: isActive,
-          actions: [
-            if (list.length > 1)
-              BottomSheetAction(
-                icon: Icons.delete_outline_rounded,
-                color: context.cs.onSurfaceVariant,
-                onTap: () async {
+      headerAction: Consumer(
+        builder: (context, ref, _) {
+          final mode =
+              ref.watch(apiPresetSortProvider).value?.mode ??
+              ApiPresetSortMode.manual;
+          return Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              GlazeSortIconChip(
+                icon: mode.icon,
+                tooltip: mode.label,
+                onTap: () => _showSortPicker(mode),
+              ),
+              IconButton(
+                icon: Icon(
+                  Icons.add_circle_outline_rounded,
+                  color: context.cs.primary,
+                ),
+                tooltip: 'settings_new_config_tooltip'.tr(),
+                onPressed: () {
                   Navigator.of(context, rootNavigator: true).pop();
-                  await ref.read(apiListProvider.notifier).remove(config.id);
-                  if (activeId == config.id) {
-                    ref.read(activeApiPresetIdProvider.notifier).state = null;
-                    _persistActiveId(null);
-                    _loadedPresetId = null;
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                      if (mounted) _loadActivePreset();
-                    });
-                  }
+                  _createNewPreset();
                 },
               ),
+            ],
+          );
+        },
+      ),
+      cardsBuilder: (context, ref) {
+        final list = ref.watch(apiListProvider).value ?? const <ApiConfig>[];
+        final sort =
+            ref.watch(apiPresetSortProvider).value ?? const ApiPresetSortState();
+        // The active id falls back to the *repository's* first preset, the same
+        // one activeApiConfigProvider picks — sorting only reorders what is
+        // shown, so it must not move the highlight to another row.
+        final activeId =
+            ref.watch(activeApiPresetIdProvider) ??
+            (list.isNotEmpty ? list.first.id : null);
+        final sorted = sortApiConfigs(list, sort);
+        return BottomSheetCards(
+          items: [
+            for (final config in sorted)
+              _presetCard(config, activeId, canDelete: list.length > 1),
           ],
-          onTap: () {
-            Navigator.of(context, rootNavigator: true).pop();
-            _saveTimer?.cancel();
-            ref.read(activeApiPresetIdProvider.notifier).state = config.id;
-            _persistActiveId(config.id);
-            _loadedPresetId = null;
-            _loadFromConfig(config);
-          },
+          onReorder: sort.mode == ApiPresetSortMode.manual
+              ? (oldIndex, newIndex) =>
+                    _onManualReorder(sorted, oldIndex, newIndex)
+              : null,
         );
-      }).toList(),
+      },
     );
   }
 
-  Future<void> _createNewPreset(List<ApiConfig> existing) async {
+  BottomSheetCardItem _presetCard(
+    ApiConfig config,
+    String? activeId, {
+    required bool canDelete,
+  }) {
+    final isActive = config.id == activeId;
+    final name = config.name.isNotEmpty
+        ? config.name
+        : config.model.isNotEmpty
+        ? config.model
+        : 'unnamed_entry'.tr();
+
+    String? faviconUrl;
+    if (config.endpoint.isNotEmpty) {
+      try {
+        final uri = Uri.parse(config.endpoint);
+        if (uri.host.isNotEmpty &&
+            !uri.host.contains('127.0.0.1') &&
+            !uri.host.contains('localhost')) {
+          faviconUrl =
+              'https://www.google.com/s2/favicons?domain=${uri.host}&sz=128';
+        }
+      } catch (_) {}
+    }
+
+    return BottomSheetCardItem(
+      id: config.id,
+      label: name,
+      sublabel: config.endpoint.isNotEmpty
+          ? config.endpoint
+                .replaceAll(RegExp(r'https?://'), '')
+                .split('/')
+                .first
+          : null,
+      icon: isActive
+          ? Icons.radio_button_checked_rounded
+          : Icons.radio_button_unchecked_rounded,
+      faviconUrl: faviconUrl,
+      isActive: isActive,
+      actions: [
+        if (canDelete)
+          BottomSheetAction(
+            icon: Icons.delete_outline_rounded,
+            color: context.cs.onSurfaceVariant,
+            onTap: () async {
+              await ref.read(apiListProvider.notifier).remove(config.id);
+              if (activeId == config.id) {
+                ref.read(activeApiPresetIdProvider.notifier).state = null;
+                _persistActiveId(null);
+                _loadedPresetId = null;
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted) _loadActivePreset();
+                });
+              }
+            },
+          ),
+      ],
+      onTap: () {
+        Navigator.of(context, rootNavigator: true).pop();
+        _saveTimer?.cancel();
+        ref.read(activeApiPresetIdProvider.notifier).state = config.id;
+        _persistActiveId(config.id);
+        _loadedPresetId = null;
+        _loadFromConfig(config);
+      },
+    );
+  }
+
+  /// Commits a drag in the manually ordered sheet. The sheet lists every preset
+  /// there is, so what the user dragged over *is* the full order.
+  void _onManualReorder(List<ApiConfig> sorted, int oldIndex, int newIndex) {
+    if (oldIndex == newIndex) return;
+    final order = [for (final config in sorted) config.id];
+    order.insert(newIndex, order.removeAt(oldIndex));
+    unawaited(ref.read(apiPresetSortProvider.notifier).setManualOrder(order));
+  }
+
+  /// Sort-mode picker, opened over the presets sheet: the sheet below follows
+  /// the new mode on its own, so nothing has to be closed or reopened.
+  void _showSortPicker(ApiPresetSortMode current) {
+    showGlazePickerSheet(
+      context,
+      title: 'sort_by'.tr(),
+      items: [
+        for (final mode in ApiPresetSortMode.values)
+          GlazePickerItem(
+            label: mode.label,
+            icon: mode.icon,
+            hint: mode.hint,
+            isActive: mode == current,
+            value: mode,
+          ),
+      ],
+      onSelect: (v) {
+        final mode = v as ApiPresetSortMode;
+        if (mode == current) return;
+        unawaited(ref.read(apiPresetSortProvider.notifier).setMode(mode));
+        // Picking the mode is the only moment the drag gesture needs
+        // explaining, so it is a toast rather than a permanent hint.
+        if (mounted && mode == ApiPresetSortMode.manual) {
+          GlazeToast.show(context, 'preset_drag_hint'.tr());
+        }
+      },
+    );
+  }
+
+  Future<void> _createNewPreset() async {
     await GlazeBottomSheet.show<void>(
       context,
       title: 'settings_new_config_title'.tr(),
