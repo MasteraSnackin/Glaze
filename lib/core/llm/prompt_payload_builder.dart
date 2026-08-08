@@ -513,6 +513,10 @@ class PromptPayloadBuilder {
       effectiveCanonRevisionNumber: effectiveProjection?.revisionNumber,
       effectiveCanonRevisionHash: effectiveProjection?.revisionHash,
       effectiveCanonCacheIdentity: effectiveProjection?.cacheIdentity ?? '',
+      // The projection was loaded from one effective-canon snapshot and
+      // revalidated immediately above. Exact message/swipe provenance may now
+      // be compared with the frozen final source window by each compiler.
+      ledgerProjectionFreshnessProvenCurrent: effectiveContext != null,
     );
   }
 
@@ -698,6 +702,7 @@ class PromptPayloadBuilder {
       effectiveCanonCacheIdentity: projection?.cacheIdentity ?? '',
       ledgerPromptInjectionPolicy: policy,
       ledgerInjectionCacheIdentity: materialized?.injectionCacheIdentity ?? '',
+      ledgerProjectionFreshnessProvenCurrent: resolvedContext != null,
     );
   }
 

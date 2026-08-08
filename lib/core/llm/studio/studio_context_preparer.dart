@@ -271,6 +271,9 @@ final class StudioContextPreparer {
         selectedSwipeByMessageId: {
           for (final message in visibleMessages) message.id: message.swipeId,
         },
+        freshness: inputs.ledgerProjectionFreshnessProvenCurrent
+            ? LedgerProjectionFreshness.provenCurrent
+            : LedgerProjectionFreshness.unknown,
       ),
       sessionId: inputs.sessionId ?? '',
     );

@@ -231,6 +231,10 @@ class PromptInputsCollector {
                   )
                   .toList(growable: false),
             ),
+      // The read-only stamp comparison above proves that this projection did
+      // not change while its history snapshot was collected. buildPrompt will
+      // still suppress only against messages that survive final token trim.
+      ledgerProjectionFreshnessProvenCurrent: effectiveContext != null,
     );
   }
 }

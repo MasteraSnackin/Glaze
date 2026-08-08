@@ -15,6 +15,7 @@ import 'package:glaze_flutter/core/models/persona.dart';
 import 'package:glaze_flutter/core/models/ledger_prompt_injection_mode.dart';
 import 'package:glaze_flutter/core/models/ledger_prompt_injection_policy.dart';
 import 'package:glaze_flutter/core/llm/prompt/effective_canon_prompt_formatter.dart';
+import 'package:glaze_flutter/core/llm/prompt/selective_ledger_projection_filter.dart';
 import 'package:glaze_flutter/core/models/tracker.dart';
 
 void main() {
@@ -299,6 +300,7 @@ void main() {
             revisionHash: 'revision',
             cacheIdentity: 'canon',
           ),
+          ledgerProjectionFreshnessProvenCurrent: true,
         ),
         visibleMessageIds: const {'source', 'latest'},
         ledgerPromptInjectionPolicy: const LedgerPromptInjectionPolicy(
@@ -344,6 +346,7 @@ void main() {
           revisionHash: 'revision',
           cacheIdentity: 'canon',
         ),
+        ledgerProjectionFreshnessProvenCurrent: true,
       );
       const policy = LedgerPromptInjectionPolicy(
         presetOptIn: true,
@@ -369,7 +372,16 @@ void main() {
       );
       expect(
         finalWriter.join(StudioContextSlot.studioSessionState),
-        contains('Lucy waits'),
+        isNot(contains('Lucy waits')),
+      );
+      expect(
+        finalWriter.diagnostics.ledgerProjectionDiagnostics.any(
+          (item) =>
+              !item.selected &&
+              item.reason ==
+                  LedgerProjectionDecisionReason.visibleSourceEvidence,
+        ),
+        isTrue,
       );
       expect(
         tracker.diagnostics.ledgerInjectionIdentity,
