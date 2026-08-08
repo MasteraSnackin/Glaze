@@ -31,4 +31,50 @@ void main() {
     expect(find.text('Ledger reconciliation running...'), findsOneWidget);
     expect(find.byType(GlazeSpinner), findsOneWidget);
   });
+
+  testWidgets('shows the Card evolution observation pass', (tester) async {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    container
+        .read(postGenStatusProvider.notifier)
+        .state = const PostGenStatusState.running(
+      sessionId: 'session-1',
+      task: PostGenTask.cardEvolutionObservation,
+    );
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(
+          home: Scaffold(body: PostGenStatusCard(sessionId: 'session-1')),
+        ),
+      ),
+    );
+
+    expect(find.text('Card evolution observations running...'), findsOneWidget);
+    expect(find.byType(GlazeSpinner), findsOneWidget);
+  });
+
+  testWidgets('shows a distinct Card Rewriter running badge', (tester) async {
+    final container = ProviderContainer();
+    addTearDown(container.dispose);
+    container
+        .read(postGenStatusProvider.notifier)
+        .state = const PostGenStatusState.running(
+      sessionId: 'session-1',
+      task: PostGenTask.cardRewriter,
+    );
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(
+          home: Scaffold(body: PostGenStatusCard(sessionId: 'session-1')),
+        ),
+      ),
+    );
+
+    expect(find.text('Card Rewriter running...'), findsOneWidget);
+    expect(find.byType(GlazeSpinner), findsOneWidget);
+  });
 }

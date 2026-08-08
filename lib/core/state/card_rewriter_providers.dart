@@ -61,11 +61,23 @@ final automatedCardEvolutionServiceProvider =
         resolveModel: resolveModel,
         isEnabled: () =>
             ref.read(pipelineSettingsProvider).cardRewriter.enabled,
-        isLorebookEvolutionEnabled: () =>
-            ref.read(pipelineSettingsProvider)
-                .cardRewriter
-                .lorebookEvolutionEnabled,
+        isLorebookEvolutionEnabled: () => ref
+            .read(pipelineSettingsProvider)
+            .cardRewriter
+            .lorebookEvolutionEnabled,
         timeoutMs: settings.timeoutMs,
+        observationPromotionThreshold: () => ref
+            .read(pipelineSettingsProvider)
+            .cardRewriter
+            .observationPromotionThreshold,
+        observationMinConfidence: () => ref
+            .read(pipelineSettingsProvider)
+            .cardRewriter
+            .observationMinConfidence,
+        observationExpiryRuns: () => ref
+            .read(pipelineSettingsProvider)
+            .cardRewriter
+            .observationExpiryRuns,
         executor:
             ({
               required config,

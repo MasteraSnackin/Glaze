@@ -541,7 +541,7 @@ class CardEvolutionRepo {
                 ..orderBy([(r) => OrderingTerm.asc(r.createdAt)]))
               .get();
       return _canonicalJson({
-        'contractVersion': 7,
+        'contractVersion': 8,
         'fields': [for (final field in writableFields) field.wireName],
         'chatHistoryHash': computeHash(historyJson),
         'effectiveCanonIdentity': assembled.$2.identity,
@@ -560,6 +560,7 @@ class CardEvolutionRepo {
               'observedChange': obs.observedChange,
               'canonicalClaim': obs.canonicalClaim,
               'evidenceMessageIds': _decodeJsonArray(obs.evidenceMessageIds),
+              'evidenceClusters': _decodeJsonClusters(obs.evidenceClustersJson),
               'cardFieldPath': obs.cardFieldPath,
               'lorebookEntryId': obs.lorebookEntryId,
               'confidence': obs.confidence,
@@ -775,6 +776,15 @@ Map<String, (String, String)>? _loreTargetsFromInput(String selectedInputJson) {
 }
 
 List<Object?> _decodeJsonArray(String encoded) {
+  try {
+    final decoded = jsonDecode(encoded);
+    return decoded is List ? decoded : const [];
+  } catch (_) {
+    return const [];
+  }
+}
+
+List<Object?> _decodeJsonClusters(String encoded) {
   try {
     final decoded = jsonDecode(encoded);
     return decoded is List ? decoded : const [];

@@ -175,23 +175,39 @@ abstract final class CardRewriterPromptBuilder {
       ..writeln('# Actions')
       ..writeln('For each existing observation, choose:')
       ..writeln(
-        '- "confirm": the latest chat history still supports this change. '
-        'Update confidence.',
+        '- "confirm": a causally independent new opportunity in supplied chat '
+        'supports this change. Include its message IDs and update confidence.',
       )
       ..writeln(
-        '- "expire": the latest chat history contradicts or no longer supports '
-        'this change.',
+        '- "no_evidence": there is no new independent support. Absence of the '
+        'character or behavior is no_evidence and changes nothing.',
+      )
+      ..writeln(
+        '- "contradict": supplied chat contains explicit incompatible evidence. '
+        'Include its message IDs. Mere absence or lack of support is never a '
+        'contradiction.',
       )
       ..writeln('For new observations, choose:')
       ..writeln(
         '- "new": a new candidate durable change is evident from the chat '
-        'history.',
+        'history. Include the supporting supplied message IDs.',
+      )
+      ..writeln(
+        'Every new/confirm evidence set must be one causally independent cluster '
+        'or new opportunity, not a continuation of the same moment. Overlapping '
+        'windows or messages cannot reconfirm. One day may contain multiple '
+        'independent clusters, while 200 messages may remain one cluster when '
+        'they belong to the same causal moment.',
+      )
+      ..writeln(
+        'Use only message IDs present in the supplied immutable chat history. '
+        'Never fabricate IDs.',
       )
       ..writeln()
       ..writeln('# Response format')
       ..writeln(
         'Respond with exactly one JSON object and nothing else: '
-        '{"observations":[{"action":"confirm|new|expire","scopeKey":"...",'
+        '{"observations":[{"action":"new|confirm|no_evidence|contradict","scopeKey":"...",'
         '"observedChange":"...","canonicalClaim":"...",'
         '"evidenceMessageIds":[],"cardFieldPath":"personality"|null,'
         '"lorebookEntryId":"bookId:entryId"|null,"confidence":0.0-1.0}]}.',
@@ -199,7 +215,7 @@ abstract final class CardRewriterPromptBuilder {
       ..writeln(
         'Return an empty "observations" list ONLY when the chat history '
         'contains no new durable changes and no existing observation needs '
-        'confirmation or expiry.',
+        'confirmation or explicit contradiction.',
       )
       ..writeln()
       ..writeln('# Instruction')

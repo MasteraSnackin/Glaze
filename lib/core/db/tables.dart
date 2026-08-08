@@ -1145,6 +1145,8 @@ class CardEvolutionObservations extends Table {
   TextColumn get observedChange => text()();
   TextColumn get canonicalClaim => text().nullable()();
   TextColumn get evidenceMessageIds => text()();
+  TextColumn get evidenceClustersJson =>
+      text().withDefault(const Constant('[]'))();
   TextColumn get cardFieldPath => text().nullable()();
   TextColumn get lorebookEntryId => text().nullable()();
   RealColumn get confidence => real()();

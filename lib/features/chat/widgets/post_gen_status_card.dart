@@ -5,7 +5,8 @@ import '../state/post_gen_status_provider.dart';
 import 'chat_status_card_shell.dart';
 
 /// Floating card shown at the top of the chat while post-generation tasks
-/// (Ledger and extension blocks) are running. Auto-dismisses 2.5s after
+/// (Ledger, Card Rewriter, and extension blocks) are running. Auto-dismisses
+/// 2.5s after
 /// the last task completes.
 class PostGenStatusCard extends ConsumerStatefulWidget {
   const PostGenStatusCard({super.key, required this.sessionId});
@@ -83,6 +84,40 @@ class _PostGenStatusCardState extends ConsumerState<PostGenStatusCard> {
           showSpinner = false;
         } else {
           label = state.detail ?? 'Ledger failed';
+          icon = Icons.error_outline;
+          accent = Colors.redAccent;
+          showSpinner = false;
+        }
+      case PostGenTask.cardEvolutionObservation:
+        if (state.phase == PostGenTaskPhase.running) {
+          label = 'Card evolution observations running...';
+          icon = Icons.manage_search_outlined;
+          accent = cs.primary;
+          showSpinner = true;
+        } else if (state.phase == PostGenTaskPhase.done) {
+          label = state.detail ?? 'Card evolution observations done';
+          icon = Icons.check_circle_outline;
+          accent = Colors.green;
+          showSpinner = false;
+        } else {
+          label = state.detail ?? 'Card evolution observations failed';
+          icon = Icons.error_outline;
+          accent = Colors.redAccent;
+          showSpinner = false;
+        }
+      case PostGenTask.cardRewriter:
+        if (state.phase == PostGenTaskPhase.running) {
+          label = 'Card Rewriter running...';
+          icon = Icons.auto_fix_high_outlined;
+          accent = cs.primary;
+          showSpinner = true;
+        } else if (state.phase == PostGenTaskPhase.done) {
+          label = state.detail ?? 'Card Rewriter done';
+          icon = Icons.check_circle_outline;
+          accent = Colors.green;
+          showSpinner = false;
+        } else {
+          label = state.detail ?? 'Card Rewriter failed';
           icon = Icons.error_outline;
           accent = Colors.redAccent;
           showSpinner = false;

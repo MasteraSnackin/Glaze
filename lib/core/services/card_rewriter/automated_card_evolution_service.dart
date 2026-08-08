@@ -18,6 +18,8 @@ import 'manual_rewrite_service.dart';
 
 const _writerMaxTokens = 20000;
 
+enum AutomatedCardEvolutionStage { observation, cardRewriter }
+
 /// Dedicated review-only automation lane. Claim and final commit are repository
 /// operations; the only work between them is shared-context prompt assembly and
 /// two bounded, cancellable writer calls.
@@ -51,19 +53,26 @@ class AutomatedCardEvolutionService {
   final Map<String, CancelToken> _tokens = {};
   final Map<String, Future<CardEvolutionFinalizeOutcome>> _inFlight = {};
 
-  Future<CardEvolutionFinalizeOutcome> runOneBatch(String sessionId) {
+  Future<CardEvolutionFinalizeOutcome> runOneBatch(
+    String sessionId, {
+    void Function(AutomatedCardEvolutionStage stage)? onStage,
+  }) {
     if (isEnabled?.call() == false) {
       return Future.value(const CardEvolutionFinalizeOutcome('disabled'));
     }
     final active = _inFlight[sessionId];
     if (active != null) return active;
-    final future = _run(sessionId);
+    final future = _run(sessionId, onStage: onStage);
     _inFlight[sessionId] = future;
     return future.whenComplete(() => _inFlight.remove(sessionId));
   }
 
-  Future<CardEvolutionFinalizeOutcome> _run(String sessionId) async {
-    await _maybeRunObservationPass(sessionId);
+  Future<CardEvolutionFinalizeOutcome> _run(
+    String sessionId, {
+    void Function(AutomatedCardEvolutionStage stage)? onStage,
+  }) async {
+    await _maybeRunObservationPass(sessionId, onStage: onStage);
+    onStage?.call(AutomatedCardEvolutionStage.cardRewriter);
     final owner = 'evolution-owner-${generateId()}';
     final now = currentTimestampSeconds();
     final claimed = await repo.claim(
@@ -256,13 +265,17 @@ class AutomatedCardEvolutionService {
   /// Runs the observation pass when the cadence gate is active (every 2nd
   /// successful reconciliation). Failures are non-blocking: the card writer
   /// continues without validated targets.
-  Future<void> _maybeRunObservationPass(String sessionId) async {
+  Future<void> _maybeRunObservationPass(
+    String sessionId, {
+    void Function(AutomatedCardEvolutionStage stage)? onStage,
+  }) async {
     try {
       final count = await repo.countSuccessfulReconciliations(sessionId);
       if (count == 0 || count % 2 != 0) return;
       final runOrdinal = count ~/ 2;
+      onStage?.call(AutomatedCardEvolutionStage.observation);
       await _runObservationPass(sessionId, runOrdinal);
-      await _checkPromotionsAndExpiry(sessionId, runOrdinal);
+      await _checkPromotions(sessionId);
     } catch (_) {
       // Observation pass failures are intentionally non-blocking.
     }
@@ -283,6 +296,7 @@ class AutomatedCardEvolutionService {
             'firstSeenRun': o.firstSeenRun,
             'lastConfirmedRun': o.lastConfirmedRun,
             'confidence': o.confidence,
+            'evidenceClusters': o.evidenceClusters,
           },
         )
         .toList();
@@ -308,8 +322,11 @@ class AutomatedCardEvolutionService {
       }
       final actions = _parseObservationResponse(outcome.text!);
       if (actions == null) return;
+      final validEvidenceIds = _chatMessageIds(snapshot.selectedInputJson);
+      if (validEvidenceIds == null) return;
       final now = currentTimestampSeconds();
       for (final action in actions) {
+        if (!validEvidenceIds.containsAll(action.evidenceMessageIds)) continue;
         await _applyObservationAction(
           sessionId: sessionId,
           characterId: snapshot.character.id,
@@ -344,6 +361,7 @@ class AutomatedCardEvolutionService {
             runOrdinal: runOrdinal,
             confidence: action.confidence,
             now: now,
+            evidenceMessageIds: action.evidenceMessageIds,
           );
         }
         break;
@@ -362,38 +380,37 @@ class AutomatedCardEvolutionService {
               semanticScopeKey: action.scopeKey,
               observedChange: action.observedChange,
               canonicalClaim: action.canonicalClaim,
-              evidenceMessageIds: action.evidenceMessageIds,
+              evidenceClusters: [action.evidenceMessageIds],
               cardFieldPath: action.cardFieldPath,
               lorebookEntryId: action.lorebookEntryId,
               confidence: action.confidence,
               status: 'active',
               firstSeenRun: runOrdinal,
+              lastConfirmedRun: runOrdinal,
               createdAt: now,
               updatedAt: now,
             ),
           );
         }
         break;
-      case 'expire':
+      case 'no_evidence':
+        break;
+      case 'contradict':
         final existing = await observationRepo.findByScopeKey(
           sessionId,
           action.scopeKey,
         );
         if (existing != null && existing.status == 'active') {
-          await observationRepo.expireObservation(existing.id, now: now);
+          await observationRepo.contradictObservation(existing.id, now: now);
         }
         break;
     }
   }
 
-  Future<void> _checkPromotionsAndExpiry(
-    String sessionId,
-    int runOrdinal,
-  ) async {
+  Future<void> _checkPromotions(String sessionId) async {
     final now = currentTimestampSeconds();
     final threshold = observationPromotionThreshold?.call() ?? 3;
     final minConfidence = observationMinConfidence?.call() ?? 0.7;
-    final expiryRuns = observationExpiryRuns?.call() ?? 4;
     final promotable = await observationRepo.getPromotableObservations(
       sessionId,
       minRepeatCount: threshold,
@@ -402,13 +419,20 @@ class AutomatedCardEvolutionService {
     for (final obs in promotable) {
       await observationRepo.promoteObservation(obs.id, now: now);
     }
-    final expired = await observationRepo.getExpiryCandidates(
-      sessionId,
-      currentRunOrdinal: runOrdinal,
-      expiryRuns: expiryRuns,
-    );
-    for (final obs in expired) {
-      await observationRepo.expireObservation(obs.id, now: now);
+  }
+
+  static Set<String>? _chatMessageIds(String selectedInputJson) {
+    try {
+      final decoded = jsonDecode(selectedInputJson);
+      if (decoded is! Map || decoded['chatHistory'] is! List) return null;
+      final result = <String>{};
+      for (final message in decoded['chatHistory'] as List) {
+        if (message is! Map || message['messageId'] is! String) return null;
+        result.add(message['messageId'] as String);
+      }
+      return result;
+    } catch (_) {
+      return null;
     }
   }
 
@@ -441,6 +465,7 @@ class AutomatedCardEvolutionService {
       final observations = decoded['observations'];
       if (observations is! List) return null;
       final result = <_ParsedObservationAction>[];
+      final scopes = <String>{};
       for (final raw in observations) {
         if (raw is! Map) return null;
         final action = raw['action'];
@@ -448,11 +473,17 @@ class AutomatedCardEvolutionService {
         final observedChange = raw['observedChange'];
         final confidence = raw['confidence'];
         if (action is! String ||
-            !const {'confirm', 'new', 'expire'}.contains(action) ||
+            !const {
+              'confirm',
+              'new',
+              'no_evidence',
+              'contradict',
+            }.contains(action) ||
             scopeKey is! String ||
             scopeKey.isEmpty ||
-            observedChange is! String ||
-            observedChange.isEmpty) {
+            !scopes.add(scopeKey) ||
+            (action == 'new' &&
+                (observedChange is! String || observedChange.isEmpty))) {
           return null;
         }
         final conf = confidence is num ? confidence.toDouble() : 0.5;
@@ -462,14 +493,20 @@ class AutomatedCardEvolutionService {
             ? 1.0
             : conf;
         final evidenceRaw = raw['evidenceMessageIds'];
-        final evidence = evidenceRaw is List
-            ? [for (final item in evidenceRaw) item.toString()]
-            : const <String>[];
+        if (evidenceRaw is! List ||
+            evidenceRaw.any((item) => item is! String)) {
+          return null;
+        }
+        final evidence = <String>[];
+        for (final item in evidenceRaw.cast<String>()) {
+          if (item.isNotEmpty && !evidence.contains(item)) evidence.add(item);
+        }
+        if (action != 'no_evidence' && evidence.isEmpty) return null;
         result.add(
           _ParsedObservationAction(
             action: action,
             scopeKey: scopeKey,
-            observedChange: observedChange,
+            observedChange: observedChange is String ? observedChange : '',
             canonicalClaim: raw['canonicalClaim'] is String
                 ? raw['canonicalClaim'] as String
                 : null,

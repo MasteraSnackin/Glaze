@@ -10,6 +10,8 @@ part 'card_evolution_observation.g.dart';
 /// validated target. After a successful apply the status becomes `consumed`.
 @freezed
 abstract class CardEvolutionObservation with _$CardEvolutionObservation {
+  const CardEvolutionObservation._();
+
   const factory CardEvolutionObservation({
     required String id,
     required String sessionId,
@@ -18,7 +20,7 @@ abstract class CardEvolutionObservation with _$CardEvolutionObservation {
     required String semanticScopeKey,
     required String observedChange,
     String? canonicalClaim,
-    required List<String> evidenceMessageIds,
+    required List<List<String>> evidenceClusters,
     String? cardFieldPath,
     String? lorebookEntryId,
     required double confidence,
@@ -32,4 +34,9 @@ abstract class CardEvolutionObservation with _$CardEvolutionObservation {
 
   factory CardEvolutionObservation.fromJson(Map<String, dynamic> json) =>
       _$CardEvolutionObservationFromJson(json);
+
+  /// Compatibility/audit view. Independent clusters remain the source of truth.
+  List<String> get evidenceMessageIds => [
+    for (final cluster in evidenceClusters) ...cluster,
+  ];
 }

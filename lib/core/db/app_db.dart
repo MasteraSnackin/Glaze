@@ -74,7 +74,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 112;
+  int get schemaVersion => 113;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -2056,6 +2056,51 @@ class AppDatabase extends _$AppDatabase {
             'ALTER TABLE api_configs '
             'RENAME COLUMN gemini_use_system_instruction '
             'TO use_system_instruction',
+          );
+        }
+      }
+      if (from < 113) {
+        final columns = await customSelect(
+          "PRAGMA table_info('card_evolution_observations')",
+        ).get();
+        final columnNames = columns
+            .map((column) => column.read<String>('name'))
+            .toSet();
+        if (!columnNames.contains('evidence_clusters_json')) {
+          await m.addColumn(
+            cardEvolutionObservations,
+            cardEvolutionObservations.evidenceClustersJson,
+          );
+        }
+        final observations = await customSelect(
+          'SELECT id, evidence_message_ids FROM card_evolution_observations',
+        ).get();
+        for (final observation in observations) {
+          final legacy = observation.read<String>('evidence_message_ids');
+          final canonical = <String>[];
+          try {
+            final decoded = jsonDecode(legacy);
+            if (decoded is List) {
+              for (final value in decoded) {
+                if (value is String &&
+                    value.isNotEmpty &&
+                    !canonical.contains(value)) {
+                  canonical.add(value);
+                }
+              }
+            }
+          } catch (_) {
+            // Malformed legacy evidence is unverifiable and is discarded.
+          }
+          await customStatement(
+            'UPDATE card_evolution_observations '
+            'SET evidence_message_ids = ?, evidence_clusters_json = ?, '
+            'repeat_count = 1 WHERE id = ?',
+            [
+              jsonEncode(canonical),
+              jsonEncode(canonical.isEmpty ? const [] : [canonical]),
+              observation.read<String>('id'),
+            ],
           );
         }
       }

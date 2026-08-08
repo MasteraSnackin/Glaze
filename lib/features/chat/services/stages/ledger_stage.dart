@@ -11,6 +11,7 @@ import '../../../../core/llm/studio_turn_config_snapshot.dart';
 import '../../../../core/models/agent_operation_record.dart';
 import '../../../../core/models/chat_message.dart';
 import '../../../../core/models/pipeline_settings.dart';
+import '../../../../core/services/card_rewriter/automated_card_evolution_service.dart';
 import '../../../../core/state/db_provider.dart';
 import '../../../../core/state/memory_agent_providers.dart';
 import '../../../../core/state/character_provider.dart';
@@ -249,16 +250,57 @@ class LedgerStage {
             // (plan §Automated Card Evolution cadence). Counting via the run
             // repo head ordinal keeps the cadence durable across rerolls and
             // app restarts; the single-row checkpoint cannot do this.
-            final runHead = await ctx
-                .ref
+            final runHead = await ctx.ref
                 .read(ledgerReconciliationRunRepoProvider)
                 .getHead(sessionId);
-            if (runHead != null &&
-                runHead.ordinal % 2 == 0 &&
-                isCurrent()) {
-              await ctx.ref
+            if (runHead != null && runHead.ordinal % 2 == 0 && isCurrent()) {
+              final rewriteOutcome = await ctx.ref
                   .read(automatedCardEvolutionServiceProvider)
-                  .runOneBatch(sessionId);
+                  .runOneBatch(
+                    sessionId,
+                    onStage: (stage) {
+                      if (!ctx.ref.mounted || !isCurrent()) return;
+                      ctx.ref
+                          .read(postGenStatusProvider.notifier)
+                          .state = PostGenStatusState.running(
+                        sessionId: sessionId,
+                        task: stage == AutomatedCardEvolutionStage.observation
+                            ? PostGenTask.cardEvolutionObservation
+                            : PostGenTask.cardRewriter,
+                      );
+                    },
+                  );
+              if (ctx.ref.mounted && isCurrent()) {
+                final isFailure = const {
+                  'modelNotConfigured',
+                  'cardModelFailed',
+                  'lorebookModelFailed',
+                  'invalidCardOutput',
+                  'invalidLorebookOutput',
+                  'snapshotUnavailable',
+                  'staleEvidence',
+                  'canonUnavailable',
+                  'fieldMismatch',
+                  'unexpectedFailure',
+                }.contains(rewriteOutcome.kind);
+                final detail = rewriteOutcome.kind == 'persisted'
+                    ? 'Card Rewriter created a review proposal'
+                    : rewriteOutcome.kind == 'emptyModelProposal'
+                    ? 'Card Rewriter found no durable card changes'
+                    : 'Card Rewriter: ${rewriteOutcome.kind}'
+                          '${rewriteOutcome.detail == null ? '' : ' — ${rewriteOutcome.detail}'}';
+                ctx.ref.read(postGenStatusProvider.notifier).state = isFailure
+                    ? PostGenStatusState.error(
+                        sessionId: sessionId,
+                        task: PostGenTask.cardRewriter,
+                        detail: detail,
+                      )
+                    : PostGenStatusState.done(
+                        sessionId: sessionId,
+                        task: PostGenTask.cardRewriter,
+                        detail: detail,
+                      );
+              }
               if (!isCurrent()) return;
             }
           }
