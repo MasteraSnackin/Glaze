@@ -120,6 +120,9 @@ void main() {
   });
 
   group('ChatWebViewTrackpadScroll', () {
+    // testWidgets bodies reset the override themselves: the binding asserts
+    // every foundation debug variable is unset when the body returns, which
+    // happens before tearDown gets a chance to run.
     tearDown(() => debugDefaultTargetPlatformOverride = null);
 
     test('is only needed on Windows', () {
@@ -158,6 +161,9 @@ void main() {
       expect(listener.onPointerPanZoomStart, isNotNull);
       expect(listener.onPointerPanZoomUpdate, isNotNull);
       expect(listener.onPointerPanZoomEnd, isNotNull);
+      expect(listener.behavior, HitTestBehavior.opaque);
+
+      debugDefaultTargetPlatformOverride = null;
     });
 
     testWidgets('adds no wrapper off Windows', (tester) async {
@@ -181,6 +187,8 @@ void main() {
         ),
         findsNothing,
       );
+
+      debugDefaultTargetPlatformOverride = null;
     });
   });
 
