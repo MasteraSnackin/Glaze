@@ -2182,5 +2182,10 @@
   "preset_delete_many_confirm": {
     "one": "Delete {} preset? This cannot be undone.",
     "other": "Delete {} presets? This cannot be undone."
-  }
+  },
+  "api_delete_many_confirm": {
+    "one": "Delete {} connection? This cannot be undone.",
+    "other": "Delete {} connections? This cannot be undone."
+  },
+  "sort_reorder": "Reorder"
 }

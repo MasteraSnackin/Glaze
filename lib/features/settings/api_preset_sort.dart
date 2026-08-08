@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/models/api_config.dart';
@@ -62,6 +63,11 @@ class ApiPresetSortState {
     manualOrder: manualOrder ?? this.manualOrder,
   );
 }
+
+/// Whether the presets sheet has dragging armed, from the chip next to the sort
+/// picker. Ephemeral UI state — the sheet arms it while it is open and drops it
+/// on close, so a long press means "select" the rest of the time.
+final apiPresetReorderArmedProvider = StateProvider<bool>((ref) => false);
 
 const _kSortModeKey = 'apiPresetListSortMode';
 const _kManualOrderKey = 'apiPresetListManualOrder';

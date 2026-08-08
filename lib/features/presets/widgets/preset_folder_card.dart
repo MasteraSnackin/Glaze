@@ -74,8 +74,10 @@ class PresetFolderCard extends StatelessWidget {
                   const SizedBox(height: 4),
                   Row(
                     children: [
+                      // A folder, not the preset card's token glyph — the
+                      // number here counts members, not tokens.
                       PresetSmallBadge(
-                        icon: Icons.description,
+                        icon: Icons.folder_rounded,
                         label: '$count',
                       ),
                     ],

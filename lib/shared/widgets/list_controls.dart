@@ -167,6 +167,53 @@ class GlazeSortIconChip extends StatelessWidget {
   }
 }
 
+/// Glass toggle that arms dragging for a manually ordered list, shown next to
+/// the sort chip while that mode is picked.
+///
+/// Rows only move while it is on, which leaves the long press free to mean
+/// "select" the rest of the time. Filled while armed, so the mode the list is
+/// in is never a guess.
+class GlazeReorderToggleButton extends StatelessWidget {
+  final bool armed;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  const GlazeReorderToggleButton({
+    super.key,
+    required this.armed,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: GestureDetector(
+        onTap: onTap,
+        child: SizedBox(
+          width: 32,
+          height: 32,
+          child: GlassSurface(
+            borderRadius: BorderRadius.circular(16),
+            tint: armed ? context.cs.primary : context.cs.surface,
+            border: Border.all(
+              color: context.cs.primary.withValues(alpha: armed ? 0.9 : 0.18),
+            ),
+            child: Center(
+              child: Icon(
+                Icons.swap_vert_rounded,
+                size: 18,
+                color: armed ? Colors.white : context.cs.primary,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// Glass button that opens a filter sheet, badged with how many filters are
 /// currently applied.
 class GlazeFilterIconButton extends StatelessWidget {
