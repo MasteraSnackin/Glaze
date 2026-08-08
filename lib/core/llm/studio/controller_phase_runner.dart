@@ -116,10 +116,9 @@ class ControllerPhaseRunner {
     }
     final effectivePreset = resolvedPreset.preset!;
     try {
-      final agents = effectivePreset.agents
-          .where((agent) => agent.enabled)
-          .toList()
-        ..sort((a, b) => a.order.compareTo(b.order));
+      final agents =
+          effectivePreset.agents.where((agent) => agent.enabled).toList()
+            ..sort((a, b) => a.order.compareTo(b.order));
       if (agents.isEmpty) return const PreGenPhaseResult(status: 'disabled');
       if (token.isCancelled) return const PreGenPhaseResult(status: 'aborted');
 
@@ -171,6 +170,7 @@ class ControllerPhaseRunner {
             turnConfig,
           ),
           inputs: inputs,
+          context: context,
           sceneKey: sceneKey,
           turnIndex: turnIndex,
         );

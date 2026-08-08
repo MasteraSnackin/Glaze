@@ -12,6 +12,8 @@ import 'package:glaze_flutter/core/models/cleaner_settings.dart';
 import 'package:glaze_flutter/core/models/pipeline_settings.dart';
 import 'package:glaze_flutter/core/models/studio_agent_settings.dart';
 import 'package:glaze_flutter/core/models/studio_config.dart';
+import 'package:glaze_flutter/core/models/ledger_prompt_injection_mode.dart';
+import 'package:glaze_flutter/core/models/ledger_prompt_injection_policy.dart';
 import 'package:glaze_flutter/core/state/active_studio_preset_provider.dart';
 import 'package:glaze_flutter/core/state/db_provider.dart';
 import 'package:glaze_flutter/core/state/studio_turn_config_resolver.dart';
@@ -19,6 +21,31 @@ import 'package:glaze_flutter/features/settings/api_list_provider.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  test('snapshot freezes policy derived from unresolved preset blocks', () {
+    final snapshot = StudioTurnConfigSnapshot(
+      config: const StudioConfig(sessionId: 'session', enabled: true),
+      preset: const StudioPreset(
+        id: 'preset',
+        blocks: [
+          StudioPresetBlock(
+            id: ledgerPromptInjectionHeaderId,
+            title: ledgerPromptInjectionHeaderTitle,
+            enabled: false,
+          ),
+        ],
+      ),
+      pipelineSettings: const PipelineSettings(),
+      apiConfigs: const [],
+      activeApiConfig: null,
+    );
+
+    expect(snapshot.ledgerPromptInjectionPolicy.presetOptIn, isFalse);
+    expect(
+      snapshot.ledgerPromptInjectionPolicy.effectiveMode,
+      LedgerPromptInjectionMode.disabled,
+    );
+  });
 
   test(
     'resolver default-denies before loading enabled-only dependencies',

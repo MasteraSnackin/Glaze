@@ -1,7 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/llm/agent_runner.dart';
-import 'package:glaze_flutter/core/llm/studio/studio_context.dart';
 import 'package:glaze_flutter/core/llm/studio_brief_cache.dart';
 import 'package:glaze_flutter/core/llm/studio_brief_parser.dart';
 import 'package:glaze_flutter/core/llm/studio_stage_brief.dart';
@@ -58,11 +57,7 @@ void main() {
     final context = _cacheKey(
       cache,
       preset: _preset.copyWith(
-        blocks: [
-          _preset.blocks.single.copyWith(
-            injectionPoint: 'final',
-          ),
-        ],
+        blocks: [_preset.blocks.single.copyWith(injectionPoint: 'final')],
       ),
     );
     final targeted = _cacheKey(
@@ -109,6 +104,13 @@ void main() {
     );
 
     expect(changed, isNot(original));
+  });
+
+  test('Ledger materialization identity changes the cache key', () {
+    final first = _cacheKey(cache, ledgerInjectionIdentity: 'ledger-a');
+    final second = _cacheKey(cache, ledgerInjectionIdentity: 'ledger-b');
+
+    expect(first, isNot(second));
   });
 
   test('refresh policy uses only the normalized explicit value', () {
@@ -189,6 +191,7 @@ String _cacheKey(
   StudioBriefCache cache, {
   String sessionId = 'session-a',
   StudioPreset preset = _preset,
+  String ledgerInjectionIdentity = '',
 }) {
   return cache.cacheKeyForAgent(
     config: _config,
@@ -201,6 +204,7 @@ String _cacheKey(
     agent: _agent,
     policy: 'static',
     sceneKey: '',
+    ledgerInjectionIdentity: ledgerInjectionIdentity,
   );
 }
 

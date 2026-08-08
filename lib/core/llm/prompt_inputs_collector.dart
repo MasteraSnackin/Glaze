@@ -11,6 +11,8 @@ import '../state/summary_providers.dart';
 import 'prompt_builder.dart';
 import 'prompt_inputs.dart';
 import 'prompt/effective_canon_prompt_formatter.dart';
+import '../models/ledger_prompt_injection_mode.dart';
+import '../models/ledger_prompt_injection_policy.dart';
 import 'prompt/prompt_build_stale_exception.dart';
 
 typedef ApiConfigInitializer = Future<void> Function();
@@ -65,13 +67,14 @@ class PromptInputsCollector {
     final lorebookRepo = _ref.read(lorebookRepoProvider);
 
     final sourceCharacter = await charRepo.getById(charId);
-    if (sourceCharacter == null) throw StateError('Character not found: $charId');
+    if (sourceCharacter == null) {
+      throw StateError('Character not found: $charId');
+    }
     final effectiveContext = session == null
         ? null
-        : await _ref.read(effectiveCanonContextLoaderProvider).load(
-            sessionId: session.id,
-            sourceCharacter: sourceCharacter,
-          );
+        : await _ref
+              .read(effectiveCanonContextLoaderProvider)
+              .load(sessionId: session.id, sourceCharacter: sourceCharacter);
     final character = effectiveContext?.character ?? sourceCharacter;
 
     await _initializeApiConfigs();
@@ -109,10 +112,7 @@ class PromptInputsCollector {
         ? sourceLorebooks
         : await _ref
               .read(sessionLorebookEvolutionRepoProvider)
-              .applyOverlays(
-                sessionId: session.id,
-                lorebooks: sourceLorebooks,
-              );
+              .applyOverlays(sessionId: session.id, lorebooks: sourceLorebooks);
     final lorebookSettings = _ref.read(lorebookSettingsProvider);
     final lorebookActivations = _ref.read(lorebookActivationsProvider);
 
@@ -138,12 +138,14 @@ class PromptInputsCollector {
 
     if (effectiveContext != null) {
       final current = await charRepo.getById(charId);
-      if (current == null || !await _ref.read(effectiveCanonContextLoaderProvider)
-          .isStillCurrentReadOnly(
-            sessionId: session!.id,
-            sourceCharacter: current,
-            stamp: effectiveContext.stamp,
-          )) {
+      if (current == null ||
+          !await _ref
+              .read(effectiveCanonContextLoaderProvider)
+              .isStillCurrentReadOnly(
+                sessionId: session!.id,
+                sourceCharacter: current,
+                stamp: effectiveContext.stamp,
+              )) {
         throw const PromptBuildStaleException(
           'Effective canon changed while collecting prompt inputs.',
         );
@@ -212,6 +214,23 @@ class PromptInputsCollector {
       effectiveCanonProjection: effectiveContext == null
           ? null
           : EffectiveCanonPromptProjection.fromContext(effectiveContext),
+      ledgerPromptInjectionPolicy: preset == null
+          ? const LedgerPromptInjectionPolicy(
+              presetOptIn: true,
+              mode: LedgerPromptInjectionMode.legacy,
+            )
+          : deriveLedgerPromptInjectionPolicyFromRaw(
+              presetId: preset.id,
+              rawBlocks: preset.blocks
+                  .map(
+                    (block) => <String, Object?>{
+                      'id': block.id,
+                      'name': block.name,
+                      'enabled': block.enabled,
+                    },
+                  )
+                  .toList(growable: false),
+            ),
     );
   }
 }

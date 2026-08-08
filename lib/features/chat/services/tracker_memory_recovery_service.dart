@@ -153,6 +153,10 @@ class TrackerMemoryRecoveryService {
           final context = const StudioContextPreparer().prepare(
             inputs: inputs,
             visibleMessageIds: visibleMessageIds,
+            ledgerPromptInjectionPolicy:
+                turnConfig?.ledgerPromptInjectionPolicy ??
+                inputs.ledgerPromptInjectionPolicy,
+            consumerPath: 'studio-tracker-recovery',
           );
           final result = await _ref
               .read(memoryStudioServiceProvider)

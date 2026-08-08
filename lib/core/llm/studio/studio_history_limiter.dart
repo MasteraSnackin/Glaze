@@ -72,6 +72,7 @@ class StudioHistoryLimiter {
         PromptMessage(
           role: m.role,
           content: cleaned,
+          sourceMessageId: m.sourceMessageId,
           reasoningContent: m.reasoningContent,
           imagePath: m.imagePath,
         ),
@@ -100,6 +101,7 @@ class StudioHistoryLimiter {
             (m) => PromptMessage(
               role: m.role,
               content: stripHtmlTags(m.content),
+              sourceMessageId: m.sourceMessageId,
               imagePath: m.imagePath,
             ),
           )
@@ -111,6 +113,7 @@ class StudioHistoryLimiter {
           (m) => PromptMessage(
             role: m.role,
             content: stripHtmlTags(m.content),
+            sourceMessageId: m.sourceMessageId,
             imagePath: m.imagePath,
           ),
         )

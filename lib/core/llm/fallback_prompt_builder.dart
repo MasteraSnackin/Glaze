@@ -2,18 +2,8 @@ import 'context_calculator.dart';
 import 'history_assembler.dart';
 import 'macro_engine.dart';
 import 'prompt_builder.dart';
-import 'prompt/effective_canon_prompt_formatter.dart';
-import '../models/chat_message.dart';
 
 PromptResult buildFallbackPrompt(PromptPayload payload) {
-  final canon = payload.effectiveCanonProjection == null
-      ? null
-      : EffectiveCanonPromptFormatter.format(
-          payload.effectiveCanonProjection!,
-          sessionId: payload.sessionId ?? '',
-          latestUserText: _latestText(payload.history, 'user'),
-          latestAssistantText: _latestText(payload.history, 'assistant'),
-        );
   final macroCtx = MacroContext(
     charName: payload.character.name,
     charDescription: payload.character.description,
@@ -35,7 +25,9 @@ PromptResult buildFallbackPrompt(PromptPayload payload) {
   );
   final history = <PromptMessage>[];
 
-  for (final msg in payload.history) {
+  for (final msg in payload.history.where(
+    (message) => !message.isHidden && !message.isTyping,
+  )) {
     final macroResult = replaceMacros(msg.content, macroCtx);
     history.add(
       PromptMessage(
@@ -56,42 +48,40 @@ PromptResult buildFallbackPrompt(PromptPayload payload) {
     excludeReasoningFromContextBudget:
         payload.apiConfig.excludeReasoningFromContextBudget,
   );
+  final ledgerMessages = <PromptMessage>[
+    if (payload.characterKnowledgeContent case final content?
+        when content.isNotEmpty)
+      PromptMessage(
+        role: 'system',
+        content: content,
+        blockId: 'current_character_state',
+      ),
+    if (payload.studioSessionStateContent case final content?
+        when content.isNotEmpty)
+      PromptMessage(
+        role: 'system',
+        content: content,
+        blockId: 'studio_session_state',
+      ),
+    if (payload.arcContent case final content? when content.isNotEmpty)
+      PromptMessage(role: 'system', content: content, blockId: 'arc_state'),
+  ];
   final breakdown = calculator.calculate(
-    staticBlocks: const [
-      StaticBlock(
+    staticBlocks: [
+      const StaticBlock(
         id: 'fallback_system',
         content: 'You are a helpful assistant.',
       ),
+      for (final message in ledgerMessages)
+        StaticBlock(id: message.blockId ?? 'preset', content: message.content),
     ],
     historyMessages: history,
   );
 
   return PromptResult(
-    messages: [
-      systemMessage,
-      if (canon?.characterKnowledge case final content? when content.isNotEmpty)
-        PromptMessage(
-          role: 'system',
-          content: content,
-          blockId: 'current_character_state',
-        ),
-      if (canon?.sessionState case final content? when content.isNotEmpty)
-        PromptMessage(
-          role: 'system',
-          content: content,
-          blockId: 'studio_session_state',
-        ),
-      ...breakdown.trimmedHistory,
-    ],
+    messages: [systemMessage, ...ledgerMessages, ...breakdown.trimmedHistory],
     breakdown: breakdown,
     sessionVars: payload.sessionVars,
     globalVars: payload.globalVars,
   );
 }
-
-String _latestText(List<ChatMessage> history, String role) => history
-    .lastWhere(
-      (message) => message.role == role,
-      orElse: () => const ChatMessage(id: '', role: '', content: ''),
-    )
-    .content;

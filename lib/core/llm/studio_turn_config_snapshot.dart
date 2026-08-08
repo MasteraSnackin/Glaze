@@ -1,5 +1,7 @@
 import '../models/api_config.dart';
 import '../models/pipeline_settings.dart';
+import '../models/ledger_prompt_injection_mode.dart';
+import '../models/ledger_prompt_injection_policy.dart';
 import '../models/studio_config.dart';
 import 'aux_llm_client.dart';
 import 'studio_slot_resolver.dart';
@@ -11,6 +13,7 @@ class StudioTurnConfigSnapshot {
   final PipelineSettings pipelineSettings;
   final List<ApiConfig> apiConfigs;
   final ApiConfig? activeApiConfig;
+  final LedgerPromptInjectionPolicy ledgerPromptInjectionPolicy;
 
   StudioTurnConfigSnapshot({
     required this.config,
@@ -18,7 +21,16 @@ class StudioTurnConfigSnapshot {
     required PipelineSettings pipelineSettings,
     required this.apiConfigs,
     required this.activeApiConfig,
-  }) : pipelineSettings = config?.enabled == true && preset != null
+    LedgerPromptInjectionPolicy? ledgerPromptInjectionPolicy,
+  }) : ledgerPromptInjectionPolicy =
+           ledgerPromptInjectionPolicy ??
+           (preset == null
+               ? const LedgerPromptInjectionPolicy(
+                   presetOptIn: true,
+                   mode: LedgerPromptInjectionMode.legacy,
+                 )
+               : deriveLedgerPromptInjectionPolicy(preset)),
+       pipelineSettings = config?.enabled == true && preset != null
            ? pipelineSettings.copyWith(
                cleaner: preset.agentEnabled['post_clean'] == false
                    ? pipelineSettings.cleaner.copyWith(

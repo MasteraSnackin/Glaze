@@ -29,6 +29,10 @@ import 'prompt/prompt_result.dart';
 import 'prompt/recalled_message_chunk.dart';
 import 'prompt/recalled_messages_resolver.dart';
 import 'prompt/resolved_block.dart';
+import '../models/ledger_prompt_injection_mode.dart';
+import '../models/ledger_prompt_injection_policy.dart';
+import 'prompt/effective_canon_prompt_materializer.dart';
+import 'prompt/selective_ledger_projection_filter.dart';
 
 export 'prompt/prompt_payload.dart';
 export 'prompt/prompt_result.dart';
@@ -55,6 +59,94 @@ String normalizeBlockId(String blockId) {
 }
 
 PromptResult buildPrompt(PromptPayload payload) {
+  final projection = payload.effectiveCanonProjection;
+  if (projection == null) return _buildPromptOnce(payload);
+
+  final policy = payload.ledgerPromptInjectionPolicy;
+  final mode = policy.effectiveMode;
+  final baselineMaterialization =
+      EffectiveCanonPromptMaterializer.materializeSafely(
+        SelectiveLedgerProjectionInput(
+          policy: LedgerPromptInjectionPolicy(
+            presetOptIn: policy.presetOptIn,
+            mode: mode == LedgerPromptInjectionMode.disabled
+                ? LedgerPromptInjectionMode.disabled
+                : LedgerPromptInjectionMode.legacy,
+            algorithmVersion: policy.algorithmVersion,
+            reverseScanDepth: policy.reverseScanDepth,
+          ),
+          consumerPath: payload.preset == null ? 'fallback' : 'ordinary',
+          projection: projection,
+          visibleMessages: const [],
+          selectedSwipeByMessageId: const {},
+        ),
+        sessionId: payload.sessionId ?? '',
+        latestUserText: _latestLedgerText(payload.history, 'user'),
+        latestAssistantText: _latestLedgerText(payload.history, 'assistant'),
+      );
+  final baselinePayload = payload.withLedgerMaterialization(
+    baselineMaterialization,
+  );
+
+  // Disabled, legacy, shadow, and unknown-freshness callers are deliberately
+  // single pass. Only proven-current gap filler enters the frozen two-pass
+  // coordinator below.
+  if (mode != LedgerPromptInjectionMode.gapFiller ||
+      !payload.ledgerProjectionFreshnessProvenCurrent) {
+    return _buildPromptOnce(baselinePayload);
+  }
+
+  final baseline = _buildPromptOnce(baselinePayload);
+  final visibleIds = baseline.breakdown.visibleMessageIds;
+  final depth = policy.reverseScanDepth;
+  final visible = payload.history
+      .where(
+        (message) =>
+            visibleIds.contains(message.id) &&
+            !message.isHidden &&
+            !message.isTyping &&
+            (message.role == 'user' || message.role == 'assistant'),
+      )
+      .toList(growable: false);
+  final clamped = visible.length <= depth
+      ? visible
+      : visible.sublist(visible.length - depth);
+  final selected = EffectiveCanonPromptMaterializer.materializeSafely(
+    SelectiveLedgerProjectionInput(
+      policy: policy,
+      consumerPath: payload.preset == null ? 'fallback' : 'ordinary',
+      projection: projection,
+      visibleMessages: clamped,
+      selectedSwipeByMessageId: {
+        for (final message in clamped) message.id: message.swipeId,
+      },
+      freshness: LedgerProjectionFreshness.provenCurrent,
+    ),
+    sessionId: payload.sessionId ?? '',
+    latestUserText: _latestLedgerText(clamped, 'user'),
+    latestAssistantText: _latestLedgerText(clamped, 'assistant'),
+  );
+  final rebuilt = _buildPromptOnce(payload.withLedgerMaterialization(selected));
+  final suppressionEvidence = selected.diagnostics
+      .where((item) => !item.selected)
+      .expand((item) => item.matchingSourceIds)
+      .toSet();
+  if (!rebuilt.breakdown.visibleMessageIds.containsAll(suppressionEvidence)) {
+    return baseline;
+  }
+  return rebuilt;
+}
+
+String _latestLedgerText(List<ChatMessage> history, String role) => history
+    .lastWhere(
+      (message) =>
+          message.role == role && !message.isHidden && !message.isTyping,
+      orElse: () => const ChatMessage(id: '', role: '', content: ''),
+    )
+    .content;
+
+/// One-pass assembly primitive. Ledger fields must already be materialized.
+PromptResult _buildPromptOnce(PromptPayload payload) {
   if (payload.preset == null) return buildFallbackPrompt(payload);
 
   final preset = payload.preset!;

@@ -11,6 +11,7 @@ import 'prompt_builder.dart';
 import 'studio_brief_parser.dart';
 import 'studio_controller_ontology.dart';
 import 'studio_stage_brief.dart';
+import 'studio/studio_context.dart';
 
 /// Owns the Studio brief cache: probe, persist, key derivation, and
 /// refresh-policy normalization. Extracted from [MemoryStudioService] (plan §2):
@@ -95,6 +96,7 @@ class StudioBriefCache {
     required int? maxTokensOverride,
     required double? temperatureOverride,
     required GenerationContextInputs inputs,
+    required StudioContext context,
     required String sceneKey,
     required int turnIndex,
   }) {
@@ -110,6 +112,7 @@ class StudioBriefCache {
       agent: agent,
       policy: policy,
       sceneKey: sceneKey,
+      ledgerInjectionIdentity: context.diagnostics.ledgerInjectionIdentity,
     );
     final cached = usableCachedBrief(
       cacheKey: cacheKey,
@@ -191,6 +194,7 @@ class StudioBriefCache {
     required StudioAgent agent,
     required String policy,
     required String sceneKey,
+    String ledgerInjectionIdentity = '',
   }) {
     // Generation parameters live on the agent's spec, not on the agent (§4),
     // so the cache key must read them from there or it stops noticing changes.
@@ -203,7 +207,7 @@ class StudioBriefCache {
         return a.$1.compareTo(b.$1);
       });
     final base = <String, dynamic>{
-      'v': 7,
+      'v': 8,
       'sessionId': sessionId,
       'studioConfigId': config.sessionId,
       'cheapApiConfigId': studioPreset.cheapApiConfigId,
@@ -244,13 +248,20 @@ class StudioBriefCache {
           for (final (_, block) in blocks)
             {
               'id': block.id,
+              'title': block.title,
+              'type': block.type.name,
+              'contextSlot': block.contextSlot?.name,
               'mode': block.mode,
               'injectionPoint': block.injectionPoint,
               'targetAgentId': block.targetAgentId,
               'sourceAgentId': block.sourceAgentId,
               'role': block.role,
               'enabled': block.enabled,
+              'locked': block.locked,
               'order': block.order,
+              'section': block.section,
+              'isStatic': block.isStatic,
+              'groupBoundary': block.groupBoundary,
               'content': block.content,
             },
         ],
@@ -271,6 +282,7 @@ class StudioBriefCache {
         'phase': agent.phase,
       },
       'refreshPolicy': policy,
+      'ledgerInjectionIdentity': ledgerInjectionIdentity,
       if (policy == 'scene') 'sceneKey': sceneKey,
     };
     return computeHash(jsonEncode(base));

@@ -1,4 +1,6 @@
-import '../../models/chat_message.dart' show TriggeredEntry;
+import '../../models/chat_message.dart' show ChatMessage, TriggeredEntry;
+import '../../models/ledger_prompt_injection_mode.dart';
+import '../../models/ledger_prompt_injection_policy.dart';
 import '../generation_context_inputs.dart';
 import '../history_assembler.dart';
 import '../macro_engine.dart';
@@ -6,6 +8,8 @@ import '../prompt/lorebook_context_resolver.dart';
 import '../prompt/memory_block_injector.dart' show finalizeMemoryCoverage;
 import '../prompt/memory_context_resolver.dart';
 import '../prompt/recalled_messages_resolver.dart';
+import '../prompt/effective_canon_prompt_materializer.dart';
+import '../prompt/selective_ledger_projection_filter.dart';
 import 'studio_context.dart';
 
 final class StudioContextPreparer {
@@ -14,8 +18,54 @@ final class StudioContextPreparer {
   StudioContext prepare({
     required GenerationContextInputs inputs,
     required Set<String> visibleMessageIds,
+    LedgerPromptInjectionPolicy ledgerPromptInjectionPolicy =
+        const LedgerPromptInjectionPolicy(
+          presetOptIn: true,
+          mode: LedgerPromptInjectionMode.legacy,
+        ),
+    String consumerPath = 'studio',
     bool disableSourceWindowExclusion = false,
   }) {
+    final visibleLedgerMessages = inputs.history
+        .where(
+          (message) =>
+              !message.isHidden &&
+              !message.isTyping &&
+              (message.role == 'user' || message.role == 'assistant') &&
+              visibleMessageIds.contains(message.id),
+        )
+        .toList(growable: false);
+    final scanStart =
+        visibleLedgerMessages.length >
+            ledgerPromptInjectionPolicy.reverseScanDepth
+        ? visibleLedgerMessages.length -
+              ledgerPromptInjectionPolicy.reverseScanDepth
+        : 0;
+    final selectionWindow = visibleLedgerMessages.sublist(scanStart);
+    final ledger = _materializeLedger(
+      inputs: inputs,
+      policy: ledgerPromptInjectionPolicy,
+      consumerPath: consumerPath,
+      visibleMessages: selectionWindow,
+    );
+    final disabled =
+        ledgerPromptInjectionPolicy.effectiveMode ==
+        LedgerPromptInjectionMode.disabled;
+    final characterKnowledge = disabled
+        ? null
+        : ledger == null
+        ? inputs.characterKnowledgeContent
+        : ledger.characterKnowledgeContent;
+    final studioSessionState = disabled
+        ? null
+        : ledger == null
+        ? inputs.studioSessionStateContent
+        : ledger.studioSessionStateContent;
+    final arcContent = disabled
+        ? null
+        : ledger == null
+        ? inputs.arcContent
+        : ledger.arcContent;
     final baseMacroContext = MacroContext(
       charName: inputs.character.name,
       charDescription: inputs.character.description,
@@ -33,9 +83,9 @@ final class StudioContextPreparer {
       summaryContent: inputs.summaryContent,
       guidanceText: inputs.guidanceText,
       macroName: inputs.character.macroName,
-      arcContent: inputs.arcContent,
+      arcContent: arcContent,
       entitiesContent: inputs.entitiesContent,
-      studioSessionState: inputs.studioSessionStateContent,
+      studioSessionState: studioSessionState,
     );
     final lore = const LorebookContextResolver().resolve(
       history: inputs.history,
@@ -154,10 +204,10 @@ final class StudioContextPreparer {
     slots[StudioContextSlot.loreAfter]!.addAll(lore.loreAfter);
     add(StudioContextSlot.loreMacro, loreMacroContent);
     add(StudioContextSlot.recalledMessages, recalled);
-    add(StudioContextSlot.characterKnowledge, inputs.characterKnowledgeContent);
-    add(StudioContextSlot.studioSessionState, inputs.studioSessionStateContent);
+    add(StudioContextSlot.characterKnowledge, characterKnowledge);
+    add(StudioContextSlot.studioSessionState, studioSessionState);
     add(StudioContextSlot.runtimeDynamic, inputs.guidanceText);
-    add(StudioContextSlot.runtimeDynamic, inputs.arcContent);
+    add(StudioContextSlot.runtimeDynamic, arcContent);
     add(StudioContextSlot.runtimeDynamic, inputs.entitiesContent);
     for (final block in inputs.runtimePromptBlocks) {
       final content = replaceMacros(block.content, macroContext).text;
@@ -195,7 +245,34 @@ final class StudioContextPreparer {
         memoryCoverage: Map<String, dynamic>.unmodifiable(memoryCoverage),
         vectorLoreTokens: lore.vectorLoreTokens,
         visibleMessageIds: Set<String>.unmodifiable(visibleMessageIds),
+        ledgerProjectionDiagnostics: ledger?.diagnostics ?? const [],
+        ledgerInjectionIdentity:
+            ledger?.injectionCacheIdentity ??
+            '${ledgerPromptInjectionPolicy.identity}/${inputs.effectiveCanonCacheIdentity}',
       ),
+    );
+  }
+
+  EffectiveCanonPromptMaterialization? _materializeLedger({
+    required GenerationContextInputs inputs,
+    required LedgerPromptInjectionPolicy policy,
+    required String consumerPath,
+    required List<ChatMessage> visibleMessages,
+  }) {
+    final projection = inputs.effectiveCanonProjection;
+    if (projection == null) return null;
+
+    return EffectiveCanonPromptMaterializer.materializeSafely(
+      SelectiveLedgerProjectionInput(
+        policy: policy,
+        consumerPath: consumerPath,
+        projection: projection,
+        visibleMessages: visibleMessages,
+        selectedSwipeByMessageId: {
+          for (final message in visibleMessages) message.id: message.swipeId,
+        },
+      ),
+      sessionId: inputs.sessionId ?? '',
     );
   }
 

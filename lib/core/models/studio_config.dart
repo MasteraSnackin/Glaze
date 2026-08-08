@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:freezed_annotation/freezed_annotation.dart';
 
 import '../llm/studio/studio_context.dart';
+import 'ledger_prompt_injection_mode.dart';
 
 part 'studio_config.freezed.dart';
 part 'studio_config.g.dart';
@@ -18,6 +19,8 @@ abstract class StudioRuntimeSettings with _$StudioRuntimeSettings {
   const factory StudioRuntimeSettings({
     @Default(1) int version,
     @Default([]) List<String> broadcastBlocks,
+    LedgerPromptInjectionMode? requestedLedgerPromptInjectionMode,
+    String? requestedLedgerPromptInjectionAlgorithmVersion,
   }) = _StudioRuntimeSettings;
 
   factory StudioRuntimeSettings.fromJson(Map<String, dynamic> json) =>
