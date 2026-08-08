@@ -18,6 +18,7 @@ import '../bridge/chat_webview_settings.dart';
 import '../../settings/app_settings_provider.dart';
 import 'chat_webview_callbacks.dart';
 import 'chat_webview_ext_block_callbacks.dart';
+import 'chat_webview_trackpad_scroll.dart';
 import 'message_scripts_prompt_sheet.dart';
 import 'webview_callbacks.dart';
 
@@ -180,120 +181,127 @@ class ChatWebViewSurface extends ConsumerWidget {
         Positioned.fill(
           child: IgnorePointer(
             ignoring: sessionSwitching,
-            child: InAppWebView(
-              webViewEnvironment: webViewEnvironment,
-              keepAlive: chatWebViewKeepAliveForPlatform(),
-              initialFile: chatWebViewInitialFile(),
-              initialUrlRequest: chatWebViewInitialUrlRequest(),
-              initialSettings: chatWebViewInAppSettings(),
-              onWebViewCreated: (controller) async {
-                PerfDebug.chatWebViewSurfaceCreated();
-                final jsBridgeService = await bridgeHost.buildJsBridgeService();
-                if (!isMounted()) return;
-                final bridge = ChatBridgeController(
-                  controller,
-                  jsBridgeService,
-                );
-                final allowMessageScripts =
-                    ref.read(appSettingsProvider).value?.allowMessageScripts ??
-                    false;
-                await bridge.evalJs(
-                  'window.bridge?.setAllowMessageScripts('
-                  '$allowMessageScripts)',
-                );
-                // Register bridge in the registry so services can access it.
-                ref.read(chatBridgeRegistryProvider(charId).notifier).state =
-                    bridge;
-                onBridgeReady(bridge);
-                PerfDebug.chatWebViewBridgeReady();
-
-                // Do not call clearAll() here — it races with _initWebViewOnce
-                // (shows #loading-screen via JS) and broke UseVirtualScroll on
-                // keep-alive re-attach. Initializer.setMessages resets the DOM.
-
-                final callbacks = ChatWebViewCallbacks(
-                  ref: ref,
-                  charId: charId,
-                  messageActions: messageActions,
-                  editActions: editActions,
-                  imageGenActions: imageGenActions,
-                  scrollActions: scrollActions,
-                  miscActions: miscActions,
-                );
-                bridge.onMessageContext = callbacks.onMessageContext;
-                bridge.onSwipe = callbacks.onSwipe;
-                bridge.onChangeGreeting = callbacks.onChangeGreeting;
-                bridge.onHeaderScroll = callbacks.onHeaderScroll;
-                bridge.onScrollToBottomVisibility =
-                    callbacks.onScrollToBottomVisibility;
-                bridge.onRegenerate = callbacks.onRegenerate;
-                bridge.onSelectionAction = callbacks.onSelectionAction;
-                bridge.onSelectionChange = callbacks.onSelectionChange;
-                bridge.onEditSave = callbacks.onEditSave;
-                bridge.onEditCancel = callbacks.onEditCancel;
-                bridge.onEditFocusChange = callbacks.onEditFocusChange;
-                bridge.onImageClick = callbacks.onImageClick;
-                bridge.onImgDownload = callbacks.onImgDownload;
-                bridge.onGuidedSwipe = callbacks.onGuidedSwipe;
-                bridge.onMemoryClick = callbacks.onMemoryClick;
-                bridge.onToggleHidden = callbacks.onToggleHidden;
-                bridge.onToggleImageHidden = callbacks.onToggleImageHidden;
-                bridge.onInjectClick = callbacks.onInjectClick;
-                bridge.onImgRetry = callbacks.onImgRetry;
-                bridge.onImgEnableRetry = callbacks.onImgEnableRetry;
-                bridge.onImgFind = callbacks.onImgFind;
-                bridge.onImgRegen = callbacks.onImgRegen;
-                bridge.onImgOptions = callbacks.onImgOptions;
-                bridge.onImgCancel = callbacks.onImgCancel;
-                bridge.onStop = callbacks.onStop;
-                bridge.onLinkClick = callbacks.onLinkClick;
-                bridge.onLoadMore = callbacks.onLoadMore;
-                bridge.onMessageScriptBlocked = () {
+            // Windows touchpad panning never reaches WebView2 on its own —
+            // see ChatWebViewTrackpadScroll. Sits inside the IgnorePointer so
+            // a session switch freezes it along with the rest of the input.
+            child: ChatWebViewTrackpadScroll(
+              charId: charId,
+              child: InAppWebView(
+                webViewEnvironment: webViewEnvironment,
+                keepAlive: chatWebViewKeepAliveForPlatform(),
+                initialFile: chatWebViewInitialFile(),
+                initialUrlRequest: chatWebViewInitialUrlRequest(),
+                initialSettings: chatWebViewInAppSettings(),
+                onWebViewCreated: (controller) async {
+                  PerfDebug.chatWebViewSurfaceCreated();
+                  final jsBridgeService = await bridgeHost
+                      .buildJsBridgeService();
                   if (!isMounted()) return;
-                  // ignore: use_build_context_synchronously
-                  unawaited(maybeShowMessageScriptsPrompt(context, ref));
-                };
-                if (!isMounted()) return;
+                  final bridge = ChatBridgeController(
+                    controller,
+                    jsBridgeService,
+                  );
+                  final allowMessageScripts =
+                      ref.read(appSettingsProvider).value?.allowMessageScripts ??
+                      false;
+                  await bridge.evalJs(
+                    'window.bridge?.setAllowMessageScripts('
+                    '$allowMessageScripts)',
+                  );
+                  // Register bridge in the registry so services can access it.
+                  ref.read(chatBridgeRegistryProvider(charId).notifier).state =
+                      bridge;
+                  onBridgeReady(bridge);
+                  PerfDebug.chatWebViewBridgeReady();
 
-                // The ext-block callbacks run after `await` paths. The
-                // controller is created once per WebView lifetime so
-                // the context capture is safe.
-                final extBlocks = ChatWebViewExtBlockCallbacks(
-                  ref: ref,
-                  charId: charId,
-                  sessionId: sessionId,
-                  // ignore: use_build_context_synchronously
-                  context: context,
-                  isMounted: isMounted,
-                  refreshPanel: refreshPanel,
-                );
-                bridge.onExtBlocksRunAll = extBlocks.onRunAll();
-                bridge.onExtBlockStop = extBlocks.onStop();
-                bridge.onExtBlockRegen = extBlocks.onRegen();
-                bridge.onExtBlockRegenImage = extBlocks.onRegenImage();
-                bridge.onExtBlockEdit = extBlocks.onEdit();
-                bridge.onExtBlockDelete = extBlocks.onDelete();
+                  // Do not call clearAll() here — it races with _initWebViewOnce
+                  // (shows #loading-screen via JS) and broke UseVirtualScroll on
+                  // keep-alive re-attach. Initializer.setMessages resets the DOM.
 
-                final isAlive = await controller.isLoading() == false;
-                if (isAlive) {
+                  final callbacks = ChatWebViewCallbacks(
+                    ref: ref,
+                    charId: charId,
+                    messageActions: messageActions,
+                    editActions: editActions,
+                    imageGenActions: imageGenActions,
+                    scrollActions: scrollActions,
+                    miscActions: miscActions,
+                  );
+                  bridge.onMessageContext = callbacks.onMessageContext;
+                  bridge.onSwipe = callbacks.onSwipe;
+                  bridge.onChangeGreeting = callbacks.onChangeGreeting;
+                  bridge.onHeaderScroll = callbacks.onHeaderScroll;
+                  bridge.onScrollToBottomVisibility =
+                      callbacks.onScrollToBottomVisibility;
+                  bridge.onRegenerate = callbacks.onRegenerate;
+                  bridge.onSelectionAction = callbacks.onSelectionAction;
+                  bridge.onSelectionChange = callbacks.onSelectionChange;
+                  bridge.onEditSave = callbacks.onEditSave;
+                  bridge.onEditCancel = callbacks.onEditCancel;
+                  bridge.onEditFocusChange = callbacks.onEditFocusChange;
+                  bridge.onImageClick = callbacks.onImageClick;
+                  bridge.onImgDownload = callbacks.onImgDownload;
+                  bridge.onGuidedSwipe = callbacks.onGuidedSwipe;
+                  bridge.onMemoryClick = callbacks.onMemoryClick;
+                  bridge.onToggleHidden = callbacks.onToggleHidden;
+                  bridge.onToggleImageHidden = callbacks.onToggleImageHidden;
+                  bridge.onInjectClick = callbacks.onInjectClick;
+                  bridge.onImgRetry = callbacks.onImgRetry;
+                  bridge.onImgEnableRetry = callbacks.onImgEnableRetry;
+                  bridge.onImgFind = callbacks.onImgFind;
+                  bridge.onImgRegen = callbacks.onImgRegen;
+                  bridge.onImgOptions = callbacks.onImgOptions;
+                  bridge.onImgCancel = callbacks.onImgCancel;
+                  bridge.onStop = callbacks.onStop;
+                  bridge.onLinkClick = callbacks.onLinkClick;
+                  bridge.onLoadMore = callbacks.onLoadMore;
+                  bridge.onMessageScriptBlocked = () {
+                    if (!isMounted()) return;
+                    // ignore: use_build_context_synchronously
+                    unawaited(maybeShowMessageScriptsPrompt(context, ref));
+                  };
+                  if (!isMounted()) return;
+
+                  // The ext-block callbacks run after `await` paths. The
+                  // controller is created once per WebView lifetime so
+                  // the context capture is safe.
+                  final extBlocks = ChatWebViewExtBlockCallbacks(
+                    ref: ref,
+                    charId: charId,
+                    sessionId: sessionId,
+                    // ignore: use_build_context_synchronously
+                    context: context,
+                    isMounted: isMounted,
+                    refreshPanel: refreshPanel,
+                  );
+                  bridge.onExtBlocksRunAll = extBlocks.onRunAll();
+                  bridge.onExtBlockStop = extBlocks.onStop();
+                  bridge.onExtBlockRegen = extBlocks.onRegen();
+                  bridge.onExtBlockRegenImage = extBlocks.onRegenImage();
+                  bridge.onExtBlockEdit = extBlocks.onEdit();
+                  bridge.onExtBlockDelete = extBlocks.onDelete();
+
+                  final isAlive = await controller.isLoading() == false;
+                  if (isAlive) {
+                    await onInitWebView();
+                  }
+                },
+                onLoadStop: (controller, url) async {
+                  PerfDebug.chatWebViewLoadStopped();
+                  // The init path is also wired through onWebViewCreated. When
+                  // load stop wins the race, run init here.
+                  await ref
+                      .read(chatBridgeRegistryProvider(charId))
+                      ?.evalJs(
+                        'window.bridge?.setAllowMessageScripts('
+                        '${ref.read(appSettingsProvider).value?.allowMessageScripts ?? false})',
+                      );
                   await onInitWebView();
-                }
-              },
-              onLoadStop: (controller, url) async {
-                PerfDebug.chatWebViewLoadStopped();
-                // The init path is also wired through onWebViewCreated. When
-                // load stop wins the race, run init here.
-                await ref
-                    .read(chatBridgeRegistryProvider(charId))
-                    ?.evalJs(
-                      'window.bridge?.setAllowMessageScripts('
-                      '${ref.read(appSettingsProvider).value?.allowMessageScripts ?? false})',
-                    );
-                await onInitWebView();
-              },
-              shouldOverrideUrlLoading: (controller, request) async {
-                return chatWebViewNavigationPolicy(request.request.url);
-              },
+                },
+                shouldOverrideUrlLoading: (controller, request) async {
+                  return chatWebViewNavigationPolicy(request.request.url);
+                },
+              ),
             ),
           ),
         ),

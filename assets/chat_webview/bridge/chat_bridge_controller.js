@@ -6,6 +6,7 @@ import { MessageUpdateBatcher } from './message_update_batcher.js';
 import { SelectionManager } from './selection_manager.js';
 import { EditController } from './edit_controller.js';
 import { SwipeGestureHandler } from './swipe_gesture_handler.js';
+import { TrackpadScroll } from './trackpad_scroll.js';
 import { InteractionDispatch } from './interaction_dispatch.js';
 import { PanelHost } from './panel_host.js';
 import { sanitizeExtBlockHtml } from './html_sanitizer.js';
@@ -55,6 +56,9 @@ export class Bridge {
       () => this.isGenerating,
       () => this.disableSwipeRegeneration,
     );
+    // Windows-only fallback path: the embedder never delivers touchpad pans to
+    // WebView2 as wheel events, so Flutter replays them through here.
+    this._trackpadScroll = new TrackpadScroll(() => this.virtualList.container);
     // Bottom-inset reconciliation state — see setBottomPadding().
     // `_bottomInsetPx` is the inset Flutter measured from the bottom edge of the
     // full-size WebView box (input bar + keyboard/drawer + safe area);
@@ -230,6 +234,12 @@ export class Bridge {
   }
 
   /* ---------- Scroll / load-more ---------- */
+
+  // Windows touchpad pan replayed by Flutter as a wheel at the cursor. See
+  // ./trackpad_scroll.js for why the embedder can't deliver it itself.
+  trackpadScroll(dx, dy, x, y) {
+    this._trackpadScroll.scrollBy(dx, dy, x, y);
+  }
 
   // Re-shows the header and re-baselines the hide-on-scroll tracker. Flutter
   // calls this whenever a chat is opened or a session is switched.

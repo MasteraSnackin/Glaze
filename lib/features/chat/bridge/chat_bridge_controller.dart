@@ -695,6 +695,12 @@ class ChatBridgeController {
       layout.setSelectionMode(enabled);
   Future<void> toggleMessageSelection(String id) =>
       layout.toggleMessageSelection(id);
+  Future<void> trackpadScroll({
+    required double dx,
+    required double dy,
+    required double x,
+    required double y,
+  }) => layout.trackpadScroll(dx: dx, dy: dy, x: x, y: y);
 
   // Memory
   void updateMemoryBookData({
