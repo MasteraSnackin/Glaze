@@ -45,6 +45,7 @@ import 'preset_list_provider.dart';
 import 'preset_selection_provider.dart';
 import 'preset_sort.dart';
 import 'widgets/add_presets_to_folder_sheet.dart';
+import 'widgets/animated_preset_row.dart';
 import 'widgets/preset_filter_sheet.dart';
 import 'widgets/preset_folders_section.dart';
 import 'widgets/preset_options_sheet.dart';
@@ -54,6 +55,10 @@ import 'widgets/preset_small_badge.dart';
 /// estimate the scroll offset of the active preset before its row is laid out;
 /// [Scrollable.ensureVisible] corrects the estimate on the following frame.
 const double _kRowExtent = 72;
+
+/// How long the list takes to cross-fade when the user steps into a folder or
+/// back out of it.
+const Duration _kFolderFade = Duration(milliseconds: 220);
 
 class PresetListScreen extends ConsumerStatefulWidget {
   final bool startExpanded;
@@ -87,7 +92,10 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
   /// Preset kind picked in the control-row dropdown; null = every kind.
   PresetKind? _typeFilter;
 
-  final ScrollController _scrollController = ScrollController();
+  /// Controller of the list that is currently on top. Each list owns its own
+  /// (see [_ScrollHost]) because the folder cross-fade keeps the outgoing one
+  /// mounted while the incoming one builds.
+  ScrollController? _scrollController;
 
   /// Key on the header sliver, used to measure what sits above the rows when
   /// estimating the active preset's scroll offset.
@@ -99,6 +107,16 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
   /// The list scrolls to the active preset once per screen open, not on every
   /// rebuild — otherwise the user could never scroll away from it.
   bool _didAutoScroll = false;
+
+  /// Set until that scroll has been made. [_activeRowKey] is only attached
+  /// while it holds, so the two lists that overlap during a folder cross-fade
+  /// can never claim the same [GlobalKey].
+  bool _revealPending = true;
+
+  /// Rows playing their collapse animation. The presets behind them still
+  /// exist — the delete is committed once the animation has run — so the list
+  /// keeps rendering them, shrinking and untappable, until then.
+  final Set<String> _exitingKeys = {};
 
   /// Dragging is armed from the chip next to the sort picker, not by the manual
   /// mode alone: while it is off a long press still opens multi-select, which is
@@ -120,11 +138,8 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
     });
   }
 
-  @override
-  void dispose() {
-    _scrollController.dispose();
-    super.dispose();
-  }
+  // No dispose override: the scroll controllers belong to the lists that use
+  // them and are disposed with them — see [_ScrollHost].
 
   void _openEditor(Preset? preset) {
     setState(() {
@@ -170,7 +185,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
       return;
     }
     if (_currentFolderId != null) {
-      setState(() => _currentFolderId = null);
+      _leaveFolder();
       return;
     }
     if (widget.startExpanded) {
@@ -178,6 +193,19 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
     } else {
       Navigator.of(context).maybePop();
     }
+  }
+
+  void _openFolder(String id) {
+    ref.read(presetSelectionProvider.notifier).clear();
+    // The auto-scroll is done with once the user navigates, and its key must be
+    // free before a second list is mounted alongside the current one.
+    _revealPending = false;
+    setState(() => _currentFolderId = id);
+  }
+
+  void _leaveFolder() {
+    _revealPending = false;
+    setState(() => _currentFolderId = null);
   }
 
   String? _folderName(String id) {
@@ -217,6 +245,12 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
       title: title,
       showBack: true,
       onBack: _handleBack,
+      // Opened as a modal sheet, a back gesture unwinds the same chain the
+      // header's back button walks — leave the editor, drop the selection, step
+      // out of the folder — and only closes the sheet once none of those is
+      // left. Without this every one of them would be skipped and the sheet
+      // would vanish on the first swipe.
+      canPop: !_inAnyEditor && !selection.active && folderId == null,
       // The type dropdown, the filter button and the sort chip belong to the
       // header, not to the scroll content: pinned there they stay reachable at
       // any scroll offset, in the modal sheet and as a fullscreen route alike.
@@ -282,6 +316,10 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
 
   // ─── list ──────────────────────────────────────────────────────────────
 
+  /// Identity of a row inside the list, so its element (and the animation state
+  /// riding on it) stays with its preset as the rows around it come and go.
+  static String _rowKey(PresetItem item) => 'row_${item.memberKey}';
+
   Widget _buildBody(
     BuildContext context,
     List<Preset> presets,
@@ -339,96 +377,142 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
     final topInset = MediaQuery.paddingOf(context).top;
     final bottomInset = MediaQuery.paddingOf(context).bottom;
 
+    final rowIndexByKey = <String, int>{
+      for (var i = 0; i < items.length; i++) _rowKey(items[i]): i,
+    };
+
     Widget row(int i) {
       final item = items[i];
       final active = isActive(item);
-      return Padding(
-        key: i == activeIndex ? _activeRowKey : null,
-        padding: const EdgeInsets.only(bottom: 10),
-        child: _PsCard(
-          item: item,
-          isActive: active,
-          selectionMode: selection.active,
-          isSelected: selection.contains(item.id, item.kind),
-          onTap: () => _onCardTap(item, active),
-          // While dragging is armed a long press lifts the row, so it can't
-          // also open multi-select — that moves to the row menu.
-          onLongPress: reordering
-              ? null
-              : () => _startSelection(item.id, item.kind),
-          onConnections: item.isAgentic
-              ? null
-              : () => showPresetConnections(context, item.preset!.id),
-          onEdit: item.isAgentic
-              ? () => _openStudioEditor(item.studioPreset!.id)
-              : () => _openEditor(item.preset),
-          onMenu: () => _showItemMenu(item),
+      // Keyed by preset, so a row's state follows its preset when the list
+      // reorders and a row that just appeared gets a fresh state — which is
+      // what plays its entry animation.
+      return AnimatedPresetRow(
+        key: ValueKey(_rowKey(item)),
+        exiting: _exitingKeys.contains(item.memberKey),
+        child: Padding(
+          key: _revealPending && i == activeIndex ? _activeRowKey : null,
+          padding: const EdgeInsets.only(bottom: 10),
+          child: _PsCard(
+            item: item,
+            isActive: active,
+            selectionMode: selection.active,
+            isSelected: selection.contains(item.id, item.kind),
+            onTap: () => _onCardTap(item, active),
+            // While dragging is armed a long press lifts the row, so it can't
+            // also open multi-select — that moves to the row menu.
+            onLongPress: reordering
+                ? null
+                : () => _startSelection(item.id, item.kind),
+            onConnections: item.isAgentic
+                ? null
+                : () => showPresetConnections(context, item.preset!.id),
+            onEdit: item.isAgentic
+                ? () => _openStudioEditor(item.studioPreset!.id)
+                : () => _openEditor(item.preset),
+            onMenu: () => _showItemMenu(item),
+          ),
         ),
       );
     }
 
-    return CustomScrollView(
-      controller: _scrollController,
-      slivers: [
-        SliverPadding(
-          padding: EdgeInsets.fromLTRB(16, 12 + topInset, 16, 0),
-          sliver: SliverToBoxAdapter(
-            child: KeyedSubtree(
-              key: _headerKey,
-              child: folderId == null
-                  ? PresetFoldersSection(
-                      onOpenFolder: (id) {
-                        ref.read(presetSelectionProvider.notifier).clear();
-                        setState(() => _currentFolderId = id);
-                      },
-                    )
-                  : const SizedBox.shrink(),
+    final list = _ScrollHost(
+      onCreated: (controller) => _scrollController = controller,
+      onDisposed: (controller) {
+        if (identical(_scrollController, controller)) _scrollController = null;
+      },
+      builder: (controller) => CustomScrollView(
+        controller: controller,
+        slivers: [
+          SliverPadding(
+            padding: EdgeInsets.fromLTRB(16, 12 + topInset, 16, 0),
+            sliver: SliverToBoxAdapter(
+              child: KeyedSubtree(
+                // Only while the auto-scroll still needs to measure this block:
+                // the two lists that overlap during the folder cross-fade must
+                // never both carry the same [GlobalKey].
+                key: _revealPending && folderId == null ? _headerKey : null,
+                child: folderId == null
+                    ? PresetFoldersSection(onOpenFolder: _openFolder)
+                    : const SizedBox.shrink(),
+              ),
             ),
           ),
-        ),
-        // "No presets" would be a lie at the top level while folders are
-        // listed above it — every preset simply lives in one of them.
-        if (items.isEmpty && !(folderId == null && hasFolders))
-          SliverPadding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 40),
-            sliver: SliverToBoxAdapter(
-              child: Center(
-                child: Text(
-                  folderId != null
-                      ? 'preset_folder_empty'.tr()
-                      : 'label_no_presets'.tr(),
-                  style: TextStyle(color: context.cs.onSurfaceVariant),
+          // "No presets" would be a lie at the top level while folders are
+          // listed above it — every preset simply lives in one of them.
+          if (items.isEmpty && !(folderId == null && hasFolders))
+            SliverPadding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 40),
+              sliver: SliverToBoxAdapter(
+                child: Center(
+                  child: Text(
+                    folderId != null
+                        ? 'preset_folder_empty'.tr()
+                        : 'label_no_presets'.tr(),
+                    style: TextStyle(color: context.cs.onSurfaceVariant),
+                  ),
                 ),
               ),
-            ),
-          )
-        else if (reordering)
-          SliverPadding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            sliver: SliverReorderableList(
-              itemCount: items.length,
-              onReorderItem: (oldIndex, newIndex) =>
-                  _onManualReorder(items, all, oldIndex, newIndex),
-              itemBuilder: (_, i) => ReorderableDelayedDragStartListener(
-                key: ValueKey(items[i].memberKey),
-                index: i,
-                child: row(i),
+            )
+          else if (reordering)
+            SliverPadding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              sliver: SliverReorderableList(
+                itemCount: items.length,
+                onReorderItem: (oldIndex, newIndex) =>
+                    _onManualReorder(items, all, oldIndex, newIndex),
+                itemBuilder: (_, i) => ReorderableDelayedDragStartListener(
+                  key: ValueKey(items[i].memberKey),
+                  index: i,
+                  child: row(i),
+                ),
+              ),
+            )
+          else
+            SliverPadding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              sliver: SliverList.builder(
+                itemCount: items.length,
+                itemBuilder: (_, i) => row(i),
+                // Without this the delegate matches rows by position, so
+                // deleting one rebuilds every row under it from scratch — and
+                // each of those would replay its entry animation instead of
+                // simply sliding up into the freed slot.
+                findChildIndexCallback: (key) =>
+                    key is ValueKey<String> ? rowIndexByKey[key.value] : null,
               ),
             ),
-          )
-        else
           SliverPadding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            sliver: SliverList.builder(
-              itemCount: items.length,
-              itemBuilder: (_, i) => row(i),
-            ),
+            padding: EdgeInsets.fromLTRB(16, 4, 16, 16 + bottomInset),
+            sliver: SliverToBoxAdapter(child: _buildAddButton(context)),
           ),
-        SliverPadding(
-          padding: EdgeInsets.fromLTRB(16, 4, 16, 16 + bottomInset),
-          sliver: SliverToBoxAdapter(child: _buildAddButton(context)),
-        ),
-      ],
+        ],
+      ),
+    );
+
+    // Stepping into a folder — and back out of it — swaps the whole list, so it
+    // cross-fades instead of cutting: the folder's rows appear over the ones
+    // they replace rather than snapping into their place.
+    return AnimatedSwitcher(
+      duration: _kFolderFade,
+      switchInCurve: Curves.easeOut,
+      switchOutCurve: Curves.easeIn,
+      // Both lists are laid out at the viewport's full size while they overlap,
+      // so the incoming one is already scrolled and positioned exactly where it
+      // will stay once it is opaque.
+      layoutBuilder: (currentChild, previousChildren) => Stack(
+        fit: StackFit.expand,
+        children: [
+          // The list on its way out is still painted, but a tap during the
+          // fade belongs to the one arriving on top of it.
+          for (final child in previousChildren) IgnorePointer(child: child),
+          ?currentChild,
+        ],
+      ),
+      child: KeyedSubtree(
+        key: ValueKey(folderId ?? '#root'),
+        child: list,
+      ),
     );
   }
 
@@ -494,26 +578,33 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
   }
 
   void _revealIndex(int index) {
-    if (!mounted || !_scrollController.hasClients) return;
+    final controller = _scrollController;
+    if (!mounted || controller == null || !controller.hasClients) {
+      _revealPending = false;
+      return;
+    }
 
     final headerBox =
         _headerKey.currentContext?.findRenderObject() as RenderBox?;
     final double headerExtent = headerBox?.size.height ?? 0.0;
-    final viewport = _scrollController.position.viewportDimension;
+    final viewport = controller.position.viewportDimension;
     // Land the row a quarter of the way down the viewport rather than flush
     // against the top edge, so the presets around it stay in context. Cards
     // carrying a cover are taller than [_kRowExtent], so this is only a first
     // approximation.
     final double estimate =
         headerExtent + index * _kRowExtent - viewport * 0.25;
-    _scrollController.jumpTo(
-      estimate.clamp(0.0, _scrollController.position.maxScrollExtent),
+    controller.jumpTo(
+      estimate.clamp(0.0, controller.position.maxScrollExtent),
     );
 
     // Correct the estimate now that the row itself is built (it is, after that
     // jump — the error stays inside the viewport's cache extent).
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final ctx = _activeRowKey.currentContext;
+      // Done with the key from here on: the row drops it on the next rebuild,
+      // leaving it free for whichever list the folder cross-fade mounts next.
+      _revealPending = false;
       if (!mounted || ctx == null) return;
       Scrollable.ensureVisible(
         ctx,
@@ -737,10 +828,31 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
       ]),
       onClone: () => unawaited(_clonePreset(preset)),
       onExport: () => unawaited(exportPreset(context, preset)),
-      onDelete: () => unawaited(
-        deletePresetAndFolderMemberships(ref, preset.id, PresetKind.normal),
-      ),
+      onDelete: () => unawaited(_deleteItems([PresetItem(preset: preset)])),
     );
+  }
+
+  /// Collapses the rows of [targets] and only then deletes the presets behind
+  /// them, so the list closes the gap on an empty slot instead of yanking a
+  /// visible card out from under the ones below it.
+  Future<void> _deleteItems(List<PresetItem> targets) async {
+    if (targets.isEmpty) return;
+    final keys = [for (final item in targets) item.memberKey];
+    setState(() => _exitingKeys.addAll(keys));
+    await Future<void>.delayed(AnimatedPresetRow.exitDuration);
+
+    try {
+      for (final item in targets) {
+        // Each delete awaits a DB round-trip; bail out if the screen went away
+        // in the meantime rather than reading a disposed ref.
+        if (!mounted) return;
+        await deletePresetAndFolderMemberships(ref, item.id, item.kind);
+      }
+    } finally {
+      // The rows are gone by now, but a delete that failed would otherwise
+      // leave its preset collapsed to nothing and unreachable.
+      if (mounted) setState(() => _exitingKeys.removeAll(keys));
+    }
   }
 
   Future<void> _clonePreset(Preset preset) async {
@@ -821,7 +933,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
       description: 'studio_confirm_delete_preset'.tr(args: [preset.name]),
     );
     if (!ok || !mounted) return;
-    await deletePresetAndFolderMemberships(ref, preset.id, PresetKind.agentic);
+    await _deleteItems([PresetItem(studioPreset: preset)]);
   }
 
   // ─── add / import ──────────────────────────────────────────────────────
@@ -1149,12 +1261,8 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
           onTap: () async {
             Navigator.of(context, rootNavigator: true).pop();
             ref.read(presetSelectionProvider.notifier).clear();
-            for (final item in deletable) {
-              // Each delete awaits a DB round-trip; bail out if the screen went
-              // away in the meantime rather than reading a disposed ref.
-              if (!mounted) return;
-              await deletePresetAndFolderMemberships(ref, item.id, item.kind);
-            }
+            // Every selected row collapses together, then the deletes land.
+            await _deleteItems(deletable);
           },
         ),
         BottomSheetItem(
@@ -1165,6 +1273,48 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
       ],
     );
   }
+}
+
+/// Gives the list it builds a [ScrollController] of its own.
+///
+/// The folder cross-fade keeps the outgoing list mounted while the incoming one
+/// builds, and one controller cannot be attached to two scroll views at the
+/// same time. Each host creates its controller with its list and disposes it
+/// with it; [onCreated] hands the screen the controller of the list that is
+/// currently on top, so the auto-scroll always talks to the live one.
+class _ScrollHost extends StatefulWidget {
+  final ValueChanged<ScrollController> onCreated;
+  final ValueChanged<ScrollController> onDisposed;
+  final Widget Function(ScrollController controller) builder;
+
+  const _ScrollHost({
+    required this.onCreated,
+    required this.onDisposed,
+    required this.builder,
+  });
+
+  @override
+  State<_ScrollHost> createState() => _ScrollHostState();
+}
+
+class _ScrollHostState extends State<_ScrollHost> {
+  final ScrollController _controller = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    widget.onCreated(_controller);
+  }
+
+  @override
+  void dispose() {
+    widget.onDisposed(_controller);
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.builder(_controller);
 }
 
 // ─── ps-card ─────────────────────────────────────────────────────────────────

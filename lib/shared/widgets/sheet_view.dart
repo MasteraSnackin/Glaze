@@ -67,6 +67,18 @@ class SheetView extends ConsumerStatefulWidget {
   final int? shellBranchIndex;
   final bool enableHeaderBlur;
 
+  /// Whether a system/gesture back may dismiss the sheet outright.
+  ///
+  /// Set it to false while the body is showing an inner state of its own — a
+  /// folder, a multi-selection, an inline editor — and the back event is handed
+  /// to [onBack] instead, exactly like the header's back button, so the body
+  /// unwinds one level per press before the sheet closes. Only consulted when
+  /// the sheet is presented as a modal bottom sheet; as a fullscreen route back
+  /// already goes through [onBack].
+  ///
+  /// Dragging the sheet down stays an outright dismissal either way.
+  final bool canPop;
+
   const SheetView({
     super.key,
     this.title,
@@ -90,6 +102,7 @@ class SheetView extends ConsumerStatefulWidget {
     this.showRouteBackground = true,
     this.shellBranchIndex,
     this.enableHeaderBlur = true,
+    this.canPop = true,
   });
 
   @override
@@ -329,6 +342,12 @@ class _SheetViewState extends ConsumerState<SheetView>
     );
   }
 
+  /// Closes the sheet after a drag-down. pop(), not maybePop(): flinging the
+  /// sheet away is an explicit dismissal, so it closes the whole sheet even
+  /// when [SheetView.canPop] is false because the body has an inner state a
+  /// *back* press would step out of first.
+  void _dismiss() => Navigator.of(context).pop();
+
   void _onDragEnd(DragEndDetails d) {
     final vy = d.velocity.pixelsPerSecond.dy;
     final collapsed = _collapsed(context);
@@ -337,7 +356,7 @@ class _SheetViewState extends ConsumerState<SheetView>
 
     if (widget.fitContent) {
       if (vy > 600 || _currentHeight < collapsed * 0.6) {
-        Navigator.of(context).maybePop();
+        _dismiss();
       } else {
         _animateTo(collapsed, expanding: false);
       }
@@ -347,7 +366,7 @@ class _SheetViewState extends ConsumerState<SheetView>
     if (vy < -600 || (_currentHeight > mid && vy <= 600)) {
       _animateTo(full, expanding: true);
     } else if (vy > 600 || _currentHeight < collapsed * 0.6) {
-      Navigator.of(context).maybePop();
+      _dismiss();
     } else {
       _animateTo(
         _currentHeight >= mid ? full : collapsed,
@@ -569,28 +588,39 @@ class _SheetViewState extends ConsumerState<SheetView>
       opaque: true,
     );
 
-    return ConstrainedBox(
-      constraints: BoxConstraints(
-        maxHeight: widget.fitContent ? _full(context) * 0.95 : double.infinity,
-      ),
-      child: ValueListenableBuilder<double>(
-        valueListenable: _heightN,
-        child: content,
-        builder: (context, height, child) {
-          return SizedBox(
-            height: widget.fitContent ? null : height,
-            child: ClipRRect(
-              // Constant, so the sheet keeps its rounded top edge when expanded
-              // to full height. It used to taper to 0 on the way up, which made
-              // a sheet opened by tapping the handle end as a square-cornered
-              // slab flush against the status bar.
-              borderRadius: const BorderRadius.vertical(
-                top: Radius.circular(_kSheetCornerRadius),
+    // pop(), not maybePop(): a body that blocks the pop (canPop false) handles
+    // the back event in onBack, and maybePop() would re-enter this callback.
+    final sheetBackHandler = widget.onBack ?? () => Navigator.of(context).pop();
+
+    return PopScope(
+      canPop: widget.canPop,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        sheetBackHandler();
+      },
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: widget.fitContent ? _full(context) * 0.95 : double.infinity,
+        ),
+        child: ValueListenableBuilder<double>(
+          valueListenable: _heightN,
+          child: content,
+          builder: (context, height, child) {
+            return SizedBox(
+              height: widget.fitContent ? null : height,
+              child: ClipRRect(
+                // Constant, so the sheet keeps its rounded top edge when
+                // expanded to full height. It used to taper to 0 on the way up,
+                // which made a sheet opened by tapping the handle end as a
+                // square-cornered slab flush against the status bar.
+                borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(_kSheetCornerRadius),
+                ),
+                child: child,
               ),
-              child: child,
-            ),
-          );
-        },
+            );
+          },
+        ),
       ),
     );
   }
