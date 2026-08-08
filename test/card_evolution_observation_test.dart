@@ -13,7 +13,10 @@ void main() {
       semanticScopeKey: 'character.preference.X',
       observedChange: 'Alice is becoming more trusting',
       canonicalClaim: 'Alice has become more trusting over time',
-      evidenceMessageIds: const ['msg:1', 'msg:2', 'msg:3'],
+      evidenceClusters: const [
+        ['msg:1', 'msg:2'],
+        ['msg:3'],
+      ],
       cardFieldPath: 'personality',
       lorebookEntryId: 'book:entry',
       confidence: 0.85,
@@ -39,7 +42,7 @@ void main() {
       runOrdinal: 1,
       semanticScopeKey: 'character.attitude.Y',
       observedChange: 'Bob is more reserved',
-      evidenceMessageIds: const [],
+      evidenceClusters: const [],
       confidence: 0.5,
       status: 'active',
       firstSeenRun: 1,
@@ -56,5 +59,6 @@ void main() {
     expect(restored.lorebookEntryId, isNull);
     expect(restored.lastConfirmedRun, isNull);
     expect(restored.repeatCount, 1);
+    expect(restored.evidenceMessageIds, isEmpty);
   });
 }

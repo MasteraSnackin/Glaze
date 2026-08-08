@@ -47,6 +47,7 @@ class CardEvolutionObservationRepo {
           observedChange: observation.observedChange,
           canonicalClaim: Value(observation.canonicalClaim),
           evidenceMessageIds: jsonEncode(observation.evidenceMessageIds),
+          evidenceClustersJson: Value(jsonEncode(observation.evidenceClusters)),
           cardFieldPath: Value(observation.cardFieldPath),
           lorebookEntryId: Value(observation.lorebookEntryId),
           confidence: observation.confidence,
@@ -59,16 +60,39 @@ class CardEvolutionObservationRepo {
         ),
       );
 
-  Future<void> confirmObservation({
+  Future<ObservationConfirmationOutcome> confirmObservation({
     required String id,
     required int runOrdinal,
     required double confidence,
     required int now,
+    required List<String> evidenceMessageIds,
   }) => db.transaction(() async {
     final row = await (db.select(
       db.cardEvolutionObservations,
     )..where((r) => r.id.equals(id))).getSingleOrNull();
-    if (row == null) return;
+    if (row == null) return ObservationConfirmationOutcome.duplicate;
+    final incoming = _canonicalEvidence(evidenceMessageIds);
+    if (incoming.isEmpty) return ObservationConfirmationOutcome.noEvidence;
+    if (row.runOrdinal == runOrdinal || row.lastConfirmedRun == runOrdinal) {
+      return ObservationConfirmationOutcome.sameRun;
+    }
+    final clusters = _decodeClusters(row.evidenceClustersJson);
+    final incomingSet = incoming.toSet();
+    if (clusters.any(
+      (cluster) =>
+          cluster.length == incomingSet.length &&
+          incomingSet.containsAll(cluster),
+    )) {
+      return ObservationConfirmationOutcome.duplicate;
+    }
+    final existingIds = {for (final cluster in clusters) ...cluster};
+    if (incoming.any(existingIds.contains)) {
+      return ObservationConfirmationOutcome.overlap;
+    }
+    clusters.add(incoming);
+    final union = _canonicalEvidence([
+      for (final cluster in clusters) ...cluster,
+    ]);
     await (db.update(
       db.cardEvolutionObservations,
     )..where((r) => r.id.equals(id))).write(
@@ -76,9 +100,12 @@ class CardEvolutionObservationRepo {
         repeatCount: Value(row.repeatCount + 1),
         lastConfirmedRun: Value(runOrdinal),
         confidence: Value(confidence),
+        evidenceClustersJson: Value(jsonEncode(clusters)),
+        evidenceMessageIds: Value(jsonEncode(union)),
         updatedAt: Value(now),
       ),
     );
+    return ObservationConfirmationOutcome.confirmed;
   });
 
   Future<void> promoteObservation(String id, {required int now}) =>
@@ -92,7 +119,7 @@ class CardEvolutionObservationRepo {
             ),
           );
 
-  Future<void> expireObservation(String id, {required int now}) =>
+  Future<void> contradictObservation(String id, {required int now}) =>
       (db.update(db.cardEvolutionObservations)
             ..where((r) => r.id.equals(id))
             ..where((r) => r.status.equals('active')))
@@ -153,35 +180,8 @@ class CardEvolutionObservationRepo {
     return [for (final row in rows) _toModel(row)];
   });
 
-  Future<List<CardEvolutionObservation>> getExpiryCandidates(
-    String sessionId, {
-    required int currentRunOrdinal,
-    required int expiryRuns,
-  }) => db.transaction(() async {
-    final rows =
-        await (db.select(db.cardEvolutionObservations)
-              ..where((r) => r.sessionId.equals(sessionId))
-              ..where((r) => r.status.equals('active'))
-              ..where((r) => r.lastConfirmedRun.isNotNull()))
-            .get();
-    return [
-      for (final row in rows)
-        if (currentRunOrdinal - (row.lastConfirmedRun ?? currentRunOrdinal) >=
-            expiryRuns)
-          _toModel(row),
-    ];
-  });
-
   static CardEvolutionObservation _toModel(CardEvolutionObservationRow row) {
-    List<String> evidence;
-    try {
-      final decoded = jsonDecode(row.evidenceMessageIds);
-      evidence = decoded is List
-          ? [for (final item in decoded) item.toString()]
-          : const [];
-    } catch (_) {
-      evidence = const [];
-    }
+    final evidenceClusters = _decodeClusters(row.evidenceClustersJson);
     return CardEvolutionObservation(
       id: row.id,
       sessionId: row.sessionId,
@@ -190,7 +190,7 @@ class CardEvolutionObservationRepo {
       semanticScopeKey: row.semanticScopeKey,
       observedChange: row.observedChange,
       canonicalClaim: row.canonicalClaim,
-      evidenceMessageIds: evidence,
+      evidenceClusters: evidenceClusters,
       cardFieldPath: row.cardFieldPath,
       lorebookEntryId: row.lorebookEntryId,
       confidence: row.confidence,
@@ -202,4 +202,36 @@ class CardEvolutionObservationRepo {
       updatedAt: row.updatedAt,
     );
   }
+
+  static List<String> _canonicalEvidence(Iterable<Object?> values) {
+    final result = <String>[];
+    for (final value in values) {
+      if (value is String && value.isNotEmpty && !result.contains(value)) {
+        result.add(value);
+      }
+    }
+    return result;
+  }
+
+  static List<List<String>> _decodeClusters(String encoded) {
+    try {
+      final decoded = jsonDecode(encoded);
+      if (decoded is! List) return [];
+      return [
+        for (final cluster in decoded)
+          if (cluster is List && _canonicalEvidence(cluster).isNotEmpty)
+            _canonicalEvidence(cluster),
+      ];
+    } catch (_) {
+      return [];
+    }
+  }
+}
+
+enum ObservationConfirmationOutcome {
+  confirmed,
+  duplicate,
+  noEvidence,
+  overlap,
+  sameRun,
 }

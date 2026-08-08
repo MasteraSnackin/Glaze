@@ -98,7 +98,9 @@ void main() {
           semanticScopeKey: 'character.preference.trust',
           observedChange: 'Alice is consistently more trusting',
           canonicalClaim: 'Alice has become more trusting',
-          evidenceMessageIds: const ['a1', 'u1'],
+          evidenceClusters: const [
+            ['a1', 'u1'],
+          ],
           cardFieldPath: 'personality',
           confidence: 0.9,
           status: 'promoted',
@@ -135,17 +137,20 @@ void main() {
         id: 'obs-1',
         sessionId: 'session',
         characterId: 'character',
-        runOrdinal: 1,
+        runOrdinal: 0,
         semanticScopeKey: 'character.preference.trust',
         observedChange: 'Alice is becoming more trusting',
         canonicalClaim: 'Alice has become more trusting',
-        evidenceMessageIds: const ['a1'],
+        evidenceClusters: const [
+          ['a1'],
+          ['u1'],
+        ],
         cardFieldPath: 'personality',
         confidence: 0.8,
         status: 'active',
         firstSeenRun: 1,
         repeatCount: 2,
-        lastConfirmedRun: 1,
+        lastConfirmedRun: 0,
         createdAt: 10,
         updatedAt: 10,
       ),
@@ -175,7 +180,9 @@ void main() {
         runOrdinal: 1,
         semanticScopeKey: 'character.preference.trust',
         observedChange: 'Alice is consistently more trusting',
-        evidenceMessageIds: const ['a1'],
+        evidenceClusters: const [
+          ['a1'],
+        ],
         confidence: 0.9,
         status: 'promoted',
         firstSeenRun: 1,
@@ -216,7 +223,7 @@ void main() {
     );
   });
 
-  test('expiry after runs without confirmation', () async {
+  test('no evidence does not expire or otherwise mutate observation', () async {
     await fixture.seedReconciliationRun(ordinal: 1);
     await fixture.seedReconciliationRun(ordinal: 2);
     await fixture.observationRepo.insertObservation(
@@ -227,7 +234,9 @@ void main() {
         runOrdinal: 1,
         semanticScopeKey: 'character.preference.trust',
         observedChange: 'Alice is becoming more trusting',
-        evidenceMessageIds: const ['a1'],
+        evidenceClusters: const [
+          ['a1'],
+        ],
         confidence: 0.6,
         status: 'active',
         firstSeenRun: 1,
@@ -239,16 +248,144 @@ void main() {
     );
     await fixture
         .service(
-          (_, _) async => _ok(fixture.cardBatchOutput),
-          observationExpiryRuns: () => 4,
+          (_, prompt) async => _ok(
+            prompt.contains('observation journal keeper')
+                ? jsonEncode({
+                    'observations': [
+                      {
+                        'action': 'no_evidence',
+                        'scopeKey': 'character.preference.trust',
+                        'evidenceMessageIds': <String>[],
+                        'confidence': 0.6,
+                      },
+                    ],
+                  })
+                : fixture.cardBatchOutput,
+          ),
         )
         .runOneBatch('session');
-    // runOrdinal = 2~/2 = 1. 1 - 1 = 0 < 4, so NOT expired yet.
     final active = await fixture.observationRepo.getActiveObservations(
       'session',
     );
     expect(active, hasLength(1));
+    expect(active.single.updatedAt, 10);
   });
+
+  test(
+    'explicit contradiction with valid evidence expires observation',
+    () async {
+      await fixture.seedReconciliationRun(ordinal: 1);
+      await fixture.seedReconciliationRun(ordinal: 2);
+      await fixture.observationRepo.insertObservation(
+        CardEvolutionObservation(
+          id: 'obs-contradicted',
+          sessionId: 'session',
+          characterId: 'character',
+          runOrdinal: 0,
+          semanticScopeKey: 'character.preference.trust',
+          observedChange: 'Alice is becoming more trusting',
+          evidenceClusters: const [
+            ['a1'],
+          ],
+          confidence: 0.7,
+          status: 'active',
+          firstSeenRun: 1,
+          createdAt: 10,
+          updatedAt: 10,
+        ),
+      );
+      await fixture
+          .service((_, prompt) async {
+            if (prompt.contains('observation journal keeper')) {
+              return _ok(
+                jsonEncode({
+                  'observations': [
+                    {
+                      'action': 'contradict',
+                      'scopeKey': 'character.preference.trust',
+                      'evidenceMessageIds': ['a2'],
+                      'confidence': 0.2,
+                    },
+                  ],
+                }),
+              );
+            }
+            return _ok(fixture.cardBatchOutput);
+          })
+          .runOneBatch('session');
+      expect(
+        (await fixture.observationRepo.findById('obs-contradicted'))!.status,
+        'expired',
+      );
+    },
+  );
+
+  test('fabricated evidence IDs cannot create observations', () async {
+    await fixture.seedReconciliationRun(ordinal: 1);
+    await fixture.seedReconciliationRun(ordinal: 2);
+    await fixture
+        .service((_, prompt) async {
+          if (prompt.contains('observation journal keeper')) {
+            return _ok(
+              jsonEncode({
+                'observations': [
+                  {
+                    'action': 'new',
+                    'scopeKey': 'character.preference.fabricated',
+                    'observedChange': 'Fabricated change',
+                    'evidenceMessageIds': ['not-in-chat'],
+                    'confidence': 0.9,
+                  },
+                ],
+              }),
+            );
+          }
+          return _ok(fixture.cardBatchOutput);
+        })
+        .runOneBatch('session');
+    expect(
+      await fixture.observationRepo.getActiveObservations('session'),
+      isEmpty,
+    );
+  });
+
+  test(
+    'duplicate scopes and non-string evidence reject the whole output',
+    () async {
+      await fixture.seedReconciliationRun(ordinal: 1);
+      await fixture.seedReconciliationRun(ordinal: 2);
+      await fixture
+          .service((_, prompt) async {
+            if (prompt.contains('observation journal keeper')) {
+              return _ok(
+                jsonEncode({
+                  'observations': [
+                    {
+                      'action': 'new',
+                      'scopeKey': 'character.preference.trust',
+                      'observedChange': 'First',
+                      'evidenceMessageIds': ['a1'],
+                      'confidence': 0.8,
+                    },
+                    {
+                      'action': 'confirm',
+                      'scopeKey': 'character.preference.trust',
+                      'evidenceMessageIds': [1],
+                      'confidence': 0.8,
+                    },
+                  ],
+                }),
+              );
+            }
+            return _ok(fixture.cardBatchOutput);
+          })
+          .runOneBatch('session');
+      expect(
+        await fixture.observationRepo.getActiveObservations('session'),
+        isEmpty,
+      );
+    },
+  );
 }
 
 AuxCallOutcome _ok(String text) =>
@@ -384,6 +521,7 @@ final class _Fixture {
         'scopeKey': 'character.preference.trust',
         'observedChange': 'Alice is becoming more trusting',
         'confidence': 0.85,
+        'evidenceMessageIds': ['a2', 'u2'],
       },
     ],
   });

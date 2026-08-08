@@ -25,6 +25,9 @@ void main() {
     expect(found.repeatCount, 1);
     expect(found.lastConfirmedRun, isNull);
     expect(found.evidenceMessageIds, ['msg:1', 'msg:2']);
+    expect(found.evidenceClusters, [
+      ['msg:1', 'msg:2'],
+    ]);
   });
 
   test('confirm bumps repeat count and last confirmed run', () async {
@@ -34,6 +37,7 @@ void main() {
       runOrdinal: 2,
       confidence: 0.8,
       now: 20,
+      evidenceMessageIds: const ['msg:3', 'msg:4'],
     );
     final found = await repo.findByScopeKey(
       'session',
@@ -43,7 +47,59 @@ void main() {
     expect(found.lastConfirmedRun, 2);
     expect(found.confidence, 0.8);
     expect(found.updatedAt, 20);
+    expect(found.evidenceClusters, [
+      ['msg:1', 'msg:2'],
+      ['msg:3', 'msg:4'],
+    ]);
   });
+
+  test(
+    'confirm is idempotent for duplicate, overlap, empty, and same run',
+    () async {
+      await repo.insertObservation(_observation());
+      expect(
+        await repo.confirmObservation(
+          id: 'obs-1',
+          runOrdinal: 2,
+          confidence: 0.8,
+          now: 20,
+          evidenceMessageIds: const ['msg:2', 'msg:1'],
+        ),
+        ObservationConfirmationOutcome.duplicate,
+      );
+      expect(
+        await repo.confirmObservation(
+          id: 'obs-1',
+          runOrdinal: 2,
+          confidence: 0.8,
+          now: 20,
+          evidenceMessageIds: const ['msg:2', 'msg:3'],
+        ),
+        ObservationConfirmationOutcome.overlap,
+      );
+      expect(
+        await repo.confirmObservation(
+          id: 'obs-1',
+          runOrdinal: 2,
+          confidence: 0.8,
+          now: 20,
+          evidenceMessageIds: const [],
+        ),
+        ObservationConfirmationOutcome.noEvidence,
+      );
+      expect(
+        await repo.confirmObservation(
+          id: 'obs-1',
+          runOrdinal: 1,
+          confidence: 0.8,
+          now: 20,
+          evidenceMessageIds: const ['msg:3'],
+        ),
+        ObservationConfirmationOutcome.sameRun,
+      );
+      expect((await repo.findById('obs-1'))!.repeatCount, 1);
+    },
+  );
 
   test('promote flips status and excludes from active', () async {
     await repo.insertObservation(_observation());
@@ -54,9 +110,9 @@ void main() {
     expect(promoted.first.status, 'promoted');
   });
 
-  test('expire flips status and excludes from active', () async {
+  test('explicit contradiction expires and excludes from active', () async {
     await repo.insertObservation(_observation());
-    await repo.expireObservation('obs-1', now: 20);
+    await repo.contradictObservation('obs-1', now: 20);
     expect(await repo.getActiveObservations('session'), isEmpty);
   });
 
@@ -86,24 +142,6 @@ void main() {
     expect(promotable.first.id, 'obs-2');
   });
 
-  test('getExpiryCandidates filters by last confirmed run gap', () async {
-    await repo.insertObservation(_observation(lastConfirmedRun: 1));
-    await repo.insertObservation(
-      _observation(
-        id: 'obs-2',
-        scopeKey: 'character.attitude.Y',
-        lastConfirmedRun: 5,
-      ),
-    );
-    final expired = await repo.getExpiryCandidates(
-      'session',
-      currentRunOrdinal: 6,
-      expiryRuns: 4,
-    );
-    expect(expired, hasLength(1));
-    expect(expired.first.id, 'obs-1');
-  });
-
   test('unique key collision on insert throws', () async {
     await repo.insertObservation(_observation());
     await expectLater(
@@ -127,7 +165,9 @@ CardEvolutionObservation _observation({
   semanticScopeKey: scopeKey,
   observedChange: 'Alice is becoming more trusting',
   canonicalClaim: 'Alice has become more trusting over time',
-  evidenceMessageIds: const ['msg:1', 'msg:2'],
+  evidenceClusters: const [
+    ['msg:1', 'msg:2'],
+  ],
   cardFieldPath: 'personality',
   confidence: confidence,
   status: 'active',

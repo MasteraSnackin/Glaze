@@ -79,12 +79,18 @@ void main() {
     );
 
     expect(claim.kind, 'claimed');
+    expect(
+      (jsonDecode(claim.claim!.selectedInputJson) as Map)['contractVersion'],
+      8,
+    );
     expect(claim.claim!.selectedInputJson, contains('assistant development'));
     expect(claim.claim!.selectedInputJson, contains('user response'));
     expect(claim.claim!.selectedInputJson, contains('"effectiveCanon"'));
-    expect(await db.select(db.ledgerReconciliationSuccessfulRuns).get(), isEmpty);
+    expect(
+      await db.select(db.ledgerReconciliationSuccessfulRuns).get(),
+      isEmpty,
+    );
   });
-
 
   test('a changed chat snapshot makes a claimed lease stale', () async {
     final claim = (await evolution.claim(
@@ -95,7 +101,10 @@ void main() {
     )).claim!;
     await db.customStatement(
       'UPDATE chat_sessions SET messages_json = ? WHERE session_id = ?',
-      [jsonEncode([..._messages, _nextAssistant, _nextUser]), 'session'],
+      [
+        jsonEncode([..._messages, _nextAssistant, _nextUser]),
+        'session',
+      ],
     );
 
     expect(
@@ -117,7 +126,10 @@ void main() {
     )).claim!;
     await db.customStatement(
       'UPDATE chat_sessions SET messages_json = ? WHERE session_id = ?',
-      [jsonEncode([..._messages, _nextAssistant, _nextUser]), 'session'],
+      [
+        jsonEncode([..._messages, _nextAssistant, _nextUser]),
+        'session',
+      ],
     );
 
     final recovered = await evolution.claim(
@@ -130,33 +142,45 @@ void main() {
     expect(recovered.kind, 'claimed');
     expect(recovered.claim!.row.id, isNot(first.row.id));
     expect(recovered.claim!.row.ownerId, 'new-app-owner');
-    expect(recovered.claim!.selectedInputJson, contains('new assistant development'));
     expect(
-      await (db.select(db.cardEvolutionClaims)
-            ..where((row) => row.id.equals(first.row.id)))
-          .getSingleOrNull(),
+      recovered.claim!.selectedInputJson,
+      contains('new assistant development'),
+    );
+    expect(
+      await (db.select(
+        db.cardEvolutionClaims,
+      )..where((row) => row.id.equals(first.row.id))).getSingleOrNull(),
       isNull,
     );
   });
 
-  test('excludes a trailing mutable user-assistant turn from evidence', () async {
-    await db.customStatement(
-      'UPDATE chat_sessions SET messages_json = ? WHERE session_id = ?',
-      [jsonEncode([..._messages, _nextAssistant]), 'session'],
-    );
+  test(
+    'excludes a trailing mutable user-assistant turn from evidence',
+    () async {
+      await db.customStatement(
+        'UPDATE chat_sessions SET messages_json = ? WHERE session_id = ?',
+        [
+          jsonEncode([..._messages, _nextAssistant]),
+          'session',
+        ],
+      );
 
-    final claim = await evolution.claim(
-      sessionId: 'session',
-      ownerId: 'owner',
-      now: 10,
-      leaseSeconds: 30,
-    );
+      final claim = await evolution.claim(
+        sessionId: 'session',
+        ownerId: 'owner',
+        now: 10,
+        leaseSeconds: 30,
+      );
 
-    expect(claim.kind, 'claimed');
-    expect(claim.claim!.selectedInputJson, isNot(contains('new assistant development')));
-    expect(claim.claim!.selectedInputJson, isNot(contains('user response')));
-    expect(claim.claim!.selectedInputJson, contains('assistant development'));
-  });
+      expect(claim.kind, 'claimed');
+      expect(
+        claim.claim!.selectedInputJson,
+        isNot(contains('new assistant development')),
+      );
+      expect(claim.claim!.selectedInputJson, isNot(contains('user response')));
+      expect(claim.claim!.selectedInputJson, contains('assistant development'));
+    },
+  );
 
   test('finalize atomically writes a three-field review proposal', () async {
     final claim = (await evolution.claim(
@@ -274,11 +298,7 @@ const _nextAssistant = {
   'content': 'new assistant development',
 };
 
-const _nextUser = {
-  'id': 'u3',
-  'role': 'user',
-  'content': 'next user response',
-};
+const _nextUser = {'id': 'u3', 'role': 'user', 'content': 'next user response'};
 
 List<CardRewriteOperationSnapshot> _operations() => [
   _operation(
