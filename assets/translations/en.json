@@ -1538,6 +1538,7 @@
   "settings_config_name": "Config Name",
   "settings_protocol": "Protocol",
   "settings_fetch_models": "Fetch models",
+  "settings_search_models": "Search models...",
   "settings_select_model": "Select model",
   "settings_enable_vector_desc": "Enable semantic search for lorebook entries",
   "settings_use_llm_api": "Use LLM API",

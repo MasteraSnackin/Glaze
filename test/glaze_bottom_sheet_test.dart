@@ -90,6 +90,99 @@ void main() {
     expect(result, 'item-2');
   });
 
+  /// Three rows with distinct labels, opened as a searchable sheet.
+  Future<void> pumpSearchSheet(
+    WidgetTester tester, {
+    required bool batterySaver,
+  }) async {
+    SharedPreferences.setMockInitialValues({'batterySaver': batterySaver});
+    late BuildContext sheetContext;
+    final items = [
+      BottomSheetItem(label: 'gpt-4o-mini', onTap: () {}),
+      BottomSheetItem(label: 'claude-opus', onTap: () {}),
+      BottomSheetItem(label: 'gemini-pro', onTap: () {}),
+    ];
+
+    await tester.pumpWidget(
+      testApp(
+        () => GlazeBottomSheet.show<void>(
+          sheetContext,
+          items: items,
+          searchable: true,
+          searchHint: 'Search models',
+        ),
+      ),
+    );
+    sheetContext = tester.element(find.text('Open'));
+
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('search field filters the rows down to the matches', (
+    tester,
+  ) async {
+    await pumpSearchSheet(tester, batterySaver: false);
+
+    expect(find.text('Search models'), findsOneWidget);
+    expect(find.text('claude-opus'), findsOneWidget);
+
+    // Tokens match independently, so "gpt 4o" still finds "gpt-4o-mini".
+    await tester.enterText(find.byType(TextField), 'gpt 4o');
+    await tester.pumpAndSettle();
+
+    expect(find.text('gpt-4o-mini'), findsOneWidget);
+    expect(find.text('claude-opus'), findsNothing);
+    expect(find.text('gemini-pro'), findsNothing);
+  });
+
+  testWidgets('filtered-out rows animate away instead of popping', (
+    tester,
+  ) async {
+    await pumpSearchSheet(tester, batterySaver: false);
+
+    await tester.enterText(find.byType(TextField), 'gpt');
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 60));
+
+    // Mid-flight: the row is collapsing, so it is still mounted.
+    expect(find.text('claude-opus'), findsOneWidget);
+
+    await tester.pumpAndSettle();
+    expect(find.text('claude-opus'), findsNothing);
+  });
+
+  testWidgets('battery saver drops the filter animation', (tester) async {
+    await pumpSearchSheet(tester, batterySaver: true);
+
+    await tester.enterText(find.byType(TextField), 'gpt');
+    await tester.pump();
+
+    // No transition to wait out — the row is gone on the very next frame.
+    expect(find.text('claude-opus'), findsNothing);
+    expect(find.text('gpt-4o-mini'), findsOneWidget);
+  });
+
+  testWidgets('search shows an empty state when nothing matches', (
+    tester,
+  ) async {
+    await pumpSearchSheet(tester, batterySaver: false);
+
+    await tester.enterText(find.byType(TextField), 'nothing-matches-this');
+    await tester.pumpAndSettle();
+
+    expect(find.byIcon(Icons.search_off_rounded), findsOneWidget);
+    expect(find.text('gpt-4o-mini'), findsNothing);
+
+    // Clearing restores every row.
+    await tester.tap(find.byIcon(Icons.close_rounded));
+    await tester.pumpAndSettle();
+
+    expect(find.byIcon(Icons.search_off_rounded), findsNothing);
+    expect(find.text('gpt-4o-mini'), findsOneWidget);
+    expect(find.text('claude-opus'), findsOneWidget);
+  });
+
   testWidgets('materialized items still build every row', (tester) async {
     late BuildContext sheetContext;
     final items = List.generate(

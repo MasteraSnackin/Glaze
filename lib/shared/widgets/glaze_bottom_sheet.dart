@@ -135,6 +135,10 @@ class BottomSheetInput {
 typedef BottomSheetItemBuilder =
     BottomSheetItem Function(BuildContext context, int index);
 
+/// Per-row collapse/expand used while a search query filters a sheet list.
+/// Long enough to read as a transition, short enough not to lag typing.
+const Duration _kFilterAnimDuration = Duration(milliseconds: 220);
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 class GlazeBottomSheet {
@@ -154,6 +158,9 @@ class GlazeBottomSheet {
     bool locked = false,
     bool isDismissible = true,
     int? scrollToIndex,
+    bool searchable = false,
+    String? searchHint,
+    bool autofocusSearch = false,
   }) {
     assert(
       (itemCount == null) == (itemBuilder == null),
@@ -181,6 +188,11 @@ class GlazeBottomSheet {
       itemBuilder == null || scrollToIndex == null,
       'scrollToIndex is only supported for materialized items.',
     );
+    assert(
+      !searchable || itemBuilder == null,
+      'Search filters materialized lists only — a lazy builder has no labels '
+      'to match against.',
+    );
     return showModalBottomSheet<T>(
       context: context,
       useRootNavigator: true,
@@ -203,6 +215,9 @@ class GlazeBottomSheet {
         input: input,
         locked: locked,
         scrollToIndex: scrollToIndex,
+        searchable: searchable,
+        searchHint: searchHint,
+        autofocusSearch: autofocusSearch,
         child: child,
       ),
     );
@@ -265,6 +280,9 @@ class _GlazeBottomSheetContent extends ConsumerStatefulWidget {
   final Widget? child;
   final bool locked;
   final int? scrollToIndex;
+  final bool searchable;
+  final String? searchHint;
+  final bool autofocusSearch;
 
   const _GlazeBottomSheetContent({
     this.title,
@@ -280,6 +298,9 @@ class _GlazeBottomSheetContent extends ConsumerStatefulWidget {
     this.child,
     required this.locked,
     this.scrollToIndex,
+    this.searchable = false,
+    this.searchHint,
+    this.autofocusSearch = false,
   });
 
   @override
@@ -294,7 +315,20 @@ class _GlazeBottomSheetContentState
   final ScrollController _scrollController = ScrollController();
   final _headerKey = GlobalKey();
   final _scrollTargetKey = GlobalKey();
+  final _bodyKey = GlobalKey();
   double _headerH = 52; // Estimate initial height
+
+  final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocus = FocusNode();
+
+  /// Lower-cased whitespace-separated tokens of the search query. Empty means
+  /// "no filter", which short-circuits every visibility computation below.
+  List<String> _queryTokens = const [];
+
+  /// Height the unfiltered body settled at, capped to the viewport. Applied as
+  /// a floor while filtering so the sheet keeps its size (and the search field
+  /// keeps its place) instead of collapsing under the shrinking result list.
+  double? _stableBodyH;
 
   @override
   void initState() {
@@ -332,15 +366,66 @@ class _GlazeBottomSheetContentState
     });
   }
 
+  /// Records the body's natural height once, on the first frame (query still
+  /// empty), so [_stableBodyH] can pin the sheet while results are filtered
+  /// out. Registered after [_measureHeader] so the cap uses the measured
+  /// header height, not the initial estimate.
+  void _measureBody(double safeBottom) {
+    if (!widget.searchable || _stableBodyH != null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _stableBodyH != null) return;
+      final box = _bodyKey.currentContext?.findRenderObject() as RenderBox?;
+      if (box == null || !box.hasSize) return;
+      final cap =
+          MediaQuery.of(context).size.height * 0.95 -
+          _headerH -
+          safeBottom -
+          20;
+      if (cap <= 0) return;
+      final h = box.size.height.clamp(0.0, cap);
+      if (h > 0) setState(() => _stableBodyH = h);
+    });
+  }
+
   @override
   void dispose() {
     _inputController.dispose();
     _inputFocus.dispose();
+    _searchController.dispose();
+    _searchFocus.dispose();
     _scrollController.dispose();
     super.dispose();
   }
 
   bool get _hasHeader => widget.title != null || widget.headerAction != null;
+
+  void _onSearchChanged(String value) {
+    setState(() {
+      _queryTokens = value
+          .toLowerCase()
+          .split(RegExp(r'\s+'))
+          .where((t) => t.isNotEmpty)
+          .toList(growable: false);
+    });
+  }
+
+  void _clearSearch() {
+    _searchController.clear();
+    setState(() => _queryTokens = const []);
+  }
+
+  /// Per-entry visibility for one of the sheet's lists, or null when nothing is
+  /// being filtered (the common case — callers then skip the reveal wrappers
+  /// entirely).
+  List<bool>? _visibility<T>(
+    List<T>? entries,
+    List<String?> Function(T) fields,
+  ) {
+    if (entries == null || _queryTokens.isEmpty) return null;
+    return entries
+        .map((e) => _matchesQuery(_queryTokens, fields(e)))
+        .toList(growable: false);
+  }
 
   Widget _buildLazyList(BuildContext context, EdgeInsets padding) {
     return CustomScrollView(
@@ -375,6 +460,30 @@ class _GlazeBottomSheetContentState
     );
 
     _measureHeader();
+    _measureBody(safeBottom);
+
+    // Battery saver drops the reveal animation: filtered rows are simply not
+    // built, so typing costs a plain rebuild with no per-row controllers.
+    final animateFilter = widget.searchable && !batterySaver;
+    final itemsVisible = _visibility(widget.items, (i) => [i.label, i.hint]);
+    final cardsVisible = _visibility(
+      widget.itemsAsCards,
+      (i) => [i.label, i.hint],
+    );
+    final sessionsVisible = _visibility(
+      widget.sessionItems,
+      (i) => [i.title, i.preview],
+    );
+    final cardItemsVisible = _visibility(
+      widget.cardItems,
+      (i) => [i.label, i.sublabel, i.badge],
+    );
+    final noResults =
+        _queryTokens.isNotEmpty &&
+        !_hasMatch(itemsVisible) &&
+        !_hasMatch(cardsVisible) &&
+        !_hasMatch(sessionsVisible) &&
+        !_hasMatch(cardItemsVisible);
 
     final sheetBody = ConstrainedBox(
       constraints: BoxConstraints(
@@ -425,39 +534,64 @@ class _GlazeBottomSheetContentState
                             // scroll only shifts the layer instead of re-recording
                             // every row each frame.
                             child: RepaintBoundary(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.stretch,
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const SizedBox(height: 4),
-                                  if (widget.child != null) widget.child!,
-                                  if (widget.bigInfo != null)
-                                    _BigInfo(info: widget.bigInfo!),
-                                  if (widget.items != null &&
-                                      widget.items!.isNotEmpty)
-                                    _ItemsList(
-                                      items: widget.items!,
-                                      scrollToIndex: widget.scrollToIndex,
-                                      scrollTargetKey: _scrollTargetKey,
-                                    ),
-                                  if (widget.itemsAsCards != null &&
-                                      widget.itemsAsCards!.isNotEmpty)
-                                    _ItemsCardList(items: widget.itemsAsCards!),
-                                  if (widget.sessionItems != null &&
-                                      widget.sessionItems!.isNotEmpty)
-                                    GlazeSessionList(
-                                      items: widget.sessionItems!,
-                                    ),
-                                  if (widget.cardItems != null &&
-                                      widget.cardItems!.isNotEmpty)
-                                    _CardList(items: widget.cardItems!),
-                                  if (widget.input != null)
-                                    _InputSection(
-                                      input: widget.input!,
-                                      controller: _inputController,
-                                      focusNode: _inputFocus,
-                                    ),
-                                ],
+                              child: ConstrainedBox(
+                                constraints: BoxConstraints(
+                                  minHeight: _stableBodyH ?? 0,
+                                ),
+                                child: Column(
+                                  key: _bodyKey,
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const SizedBox(height: 4),
+                                    if (widget.child != null) widget.child!,
+                                    if (widget.bigInfo != null)
+                                      _BigInfo(info: widget.bigInfo!),
+                                    if (widget.items != null &&
+                                        widget.items!.isNotEmpty)
+                                      _ItemsList(
+                                        items: widget.items!,
+                                        visible: itemsVisible,
+                                        animateFilter: animateFilter,
+                                        scrollToIndex: widget.scrollToIndex,
+                                        scrollTargetKey: _scrollTargetKey,
+                                      ),
+                                    if (widget.itemsAsCards != null &&
+                                        widget.itemsAsCards!.isNotEmpty)
+                                      _ItemsCardList(
+                                        items: widget.itemsAsCards!,
+                                        visible: cardsVisible,
+                                        animateFilter: animateFilter,
+                                      ),
+                                    if (widget.sessionItems != null &&
+                                        widget.sessionItems!.isNotEmpty)
+                                      GlazeSessionList(
+                                        items: widget.sessionItems!,
+                                        visible: sessionsVisible,
+                                        animateFilter: animateFilter,
+                                      ),
+                                    if (widget.cardItems != null &&
+                                        widget.cardItems!.isNotEmpty)
+                                      _CardList(
+                                        items: widget.cardItems!,
+                                        visible: cardItemsVisible,
+                                        animateFilter: animateFilter,
+                                      ),
+                                    if (widget.searchable)
+                                      _SheetReveal(
+                                        visible: noResults,
+                                        animate: animateFilter,
+                                        child: const _SearchEmptyState(),
+                                      ),
+                                    if (widget.input != null)
+                                      _InputSection(
+                                        input: widget.input!,
+                                        controller: _inputController,
+                                        focusNode: _inputFocus,
+                                      ),
+                                  ],
+                                ),
                               ),
                             ),
                           ),
@@ -478,6 +612,16 @@ class _GlazeBottomSheetContentState
                     _HandleBar(),
                     if (_hasHeader)
                       _Header(title: widget.title, action: widget.headerAction),
+                    if (widget.searchable)
+                      _SheetSearchField(
+                        controller: _searchController,
+                        focusNode: _searchFocus,
+                        hint: widget.searchHint,
+                        autofocus: widget.autofocusSearch,
+                        hasQuery: _searchController.text.isNotEmpty,
+                        onChanged: _onSearchChanged,
+                        onClear: _clearSearch,
+                      ),
                   ],
                 ),
               ),
@@ -488,6 +632,212 @@ class _GlazeBottomSheetContentState
     );
 
     return sheetBody;
+  }
+}
+
+// ── Search & filter animation ─────────────────────────────────────────────────
+
+/// True when every token of the query appears somewhere in [fields]. Tokens
+/// are matched independently, so "gpt 4o" finds `gpt-4o-mini` and the caller's
+/// field order doesn't matter.
+bool _matchesQuery(List<String> tokens, List<String?> fields) {
+  if (tokens.isEmpty) return true;
+  final buf = StringBuffer();
+  for (final f in fields) {
+    if (f == null || f.isEmpty) continue;
+    buf
+      ..write(f.toLowerCase())
+      ..write(' ');
+  }
+  final hay = buf.toString();
+  for (final token in tokens) {
+    if (!hay.contains(token)) return false;
+  }
+  return true;
+}
+
+/// Whether a list should render at all: a null mask means "not filtered", so
+/// everything the list holds is visible.
+bool _anyVisible(List<bool>? visible) =>
+    visible == null || visible.contains(true);
+
+/// Whether a *filtered* list kept at least one row. Unlike [_anyVisible], a
+/// null mask counts as "no matches" — it means the sheet simply has no list of
+/// that kind, which must not suppress the empty state.
+bool _hasMatch(List<bool>? visible) =>
+    visible != null && visible.contains(true);
+
+/// Collapse/expand transition for a single row of a filtered sheet list.
+///
+/// Rows stay mounted and animate their own height, opacity and a small
+/// horizontal slide, so a filtered-out row folds away instead of popping and
+/// the sheet's height follows along smoothly. With [animate] false (battery
+/// saver, or a sheet with no search field) the row is built or dropped outright
+/// — no controllers, no clip layers, no per-frame cost.
+class _SheetReveal extends StatelessWidget {
+  final bool visible;
+  final bool animate;
+  final Widget child;
+
+  const _SheetReveal({
+    required this.visible,
+    required this.animate,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (!animate) {
+      return visible ? child : const SizedBox.shrink();
+    }
+    return TweenAnimationBuilder<double>(
+      // begin only seeds the very first build; afterwards the implicit
+      // animation runs from the row's current value to the new end.
+      tween: Tween<double>(
+        begin: visible ? 1.0 : 0.0,
+        end: visible ? 1.0 : 0.0,
+      ),
+      duration: _kFilterAnimDuration,
+      curve: Curves.easeOutCubic,
+      child: child,
+      builder: (context, t, child) {
+        if (t >= 1) return child!;
+        if (t <= 0) return const SizedBox.shrink();
+        final f = t.clamp(0.0, 1.0);
+        return ClipRect(
+          child: Align(
+            alignment: Alignment.topCenter,
+            heightFactor: f,
+            child: Opacity(
+              opacity: f,
+              child: Transform.translate(
+                offset: Offset(16 * (1 - f), 0),
+                child: child,
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _SheetSearchField extends StatelessWidget {
+  final TextEditingController controller;
+  final FocusNode focusNode;
+  final String? hint;
+  final bool autofocus;
+  final bool hasQuery;
+  final ValueChanged<String> onChanged;
+  final VoidCallback onClear;
+
+  const _SheetSearchField({
+    required this.controller,
+    required this.focusNode,
+    required this.hint,
+    required this.autofocus,
+    required this.hasQuery,
+    required this.onChanged,
+    required this.onClear,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      child: TextField(
+        controller: controller,
+        focusNode: focusNode,
+        autofocus: autofocus,
+        onChanged: onChanged,
+        textInputAction: TextInputAction.search,
+        cursorColor: context.cs.primary,
+        style: TextStyle(color: context.cs.onSurface, fontSize: 14),
+        decoration: InputDecoration(
+          isDense: true,
+          hintText: hint ?? 'search'.tr(),
+          hintStyle: TextStyle(
+            color: context.cs.onSurfaceVariant,
+            fontSize: 14,
+          ),
+          prefixIcon: Icon(
+            Icons.search_rounded,
+            size: 18,
+            color: context.cs.onSurfaceVariant,
+          ),
+          prefixIconConstraints: const BoxConstraints(
+            minWidth: 38,
+            minHeight: 0,
+          ),
+          // Always mounted, only faded: the sheet body reserves the header
+          // height as a static top inset, so a suffix that comes and goes
+          // would resize the header out from under the list.
+          suffixIcon: AnimatedOpacity(
+            opacity: hasQuery ? 1.0 : 0.0,
+            duration: const Duration(milliseconds: 120),
+            child: IgnorePointer(
+              ignoring: !hasQuery,
+              child: GestureDetector(
+                onTap: onClear,
+                behavior: HitTestBehavior.opaque,
+                child: Icon(
+                  Icons.close_rounded,
+                  size: 18,
+                  color: context.cs.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ),
+          suffixIconConstraints: const BoxConstraints(
+            minWidth: 38,
+            minHeight: 0,
+          ),
+          filled: true,
+          fillColor: Colors.white.withValues(alpha: 0.06),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide.none,
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide(
+              color: context.cs.primary.withValues(alpha: 0.5),
+            ),
+          ),
+          contentPadding: const EdgeInsets.symmetric(vertical: 11),
+        ),
+      ),
+    );
+  }
+}
+
+class _SearchEmptyState extends StatelessWidget {
+  const _SearchEmptyState();
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+      child: Column(
+        children: [
+          Icon(
+            Icons.search_off_rounded,
+            size: 36,
+            color: context.cs.onSurfaceVariant.withValues(alpha: 0.5),
+          ),
+          const SizedBox(height: 10),
+          Text(
+            'no_results'.tr(),
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 14, color: context.cs.onSurfaceVariant),
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -543,41 +893,70 @@ class _Header extends StatelessWidget {
 
 class _ItemsList extends StatelessWidget {
   final List<BottomSheetItem> items;
+
+  /// Per-item search visibility, or null when the list is unfiltered.
+  final List<bool>? visible;
+  final bool animateFilter;
   final int? scrollToIndex;
   final Key? scrollTargetKey;
 
   const _ItemsList({
     required this.items,
+    this.visible,
+    this.animateFilter = false,
     this.scrollToIndex,
     this.scrollTargetKey,
   });
 
+  bool _isVisible(int i) => visible == null || visible![i];
+
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.06),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
-          borderRadius: BorderRadius.circular(16),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: Column(
-          children: [
-            for (int i = 0; i < items.length; i++) ...[
-              if (i > 0)
-                Divider(
-                  height: 1,
-                  thickness: 1,
-                  color: Colors.white.withValues(alpha: 0.06),
+    // The separator rides *above* its row, so the topmost surviving row must
+    // drop it — otherwise a filtered list opens with a stray hairline.
+    var firstVisible = -1;
+    for (var i = 0; i < items.length; i++) {
+      if (_isVisible(i)) {
+        firstVisible = i;
+        break;
+      }
+    }
+    return _SheetReveal(
+      visible: firstVisible >= 0,
+      animate: animateFilter,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        child: Container(
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.06),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            children: [
+              for (int i = 0; i < items.length; i++)
+                _SheetReveal(
+                  visible: _isVisible(i),
+                  animate: animateFilter,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (i != firstVisible)
+                        Divider(
+                          height: 1,
+                          thickness: 1,
+                          color: Colors.white.withValues(alpha: 0.06),
+                        ),
+                      KeyedSubtree(
+                        key: i == scrollToIndex ? scrollTargetKey : null,
+                        child: _ItemRow(item: items[i]),
+                      ),
+                    ],
+                  ),
                 ),
-              KeyedSubtree(
-                key: i == scrollToIndex ? scrollTargetKey : null,
-                child: _ItemRow(item: items[i]),
-              ),
             ],
-          ],
+          ),
         ),
       ),
     );
@@ -698,21 +1077,35 @@ class _LazyItemRow extends StatelessWidget {
 
 class _ItemsCardList extends StatelessWidget {
   final List<BottomSheetItem> items;
+  final List<bool>? visible;
+  final bool animateFilter;
 
-  const _ItemsCardList({required this.items});
+  const _ItemsCardList({
+    required this.items,
+    this.visible,
+    this.animateFilter = false,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-      child: Column(
-        children: [
-          for (int i = 0; i < items.length; i++)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: _ItemCardRow(item: items[i]),
-            ),
-        ],
+    return _SheetReveal(
+      visible: _anyVisible(visible),
+      animate: animateFilter,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        child: Column(
+          children: [
+            for (int i = 0; i < items.length; i++)
+              _SheetReveal(
+                visible: visible == null || visible![i],
+                animate: animateFilter,
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: _ItemCardRow(item: items[i]),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -822,20 +1215,37 @@ class _ItemLabel extends StatelessWidget {
 class GlazeSessionList extends StatelessWidget {
   final List<BottomSheetSessionItem> items;
 
-  const GlazeSessionList({super.key, required this.items});
+  /// Per-item search visibility, or null when the list is unfiltered.
+  final List<bool>? visible;
+  final bool animateFilter;
+
+  const GlazeSessionList({
+    super.key,
+    required this.items,
+    this.visible,
+    this.animateFilter = false,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-      child: Column(
-        children: [
-          for (int i = 0; i < items.length; i++)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: GlazeSessionRow(item: items[i]),
-            ),
-        ],
+    return _SheetReveal(
+      visible: _anyVisible(visible),
+      animate: animateFilter,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        child: Column(
+          children: [
+            for (int i = 0; i < items.length; i++)
+              _SheetReveal(
+                visible: visible == null || visible![i],
+                animate: animateFilter,
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: GlazeSessionRow(item: items[i]),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -1010,22 +1420,35 @@ class GlazeSessionRow extends StatelessWidget {
 
 class _CardList extends StatelessWidget {
   final List<BottomSheetCardItem> items;
+  final List<bool>? visible;
+  final bool animateFilter;
 
-  const _CardList({required this.items});
+  const _CardList({
+    required this.items,
+    this.visible,
+    this.animateFilter = false,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-      child: Column(
-        children: items
-            .map(
-              (item) => Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: _CardRow(item: item),
+    return _SheetReveal(
+      visible: _anyVisible(visible),
+      animate: animateFilter,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        child: Column(
+          children: [
+            for (int i = 0; i < items.length; i++)
+              _SheetReveal(
+                visible: visible == null || visible![i],
+                animate: animateFilter,
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: _CardRow(item: items[i]),
+                ),
               ),
-            )
-            .toList(),
+          ],
+        ),
       ),
     );
   }
