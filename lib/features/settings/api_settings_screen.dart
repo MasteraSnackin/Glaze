@@ -16,6 +16,7 @@ import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../shared/widgets/glaze_spinner.dart';
 import '../../shared/widgets/glaze_tab_bar.dart';
+import '../../shared/widgets/list_controls.dart';
 import '../../shared/widgets/swipe_tab_switcher.dart';
 import '../../shared/widgets/tab_slide_switcher.dart';
 import '../../shared/widgets/glaze_error_dialog.dart';
@@ -24,6 +25,8 @@ import '../../shared/widgets/sheet_view.dart';
 import 'api_config_draft.dart';
 import '../studio/widgets/studio_slots_tab.dart';
 import 'api_list_provider.dart';
+import 'api_preset_selection_provider.dart';
+import 'api_preset_sort.dart';
 import 'widgets/connection_status.dart';
 import '../../shared/widgets/menu_group.dart';
 import '../../shared/widgets/extra_request_parameters_editor.dart';
@@ -88,6 +91,10 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   List<ExtraRequestParameter> _extraRequestParameters = const [];
 
   String? _loadedPresetId;
+
+  /// Whether the presets sheet is on screen. A bulk delete can outlive it, and
+  /// closing "the sheet" once it is gone would pop whatever took its place.
+  bool _presetSheetOpen = false;
   // Each tab owns its own scroll controller. During a slide transition both
   // tab bodies are briefly alive at once, so they must never share a single
   // controller (a controller attached to two scroll views throws). The sheet
@@ -475,7 +482,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     String activeName,
   ) {
     return GestureDetector(
-      onTap: list.isEmpty ? null : () => _showPresetSheet(context, list),
+      onTap: list.isEmpty ? null : _showPresetSheet,
       child: Container(
         height: 32,
         padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -525,7 +532,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
           ),
           const SizedBox(height: 12),
           FilledButton.tonal(
-            onPressed: () => _createNewPreset([]),
+            onPressed: _createNewPreset,
             child: Text('settings_add_api_config'.tr()),
           ),
         ],
@@ -1038,91 +1045,320 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
 
   // ── Sheet actions ─────────────────────────────────────────────────────────────
 
-  Future<void> _showPresetSheet(
-    BuildContext context,
-    List<ApiConfig> list,
-  ) async {
-    final activeId =
-        ref.read(activeApiPresetIdProvider) ??
-        (list.isNotEmpty ? list.first.id : null);
+  /// The presets sheet. Its rows are built from the providers on every rebuild
+  /// (`cardsBuilder`), so switching the sort mode, dragging a row, deleting a
+  /// preset or selecting several updates the open sheet in place — it is never
+  /// closed and reopened to show the change.
+  Future<void> _showPresetSheet() async {
+    _presetSheetOpen = true;
     await GlazeBottomSheet.show<void>(
       context,
       title: 'settings_api_configs_title'.tr(),
-      headerAction: IconButton(
-        icon: Icon(Icons.add_circle_outline_rounded, color: context.cs.primary),
-        tooltip: 'settings_new_config_tooltip'.tr(),
-        onPressed: () {
-          Navigator.of(context, rootNavigator: true).pop();
-          _createNewPreset(list);
-        },
-      ),
-      cardItems: list.map((config) {
-        final isActive = config.id == activeId;
-        final name = config.name.isNotEmpty
-            ? config.name
-            : config.model.isNotEmpty
-            ? config.model
-            : 'unnamed_entry'.tr();
-
-        String? faviconUrl;
-        if (config.endpoint.isNotEmpty) {
-          try {
-            final uri = Uri.parse(config.endpoint);
-            if (uri.host.isNotEmpty &&
-                !uri.host.contains('127.0.0.1') &&
-                !uri.host.contains('localhost')) {
-              faviconUrl =
-                  'https://www.google.com/s2/favicons?domain=${uri.host}&sz=128';
-            }
-          } catch (_) {}
-        }
-
-        return BottomSheetCardItem(
-          label: name,
-          sublabel: config.endpoint.isNotEmpty
-              ? config.endpoint
-                    .replaceAll(RegExp(r'https?://'), '')
-                    .split('/')
-                    .first
-              : null,
-          icon: isActive
-              ? Icons.radio_button_checked_rounded
-              : Icons.radio_button_unchecked_rounded,
-          faviconUrl: faviconUrl,
-          isActive: isActive,
-          actions: [
-            if (list.length > 1)
-              BottomSheetAction(
-                icon: Icons.delete_outline_rounded,
-                color: context.cs.onSurfaceVariant,
-                onTap: () async {
+      headerAction: Consumer(
+        builder: (context, ref, _) {
+          final selection = ref.watch(apiPresetSelectionProvider);
+          if (selection.active) return _buildSelectionActions(selection);
+          final mode =
+              ref.watch(apiPresetSortProvider).value?.mode ??
+              ApiPresetSortMode.manual;
+          final armed = ref.watch(apiPresetReorderArmedProvider);
+          return Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Only the manually ordered sheet has an order to drag rows into.
+              if (mode == ApiPresetSortMode.manual) ...[
+                GlazeReorderToggleButton(
+                  armed: armed,
+                  tooltip: 'sort_reorder'.tr(),
+                  onTap: _toggleReorderArmed,
+                ),
+                const SizedBox(width: 8),
+              ],
+              GlazeSortIconChip(
+                icon: mode.icon,
+                tooltip: mode.label,
+                onTap: () => _showSortPicker(mode),
+              ),
+              IconButton(
+                icon: Icon(
+                  Icons.add_circle_outline_rounded,
+                  color: context.cs.primary,
+                ),
+                tooltip: 'settings_new_config_tooltip'.tr(),
+                onPressed: () {
                   Navigator.of(context, rootNavigator: true).pop();
-                  await ref.read(apiListProvider.notifier).remove(config.id);
-                  if (activeId == config.id) {
-                    ref.read(activeApiPresetIdProvider.notifier).state = null;
-                    _persistActiveId(null);
-                    _loadedPresetId = null;
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                      if (mounted) _loadActivePreset();
-                    });
-                  }
+                  _createNewPreset();
                 },
               ),
+            ],
+          );
+        },
+      ),
+      cardsBuilder: (context, ref) {
+        final list = ref.watch(apiListProvider).value ?? const <ApiConfig>[];
+        final sort =
+            ref.watch(apiPresetSortProvider).value ?? const ApiPresetSortState();
+        final selection = ref.watch(apiPresetSelectionProvider);
+        final reordering =
+            sort.mode == ApiPresetSortMode.manual &&
+            ref.watch(apiPresetReorderArmedProvider);
+        // The active id falls back to the *repository's* first preset, the same
+        // one activeApiConfigProvider picks — sorting only reorders what is
+        // shown, so it must not move the highlight to another row.
+        final activeId =
+            ref.watch(activeApiPresetIdProvider) ??
+            (list.isNotEmpty ? list.first.id : null);
+        final sorted = sortApiConfigs(list, sort);
+        return BottomSheetCards(
+          items: [
+            for (final config in sorted)
+              _presetCard(
+                config,
+                activeId,
+                selection: selection,
+                reordering: reordering,
+                canDelete: list.length > 1,
+              ),
           ],
-          onTap: () {
-            Navigator.of(context, rootNavigator: true).pop();
-            _saveTimer?.cancel();
-            ref.read(activeApiPresetIdProvider.notifier).state = config.id;
-            _persistActiveId(config.id);
-            _loadedPresetId = null;
-            _loadFromConfig(config);
-          },
+          onReorder: reordering
+              ? (oldIndex, newIndex) =>
+                    _onManualReorder(sorted, oldIndex, newIndex)
+              : null,
         );
-      }).toList(),
+      },
+    );
+    _presetSheetOpen = false;
+    if (!mounted) return;
+    // The selection and the armed drag belong to the open sheet, not to the
+    // screen behind it.
+    ref.read(apiPresetSelectionProvider.notifier).clear();
+    ref.read(apiPresetReorderArmedProvider.notifier).state = false;
+  }
+
+  /// What the sheet header shows while presets are selected: the count and the
+  /// bulk actions, in place of the sort and add controls.
+  Widget _buildSelectionActions(ApiPresetSelectionState selection) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          '${selection.count} ${'selected_count'.tr()}',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: context.cs.onSurfaceVariant,
+          ),
+        ),
+        IconButton(
+          icon: Icon(Icons.delete_outline_rounded, color: context.cs.error),
+          tooltip: 'action_delete'.tr(),
+          onPressed: () => _confirmDeleteSelected(selection),
+        ),
+        IconButton(
+          icon: Icon(Icons.close_rounded, color: context.cs.onSurfaceVariant),
+          tooltip: 'btn_cancel'.tr(),
+          onPressed: () =>
+              ref.read(apiPresetSelectionProvider.notifier).clear(),
+        ),
+      ],
     );
   }
 
-  Future<void> _createNewPreset(List<ApiConfig> existing) async {
+  BottomSheetCardItem _presetCard(
+    ApiConfig config,
+    String? activeId, {
+    required ApiPresetSelectionState selection,
+    required bool reordering,
+    required bool canDelete,
+  }) {
+    final isActive = config.id == activeId;
+    final isSelected = selection.contains(config.id);
+    final name = config.name.isNotEmpty
+        ? config.name
+        : config.model.isNotEmpty
+        ? config.model
+        : 'unnamed_entry'.tr();
+
+    String? faviconUrl;
+    if (config.endpoint.isNotEmpty) {
+      try {
+        final uri = Uri.parse(config.endpoint);
+        if (uri.host.isNotEmpty &&
+            !uri.host.contains('127.0.0.1') &&
+            !uri.host.contains('localhost')) {
+          faviconUrl =
+              'https://www.google.com/s2/favicons?domain=${uri.host}&sz=128';
+        }
+      } catch (_) {}
+    }
+
+    return BottomSheetCardItem(
+      id: config.id,
+      label: name,
+      sublabel: config.endpoint.isNotEmpty
+          ? config.endpoint
+                .replaceAll(RegExp(r'https?://'), '')
+                .split('/')
+                .first
+          : null,
+      // While selecting, the radio button gives way to a check mark: the row
+      // now answers "is it picked", not "is it the connection in use".
+      icon: selection.active
+          ? (isSelected
+                ? Icons.check_circle_rounded
+                : Icons.radio_button_unchecked_rounded)
+          : (isActive
+                ? Icons.radio_button_checked_rounded
+                : Icons.radio_button_unchecked_rounded),
+      faviconUrl: selection.active ? null : faviconUrl,
+      isActive: selection.active ? isSelected : isActive,
+      // While dragging is armed a long press lifts the row, so it can't also
+      // open multi-select.
+      onLongPress: reordering
+          ? null
+          : () => ref
+                .read(apiPresetSelectionProvider.notifier)
+                .start(config.id),
+      actions: [
+        // Bulk delete owns the header while selecting; per-row deletes would
+        // only compete with it.
+        if (canDelete && !selection.active)
+          BottomSheetAction(
+            icon: Icons.delete_outline_rounded,
+            color: context.cs.onSurfaceVariant,
+            onTap: () async {
+              await ref.read(apiListProvider.notifier).remove(config.id);
+              _reloadAfterDelete(activeId, {config.id});
+            },
+          ),
+      ],
+      onTap: () {
+        if (selection.active) {
+          ref.read(apiPresetSelectionProvider.notifier).toggle(config.id);
+          return;
+        }
+        Navigator.of(context, rootNavigator: true).pop();
+        _saveTimer?.cancel();
+        ref.read(activeApiPresetIdProvider.notifier).state = config.id;
+        _persistActiveId(config.id);
+        _loadedPresetId = null;
+        _loadFromConfig(config);
+      },
+    );
+  }
+
+  /// Moves the editor off a preset that was just deleted: clearing the active
+  /// id lets [activeApiConfigProvider] fall back to the first one left.
+  void _reloadAfterDelete(String? activeId, Set<String> removedIds) {
+    if (activeId == null || !removedIds.contains(activeId)) return;
+    ref.read(activeApiPresetIdProvider.notifier).state = null;
+    _persistActiveId(null);
+    _loadedPresetId = null;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _loadActivePreset();
+    });
+  }
+
+  /// Deletes every selected preset, after a confirmation. The sheet stays open
+  /// and the rows simply go — unless nothing is left to show, which is the one
+  /// case it closes itself.
+  void _confirmDeleteSelected(ApiPresetSelectionState selection) {
+    final ids = selection.ids.toList();
+    if (ids.isEmpty) return;
+    final list = ref.read(apiListProvider).value ?? const <ApiConfig>[];
+    final activeId =
+        ref.read(activeApiPresetIdProvider) ??
+        (list.isNotEmpty ? list.first.id : null);
+    GlazeBottomSheet.show<void>(
+      context,
+      title: 'action_delete'.tr(),
+      bigInfo: BottomSheetBigInfo(
+        icon: Icons.delete_outline,
+        description: 'api_delete_many_confirm'.plural(ids.length),
+      ),
+      items: [
+        BottomSheetItem(
+          label: 'btn_delete'.tr(),
+          isDestructive: true,
+          centered: true,
+          onTap: () async {
+            Navigator.of(context, rootNavigator: true).pop();
+            ref.read(apiPresetSelectionProvider.notifier).clear();
+            for (final id in ids) {
+              // Each delete awaits a DB round-trip; bail out if the screen went
+              // away in the meantime rather than reading a disposed ref.
+              if (!mounted) return;
+              await ref.read(apiListProvider.notifier).remove(id);
+            }
+            if (!mounted) return;
+            _reloadAfterDelete(activeId, ids.toSet());
+            final remaining = await ref.read(apiListProvider.future);
+            // An empty sheet would be a header and nothing else.
+            if (remaining.isEmpty && mounted && _presetSheetOpen) {
+              Navigator.of(context, rootNavigator: true).pop();
+            }
+          },
+        ),
+        BottomSheetItem(
+          label: 'btn_cancel'.tr(),
+          centered: true,
+          onTap: () => Navigator.of(context, rootNavigator: true).pop(),
+        ),
+      ],
+    );
+  }
+
+  /// Commits a drag in the manually ordered sheet. The sheet lists every preset
+  /// there is, so what the user dragged over *is* the full order.
+  void _onManualReorder(List<ApiConfig> sorted, int oldIndex, int newIndex) {
+    if (oldIndex == newIndex) return;
+    final order = [for (final config in sorted) config.id];
+    order.insert(newIndex, order.removeAt(oldIndex));
+    unawaited(ref.read(apiPresetSortProvider.notifier).setManualOrder(order));
+  }
+
+  /// Arms or disarms dragging in the sheet. Arming clears any multi-select —
+  /// the two modes claim the same long press, so only one can be on.
+  void _toggleReorderArmed() {
+    final armed = !ref.read(apiPresetReorderArmedProvider);
+    ref.read(apiPresetReorderArmedProvider.notifier).state = armed;
+    if (!armed) return;
+    ref.read(apiPresetSelectionProvider.notifier).clear();
+    // Arming is the only moment the drag gesture needs explaining, so it is a
+    // toast rather than a permanent hint.
+    GlazeToast.show(context, 'preset_drag_hint'.tr());
+  }
+
+  /// Sort-mode picker, opened over the presets sheet: the sheet below follows
+  /// the new mode on its own, so nothing has to be closed or reopened.
+  void _showSortPicker(ApiPresetSortMode current) {
+    showGlazePickerSheet(
+      context,
+      title: 'sort_by'.tr(),
+      items: [
+        for (final mode in ApiPresetSortMode.values)
+          GlazePickerItem(
+            label: mode.label,
+            icon: mode.icon,
+            hint: mode.hint,
+            isActive: mode == current,
+            value: mode,
+          ),
+      ],
+      onSelect: (v) {
+        final mode = v as ApiPresetSortMode;
+        if (mode == current) return;
+        // Another mode has no order to drag rows into: the toggle goes away,
+        // so it must not stay armed behind it.
+        if (mode != ApiPresetSortMode.manual) {
+          ref.read(apiPresetReorderArmedProvider.notifier).state = false;
+        }
+        unawaited(ref.read(apiPresetSortProvider.notifier).setMode(mode));
+      },
+    );
+  }
+
+  Future<void> _createNewPreset() async {
     await GlazeBottomSheet.show<void>(
       context,
       title: 'settings_new_config_title'.tr(),

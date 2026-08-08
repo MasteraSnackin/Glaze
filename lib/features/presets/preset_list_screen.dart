@@ -118,6 +118,11 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
   /// keeps rendering them, shrinking and untappable, until then.
   final Set<String> _exitingKeys = {};
 
+  /// Dragging is armed from the chip next to the sort picker, not by the manual
+  /// mode alone: while it is off a long press still opens multi-select, which is
+  /// the gesture users reach for far more often than reordering.
+  bool _reorderArmed = false;
+
   bool get _inEditor => _isCreating || _editingPreset != null;
   bool get _inStudioEditor => _editingStudioId != null;
   bool get _inAnyEditor => _inEditor || _inStudioEditor;
@@ -353,7 +358,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
     }
     items = items.where(_filters.matches).toList();
     items = sortPresetItems(items, sort);
-    final manual = sort.mode == PresetSortMode.manual;
+    final reordering = sort.mode == PresetSortMode.manual && _reorderArmed;
 
     // Studio ON ⇒ only an agentic preset can be active; Studio OFF ⇒ only a
     // plain preset can be active. So the two kinds never both highlight.
@@ -394,13 +399,11 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
             selectionMode: selection.active,
             isSelected: selection.contains(item.id, item.kind),
             onTap: () => _onCardTap(item, active),
-            // While the list is manually ordered a long press starts the drag,
-            // so it can't also open multi-select — that moves to the row menu.
-            onLongPress: manual
+            // While dragging is armed a long press lifts the row, so it can't
+            // also open multi-select — that moves to the row menu.
+            onLongPress: reordering
                 ? null
-                : () => ref
-                      .read(presetSelectionProvider.notifier)
-                      .start(item.id, item.kind),
+                : () => _startSelection(item.id, item.kind),
             onConnections: item.isAgentic
                 ? null
                 : () => showPresetConnections(context, item.preset!.id),
@@ -451,7 +454,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
                 ),
               ),
             )
-          else if (manual)
+          else if (reordering)
             SliverPadding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               sliver: SliverReorderableList(
@@ -664,6 +667,15 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
               onTap: () => _showFilterSheet(context),
             ),
             const SizedBox(width: 8),
+            // Only the manually ordered list has an order to drag rows into.
+            if (mode == PresetSortMode.manual) ...[
+              GlazeReorderToggleButton(
+                armed: _reorderArmed,
+                tooltip: 'sort_reorder'.tr(),
+                onTap: _toggleReorderArmed,
+              ),
+              const SizedBox(width: 8),
+            ],
             GlazeSortIconChip(
               icon: mode.icon,
               tooltip: mode.label,
@@ -673,6 +685,25 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
         );
       },
     );
+  }
+
+  /// Arms or disarms dragging. Arming clears any multi-select — the two modes
+  /// claim the same long press, so only one of them can be on.
+  void _toggleReorderArmed() {
+    final armed = !_reorderArmed;
+    setState(() => _reorderArmed = armed);
+    if (!armed) return;
+    ref.read(presetSelectionProvider.notifier).clear();
+    // Arming is the only moment the drag gesture needs explaining, so it is a
+    // toast rather than a permanent chip.
+    GlazeToast.show(context, 'preset_drag_hint'.tr());
+  }
+
+  /// Enters multi-select, disarming a drag left over from the manual mode so a
+  /// long press cannot mean both things at once.
+  void _startSelection(String presetId, PresetKind kind) {
+    if (_reorderArmed) setState(() => _reorderArmed = false);
+    ref.read(presetSelectionProvider.notifier).start(presetId, kind);
   }
 
   void _showSortPicker(BuildContext context, PresetSortMode current) {
@@ -690,15 +721,10 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
           ),
       ],
       onSelect: (v) {
-        if (v == PresetSortMode.manual) {
-          // Leaving multi-select on while switching into the drag-ordered mode
-          // would strand the selection bar (a long press drags there instead).
-          ref.read(presetSelectionProvider.notifier).clear();
-          // Picking the mode is the only moment the drag gesture needs
-          // explaining, so it is a toast rather than a permanent chip.
-          if (mounted && current != PresetSortMode.manual) {
-            GlazeToast.show(this.context, 'preset_drag_hint'.tr());
-          }
+        // Another mode has no order to drag rows into: the toggle goes away,
+        // so it must not stay armed behind it.
+        if (v != PresetSortMode.manual && _reorderArmed && mounted) {
+          setState(() => _reorderArmed = false);
         }
         unawaited(
           ref.read(presetSortProvider.notifier).setMode(v as PresetSortMode),
@@ -776,9 +802,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
       isFeatured: isFeaturedPreset(preset.id),
       hasImage: preset.imagePath != null && preset.imagePath!.isNotEmpty,
       canDelete: true,
-      onSelect: () => ref
-          .read(presetSelectionProvider.notifier)
-          .start(preset.id, PresetKind.normal),
+      onSelect: () => _startSelection(preset.id, PresetKind.normal),
       onRename: () => showPresetRename(
         context,
         currentName: preset.name,
@@ -860,9 +884,7 @@ class _PresetListScreenState extends ConsumerState<PresetListScreen> {
     showStudioPresetOptions(
       context,
       preset: preset,
-      onSelect: () => ref
-          .read(presetSelectionProvider.notifier)
-          .start(preset.id, PresetKind.agentic),
+      onSelect: () => _startSelection(preset.id, PresetKind.agentic),
       onRename: () => showStudioPresetRename(
         context,
         preset: preset,
