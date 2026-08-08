@@ -78,6 +78,16 @@ void main() {
         (await revisions.getForCharacter('c')).last.parentRevisionHash,
         CardCanonicalizer.sha256(first),
       );
+
+      final reverted = await loader.load(
+        sessionId: 's',
+        sourceCharacter: first,
+      );
+      final lineage = await revisions.getForCharacter('c');
+      expect(reverted.effectiveRevision.number, 3);
+      expect(lineage.map((item) => item.revision), [1, 2, 3]);
+      expect(lineage[2].revisionHash, lineage[0].revisionHash);
+      expect(lineage[2].parentRevisionHash, lineage[1].revisionHash);
     },
   );
 
@@ -120,6 +130,10 @@ void main() {
       );
       var context = await loader.load(sessionId: 's', sourceCharacter: second);
       expect(context.character.description, 'one');
+      await loader.load(sessionId: 's', sourceCharacter: first);
+      context = await loader.load(sessionId: 's', sourceCharacter: first);
+      expect(context.character.description, 'one');
+      expect(context.effectiveRevision.number, 1);
       await baselines.updatePolicy(
         sessionId: 's',
         policy: CharacterCardUpdatePolicy.askOnChange,

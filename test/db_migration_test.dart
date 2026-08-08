@@ -78,7 +78,7 @@ void main() {
 
       // user_version matches the Drift schema version (app_db.dart schemaVersion).
       // Update this constant whenever a new migration step is added.
-      expect(version, 113);
+      expect(version, 114);
     });
 
     test(
@@ -232,7 +232,7 @@ void main() {
         final version = await upgraded
             .customSelect('PRAGMA user_version')
             .get();
-        expect(version.first.read<int>('user_version'), 113);
+        expect(version.first.read<int>('user_version'), 114);
         expect(names, contains('variant_group_id'));
         expect(names, contains('hidden'));
       },
@@ -262,7 +262,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 113);
+      expect(version.read<int>('user_version'), 114);
     });
 
     test(
@@ -611,7 +611,7 @@ void main() {
 
     test('current schema includes atomic character fact tables', () async {
       final version = await db.customSelect('PRAGMA user_version').getSingle();
-      expect(version.read<int>('user_version'), 113);
+      expect(version.read<int>('user_version'), 114);
 
       final factColumns = await db
           .customSelect("PRAGMA table_info('character_knowledge_fact_rows')")
@@ -723,7 +723,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 113);
+      expect(version.read<int>('user_version'), 114);
     });
 
     test(
@@ -833,7 +833,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 113);
+      expect(version.read<int>('user_version'), 114);
     });
 
     test('v80 adds Responses API toggle defaulting to off', () async {
@@ -873,7 +873,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 113);
+      expect(version.read<int>('user_version'), 114);
     });
 
     test('v81 adds composite embedding source index', () async {
@@ -907,7 +907,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 113);
+      expect(version.read<int>('user_version'), 114);
     });
 
     test('v82 creates rewrite persistence schema and provenance columns', () async {
@@ -981,7 +981,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 113);
+      expect(version.read<int>('user_version'), 114);
     });
 
     test('v83 rebuilds interim text revision columns without losing rows', () async {
@@ -1139,9 +1139,24 @@ void main() {
         final revisionIndexes = await db
             .customSelect("PRAGMA index_list('character_revision_rows')")
             .get();
-        expect(
-          revisionIndexes.any((row) => row.read<int>('unique') == 1),
-          isTrue,
+        final hashIndex = revisionIndexes.singleWhere(
+          (row) => row.read<String>('name') == 'idx_character_revision_hash',
+        );
+        expect(hashIndex.read<int>('unique'), 0);
+
+        await db.customStatement(
+          'INSERT INTO character_revision_rows '
+          '(character_id, revision, revision_hash, snapshot_json) '
+          "VALUES ('repeatable', 1, 'same-hash', '{}'), "
+          "('repeatable', 2, 'same-hash', '{}')",
+        );
+        await expectLater(
+          db.customStatement(
+            'INSERT INTO character_revision_rows '
+            '(character_id, revision, revision_hash, snapshot_json) '
+            "VALUES ('repeatable', 2, 'another-hash', '{}')",
+          ),
+          throwsA(anything),
         );
       },
     );
@@ -1418,7 +1433,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 113);
+      expect(version.read<int>('user_version'), 114);
 
       // Rows and payloads survive; legacy statuses pass through or are
       // normalized fail-closed, and new columns carry neutral defaults.
@@ -1623,7 +1638,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 113);
+      expect(version.read<int>('user_version'), 114);
       final row = await upgraded
           .customSelect(
             'SELECT blocks_json FROM studio_preset_rows WHERE preset_id = ?',
@@ -1739,7 +1754,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 113);
+      expect(version.read<int>('user_version'), 114);
       final check = await upgraded.customSelect('PRAGMA integrity_check').get();
       expect(check.single.read<String>('integrity_check'), 'ok');
     });
@@ -2320,7 +2335,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 113);
+      expect(version.read<int>('user_version'), 114);
     });
 
     test(
@@ -2409,7 +2424,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 113);
+      expect(version.read<int>('user_version'), 114);
     });
 
     test('v111 resolves the retired session_id_mode default', () async {
@@ -2566,6 +2581,63 @@ void main() {
       expect(bad.read<String>('evidence_message_ids'), '[]');
       expect(bad.read<String>('evidence_clusters_json'), '[]');
       expect(bad.read<int>('repeat_count'), 1);
+    });
+
+    test('v114 allows a later revision to reuse an earlier hash', () async {
+      final file = File(
+        '${Directory.systemTemp.path}/glaze_mig_revision_hash_${DateTime.now().microsecondsSinceEpoch}.db',
+      );
+      addTearDown(() async {
+        if (file.existsSync()) await file.delete();
+      });
+      final seeded = AppDatabase.forTesting(
+        NativeDatabase.createInBackground(file),
+      );
+      await seeded.customSelect('SELECT 1').get();
+      await seeded.customStatement('DROP INDEX idx_character_revision_hash');
+      await seeded.customStatement(
+        'CREATE UNIQUE INDEX character_revision_rows_character_id_revision_hash '
+        'ON character_revision_rows (character_id, revision_hash)',
+      );
+      await seeded.customStatement(
+        'INSERT INTO character_revision_rows '
+        '(character_id, revision, revision_hash, parent_revision_hash, snapshot_json) '
+        "VALUES ('c', 1, 'hash-a', '', '{\"description\":\"a\"}'), "
+        "('c', 2, 'hash-b', 'hash-a', '{\"description\":\"b\"}')",
+      );
+      await seeded.customStatement('PRAGMA user_version = 113');
+      await seeded.close();
+
+      final upgraded = AppDatabase.forTesting(
+        NativeDatabase.createInBackground(file),
+      );
+      addTearDown(() async => upgraded.close());
+      await upgraded.customStatement(
+        'INSERT INTO character_revision_rows '
+        '(character_id, revision, revision_hash, parent_revision_hash, snapshot_json) '
+        "VALUES ('c', 3, 'hash-a', 'hash-b', '{\"description\":\"a\"}')",
+      );
+      final rows = await upgraded
+          .customSelect(
+            'SELECT revision, revision_hash, parent_revision_hash '
+            'FROM character_revision_rows ORDER BY revision',
+          )
+          .get();
+      expect(rows.map((row) => row.read<int>('revision')), [1, 2, 3]);
+      expect(rows.last.read<String>('revision_hash'), 'hash-a');
+      expect(rows.last.read<String>('parent_revision_hash'), 'hash-b');
+      final indexes = await upgraded
+          .customSelect("PRAGMA index_list('character_revision_rows')")
+          .get();
+      expect(
+        indexes
+            .singleWhere(
+              (row) =>
+                  row.read<String>('name') == 'idx_character_revision_hash',
+            )
+            .read<int>('unique'),
+        0,
+      );
     });
   });
 }

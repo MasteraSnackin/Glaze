@@ -100,7 +100,11 @@ class EffectiveCanonAssembler {
         'Baseline ${baseline.baselineHash} is not in ${input.sourceCharacter.id} lineage.',
       );
     }
-    final revision = mapped.single;
+    // Hashes identify content, not a unique lineage occurrence. A valid
+    // A -> B -> A history can contain the baseline hash more than once; the
+    // earliest occurrence is the one that originally established this
+    // hash-only legacy baseline.
+    final revision = mapped.first;
     final changed = current.revisionHash != baseline.sourceHashLastSeen;
     if (baseline.cardUpdatePolicy == CharacterCardUpdatePolicy.askOnChange &&
         !changed) {

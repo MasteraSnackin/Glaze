@@ -435,6 +435,10 @@ class CharacterKnowledgeFactRows extends Table {
 }
 
 @DataClassName('CharacterRevisionRow')
+@TableIndex(
+  name: 'idx_character_revision_hash',
+  columns: {#characterId, #revisionHash},
+)
 class CharacterRevisionRows extends Table {
   @override
   String get tableName => 'character_revision_rows';
@@ -450,9 +454,6 @@ class CharacterRevisionRows extends Table {
 
   @override
   Set<Column> get primaryKey => {characterId, revision};
-
-  @override
-  List<String> get customConstraints => ['UNIQUE(character_id, revision_hash)'];
 }
 
 @DataClassName('AppliedCanonTransitionRow')
