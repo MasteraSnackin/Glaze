@@ -74,7 +74,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 113;
+  int get schemaVersion => 114;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -2103,6 +2103,42 @@ class AppDatabase extends _$AppDatabase {
             ],
           );
         }
+      }
+      if (from < 114) {
+        // A character can legitimately return to an earlier canonical state
+        // (A -> B -> A). Revision numbers identify lineage entries; hashes
+        // identify their content and therefore must not be unique. Rebuilding
+        // removes the old UNIQUE(character_id, revision_hash) auto-index while
+        // preserving rows and creates the non-unique lookup index declared on
+        // the table.
+        await customStatement(
+          'ALTER TABLE character_revision_rows '
+          'RENAME TO character_revision_rows_v113',
+        );
+        await customStatement(
+          'CREATE TABLE character_revision_rows ('
+          'character_id TEXT NOT NULL, '
+          'revision INTEGER NOT NULL, '
+          'revision_hash TEXT NOT NULL, '
+          "parent_revision_hash TEXT NOT NULL DEFAULT '', "
+          'snapshot_json TEXT NOT NULL, '
+          'created_at INTEGER NOT NULL DEFAULT 0, '
+          'PRIMARY KEY (character_id, revision)'
+          ')',
+        );
+        await customStatement(
+          'INSERT INTO character_revision_rows '
+          '(character_id, revision, revision_hash, parent_revision_hash, '
+          'snapshot_json, created_at) '
+          'SELECT character_id, revision, revision_hash, '
+          'parent_revision_hash, snapshot_json, created_at '
+          'FROM character_revision_rows_v113',
+        );
+        await customStatement('DROP TABLE character_revision_rows_v113');
+        await customStatement(
+          'CREATE INDEX idx_character_revision_hash '
+          'ON character_revision_rows (character_id, revision_hash)',
+        );
       }
     },
   );

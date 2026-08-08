@@ -79,7 +79,7 @@ All schema changes go in `AppDatabase.migration` in `app_db.dart`.
 Bump the schema version and add a `from → to` migration step.
 Never modify existing column types without a migration.
 
-Current version: **106**
+Current version: **114**
 
 Migration history:
 - v18: added `characters.picksHash`
@@ -194,6 +194,11 @@ Migration history:
   `use_system_instruction` — the toggle covers Anthropic's `system` as well as
   Gemini's `system_instruction`. Guarded: runs only on databases that still
   carry the prefixed name (v110/v111 builds of the branch that introduced it).
+- v113: added independent evidence clusters to card evolution observations and
+  migrated legacy evidence into one canonical cluster.
+- v114: rebuilt `character_revision_rows` so revision hashes are non-unique.
+  Returning to earlier card content now appends a valid lineage entry; a
+  non-unique `(character_id, revision_hash)` index retains lookup performance.
 
 ---
 
