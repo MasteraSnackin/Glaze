@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -63,6 +64,8 @@ class ModelField extends ConsumerWidget {
       await GlazeBottomSheet.show<void>(
         context,
         title: 'Выберите модель',
+        searchable: true,
+        searchHint: 'settings_search_models'.tr(),
         items: ids.map((id) {
           return BottomSheetItem(
             label: id,

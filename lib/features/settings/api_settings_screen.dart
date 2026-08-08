@@ -1165,6 +1165,8 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       context,
       title: 'onboarding_select_model'.tr(),
       scrollToIndex: selectedIndex >= 0 ? selectedIndex : null,
+      searchable: true,
+      searchHint: 'settings_search_models'.tr(),
       items: models
           .map(
             (m) => BottomSheetItem(

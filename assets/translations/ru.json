@@ -1549,6 +1549,7 @@
   "settings_config_name": "Название конфигурации",
   "settings_protocol": "Протокол",
   "settings_fetch_models": "Получить модели",
+  "settings_search_models": "Поиск моделей...",
   "settings_select_model": "Выбрать модель",
   "settings_enable_vector_desc": "Включить семантический поиск по записям лорбуков",
   "settings_use_llm_api": "Использовать API LLM",
