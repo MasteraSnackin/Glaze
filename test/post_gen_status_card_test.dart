@@ -52,7 +52,7 @@ void main() {
     );
 
     expect(find.text('Card evolution observations running...'), findsOneWidget);
-    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    expect(find.byType(GlazeSpinner), findsOneWidget);
   });
 
   testWidgets('shows a distinct Card Rewriter running badge', (tester) async {
@@ -75,6 +75,6 @@ void main() {
     );
 
     expect(find.text('Card Rewriter running...'), findsOneWidget);
-    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    expect(find.byType(GlazeSpinner), findsOneWidget);
   });
 }
