@@ -84,4 +84,31 @@ class LayoutBridgeCommands {
       'window.bridge?.renderer?.toggleMessageSelection("${_host.escape(id)}")',
     );
   }
+
+  /// Replays a Windows precision-touchpad pan as a scroll inside the page.
+  ///
+  /// Flutter's win32 embedder reports precision-touchpad scrolling as
+  /// pan/zoom pointer events (`PointerPanZoom*`), not as `PointerScrollEvent`,
+  /// and `flutter_inappwebview_windows` only forwards the latter to WebView2 —
+  /// so a touchpad produces no `wheel` event in the page at all
+  /// (flutter_inappwebview #2503 / #2511, both closed as not planned). The
+  /// Flutter side captures the pan and hands it back here.
+  ///
+  /// [dx]/[dy] are scroll deltas in CSS pixels (already sign-flipped to
+  /// wheel semantics: positive [dy] scrolls the content down). [x]/[y] are
+  /// the pointer's client coordinates, used to pick the element under the
+  /// cursor so nested scrollers (edit textarea, panels) behave as they do
+  /// with a real wheel.
+  Future<void> trackpadScroll({
+    required double dx,
+    required double dy,
+    required double x,
+    required double y,
+  }) {
+    return _host.evalJs(
+      'window.bridge?.trackpadScroll('
+      '${dx.toStringAsFixed(2)}, ${dy.toStringAsFixed(2)}, '
+      '${x.toStringAsFixed(1)}, ${y.toStringAsFixed(1)})',
+    );
+  }
 }
