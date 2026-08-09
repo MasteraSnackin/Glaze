@@ -205,7 +205,7 @@ export class Formatter {
 
     // 7. Extract Glaze custom markers BEFORE quotes
     const styledSegments = [];
-    const styledRegex = /(==hc:#[0-9a-fA-F]{3,8}==.+?==|==glow:#[0-9a-fA-F]{3,8},\d+==.+?==|==cg:#[0-9a-fA-F]{3,8},#[0-9a-fA-F]{3,8},\d+==.+?==|==grad:#[0-9a-fA-F]{3,8}(?:,#[0-9a-fA-F]{3,8})+==.+?==|==bg:#[0-9a-fA-F]{3,8}==.+?==|==mark==.+?==|==active==.+?==|\*\*[^*]+?\*\*|(?<!\*)\*[^*]+?\*(?!\*)|__[^_]+?__|(?<!\w)_[^_]+?_(?!\w)|~~[^~]+?~~)/gs;
+    const styledRegex = /(==hc:#[0-9a-fA-F]{3,8}==.+?==|==glow:#[0-9a-fA-F]{3,8},\d+==.+?==|==cg:#[0-9a-fA-F]{3,8},#[0-9a-fA-F]{3,8},\d+==.+?==|==grad:#[0-9a-fA-F]{3,8}(?:,#[0-9a-fA-F]{3,8})+==.+?==|==bg:#[0-9a-fA-F]{3,8}==.+?==|==mark==.+?==|==active==.+?==|\*\*[^*\n]+?\*\*|(?<!\*)\*[^*\n]+?\*(?!\*)|__[^_\n]+?__|(?<!\w)_[^_\n]+?_(?!\w)|~~[^~\n]+?~~)/gs;
 
     html = html.replace(styledRegex, (match) => {
       const id = this._ph('S_', styledSegments.length);
@@ -239,10 +239,11 @@ export class Formatter {
     html = html.replace(/^>\s?(.*)$/gm, '<blockquote class="chat-blockquote">$1</blockquote>');
     html = html.replace(/<\/blockquote>\n*<blockquote class="chat-blockquote">/g, '<br>');
     html = html.replace(/^(_{3,}|-{3,}|\*{3,})$/gm, '<hr>');
-    html = html.replace(/~~([\s\S]+?)~~/g, '<del>$1</del>');
-    html = html.replace(/\*\*\*([\s\S]+?)\*\*\*/g, '<strong><em>$1</em></strong>');
-    html = html.replace(/\*\*([\s\S]+?)\*\*/g, '<strong>$1</strong>');
-    html = html.replace(/\*([\s\S]+?)\*/g, '<em>$1</em>');
+    html = html.replace(/~~([^~\n]+?)~~/g, '<del>$1</del>');
+    html = html.replace(/\*\*\*([^*\n]+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+    html = html.replace(/\*\*([^*\n]+?)\*\*/g, '<strong>$1</strong>');
+    // Never let an unmatched marker consume text from a later line.
+    html = html.replace(/\*([^*\n]+?)\*/g, '<em>$1</em>');
     html = html.replace(/<em>/g, '<em class="chat-italic">');
 
     html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');

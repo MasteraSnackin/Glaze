@@ -48,7 +48,7 @@ class MemoryDraftGenerator {
       endpoint = pipeline.memoryBookApi.generationEndpoint;
       apiKey = pipeline.memoryBookApi.generationApiKey;
       model = pipeline.memoryBookApi.generationModel;
-      protocol = LlmProtocol.openai;
+      protocol = LlmProtocol.customChatCompletion;
     } else {
       await _ref.read(apiListProvider.future);
       final chatConfig = MemoryBookApiConfigResolver(

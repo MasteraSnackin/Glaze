@@ -100,6 +100,7 @@ class AgentStreamRunner {
       omitTopP: resolved.omitTopP,
       omitReasoning: resolved.omitReasoning,
       omitReasoningEffort: resolved.omitReasoningEffort,
+      showNativeReasoning: resolved.showNativeReasoning,
       // The Studio timer owns first-chunk timeout semantics. A Dio receive
       // timeout would incorrectly become a second total/idle timeout.
       receiveTimeoutMs: 0,

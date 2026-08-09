@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/llm/transport/chat_transport_request.dart';
+import 'package:glaze_flutter/core/llm/transport/llm_protocol.dart';
 import 'package:glaze_flutter/core/llm/transport/openai_chat_transport.dart';
 import 'package:glaze_flutter/core/models/extra_request_parameter.dart';
 
@@ -17,6 +18,8 @@ ChatTransportRequest _req({
   bool omitTopK = false,
   bool omitFrequencyPenalty = false,
   bool omitPresencePenalty = false,
+  bool requestReasoning = false,
+  String reasoningEffort = 'medium',
   List<Map<String, dynamic>> messages = const [
     {'role': 'user', 'content': 'hi'},
   ],
@@ -36,6 +39,8 @@ ChatTransportRequest _req({
     omitTopK: omitTopK,
     omitFrequencyPenalty: omitFrequencyPenalty,
     omitPresencePenalty: omitPresencePenalty,
+    requestReasoning: requestReasoning,
+    reasoningEffort: reasoningEffort,
     sessionId: 'sess-1',
     sessionIdMode: sessionIdMode,
     receiveTimeoutMs: receiveTimeoutMs,
@@ -148,6 +153,23 @@ void main() {
     final messages = (body['messages'] as List).cast<Map<String, dynamic>>();
     expect(messages[1]['reasoning_content'], 'private plan');
     expect(messages[1]['content'], 'answer');
+  });
+
+  test('official OpenAI caps maximum reasoning effort at high', () {
+    final body = OpenAiChatTransport.buildBody(
+      _req(requestReasoning: true, reasoningEffort: 'max'),
+    );
+
+    expect(body['reasoning_effort'], 'high');
+  });
+
+  test('Custom Chat Completion sends maximum reasoning effort as max', () {
+    final body = OpenAiChatTransport.buildBody(
+      _req(requestReasoning: true, reasoningEffort: 'max'),
+      protocol: LlmProtocol.customChatCompletion,
+    );
+
+    expect(body['reasoning_effort'], 'max');
   });
 
   group('extra request parameters', () {

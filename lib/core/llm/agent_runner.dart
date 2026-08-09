@@ -171,6 +171,8 @@ class AgentRunner {
             requestReasoning: pipeline.studioAgent.studioFinalDisableReasoning
                 ? false
                 : pipeline.studioAgent.studioFinalRequestReasoning,
+            showNativeReasoning:
+                pipeline.studioAgent.studioFinalShowNativeReasoning,
             omitReasoning: pipeline.studioAgent.studioFinalDisableReasoning
                 ? true
                 : pipeline.studioAgent.studioFinalOmitReasoning,
@@ -184,6 +186,8 @@ class AgentRunner {
             requestReasoning: pipeline.cleaner.postCleanerDisableReasoning
                 ? false
                 : pipeline.cleaner.postCleanerRequestReasoning,
+            showNativeReasoning:
+                pipeline.cleaner.postCleanerShowNativeReasoning,
             omitReasoning: pipeline.cleaner.postCleanerDisableReasoning
                 ? true
                 : pipeline.cleaner.postCleanerOmitReasoning,
@@ -192,16 +196,21 @@ class AgentRunner {
             reasoningEffort: pipeline.cleaner.postCleanerReasoningEffort,
           )
         : resolved.copyWithReasoning(
-            useResponsesApi: pipeline.studioAgent.studioControllerUseResponsesApi,
-            requestReasoning: pipeline.studioAgent.studioControllerDisableReasoning
+            useResponsesApi:
+                pipeline.studioAgent.studioControllerUseResponsesApi,
+            requestReasoning:
+                pipeline.studioAgent.studioControllerDisableReasoning
                 ? false
                 : pipeline.studioAgent.studioControllerRequestReasoning,
+            showNativeReasoning:
+                pipeline.studioAgent.studioControllerShowNativeReasoning,
             omitReasoning: pipeline.studioAgent.studioControllerDisableReasoning
                 ? true
                 : pipeline.studioAgent.studioControllerOmitReasoning,
             omitReasoningEffort:
                 pipeline.studioAgent.studioControllerOmitReasoningEffort,
-            reasoningEffort: pipeline.studioAgent.studioControllerReasoningEffort,
+            reasoningEffort:
+                pipeline.studioAgent.studioControllerReasoningEffort,
           );
     return _streamRunner.run(
       agent: agent,
@@ -213,8 +222,8 @@ class AgentRunner {
       timeoutMs: timeoutMs,
       maxTokensOverride: maxTokensOverride,
       temperatureOverride: temperatureOverride,
-      tagStart: apiConfig.reasoningTagStart,
-      tagEnd: apiConfig.reasoningTagEnd,
+      tagStart: effectiveResolved.reasoningTagStart,
+      tagEnd: effectiveResolved.reasoningTagEnd,
       headerModel: isFinalResponse ? 'reasoning_model'.tr() : null,
       headerInline: isFinalResponse ? 'reasoning_inline'.tr() : null,
       onFinalResponseUpdate: onFinalResponseUpdate,
@@ -271,7 +280,8 @@ class AgentRunner {
     if (slot > 0) {
       return slot < 1000 ? 1000 : slot;
     }
-    final specTimeout = StudioControllerOntology.specForAgent(agent)?.timeoutMs ?? 4000;
+    final specTimeout =
+        StudioControllerOntology.specForAgent(agent)?.timeoutMs ?? 4000;
     if (specTimeout > 4000) {
       return specTimeout < 1000 ? 1000 : specTimeout;
     }
@@ -391,6 +401,7 @@ class ResolvedAgentConfig {
   final bool omitTemperature;
   final bool omitTopP;
   final bool requestReasoning;
+  final bool showNativeReasoning;
   final bool useResponsesApi;
   final String? reasoningEffort;
   final bool omitReasoning;
@@ -401,6 +412,8 @@ class ResolvedAgentConfig {
   final String sessionIdMode;
   final int contextSize;
   final List<ExtraRequestParameter> extraRequestParameters;
+  final String? reasoningTagStart;
+  final String? reasoningTagEnd;
 
   const ResolvedAgentConfig({
     required this.endpoint,
@@ -414,6 +427,7 @@ class ResolvedAgentConfig {
     this.omitTemperature = false,
     this.omitTopP = false,
     this.requestReasoning = false,
+    this.showNativeReasoning = true,
     this.useResponsesApi = false,
     this.reasoningEffort,
     this.omitReasoning = false,
@@ -424,6 +438,8 @@ class ResolvedAgentConfig {
     this.sessionIdMode = 'openrouter',
     this.contextSize = 32000,
     this.extraRequestParameters = const [],
+    this.reasoningTagStart,
+    this.reasoningTagEnd,
   });
 
   factory ResolvedAgentConfig.fromApiConfig(
@@ -442,6 +458,7 @@ class ResolvedAgentConfig {
       omitTemperature: config.omitTemperature,
       omitTopP: config.omitTopP,
       requestReasoning: config.requestReasoning,
+      showNativeReasoning: config.showNativeReasoning,
       useResponsesApi: config.useResponsesApi,
       reasoningEffort: config.reasoningEffort,
       omitReasoning: config.omitReasoning,
@@ -452,6 +469,8 @@ class ResolvedAgentConfig {
       sessionIdMode: config.sessionIdMode,
       contextSize: config.contextSize,
       extraRequestParameters: config.extraRequestParameters,
+      reasoningTagStart: config.reasoningTagStart,
+      reasoningTagEnd: config.reasoningTagEnd,
     );
   }
 
@@ -460,6 +479,7 @@ class ResolvedAgentConfig {
   ResolvedAgentConfig copyWithReasoning({
     bool? useResponsesApi,
     bool? requestReasoning,
+    bool? showNativeReasoning,
     bool? omitReasoning,
     bool? omitReasoningEffort,
     String? reasoningEffort,
@@ -476,6 +496,7 @@ class ResolvedAgentConfig {
       omitTemperature: omitTemperature,
       omitTopP: omitTopP,
       requestReasoning: requestReasoning ?? this.requestReasoning,
+      showNativeReasoning: showNativeReasoning ?? this.showNativeReasoning,
       useResponsesApi: useResponsesApi ?? this.useResponsesApi,
       reasoningEffort: reasoningEffort ?? this.reasoningEffort,
       omitReasoning: omitReasoning ?? this.omitReasoning,
@@ -486,6 +507,8 @@ class ResolvedAgentConfig {
       sessionIdMode: sessionIdMode,
       contextSize: contextSize,
       extraRequestParameters: extraRequestParameters,
+      reasoningTagStart: reasoningTagStart,
+      reasoningTagEnd: reasoningTagEnd,
     );
   }
 
@@ -510,6 +533,7 @@ class ResolvedAgentConfig {
       omitTemperature: omitTemperature ?? this.omitTemperature,
       omitTopP: omitTopP ?? this.omitTopP,
       requestReasoning: requestReasoning,
+      showNativeReasoning: showNativeReasoning,
       useResponsesApi: useResponsesApi,
       reasoningEffort: reasoningEffort,
       omitReasoning: omitReasoning,
@@ -521,6 +545,8 @@ class ResolvedAgentConfig {
       contextSize: contextSize,
       extraRequestParameters:
           extraRequestParameters ?? this.extraRequestParameters,
+      reasoningTagStart: reasoningTagStart,
+      reasoningTagEnd: reasoningTagEnd,
     );
   }
 }

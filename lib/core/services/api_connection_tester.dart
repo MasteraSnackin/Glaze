@@ -21,15 +21,14 @@ class ApiTestFailure extends ApiTestResult {
 class ApiConnectionTester {
   final ChatTransport Function(String protocol) _pickTransport;
 
-  ApiConnectionTester({
-    ChatTransport Function(String protocol)? pickTransport,
-  }) : _pickTransport = pickTransport ?? pickChatTransport;
+  ApiConnectionTester({ChatTransport Function(String protocol)? pickTransport})
+    : _pickTransport = pickTransport ?? pickChatTransport;
 
   Future<ApiTestResult> testLlm({
     required String endpoint,
     required String apiKey,
     required String model,
-    String protocol = LlmProtocol.openai,
+    String protocol = LlmProtocol.customChatCompletion,
     bool useResponsesApi = false,
   }) async {
     try {
@@ -79,7 +78,9 @@ class ApiConnectionTester {
   }
 
   String _normalizedProtocol(String protocol) {
-    return LlmProtocol.isValid(protocol) ? protocol : LlmProtocol.openai;
+    return LlmProtocol.isValid(protocol)
+        ? protocol
+        : LlmProtocol.customChatCompletion;
   }
 
   Future<ApiTestResult> testEmbedding({

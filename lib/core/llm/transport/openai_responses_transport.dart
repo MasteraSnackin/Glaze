@@ -335,15 +335,18 @@ class OpenAiResponsesTransport implements ChatTransport {
   ).fetchModels(endpoint: endpoint, apiKey: apiKey);
 }
 
-/// Routes each OpenAI-compatible request without changing existing presets.
-class OpenAiCompatibleTransport implements ChatTransport {
+/// Routes a custom endpoint to Chat Completions or Responses according to the
+/// preset's Responses API toggle.
+class CustomChatCompletionTransport implements ChatTransport {
   final ChatTransport chatCompletions;
   final ChatTransport responses;
 
-  OpenAiCompatibleTransport({
+  CustomChatCompletionTransport({
     ChatTransport? chatCompletions,
     ChatTransport? responses,
-  }) : chatCompletions = chatCompletions ?? OpenAiChatTransport(),
+  }) : chatCompletions =
+           chatCompletions ??
+           OpenAiChatTransport(protocol: LlmProtocol.customChatCompletion),
        responses = responses ?? OpenAiResponsesTransport();
 
   @override

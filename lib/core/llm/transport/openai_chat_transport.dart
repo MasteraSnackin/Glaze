@@ -19,6 +19,7 @@ import 'llm_protocol.dart';
 /// shim that delegates here.
 class OpenAiChatTransport implements ChatTransport {
   final Dio _dio;
+  final String _protocol;
 
   /// Number of automatic retries on HTTP 408 (Request Timeout) — common on
   /// mobile networks where the upload is too slow for the provider.
@@ -28,17 +29,20 @@ class OpenAiChatTransport implements ChatTransport {
   /// `OpenRouterChatTransport` to inject `HTTP-Referer` and `X-Title`.
   final Map<String, String> _extraHeaders;
 
-  OpenAiChatTransport({Dio? dio, Map<String, String>? extraHeaders})
-    : _dio =
-          dio ??
-          Dio(
-            BaseOptions(
-              connectTimeout: const Duration(seconds: 30),
-              sendTimeout: const Duration(seconds: 60),
-              receiveTimeout: const Duration(seconds: 120),
-            ),
-          ),
-      _extraHeaders = extraHeaders ?? const {};
+  OpenAiChatTransport({
+    Dio? dio,
+    Map<String, String>? extraHeaders,
+    this._protocol = LlmProtocol.openai,
+  }) : _dio =
+           dio ??
+           Dio(
+             BaseOptions(
+               connectTimeout: const Duration(seconds: 30),
+               sendTimeout: const Duration(seconds: 60),
+               receiveTimeout: const Duration(seconds: 120),
+             ),
+           ),
+       _extraHeaders = extraHeaders ?? const {};
 
   static String normalizeEndpoint(String endpoint) {
     var normalized = endpoint.trim();
@@ -73,7 +77,7 @@ class OpenAiChatTransport implements ChatTransport {
     }
     final url = buildChatUrl(request.endpoint);
 
-    final body = buildBody(request);
+    final body = buildBody(request, protocol: _protocol);
 
     for (var attempt = 0; attempt <= _maxRetries; attempt++) {
       try {
@@ -124,7 +128,10 @@ class OpenAiChatTransport implements ChatTransport {
   /// Builds the JSON body for a chat completion request. Public so the
   /// OpenRouter transport (which reuses the same shape with extra fields) and
   /// the request-preview UI can reproduce the exact on-the-wire body.
-  static Map<String, dynamic> buildBody(ChatTransportRequest r) {
+  static Map<String, dynamic> buildBody(
+    ChatTransportRequest r, {
+    String protocol = LlmProtocol.openai,
+  }) {
     final body = <String, dynamic>{
       'model': r.model,
       'messages': r.messages,
@@ -150,10 +157,10 @@ class OpenAiChatTransport implements ChatTransport {
       body['presence_penalty'] = r.presencePenalty;
     }
     if (!r.omitReasoning && r.requestReasoning && !r.omitReasoningEffort) {
-      // `min`/`max` are Glaze-side steps; the API only knows
-      // minimal/low/medium/high.
+      // Wire values are protocol-specific: official OpenAI caps at `high`,
+      // while a selected Custom Chat Completion protocol keeps `max`.
       final effort = resolveReasoningEffort(
-        protocol: LlmProtocol.openai,
+        protocol: protocol,
         effort: r.reasoningEffort,
         model: r.model,
       );

@@ -41,7 +41,7 @@ void main() {
       embeddingApiKey: 'embedding-secret',
       embeddingModel: 'embedding-model',
       embeddingMaxChunkTokens: 789,
-      cacheControlTtl: '1h',
+      cacheControlTtl: 'off',
       cacheBreakpointMode: 'stable_prefix',
       sessionIdMode: 'always',
       firstChunkTimeoutMs: 45000,
@@ -94,11 +94,8 @@ void main() {
     expect(mapped.embeddingMaxChunkTokens, 789);
   });
 
-  test('the Responses protocol derives the legacy opt-in flag', () {
-    const config = ApiConfig(
-      id: 'api',
-      protocol: LlmProtocol.openaiResponses,
-    );
+  test('the official Responses protocol derives the opt-in flag', () {
+    const config = ApiConfig(id: 'api', protocol: LlmProtocol.openaiResponses);
 
     final draft = ApiConfigDraft.fromConfig(config);
 
@@ -106,7 +103,7 @@ void main() {
     expect(draft.toConfig(config).useResponsesApi, isTrue);
   });
 
-  test('leaving the Responses protocol clears the legacy opt-in flag', () {
+  test('official Chat Completions clears the Responses opt-in flag', () {
     const config = ApiConfig(
       id: 'api',
       protocol: LlmProtocol.openai,
@@ -119,6 +116,19 @@ void main() {
     expect(draft.toConfig(config).useResponsesApi, isFalse);
   });
 
+  test('Custom Chat Completion preserves the Responses endpoint toggle', () {
+    const config = ApiConfig(
+      id: 'api',
+      protocol: LlmProtocol.customChatCompletion,
+      useResponsesApi: true,
+    );
+
+    final draft = ApiConfigDraft.fromConfig(config);
+
+    expect(draft.values.useResponsesApi, isTrue);
+    expect(draft.toConfig(config).useResponsesApi, isTrue);
+  });
+
   test('a legacy JSON preset with the opt-in maps onto the new protocol', () {
     final config = ApiConfig.fromJson(const {
       'id': 'api',
@@ -126,7 +136,26 @@ void main() {
       'useResponsesApi': true,
     });
 
-    expect(config.protocol, LlmProtocol.openaiResponses);
+    expect(config.protocol, LlmProtocol.customChatCompletion);
+    expect(config.useResponsesApi, isTrue);
+  });
+
+  test('legacy custom JSON maps onto Custom Chat Completion', () {
+    final missing = ApiConfig.fromJson(const {'id': 'missing'});
+    final explicit = ApiConfig.fromJson(const {
+      'id': 'explicit',
+      'providerId': 'openai_compatible',
+      'protocol': 'openai',
+    });
+    final official = ApiConfig.fromJson(const {
+      'id': 'official',
+      'providerId': 'openai',
+      'protocol': 'openai',
+    });
+
+    expect(missing.protocol, LlmProtocol.customChatCompletion);
+    expect(explicit.protocol, LlmProtocol.customChatCompletion);
+    expect(official.protocol, LlmProtocol.openai);
   });
 
   test('OpenRouter keeps a live cache TTL so OR markers can be placed', () {
@@ -144,37 +173,45 @@ void main() {
     expect(draft.toConfig(config).cacheBreakpointMode, 'stable_prefix');
   });
 
-  for (final testCase in <({String name, String protocol, String endpoint,
-      String stored, String resolved})>[
-    (
-      name: 'OpenRouter protocol keeps the legacy default on',
-      protocol: LlmProtocol.openrouter,
-      endpoint: '',
-      stored: 'openrouter',
-      resolved: 'always',
-    ),
-    (
-      name: 'a custom preset pointed at OpenRouter keeps it on',
-      protocol: LlmProtocol.openai,
-      endpoint: 'https://openrouter.ai/api/v1',
-      stored: 'openrouter',
-      resolved: 'always',
-    ),
-    (
-      name: 'a plain OpenAI preset resolves the legacy default to off',
-      protocol: LlmProtocol.openai,
-      endpoint: 'https://api.openai.com/v1',
-      stored: 'openrouter',
-      resolved: 'off',
-    ),
-    (
-      name: 'an explicit off on OpenRouter is not overridden',
-      protocol: LlmProtocol.openrouter,
-      endpoint: '',
-      stored: 'off',
-      resolved: 'off',
-    ),
-  ]) {
+  for (final testCase
+      in <
+        ({
+          String name,
+          String protocol,
+          String endpoint,
+          String stored,
+          String resolved,
+        })
+      >[
+        (
+          name: 'OpenRouter protocol keeps the legacy default on',
+          protocol: LlmProtocol.openrouter,
+          endpoint: '',
+          stored: 'openrouter',
+          resolved: 'always',
+        ),
+        (
+          name: 'a custom preset pointed at OpenRouter keeps it on',
+          protocol: LlmProtocol.customChatCompletion,
+          endpoint: 'https://openrouter.ai/api/v1',
+          stored: 'openrouter',
+          resolved: 'always',
+        ),
+        (
+          name: 'a plain OpenAI preset resolves the legacy default to off',
+          protocol: LlmProtocol.openai,
+          endpoint: 'https://api.openai.com/v1',
+          stored: 'openrouter',
+          resolved: 'off',
+        ),
+        (
+          name: 'an explicit off on OpenRouter is not overridden',
+          protocol: LlmProtocol.openrouter,
+          endpoint: '',
+          stored: 'off',
+          resolved: 'off',
+        ),
+      ]) {
     test('session_id: ${testCase.name}', () {
       final config = ApiConfig(
         id: 'api',
@@ -190,14 +227,17 @@ void main() {
     });
   }
 
-  test('invalid protocol falls back to OpenAI during load and save', () {
-    const config = ApiConfig(id: 'api', protocol: 'invalid');
+  test(
+    'invalid protocol falls back to Custom Chat Completion during load and save',
+    () {
+      const config = ApiConfig(id: 'api', protocol: 'invalid');
 
-    final draft = ApiConfigDraft.fromConfig(config);
+      final draft = ApiConfigDraft.fromConfig(config);
 
-    expect(draft.values.protocol, LlmProtocol.openai);
-    expect(draft.toConfig(config).protocol, LlmProtocol.openai);
-  });
+      expect(draft.values.protocol, LlmProtocol.customChatCompletion);
+      expect(draft.toConfig(config).protocol, LlmProtocol.customChatCompletion);
+    },
+  );
 
   for (final testCase in <({String protocol, String input, String output})>[
     // Every protocol keeps all six steps now — the collapse to what the API
@@ -206,6 +246,7 @@ void main() {
     (protocol: LlmProtocol.anthropic, input: 'min', output: 'min'),
     (protocol: LlmProtocol.gemini, input: 'min', output: 'min'),
     (protocol: LlmProtocol.openai, input: 'min', output: 'min'),
+    (protocol: LlmProtocol.customChatCompletion, input: 'max', output: 'max'),
     (protocol: LlmProtocol.openaiResponses, input: 'min', output: 'min'),
     (protocol: LlmProtocol.openrouter, input: 'min', output: 'min'),
     (protocol: LlmProtocol.openai, input: 'max', output: 'max'),
@@ -228,14 +269,23 @@ void main() {
     );
   }
 
-  for (final testCase in <({
-    String protocol,
-    bool keepsOpenAiOptions,
-    bool keepsPenalties,
-    bool keepsPromptCache,
-  })>[
+  for (final testCase
+      in <
+        ({
+          String protocol,
+          bool keepsOpenAiOptions,
+          bool keepsPenalties,
+          bool keepsPromptCache,
+        })
+      >[
         (
           protocol: LlmProtocol.openai,
+          keepsOpenAiOptions: true,
+          keepsPenalties: true,
+          keepsPromptCache: false,
+        ),
+        (
+          protocol: LlmProtocol.customChatCompletion,
           keepsOpenAiOptions: true,
           keepsPenalties: true,
           keepsPromptCache: true,

@@ -764,8 +764,7 @@ class ApiConfigs extends Table {
 
   TextColumn get configId => text()();
   TextColumn get name => text()();
-  TextColumn get providerId =>
-      text().withDefault(const Constant('openai_compatible'))();
+  TextColumn get providerId => text().withDefault(const Constant('openai'))();
   TextColumn get protocol => text().withDefault(const Constant('openai'))();
   TextColumn get endpoint => text().nullable()();
   TextColumn get apiKey => text().nullable()();

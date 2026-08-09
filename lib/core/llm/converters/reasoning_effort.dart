@@ -8,9 +8,10 @@
 /// dropdown per protocol:
 ///
 /// - `auto` → `null`: the field is omitted and the provider default wins.
-/// - OpenAI-style protocols only accept `low | medium | high` (plus `minimal`
-///   on the GPT-5 family), so `max` collapses to `high` and `min` collapses to
-///   `minimal` or `low` depending on the model.
+/// - Official OpenAI and OpenRouter accept up to `high`, so `max` becomes
+///   `high`. Custom Chat Completion endpoints receive `max` unchanged.
+/// - The UI's `min` step becomes `minimal` on the GPT-5 family or `low` on
+///   older models.
 /// - Anthropic and Gemini read the raw step as a share of the thinking budget
 ///   (`thinking_budget.dart`), so all six pass through untouched.
 library;
@@ -48,6 +49,18 @@ String? resolveReasoningEffort({
     case LlmProtocol.gemini:
       // Budget fractions — the full scale is meaningful, pass it through.
       return effort;
+    case LlmProtocol.customChatCompletion:
+      switch (effort) {
+        case 'min':
+          return _minimalEffortModels.hasMatch(model) ? 'minimal' : 'low';
+        case 'low':
+        case 'medium':
+        case 'high':
+        case 'max':
+          return effort;
+        default:
+          return null;
+      }
     default:
       switch (effort) {
         case 'min':

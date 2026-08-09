@@ -412,6 +412,17 @@ void main() {
       );
       expect(formatterTextFormatJs, contains('return paragraph[1]'));
     });
+
+    test('unmatched emphasis markers cannot consume a later line', () {
+      expect(
+        formatterFormatterJs,
+        contains(r'(?<!\*)\*[^*\n]+?\*(?!\*)'),
+      );
+      expect(
+        formatterFormatterJs,
+        contains(r'html = html.replace(/\*([^*\n]+?)\*/g'),
+      );
+    });
   });
 
   // ─── markdown image options button ────────────────────────────────────────

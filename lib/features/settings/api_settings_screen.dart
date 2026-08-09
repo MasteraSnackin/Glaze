@@ -71,6 +71,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   int _topK = 0;
   bool _stream = true;
   bool _requestReasoning = false;
+  bool _customUseResponsesApi = false;
   bool _useSystemInstruction = true;
   bool _showNativeReasoning = true;
   bool _excludeReasoningFromContextBudget = false;
@@ -234,6 +235,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       _presencePenalty = values.presencePenalty;
       _stream = values.stream;
       _requestReasoning = values.requestReasoning;
+      _customUseResponsesApi = values.useResponsesApi;
       _useSystemInstruction = values.useSystemInstruction;
       _showNativeReasoning = values.showNativeReasoning;
       _excludeReasoningFromContextBudget =
@@ -271,6 +273,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
         presencePenalty: _presencePenalty,
         stream: _stream,
         requestReasoning: _requestReasoning,
+        useResponsesApi: _customUseResponsesApi,
         useSystemInstruction: _useSystemInstruction,
         showNativeReasoning: _showNativeReasoning,
         excludeReasoningFromContextBudget: _excludeReasoningFromContextBudget,
@@ -315,22 +318,26 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   bool get _isResponses => _protocol == LlmProtocol.openaiResponses;
 
   bool get _supportsTopK =>
-      _protocol == LlmProtocol.openai ||
+      _protocol == LlmProtocol.customChatCompletion ||
       _protocol == LlmProtocol.openrouter ||
       _protocol == LlmProtocol.anthropic ||
       _protocol == LlmProtocol.gemini;
 
   bool get _supportsFrequencyPenalty =>
-      _protocol == LlmProtocol.openai || _protocol == LlmProtocol.openrouter;
+      _protocol == LlmProtocol.openai ||
+      _protocol == LlmProtocol.customChatCompletion ||
+      _protocol == LlmProtocol.openrouter;
 
   bool get _supportsPresencePenalty =>
-      _protocol == LlmProtocol.openai || _protocol == LlmProtocol.openrouter;
+      _protocol == LlmProtocol.openai ||
+      _protocol == LlmProtocol.customChatCompletion ||
+      _protocol == LlmProtocol.openrouter;
 
   /// OpenRouter included: `buildRouterRequest` needs a live TTL to place
   /// `cache_control` markers for Claude-through-OR.
   bool get _supportsPromptCache =>
       _protocol == LlmProtocol.anthropic ||
-      _protocol == LlmProtocol.openai ||
+      _protocol == LlmProtocol.customChatCompletion ||
       _protocol == LlmProtocol.openrouter;
 
   bool get _supportsReasoning => true;
@@ -343,11 +350,15 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   String get _systemInstructionFieldName =>
       _protocol == LlmProtocol.anthropic ? 'system' : 'system_instruction';
 
-  /// Derived from the protocol — the Responses API is no longer a toggle.
-  bool get _useResponsesApi => _isResponses;
+  /// Official Responses is a protocol; Custom Chat Completion retains its
+  /// endpoint-mode toggle for compatible custom backends.
+  bool get _useResponsesApi =>
+      _isResponses ||
+      (_protocol == LlmProtocol.customChatCompletion && _customUseResponsesApi);
 
   bool get _showsOmitSamplingControls =>
       _protocol == LlmProtocol.openai ||
+      _protocol == LlmProtocol.customChatCompletion ||
       _protocol == LlmProtocol.openaiResponses ||
       _protocol == LlmProtocol.openrouter;
 
@@ -616,11 +627,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
           suffix: _isLoadingModels
               ? const Padding(
                   padding: EdgeInsets.all(12),
-                  child: SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: GlazeSpinner(),
-                  ),
+                  child: SizedBox(width: 18, height: 18, child: GlazeSpinner()),
                 )
               : IconButton(
                   icon: Icon(
@@ -724,6 +731,16 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       header: 'label_reasoning_settings'.tr(),
       helpTerm: 'preset-reasoning',
       items: [
+        if (_protocol == LlmProtocol.customChatCompletion)
+          MenuSwitchItem(
+            label: 'label_use_responses_api'.tr(),
+            description: 'desc_use_responses_api'.tr(),
+            value: _customUseResponsesApi,
+            onChanged: (v) {
+              setState(() => _customUseResponsesApi = v);
+              _scheduleSave();
+            },
+          ),
         if (_supportsReasoning)
           MenuSwitchItem(
             label: 'label_reasoning'.tr(),
@@ -736,17 +753,26 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
             },
           ),
         if (_supportsReasoning)
+          MenuSwitchItem(
+            label: 'label_request_native_reasoning'.tr(),
+            description: 'desc_request_native_reasoning'.tr(),
+            value: _requestReasoning && !_omitReasoning,
+            onChanged: (v) {
+              setState(() {
+                _requestReasoning = v;
+                _omitReasoning = false;
+              });
+              _scheduleSave();
+            },
+          ),
+        if (_supportsReasoning)
           MenuSelectorItem(
             label: 'label_reasoning_effort'.tr(),
             helpTerm: 'reasoning-effort',
             currentValue: _reasoningEffortLabel(_reasoningEffort),
-            included: _requestReasoning,
+            included: !_omitReasoningEffort,
             onIncludedChanged: (v) {
-              setState(() {
-                _requestReasoning = v;
-                _omitReasoning = !v;
-                _omitReasoningEffort = !v;
-              });
+              setState(() => _omitReasoningEffort = !v);
               _scheduleSave();
             },
             onTap: _openReasoningEffortSelector,
@@ -761,85 +787,85 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     // Anthropic with thinking on hides every sampling control — don't leave an
     // empty card behind.
     final items = <Widget>[
-        if (_supportsTopP && !_hideSamplingWhileReasoningAnthropic)
-          MenuRangeItem(
-            label: 'label_top_p'.tr(),
-            helpTerm: 'top-p',
-            value: _topP,
-            min: 0,
-            max: 1,
-            divisions: 100,
-            editableValue: true,
-            included: _showsOmitSamplingControls ? !_omitTopP : null,
-            onIncludedChanged: _showsOmitSamplingControls
-                ? (v) {
-                    setState(() => _omitTopP = !v);
-                    _scheduleSave();
-                  }
-                : null,
-            onChanged: (v) {
-              setState(() => _topP = v);
-              _scheduleSave();
-            },
-          ),
-        if (_supportsTopK && !_hideSamplingWhileReasoningAnthropic)
-          MenuRangeItem(
-            label: 'label_top_k_sampling'.tr(),
-            helpTerm: 'top-k',
-            value: _topK.toDouble(),
-            min: 0,
-            max: 200,
-            divisions: 200,
-            editableValue: true,
-            decimalPlaces: 0,
-            included: !_omitTopK,
-            onIncludedChanged: (v) {
-              setState(() => _omitTopK = !v);
-              _scheduleSave();
-            },
-            onChanged: (v) {
-              setState(() => _topK = v.round());
-              _scheduleSave();
-            },
-          ),
-        if (_supportsFrequencyPenalty)
-          MenuRangeItem(
-            label: 'label_frequency_penalty'.tr(),
-            helpTerm: 'frequency-penalty',
-            value: _frequencyPenalty,
-            min: -2,
-            max: 2,
-            divisions: 80,
-            editableValue: true,
-            included: !_omitFrequencyPenalty,
-            onIncludedChanged: (v) {
-              setState(() => _omitFrequencyPenalty = !v);
-              _scheduleSave();
-            },
-            onChanged: (v) {
-              setState(() => _frequencyPenalty = v);
-              _scheduleSave();
-            },
-          ),
-        if (_supportsPresencePenalty)
-          MenuRangeItem(
-            label: 'label_presence_penalty'.tr(),
-            helpTerm: 'presence-penalty',
-            value: _presencePenalty,
-            min: -2,
-            max: 2,
-            divisions: 80,
-            editableValue: true,
-            included: !_omitPresencePenalty,
-            onIncludedChanged: (v) {
-              setState(() => _omitPresencePenalty = !v);
-              _scheduleSave();
-            },
-            onChanged: (v) {
-              setState(() => _presencePenalty = v);
-              _scheduleSave();
-            },
-          ),
+      if (_supportsTopP && !_hideSamplingWhileReasoningAnthropic)
+        MenuRangeItem(
+          label: 'label_top_p'.tr(),
+          helpTerm: 'top-p',
+          value: _topP,
+          min: 0,
+          max: 1,
+          divisions: 100,
+          editableValue: true,
+          included: _showsOmitSamplingControls ? !_omitTopP : null,
+          onIncludedChanged: _showsOmitSamplingControls
+              ? (v) {
+                  setState(() => _omitTopP = !v);
+                  _scheduleSave();
+                }
+              : null,
+          onChanged: (v) {
+            setState(() => _topP = v);
+            _scheduleSave();
+          },
+        ),
+      if (_supportsTopK && !_hideSamplingWhileReasoningAnthropic)
+        MenuRangeItem(
+          label: 'label_top_k_sampling'.tr(),
+          helpTerm: 'top-k',
+          value: _topK.toDouble(),
+          min: 0,
+          max: 200,
+          divisions: 200,
+          editableValue: true,
+          decimalPlaces: 0,
+          included: !_omitTopK,
+          onIncludedChanged: (v) {
+            setState(() => _omitTopK = !v);
+            _scheduleSave();
+          },
+          onChanged: (v) {
+            setState(() => _topK = v.round());
+            _scheduleSave();
+          },
+        ),
+      if (_supportsFrequencyPenalty)
+        MenuRangeItem(
+          label: 'label_frequency_penalty'.tr(),
+          helpTerm: 'frequency-penalty',
+          value: _frequencyPenalty,
+          min: -2,
+          max: 2,
+          divisions: 80,
+          editableValue: true,
+          included: !_omitFrequencyPenalty,
+          onIncludedChanged: (v) {
+            setState(() => _omitFrequencyPenalty = !v);
+            _scheduleSave();
+          },
+          onChanged: (v) {
+            setState(() => _frequencyPenalty = v);
+            _scheduleSave();
+          },
+        ),
+      if (_supportsPresencePenalty)
+        MenuRangeItem(
+          label: 'label_presence_penalty'.tr(),
+          helpTerm: 'presence-penalty',
+          value: _presencePenalty,
+          min: -2,
+          max: 2,
+          divisions: 80,
+          editableValue: true,
+          included: !_omitPresencePenalty,
+          onIncludedChanged: (v) {
+            setState(() => _omitPresencePenalty = !v);
+            _scheduleSave();
+          },
+          onChanged: (v) {
+            setState(() => _presencePenalty = v);
+            _scheduleSave();
+          },
+        ),
     ];
     if (items.isEmpty) return const SizedBox.shrink();
     return MenuGroup(
@@ -1097,7 +1123,8 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       cardsBuilder: (context, ref) {
         final list = ref.watch(apiListProvider).value ?? const <ApiConfig>[];
         final sort =
-            ref.watch(apiPresetSortProvider).value ?? const ApiPresetSortState();
+            ref.watch(apiPresetSortProvider).value ??
+            const ApiPresetSortState();
         final selection = ref.watch(apiPresetSelectionProvider);
         final reordering =
             sort.mode == ApiPresetSortMode.manual &&
@@ -1216,9 +1243,8 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       // open multi-select.
       onLongPress: reordering
           ? null
-          : () => ref
-                .read(apiPresetSelectionProvider.notifier)
-                .start(config.id),
+          : () =>
+                ref.read(apiPresetSelectionProvider.notifier).start(config.id),
       actions: [
         // Bulk delete owns the header while selecting; per-row deletes would
         // only compete with it.

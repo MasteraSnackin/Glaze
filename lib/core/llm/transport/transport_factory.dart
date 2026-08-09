@@ -10,8 +10,8 @@ import 'openrouter_chat_transport.dart';
 
 /// Resolves a [ChatTransport] for the given protocol string.
 ///
-/// Unknown / legacy values fall back to OpenAI for safety — that keeps
-/// pre-v23 configs (no `protocol` field) working without any UI prompt.
+/// Unknown / legacy values fall back to Custom Chat Completion for safety —
+/// that keeps old configs working without assigning official API semantics.
 ///
 /// Implementations are stateless and cheap to instantiate, so the factory
 /// just `new`s on every call. If a transport ever needs shared HTTP-client
@@ -20,7 +20,9 @@ ChatTransport pickChatTransport(String protocol) {
   final ChatTransport inner;
   switch (protocol) {
     case LlmProtocol.openai:
-      inner = OpenAiCompatibleTransport();
+      inner = OpenAiChatTransport();
+    case LlmProtocol.customChatCompletion:
+      inner = CustomChatCompletionTransport();
     case LlmProtocol.openaiResponses:
       inner = OpenAiResponsesTransport();
     case LlmProtocol.anthropic:
@@ -30,7 +32,7 @@ ChatTransport pickChatTransport(String protocol) {
     case LlmProtocol.openrouter:
       inner = OpenRouterChatTransport();
     default:
-      inner = OpenAiChatTransport();
+      inner = CustomChatCompletionTransport();
   }
   // Diagnostics: dump every outgoing request payload (no-op when disabled).
   return LoggingChatTransport(inner, label: protocol);
