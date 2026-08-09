@@ -199,6 +199,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
   ChatBridgeController? _bridge;
   bool _ready = false;
   bool _sessionSwitching = false;
+  int _sessionSwitchEpoch = 0;
   Future<void>? _initFuture;
   ChatWebViewWidget? _deferredSwitchFrom;
   bool _bridgeFailureNotified = false;
@@ -429,7 +430,14 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
           isGeneratingImage: widget.isGeneratingImage,
           isPostGenRunning: widget.isPostGenRunning,
         ),
-        onReady: () => _ready = true,
+        onReady: () {
+          if (!mounted || !identical(_bridge, bridge)) return;
+          _ready = true;
+          // Do not expose the controller to background services or the Windows
+          // trackpad sink until the page bridge and its DOM are initialized.
+          ref.read(chatBridgeRegistryProvider(widget.charId).notifier).state =
+              bridge;
+        },
         onSyncExtBlockPanels: _syncExtBlockPanels,
         applyTheme: _applyThemeToBridge,
       ).run().timeout(_kWebViewInitTimeout);
@@ -461,7 +469,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     final deferred = _deferredSwitchFrom;
     _deferredSwitchFrom = null;
     if (deferred != null) {
-      unawaited(_applySessionSwitch(deferred));
+      unawaited(_applySessionSwitch(deferred, epoch: _sessionSwitchEpoch));
     } else if (initSessionId != widget.sessionId) {
       unawaited(_syncCurrentSessionToBridge());
     } else {
@@ -681,15 +689,19 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     );
   }
 
-  Future<void> _applySessionSwitch(ChatWebViewWidget old) async {
+  Future<void> _applySessionSwitch(
+    ChatWebViewWidget old, {
+    required int epoch,
+  }) async {
     final bridge = _bridge;
+    bool ownsSwitch() => mounted && epoch == _sessionSwitchEpoch;
     // `didUpdateWidget` raises the cover synchronously before calling this, and
     // the cover both hides the surface and swallows every touch on it. Any exit
     // that leaves it up is indistinguishable from a hung chat, so the two early
     // returns below have to lower it themselves — only the deferred path may
     // keep it up, and the init it waits on is bounded by `_kWebViewInitTimeout`.
     if (bridge == null) {
-      _setSessionSwitching(false);
+      if (ownsSwitch()) _setSessionSwitching(false);
       return;
     }
     if (!_ready) {
@@ -699,6 +711,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
 
     try {
       await _awaitPendingMessageMutation();
+      if (!ownsSwitch()) return;
 
       // Drop any interactive panels from the previous session before clearing
       // the WebView DOM. JS-side `clearAll()` also closes panels, but the
@@ -709,6 +722,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       // Same reasoning as on open: the replace below jumps the list, which the
       // header tracker would otherwise read as the user scrolling down.
       await _showChatHeader(bridge);
+      if (!ownsSwitch()) return;
       if (widget.charId != old.charId) {
         await _bridgeOp(
           bridge.setIdentity(
@@ -722,7 +736,9 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
           ),
           label: 'setIdentity',
         );
+        if (!ownsSwitch()) return;
         await _bridgeOp(_applyThemeToBridge(), label: 'applyTheme');
+        if (!ownsSwitch()) return;
         await _bridgeOp(
           bridge.setBackgroundNoise(
             widget.bgNoiseOpacity,
@@ -730,6 +746,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
           ),
           label: 'setBackgroundNoise',
         );
+        if (!ownsSwitch()) return;
         await _bridgeOp(
           bridge.setChatFont(
             fontName: widget.chatFontName,
@@ -739,6 +756,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
           ),
           label: 'setChatFont',
         );
+        if (!ownsSwitch()) return;
       } else {
         await _bridgeOp(
           bridge.setIdentity(
@@ -752,9 +770,11 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
           ),
           label: 'setIdentity',
         );
+        if (!ownsSwitch()) return;
       }
 
       await _bridgeOp(bridge.clearAll(), label: 'clearAll');
+      if (!ownsSwitch()) return;
       await _bridgeOp(
         bridge.setMessages(
           widget.messages,
@@ -762,10 +782,11 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
         ),
         label: 'setMessages',
       );
+      if (!ownsSwitch()) return;
       unawaited(_syncExtBlockPanels());
       await _bridgeOp(bridge.scrollToBottom(), label: 'scrollToBottom');
     } finally {
-      _setSessionSwitching(false);
+      if (ownsSwitch()) _setSessionSwitching(false);
     }
     _syncState.wasGenerating = widget.isGenerating;
     _syncState.streamingSent = false;
@@ -918,10 +939,11 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       // surface's stale content, instead of waiting for the async switch below
       // to flip it a frame or two later.
       _sessionSwitching = true;
+      final epoch = ++_sessionSwitchEpoch;
       if (!_ready) {
         _deferredSwitchFrom = oldWidget;
       } else {
-        unawaited(_applySessionSwitch(oldWidget));
+        unawaited(_applySessionSwitch(oldWidget, epoch: epoch));
       }
       return;
     }
@@ -1073,6 +1095,7 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       scrollActions: widget.scrollActions,
       miscActions: widget.miscActions,
       isMounted: () => mounted,
+      isCurrentSession: (sessionId) => widget.sessionId == sessionId,
       sessionSwitching: _sessionSwitching,
       refreshPanel: _refreshExtBlocksPanel,
       bgImageBytes: bgImageBytes,
