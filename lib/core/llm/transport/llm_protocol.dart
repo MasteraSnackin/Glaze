@@ -6,9 +6,14 @@
 class LlmProtocol {
   LlmProtocol._();
 
-  /// OpenAI Chat Completions API and any OpenAI-compatible custom endpoint.
+  /// Official OpenAI Chat Completions API.
   /// Auth: `Authorization: Bearer`. URL: `{endpoint}/v1/chat/completions`.
   static const String openai = 'openai';
+
+  /// Custom endpoint implementing the Chat Completions wire format.
+  /// Custom providers may accept `reasoning_effort` values beyond the
+  /// official provider scale, including `max`.
+  static const String customChatCompletion = 'custom_chat_completion';
 
   /// OpenAI Responses API and any endpoint implementing it. Same auth and
   /// endpoint shape as [openai], different body (`input` instead of
@@ -36,6 +41,7 @@ class LlmProtocol {
 
   static const List<String> all = [
     openai,
+    customChatCompletion,
     openaiResponses,
     anthropic,
     gemini,
@@ -43,8 +49,9 @@ class LlmProtocol {
   ];
 
   static const Map<String, String> labels = {
-    openai: 'Custom (OpenAI Chat Completion)',
-    openaiResponses: 'Custom (OpenAI Responses)',
+    openai: 'OpenAI (Chat Completions)',
+    customChatCompletion: 'Custom Chat Completion',
+    openaiResponses: 'OpenAI (Responses)',
     anthropic: 'Anthropic',
     gemini: 'Google Gemini',
     openrouter: 'OpenRouter',

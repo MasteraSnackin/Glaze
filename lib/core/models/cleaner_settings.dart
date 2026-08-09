@@ -46,6 +46,7 @@ abstract class CleanerSettings with _$CleanerSettings {
     // Flash thinking models cannot spend the rewrite budget on a think-block.
     @Default(false) bool postCleanerDisableReasoning,
     @Default(false) bool postCleanerRequestReasoning,
+    @Default(true) bool postCleanerShowNativeReasoning,
     @Default(false) bool postCleanerUseResponsesApi,
     @Default('auto') String postCleanerReasoningEffort,
     @Default(false) bool postCleanerOmitTemperature,

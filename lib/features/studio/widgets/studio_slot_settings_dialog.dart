@@ -26,6 +26,7 @@ class StudioSlotSettings {
   final double frequencyPenalty;
   final double presencePenalty;
   final bool requestReasoning;
+  final bool showNativeReasoning;
   final bool useResponsesApi;
   final String reasoningEffort;
   final bool omitTemperature;
@@ -45,6 +46,7 @@ class StudioSlotSettings {
     required this.frequencyPenalty,
     required this.presencePenalty,
     required this.requestReasoning,
+    required this.showNativeReasoning,
     required this.useResponsesApi,
     required this.reasoningEffort,
     required this.omitTemperature,
@@ -69,6 +71,7 @@ class StudioSlotSettings {
             studioFinalFrequencyPenalty: frequencyPenalty,
             studioFinalPresencePenalty: presencePenalty,
             studioFinalRequestReasoning: requestReasoning,
+            studioFinalShowNativeReasoning: showNativeReasoning,
             studioFinalUseResponsesApi: useResponsesApi,
             studioFinalReasoningEffort: reasoningEffort,
             studioFinalOmitTemperature: omitTemperature,
@@ -92,6 +95,7 @@ class StudioSlotSettings {
             studioControllerFrequencyPenalty: frequencyPenalty,
             studioControllerPresencePenalty: presencePenalty,
             studioControllerRequestReasoning: requestReasoning,
+            studioControllerShowNativeReasoning: showNativeReasoning,
             studioControllerUseResponsesApi: useResponsesApi,
             studioControllerReasoningEffort: reasoningEffort,
             studioControllerOmitTemperature: omitTemperature,
@@ -112,6 +116,7 @@ class StudioSlotSettings {
             postCleanerFrequencyPenalty: frequencyPenalty,
             postCleanerPresencePenalty: presencePenalty,
             postCleanerRequestReasoning: requestReasoning,
+            postCleanerShowNativeReasoning: showNativeReasoning,
             postCleanerUseResponsesApi: useResponsesApi,
             postCleanerReasoningEffort: reasoningEffort,
             postCleanerOmitTemperature: omitTemperature,
@@ -162,6 +167,7 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
   late double _frequencyPenalty;
   late double _presencePenalty;
   late bool _requestReasoning;
+  late bool _showNativeReasoning;
   late bool _useResponsesApi;
   late String _reasoningEffort;
   late bool _omitTemperature;
@@ -189,6 +195,7 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
         _frequencyPenalty = a.studioFinalFrequencyPenalty;
         _presencePenalty = a.studioFinalPresencePenalty;
         _requestReasoning = a.studioFinalRequestReasoning;
+        _showNativeReasoning = a.studioFinalShowNativeReasoning;
         _useResponsesApi = a.studioFinalUseResponsesApi;
         _reasoningEffort = a.studioFinalReasoningEffort;
         _omitTemperature = a.studioFinalOmitTemperature;
@@ -217,6 +224,7 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
         _frequencyPenalty = a.studioControllerFrequencyPenalty;
         _presencePenalty = a.studioControllerPresencePenalty;
         _requestReasoning = a.studioControllerRequestReasoning;
+        _showNativeReasoning = a.studioControllerShowNativeReasoning;
         _useResponsesApi = a.studioControllerUseResponsesApi;
         _reasoningEffort = a.studioControllerReasoningEffort;
         _omitTemperature = a.studioControllerOmitTemperature;
@@ -244,6 +252,7 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
         _frequencyPenalty = c.postCleanerFrequencyPenalty;
         _presencePenalty = c.postCleanerPresencePenalty;
         _requestReasoning = c.postCleanerRequestReasoning;
+        _showNativeReasoning = c.postCleanerShowNativeReasoning;
         _useResponsesApi = c.postCleanerUseResponsesApi;
         _reasoningEffort = c.postCleanerReasoningEffort;
         _omitTemperature = c.postCleanerOmitTemperature;
@@ -271,6 +280,7 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
         _frequencyPenalty = 0;
         _presencePenalty = 0;
         _requestReasoning = false;
+        _showNativeReasoning = false;
         _useResponsesApi = false;
         _reasoningEffort = 'auto';
         _omitTemperature = false;
@@ -353,6 +363,7 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
         frequencyPenalty: _frequencyPenalty,
         presencePenalty: _presencePenalty,
         requestReasoning: _requestReasoning,
+        showNativeReasoning: _showNativeReasoning,
         useResponsesApi: _useResponsesApi,
         reasoningEffort: _reasoningEffort,
         omitTemperature: _omitTemperature,
@@ -484,10 +495,17 @@ class _StudioSlotSettingsDialogState extends State<StudioSlotSettingsDialog> {
                   label: 'studio_slot_settings_request_reasoning'.tr(),
                   description: 'studio_slot_settings_request_reasoning_desc'
                       .tr(),
-                  included: !_omitReasoning,
-                  onIncludedChanged: (v) => setState(() => _omitReasoning = !v),
-                  value: _requestReasoning,
-                  onChanged: (v) => setState(() => _requestReasoning = v),
+                  value: _requestReasoning && !_omitReasoning,
+                  onChanged: (v) => setState(() {
+                    _requestReasoning = v;
+                    _omitReasoning = false;
+                  }),
+                ),
+                MenuSwitchItem(
+                  label: 'label_reasoning'.tr(),
+                  description: 'desc_reasoning'.tr(),
+                  value: _showNativeReasoning,
+                  onChanged: (v) => setState(() => _showNativeReasoning = v),
                 ),
                 MenuSelectorItem(
                   label: 'label_reasoning_effort'.tr(),

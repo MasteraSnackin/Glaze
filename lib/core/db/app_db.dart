@@ -74,7 +74,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 114;
+  int get schemaVersion => 115;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -2138,6 +2138,18 @@ class AppDatabase extends _$AppDatabase {
         await customStatement(
           'CREATE INDEX idx_character_revision_hash '
           'ON character_revision_rows (character_id, revision_hash)',
+        );
+      }
+      if (from < 115) {
+        // Historical custom configs used OpenAI-named protocol/provider ids.
+        // v109 also moved custom Responses users to openai_responses. Restore
+        // both modes under the neutral custom protocol; use_responses_api keeps
+        // selecting the endpoint inside that transport.
+        await customStatement(
+          "UPDATE api_configs SET protocol = 'custom_chat_completion', "
+          "provider_id = 'custom_chat_completion' "
+          "WHERE protocol IN ('openai', 'openai_responses', "
+          "'openai_compatible') OR provider_id = 'openai_compatible'",
         );
       }
     },

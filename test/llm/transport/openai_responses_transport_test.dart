@@ -18,6 +18,7 @@ ChatTransportRequest _request({
   int topK = 0,
   String? sessionId,
   String sessionIdMode = 'openrouter',
+  String reasoningEffort = 'high',
 }) => ChatTransportRequest(
   endpoint: 'https://api.rout.my/v1/chat/completions',
   apiKey: 'test-key',
@@ -46,7 +47,7 @@ ChatTransportRequest _request({
   sessionIdMode: sessionIdMode,
   stream: stream,
   requestReasoning: true,
-  reasoningEffort: 'high',
+  reasoningEffort: reasoningEffort,
   showNativeReasoning: true,
   useResponsesApi: true,
 );
@@ -146,6 +147,14 @@ void main() {
     expect(body.containsKey('top_p'), isFalse);
   });
 
+  test('caps maximum reasoning effort at high', () {
+    final body = OpenAiResponsesTransport.buildBody(
+      _request(reasoningEffort: 'max'),
+    );
+
+    expect(body['reasoning'], {'summary': 'auto', 'effort': 'high'});
+  });
+
   test('parameters with no Responses equivalent are never sent', () {
     final body = OpenAiResponsesTransport.buildBody(
       _request(frequencyPenalty: 1.5, presencePenalty: -1, topK: 40),
@@ -235,7 +244,7 @@ data: {"type":"response.completed","response":{"id":"resp_1"}}
   test('router keeps Chat Completions as the default', () async {
     final chat = _FakeTransport();
     final responses = _FakeTransport();
-    final transport = OpenAiCompatibleTransport(
+    final transport = CustomChatCompletionTransport(
       chatCompletions: chat,
       responses: responses,
     );

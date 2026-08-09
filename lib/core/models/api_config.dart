@@ -11,7 +11,7 @@ abstract class ApiConfig with _$ApiConfig {
   const factory ApiConfig({
     required String id,
     @Default('') String name,
-    @Default('openai_compatible') String providerId,
+    @Default('openai') String providerId,
     @Default('openai') String protocol,
     @Default('') String endpoint,
     @Default('') String apiKey,
@@ -71,14 +71,19 @@ Map<String, dynamic> _normalizeApiConfigJson(Map<String, dynamic> json) {
       'reasoningHistoryCount',
       () => json['includeLastReasoning'] == true ? 1 : 0,
     );
-  // The Responses API used to be a boolean opt-in on the OpenAI-compatible
-  // protocol; it is now a protocol of its own. Payloads exported before the
-  // split (and any JSON that still carries the flag) map onto it here so an
-  // imported preset keeps talking to `/responses`.
-  if (normalized['useResponsesApi'] == true &&
-      (normalized['protocol'] == null ||
-          normalized['protocol'] == LlmProtocol.openai)) {
-    normalized['protocol'] = LlmProtocol.openaiResponses;
+  final sourceProtocol = normalized['protocol'];
+  final sourceProvider = normalized['providerId'];
+  if (sourceProtocol == 'openai_compatible' ||
+      sourceProtocol == null ||
+      (sourceProtocol == LlmProtocol.openai &&
+          (sourceProvider == null || sourceProvider == 'openai_compatible')) ||
+      (sourceProtocol == LlmProtocol.openaiResponses &&
+          (sourceProvider == null || sourceProvider == 'openai_compatible'))) {
+    // Historical custom presets used `openai` (or later
+    // `openai_responses`) plus this provider id. Keep them custom and retain
+    // useResponsesApi as the endpoint-mode toggle.
+    normalized['protocol'] = LlmProtocol.customChatCompletion;
+    normalized['providerId'] = 'custom_chat_completion';
   }
   return normalized;
 }

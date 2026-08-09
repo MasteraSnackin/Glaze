@@ -2,15 +2,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/llm/converters/reasoning_effort.dart';
 import 'package:glaze_flutter/core/llm/transport/llm_protocol.dart';
 
-String? _resolve(
-  String protocol,
-  String? effort, {
-  String model = 'gpt-4o',
-}) => resolveReasoningEffort(
-  protocol: protocol,
-  effort: effort,
-  model: model,
-);
+String? _resolve(String protocol, String? effort, {String model = 'gpt-4o'}) =>
+    resolveReasoningEffort(protocol: protocol, effort: effort, model: model);
 
 void main() {
   test('the same six steps are offered for every protocol', () {
@@ -37,14 +30,14 @@ void main() {
     }
   });
 
-  group('OpenAI-style protocols', () {
+  group('official OpenAI-style protocols', () {
     const protocols = [
       LlmProtocol.openai,
       LlmProtocol.openaiResponses,
       LlmProtocol.openrouter,
     ];
 
-    test('max collapses to high — the API has no max', () {
+    test('max is capped at high', () {
       for (final protocol in protocols) {
         expect(_resolve(protocol, 'max'), 'high', reason: protocol);
       }
@@ -58,7 +51,10 @@ void main() {
           reason: protocol,
         );
         // Proxy-prefixed names still match.
-        expect(_resolve(protocol, 'min', model: 'openai/gpt-5-mini'), 'minimal');
+        expect(
+          _resolve(protocol, 'min', model: 'openai/gpt-5-mini'),
+          'minimal',
+        );
         // Older reasoning models do not accept `minimal`.
         expect(_resolve(protocol, 'min', model: 'o3-mini'), 'low');
         expect(_resolve(protocol, 'min', model: 'gpt-4o'), 'low');
@@ -76,6 +72,11 @@ void main() {
     test('an unknown step sends nothing rather than a rejected value', () {
       expect(_resolve(LlmProtocol.openai, 'ludicrous'), isNull);
     });
+  });
+
+  test('Custom Chat Completion keeps max distinct from high', () {
+    expect(_resolve(LlmProtocol.customChatCompletion, 'max'), 'max');
+    expect(_resolve(LlmProtocol.customChatCompletion, 'high'), 'high');
   });
 
   test('Anthropic and Gemini keep the full scale as a budget share', () {

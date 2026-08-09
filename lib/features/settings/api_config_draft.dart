@@ -60,32 +60,41 @@ class ApiConfigDraft {
   static ApiConfig normalizeValues(ApiConfig values) {
     final protocol = LlmProtocol.isValid(values.protocol)
         ? values.protocol
-        : LlmProtocol.openai;
+        : LlmProtocol.customChatCompletion;
     final reasoningEffort = isValidReasoningEffort(values.reasoningEffort)
         ? values.reasoningEffort
         : 'medium';
     // Sampling omit-toggles: both OpenAI wire formats plus OpenRouter.
     final supportsOpenAiOptions =
         protocol == LlmProtocol.openai ||
+        protocol == LlmProtocol.customChatCompletion ||
         protocol == LlmProtocol.openaiResponses ||
         protocol == LlmProtocol.openrouter;
     // The Responses API has no penalties and no body-level cache_control.
     final supportsPenalties =
-        protocol == LlmProtocol.openai || protocol == LlmProtocol.openrouter;
+        protocol == LlmProtocol.openai ||
+        protocol == LlmProtocol.customChatCompletion ||
+        protocol == LlmProtocol.openrouter;
     // OpenRouter kept a live TTL out of reach: the UI hid the control and this
     // forced it to 'off', so `buildRouterRequest` never placed cache markers
     // for Claude-through-OR.
     final supportsPromptCache =
         protocol == LlmProtocol.anthropic ||
-        protocol == LlmProtocol.openai ||
+        protocol == LlmProtocol.customChatCompletion ||
         protocol == LlmProtocol.openrouter;
 
     return values.copyWith(
       protocol: protocol,
+      providerId: protocol == LlmProtocol.customChatCompletion
+          ? 'custom_chat_completion'
+          : values.providerId,
       sessionIdMode: _resolveSessionIdMode(values, protocol),
       // The Responses API is a protocol now, so the legacy boolean is derived
       // from it rather than edited on its own.
-      useResponsesApi: protocol == LlmProtocol.openaiResponses,
+      useResponsesApi:
+          protocol == LlmProtocol.openaiResponses ||
+          (protocol == LlmProtocol.customChatCompletion &&
+              values.useResponsesApi),
       reasoningEffort: reasoningEffort,
       omitTemperature: supportsOpenAiOptions ? values.omitTemperature : false,
       omitTopP: supportsOpenAiOptions ? values.omitTopP : false,

@@ -15,7 +15,11 @@ Object _inner(String protocol) =>
 
 void main() {
   test('each protocol resolves to its transport', () {
-    expect(_inner(LlmProtocol.openai), isA<OpenAiCompatibleTransport>());
+    expect(_inner(LlmProtocol.openai), isA<OpenAiChatTransport>());
+    expect(
+      _inner(LlmProtocol.customChatCompletion),
+      isA<CustomChatCompletionTransport>(),
+    );
     expect(
       _inner(LlmProtocol.openaiResponses),
       isA<OpenAiResponsesTransport>(),
@@ -26,7 +30,7 @@ void main() {
   });
 
   test('unknown protocols still fall back to Chat Completions', () {
-    expect(_inner('legacy-value'), isA<OpenAiChatTransport>());
+    expect(_inner('legacy-value'), isA<CustomChatCompletionTransport>());
   });
 
   test('every listed protocol has a label', () {

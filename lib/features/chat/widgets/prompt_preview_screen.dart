@@ -576,14 +576,26 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
         LlmProtocol.gemini => GeminiChatTransport.buildRequest(request).body,
         LlmProtocol.openrouter => OpenAiChatTransport.buildBody(
           OpenRouterChatTransport.buildRouterRequest(request),
+          protocol: LlmProtocol.openrouter,
         ),
         LlmProtocol.openaiResponses => OpenAiResponsesTransport.buildBody(
           request,
         ),
-        _ =>
+        LlmProtocol.openai => OpenAiChatTransport.buildBody(
+          request,
+          protocol: LlmProtocol.openai,
+        ),
+        LlmProtocol.customChatCompletion =>
           cfg.useResponsesApi
               ? OpenAiResponsesTransport.buildBody(request)
-              : OpenAiChatTransport.buildBody(request),
+              : OpenAiChatTransport.buildBody(
+                  request,
+                  protocol: LlmProtocol.customChatCompletion,
+                ),
+        _ => OpenAiChatTransport.buildBody(
+          request,
+          protocol: LlmProtocol.customChatCompletion,
+        ),
       };
     } catch (_) {
       return null;
