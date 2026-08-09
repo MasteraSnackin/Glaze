@@ -168,6 +168,51 @@ void main() {
       expect(result.projection.facts, hasLength(1));
     });
 
+    test('a present knower does not retain unrelated knowledge', () {
+      final result = _select(
+        _projection(
+          facts: [
+            _fact(
+              id: 'gilda-knowledge',
+              knowerKey: 'kodi',
+              knowerName: 'Kodi',
+              subjectKey: 'gilda',
+              subjectName: 'Gilda',
+            ),
+            _fact(id: 'kodi-fact', subjectKey: 'kodi', subjectName: 'Kodi'),
+          ],
+        ),
+        visible: [_message('m', 'Kodi asks Chloe about the pool.')],
+      );
+      expect(result.projection.facts.map((fact) => fact.id), ['kodi-fact']);
+    });
+
+    test(
+      'a recently mentioned subject remains relevant across three turns',
+      () {
+        final result = _select(
+          _projection(
+            facts: [
+              _fact(id: 'audi', subjectKey: 'audi', subjectName: 'Audi'),
+              _fact(id: 'chloe', subjectKey: 'chloe', subjectName: 'Chloe'),
+            ],
+          ),
+          visible: [
+            _message('m1', 'Gilda still needs to discuss the Audi.'),
+            _message('m2', 'We can wait for her answer.'),
+            _message('m3', 'Chloe enters the kitchen.'),
+            _message('m4', 'Chloe asks about the pool.'),
+            _message('m5', 'The party grows quieter.'),
+            _message('m6', 'Kodi watches the doorway.'),
+          ],
+        );
+        expect(result.projection.facts.map((fact) => fact.id), [
+          'audi',
+          'chloe',
+        ]);
+      },
+    );
+
     test('tentative and inferred facts never enter selective output', () {
       final result = _select(
         _projection(
