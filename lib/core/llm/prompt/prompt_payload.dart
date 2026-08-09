@@ -208,6 +208,7 @@ class PromptPayload {
               projection: projection,
               visibleMessages: const [],
               selectedSwipeByMessageId: const {},
+              focalUserName: inputs.persona?.name ?? '',
               structuredContinuitySourceIds: const {},
             ),
             sessionId: inputs.sessionId ?? '',

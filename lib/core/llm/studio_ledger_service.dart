@@ -313,7 +313,10 @@ class StudioLedgerService {
 
       var responseText = outcome.text!;
       var cleanupResponseText = responseText;
-      var parsed = _parser.parse(responseText);
+      var parsed = _parser.parse(
+        responseText,
+        focalUserName: macroCtx?.userName ?? '',
+      );
       final originalFailure = parsed.failure;
       final originalVisibleLedger = parsed.visibleLedger;
       var attempts = outcome.attempts;
@@ -382,7 +385,10 @@ class StudioLedgerService {
         }
         if (needsExportRepair) {
           final repairedText = repair.text!;
-          final repaired = _parser.parse(repairedText);
+          final repaired = _parser.parse(
+            repairedText,
+            focalUserName: macroCtx?.userName ?? '',
+          );
           if (repaired.export != null &&
               !_repairPreservesStructuredEvidence(
                 responseText,
@@ -947,7 +953,10 @@ class StudioLedgerService {
       );
 
       var effectiveResponse = rawResponse;
-      var parseResult = _parser.parse(effectiveResponse);
+      var parseResult = _parser.parse(
+        effectiveResponse,
+        focalUserName: macroCtx?.userName ?? '',
+      );
       final originalFailure = parseResult.failure;
       final originalVisibleLedger = parseResult.visibleLedger;
       var attempts = outcome.attempts;
@@ -1011,7 +1020,10 @@ class StudioLedgerService {
           );
         }
         effectiveResponse = repair.text!;
-        parseResult = _parser.parse(effectiveResponse);
+        parseResult = _parser.parse(
+          effectiveResponse,
+          focalUserName: macroCtx?.userName ?? '',
+        );
         if (parseResult.export != null &&
             !_repairPreservesStructuredEvidence(
               rawResponse,
@@ -1285,6 +1297,7 @@ class StudioLedgerService {
         recentHistoryText: recentHistoryText,
         currentTrackers: currentTrackers,
         recentMemoryEntries: recentMemoryEntries,
+        focalUserName: macroCtx?.userName ?? '',
       );
     }
     final hasActiveLedgerBlocks = ledgerBlocks.any(
@@ -1302,6 +1315,7 @@ class StudioLedgerService {
         recentMemoryEntries: recentMemoryEntries,
         character: character,
         entityAliases: entityAliases,
+        focalUserName: macroCtx?.userName ?? '',
       );
     }
 

@@ -60,6 +60,7 @@ final class SelectiveLedgerProjectionInput {
     required this.projection,
     required this.visibleMessages,
     required this.selectedSwipeByMessageId,
+    this.focalUserName = '',
     this.structuredContinuitySourceIds = const <String>{},
     this.freshness = LedgerProjectionFreshness.unknown,
   });
@@ -69,6 +70,10 @@ final class SelectiveLedgerProjectionInput {
   final EffectiveCanonPromptProjection projection;
   final List<ChatMessage> visibleMessages;
   final Map<String, int> selectedSwipeByMessageId;
+
+  /// Resolved `{{user}}` identity. It is not enough by itself to make a
+  /// fact relevant: the protagonist is present in nearly every turn.
+  final String focalUserName;
   final Set<String> structuredContinuitySourceIds;
   final LedgerProjectionFreshness freshness;
 }
@@ -126,7 +131,10 @@ abstract final class SelectiveLedgerProjectionFilter {
           message.id: message,
     };
     final causalWindow = _latestCausalWindow(visible.values);
-    final groups = _buildGroups(input.projection);
+    final groups = _buildGroups(
+      input.projection,
+      focalUserName: input.focalUserName,
+    );
     final factRelevanceActive = groups
         .where((group) => group.facts.isNotEmpty)
         .any(
@@ -242,10 +250,14 @@ final class _Group {
   final List<_SourceRef> sources = [];
   final Set<String> entities = {};
   final Set<String> factRelevanceEntities = {};
+  bool factRelevanceDependsOnlyOnFocalUser = false;
   LedgerProjectionDeliveryTier tier = LedgerProjectionDeliveryTier.gap;
 }
 
-List<_Group> _buildGroups(EffectiveCanonPromptProjection projection) {
+List<_Group> _buildGroups(
+  EffectiveCanonPromptProjection projection, {
+  String focalUserName = '',
+}) {
   final byId = <String, _Group>{};
   _Group get(String id) => byId.putIfAbsent(id, () => _Group(id));
   for (final fact in projection.facts) {
@@ -266,13 +278,18 @@ List<_Group> _buildGroups(EffectiveCanonPromptProjection projection) {
         ...fact.entities,
       ].where((value) => value.trim().isNotEmpty),
     );
-    group.factRelevanceEntities.addAll(
-      [
-        fact.subjectKey,
-        fact.subjectName,
-        ...fact.entities,
-      ].where((value) => value.trim().isNotEmpty),
-    );
+    final relevanceEntities = [
+      fact.subjectKey,
+      fact.subjectName,
+      ...fact.entities,
+    ].where((value) => value.trim().isNotEmpty).toList(growable: false);
+    final nonFocalEntities = relevanceEntities
+        .where((value) => !_isFocalUserIdentity(value, focalUserName))
+        .toList(growable: false);
+    group.factRelevanceEntities.addAll(nonFocalEntities);
+    if (relevanceEntities.isNotEmpty && nonFocalEntities.isEmpty) {
+      group.factRelevanceDependsOnlyOnFocalUser = true;
+    }
     if (!_isSelectableFact(fact)) {
       group.tier = LedgerProjectionDeliveryTier.excluded;
     } else if (_isCriticalFact(fact)) {
@@ -372,7 +389,8 @@ _Decision _decide(
   // uses only the newest conversational exchange, not the full history.
   if (group.facts.isNotEmpty &&
       factRelevanceActive &&
-      group.factRelevanceEntities.isNotEmpty &&
+      (group.factRelevanceEntities.isNotEmpty ||
+          group.factRelevanceDependsOnlyOnFocalUser) &&
       causalWindow.isNotEmpty &&
       !group.factRelevanceEntities.any(
         (entity) => causalWindow.any(
@@ -394,6 +412,19 @@ List<ChatMessage> _latestCausalWindow(Iterable<ChatMessage> visible) {
   const maxMessages = 6;
   if (conversational.length <= maxMessages) return conversational;
   return conversational.sublist(conversational.length - maxMessages);
+}
+
+bool _isFocalUserIdentity(String value, String focalUserName) {
+  final normalized = _normalizeIdentity(value);
+  final focal = _normalizeIdentity(focalUserName);
+  return normalized == '{{user}}' || (focal.isNotEmpty && normalized == focal);
+}
+
+String _normalizeIdentity(String value) {
+  final normalized = value.trim().toLowerCase();
+  return normalized.startsWith('entity:')
+      ? normalized.substring('entity:'.length)
+      : normalized;
 }
 
 final class _SourceRef {

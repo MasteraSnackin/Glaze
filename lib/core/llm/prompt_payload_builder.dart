@@ -626,6 +626,14 @@ class PromptPayloadBuilder {
               selectedSwipeByMessageId: {
                 for (final message in history) message.id: message.swipeId,
               },
+              focalUserName:
+                  session.messages.reversed
+                      .map((message) => message.personaName?.trim())
+                      .firstWhere(
+                        (name) => name != null && name.isNotEmpty,
+                        orElse: () => null,
+                      ) ??
+                  '',
             ),
             sessionId: session.id,
             latestUserText: latestUserTextFromHistory(history),

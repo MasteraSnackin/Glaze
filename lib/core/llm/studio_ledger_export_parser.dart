@@ -101,7 +101,7 @@ class StudioLedgerExportParser {
   /// - Extracts the `<glaze_memory_export>…</glaze_memory_export>` JSON block.
   /// - Validates the export (see class-level docs).
   /// - Returns null export + rejectionReason when invalid.
-  LedgerParseResult parse(String rawOutput) {
+  LedgerParseResult parse(String rawOutput, {String focalUserName = ''}) {
     final visibleLedger = _extractBlock(rawOutput, 'studio_ledger');
     final exportBlock = _findBlock(rawOutput, 'glaze_memory_export');
     final exportRaw = exportBlock.content;
@@ -165,7 +165,7 @@ class StudioLedgerExportParser {
     final rejectedOps = <String>[];
 
     for (final op in export.ops) {
-      final reason = _validateOp(op);
+      final reason = _validateOp(op, focalUserName: focalUserName);
       if (reason != null) {
         rejectedOps.add('${op.key}: $reason');
         debugPrint('[StudioLedger] rejected op ${op.op} ${op.key}: $reason');
@@ -181,7 +181,10 @@ class StudioLedgerExportParser {
       );
     }
 
-    final validatedFacts = _validateKnowledgeFacts(export.knowledgeFacts);
+    final validatedFacts = _validateKnowledgeFacts(
+      export.knowledgeFacts,
+      focalUserName: focalUserName,
+    );
 
     // Ignore completely empty exports.
     final isEmpty = validatedOps.isEmpty && validatedFacts.isEmpty;
@@ -485,8 +488,9 @@ class StudioLedgerExportParser {
   // ── Validation ──────────────────────────────────────────────────────────────
 
   List<LedgerKnowledgeFact> _validateKnowledgeFacts(
-    List<LedgerKnowledgeFact> facts,
-  ) {
+    List<LedgerKnowledgeFact> facts, {
+    String focalUserName = '',
+  }) {
     final accepted = <LedgerKnowledgeFact>[];
     final seen = <String>{};
     for (final fact in facts) {
@@ -494,7 +498,10 @@ class StudioLedgerExportParser {
         confidence: fact.confidence.clamp(0, 1).toDouble(),
         importance: fact.importance.clamp(0, 1).toDouble(),
       );
-      final reason = _validateKnowledgeFact(normalized);
+      final reason = _validateKnowledgeFact(
+        normalized,
+        focalUserName: focalUserName,
+      );
       if (reason != null) {
         debugPrint('[StudioLedger] rejected knowledge fact: $reason');
         continue;
@@ -513,7 +520,10 @@ class StudioLedgerExportParser {
     return accepted;
   }
 
-  String? _validateKnowledgeFact(LedgerKnowledgeFact fact) {
+  String? _validateKnowledgeFact(
+    LedgerKnowledgeFact fact, {
+    String focalUserName = '',
+  }) {
     if (fact.knowerKey.isEmpty || fact.subjectKey.isEmpty) {
       return 'missing knowerKey or subjectKey';
     }
@@ -533,11 +543,20 @@ class StudioLedgerExportParser {
     )) {
       return 'unknown epistemicState "${fact.epistemicState}"';
     }
+    if (_isFocalUserIdentity(fact.knowerKey, focalUserName) &&
+        (fact.factClass != CharacterKnowledgeFactClass.knowledge.wireName ||
+            !const {
+              'observed',
+              'heard_claim',
+              'confirmed',
+            }.contains(fact.epistemicState))) {
+      return 'focal-user knowledge must be explicit observed/heard/confirmed access';
+    }
     return null;
   }
 
   /// Returns a rejection reason string, or null when the op is valid.
-  String? _validateOp(LedgerOp op) {
+  String? _validateOp(LedgerOp op, {String focalUserName = ''}) {
     // Unknown op code.
     if (!kAllowedOpCodes.contains(op.op)) {
       return 'unknown op code "${op.op}"';
@@ -558,6 +577,9 @@ class StudioLedgerExportParser {
 
     final keyReason = _validateCurrentStateKey(op.key);
     if (keyReason != null) return keyReason;
+    if (_isFocalUserStateKey(op.key, focalUserName)) {
+      return 'model-owned focal-user state is not allowed';
+    }
 
     // For set: value must not be empty and must remain a compact current value.
     if (op.op != 'delete' && op.value.trim().isEmpty) {
@@ -573,6 +595,34 @@ class StudioLedgerExportParser {
     }
 
     return null;
+  }
+
+  bool _isFocalUserStateKey(String key, String focalUserName) {
+    if (key.startsWith('npc:')) {
+      final match = RegExp(r'^npc:([^.:][^.]*?)\.').firstMatch(key);
+      return match != null &&
+          _isFocalUserIdentity(match.group(1)!, focalUserName);
+    }
+    if (key.startsWith('arc:')) {
+      final match = RegExp(r'^arc:([^.:][^.]*?)\.').firstMatch(key);
+      return match != null &&
+          _isFocalUserIdentity(match.group(1)!, focalUserName);
+    }
+    return false;
+  }
+
+  bool _isFocalUserIdentity(String value, String focalUserName) {
+    final normalized = _normalizedIdentity(value);
+    final focal = _normalizedIdentity(focalUserName);
+    return normalized.isNotEmpty &&
+        (normalized == focal || normalized == '{{user}}');
+  }
+
+  String _normalizedIdentity(String value) {
+    final normalized = value.trim().toLowerCase();
+    return normalized.startsWith('entity:')
+        ? normalized.substring('entity:'.length)
+        : normalized;
   }
 
   String? _validateCurrentStateKey(String key) {

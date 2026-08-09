@@ -932,6 +932,86 @@ Ledger text.
       expect(result.wasRejected, isTrue);
     });
 
+    test('rejects model-owned tracker and arc state for the focal user', () {
+      const raw = '''
+<glaze_memory_export>
+{
+  "ops": [
+    {"op":"set","key":"npc:Danvi.current_goal","value":"Protect Chloe","evidence":"Model inference","eventState":"planned"},
+    {"op":"set","key":"arc:Danvi.status","value":"active","evidence":"Model inference","eventState":"planned"},
+    {"op":"set","key":"relationship:Chloe:Danvi.trust","value":"cautious","evidence":"They spoke","eventState":"completed"}
+  ]
+}
+</glaze_memory_export>''';
+
+      final result = parser.parse(raw, focalUserName: 'Danvi');
+
+      expect(result.export, isNotNull);
+      expect(result.export!.ops, hasLength(1));
+      expect(result.export!.ops.single.key, 'relationship:Chloe:Danvi.trust');
+    });
+
+    test(
+      'rejects literal user macro state even without a resolved persona',
+      () {
+        const raw = '''
+<glaze_memory_export>
+{"ops":[{"op":"set","key":"npc:{{user}}.current_goal","value":"Fix everything","evidence":"Model inference","eventState":"planned"}]}
+</glaze_memory_export>''';
+
+        final result = parser.parse(raw);
+
+        expect(result.export, isNull);
+        expect(result.failure, LedgerParseFailure.semanticSchema);
+      },
+    );
+
+    test('allows focal-user knowledge only as explicit information access', () {
+      const raw = '''
+<glaze_memory_export>
+{
+  "ops": [],
+  "knowledgeFacts": [
+    {
+      "knowerKey":"entity:danvi",
+      "knowerName":"Danvi",
+      "subjectKey":"entity:chloe",
+      "subjectName":"Chloe",
+      "factClass":"knowledge",
+      "scopeKey":"knowledge:chloe:doping_policy",
+      "predicate":"heard_doping_policy",
+      "object":"Chloe explained the doping policy.",
+      "epistemicState":"heard_claim",
+      "confidence":0.9,
+      "importance":0.6
+    },
+    {
+      "knowerKey":"entity:danvi",
+      "knowerName":"Danvi",
+      "subjectKey":"entity:chloe",
+      "subjectName":"Chloe",
+      "factClass":"goal",
+      "scopeKey":"goal:danvi",
+      "predicate":"wants_to_help",
+      "object":"Danvi wants to solve Chloe's problem.",
+      "epistemicState":"inferred",
+      "confidence":0.7,
+      "importance":0.7
+    }
+  ]
+}
+</glaze_memory_export>''';
+
+      final result = parser.parse(raw, focalUserName: 'Danvi');
+
+      expect(result.export, isNotNull);
+      expect(result.export!.knowledgeFacts, hasLength(1));
+      expect(
+        result.export!.knowledgeFacts.single.predicate,
+        'heard_doping_policy',
+      );
+    });
+
     test('rejects oversized current-state values', () {
       final longVal = 'x' * 4000;
       final longOpBlock =

@@ -17,6 +17,7 @@ import '../../../../core/state/db_provider.dart';
 import '../../../../core/state/memory_agent_providers.dart';
 import '../../../../core/state/character_provider.dart';
 import '../../../../core/state/card_rewriter_providers.dart';
+import '../../../../core/state/persona_resolution.dart';
 import '../../../../core/state/studio_turn_config_resolver.dart';
 import '../../../../shared/widgets/glaze_toast.dart';
 import '../../state/agent_operations_log_provider.dart';
@@ -175,13 +176,22 @@ class LedgerStage {
 
       // Build MacroContext for resolving preset-block macros.
       final character = ctx.ref.read(characterByIdProvider(ctx.charId));
+      final persona = ctx.ref.read(
+        effectivePersonaForChatProvider((
+          charId: ctx.charId,
+          sessionId: sessionId,
+        )),
+      );
+      final focalUserName = persona?.name.trim().isNotEmpty == true
+          ? persona!.name
+          : _personaName(messages);
       final ledgerMacroCtx = MacroContext(
         charName: character?.name ?? '',
         charDescription: character?.description,
         charScenario: character?.scenario,
         charPersonality: character?.personality,
         charMesExample: character?.mesExample,
-        userName: 'User',
+        userName: focalUserName,
         macroName: character?.macroName,
         charId: ctx.charId,
         sessionId: sessionId,
@@ -453,6 +463,14 @@ class LedgerStage {
         );
       }
     }
+  }
+
+  String _personaName(Iterable<ChatMessage> messages) {
+    for (final message in messages.toList().reversed) {
+      final name = message.personaName?.trim();
+      if (name != null && name.isNotEmpty) return name;
+    }
+    return 'User';
   }
 
   /// Returns a non-null skip reason when the cadence should suppress the

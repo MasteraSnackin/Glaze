@@ -187,6 +187,52 @@ void main() {
       expect(result.projection.facts.map((fact) => fact.id), ['kodi-fact']);
     });
 
+    test('focal user mention does not retain unrelated user-subject facts', () {
+      final result = _select(
+        _projection(
+          facts: [
+            _fact(id: 'engagement', subjectKey: 'danvi', subjectName: 'Danvi'),
+            _fact(id: 'chloe', subjectKey: 'chloe', subjectName: 'Chloe'),
+          ],
+        ),
+        focalUserName: 'Danvi',
+        visible: [
+          _message('m1', 'Danvi tells Chloe about the pool.'),
+          _message('m2', 'Chloe asks about training.'),
+        ],
+      );
+
+      expect(result.projection.facts.map((fact) => fact.id), ['chloe']);
+      expect(
+        result.diagnostics
+            .firstWhere((item) => item.groupId.endsWith(':engagement'))
+            .reason,
+        LedgerProjectionDecisionReason.notRelevantToCausalWindow,
+      );
+    });
+
+    test('focal-user fact survives when an external entity is current', () {
+      final result = _select(
+        _projection(
+          facts: [
+            _fact(
+              id: 'audi',
+              subjectKey: 'danvi',
+              subjectName: 'Danvi',
+            ).copyWith(entities: const ['Audi', 'Gilda']),
+            _fact(id: 'chloe', subjectKey: 'chloe', subjectName: 'Chloe'),
+          ],
+        ),
+        focalUserName: 'Danvi',
+        visible: [
+          _message('m1', 'Danvi asks whether Gilda wants the Audi.'),
+          _message('m2', 'Chloe waits for the answer.'),
+        ],
+      );
+
+      expect(result.projection.facts.map((fact) => fact.id), ['audi', 'chloe']);
+    });
+
     test(
       'a recently mentioned subject remains relevant across three turns',
       () {
@@ -531,6 +577,7 @@ SelectiveLedgerProjectionResult _select(
   List<ChatMessage> visible = const [],
   Set<String> continuity = const {},
   Map<String, int> swipes = const {},
+  String focalUserName = '',
   LedgerProjectionFreshness freshness = LedgerProjectionFreshness.provenCurrent,
 }) => SelectiveLedgerProjectionFilter.select(
   _input(
@@ -539,6 +586,7 @@ SelectiveLedgerProjectionResult _select(
     visible: visible,
     continuity: continuity,
     swipes: swipes,
+    focalUserName: focalUserName,
     freshness: freshness,
   ),
 );
@@ -549,6 +597,7 @@ SelectiveLedgerProjectionInput _input(
   List<ChatMessage> visible = const [],
   Set<String> continuity = const {},
   Map<String, int> swipes = const {},
+  String focalUserName = '',
   String path = 'ordinary',
   LedgerProjectionFreshness freshness = LedgerProjectionFreshness.provenCurrent,
 }) => SelectiveLedgerProjectionInput(
@@ -557,6 +606,7 @@ SelectiveLedgerProjectionInput _input(
   projection: projection,
   visibleMessages: visible,
   selectedSwipeByMessageId: swipes,
+  focalUserName: focalUserName,
   structuredContinuitySourceIds: continuity,
   freshness: freshness,
 );

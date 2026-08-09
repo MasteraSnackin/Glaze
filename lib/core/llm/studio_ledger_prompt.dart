@@ -51,6 +51,7 @@ class StudioLedgerPrompt {
     required List<MemoryEntry> recentMemoryEntries,
     Character? character,
     Map<String, String> entityAliases = const {},
+    String focalUserName = '',
   }) {
     final trackerBlock = buildCurrentStateBlock(
       currentTrackers,
@@ -126,7 +127,9 @@ knowledgeFacts rules:
 - supersedesId only when correcting a known injected fact ID.
 - Distinguish direct observation, heard claim, inference, confirmation, disbelief, and correction.
 - Never output future events as facts.
-- scopeKey: narrowest defensible scope (e.g. relationship:danvi), never global for convenience.''';
+ - scopeKey: narrowest defensible scope (e.g. relationship:danvi), never global for convenience.
+ - Do not create npc:$focalUserName.* or arc:$focalUserName.* state. The user's goals, emotions, intentions, and arc belong to their own messages.
+ - For $focalUserName, write knowledgeFacts only for concrete information explicitly seen, heard, or confirmed; this tracks information access and never dictates a reaction or belief.''';
   }
 
   /// Parser-compatible per-turn compatibility profile for presets that do not
@@ -138,6 +141,7 @@ knowledgeFacts rules:
     required String recentHistoryText,
     required List<Tracker> currentTrackers,
     required List<MemoryEntry> recentMemoryEntries,
+    String focalUserName = '',
   }) {
     final trackerBlock = buildCurrentStateBlock(
       currentTrackers,
@@ -196,7 +200,8 @@ knowledgeFacts rules:
 - One proposition per fact. Never summarize prior facts.
 - supersedesId only when correcting a known injected fact ID.
 - Never output future events as facts.
-- scopeKey must be the narrowest defensible scope.''';
+ - scopeKey must be the narrowest defensible scope.
+ - Do not create npc:$focalUserName.* or arc:$focalUserName.* state. For $focalUserName, write knowledgeFacts only for concrete information explicitly seen, heard, or confirmed.''';
   }
 
   /// Full values for state relevant to this turn. This filters rows, never

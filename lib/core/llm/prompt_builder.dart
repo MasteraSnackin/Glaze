@@ -79,6 +79,7 @@ PromptResult buildPrompt(PromptPayload payload) {
           projection: projection,
           visibleMessages: const [],
           selectedSwipeByMessageId: const {},
+          focalUserName: payload.persona?.name ?? '',
         ),
         sessionId: payload.sessionId ?? '',
         latestUserText: _latestLedgerText(payload.history, 'user'),
@@ -120,6 +121,7 @@ PromptResult buildPrompt(PromptPayload payload) {
       selectedSwipeByMessageId: {
         for (final message in clamped) message.id: message.swipeId,
       },
+      focalUserName: payload.persona?.name ?? '',
       freshness: LedgerProjectionFreshness.provenCurrent,
     ),
     sessionId: payload.sessionId ?? '',
