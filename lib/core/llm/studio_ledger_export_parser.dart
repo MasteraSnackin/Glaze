@@ -63,14 +63,30 @@ class LedgerParseResult {
   /// Human-readable rejection reason, for diagnostics.
   final String? rejectionReason;
 
+  /// Machine-readable failure class used by the service to decide whether a
+  /// single formatting repair is safe. Semantic rejections are never retried.
+  final LedgerParseFailure failure;
+
   const LedgerParseResult({
     this.export,
     required this.visibleLedger,
     this.rejectionReason,
+    this.failure = LedgerParseFailure.none,
   });
 
   bool get hasExport => export != null;
   bool get wasRejected => rejectionReason != null;
+}
+
+enum LedgerParseFailure {
+  none,
+  missingExport,
+  incompleteJson,
+  malformedJson,
+  semanticSchema,
+  emptyExport;
+
+  bool get isRepairable => this == incompleteJson || this == malformedJson;
 }
 
 /// Parses and validates the Studio Ledger LLM output.
@@ -87,12 +103,28 @@ class StudioLedgerExportParser {
   /// - Returns null export + rejectionReason when invalid.
   LedgerParseResult parse(String rawOutput) {
     final visibleLedger = _extractBlock(rawOutput, 'studio_ledger');
-    final exportRaw = _extractBlock(rawOutput, 'glaze_memory_export');
+    final exportBlock = _findBlock(rawOutput, 'glaze_memory_export');
+    final exportRaw = exportBlock.content;
 
-    if (exportRaw.isEmpty) {
+    if (!exportBlock.hasOpeningTag) {
       return LedgerParseResult(
         visibleLedger: visibleLedger,
         rejectionReason: 'no <glaze_memory_export> block found',
+        failure: LedgerParseFailure.missingExport,
+      );
+    }
+    if (!exportBlock.hasClosingTag) {
+      return LedgerParseResult(
+        visibleLedger: visibleLedger,
+        rejectionReason: 'incomplete <glaze_memory_export> block',
+        failure: LedgerParseFailure.incompleteJson,
+      );
+    }
+    if (exportRaw.isEmpty) {
+      return LedgerParseResult(
+        visibleLedger: visibleLedger,
+        rejectionReason: 'export block does not contain a JSON object',
+        failure: LedgerParseFailure.malformedJson,
       );
     }
 
@@ -103,6 +135,9 @@ class StudioLedgerExportParser {
         return LedgerParseResult(
           visibleLedger: visibleLedger,
           rejectionReason: 'export block does not contain a JSON object',
+          failure: _looksIncompleteJson(exportRaw)
+              ? LedgerParseFailure.incompleteJson
+              : LedgerParseFailure.malformedJson,
         );
       }
       final decoded = jsonDecode(repairJson(jsonRaw));
@@ -110,6 +145,7 @@ class StudioLedgerExportParser {
         return LedgerParseResult(
           visibleLedger: visibleLedger,
           rejectionReason: 'export root is not a JSON object',
+          failure: LedgerParseFailure.malformedJson,
         );
       }
       export = StudioLedgerExport.fromJson(_normalizeExportJson(decoded));
@@ -118,6 +154,9 @@ class StudioLedgerExportParser {
       return LedgerParseResult(
         visibleLedger: visibleLedger,
         rejectionReason: 'malformed JSON: $e',
+        failure: _looksIncompleteJson(exportRaw)
+            ? LedgerParseFailure.incompleteJson
+            : LedgerParseFailure.malformedJson,
       );
     }
 
@@ -152,6 +191,9 @@ class StudioLedgerExportParser {
         rejectionReason: rejectedOps.isNotEmpty
             ? 'all ops rejected, no knowledge facts'
             : 'empty export (no ops or knowledge facts)',
+        failure: rejectedOps.isNotEmpty
+            ? LedgerParseFailure.semanticSchema
+            : LedgerParseFailure.emptyExport,
       );
     }
 
@@ -175,17 +217,60 @@ class StudioLedgerExportParser {
   /// the opening tag to the end of the source — the downstream JSON repair +
   /// brace extraction can still recover a partial export.
   String _extractBlock(String source, String tag) {
+    return _findBlock(source, tag).content;
+  }
+
+  ({String content, bool hasOpeningTag, bool hasClosingTag}) _findBlock(
+    String source,
+    String tag,
+  ) {
     final open = '<$tag>';
     final close = '</$tag>';
     final start = source.indexOf(open);
-    if (start < 0) return '';
+    if (start < 0) {
+      return (content: '', hasOpeningTag: false, hasClosingTag: false);
+    }
     final contentStart = start + open.length;
     final end = source.indexOf(close, contentStart);
     if (end < 0) {
-      // Truncated response — return everything after the opening tag.
-      return source.substring(contentStart).trim();
+      return (
+        content: source.substring(contentStart).trim(),
+        hasOpeningTag: true,
+        hasClosingTag: false,
+      );
     }
-    return source.substring(contentStart, end).trim();
+    return (
+      content: source.substring(contentStart, end).trim(),
+      hasOpeningTag: true,
+      hasClosingTag: true,
+    );
+  }
+
+  bool _looksIncompleteJson(String source) {
+    final start = source.indexOf('{');
+    if (start < 0) return false;
+    var depth = 0;
+    var inString = false;
+    var escaped = false;
+    for (var i = start; i < source.length; i++) {
+      final char = source[i];
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (char == r'\') {
+          escaped = true;
+        } else if (char == '"') {
+          inString = false;
+        }
+      } else if (char == '"') {
+        inString = true;
+      } else if (char == '{' || char == '[') {
+        depth++;
+      } else if (char == '}' || char == ']') {
+        depth--;
+      }
+    }
+    return inString || depth > 0;
   }
 
   // ── LLM JSON normalization ────────────────────────────────────────────────

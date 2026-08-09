@@ -990,8 +990,7 @@ class CleanerStage {
 
     // Stage 7: Studio Ledger — fired here so it always receives the final
     // canonical text. Runs on both auto and manual rerun — on manual rerun
-    // the ledger inherits the cleaner's resolved config so it doesn't
-    // re-resolve (and doesn't fall back to the active chat API).
+    // Ledger resolves its own dedicated slot from the same turn snapshot.
     // Skip on manual rerun when both auto toggles were off — Ledger already
     // ran on the raw text during auto post-gen.
     // Awaited (not unawaited) so the foreground service hold acquired by
@@ -1015,7 +1014,6 @@ class CleanerStage {
         finalAssistantText: ledgerText,
         targetMessage: ledgerTargetMessage ?? targetMessage,
         isManualRerun: isManualRerun,
-        resolvedConfig: cleanerConfig,
         cancelToken: _cleanerCancelToken,
         studioTurnConfig: studioTurnConfig,
       );

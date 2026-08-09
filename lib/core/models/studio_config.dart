@@ -9,6 +9,12 @@ part 'studio_config.g.dart';
 
 enum StudioBlockType { instruction, context, history, priorBriefs }
 
+/// Selects the post-generation Ledger workflow for one Studio preset.
+///
+/// JSON written by older builds (or an unsupported future value) deliberately
+/// resolves to [currentReconciled], preserving the current workflow.
+enum StudioLedgerEngine { currentReconciled, legacyTurnOnly }
+
 /// Per-preset runtime metadata that is NOT duplicated by global
 /// [PipelineSettings]. Model overrides, sampling parameters, and cleaner /
 /// ledger settings live exclusively in [PipelineSettings] so the UI and the
@@ -19,6 +25,9 @@ abstract class StudioRuntimeSettings with _$StudioRuntimeSettings {
   const factory StudioRuntimeSettings({
     @Default(1) int version,
     @Default([]) List<String> broadcastBlocks,
+    @JsonKey(unknownEnumValue: StudioLedgerEngine.currentReconciled)
+    @Default(StudioLedgerEngine.currentReconciled)
+    StudioLedgerEngine ledgerEngine,
     LedgerPromptInjectionMode? requestedLedgerPromptInjectionMode,
     String? requestedLedgerPromptInjectionAlgorithmVersion,
   }) = _StudioRuntimeSettings;

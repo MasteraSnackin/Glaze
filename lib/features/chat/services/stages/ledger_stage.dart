@@ -11,6 +11,7 @@ import '../../../../core/llm/studio_turn_config_snapshot.dart';
 import '../../../../core/models/agent_operation_record.dart';
 import '../../../../core/models/chat_message.dart';
 import '../../../../core/models/pipeline_settings.dart';
+import '../../../../core/models/studio_config.dart';
 import '../../../../core/services/card_rewriter/automated_card_evolution_service.dart';
 import '../../../../core/state/db_provider.dart';
 import '../../../../core/state/memory_agent_providers.dart';
@@ -54,11 +55,43 @@ class LedgerStage {
     required String finalAssistantText,
     required ChatMessage targetMessage,
     bool isManualRerun = false,
-    AuxApiConfig? resolvedConfig,
     CancelToken? cancelToken,
     StudioTurnConfigSnapshot? studioTurnConfig,
   }) async {
     if (!ctx.ref.mounted) return;
+
+    PostGenStatusState? ownedRunningStatus;
+    void startStatus(PostGenTask task) {
+      if (!ctx.ref.mounted) return;
+      final status = PostGenStatusState.running(
+        sessionId: sessionId,
+        task: task,
+      );
+      ownedRunningStatus = status;
+      ctx.ref.read(postGenStatusProvider.notifier).state = status;
+    }
+
+    bool ownsRunningStatus() {
+      if (!ctx.ref.mounted || ownedRunningStatus == null) return false;
+      final current = ctx.ref.read(postGenStatusProvider);
+      return identical(current, ownedRunningStatus) &&
+          current.sessionId == sessionId &&
+          current.task == ownedRunningStatus!.task &&
+          current.phase == PostGenTaskPhase.running;
+    }
+
+    void finishOwnedStatus(PostGenStatusState status) {
+      if (!ownsRunningStatus() || status.sessionId != sessionId) return;
+      ctx.ref.read(postGenStatusProvider.notifier).state = status;
+      ownedRunningStatus = null;
+    }
+
+    void clearOwnedStatus() {
+      if (!ownsRunningStatus()) return;
+      ctx.ref.read(postGenStatusProvider.notifier).state =
+          const PostGenStatusState.idle();
+      ownedRunningStatus = null;
+    }
 
     final isCurrent = isManualRerun
         ? () => ctx.ref.mounted
@@ -119,27 +152,21 @@ class LedgerStage {
         return;
       }
 
-      // Resolve the LLM config. When the caller provides a pre-resolved
-      // config (e.g. the cleaner stage passes its own resolved config so
-      // the ledger inherits the same model without re-resolving), use it
-      // directly. Otherwise resolve from the Studio cleaner slot.
+      // Always resolve the dedicated Ledger slot from the immutable turn
+      // snapshot. A cleaner config must never override an explicit Ledger slot.
       final AuxApiConfig ledgerConfig;
-      if (resolvedConfig != null) {
-        ledgerConfig = resolvedConfig;
-      } else {
-        try {
-          ledgerConfig = turnConfig.resolveLedgerConfig(
-            errorLabel: 'studio-ledger',
-          );
-        } catch (e) {
-          debugPrint('[StudioLedger] slot resolution failed: $e');
-          await _recordDiag(
-            sessionId: sessionId,
-            targetMessage: targetMessage,
-            reason: 'skipped, slot resolution failed: $e',
-          );
-          return;
-        }
+      try {
+        ledgerConfig = turnConfig.resolveLedgerConfig(
+          errorLabel: 'studio-ledger',
+        );
+      } catch (e) {
+        debugPrint('[StudioLedger] slot resolution failed: $e');
+        await _recordDiag(
+          sessionId: sessionId,
+          targetMessage: targetMessage,
+          reason: 'skipped, slot resolution failed: $e',
+        );
+        return;
       }
 
       final recentHistory = extractRecentHistoryText(messages, maxMessages: 10);
@@ -161,7 +188,13 @@ class LedgerStage {
       );
 
       LedgerRunResult? reconciliationResult;
-      if (!isManualRerun) {
+      final ledgerEngine =
+          studioPreset?.runtime.ledgerEngine ??
+          StudioLedgerEngine.currentReconciled;
+      if (shouldRunAutomaticLedgerReconciliation(
+        engine: ledgerEngine,
+        isManualRerun: isManualRerun,
+      )) {
         final checkpointRepo = ctx.ref.read(
           ledgerReconciliationCheckpointRepoProvider,
         );
@@ -182,14 +215,7 @@ class LedgerStage {
               model: ledgerConfig.model,
             ),
           );
-          if (ctx.ref.mounted) {
-            ctx.ref
-                .read(postGenStatusProvider.notifier)
-                .state = PostGenStatusState.running(
-              sessionId: sessionId,
-              task: PostGenTask.ledgerReconciliation,
-            );
-          }
+          startStatus(PostGenTask.ledgerReconciliation);
           reconciliationResult = await service.reconcile(
             sessionId: sessionId,
             settings: pipeline,
@@ -199,6 +225,7 @@ class LedgerStage {
             macroCtx: ledgerMacroCtx,
             isStillCurrent: isCurrent,
             cancelToken: cancelToken,
+            operationIdentity: 'automatic:$genId',
           );
           await _recordReconciliationDiag(
             sessionId: sessionId,
@@ -222,19 +249,23 @@ class LedgerStage {
             final detail =
                 'Ledger reconciliation ${reconciliationResult.status} '
                 '(ops=${reconciliationResult.opsApplied})';
-            ctx.ref
-                .read(postGenStatusProvider.notifier)
-                .state = reconciliationResult.status == 'ok'
-                ? PostGenStatusState.done(
-                    sessionId: sessionId,
-                    task: PostGenTask.ledgerReconciliation,
-                    detail: detail,
-                  )
-                : PostGenStatusState.error(
-                    sessionId: sessionId,
-                    task: PostGenTask.ledgerReconciliation,
-                    detail: detail,
-                  );
+            if (reconciliationResult.status == 'aborted') {
+              clearOwnedStatus();
+            } else {
+              finishOwnedStatus(
+                reconciliationResult.status == 'ok'
+                    ? PostGenStatusState.done(
+                        sessionId: sessionId,
+                        task: PostGenTask.ledgerReconciliation,
+                        detail: detail,
+                      )
+                    : PostGenStatusState.error(
+                        sessionId: sessionId,
+                        task: PostGenTask.ledgerReconciliation,
+                        detail: detail,
+                      ),
+              );
+            }
           }
           debugPrint(
             '[StudioLedger] reconciliation session=$sessionId '
@@ -260,11 +291,8 @@ class LedgerStage {
                     sessionId,
                     onStage: (stage) {
                       if (!ctx.ref.mounted || !isCurrent()) return;
-                      ctx.ref
-                          .read(postGenStatusProvider.notifier)
-                          .state = PostGenStatusState.running(
-                        sessionId: sessionId,
-                        task: stage == AutomatedCardEvolutionStage.observation
+                      startStatus(
+                        stage == AutomatedCardEvolutionStage.observation
                             ? PostGenTask.cardEvolutionObservation
                             : PostGenTask.cardRewriter,
                       );
@@ -289,17 +317,19 @@ class LedgerStage {
                     ? 'Card Rewriter found no durable card changes'
                     : 'Card Rewriter: ${rewriteOutcome.kind}'
                           '${rewriteOutcome.detail == null ? '' : ' — ${rewriteOutcome.detail}'}';
-                ctx.ref.read(postGenStatusProvider.notifier).state = isFailure
-                    ? PostGenStatusState.error(
-                        sessionId: sessionId,
-                        task: PostGenTask.cardRewriter,
-                        detail: detail,
-                      )
-                    : PostGenStatusState.done(
-                        sessionId: sessionId,
-                        task: PostGenTask.cardRewriter,
-                        detail: detail,
-                      );
+                finishOwnedStatus(
+                  isFailure
+                      ? PostGenStatusState.error(
+                          sessionId: sessionId,
+                          task: PostGenTask.cardRewriter,
+                          detail: detail,
+                        )
+                      : PostGenStatusState.done(
+                          sessionId: sessionId,
+                          task: PostGenTask.cardRewriter,
+                          detail: detail,
+                        ),
+                );
               }
               if (!isCurrent()) return;
             }
@@ -308,14 +338,7 @@ class LedgerStage {
         }
       }
 
-      if (ctx.ref.mounted) {
-        ctx.ref
-            .read(postGenStatusProvider.notifier)
-            .state = PostGenStatusState.running(
-          sessionId: sessionId,
-          task: PostGenTask.ledger,
-        );
-      }
+      startStatus(PostGenTask.ledger);
 
       final result = await service.run(
         sessionId: sessionId,
@@ -331,6 +354,8 @@ class LedgerStage {
         cancelToken: cancelToken,
         ledgerBlocks: studioPreset?.blocks ?? const [],
         macroCtx: ledgerMacroCtx,
+        engine: ledgerEngine,
+        operationIdentity: 'automatic:$genId',
       );
 
       await _recordDiag(
@@ -352,19 +377,23 @@ class LedgerStage {
 
       if (ctx.ref.mounted) {
         final detail = 'Ledger ${result.status} (ops=${result.opsApplied})';
-        ctx.ref
-            .read(postGenStatusProvider.notifier)
-            .state = result.status == 'ok'
-            ? PostGenStatusState.done(
-                sessionId: sessionId,
-                task: PostGenTask.ledger,
-                detail: detail,
-              )
-            : PostGenStatusState.error(
-                sessionId: sessionId,
-                task: PostGenTask.ledger,
-                detail: detail,
-              );
+        if (result.status == 'aborted') {
+          clearOwnedStatus();
+        } else {
+          finishOwnedStatus(
+            result.status == 'ok'
+                ? PostGenStatusState.done(
+                    sessionId: sessionId,
+                    task: PostGenTask.ledger,
+                    detail: detail,
+                  )
+                : PostGenStatusState.error(
+                    sessionId: sessionId,
+                    task: PostGenTask.ledger,
+                    detail: detail,
+                  ),
+          );
+        }
       }
 
       if (ledgerStatusToOp(result.status).isFailure) {
@@ -396,12 +425,33 @@ class LedgerStage {
         targetMessage: targetMessage,
         result: LedgerRunResult(status: 'error', error: 'trigger error: $e'),
       );
+      if (ownedRunningStatus != null) {
+        finishOwnedStatus(
+          PostGenStatusState.error(
+            sessionId: sessionId,
+            task: ownedRunningStatus!.task,
+            detail: 'Studio Ledger stopped: $e',
+          ),
+        );
+      }
       GlazeToast.showWithoutContext(
         'Studio Ledger failed. Open Agentic Ops -> Last turn to inspect or rerun.',
         duration: 5000,
         position: ToastPosition.top,
         isError: true,
       );
+    } finally {
+      // Covers cancellation and exceptions in catch-side diagnostics. Identity
+      // plus session/task checks ensure an older run cannot clear a newer one.
+      if (ownedRunningStatus != null && ownsRunningStatus()) {
+        finishOwnedStatus(
+          PostGenStatusState.error(
+            sessionId: sessionId,
+            task: ownedRunningStatus!.task,
+            detail: 'Studio Ledger stopped before completion',
+          ),
+        );
+      }
     }
   }
 
@@ -553,3 +603,12 @@ class LedgerStage {
         );
   }
 }
+
+/// Engine gating is deliberately independent of generation-time Ledger prompt
+/// projection. Projection opt-out controls main-generation context only; this
+/// controls post-generation reconciliation/Card Rewriter automation only.
+@visibleForTesting
+bool shouldRunAutomaticLedgerReconciliation({
+  required StudioLedgerEngine engine,
+  required bool isManualRerun,
+}) => !isManualRerun && engine == StudioLedgerEngine.currentReconciled;

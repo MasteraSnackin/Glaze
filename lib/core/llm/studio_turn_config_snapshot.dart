@@ -81,11 +81,11 @@ class StudioTurnConfigSnapshot {
           : (preset?.cleanerApiConfigId ?? ''),
       fallback: activeApiConfig,
       errorLabel: errorLabel,
-      modelOverride: model.isNotEmpty
-          ? model
-          : pipelineSettings.cleaner.postCleanerModel,
-      extraRequestParameterOverrides:
-          pipelineSettings.cleaner.postCleanerExtraRequestParameters,
+      // A configured Ledger route is independent from cleaner tuning. The
+      // cleaner model/extra parameters are inherited only by the complete
+      // legacy fallback above (neither a Ledger slot nor model is configured).
+      modelOverride: model,
+      extraRequestParameterOverrides: const [],
       useResponsesApi: useResponsesApi,
     );
   }

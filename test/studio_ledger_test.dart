@@ -188,6 +188,21 @@ void main() {
       expect(result.export, isNull);
       expect(result.rejectionReason, contains('all ops rejected'));
     });
+
+    test('legacy per-turn compatibility profile is parser-compatible', () {
+      final prompt = const StudioLedgerPrompt().buildLegacyTurnOnly(
+        finalAssistantText: 'Lucy closes the door.',
+        recentHistoryText: 'User: Leave now.',
+        currentTrackers: const [],
+        recentMemoryEntries: const [],
+      );
+
+      expect(prompt, contains('<glaze_memory_export>'));
+      expect(prompt, contains('{"ops":[],"knowledgeFacts":[]}'));
+      expect(prompt, contains('Allowed ops: set, delete'));
+      expect(prompt, isNot(contains('rename_entity')));
+      expect(prompt, isNot(contains('accepted assistant prose as evidence')));
+    });
   });
 
   group('Ledger reconciliation', () {
@@ -804,6 +819,28 @@ $_validJson
       final result = parser.parse(bad);
       expect(result.export, isNull);
       expect(result.wasRejected, isTrue);
+      expect(result.failure, LedgerParseFailure.incompleteJson);
+    });
+
+    test('distinguishes missing, malformed, and semantic rejection', () {
+      expect(
+        parser.parse('no block').failure,
+        LedgerParseFailure.missingExport,
+      );
+      expect(
+        parser
+            .parse('<glaze_memory_export>{not json}</glaze_memory_export>')
+            .failure,
+        LedgerParseFailure.malformedJson,
+      );
+      expect(
+        parser
+            .parse(
+              '<glaze_memory_export>{"ops":[{"op":"bad"}]}</glaze_memory_export>',
+            )
+            .failure,
+        LedgerParseFailure.semanticSchema,
+      );
     });
 
     test('normalizes non-string LLM fields before generated parsing', () {

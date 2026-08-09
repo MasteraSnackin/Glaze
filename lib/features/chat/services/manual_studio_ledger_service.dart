@@ -78,6 +78,7 @@ abstract interface class StudioLedgerExecutor {
     required ChatMessage target,
     required MacroContext macroCtx,
     required FutureOr<bool> Function() isStillCurrent,
+    required StudioLedgerEngine engine,
   });
 
   Future<LedgerRunResult> reconcile({
@@ -105,6 +106,7 @@ class DefaultStudioLedgerExecutor implements StudioLedgerExecutor {
     required ChatMessage target,
     required MacroContext macroCtx,
     required FutureOr<bool> Function() isStillCurrent,
+    required StudioLedgerEngine engine,
   }) {
     return _service.run(
       sessionId: sessionId,
@@ -120,6 +122,9 @@ class DefaultStudioLedgerExecutor implements StudioLedgerExecutor {
       macroCtx: macroCtx,
       isStillCurrent: isStillCurrent,
       commitSnapshot: true,
+      engine: engine,
+      operationIdentity:
+          'manual:${target.id}:${target.swipeId}:${target.agentSwipeId}',
     );
   }
 
@@ -140,6 +145,9 @@ class DefaultStudioLedgerExecutor implements StudioLedgerExecutor {
       ledgerBlocks: turnConfig.preset?.blocks ?? const [],
       macroCtx: macroCtx,
       isStillCurrent: isStillCurrent,
+      operationIdentity:
+          'manual:${plan.rangeHash}:${plan.endMessage.id}:'
+          '${plan.endMessage.swipeId}:${plan.endMessage.agentSwipeId}',
     );
   }
 }
@@ -207,6 +215,9 @@ class ManualStudioLedgerService {
         target: target,
         macroCtx: macroCtx,
         isStillCurrent: isTargetCurrent,
+        engine:
+            turnConfig.preset?.runtime.ledgerEngine ??
+            StudioLedgerEngine.currentReconciled,
       ),
     );
     if (!await isTargetCurrent()) {

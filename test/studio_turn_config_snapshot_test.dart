@@ -9,6 +9,8 @@ import 'package:glaze_flutter/core/llm/studio/agent_config_resolver.dart';
 import 'package:glaze_flutter/core/llm/studio_turn_config_snapshot.dart';
 import 'package:glaze_flutter/core/models/api_config.dart';
 import 'package:glaze_flutter/core/models/cleaner_settings.dart';
+import 'package:glaze_flutter/core/models/extra_request_parameter.dart';
+import 'package:glaze_flutter/core/models/ledger_settings.dart';
 import 'package:glaze_flutter/core/models/pipeline_settings.dart';
 import 'package:glaze_flutter/core/models/studio_agent_settings.dart';
 import 'package:glaze_flutter/core/models/studio_config.dart';
@@ -336,6 +338,83 @@ void main() {
 
     expect(resolved.endpoint, oldApi.endpoint);
     expect(resolved.model, 'snapshot-model');
+  });
+
+  test('dedicated Ledger slot is not overridden by cleaner routing', () {
+    const cleaner = ApiConfig(
+      id: 'cleaner',
+      endpoint: 'https://cleaner.example',
+      model: 'cleaner-model',
+    );
+    const ledger = ApiConfig(
+      id: 'ledger',
+      endpoint: 'https://ledger.example',
+      model: 'ledger-model',
+    );
+    final snapshot = StudioTurnConfigSnapshot(
+      config: const StudioConfig(sessionId: 'session', enabled: true),
+      preset: const StudioPreset(
+        id: 'preset',
+        cleanerApiConfigId: 'cleaner',
+        ledgerApiConfigId: 'ledger',
+      ),
+      pipelineSettings: const PipelineSettings(),
+      apiConfigs: const [cleaner, ledger],
+      activeApiConfig: cleaner,
+    );
+
+    final resolved = snapshot.resolveLedgerConfig(errorLabel: 'test-ledger');
+    expect(resolved.endpoint, ledger.endpoint);
+    expect(resolved.model, ledger.model);
+  });
+
+  test('dedicated Ledger slot keeps its model and excludes cleaner extras', () {
+    const cleanerExtra = ExtraRequestParameter(key: 'cleaner_only', value: '1');
+    final snapshot = StudioTurnConfigSnapshot(
+      config: const StudioConfig(sessionId: 'session', enabled: true),
+      preset: const StudioPreset(
+        id: 'preset',
+        cleanerApiConfigId: 'cleaner',
+        ledgerApiConfigId: 'ledger',
+      ),
+      pipelineSettings: const PipelineSettings(
+        cleaner: CleanerSettings(
+          postCleanerModel: 'cleaner-override',
+          postCleanerExtraRequestParameters: [cleanerExtra],
+        ),
+      ),
+      apiConfigs: const [
+        ApiConfig(id: 'cleaner', model: 'cleaner-model'),
+        ApiConfig(id: 'ledger', model: 'ledger-model'),
+      ],
+      activeApiConfig: null,
+    );
+
+    final resolved = snapshot.resolveLedgerConfig(errorLabel: 'ledger');
+    expect(resolved.model, 'ledger-model');
+    expect(resolved.extraRequestParameters, isEmpty);
+  });
+
+  test('Ledger model-only route uses cleaner slot without cleaner extras', () {
+    final snapshot = StudioTurnConfigSnapshot(
+      config: const StudioConfig(sessionId: 'session', enabled: true),
+      preset: const StudioPreset(id: 'preset', cleanerApiConfigId: 'cleaner'),
+      pipelineSettings: const PipelineSettings(
+        cleaner: CleanerSettings(
+          postCleanerModel: 'cleaner-override',
+          postCleanerExtraRequestParameters: [
+            ExtraRequestParameter(key: 'cleaner_only', value: '1'),
+          ],
+        ),
+        ledger: LedgerSettings(studioLedgerModel: 'ledger-override'),
+      ),
+      apiConfigs: const [ApiConfig(id: 'cleaner', model: 'cleaner-model')],
+      activeApiConfig: null,
+    );
+
+    final resolved = snapshot.resolveLedgerConfig(errorLabel: 'ledger');
+    expect(resolved.model, 'ledger-override');
+    expect(resolved.extraRequestParameters, isEmpty);
   });
 
   test(

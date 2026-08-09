@@ -223,14 +223,23 @@ class OpenAiChatTransport implements ChatTransport {
     var doneReceived = false;
     String? lastRawJsonPayload;
 
+    Future<void> finishAfterCancel([Object? error, StackTrace? stack]) async {
+      await subscription?.cancel();
+      if (completer.isCompleted) return;
+      if (error == null) {
+        completer.complete();
+      } else {
+        completer.completeError(error, stack);
+      }
+    }
+
     subscription = (responseStream as Stream<List<int>>).listen(
       (chunk) {
         if (cancelToken?.isCancelled == true) {
           debugPrint(
             '[SSE] cancel detected in listen callback, stopping stream',
           );
-          subscription?.cancel();
-          if (!completer.isCompleted) completer.complete();
+          unawaited(finishAfterCancel());
           return;
         }
         buffer += utf8.decode(chunk, allowMalformed: true);
@@ -243,8 +252,7 @@ class OpenAiChatTransport implements ChatTransport {
               '[SSE] cancel detected while parsing lines, stopping immediately',
             );
             buffer = '';
-            subscription?.cancel();
-            if (!completer.isCompleted) completer.complete();
+            unawaited(finishAfterCancel());
             return;
           }
           final trimmed = line.trim();
@@ -267,8 +275,7 @@ class OpenAiChatTransport implements ChatTransport {
               );
               doneReceived = true;
             }
-            subscription?.cancel();
-            if (!completer.isCompleted) completer.complete();
+            unawaited(finishAfterCancel());
             return;
           }
 
@@ -302,25 +309,19 @@ class OpenAiChatTransport implements ChatTransport {
           } catch (_) {}
         }
       },
-      onDone: () {
-        if (!completer.isCompleted) completer.complete();
-      },
-      onError: (Object e) {
-        if (!completer.isCompleted) {
-          completer.completeError(e);
-        }
-      },
+      onDone: () => unawaited(finishAfterCancel()),
+      onError: (Object e, StackTrace stack) =>
+          unawaited(finishAfterCancel(e, stack)),
       cancelOnError: true,
     );
 
     if (cancelToken != null) {
       unawaited(
-        cancelToken.whenCancel.then((_) {
+        cancelToken.whenCancel.then((_) async {
           debugPrint(
             '[SSE] CancelToken fired — cancelling stream subscription',
           );
-          subscription?.cancel();
-          if (!completer.isCompleted) completer.complete();
+          await finishAfterCancel();
         }),
       );
     }

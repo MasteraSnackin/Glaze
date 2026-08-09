@@ -6,8 +6,11 @@ import '../models/pipeline_settings.dart';
 import '../models/extra_request_parameter.dart';
 import 'aux_retry_runner.dart';
 import 'idle_timeout_guard.dart';
+import 'transport/chat_transport.dart';
 import 'transport/chat_transport_request.dart';
 import 'transport/transport_factory.dart';
+
+typedef AuxTransportPicker = ChatTransport Function(String protocol);
 
 /// Resolved auxiliary API configuration for a non-streaming LLM call.
 class AuxApiConfig {
@@ -55,7 +58,13 @@ class AuxApiConfig {
 /// );
 /// ```
 class AuxLlmClient {
-  const AuxLlmClient();
+  final AuxTransportPicker transportPicker;
+  final AuxRetryPolicy retryPolicy;
+
+  const AuxLlmClient({
+    this.transportPicker = pickChatTransport,
+    this.retryPolicy = const AuxRetryPolicy(),
+  });
 
   /// Resolves the post-cleaner timeout from settings.
   ///
@@ -140,16 +149,16 @@ class AuxLlmClient {
     if (config.endpoint.isEmpty || config.model.isEmpty) {
       throw Exception('Aux API not configured');
     }
-    final runner = const AuxRetryRunner();
+    final runner = AuxRetryRunner(policy: retryPolicy);
     return runner.run(
       cancelToken: cancelToken,
-      attempt: (i) => _callOnce(
+      attemptWithCancelToken: (i, attemptCancelToken) => _callOnce(
         config: config,
         prompt: prompt,
         maxTokens: maxTokens,
         temperature: temperature,
         timeoutMs: timeoutMs,
-        cancelToken: cancelToken,
+        cancelToken: attemptCancelToken,
         omitReasoning: omitReasoning,
         omitReasoningEffort: omitReasoningEffort,
         requestReasoning: requestReasoning,
@@ -186,16 +195,16 @@ class AuxLlmClient {
     if (config.endpoint.isEmpty || config.model.isEmpty) {
       throw Exception('Aux API not configured');
     }
-    final runner = const AuxRetryRunner();
+    final runner = AuxRetryRunner(policy: retryPolicy);
     return runner.run(
       cancelToken: cancelToken,
-      attempt: (i) => _callStream(
+      attemptWithCancelToken: (i, attemptCancelToken) => _callStream(
         config: config,
         prompt: prompt,
         maxTokens: maxTokens,
         temperature: temperature,
         timeoutMs: timeoutMs,
-        cancelToken: cancelToken,
+        cancelToken: attemptCancelToken,
         onChunk: onChunk,
         omitReasoning: omitReasoning,
         omitReasoningEffort: omitReasoningEffort,
@@ -245,22 +254,29 @@ class AuxLlmClient {
     bool omitReasoningEffort = true,
     bool requestReasoning = false,
   }) async {
-    final completer = Completer<String>();
-    final transport = pickChatTransport(config.protocol);
+    final transport = transportPicker(config.protocol);
+    String? result;
+    Object? transportError;
+    var callbackReceived = false;
+    var acceptingCallbacks = true;
+    var timedOut = false;
 
     // Idle timeout: cancel the timer on the first chunk (text OR reasoning)
     // so a long (but progressing) generation is never cut off. Mirrors
     // AgentStreamRunner's pattern.
     final guard = IdleTimeoutGuard(timeoutMs, () {
-      if (!completer.isCompleted) {
-        completer.completeError(
-          TimeoutException('Aux call timed out (idle) after ${timeoutMs}ms'),
-        );
+      if (acceptingCallbacks) {
+        timedOut = true;
+        acceptingCallbacks = false;
+        cancelToken?.cancel('Aux call idle timeout');
       }
     });
 
-    unawaited(
-      transport.stream(
+    try {
+      // Deliberately await the transport itself, not a callback completer. On
+      // timeout the request is cancelled above and fully drained here before
+      // this attempt may return and the retry runner may start another one.
+      await transport.stream(
         request: ChatTransportRequest(
           endpoint: config.endpoint,
           apiKey: config.apiKey,
@@ -281,22 +297,39 @@ class AuxLlmClient {
         ),
         cancelToken: cancelToken,
         onUpdate: (delta, reasoningDelta) {
+          if (!acceptingCallbacks || cancelToken?.isCancelled == true) return;
           if (delta.isNotEmpty || reasoningDelta?.isNotEmpty == true) {
             guard.cancel();
           }
         },
         onComplete: (text, _, {rawResponseJson}) {
           guard.dispose();
-          if (!completer.isCompleted) completer.complete(text);
+          if (!acceptingCallbacks || cancelToken?.isCancelled == true) return;
+          callbackReceived = true;
+          result = text;
         },
         onError: (error) {
           guard.dispose();
-          if (!completer.isCompleted) completer.completeError(error);
+          if (!acceptingCallbacks || cancelToken?.isCancelled == true) return;
+          callbackReceived = true;
+          transportError = error;
         },
-      ),
-    );
-
-    return completer.future.whenComplete(guard.dispose);
+      );
+    } catch (e) {
+      if (acceptingCallbacks) transportError = e;
+    } finally {
+      acceptingCallbacks = false;
+      guard.dispose();
+    }
+    if (timedOut) {
+      throw TimeoutException('Aux call timed out (idle) after ${timeoutMs}ms');
+    }
+    if (cancelToken?.isCancelled == true) throw cancelToken!.cancelError!;
+    if (transportError != null) throw transportError!;
+    if (!callbackReceived) {
+      throw StateError('Aux transport ended without a result');
+    }
+    return result ?? '';
   }
 
   /// Streaming variant of [_callOnce]. Calls `transport.stream` with
@@ -314,23 +347,27 @@ class AuxLlmClient {
     bool omitReasoningEffort = true,
     bool requestReasoning = false,
   }) async {
-    final completer = Completer<String>();
-    final transport = pickChatTransport(config.protocol);
+    final transport = transportPicker(config.protocol);
     final accumulated = StringBuffer();
+    String? result;
+    Object? transportError;
+    var callbackReceived = false;
+    var acceptingCallbacks = true;
+    var timedOut = false;
 
     // Idle timeout: cancel the timer on the first chunk (text OR reasoning)
     // so a long (but progressing) generation is never cut off. Mirrors
     // AgentStreamRunner's pattern.
     final guard = IdleTimeoutGuard(timeoutMs, () {
-      if (!completer.isCompleted) {
-        completer.completeError(
-          TimeoutException('Aux stream timed out (idle) after ${timeoutMs}ms'),
-        );
+      if (acceptingCallbacks) {
+        timedOut = true;
+        acceptingCallbacks = false;
+        cancelToken?.cancel('Aux stream idle timeout');
       }
     });
 
-    unawaited(
-      transport.stream(
+    try {
+      await transport.stream(
         request: ChatTransportRequest(
           endpoint: config.endpoint,
           apiKey: config.apiKey,
@@ -347,14 +384,16 @@ class AuxLlmClient {
           omitReasoning: omitReasoning,
           omitReasoningEffort: omitReasoningEffort,
           extraRequestParameters: config.extraRequestParameters,
+          receiveTimeoutMs: timeoutMs,
         ),
         cancelToken: cancelToken,
         onUpdate: (delta, reasoningDelta) {
+          if (!acceptingCallbacks || cancelToken?.isCancelled == true) return;
           if (delta.isNotEmpty) {
             guard.cancel();
             accumulated.write(delta);
             final text = accumulated.toString();
-            if (onChunk != null && !completer.isCompleted) {
+            if (onChunk != null) {
               try {
                 onChunk(text);
               } catch (_) {
@@ -371,18 +410,19 @@ class AuxLlmClient {
           // like trimming or final newline normalization). Fall back to our
           // own accumulation if the transport returned empty.
           final finalText = text.isNotEmpty ? text : accumulated.toString();
-          if (!completer.isCompleted) {
+          if (acceptingCallbacks && cancelToken?.isCancelled != true) {
             if (onChunk != null && finalText != accumulated.toString()) {
               try {
                 onChunk(finalText);
               } catch (_) {}
             }
-            completer.complete(finalText);
+            callbackReceived = true;
+            result = finalText;
           }
         },
         onError: (error) {
           guard.dispose();
-          if (!completer.isCompleted) {
+          if (acceptingCallbacks && cancelToken?.isCancelled != true) {
             // Flush any partially-accumulated text to the chunk callback so
             // callers that rely on the onChunk side-channel (e.g. the cleaner's
             // _lastStreamedText partial-save) can recover content that arrived
@@ -396,12 +436,27 @@ class AuxLlmClient {
                 // Callback errors must not mask the real transport error.
               }
             }
-            completer.completeError(error);
+            callbackReceived = true;
+            transportError = error;
           }
         },
-      ),
-    );
-
-    return completer.future.whenComplete(guard.dispose);
+      );
+    } catch (e) {
+      if (acceptingCallbacks) transportError = e;
+    } finally {
+      acceptingCallbacks = false;
+      guard.dispose();
+    }
+    if (timedOut) {
+      throw TimeoutException(
+        'Aux stream timed out (idle) after ${timeoutMs}ms',
+      );
+    }
+    if (cancelToken?.isCancelled == true) throw cancelToken!.cancelError!;
+    if (transportError != null) throw transportError!;
+    if (!callbackReceived) {
+      throw StateError('Aux stream transport ended without a result');
+    }
+    return result ?? accumulated.toString();
   }
 }

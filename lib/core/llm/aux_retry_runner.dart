@@ -99,9 +99,14 @@ class AuxRetryRunner {
   /// success. [cancelToken] is checked between attempts; if cancelled, the
   /// loop exits early with [AgentOperationStatus.aborted].
   Future<AuxCallOutcome> run({
-    required Future<String> Function(int attempt) attempt,
+    Future<String> Function(int attempt)? attempt,
+    Future<String> Function(int attempt, CancelToken cancelToken)?
+    attemptWithCancelToken,
     CancelToken? cancelToken,
   }) async {
+    if ((attempt == null) == (attemptWithCancelToken == null)) {
+      throw ArgumentError('Provide exactly one attempt callback');
+    }
     final sw = Stopwatch()..start();
     final attemptsLog = <AgentOperationAttempt>[];
     Object? lastError;
@@ -140,16 +145,32 @@ class AuxRetryRunner {
         }
       }
 
+      final attemptStartedAtMs = DateTime.now().millisecondsSinceEpoch;
       final attemptSw = Stopwatch()..start();
+      // Every attempt gets its own token. This lets an attempt cancel only its
+      // transport (for example on a local idle timeout), while parent
+      // cancellation still propagates to the currently active request.
+      final attemptCancelToken = CancelToken();
+      if (cancelToken != null) {
+        unawaited(
+          cancelToken.whenCancel.then((_) {
+            if (!attemptCancelToken.isCancelled) {
+              attemptCancelToken.cancel(cancelToken.cancelError);
+            }
+          }),
+        );
+      }
       try {
-        final text = await attempt(i);
+        final text = attemptWithCancelToken != null
+            ? await attemptWithCancelToken(i, attemptCancelToken)
+            : await attempt!(i);
         attemptSw.stop();
         attemptsLog.add(
           AgentOperationAttempt(
             attempt: i + 1,
             statusCode: 200,
             status: 'ok',
-            startedAtMs: DateTime.now().millisecondsSinceEpoch,
+            startedAtMs: attemptStartedAtMs,
             elapsedMs: attemptSw.elapsedMilliseconds,
           ),
         );
@@ -157,7 +178,9 @@ class AuxRetryRunner {
       } catch (e) {
         attemptSw.stop();
         lastError = e;
-        attemptsLog.add(_logError(i, e, attemptSw.elapsedMilliseconds));
+        attemptsLog.add(
+          _logError(i, e, attemptStartedAtMs, attemptSw.elapsedMilliseconds),
+        );
         if (cancelToken?.isCancelled ?? false) {
           return _finish(
             AgentOperationStatus.aborted,
@@ -225,7 +248,12 @@ class AuxRetryRunner {
     return AgentOperationStatus.error;
   }
 
-  static AgentOperationAttempt _logError(int attempt, Object e, int elapsedMs) {
+  static AgentOperationAttempt _logError(
+    int attempt,
+    Object e,
+    int startedAtMs,
+    int elapsedMs,
+  ) {
     int code = 0;
     String statusLabel = 'error';
     if (e is TimeoutException) {
@@ -253,7 +281,7 @@ class AuxRetryRunner {
       statusCode: code,
       status: statusLabel,
       error: trimmed,
-      startedAtMs: DateTime.now().millisecondsSinceEpoch,
+      startedAtMs: startedAtMs,
       elapsedMs: elapsedMs,
     );
   }
