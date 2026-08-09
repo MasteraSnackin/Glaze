@@ -89,11 +89,11 @@ PromptResult buildPrompt(PromptPayload payload) {
     baselineMaterialization,
   );
 
-  // Disabled, legacy, shadow, and unknown-freshness callers are deliberately
-  // single pass. Only proven-current gap filler enters the frozen two-pass
-  // coordinator below.
-  if (mode != LedgerPromptInjectionMode.gapFiller ||
-      !payload.ledgerProjectionFreshnessProvenCurrent) {
+  // Disabled and shadow callers remain single pass. Both user-facing modes
+  // take the same frozen visible window for relevance; only Gap Filler may
+  // additionally suppress facts already covered by that history.
+  if (mode == LedgerPromptInjectionMode.disabled ||
+      mode == LedgerPromptInjectionMode.shadow) {
     return _buildPromptOnce(baselinePayload);
   }
 
@@ -122,13 +122,19 @@ PromptResult buildPrompt(PromptPayload payload) {
         for (final message in clamped) message.id: message.swipeId,
       },
       focalUserName: payload.persona?.name ?? '',
-      freshness: LedgerProjectionFreshness.provenCurrent,
+      freshness: payload.ledgerProjectionFreshnessProvenCurrent
+          ? LedgerProjectionFreshness.provenCurrent
+          : LedgerProjectionFreshness.unknown,
     ),
     sessionId: payload.sessionId ?? '',
     latestUserText: _latestLedgerText(clamped, 'user'),
     latestAssistantText: _latestLedgerText(clamped, 'assistant'),
   );
   final rebuilt = _buildPromptOnce(payload.withLedgerMaterialization(selected));
+  // Legacy uses relevance only, so it cannot suppress based on source
+  // coverage. Gap Filler verifies that coverage evidence still survives the
+  // second build before accepting its selected result.
+  if (mode != LedgerPromptInjectionMode.gapFiller) return rebuilt;
   final suppressionEvidence = selected.diagnostics
       .where((item) => !item.selected)
       .expand((item) => item.matchingSourceIds)

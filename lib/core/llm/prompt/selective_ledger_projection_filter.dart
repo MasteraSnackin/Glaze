@@ -115,14 +115,6 @@ abstract final class SelectiveLedgerProjectionFilter {
         ],
       );
     }
-    if (mode == LedgerPromptInjectionMode.legacy) {
-      return SelectiveLedgerProjectionResult(
-        projection: input.projection,
-        selectiveProjection: input.projection,
-        diagnostics: const [],
-      );
-    }
-
     final visible = {
       for (final message in input.visibleMessages)
         if ((message.role == 'user' || message.role == 'assistant') &&
@@ -143,6 +135,31 @@ abstract final class SelectiveLedgerProjectionFilter {
               (message) => _literalEntity(message.content, entity),
             ),
           ),
+        );
+    // A current scene can be represented by tracker state without having a
+    // matching Character Knowledge fact. Tracker keys use canonical IDs while
+    // chat commonly uses display names in another language, so an entity-name
+    // comparison alone is not reliable. A tracker anchored in the causal
+    // window is equally explicit current-scene evidence.
+    final trackerRelevanceActive = groups
+        .where((group) => group.trackers.isNotEmpty)
+        .any(
+          (group) =>
+              group.entities.any(
+                (entity) => causalWindow.any(
+                  (message) => _literalEntity(message.content, entity),
+                ),
+              ) ||
+              group.sources.any(
+                (source) => causalWindow.any(
+                  (message) =>
+                      source.messageId == message.id &&
+                      (source.swipeId == null ||
+                          source.swipeId ==
+                              (input.selectedSwipeByMessageId[message.id] ??
+                                  message.swipeId)),
+                ),
+              ),
         );
     final selectedFacts = <CharacterKnowledgeFact>[];
     final selectedTrackers = <Tracker>[];
@@ -166,7 +183,8 @@ abstract final class SelectiveLedgerProjectionFilter {
         input.freshness,
         manualTargets,
         causalWindow,
-        factRelevanceActive,
+        factRelevanceActive || trackerRelevanceActive,
+        mode != LedgerPromptInjectionMode.legacy,
       );
       diagnostics.add(
         LedgerProjectionDiagnostic(
@@ -206,7 +224,11 @@ abstract final class SelectiveLedgerProjectionFilter {
       final durable =
           transition.affectedTrackerKeys.any(_isCriticalTrackerKey) ||
           _looksDurableScope(transition.semanticScopeKey);
+      // Relevance applies to facts only. Legacy keeps the established complete
+      // transition contract; Gap Filler may omit a non-durable transition when
+      // every affected current-state group is absent.
       final selected =
+          mode == LedgerPromptInjectionMode.legacy ||
           input.freshness == LedgerProjectionFreshness.unknown ||
           (durable &&
               (targetGroups.isEmpty ||
@@ -230,9 +252,16 @@ abstract final class SelectiveLedgerProjectionFilter {
       facts: selectedFacts,
       trackers: selectedTrackers,
       transitions: transitions,
-      claims: transitions.map((item) => item.claim).toList(growable: false),
+      // Older isolate payloads can carry only string transition claims. Legacy
+      // must preserve that contract verbatim; structured claims are selected
+      // independently for Gap Filler.
+      claims: mode == LedgerPromptInjectionMode.legacy
+          ? input.projection.unblockedTransitionClaims
+          : transitions.map((item) => item.claim).toList(growable: false),
     );
     return SelectiveLedgerProjectionResult(
+      // Shadow is an internal comparison mode. User-facing modes are:
+      // legacy = relevance only; gapFiller = relevance plus history coverage.
       projection: mode == LedgerPromptInjectionMode.shadow
           ? input.projection
           : selective,
@@ -329,6 +358,7 @@ _Decision _decide(
   Set<String> manualTargets,
   List<ChatMessage> causalWindow,
   bool factRelevanceActive,
+  bool allowHistoryCoverage,
 ) {
   if (group.tier == LedgerProjectionDeliveryTier.excluded) {
     return const _Decision(
@@ -340,9 +370,28 @@ _Decision _decide(
       group.trackers.any((item) => manualTargets.contains(item.name))) {
     return const _Decision(true, LedgerProjectionDecisionReason.selected);
   }
-  // Unknown freshness intentionally performs validity filtering only. This is
-  // the conservative plan §616-618 fallback: no history-based suppression.
-  if (freshness == LedgerProjectionFreshness.unknown) {
+  // Non-critical facts are durable context, but should not pull an unrelated
+  // character or plot thread back into the immediate scene. Relevance is
+  // independent of the selected delivery mode; only coverage is Gap-Filler
+  // specific. This deliberately uses only the newest conversational exchange.
+  if (group.facts.isNotEmpty &&
+      factRelevanceActive &&
+      (group.factRelevanceEntities.isNotEmpty ||
+          group.factRelevanceDependsOnlyOnFocalUser) &&
+      causalWindow.isNotEmpty &&
+      !group.factRelevanceEntities.any(
+        (entity) => causalWindow.any(
+          (message) => _literalEntity(message.content, entity),
+        ),
+      )) {
+    return const _Decision(
+      false,
+      LedgerProjectionDecisionReason.notRelevantToCausalWindow,
+    );
+  }
+  // Unknown freshness never permits history-based suppression, but it does
+  // not disable the independent relevance filter above.
+  if (!allowHistoryCoverage || freshness == LedgerProjectionFreshness.unknown) {
     return const _Decision(true, LedgerProjectionDecisionReason.selected);
   }
   final visibleSources =
@@ -382,24 +431,6 @@ _Decision _decide(
     return const _Decision(
       false,
       LedgerProjectionDecisionReason.visibleEntityCoverage,
-    );
-  }
-  // Non-critical facts are durable context, but should not pull an unrelated
-  // character or plot thread back into the immediate scene. This deliberately
-  // uses only the newest conversational exchange, not the full history.
-  if (group.facts.isNotEmpty &&
-      factRelevanceActive &&
-      (group.factRelevanceEntities.isNotEmpty ||
-          group.factRelevanceDependsOnlyOnFocalUser) &&
-      causalWindow.isNotEmpty &&
-      !group.factRelevanceEntities.any(
-        (entity) => causalWindow.any(
-          (message) => _literalEntity(message.content, entity),
-        ),
-      )) {
-    return const _Decision(
-      false,
-      LedgerProjectionDecisionReason.notRelevantToCausalWindow,
     );
   }
   return const _Decision(true, LedgerProjectionDecisionReason.selected);

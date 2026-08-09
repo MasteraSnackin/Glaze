@@ -28,7 +28,7 @@ void main() {
       );
     });
 
-    test('legacy returns the identical projection instance', () {
+    test('legacy keeps facts when no causal relevance signal exists', () {
       final projection = _projection(facts: [_fact()]);
       final result = _select(
         projection,
@@ -37,8 +37,52 @@ void main() {
           mode: LedgerPromptInjectionMode.legacy,
         ),
       );
-      expect(identical(result.projection, projection), isTrue);
-      expect(result.diagnostics, isEmpty);
+      expect(result.projection.facts.map((fact) => fact.id), ['fact-1']);
+      expect(result.diagnostics, isNotEmpty);
+    });
+
+    test('legacy applies relevance but does not suppress visible source', () {
+      final projection = _projection(
+        facts: [
+          _fact(
+            id: 'chloe',
+            source: 'm1',
+            subjectKey: 'chloe',
+            subjectName: 'Chloe',
+          ),
+          _fact(
+            id: 'gilda',
+            source: 'm0',
+            subjectKey: 'gilda',
+            subjectName: 'Gilda',
+          ),
+        ],
+      );
+      final result = _select(
+        projection,
+        policy: const LedgerPromptInjectionPolicy(
+          presetOptIn: true,
+          mode: LedgerPromptInjectionMode.legacy,
+        ),
+        visible: [
+          _message('m1', 'Chloe asks about training.'),
+          _message('m2', 'The pool is open tomorrow.'),
+        ],
+      );
+
+      expect(result.projection.facts.map((fact) => fact.id), ['chloe']);
+      expect(
+        result.diagnostics
+            .firstWhere((item) => item.groupId.contains('chloe'))
+            .reason,
+        LedgerProjectionDecisionReason.selected,
+      );
+      expect(
+        result.diagnostics
+            .firstWhere((item) => item.groupId.contains('gilda'))
+            .reason,
+        LedgerProjectionDecisionReason.notRelevantToCausalWindow,
+      );
     });
 
     test('shadow diagnoses source coverage but outputs legacy', () {
@@ -234,6 +278,46 @@ void main() {
     });
 
     test(
+      'current tracker entity activates fact relevance without a matching fact',
+      () {
+        final result = _select(
+          _projection(
+            facts: [
+              _fact(
+                id: 'engagement',
+                subjectKey: 'danvi',
+                subjectName: 'Danvi',
+              ),
+              _fact(id: 'audi', subjectKey: 'gilda', subjectName: 'Gilda'),
+            ],
+            trackers: [
+              _tracker(
+                'npc:chloe_brooks.location',
+                'Kitchen with Danvi',
+                provenance: 'message=m2|swipe=0',
+              ),
+            ],
+          ),
+          focalUserName: 'Danvi',
+          visible: [
+            _message('m1', 'Danvi and Chloe discuss the pool.'),
+            _message('m2', 'Chloe asks about training.'),
+          ],
+        );
+
+        expect(result.projection.facts, isEmpty);
+        expect(
+          result.diagnostics
+              .where((item) => item.groupId.startsWith('fact:'))
+              .map((item) => item.reason),
+          everyElement(
+            LedgerProjectionDecisionReason.notRelevantToCausalWindow,
+          ),
+        );
+      },
+    );
+
+    test(
       'a recently mentioned subject remains relevant across three turns',
       () {
         final result = _select(
@@ -369,9 +453,10 @@ void main() {
     test(
       'mixed validity and criticality are item-level and order independent',
       () {
-        final active = _fact(id: 'active');
+        final active = _fact(id: 'active', subjectName: 'Run');
         final retracted = _fact(
           id: 'retracted',
+          subjectName: 'Run',
           lifecycle: CharacterKnowledgeFactLifecycle.retracted,
         );
         final volatile = _tracker(
