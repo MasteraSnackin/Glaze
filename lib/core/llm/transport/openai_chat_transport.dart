@@ -262,9 +262,8 @@ class OpenAiChatTransport implements ChatTransport {
             unawaited(finishAfterCancel());
             return;
           }
-          final trimmed = line.trim();
-          if (!trimmed.startsWith('data: ')) continue;
-          final data = trimmed.substring(6).trim();
+          final data = _sseData(line);
+          if (data == null) continue;
           if (data == '[DONE]') {
             if (cancelToken != null && cancelToken.isCancelled) {
               debugPrint(
@@ -455,9 +454,8 @@ class OpenAiChatTransport implements ChatTransport {
     var fullText = '';
     var fullReasoning = '';
     for (final line in body.split('\n')) {
-      final trimmed = line.trim();
-      if (!trimmed.startsWith('data: ')) continue;
-      final payload = trimmed.substring(6).trim();
+      final payload = _sseData(line);
+      if (payload == null) continue;
       if (payload == '[DONE]') break;
       try {
         final json = jsonDecode(payload) as Map<String, dynamic>;
@@ -532,6 +530,17 @@ class OpenAiChatTransport implements ChatTransport {
         {'index': 0, 'message': message, 'finish_reason': 'stop'},
       ],
     });
+  }
+
+  /// Extract an SSE data field without trimming its JSON payload. The optional
+  /// single space after `data:` is framing, not content.
+  String? _sseData(String line) {
+    final normalized = line.endsWith('\r')
+        ? line.substring(0, line.length - 1)
+        : line;
+    if (!normalized.startsWith('data:')) return null;
+    final value = normalized.substring(5);
+    return value.startsWith(' ') ? value.substring(1) : value;
   }
 
   @override

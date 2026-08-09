@@ -8,6 +8,8 @@ import 'package:glaze_flutter/core/llm/transport/llm_protocol.dart';
 import 'package:glaze_flutter/core/llm/transport/openai_chat_transport.dart';
 import 'package:glaze_flutter/core/models/extra_request_parameter.dart';
 
+import '_sse_adapter.dart';
+
 ChatTransportRequest _req({
   String endpoint = 'https://api.openai.com',
   String sessionIdMode = 'openrouter',
@@ -210,5 +212,33 @@ void main() {
       expect(body['stream'], isTrue);
       expect(body['messages'], isNotEmpty);
     });
+  });
+
+  test('preserves newlines split across SSE network chunks', () async {
+    const body = '''data:{"choices":[{"delta":{"content":"first\\n"}}]}
+
+data: {"choices":[{"delta":{"content":"\\nsecond"}}]}
+
+data: [DONE]
+
+''';
+    final bodyBytes = utf8.encode(body);
+    final firstNewline = bodyBytes.indexOf(0x0a);
+    final dio = Dio()
+      ..httpClientAdapter = SseAdapter(
+        body,
+        chunkSizes: [firstNewline + 1, 1, 2],
+      );
+    final updates = <String>[];
+    String? completed;
+
+    await OpenAiChatTransport(dio: dio).stream(
+      request: _req(),
+      onUpdate: (delta, _) => updates.add(delta),
+      onComplete: (text, _, {rawResponseJson}) => completed = text,
+    );
+
+    expect(updates, ['first\n', '\nsecond']);
+    expect(completed, 'first\n\nsecond');
   });
 }
