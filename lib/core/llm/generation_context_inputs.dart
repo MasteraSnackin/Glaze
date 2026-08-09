@@ -5,6 +5,8 @@ import '../models/chat_message.dart'
 import '../models/lorebook.dart'
     show Lorebook, LorebookActivations, LorebookEntry, LorebookGlobalSettings;
 import '../models/persona.dart';
+import '../models/ledger_prompt_injection_mode.dart';
+import '../models/ledger_prompt_injection_policy.dart';
 import '../models/preset.dart' show PresetRegex;
 import 'lorebook_scanner.dart' show ScannedEntry;
 import 'memory_excerpt_selector.dart'
@@ -66,6 +68,9 @@ class GenerationContextInputs {
   final int? effectiveCanonRevisionNumber;
   final String? effectiveCanonRevisionHash;
   final String effectiveCanonCacheIdentity;
+  final LedgerPromptInjectionPolicy ledgerPromptInjectionPolicy;
+  final String ledgerInjectionCacheIdentity;
+  final bool ledgerProjectionFreshnessProvenCurrent;
 
   const GenerationContextInputs({
     required this.character,
@@ -112,5 +117,11 @@ class GenerationContextInputs {
     this.effectiveCanonRevisionNumber,
     this.effectiveCanonRevisionHash,
     this.effectiveCanonCacheIdentity = '',
+    this.ledgerPromptInjectionPolicy = const LedgerPromptInjectionPolicy(
+      presetOptIn: true,
+      mode: LedgerPromptInjectionMode.legacy,
+    ),
+    this.ledgerInjectionCacheIdentity = '',
+    this.ledgerProjectionFreshnessProvenCurrent = false,
   });
 }

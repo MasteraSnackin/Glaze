@@ -119,28 +119,28 @@ void main() {
   });
 
   group('studioFinalVisibleMessageIds', () {
-    test('typed Studio window treats zero context size as unlimited', () {
+    test('tracker window uses tracker limiter semantics for zero size', () {
       final ids = StudioStreamInterceptor.computeStudioVisibleMessageIds(const [
         ChatMessage(id: 'one', role: 'user', content: 'one'),
         ChatMessage(id: 'two', role: 'assistant', content: 'two'),
       ], 0);
 
-      expect(ids, {'one', 'two'});
+      expect(ids, {'two'});
     });
 
-    test('returns empty set when finalContextSize is 0', () {
+    test('zero finalContextSize means no count cap', () {
       final ids = StreamGenerationService.computeStudioFinalVisibleMessageIds([
         _msg('m1'),
         _msg('m2'),
       ], 0);
-      expect(ids, isEmpty);
+      expect(ids, {'m1', 'm2'});
     });
 
-    test('returns empty set when finalContextSize is negative', () {
+    test('negative finalContextSize means no count cap', () {
       final ids = StreamGenerationService.computeStudioFinalVisibleMessageIds([
         _msg('m1'),
       ], -5);
-      expect(ids, isEmpty);
+      expect(ids, {'m1'});
     });
 
     test('returns all non-hidden ids when contextSize >= history length', () {
@@ -196,6 +196,26 @@ void main() {
         _msg('only'),
       ], 1);
       expect(ids, {'only'});
+    });
+
+    test('matches final limiter token cap including reasoning', () {
+      final huge = List.filled(250000, 'x').join();
+      final ids = StreamGenerationService.computeStudioFinalVisibleMessageIds(
+        [
+          _msg('old'),
+          ChatMessage(
+            id: 'reasoning-heavy',
+            role: 'assistant',
+            content: 'short',
+            reasoning: huge,
+          ),
+          _msg('latest'),
+        ],
+        10,
+        reasoningHistoryCount: 1,
+      );
+
+      expect(ids, {'latest'});
     });
   });
 }

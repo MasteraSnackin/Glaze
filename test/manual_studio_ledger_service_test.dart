@@ -156,6 +156,23 @@ void main() {
     expect(diagnostic?.value, 'turn=a2 \u2022 manual rerun, ok (ops=2)');
   });
 
+  test('rerun passes the preset-selected Ledger engine', () async {
+    await putSession('session');
+    await presetRepo.put(
+      const StudioPreset(
+        id: 'preset',
+        cleanerApiConfigId: 'cleaner',
+        runtime: StudioRuntimeSettings(
+          ledgerEngine: StudioLedgerEngine.legacyTurnOnly,
+        ),
+      ),
+    );
+
+    await createService().rerun(sessionId: 'session', target: assistant2);
+
+    expect(ledger.lastEngine, StudioLedgerEngine.legacyTurnOnly);
+  });
+
   test(
     'reconciliation selects the latest committed visible endpoint',
     () async {
@@ -284,6 +301,7 @@ class _FakeLedgerExecutor implements StudioLedgerExecutor {
   String? lastRecentHistory;
   MacroContext? lastMacroContext;
   LedgerReconciliationPlan? lastPlan;
+  StudioLedgerEngine? lastEngine;
   Future<void> Function()? beforeRunComplete;
   Future<void> Function()? beforeReconcileComplete;
   final runStarted = Completer<void>();
@@ -299,12 +317,14 @@ class _FakeLedgerExecutor implements StudioLedgerExecutor {
     required ChatMessage target,
     required MacroContext macroCtx,
     required FutureOr<bool> Function() isStillCurrent,
+    required StudioLedgerEngine engine,
   }) async {
     runCalls++;
     lastTurnConfig = turnConfig;
     lastConfig = config;
     lastRecentHistory = recentHistoryText;
     lastMacroContext = macroCtx;
+    lastEngine = engine;
     if (!runStarted.isCompleted) runStarted.complete();
     await beforeRunComplete?.call();
     if (!await isStillCurrent()) return LedgerRunResult.aborted;

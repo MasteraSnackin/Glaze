@@ -5,6 +5,8 @@ import '../models/chat_message.dart';
 import '../models/api_config.dart';
 import '../models/lorebook.dart';
 import '../models/memory_book.dart';
+import '../models/ledger_prompt_injection_mode.dart';
+import '../models/ledger_prompt_injection_policy.dart';
 import 'context_calculator.dart';
 import 'history_assembler.dart';
 import 'lorebook_scanner.dart';
@@ -68,6 +70,10 @@ Map<String, dynamic> serializePayload(PromptPayload p) => {
   'effectiveCanonRevisionNumber': p.effectiveCanonRevisionNumber,
   'effectiveCanonRevisionHash': p.effectiveCanonRevisionHash,
   'effectiveCanonCacheIdentity': p.effectiveCanonCacheIdentity,
+  'ledgerPromptInjectionPolicy': p.ledgerPromptInjectionPolicy.toJson(),
+  'ledgerInjectionCacheIdentity': p.ledgerInjectionCacheIdentity,
+  'ledgerProjectionFreshnessProvenCurrent':
+      p.ledgerProjectionFreshnessProvenCurrent,
 };
 
 PromptResult deserializeResult(Map<String, dynamic> json) {
@@ -172,10 +178,22 @@ PromptPayload deserializePayload(Map<String, dynamic> json) {
         defaultMemoryExcerptChunksPerEntry,
     chunkFirstTopEntries: json['chunkFirstTopEntries'] as int? ?? 3,
     chunkFirstTopChunks: json['chunkFirstTopChunks'] as int? ?? 1,
-    arcContent: json['arcContent'] as String?,
+    arcContent:
+        _decodedLedgerPolicy(json).effectiveMode ==
+            LedgerPromptInjectionMode.disabled
+        ? null
+        : json['arcContent'] as String?,
     entitiesContent: json['entitiesContent'] as String?,
-    studioSessionStateContent: json['studioSessionStateContent'] as String?,
-    characterKnowledgeContent: json['characterKnowledgeContent'] as String?,
+    studioSessionStateContent:
+        _decodedLedgerPolicy(json).effectiveMode ==
+            LedgerPromptInjectionMode.disabled
+        ? null
+        : json['studioSessionStateContent'] as String?,
+    characterKnowledgeContent:
+        _decodedLedgerPolicy(json).effectiveMode ==
+            LedgerPromptInjectionMode.disabled
+        ? null
+        : json['characterKnowledgeContent'] as String?,
     recalledMessagesContent: json['recalledMessagesContent'] as String?,
     recalledMessageChunks: (json['recalledMessageChunks'] as List? ?? const [])
         .map((c) => RecalledMessageChunk.fromJson(c as Map<String, dynamic>))
@@ -197,8 +215,23 @@ PromptPayload deserializePayload(Map<String, dynamic> json) {
     effectiveCanonRevisionHash: json['effectiveCanonRevisionHash'] as String?,
     effectiveCanonCacheIdentity:
         json['effectiveCanonCacheIdentity'] as String? ?? '',
+    ledgerPromptInjectionPolicy: _decodedLedgerPolicy(json),
+    ledgerInjectionCacheIdentity:
+        json['ledgerInjectionCacheIdentity'] as String? ?? '',
+    ledgerProjectionFreshnessProvenCurrent:
+        json['ledgerProjectionFreshnessProvenCurrent'] as bool? ?? false,
   );
 }
+
+LedgerPromptInjectionPolicy _decodedLedgerPolicy(Map<String, dynamic> json) =>
+    json['ledgerPromptInjectionPolicy'] is Map
+    ? LedgerPromptInjectionPolicy.fromJson(
+        Map<String, dynamic>.from(json['ledgerPromptInjectionPolicy'] as Map),
+      )
+    : const LedgerPromptInjectionPolicy(
+        presetOptIn: true,
+        mode: LedgerPromptInjectionMode.legacy,
+      );
 
 Map<String, dynamic> serializeResult(PromptResult r) => {
   'messages': r.messages.map((m) => m.toJson()).toList(),

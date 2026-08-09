@@ -178,10 +178,7 @@ class StudioMessageBuilder {
                 )
                 .trim();
             if (content.isNotEmpty) {
-              messages.add({
-                'role': _blockExpander.normalizeInstructionRole(block.role),
-                'content': content,
-              });
+              _addInstructionMessage(messages, block.role, content);
             }
           }
         }
@@ -276,10 +273,47 @@ class StudioMessageBuilder {
   ) {
     final resolved = content.trim();
     if (resolved.isEmpty) return;
+    // Group boundaries are folded into authored block content before macro
+    // expansion. If the last macro expands empty, only the closing tag remains.
+    // Keep the physical wrapper attached to the preceding system message rather
+    // than emitting a tag-only API message.
+    final closing = _standaloneClosingTag.firstMatch(resolved);
+    final tagName = closing?.group(1);
+    if (tagName != null &&
+        messages.isNotEmpty &&
+        _hasUnclosedOpeningTag(messages, tagName)) {
+      final previous = messages.last;
+      if (previous['role'] == 'system' && previous['content'] is String) {
+        previous['content'] =
+            '${previous['content'].toString().trimRight()}\n$resolved';
+        return;
+      }
+    }
     messages.add({
       'role': _blockExpander.normalizeInstructionRole(role),
       'content': resolved,
     });
+  }
+
+  static final _standaloneClosingTag = RegExp(r'^</([A-Za-z][\w-]*)>$');
+
+  bool _hasUnclosedOpeningTag(
+    List<Map<String, dynamic>> messages,
+    String tagName,
+  ) {
+    final escaped = RegExp.escape(tagName);
+    final opening = RegExp('<$escaped(?:\\s[^>]*)?>');
+    final closing = RegExp('</$escaped>');
+    var balance = 0;
+    for (final message in messages) {
+      if (message['role'] != 'system' || message['content'] is! String) {
+        continue;
+      }
+      final content = message['content'] as String;
+      balance += opening.allMatches(content).length;
+      balance -= closing.allMatches(content).length;
+    }
+    return balance > 0;
   }
 
   StudioContextSlot? _slotForBlockId(String blockId) => switch (blockId) {

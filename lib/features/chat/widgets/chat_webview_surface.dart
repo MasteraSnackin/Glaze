@@ -47,6 +47,7 @@ class ChatWebViewSurface extends ConsumerWidget {
     required this.scrollActions,
     required this.miscActions,
     required this.isMounted,
+    required this.isCurrentSession,
     required this.sessionSwitching,
     required this.refreshPanel,
     required this.bgImageBytes,
@@ -69,6 +70,10 @@ class ChatWebViewSurface extends ConsumerWidget {
   final ScrollCallbacks scrollActions;
   final MiscCallbacks miscActions;
   final bool Function() isMounted;
+
+  /// Prevents an async `onWebViewCreated` continuation from installing
+  /// callbacks captured for a session that has already been replaced.
+  final bool Function(String? sessionId) isCurrentSession;
   final bool sessionSwitching;
   final Future<void> Function(String sessionId, String messageId) refreshPanel;
   final Uint8List? bgImageBytes;
@@ -196,21 +201,22 @@ class ChatWebViewSurface extends ConsumerWidget {
                   PerfDebug.chatWebViewSurfaceCreated();
                   final jsBridgeService = await bridgeHost
                       .buildJsBridgeService();
-                  if (!isMounted()) return;
+                  if (!isMounted() || !isCurrentSession(sessionId)) return;
                   final bridge = ChatBridgeController(
                     controller,
                     jsBridgeService,
                   );
                   final allowMessageScripts =
-                      ref.read(appSettingsProvider).value?.allowMessageScripts ??
+                      ref
+                          .read(appSettingsProvider)
+                          .value
+                          ?.allowMessageScripts ??
                       false;
                   await bridge.evalJs(
                     'window.bridge?.setAllowMessageScripts('
                     '$allowMessageScripts)',
                   );
-                  // Register bridge in the registry so services can access it.
-                  ref.read(chatBridgeRegistryProvider(charId).notifier).state =
-                      bridge;
+                  if (!isMounted() || !isCurrentSession(sessionId)) return;
                   onBridgeReady(bridge);
                   PerfDebug.chatWebViewBridgeReady();
 
@@ -260,7 +266,7 @@ class ChatWebViewSurface extends ConsumerWidget {
                     // ignore: use_build_context_synchronously
                     unawaited(maybeShowMessageScriptsPrompt(context, ref));
                   };
-                  if (!isMounted()) return;
+                  if (!isMounted() || !isCurrentSession(sessionId)) return;
 
                   // The ext-block callbacks run after `await` paths. The
                   // controller is created once per WebView lifetime so
@@ -282,7 +288,7 @@ class ChatWebViewSurface extends ConsumerWidget {
                   bridge.onExtBlockDelete = extBlocks.onDelete();
 
                   final isAlive = await controller.isLoading() == false;
-                  if (isAlive) {
+                  if (isAlive && isMounted() && isCurrentSession(sessionId)) {
                     await onInitWebView();
                   }
                 },
@@ -311,8 +317,7 @@ class ChatWebViewSurface extends ConsumerWidget {
         // background, so switching shows an empty chat rather than a stale flash.
         if (sessionSwitching)
           Positioned.fill(child: IgnorePointer(child: _background(context))),
-        if (sessionSwitching)
-          const Center(child: GlazeSpinner()),
+        if (sessionSwitching) const Center(child: GlazeSpinner()),
         if (bottomInset > 0)
           Positioned.fill(
             child: IgnorePointer(

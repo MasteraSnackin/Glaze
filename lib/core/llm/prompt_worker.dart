@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'dart:convert';
 import 'dart:isolate';
 
@@ -14,7 +14,6 @@ import 'memory_selector.dart';
 import 'prompt_builder.dart';
 import 'prompt_inputs.dart';
 import 'prompt_worker_codec.dart';
-import 'prompt/effective_canon_prompt_formatter.dart';
 import 'tokenizer.dart';
 
 /// Long-lived isolate worker that runs buildPrompt off the main thread.
@@ -324,19 +323,12 @@ PromptResult _buildFromInputs(PromptInputs inputs) {
   // has no separate Chat Summary system, so MemoryBook IS the summary, and
   // its djb2 fingerprint detects "memory changed since last turn" for
   // prompt-cache invalidation).
-  final memoryInjectionFingerprint = memoryContent != null && memoryContent.isNotEmpty
+  final memoryInjectionFingerprint =
+      memoryContent != null && memoryContent.isNotEmpty
       ? computeHash(memoryContent)
       : '';
 
   // 2. Build payload
-  final canon = inputs.effectiveCanonProjection == null
-      ? null
-      : EffectiveCanonPromptFormatter.format(
-          inputs.effectiveCanonProjection!,
-          sessionId: inputs.sessionId ?? '',
-          latestUserText: _latestText(inputs.history, 'user'),
-          latestAssistantText: _latestText(inputs.history, 'assistant'),
-        );
   final payload = PromptPayload(
     character: inputs.character,
     persona: inputs.persona,
@@ -390,11 +382,20 @@ PromptResult _buildFromInputs(PromptInputs inputs) {
     chunkFirstTopEntries: inputs.chunkFirstTopEntries,
     chunkFirstTopChunks: inputs.chunkFirstTopChunks,
     effectiveCanonProjection: inputs.effectiveCanonProjection,
-    effectiveCanonRevisionNumber: inputs.effectiveCanonProjection?.revisionNumber,
+    effectiveCanonRevisionNumber:
+        inputs.effectiveCanonProjection?.revisionNumber,
     effectiveCanonRevisionHash: inputs.effectiveCanonProjection?.revisionHash,
-    effectiveCanonCacheIdentity: inputs.effectiveCanonProjection?.cacheIdentity ?? '',
-    characterKnowledgeContent: canon?.characterKnowledge,
-    studioSessionStateContent: canon?.sessionState,
+    effectiveCanonCacheIdentity:
+        inputs.effectiveCanonProjection?.cacheIdentity ?? '',
+    // Raw-input isolate history has not been token-trimmed yet. The final
+    // buildPrompt coordinator materializes these channels from the projection.
+    characterKnowledgeContent: null,
+    studioSessionStateContent: null,
+    arcContent: null,
+    ledgerPromptInjectionPolicy: inputs.ledgerPromptInjectionPolicy,
+    ledgerInjectionCacheIdentity: inputs.ledgerInjectionCacheIdentity,
+    ledgerProjectionFreshnessProvenCurrent:
+        inputs.ledgerProjectionFreshnessProvenCurrent,
   );
 
   // 3. Build prompt (lorebook scanning happens inside buildPrompt)
@@ -404,8 +405,3 @@ PromptResult _buildFromInputs(PromptInputs inputs) {
 bool _glazeMatch(String key, String text) {
   return glazeCheckMatch(key, text, false, WholeWordMode.glaze);
 }
-
-String _latestText(List<ChatMessage> history, String role) => history
-    .lastWhere((message) => message.role == role, orElse: () => const ChatMessage(id: '', role: '', content: ''))
-    .content;
-

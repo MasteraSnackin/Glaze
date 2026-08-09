@@ -123,61 +123,33 @@ class StudioPresetRepo implements SyncStudioPresetStore {
   }
 
   StudioPreset _rowToModel(StudioPresetRow row) {
-    List<StudioPresetBlock> blocks;
+    // Decode the complete persisted representation at the codec boundary. In
+    // particular, blocks must still be raw while the codec inspects the Ledger
+    // control header; canonicalizing each block first can turn malformed
+    // control data into an apparently valid opt-in.
+    final decoded = StudioPresetCodec.decodePreset({
+      'id': row.presetId,
+      'name': row.name,
+      'blocks': _decodeJson(row.blocksJson),
+      'agents': _decodeJson(row.agentsJson),
+      'expensiveApiConfigId': row.expensiveApiConfigId,
+      'cheapApiConfigId': row.cheapApiConfigId,
+      'cleanerApiConfigId': row.cleanerApiConfigId,
+      'ledgerApiConfigId': row.ledgerApiConfigId,
+      'maxFinalHistoryMessages': row.maxFinalHistoryMessages,
+      'agentEnabled': _decodeJson(row.agentEnabledJson),
+      'runtime': _decodeJson(row.runtimeSettingsJson),
+      'updatedAt': row.updatedAt,
+    });
+    return _normalizePreset(decoded.preset);
+  }
+
+  Object? _decodeJson(String source) {
     try {
-      final list = jsonDecode(row.blocksJson) as List<dynamic>;
-      blocks = list
-          .map(
-            (e) => StudioPresetCodec.canonicalizeBlock(
-              Map<String, dynamic>.from(e as Map),
-            ).block,
-          )
-          .toList();
-    } catch (_) {
-      blocks = [];
+      return jsonDecode(source);
+    } on Object {
+      return null;
     }
-    Map<String, bool> agentEnabled;
-    try {
-      agentEnabled = (jsonDecode(row.agentEnabledJson) as Map<String, dynamic>)
-          .map((key, value) => MapEntry(key, value == true));
-    } catch (_) {
-      agentEnabled = const {};
-    }
-    List<StudioAgent> agents;
-    try {
-      agents = StudioAgentCodec.decodeAgentsJson(row.agentsJson);
-    } catch (_) {
-      agents = const [];
-    }
-    var runtime = const StudioRuntimeSettings();
-    try {
-      final decoded = jsonDecode(row.runtimeSettingsJson);
-      if (decoded is Map && decoded.isNotEmpty) {
-        runtime = StudioPresetCodec.decodePreset({
-          'id': row.presetId,
-          'agents': const <dynamic>[],
-          'runtime': decoded,
-        }).preset.runtime;
-      }
-    } catch (_) {
-      // Runtime settings are independent of the preset's blocks and agents.
-    }
-    return _normalizePreset(
-      StudioPreset(
-        id: row.presetId,
-        name: row.name,
-        blocks: blocks,
-        agents: agents,
-        expensiveApiConfigId: row.expensiveApiConfigId,
-        cheapApiConfigId: row.cheapApiConfigId,
-        cleanerApiConfigId: row.cleanerApiConfigId,
-        ledgerApiConfigId: row.ledgerApiConfigId,
-        maxFinalHistoryMessages: row.maxFinalHistoryMessages,
-        agentEnabled: agentEnabled,
-        runtime: runtime,
-        updatedAt: row.updatedAt,
-      ),
-    );
   }
 
   StudioPreset _normalizePreset(StudioPreset preset) {

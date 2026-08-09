@@ -4,6 +4,8 @@ import '../../models/preset.dart' show Preset, PresetRegex;
 import '../../models/chat_message.dart'
     show ChatMessage, AuthorsNote, TriggeredEntry;
 import '../../models/api_config.dart';
+import '../../models/ledger_prompt_injection_mode.dart';
+import '../../models/ledger_prompt_injection_policy.dart';
 import '../../models/lorebook.dart'
     show Lorebook, LorebookGlobalSettings, LorebookActivations, LorebookEntry;
 import '../lorebook_scanner.dart' show ScannedEntry;
@@ -13,6 +15,8 @@ import '../memory_excerpt_selector.dart'
 import 'runtime_prompt_block.dart';
 import 'recalled_message_chunk.dart';
 import 'effective_canon_prompt_formatter.dart';
+import 'effective_canon_prompt_materializer.dart';
+import 'selective_ledger_projection_filter.dart';
 import '../generation_context_inputs.dart';
 
 class PromptPayload {
@@ -113,6 +117,9 @@ class PromptPayload {
   final int? effectiveCanonRevisionNumber;
   final String? effectiveCanonRevisionHash;
   final String effectiveCanonCacheIdentity;
+  final LedgerPromptInjectionPolicy ledgerPromptInjectionPolicy;
+  final String ledgerInjectionCacheIdentity;
+  final bool ledgerProjectionFreshnessProvenCurrent;
 
   const PromptPayload({
     required this.character,
@@ -162,6 +169,12 @@ class PromptPayload {
     this.effectiveCanonRevisionNumber,
     this.effectiveCanonRevisionHash,
     this.effectiveCanonCacheIdentity = '',
+    this.ledgerPromptInjectionPolicy = const LedgerPromptInjectionPolicy(
+      presetOptIn: true,
+      mode: LedgerPromptInjectionMode.legacy,
+    ),
+    this.ledgerInjectionCacheIdentity = '',
+    this.ledgerProjectionFreshnessProvenCurrent = false,
   });
 
   factory PromptPayload.fromGenerationContext(
@@ -169,53 +182,163 @@ class PromptPayload {
     required Preset? preset,
     bool disableSourceWindowExclusion = false,
     Set<String> sourceWindowVisibleMessageIds = const {},
-  }) => PromptPayload(
-    character: inputs.character,
-    persona: inputs.persona,
+    LedgerPromptInjectionPolicy? ledgerPromptInjectionPolicy,
+    String consumerPath = 'ordinary',
+  }) {
+    final projection = inputs.effectiveCanonProjection;
+    final policy =
+        ledgerPromptInjectionPolicy ?? inputs.ledgerPromptInjectionPolicy;
+    // Do not run history-dependent Ledger selection here. This factory is also
+    // used by prefetched/raw-input paths, where [inputs.history] is not yet the
+    // token-trimmed responder context. buildPrompt owns the frozen-baseline
+    // materialization boundary.
+    final materialized = projection == null
+        ? null
+        : EffectiveCanonPromptMaterializer.materializeSafely(
+            SelectiveLedgerProjectionInput(
+              policy: LedgerPromptInjectionPolicy(
+                presetOptIn: policy.presetOptIn,
+                mode: policy.effectiveMode == LedgerPromptInjectionMode.disabled
+                    ? LedgerPromptInjectionMode.disabled
+                    : LedgerPromptInjectionMode.legacy,
+                algorithmVersion: policy.algorithmVersion,
+                reverseScanDepth: policy.reverseScanDepth,
+              ),
+              consumerPath: consumerPath,
+              projection: projection,
+              visibleMessages: const [],
+              selectedSwipeByMessageId: const {},
+              focalUserName: inputs.persona?.name ?? '',
+              structuredContinuitySourceIds: const {},
+            ),
+            sessionId: inputs.sessionId ?? '',
+            latestUserText: _latestText(inputs.history, 'user'),
+            latestAssistantText: _latestText(inputs.history, 'assistant'),
+          );
+    final disabled = policy.effectiveMode == LedgerPromptInjectionMode.disabled;
+    return PromptPayload(
+      character: inputs.character,
+      persona: inputs.persona,
+      preset: preset,
+      history: inputs.history,
+      sessionId: inputs.sessionId,
+      apiConfig: inputs.apiConfig,
+      sessionVars: inputs.sessionVars,
+      globalVars: inputs.globalVars,
+      summaryContent: inputs.summaryContent,
+      summaryPrefix: inputs.summaryPrefix,
+      memoryContent: inputs.memoryContent,
+      memoryMacroContent: inputs.memoryMacroContent,
+      memoryInjectionTarget: inputs.memoryInjectionTarget,
+      guidanceText: inputs.guidanceText,
+      lorebooks: inputs.lorebooks,
+      lorebookSettings: inputs.lorebookSettings,
+      lorebookActivations: inputs.lorebookActivations,
+      vectorEntries: inputs.vectorEntries,
+      authorsNote: inputs.authorsNote,
+      characterDepthPrompt: inputs.characterDepthPrompt,
+      characterDepthPromptDepth: inputs.characterDepthPromptDepth,
+      characterDepthPromptRole: inputs.characterDepthPromptRole,
+      memoryCoverage: inputs.memoryCoverage,
+      globalRegexes: inputs.globalRegexes,
+      preScannedEntries: inputs.preScannedEntries,
+      triggeredMemories: inputs.triggeredMemories,
+      runtimePromptBlocks: inputs.runtimePromptBlocks,
+      memorySelection: inputs.memorySelection,
+      memoryExcerptingEnabled: inputs.memoryExcerptingEnabled,
+      memoryPackingMode: inputs.memoryPackingMode,
+      memoryExcerptTokensPerChunk: inputs.memoryExcerptTokensPerChunk,
+      memoryExcerptChunksPerEntry: inputs.memoryExcerptChunksPerEntry,
+      chunkFirstTopEntries: inputs.chunkFirstTopEntries,
+      chunkFirstTopChunks: inputs.chunkFirstTopChunks,
+      arcContent: materialized != null
+          ? materialized.arcContent
+          : (disabled ? null : inputs.arcContent),
+      entitiesContent: inputs.entitiesContent,
+      studioSessionStateContent: materialized != null
+          ? materialized.studioSessionStateContent
+          : (disabled ? null : inputs.studioSessionStateContent),
+      characterKnowledgeContent: materialized != null
+          ? materialized.characterKnowledgeContent
+          : (disabled ? null : inputs.characterKnowledgeContent),
+      recalledMessagesContent: inputs.recalledMessagesContent,
+      recalledMessageChunks: inputs.recalledMessageChunks,
+      disableSourceWindowExclusion: disableSourceWindowExclusion,
+      sourceWindowVisibleMessageIds: sourceWindowVisibleMessageIds,
+      memoryInjectionFingerprint: inputs.memoryInjectionFingerprint,
+      effectiveCanonProjection: inputs.effectiveCanonProjection,
+      effectiveCanonRevisionNumber: inputs.effectiveCanonRevisionNumber,
+      effectiveCanonRevisionHash: inputs.effectiveCanonRevisionHash,
+      effectiveCanonCacheIdentity: inputs.effectiveCanonCacheIdentity,
+      ledgerPromptInjectionPolicy: policy,
+      ledgerInjectionCacheIdentity:
+          materialized?.injectionCacheIdentity ??
+          inputs.ledgerInjectionCacheIdentity,
+      ledgerProjectionFreshnessProvenCurrent:
+          inputs.ledgerProjectionFreshnessProvenCurrent,
+    );
+  }
+
+  PromptPayload withLedgerMaterialization(
+    EffectiveCanonPromptMaterialization materialization,
+  ) => PromptPayload(
+    character: character,
+    persona: persona,
     preset: preset,
-    history: inputs.history,
-    sessionId: inputs.sessionId,
-    apiConfig: inputs.apiConfig,
-    sessionVars: inputs.sessionVars,
-    globalVars: inputs.globalVars,
-    summaryContent: inputs.summaryContent,
-    summaryPrefix: inputs.summaryPrefix,
-    memoryContent: inputs.memoryContent,
-    memoryMacroContent: inputs.memoryMacroContent,
-    memoryInjectionTarget: inputs.memoryInjectionTarget,
-    guidanceText: inputs.guidanceText,
-    lorebooks: inputs.lorebooks,
-    lorebookSettings: inputs.lorebookSettings,
-    lorebookActivations: inputs.lorebookActivations,
-    vectorEntries: inputs.vectorEntries,
-    authorsNote: inputs.authorsNote,
-    characterDepthPrompt: inputs.characterDepthPrompt,
-    characterDepthPromptDepth: inputs.characterDepthPromptDepth,
-    characterDepthPromptRole: inputs.characterDepthPromptRole,
-    memoryCoverage: inputs.memoryCoverage,
-    globalRegexes: inputs.globalRegexes,
-    preScannedEntries: inputs.preScannedEntries,
-    triggeredMemories: inputs.triggeredMemories,
-    runtimePromptBlocks: inputs.runtimePromptBlocks,
-    memorySelection: inputs.memorySelection,
-    memoryExcerptingEnabled: inputs.memoryExcerptingEnabled,
-    memoryPackingMode: inputs.memoryPackingMode,
-    memoryExcerptTokensPerChunk: inputs.memoryExcerptTokensPerChunk,
-    memoryExcerptChunksPerEntry: inputs.memoryExcerptChunksPerEntry,
-    chunkFirstTopEntries: inputs.chunkFirstTopEntries,
-    chunkFirstTopChunks: inputs.chunkFirstTopChunks,
-    arcContent: inputs.arcContent,
-    entitiesContent: inputs.entitiesContent,
-    studioSessionStateContent: inputs.studioSessionStateContent,
-    characterKnowledgeContent: inputs.characterKnowledgeContent,
-    recalledMessagesContent: inputs.recalledMessagesContent,
-    recalledMessageChunks: inputs.recalledMessageChunks,
+    history: history,
+    sessionId: sessionId,
+    apiConfig: apiConfig,
+    sessionVars: sessionVars,
+    globalVars: globalVars,
+    summaryContent: summaryContent,
+    summaryPrefix: summaryPrefix,
+    memoryContent: memoryContent,
+    memoryMacroContent: memoryMacroContent,
+    memoryInjectionTarget: memoryInjectionTarget,
+    guidanceText: guidanceText,
+    lorebooks: lorebooks,
+    lorebookSettings: lorebookSettings,
+    lorebookActivations: lorebookActivations,
+    vectorEntries: vectorEntries,
+    authorsNote: authorsNote,
+    characterDepthPrompt: characterDepthPrompt,
+    characterDepthPromptDepth: characterDepthPromptDepth,
+    characterDepthPromptRole: characterDepthPromptRole,
+    memoryCoverage: memoryCoverage,
+    globalRegexes: globalRegexes,
+    preScannedEntries: preScannedEntries,
+    triggeredMemories: triggeredMemories,
+    runtimePromptBlocks: runtimePromptBlocks,
+    memorySelection: memorySelection,
+    memoryExcerptingEnabled: memoryExcerptingEnabled,
+    memoryPackingMode: memoryPackingMode,
+    memoryExcerptTokensPerChunk: memoryExcerptTokensPerChunk,
+    memoryExcerptChunksPerEntry: memoryExcerptChunksPerEntry,
+    chunkFirstTopEntries: chunkFirstTopEntries,
+    chunkFirstTopChunks: chunkFirstTopChunks,
+    arcContent: materialization.arcContent,
+    entitiesContent: entitiesContent,
+    studioSessionStateContent: materialization.studioSessionStateContent,
+    characterKnowledgeContent: materialization.characterKnowledgeContent,
+    recalledMessagesContent: recalledMessagesContent,
+    recalledMessageChunks: recalledMessageChunks,
     disableSourceWindowExclusion: disableSourceWindowExclusion,
     sourceWindowVisibleMessageIds: sourceWindowVisibleMessageIds,
-    memoryInjectionFingerprint: inputs.memoryInjectionFingerprint,
-    effectiveCanonProjection: inputs.effectiveCanonProjection,
-    effectiveCanonRevisionNumber: inputs.effectiveCanonRevisionNumber,
-    effectiveCanonRevisionHash: inputs.effectiveCanonRevisionHash,
-    effectiveCanonCacheIdentity: inputs.effectiveCanonCacheIdentity,
+    memoryInjectionFingerprint: memoryInjectionFingerprint,
+    effectiveCanonProjection: effectiveCanonProjection,
+    effectiveCanonRevisionNumber: effectiveCanonRevisionNumber,
+    effectiveCanonRevisionHash: effectiveCanonRevisionHash,
+    effectiveCanonCacheIdentity: effectiveCanonCacheIdentity,
+    ledgerPromptInjectionPolicy: ledgerPromptInjectionPolicy,
+    ledgerInjectionCacheIdentity: materialization.injectionCacheIdentity,
+    ledgerProjectionFreshnessProvenCurrent:
+        ledgerProjectionFreshnessProvenCurrent,
   );
 }
+
+String _latestText(List<ChatMessage> history, String role) => history
+    .lastWhere(
+      (message) => message.role == role,
+      orElse: () => const ChatMessage(id: '', role: '', content: ''),
+    )
+    .content;

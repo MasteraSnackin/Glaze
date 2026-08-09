@@ -124,6 +124,82 @@ void main() {
     ]);
   });
 
+  test('tag-only group close attaches to the preceding system message', () {
+    final messages = builder.buildAgentMessages(
+      agent: const StudioAgent(id: 'final'),
+      context: context,
+      config: config,
+      studioPreset: const StudioPreset(
+        id: 'studio',
+        blocks: [
+          StudioPresetBlock(
+            id: 'ledger_group_open',
+            content: '<loomledger>',
+            groupBoundary: 'open',
+            injectionPoint: 'final',
+            order: 0,
+          ),
+          StudioPresetBlock(
+            id: 'ledger',
+            title: '━ Ledger',
+            content: 'Contract',
+            injectionPoint: 'final',
+            order: 1,
+          ),
+          StudioPresetBlock(
+            id: 'empty-arc',
+            content: '{{arc}}',
+            injectionPoint: 'final',
+            order: 2,
+          ),
+          StudioPresetBlock(
+            id: 'ledger_group_close',
+            content: '</loomledger>',
+            groupBoundary: 'close',
+            injectionPoint: 'final',
+            order: 3,
+          ),
+        ],
+      ),
+      priorBriefs: const [],
+      isFinalResponse: true,
+    );
+
+    expect(messages, hasLength(1));
+    expect(messages.single['content'], '<loomledger>\nContract\n</loomledger>');
+  });
+
+  test('orphan tag-only instruction is not merged into unrelated context', () {
+    final messages = builder.buildAgentMessages(
+      agent: const StudioAgent(id: 'final'),
+      context: context,
+      config: config,
+      studioPreset: const StudioPreset(
+        id: 'studio',
+        blocks: [
+          StudioPresetBlock(
+            id: 'ordinary',
+            content: 'Ordinary system content',
+            injectionPoint: 'final',
+            order: 0,
+          ),
+          StudioPresetBlock(
+            id: 'orphan-close',
+            content: '</orphan>',
+            injectionPoint: 'final',
+            order: 1,
+          ),
+        ],
+      ),
+      priorBriefs: const [],
+      isFinalResponse: true,
+    );
+
+    expect(messages, hasLength(2));
+    expect(messages.first['content'], 'Ordinary system content');
+    expect(messages.last['content'], '</orphan>');
+  });
+
   test(
     'type-based history resolution works even when mode is direct (Loom Direct fix)',
     () {

@@ -191,6 +191,14 @@ class StudioPresetEditorBodyState
     await _persistNow(applyStudioAgentToggle(preset, specId, value));
   }
 
+  Future<void> _setLedgerEngine(StudioLedgerEngine engine) async {
+    final preset = _preset;
+    if (preset == null) return;
+    await _persistNow(
+      preset.copyWith(runtime: preset.runtime.copyWith(ledgerEngine: engine)),
+    );
+  }
+
   // ── Block ops ──────────────────────────────────────────────────────────────
 
   Future<void> _toggleBlock(StudioPresetBlock block, bool enabled) async {
@@ -613,6 +621,7 @@ class StudioPresetEditorBodyState
       onMoveToGroup: _moveBlockToGroup,
       onMoveToSection: _moveBlockToSection,
       onToggleAgent: _toggleAgent,
+      onLedgerEngineChanged: (engine) => unawaited(_setLedgerEngine(engine)),
     );
     return PresetCard(
       child: Column(

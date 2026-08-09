@@ -222,24 +222,21 @@ void main() {
     },
   );
 
-  test(
-    'canonical runtime round-trips broadcast blocks',
-    () {
-      const runtime = StudioRuntimeSettings(
-        broadcastBlocks: ['\uFEFFfirst\r\nline', 'second\nline', 'последний'],
-      );
+  test('canonical runtime round-trips broadcast blocks', () {
+    const runtime = StudioRuntimeSettings(
+      broadcastBlocks: ['\uFEFFfirst\r\nline', 'second\nline', 'последний'],
+    );
 
-      final canonical = StudioPresetCodec.canonicalizePresetJson({
-        'id': 'runtime',
-        'runtime': runtime.toJson(),
-      });
-      final restored = StudioPresetCodec.decodePreset(canonical).preset.runtime;
+    final canonical = StudioPresetCodec.canonicalizePresetJson({
+      'id': 'runtime',
+      'runtime': runtime.toJson(),
+    });
+    final restored = StudioPresetCodec.decodePreset(canonical).preset.runtime;
 
-      expect(restored, runtime);
-      expect(restored.version, 1);
-      expect(restored.broadcastBlocks, runtime.broadcastBlocks);
-    },
-  );
+    expect(restored, runtime);
+    expect(restored.version, 1);
+    expect(restored.broadcastBlocks, runtime.broadcastBlocks);
+  });
 
   test(
     'absent and malformed runtime default without affecting other fields',
@@ -268,4 +265,20 @@ void main() {
       );
     },
   );
+
+  test('Ledger engine defaults current and unknown values fail to current', () {
+    final absent = StudioPresetCodec.decodePreset({'id': 'absent'}).preset;
+    final unknown = StudioPresetCodec.decodePreset({
+      'id': 'future',
+      'runtime': {'ledgerEngine': 'futureEngine'},
+    }).preset;
+    final legacy = StudioPresetCodec.decodePreset({
+      'id': 'legacy',
+      'runtime': {'ledgerEngine': 'legacyTurnOnly'},
+    }).preset;
+
+    expect(absent.runtime.ledgerEngine, StudioLedgerEngine.currentReconciled);
+    expect(unknown.runtime.ledgerEngine, StudioLedgerEngine.currentReconciled);
+    expect(legacy.runtime.ledgerEngine, StudioLedgerEngine.legacyTurnOnly);
+  });
 }

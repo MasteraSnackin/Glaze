@@ -5,6 +5,10 @@ import 'package:drift/drift.dart' show Value;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/db/repositories/studio_preset_repo.dart';
+import 'package:glaze_flutter/core/llm/studio_turn_config_snapshot.dart';
+import 'package:glaze_flutter/core/models/ledger_prompt_injection_mode.dart';
+import 'package:glaze_flutter/core/models/ledger_prompt_injection_policy.dart';
+import 'package:glaze_flutter/core/models/pipeline_settings.dart';
 import 'package:glaze_flutter/core/models/studio_config.dart';
 
 void main() {
@@ -242,4 +246,99 @@ void main() {
       ]);
     },
   );
+
+  group('Ledger control header DB round trips', () {
+    Map<String, Object?> header({Object? enabled = true}) => {
+      'id': ledgerPromptInjectionHeaderId,
+      'title': ledgerPromptInjectionHeaderTitle,
+      'enabled': enabled,
+      'type': 'instruction',
+      'section': 'pregen',
+    };
+
+    Future<StudioPreset> roundTrip(String id, List<Object?> blocks) async {
+      await db
+          .into(db.studioPresetRows)
+          .insert(
+            StudioPresetRowsCompanion.insert(
+              presetId: id,
+              name: id,
+              blocksJson: Value(jsonEncode(blocks)),
+              runtimeSettingsJson: Value(
+                jsonEncode({
+                  'requestedLedgerPromptInjectionMode': 'gapFiller',
+                  'requestedLedgerPromptInjectionAlgorithmVersion':
+                      ledgerPromptInjectionAlgorithmVersion,
+                }),
+              ),
+            ),
+          );
+      final firstRead = (await repo.getById(id))!;
+      await repo.upsert(firstRead);
+      return (await repo.getById(id))!;
+    }
+
+    LedgerPromptInjectionMode snapshotMode(StudioPreset preset) =>
+        StudioTurnConfigSnapshot(
+          config: const StudioConfig(sessionId: 'session', enabled: true),
+          preset: preset,
+          pipelineSettings: const PipelineSettings(),
+          apiConfigs: const [],
+          activeApiConfig: null,
+        ).ledgerPromptInjectionPolicy.effectiveMode;
+
+    test('enabled header and requested gap-filler version survive', () async {
+      final restored = await roundTrip('enabled-header', [header()]);
+
+      expect(restored.blocks.single.enabled, isTrue);
+      expect(
+        restored.runtime.requestedLedgerPromptInjectionMode,
+        LedgerPromptInjectionMode.gapFiller,
+      );
+      expect(
+        restored.runtime.requestedLedgerPromptInjectionAlgorithmVersion,
+        ledgerPromptInjectionAlgorithmVersion,
+      );
+      expect(snapshotMode(restored), LedgerPromptInjectionMode.gapFiller);
+    });
+
+    test('exact disabled header remains authoritative', () async {
+      final restored = await roundTrip('disabled-header', [
+        header(enabled: false),
+      ]);
+
+      expect(restored.blocks.single.enabled, isFalse);
+      expect(snapshotMode(restored), LedgerPromptInjectionMode.disabled);
+    });
+
+    test('duplicate known headers remain fail-closed', () async {
+      final restored = await roundTrip('duplicate-header', [
+        header(),
+        header(),
+      ]);
+
+      expect(restored.blocks, hasLength(2));
+      expect(snapshotMode(restored), LedgerPromptInjectionMode.disabled);
+    });
+
+    test('malformed known header is retained as disabled sentinel', () async {
+      final restored = await roundTrip('malformed-header', [
+        header(enabled: 'yes'),
+      ]);
+
+      expect(restored.blocks, hasLength(1));
+      expect(restored.blocks.single.id, ledgerPromptInjectionHeaderId);
+      expect(restored.blocks.single.title, ledgerPromptInjectionHeaderTitle);
+      expect(restored.blocks.single.enabled, isFalse);
+      expect(snapshotMode(restored), LedgerPromptInjectionMode.disabled);
+    });
+
+    test('absent known header preserves legacy behavior', () async {
+      final restored = await roundTrip('absent-header', [
+        {'id': 'ordinary', 'title': 'Ordinary', 'type': 'instruction'},
+      ]);
+
+      expect(snapshotMode(restored), LedgerPromptInjectionMode.legacy);
+    });
+  });
 }

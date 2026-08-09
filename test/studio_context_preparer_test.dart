@@ -12,6 +12,11 @@ import 'package:glaze_flutter/core/models/chat_message.dart';
 import 'package:glaze_flutter/core/models/lorebook.dart';
 import 'package:glaze_flutter/core/models/memory_book.dart';
 import 'package:glaze_flutter/core/models/persona.dart';
+import 'package:glaze_flutter/core/models/ledger_prompt_injection_mode.dart';
+import 'package:glaze_flutter/core/models/ledger_prompt_injection_policy.dart';
+import 'package:glaze_flutter/core/llm/prompt/effective_canon_prompt_formatter.dart';
+import 'package:glaze_flutter/core/llm/prompt/selective_ledger_projection_filter.dart';
+import 'package:glaze_flutter/core/models/tracker.dart';
 
 void main() {
   const preparer = StudioContextPreparer();
@@ -196,4 +201,192 @@ void main() {
     expect(context.messagesFor(StudioContextSlot.authorsNote), isEmpty);
     expect(context.diagnostics.triggeredLorebooks, hasLength(2));
   });
+
+  test('disabled policy removes only Ledger-owned dynamic channels', () {
+    final context = preparer.prepare(
+      inputs: GenerationContextInputs(
+        character: const Character(id: 'char', name: 'Lucy'),
+        history: const [
+          ChatMessage(id: 'latest', role: 'user', content: 'Latest'),
+        ],
+        apiConfig: const ApiConfig(id: 'api'),
+        characterKnowledgeContent:
+            '<current_character_state>fact</current_character_state>',
+        studioSessionStateContent:
+            '<studio_session_state>state</studio_session_state>',
+        arcContent: '<arc_state>arc</arc_state>',
+        guidanceText: 'guidance',
+        entitiesContent: 'entities',
+        runtimePromptBlocks: const [
+          RuntimePromptBlock(
+            id: 'runtime',
+            content: 'runtime {{studio_state}} preserved',
+            depth: 0,
+            role: 'system',
+          ),
+        ],
+      ),
+      visibleMessageIds: const {'latest'},
+      ledgerPromptInjectionPolicy: const LedgerPromptInjectionPolicy(
+        presetOptIn: false,
+        mode: LedgerPromptInjectionMode.disabled,
+      ),
+    );
+
+    expect(context.messagesFor(StudioContextSlot.characterKnowledge), isEmpty);
+    expect(context.messagesFor(StudioContextSlot.studioSessionState), isEmpty);
+    final runtime = context.join(StudioContextSlot.runtimeDynamic);
+    expect(runtime, contains('guidance'));
+    expect(runtime, contains('entities'));
+    expect(runtime, contains('runtime  preserved'));
+    expect(runtime, isNot(contains('<arc_state>')));
+  });
+
+  test('formatter-owned transition content is injected exactly once', () {
+    final context = preparer.prepare(
+      inputs: GenerationContextInputs(
+        character: const Character(id: 'char', name: 'Lucy'),
+        history: const [
+          ChatMessage(id: 'latest', role: 'user', content: 'Latest'),
+        ],
+        sessionId: 'session',
+        apiConfig: const ApiConfig(id: 'api'),
+        effectiveCanonProjection: const EffectiveCanonPromptProjection(
+          facts: [],
+          trackers: [],
+          unblockedTransitionClaims: ['The door is now open.'],
+          revisionNumber: 1,
+          revisionHash: 'revision',
+          cacheIdentity: 'canon',
+        ),
+      ),
+      visibleMessageIds: const {'latest'},
+    );
+
+    final session = context.join(StudioContextSlot.studioSessionState);
+    expect(
+      RegExp('<effective_canon_transitions>').allMatches(session),
+      hasLength(1),
+    );
+    expect(session, contains('The door is now open.'));
+  });
+
+  test(
+    'filtered null character and arc channels do not resurrect raw fields',
+    () {
+      final context = preparer.prepare(
+        inputs: GenerationContextInputs(
+          character: const Character(id: 'char', name: 'Lucy'),
+          history: const [
+            ChatMessage(id: 'source', role: 'assistant', content: 'Source'),
+            ChatMessage(id: 'latest', role: 'user', content: 'Latest'),
+          ],
+          sessionId: 'session',
+          apiConfig: const ApiConfig(id: 'api'),
+          characterKnowledgeContent: 'RAW KNOWLEDGE',
+          arcContent: 'RAW ARC',
+          effectiveCanonProjection: const EffectiveCanonPromptProjection(
+            facts: [],
+            trackers: [
+              Tracker(
+                sessionId: 'session',
+                name: 'scene.immediate_thread',
+                value: 'Source',
+                provenance: 'messageId=source',
+              ),
+            ],
+            unblockedTransitionClaims: [],
+            revisionNumber: 1,
+            revisionHash: 'revision',
+            cacheIdentity: 'canon',
+          ),
+          ledgerProjectionFreshnessProvenCurrent: true,
+        ),
+        visibleMessageIds: const {'source', 'latest'},
+        ledgerPromptInjectionPolicy: const LedgerPromptInjectionPolicy(
+          presetOptIn: true,
+          mode: LedgerPromptInjectionMode.gapFiller,
+        ),
+      );
+
+      expect(
+        context.messagesFor(StudioContextSlot.characterKnowledge),
+        isEmpty,
+      );
+      expect(
+        context.join(StudioContextSlot.runtimeDynamic),
+        isNot(contains('RAW ARC')),
+      );
+    },
+  );
+
+  test(
+    'tracker and final materialize against their distinct visible windows',
+    () {
+      final inputs = GenerationContextInputs(
+        character: const Character(id: 'char', name: 'Lucy'),
+        history: const [
+          ChatMessage(id: 'source', role: 'assistant', content: 'Lucy waits.'),
+          ChatMessage(id: 'latest', role: 'user', content: 'Continue.'),
+        ],
+        sessionId: 'session',
+        apiConfig: const ApiConfig(id: 'api'),
+        effectiveCanonProjection: const EffectiveCanonPromptProjection(
+          facts: [],
+          trackers: [
+            Tracker(
+              sessionId: 'session',
+              name: 'scene.immediate_thread',
+              value: 'Lucy waits',
+              provenance: 'messageId=source',
+            ),
+          ],
+          unblockedTransitionClaims: [],
+          revisionNumber: 1,
+          revisionHash: 'revision',
+          cacheIdentity: 'canon',
+        ),
+        ledgerProjectionFreshnessProvenCurrent: true,
+      );
+      const policy = LedgerPromptInjectionPolicy(
+        presetOptIn: true,
+        mode: LedgerPromptInjectionMode.gapFiller,
+      );
+
+      final tracker = preparer.prepare(
+        inputs: inputs,
+        visibleMessageIds: const {'latest'},
+        ledgerPromptInjectionPolicy: policy,
+        consumerPath: 'studio-tracker',
+      );
+      final finalWriter = preparer.prepare(
+        inputs: inputs,
+        visibleMessageIds: const {'source', 'latest'},
+        ledgerPromptInjectionPolicy: policy,
+        consumerPath: 'studio-final',
+      );
+
+      expect(
+        tracker.join(StudioContextSlot.studioSessionState),
+        contains('Lucy waits'),
+      );
+      expect(
+        finalWriter.join(StudioContextSlot.studioSessionState),
+        isNot(contains('Lucy waits')),
+      );
+      expect(
+        finalWriter.diagnostics.ledgerProjectionDiagnostics.any(
+          (item) =>
+              !item.selected &&
+              item.reason ==
+                  LedgerProjectionDecisionReason.visibleSourceEvidence,
+        ),
+        isTrue,
+      );
+      expect(
+        tracker.diagnostics.ledgerInjectionIdentity,
+        isNot(finalWriter.diagnostics.ledgerInjectionIdentity),
+      );
+    },
+  );
 }

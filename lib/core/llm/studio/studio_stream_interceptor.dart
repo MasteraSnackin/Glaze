@@ -1,7 +1,9 @@
 import '../../models/chat_message.dart';
 import '../studio_stage_brief.dart';
 import '../../models/agent_operation_record.dart';
-import '../tokenizer.dart';
+import '../history_assembler.dart';
+import '../../models/studio_config.dart';
+import 'studio_history_limiter.dart';
 
 /// Pure static helpers for Studio stream interception.
 ///
@@ -10,16 +12,9 @@ import '../tokenizer.dart';
 class StudioStreamInterceptor {
   StudioStreamInterceptor._();
 
-  /// Token budget mirroring [StudioHistoryLimiter.finalHistoryTokenBudget].
-  /// The source-window ID set must match the messages that actually reach the
-  /// final generator — if token trimming drops messages that the message-count
-  /// slice would have kept, memory injection must know about it so it doesn't
-  /// suppress entries for messages that are no longer visible.
-  static const finalHistoryTokenBudget = 60000;
-
   /// Compute the set of visible message IDs that form the Studio final
   /// generator's source window. Takes the last [finalContextSize] non-hidden
-  /// messages from [history], but also enforces a [finalHistoryTokenBudget]
+  /// messages from [history], but also enforces the final limiter's token
   /// cap: messages are accumulated from the end until either the count or the
   /// token budget is reached, whichever comes first.
   ///
@@ -28,37 +23,53 @@ class StudioStreamInterceptor {
   /// actually sees.
   static Set<String> computeStudioFinalVisibleMessageIds(
     List<ChatMessage> history,
-    int finalContextSize,
-  ) {
-    if (finalContextSize <= 0) return const <String>{};
-    final nonHidden = history.where((m) => !m.isHidden).toList();
-    if (nonHidden.isEmpty) return const <String>{};
-
-    final selected = <String>[];
-    var totalTokens = 0;
-    for (var i = nonHidden.length - 1; i >= 0; i--) {
-      final m = nonHidden[i];
-      final tokens = estimateTokens(m.content);
-      if (selected.isNotEmpty &&
-          totalTokens + tokens > finalHistoryTokenBudget) {
-        break;
-      }
-      selected.insert(0, m.id);
-      totalTokens += tokens;
-      if (selected.length >= finalContextSize) break;
-    }
-    return selected.toSet();
+    int finalContextSize, {
+    int reasoningHistoryCount = 0,
+    bool excludeReasoningFromContextBudget = false,
+  }) {
+    final limited = StudioHistoryLimiter.limitFinalHistory(
+      _asPromptHistory(history),
+      StudioPreset(
+        id: 'visible-window',
+        maxFinalHistoryMessages: finalContextSize,
+      ),
+      reasoningHistoryCount: reasoningHistoryCount,
+      excludeReasoningFromContextBudget: excludeReasoningFromContextBudget,
+    );
+    return limited
+        .map((message) => message.sourceMessageId)
+        .whereType<String>()
+        .toSet();
   }
 
-  /// Studio context semantics: a non-positive count means all history, still
-  /// bounded by the same token cap used by the final history limiter.
+  /// Uses the tracker limiter exactly, including its 1..200 count clamp.
   static Set<String> computeStudioVisibleMessageIds(
     List<ChatMessage> history,
     int contextSize,
   ) {
-    final visibleCount = contextSize > 0 ? contextSize : history.length;
-    return computeStudioFinalVisibleMessageIds(history, visibleCount);
+    final limited = StudioHistoryLimiter.limitTrackerHistory(
+      _asPromptHistory(history),
+      contextSize,
+    );
+    return limited
+        .map((message) => message.sourceMessageId)
+        .whereType<String>()
+        .toSet();
   }
+
+  static List<PromptMessage> _asPromptHistory(List<ChatMessage> history) =>
+      history
+          .where((message) => !message.isHidden && !message.isTyping)
+          .map(
+            (message) => PromptMessage(
+              role: message.role,
+              content: message.content,
+              reasoningContent: message.reasoning,
+              sourceMessageId: message.id,
+              imagePath: message.imageHidden ? null : message.imagePath,
+            ),
+          )
+          .toList(growable: false);
 
   /// Convert Studio stage briefs into the compact JSON format stored on
   /// `ChatMessage.studioOutputs` / `AgentSwipe.studioOutputs` and read by the

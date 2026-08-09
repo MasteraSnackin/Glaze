@@ -10,6 +10,8 @@ import '../models/memory_book.dart';
 import '../models/persona.dart';
 import '../models/preset.dart';
 import '../models/tracker.dart';
+import '../models/ledger_prompt_injection_mode.dart';
+import '../models/ledger_prompt_injection_policy.dart';
 import '../state/active_selection_provider.dart';
 import '../state/db_provider.dart';
 import '../state/global_regex_provider.dart';
@@ -28,6 +30,8 @@ import 'prompt/lorebook_vector_searcher.dart';
 import 'prompt_inputs.dart';
 import 'prompt_inputs_collector.dart';
 import 'prompt/effective_canon_prompt_formatter.dart';
+import 'prompt/effective_canon_prompt_materializer.dart';
+import 'prompt/selective_ledger_projection_filter.dart';
 import '../services/card_rewriter/effective_canon_context_loader.dart';
 import 'prompt/prompt_build_stale_exception.dart';
 
@@ -116,7 +120,11 @@ class PromptPayloadBuilder {
       cancelToken: cancelToken,
     );
     final preset = await _resolveOrdinaryPreset(shouldAbort: shouldAbort);
-    return PromptPayload.fromGenerationContext(inputs, preset: preset);
+    return PromptPayload.fromGenerationContext(
+      inputs,
+      preset: preset,
+      ledgerPromptInjectionPolicy: _ordinaryLedgerPolicy(preset),
+    );
   }
 
   Future<PromptPayload> buildOrdinaryFromGenerationContext(
@@ -124,7 +132,11 @@ class PromptPayloadBuilder {
     bool Function()? shouldAbort,
   }) async {
     final preset = await _resolveOrdinaryPreset(shouldAbort: shouldAbort);
-    return PromptPayload.fromGenerationContext(inputs, preset: preset);
+    return PromptPayload.fromGenerationContext(
+      inputs,
+      preset: preset,
+      ledgerPromptInjectionPolicy: _ordinaryLedgerPolicy(preset),
+    );
   }
 
   /// Collects all live generation source data without selecting or reading an
@@ -501,6 +513,10 @@ class PromptPayloadBuilder {
       effectiveCanonRevisionNumber: effectiveProjection?.revisionNumber,
       effectiveCanonRevisionHash: effectiveProjection?.revisionHash,
       effectiveCanonCacheIdentity: effectiveProjection?.cacheIdentity ?? '',
+      // The projection was loaded from one effective-canon snapshot and
+      // revalidated immediately above. Exact message/swipe provenance may now
+      // be compared with the frozen final source window by each compiler.
+      ledgerProjectionFreshnessProvenCurrent: effectiveContext != null,
     );
   }
 
@@ -514,6 +530,25 @@ class PromptPayloadBuilder {
         ? presets.where((p) => p.id == activePresetId).firstOrNull
         : presets.firstOrNull;
   }
+
+  LedgerPromptInjectionPolicy _ordinaryLedgerPolicy(Preset? preset) =>
+      preset == null
+      ? const LedgerPromptInjectionPolicy(
+          presetOptIn: true,
+          mode: LedgerPromptInjectionMode.legacy,
+        )
+      : deriveLedgerPromptInjectionPolicyFromRaw(
+          presetId: preset.id,
+          rawBlocks: preset.blocks
+              .map(
+                (block) => <String, Object?>{
+                  'id': block.id,
+                  'name': block.name,
+                  'enabled': block.enabled,
+                },
+              )
+              .toList(growable: false),
+        );
 
   Future<PromptPayload> buildFromPreFetched({
     required String charId,
@@ -579,30 +614,36 @@ class PromptPayloadBuilder {
           .getBySessionId(session.id);
       memoryGraphEnabled = memoryBook?.settings.enabled ?? true;
     }
-    final canon = projection == null || session == null
+    final policy = _ordinaryLedgerPolicy(preset);
+    final materialized = projection == null || session == null
         ? null
-        : EffectiveCanonPromptFormatter.format(
-            projection,
+        : EffectiveCanonPromptMaterializer.materializeSafely(
+            SelectiveLedgerProjectionInput(
+              policy: policy,
+              consumerPath: 'prefetched',
+              projection: projection,
+              visibleMessages: history,
+              selectedSwipeByMessageId: {
+                for (final message in history) message.id: message.swipeId,
+              },
+              focalUserName:
+                  session.messages.reversed
+                      .map((message) => message.personaName?.trim())
+                      .firstWhere(
+                        (name) => name != null && name.isNotEmpty,
+                        orElse: () => null,
+                      ) ??
+                  '',
+            ),
             sessionId: session.id,
             latestUserText: latestUserTextFromHistory(history),
             latestAssistantText: latestAssistantTextFromHistory(history),
           );
-    final ledgerTrackers = projection?.trackers;
-    final studioSessionStateContent = canon?.sessionState;
-    String? arcContent;
+    String? arcContent = materialized?.arcContent;
     String? entitiesContent;
     if (memoryGraphEnabled &&
         (memoryBook?.settings.memoryMode ?? memSettings.memoryMode) != 'fast' &&
         session != null) {
-      try {
-        if (ledgerTrackers != null) {
-          arcContent = buildArcContent(
-            ledgerTrackers,
-            latestUserText: latestUserTextFromHistory(history),
-            latestAssistantText: latestAssistantTextFromHistory(history),
-          );
-        }
-      } catch (_) {}
       try {
         final entities = await _ref
             .read(memoryEntityRepoProvider)
@@ -659,14 +700,17 @@ class PromptPayloadBuilder {
       chunkFirstTopChunks: memSettings.chunkFirstTopChunks,
       arcContent: arcContent,
       entitiesContent: entitiesContent,
-      studioSessionStateContent: studioSessionStateContent,
-      characterKnowledgeContent: canon?.characterKnowledge,
+      studioSessionStateContent: materialized?.studioSessionStateContent,
+      characterKnowledgeContent: materialized?.characterKnowledgeContent,
       recalledMessagesContent: recalledMessagesContent,
       recalledMessageChunks: const [],
       effectiveCanonProjection: projection,
       effectiveCanonRevisionNumber: projection?.revisionNumber,
       effectiveCanonRevisionHash: projection?.revisionHash,
       effectiveCanonCacheIdentity: projection?.cacheIdentity ?? '',
+      ledgerPromptInjectionPolicy: policy,
+      ledgerInjectionCacheIdentity: materialized?.injectionCacheIdentity ?? '',
+      ledgerProjectionFreshnessProvenCurrent: resolvedContext != null,
     );
   }
 

@@ -120,35 +120,53 @@ class StreamGenerationService {
       final apiConfig = inputs.apiConfig;
 
       final pipelineSettings = turnConfig.pipelineSettings;
-      final studioFinalContextSize = studioConfig == null || studioPreset == null
+      final studioFinalContextSize =
+          studioConfig == null || studioPreset == null
           ? 0
           : pipelineSettings.studioAgent.studioFinalContextSize > 0
           ? pipelineSettings.studioAgent.studioFinalContextSize
           : studioPreset.maxFinalHistoryMessages;
       final studioFinalVisibleMessageIds = studioConfig == null
           ? const <String>{}
-          : StudioStreamInterceptor.computeStudioVisibleMessageIds(
+          : StudioStreamInterceptor.computeStudioFinalVisibleMessageIds(
               inputs.history,
               studioFinalContextSize,
+              reasoningHistoryCount:
+                  pipelineSettings.studioAgent.studioFinalReasoningHistoryCount,
+              excludeReasoningFromContextBudget: pipelineSettings
+                  .studioAgent
+                  .studioFinalExcludeReasoningFromContextBudget,
             );
       final payload = studioConfig == null
           ? await builder.buildOrdinaryFromGenerationContext(
               inputs,
               shouldAbort: _isAborted,
             )
-          : PromptPayload.fromGenerationContext(inputs, preset: null);
+          : PromptPayload.fromGenerationContext(
+              inputs,
+              preset: null,
+              ledgerPromptInjectionPolicy:
+                  turnConfig.ledgerPromptInjectionPolicy,
+              consumerPath: 'studio-saved',
+            );
       final finalPayload = studioConfig == null
           ? payload
           : PromptPayload.fromGenerationContext(
               inputs,
               preset: null,
               sourceWindowVisibleMessageIds: studioFinalVisibleMessageIds,
+              ledgerPromptInjectionPolicy:
+                  turnConfig.ledgerPromptInjectionPolicy,
+              consumerPath: 'studio-final',
             );
       final finalStudioContext = studioConfig == null
           ? null
           : const StudioContextPreparer().prepare(
               inputs: inputs,
               visibleMessageIds: studioFinalVisibleMessageIds,
+              ledgerPromptInjectionPolicy:
+                  turnConfig.ledgerPromptInjectionPolicy,
+              consumerPath: 'studio-final',
             );
       final promptResult = studioConfig == null
           ? await buildPromptInIsolate(finalPayload)
@@ -233,6 +251,9 @@ class StreamGenerationService {
             : const StudioContextPreparer().prepare(
                 inputs: inputs,
                 visibleMessageIds: trackerVisibleMessageIds,
+                ledgerPromptInjectionPolicy:
+                    turnConfig.ledgerPromptInjectionPolicy,
+                consumerPath: 'studio-tracker',
               );
         if (_isAborted()) {
           return ChatState(
@@ -762,10 +783,14 @@ class StreamGenerationService {
   @visibleForTesting
   static Set<String> computeStudioFinalVisibleMessageIds(
     List<ChatMessage> history,
-    int finalContextSize,
-  ) => StudioStreamInterceptor.computeStudioFinalVisibleMessageIds(
+    int finalContextSize, {
+    int reasoningHistoryCount = 0,
+    bool excludeReasoningFromContextBudget = false,
+  }) => StudioStreamInterceptor.computeStudioFinalVisibleMessageIds(
     history,
     finalContextSize,
+    reasoningHistoryCount: reasoningHistoryCount,
+    excludeReasoningFromContextBudget: excludeReasoningFromContextBudget,
   );
 
   static String? _lastAssistantId(ChatSession session, String? regenTargetId) {

@@ -5,6 +5,8 @@ import '../models/chat_message.dart';
 import '../models/api_config.dart';
 import '../models/lorebook.dart';
 import '../models/memory_book.dart';
+import '../models/ledger_prompt_injection_mode.dart';
+import '../models/ledger_prompt_injection_policy.dart';
 import 'prompt_builder.dart';
 import 'prompt/effective_canon_prompt_formatter.dart';
 
@@ -62,6 +64,9 @@ class PromptInputs {
   final int memoryContextBudgetTokens;
   final List<RuntimePromptBlock> runtimePromptBlocks;
   final EffectiveCanonPromptProjection? effectiveCanonProjection;
+  final LedgerPromptInjectionPolicy ledgerPromptInjectionPolicy;
+  final String ledgerInjectionCacheIdentity;
+  final bool ledgerProjectionFreshnessProvenCurrent;
 
   const PromptInputs({
     required this.character,
@@ -110,6 +115,12 @@ class PromptInputs {
     this.memoryContextBudgetTokens = 0,
     this.runtimePromptBlocks = const [],
     this.effectiveCanonProjection,
+    this.ledgerPromptInjectionPolicy = const LedgerPromptInjectionPolicy(
+      presetOptIn: true,
+      mode: LedgerPromptInjectionMode.legacy,
+    ),
+    this.ledgerInjectionCacheIdentity = '',
+    this.ledgerProjectionFreshnessProvenCurrent = false,
   });
 
   Map<String, dynamic> toJson() => {
@@ -161,6 +172,10 @@ class PromptInputs {
         .map((block) => block.toJson())
         .toList(),
     'effectiveCanonProjection': effectiveCanonProjection?.toJson(),
+    'ledgerPromptInjectionPolicy': ledgerPromptInjectionPolicy.toJson(),
+    'ledgerInjectionCacheIdentity': ledgerInjectionCacheIdentity,
+    'ledgerProjectionFreshnessProvenCurrent':
+        ledgerProjectionFreshnessProvenCurrent,
   };
 
   factory PromptInputs.fromJson(Map<String, dynamic> json) => PromptInputs(
@@ -249,6 +264,20 @@ class PromptInputs {
         : EffectiveCanonPromptProjection.fromJson(
             json['effectiveCanonProjection'] as Map<String, dynamic>,
           ),
+    ledgerPromptInjectionPolicy: json['ledgerPromptInjectionPolicy'] is Map
+        ? LedgerPromptInjectionPolicy.fromJson(
+            Map<String, dynamic>.from(
+              json['ledgerPromptInjectionPolicy'] as Map,
+            ),
+          )
+        : const LedgerPromptInjectionPolicy(
+            presetOptIn: true,
+            mode: LedgerPromptInjectionMode.legacy,
+          ),
+    ledgerInjectionCacheIdentity:
+        json['ledgerInjectionCacheIdentity'] as String? ?? '',
+    ledgerProjectionFreshnessProvenCurrent:
+        json['ledgerProjectionFreshnessProvenCurrent'] as bool? ?? false,
   );
 }
 

@@ -78,6 +78,7 @@ abstract interface class StudioLedgerExecutor {
     required ChatMessage target,
     required MacroContext macroCtx,
     required FutureOr<bool> Function() isStillCurrent,
+    required StudioLedgerEngine engine,
   });
 
   Future<LedgerRunResult> reconcile({
@@ -105,6 +106,7 @@ class DefaultStudioLedgerExecutor implements StudioLedgerExecutor {
     required ChatMessage target,
     required MacroContext macroCtx,
     required FutureOr<bool> Function() isStillCurrent,
+    required StudioLedgerEngine engine,
   }) {
     return _service.run(
       sessionId: sessionId,
@@ -120,6 +122,9 @@ class DefaultStudioLedgerExecutor implements StudioLedgerExecutor {
       macroCtx: macroCtx,
       isStillCurrent: isStillCurrent,
       commitSnapshot: true,
+      engine: engine,
+      operationIdentity:
+          'manual:${target.id}:${target.swipeId}:${target.agentSwipeId}',
     );
   }
 
@@ -140,6 +145,9 @@ class DefaultStudioLedgerExecutor implements StudioLedgerExecutor {
       ledgerBlocks: turnConfig.preset?.blocks ?? const [],
       macroCtx: macroCtx,
       isStillCurrent: isStillCurrent,
+      operationIdentity:
+          'manual:${plan.rangeHash}:${plan.endMessage.id}:'
+          '${plan.endMessage.swipeId}:${plan.endMessage.agentSwipeId}',
     );
   }
 }
@@ -189,7 +197,11 @@ class ManualStudioLedgerService {
     } catch (e) {
       throw ManualStudioLedgerConfigException(e);
     }
-    final macroCtx = await _macroContext(sessionId, session.characterId);
+    final macroCtx = await _macroContext(
+      sessionId,
+      session.characterId,
+      _personaName(session.messages),
+    );
     if (!await isTargetCurrent()) {
       return _abortedManualResult(target, startedAt);
     }
@@ -207,6 +219,9 @@ class ManualStudioLedgerService {
         target: target,
         macroCtx: macroCtx,
         isStillCurrent: isTargetCurrent,
+        engine:
+            turnConfig.preset?.runtime.ledgerEngine ??
+            StudioLedgerEngine.currentReconciled,
       ),
     );
     if (!await isTargetCurrent()) {
@@ -267,7 +282,11 @@ class ManualStudioLedgerService {
     final ledgerConfig = turnConfig.resolveLedgerConfig(
       errorLabel: 'ledger-reconciliation-manual',
     );
-    final macroCtx = await _macroContext(sessionId, session.characterId);
+    final macroCtx = await _macroContext(
+      sessionId,
+      session.characterId,
+      _personaName(session.messages),
+    );
     final startedAt = DateTime.now().millisecondsSinceEpoch;
     final isTargetCurrent = _targetOwnershipGuard(sessionId, endpoint);
     if (!await isTargetCurrent()) {
@@ -318,6 +337,7 @@ class ManualStudioLedgerService {
   Future<MacroContext> _macroContext(
     String sessionId,
     String characterId,
+    String userName,
   ) async {
     final character = await characterRepo.getById(characterId);
     return MacroContext(
@@ -326,11 +346,19 @@ class ManualStudioLedgerService {
       charScenario: character?.scenario,
       charPersonality: character?.personality,
       charMesExample: character?.mesExample,
-      userName: 'User',
+      userName: userName,
       macroName: character?.macroName,
       charId: characterId,
       sessionId: sessionId,
     );
+  }
+
+  String _personaName(Iterable<ChatMessage> messages) {
+    for (final message in messages.toList().reversed) {
+      final name = message.personaName?.trim();
+      if (name != null && name.isNotEmpty) return name;
+    }
+    return 'User';
   }
 
   Future<LedgerRunResult> _runForeground(

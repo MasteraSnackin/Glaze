@@ -48,6 +48,7 @@ class StudioBlockSectionList extends StatefulWidget {
   onMoveToGroup;
   final void Function(String blockId, String injectionPoint) onMoveToSection;
   final void Function(String specId, bool enabled) onToggleAgent;
+  final ValueChanged<StudioLedgerEngine> onLedgerEngineChanged;
 
   const StudioBlockSectionList({
     super.key,
@@ -63,6 +64,7 @@ class StudioBlockSectionList extends StatefulWidget {
     required this.onMoveToGroup,
     required this.onMoveToSection,
     required this.onToggleAgent,
+    required this.onLedgerEngineChanged,
   });
 
   @override
@@ -117,6 +119,9 @@ class _StudioBlockSectionListState extends State<StudioBlockSectionList> {
 
       for (final spec in studioAgentsForInjectionPoint(point)) {
         rows.add(_StudioListRow.agent(point, spec));
+        if (point == 'ledger' && spec.id == 'ledger') {
+          rows.add(_StudioListRow.ledgerEngine(point));
+        }
         // The post-processing context setting controls how many trailing
         // messages a post-processing agent is handed. It only applies to the
         // Post Clean agent — the Ledger always pulls its own fixed window of
@@ -227,6 +232,13 @@ class _StudioBlockSectionListState extends State<StudioBlockSectionList> {
         isLast: isLast,
       );
     }
+    if (row.isLedgerEngine) {
+      return _StudioLedgerEngineSetting(
+        key: const ValueKey('studio_ledger_engine'),
+        value: widget.preset.runtime.ledgerEngine,
+        onChanged: widget.onLedgerEngineChanged,
+      );
+    }
     if (row.isFactChecker) {
       final block = row.factCheckerBlock!;
       return StudioFactCheckerRow(
@@ -294,6 +306,7 @@ class _StudioListRow {
   final StudioControllerSpec? spec;
   final bool isPostContext;
   final bool isFactChecker;
+  final bool isLedgerEngine;
   final StudioPresetBlock? factCheckerBlock;
 
   const _StudioListRow.header(
@@ -306,6 +319,7 @@ class _StudioListRow {
        spec = null,
        isPostContext = false,
        isFactChecker = false,
+       isLedgerEngine = false,
        factCheckerBlock = null;
 
   const _StudioListRow.agent(this.point, this.spec)
@@ -316,6 +330,7 @@ class _StudioListRow {
       entry = null,
       isPostContext = false,
       isFactChecker = false,
+      isLedgerEngine = false,
       factCheckerBlock = null;
 
   const _StudioListRow.postContext(this.point)
@@ -327,6 +342,19 @@ class _StudioListRow {
       spec = null,
       isPostContext = true,
       isFactChecker = false,
+      isLedgerEngine = false,
+      factCheckerBlock = null;
+
+  const _StudioListRow.ledgerEngine(this.point)
+    : label = null,
+      count = 0,
+      expanded = false,
+      onToggle = null,
+      entry = null,
+      spec = null,
+      isPostContext = false,
+      isFactChecker = false,
+      isLedgerEngine = true,
       factCheckerBlock = null;
 
   const _StudioListRow.factChecker(this.point, this.factCheckerBlock)
@@ -337,7 +365,8 @@ class _StudioListRow {
       entry = null,
       spec = null,
       isPostContext = false,
-      isFactChecker = true;
+      isFactChecker = true,
+      isLedgerEngine = false;
 
   const _StudioListRow.placeholder(this.point)
     : label = null,
@@ -348,6 +377,7 @@ class _StudioListRow {
       spec = null,
       isPostContext = false,
       isFactChecker = false,
+      isLedgerEngine = false,
       factCheckerBlock = null;
 
   const _StudioListRow.block(this.point, this.entry)
@@ -358,7 +388,48 @@ class _StudioListRow {
       spec = null,
       isPostContext = false,
       isFactChecker = false,
+      isLedgerEngine = false,
       factCheckerBlock = null;
 
   bool get isHeader => label != null;
+}
+
+class _StudioLedgerEngineSetting extends StatelessWidget {
+  const _StudioLedgerEngineSetting({
+    super.key,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final StudioLedgerEngine value;
+  final ValueChanged<StudioLedgerEngine> onChanged;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+    child: DropdownButtonFormField<StudioLedgerEngine>(
+      initialValue: value,
+      decoration: InputDecoration(
+        labelText: 'studio_ledger_engine'.tr(),
+        helperText: value == StudioLedgerEngine.legacyTurnOnly
+            ? 'studio_ledger_engine_legacy_desc'.tr()
+            : 'studio_ledger_engine_current_desc'.tr(),
+        helperMaxLines: 3,
+        border: const OutlineInputBorder(),
+      ),
+      items: [
+        DropdownMenuItem(
+          value: StudioLedgerEngine.currentReconciled,
+          child: Text('studio_ledger_engine_current'.tr()),
+        ),
+        DropdownMenuItem(
+          value: StudioLedgerEngine.legacyTurnOnly,
+          child: Text('studio_ledger_engine_legacy'.tr()),
+        ),
+      ],
+      onChanged: (next) {
+        if (next != null) onChanged(next);
+      },
+    ),
+  );
 }

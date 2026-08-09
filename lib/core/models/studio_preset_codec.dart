@@ -4,6 +4,8 @@ import '../llm/studio/studio_context.dart';
 import '../llm/studio_controller_ontology.dart';
 import 'studio_config.dart';
 import 'studio_agent_codec.dart';
+import 'ledger_prompt_injection_mode.dart';
+import 'ledger_prompt_injection_policy.dart';
 
 final class StudioBlockCanonicalizationResult {
   final StudioPresetBlock block;
@@ -14,9 +16,14 @@ final class StudioBlockCanonicalizationResult {
 
 final class StudioPresetDecodeResult {
   final StudioPreset preset;
+  final LedgerPromptInjectionPolicy ledgerPromptInjectionPolicy;
   final List<String> warnings;
 
-  const StudioPresetDecodeResult(this.preset, {this.warnings = const []});
+  const StudioPresetDecodeResult(
+    this.preset, {
+    required this.ledgerPromptInjectionPolicy,
+    this.warnings = const [],
+  });
 }
 
 /// The sole compatibility boundary between persisted legacy Studio JSON and
@@ -112,8 +119,18 @@ abstract final class StudioPresetCodec {
       final rawRuntime = json['runtime'];
       if (rawRuntime is Map) {
         try {
+          final runtimeJson = _jsonMap(rawRuntime);
+          final rawRequestedMode =
+              runtimeJson['requestedLedgerPromptInjectionMode'];
+          if (rawRequestedMode != null &&
+              _enumByName(LedgerPromptInjectionMode.values, rawRequestedMode) ==
+                  null) {
+            // Preserve the runtime object but fail an unsupported request to
+            // legacy rather than resetting unrelated settings.
+            runtimeJson['requestedLedgerPromptInjectionMode'] = 'legacy';
+          }
           runtime = StudioRuntimeSettings.fromJson(
-            _jsonMap(rawRuntime),
+            runtimeJson,
           ).copyWith(version: 1);
         } on Object {
           warnings.add(
@@ -126,6 +143,20 @@ abstract final class StudioPresetCodec {
         );
       }
     }
+    final rawBlockValues = rawBlocks is List
+        ? rawBlocks.cast<Object?>()
+        : const <Object?>[];
+    // Derive against raw authored blocks here, before any caller can resolve
+    // groups. The effective value is intentionally not persisted over absent
+    // requested settings, preserving backward-compatible JSON round trips.
+    final ledgerPromptInjectionPolicy =
+        deriveLedgerPromptInjectionPolicyFromRaw(
+          presetId: presetId,
+          rawBlocks: rawBlockValues,
+          requestedMode: runtime.requestedLedgerPromptInjectionMode,
+          requestedAlgorithmVersion:
+              runtime.requestedLedgerPromptInjectionAlgorithmVersion,
+        );
     return StudioPresetDecodeResult(
       StudioPreset(
         id: presetId,
@@ -144,6 +175,7 @@ abstract final class StudioPresetCodec {
         runtime: runtime,
         updatedAt: _integer(json['updatedAt']),
       ),
+      ledgerPromptInjectionPolicy: ledgerPromptInjectionPolicy,
       warnings: warnings,
     );
   }
@@ -153,6 +185,17 @@ abstract final class StudioPresetCodec {
   ) {
     final id = _string(json['id']);
     final title = _string(json['title'], _string(json['name']));
+    final attemptsLedgerHeader =
+        id == ledgerPromptInjectionHeaderId ||
+        title == ledgerPromptInjectionHeaderTitle;
+    // A non-boolean authored value is malformed, not truthy. Preserve the
+    // attempted known control as a disabled typed sentinel so policy derived
+    // later from StudioPreset (after a DB round trip) remains fail-closed.
+    final invalidLedgerHeaderEnabled =
+        attemptsLedgerHeader &&
+        json.containsKey('enabled') &&
+        json['enabled'] != null &&
+        json['enabled'] is! bool;
     final canonicalType = _enumByName(StudioBlockType.values, json['type']);
     final canonicalSlot = _enumByName(
       StudioContextSlot.values,
@@ -169,7 +212,7 @@ abstract final class StudioPresetCodec {
           type: canonicalType,
           contextSlot: canonicalSlot,
           targetAgentId: _nullableString(json['targetAgentId']),
-          forceDisabled: missingSlot,
+          forceDisabled: missingSlot || invalidLedgerHeaderEnabled,
         ),
         warning: missingSlot
             ? 'Studio context block "$id" has no valid contextSlot and was disabled.'
@@ -180,12 +223,24 @@ abstract final class StudioPresetCodec {
     final kind = _string(json['kind']);
     if (kind == 'previous_agents') {
       return StudioBlockCanonicalizationResult(
-        _block(json, id: id, title: title, type: StudioBlockType.priorBriefs),
+        _block(
+          json,
+          id: id,
+          title: title,
+          type: StudioBlockType.priorBriefs,
+          forceDisabled: invalidLedgerHeaderEnabled,
+        ),
       );
     }
     if (kind == 'chat_history') {
       return StudioBlockCanonicalizationResult(
-        _block(json, id: id, title: title, type: StudioBlockType.history),
+        _block(
+          json,
+          id: id,
+          title: title,
+          type: StudioBlockType.history,
+          forceDisabled: invalidLedgerHeaderEnabled,
+        ),
       );
     }
     final projection = switch (kind) {
@@ -201,6 +256,7 @@ abstract final class StudioPresetCodec {
           title: title,
           type: StudioBlockType.context,
           contextSlot: projection,
+          forceDisabled: invalidLedgerHeaderEnabled,
         ),
       );
     }
@@ -214,7 +270,7 @@ abstract final class StudioPresetCodec {
           title: title,
           type: StudioBlockType.instruction,
           targetAgentId: target,
-          forceDisabled: unresolved,
+          forceDisabled: unresolved || invalidLedgerHeaderEnabled,
         ),
         warning: unresolved
             ? 'Tracker instruction "$id" has no unique target and was disabled.'
@@ -239,7 +295,7 @@ abstract final class StudioPresetCodec {
         id: id,
         title: title,
         type: StudioBlockType.instruction,
-        forceDisabled: unknownBlank,
+        forceDisabled: unknownBlank || invalidLedgerHeaderEnabled,
       ),
       warning: unknownBlank
           ? 'Unknown blank Studio block "$id" was disabled.'

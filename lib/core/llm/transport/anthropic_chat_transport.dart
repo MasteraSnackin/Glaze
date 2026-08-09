@@ -326,11 +326,20 @@ class AnthropicChatTransport implements ChatTransport {
     StreamSubscription<List<int>>? subscription;
     var buffer = '';
 
+    Future<void> finishAfterCancel([Object? error, StackTrace? stack]) async {
+      await subscription?.cancel();
+      if (completer.isCompleted) return;
+      if (error == null) {
+        completer.complete();
+      } else {
+        completer.completeError(error, stack);
+      }
+    }
+
     subscription = stream.listen(
       (chunk) {
         if (cancelToken?.isCancelled == true) {
-          subscription?.cancel();
-          if (!completer.isCompleted) completer.complete();
+          unawaited(finishAfterCancel());
           return;
         }
         buffer += utf8.decode(chunk, allowMalformed: true);
@@ -384,8 +393,7 @@ class AnthropicChatTransport implements ChatTransport {
                 );
                 doneReceived = true;
               }
-              subscription?.cancel();
-              if (!completer.isCompleted) completer.complete();
+              unawaited(finishAfterCancel());
               return;
             } else if (type == 'error') {
               throw DioException(
@@ -402,20 +410,16 @@ class AnthropicChatTransport implements ChatTransport {
           }
         }
       },
-      onDone: () {
-        if (!completer.isCompleted) completer.complete();
-      },
-      onError: (Object e) {
-        if (!completer.isCompleted) completer.completeError(e);
-      },
+      onDone: () => unawaited(finishAfterCancel()),
+      onError: (Object e, StackTrace stack) =>
+          unawaited(finishAfterCancel(e, stack)),
       cancelOnError: true,
     );
 
     if (cancelToken != null) {
       unawaited(
-        cancelToken.whenCancel.then((_) {
-          subscription?.cancel();
-          if (!completer.isCompleted) completer.complete();
+        cancelToken.whenCancel.then((_) async {
+          await finishAfterCancel();
         }),
       );
     }

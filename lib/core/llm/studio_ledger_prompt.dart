@@ -51,6 +51,7 @@ class StudioLedgerPrompt {
     required List<MemoryEntry> recentMemoryEntries,
     Character? character,
     Map<String, String> entityAliases = const {},
+    String focalUserName = '',
   }) {
     final trackerBlock = buildCurrentStateBlock(
       currentTrackers,
@@ -126,7 +127,81 @@ knowledgeFacts rules:
 - supersedesId only when correcting a known injected fact ID.
 - Distinguish direct observation, heard claim, inference, confirmation, disbelief, and correction.
 - Never output future events as facts.
-- scopeKey: narrowest defensible scope (e.g. relationship:danvi), never global for convenience.''';
+ - scopeKey: narrowest defensible scope (e.g. relationship:danvi), never global for convenience.
+ - Do not create npc:$focalUserName.* or arc:$focalUserName.* state. The user's goals, emotions, intentions, and arc belong to their own messages.
+ - For $focalUserName, write knowledgeFacts only for concrete information explicitly seen, heard, or confirmed; this tracks information access and never dictates a reaction or belief.''';
+  }
+
+  /// Parser-compatible per-turn compatibility profile for presets that do not
+  /// use automatic reconciliation. It preserves the former workflow shape,
+  /// with minimal adaptations for the current parser contract; it is not
+  /// claimed to be a byte-for-byte historical prompt copy.
+  String buildLegacyTurnOnly({
+    required String finalAssistantText,
+    required String recentHistoryText,
+    required List<Tracker> currentTrackers,
+    required List<MemoryEntry> recentMemoryEntries,
+    String focalUserName = '',
+  }) {
+    final trackerBlock = buildCurrentStateBlock(
+      currentTrackers,
+      '$recentHistoryText\n$finalAssistantText',
+    );
+    final keyCatalog = buildExistingKeyCatalog(currentTrackers);
+    final memoryBlock = _buildMemoryBlock(recentMemoryEntries);
+    return '''$_legacyTurnOnlySystemPrompt
+
+<current_state>
+$trackerBlock
+</current_state>
+
+<existing_keys>
+$keyCatalog
+</existing_keys>
+
+<existing_memory>
+$memoryBlock
+</existing_memory>
+
+<recent_chat>
+$recentHistoryText
+</recent_chat>
+
+<final_assistant_response>
+$finalAssistantText
+</final_assistant_response>
+
+Now produce the Studio Ledger output. You MUST return BOTH blocks below.
+The <glaze_memory_export> block is MANDATORY — even when there is nothing
+to write, include it with empty arrays. Do not omit it under any circumstance.
+
+Required response template (follow this exact structure):
+<glaze_memory_export>
+{"ops":[],"knowledgeFacts":[]}
+</glaze_memory_export>
+<studio_ledger>
+Compact continuity snapshot here.
+</studio_ledger>
+
+The <glaze_memory_export> block MUST come first, before <studio_ledger>.
+It must contain a single JSON object with "ops" and "knowledgeFacts" arrays.
+When there are no state changes or knowledge facts, output empty arrays.
+
+Ops format:
+{"ops":[{"op":"set","key":"npc:Name.field","value":"…","evidence":"…","eventState":"completed"}],"knowledgeFacts":[]}
+
+Allowed namespaces: npc:, relationship:, arc:, world:, scene.
+Allowed ops: set, delete. Every set replaces the complete current value.
+Do not write npc:*.knowledge — use knowledgeFacts instead.
+Allowed eventState: planned, suggested, threatened, attempted, completed, failed, cancelled, unknown (or omit).
+Allowed factClass: knowledge, relationship, behavior_change, commitment, goal, persistent_condition, identity_development.
+Allowed epistemicState: observed, heard_claim, inferred, confirmed, disbelieved, forgotten, retracted.
+knowledgeFacts rules:
+- One proposition per fact. Never summarize prior facts.
+- supersedesId only when correcting a known injected fact ID.
+- Never output future events as facts.
+ - scopeKey must be the narrowest defensible scope.
+ - Do not create npc:$focalUserName.* or arc:$focalUserName.* state. For $focalUserName, write knowledgeFacts only for concrete information explicitly seen, heard, or confirmed.''';
   }
 
   /// Full values for state relevant to this turn. This filters rows, never
@@ -312,4 +387,26 @@ Rules:
 - Never write npc:*.knowledge or relationship:*.knowledge. Use knowledgeFacts.
 - Arc keys: arc:id.status, arc:id.summary, arc:id.do_not_reopen, arc:id.card_override
 - World/scene keys: world:location, world:time, world:date, world:active_threats, scene.present_entities, scene.absent_backstory_entities''';
+
+  static const String _legacyTurnOnlySystemPrompt =
+      '''You are Studio Ledger, an internal continuity and state extractor.
+You do not write story prose. You maintain session-canon facts for future generations.
+
+Rules:
+- Preserve prior state unless contradicted by the final response.
+- Temporary posture/outfit/props stay in the visible ledger unless important.
+- Do not create quests or persona stats unless explicitly established.
+- Do not infer romance or trust jumps without evidence.
+- Session state overrides character-card baseline.
+- Never write future events as facts or pending choices as completed events.
+- Distinguish planned, suggested, threatened, attempted, completed, failed, cancelled, and unknown event states.
+- Do not mark an entity present merely because it is mentioned.
+- Prefer patch ops; update current truth rather than creating a history log.
+- Reuse exact keys from current_state or existing_keys for the same fact.
+- Never output ledger text as story prose or a chat message.
+- Entity keys include relationship_to_user, attitude_to_user, trust_to_user, boundaries, location, current_emotional_residue, current_goal, and persistent_condition.
+- Relationship keys include trust, status, relationship, attitude, boundaries, and card_override.
+- Never write npc:*.knowledge or relationship:*.knowledge. Use knowledgeFacts.
+- Arc keys: arc:id.status, arc:id.summary, arc:id.do_not_reopen, arc:id.card_override.
+- World/scene keys: world:location, world:time, world:date, world:active_threats, scene.present_entities, scene.absent_backstory_entities.''';
 }
