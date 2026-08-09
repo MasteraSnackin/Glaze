@@ -380,6 +380,8 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     final bridge = _bridge;
     if (bridge == null) return;
     final initSessionId = widget.sessionId;
+    final initMessages = List<ChatMessage>.of(widget.messages);
+    final initVisibleStartIndex = widget.visibleStartIndex;
     PerfDebug.chatWebViewInitAttempted();
     try {
       await _waitForJsBridgeReady();
@@ -475,13 +477,13 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     } else {
       // On Windows (no keep-alive), init can take several seconds. During
       // that time didUpdateWidget may fire with new messages, but the sync
-      // dispatcher skips them because _ready is false. After init completes,
-      // re-sync the current messages to catch any changes that were missed
-      // during the init window. The ChatWebViewInitializer already pushed
-      // the messages captured at init-construction time, but if the widget
-      // received newer messages since then, this ensures they reach the JS
-      // bridge. On mobile (keep-alive) this is a no-op when messages match.
-      unawaited(_resyncMessagesAfterInit());
+      // dispatcher skips them because _ready is false. Re-sync only when data
+      // changed since the initializer captured it; an unconditional second
+      // setMessages causes a visible duplicate first-chat render on Windows.
+      if (initVisibleStartIndex != widget.visibleStartIndex ||
+          !chatMessageListsIdentical(initMessages, widget.messages)) {
+        unawaited(_resyncMessagesAfterInit());
+      }
     }
   }
 
