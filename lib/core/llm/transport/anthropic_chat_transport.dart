@@ -347,9 +347,8 @@ class AnthropicChatTransport implements ChatTransport {
         buffer = lines.removeLast();
 
         for (final line in lines) {
-          final trimmed = line.trim();
-          if (!trimmed.startsWith('data:')) continue;
-          final payload = trimmed.substring(5).trim();
+          final payload = _sseData(line);
+          if (payload == null) continue;
           if (payload.isEmpty) continue;
           lastRawJsonPayload = payload;
 
@@ -446,6 +445,15 @@ class AnthropicChatTransport implements ChatTransport {
         type: DioExceptionType.connectionError,
       );
     }
+  }
+
+  String? _sseData(String line) {
+    final normalized = line.endsWith('\r')
+        ? line.substring(0, line.length - 1)
+        : line;
+    if (!normalized.startsWith('data:')) return null;
+    final value = normalized.substring(5);
+    return value.startsWith(' ') ? value.substring(1) : value;
   }
 
   Future<void> _oneShotResponse(
