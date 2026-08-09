@@ -29,6 +29,7 @@ enum LedgerProjectionDecisionReason {
   visibleSourceEvidence,
   structuredContinuityCoverage,
   visibleEntityCoverage,
+  notRelevantToCausalWindow,
   tentativeOrInferred,
   transitionTargetSuppressed,
 }
@@ -124,7 +125,15 @@ abstract final class SelectiveLedgerProjectionFilter {
             !message.isTyping)
           message.id: message,
     };
+    final causalWindow = _latestCausalWindow(visible.values);
     final groups = _buildGroups(input.projection);
+    final relevanceActive = groups.any(
+      (group) => group.entities.any(
+        (entity) => causalWindow.any(
+          (message) => _literalEntity(message.content, entity),
+        ),
+      ),
+    );
     final selectedFacts = <CharacterKnowledgeFact>[];
     final selectedTrackers = <Tracker>[];
     final diagnostics = <LedgerProjectionDiagnostic>[];
@@ -146,6 +155,8 @@ abstract final class SelectiveLedgerProjectionFilter {
         input.selectedSwipeByMessageId,
         input.freshness,
         manualTargets,
+        causalWindow,
+        relevanceActive,
       );
       diagnostics.add(
         LedgerProjectionDiagnostic(
@@ -247,6 +258,8 @@ List<_Group> _buildGroups(EffectiveCanonPromptProjection projection) {
     }
     group.entities.addAll(
       [
+        fact.knowerKey,
+        fact.knowerName,
         fact.subjectKey,
         fact.subjectName,
         ...fact.entities,
@@ -289,6 +302,8 @@ _Decision _decide(
   Map<String, int> selectedSwipes,
   LedgerProjectionFreshness freshness,
   Set<String> manualTargets,
+  List<ChatMessage> causalWindow,
+  bool relevanceActive,
 ) {
   if (group.tier == LedgerProjectionDeliveryTier.excluded) {
     return const _Decision(
@@ -344,7 +359,32 @@ _Decision _decide(
       LedgerProjectionDecisionReason.visibleEntityCoverage,
     );
   }
+  // Non-critical facts are durable context, but should not pull an unrelated
+  // character or plot thread back into the immediate scene. This deliberately
+  // uses only the newest conversational exchange, not the full history.
+  if (group.facts.isNotEmpty &&
+      relevanceActive &&
+      group.entities.isNotEmpty &&
+      causalWindow.isNotEmpty &&
+      !group.entities.any(
+        (entity) => causalWindow.any(
+          (message) => _literalEntity(message.content, entity),
+        ),
+      )) {
+    return const _Decision(
+      false,
+      LedgerProjectionDecisionReason.notRelevantToCausalWindow,
+    );
+  }
   return const _Decision(true, LedgerProjectionDecisionReason.selected);
+}
+
+List<ChatMessage> _latestCausalWindow(Iterable<ChatMessage> visible) {
+  final conversational = visible
+      .where((message) => message.role == 'user' || message.role == 'assistant')
+      .toList(growable: false);
+  if (conversational.length <= 2) return conversational;
+  return conversational.sublist(conversational.length - 2);
 }
 
 final class _SourceRef {

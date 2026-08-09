@@ -136,6 +136,38 @@ void main() {
       );
     });
 
+    test(
+      'non-critical facts unrelated to the causal window are suppressed',
+      () {
+        final result = _select(
+          _projection(
+            facts: [
+              _fact(id: 'current', subjectKey: 'chloe', subjectName: 'Chloe'),
+              _fact(id: 'unrelated', subjectKey: 'gilda', subjectName: 'Gilda'),
+            ],
+          ),
+          visible: [_message('m', 'Chloe asks about the pool.')],
+        );
+        expect(result.projection.facts.map((fact) => fact.id), ['current']);
+        expect(
+          result.diagnostics
+              .firstWhere((item) => item.groupId.endsWith(':unrelated'))
+              .reason,
+          LedgerProjectionDecisionReason.notRelevantToCausalWindow,
+        );
+      },
+    );
+
+    test('no causal entity match retains non-critical facts', () {
+      final result = _select(
+        _projection(
+          facts: [_fact(subjectKey: 'gilda', subjectName: 'Gilda')],
+        ),
+        visible: [_message('m', 'The room falls quiet.')],
+      );
+      expect(result.projection.facts, hasLength(1));
+    });
+
     test('tentative and inferred facts never enter selective output', () {
       final result = _select(
         _projection(
@@ -503,6 +535,10 @@ EffectiveCanonPromptProjection _projection({
 CharacterKnowledgeFact _fact({
   String id = 'fact-1',
   String source = 'source-1',
+  String knowerKey = 'david',
+  String knowerName = 'David',
+  String subjectKey = 'lucy',
+  String subjectName = 'Lucy',
   CharacterKnowledgeFactClass factClass = CharacterKnowledgeFactClass.knowledge,
   CharacterKnowledgeFactLifecycle lifecycle =
       CharacterKnowledgeFactLifecycle.active,
@@ -511,10 +547,10 @@ CharacterKnowledgeFact _fact({
 }) => CharacterKnowledgeFact(
   id: id,
   chatSessionId: 's',
-  knowerKey: 'david',
-  knowerName: 'David',
-  subjectKey: 'lucy',
-  subjectName: 'Lucy',
+  knowerKey: knowerKey,
+  knowerName: knowerName,
+  subjectKey: subjectKey,
+  subjectName: subjectName,
   factClass: factClass,
   scopeKey: 'fact:$id',
   predicate: 'knows',
