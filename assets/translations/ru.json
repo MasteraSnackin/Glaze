@@ -1351,6 +1351,7 @@
   "catalog_blocked_add_keyword": "Заблокировать тег «{keyword}»",
   "catalog_clear_tags": "Сбросить ({count})",
   "catalog_search_tags": "Поиск тегов...",
+  "catalog_add_custom_tag": "Искать по тегу «{tag}»",
   "catalog_searching_tags": "Поиск тегов...",
   "catalog_nsfl_warning_title": "NSFL-Контент",
   "catalog_nsfl_warning_desc": "Поверь мне, ты не хочешь этого видеть.",
