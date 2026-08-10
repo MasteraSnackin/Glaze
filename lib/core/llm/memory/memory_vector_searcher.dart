@@ -11,6 +11,7 @@ import '../../models/chat_message.dart';
 import '../../models/memory_book.dart';
 import '../embedding_service.dart';
 import '../memory_embedding_service.dart';
+import '../memory_retrieval_mode.dart';
 import '../retrieval_query_builder.dart';
 import '../vector_math.dart';
 
@@ -124,7 +125,8 @@ class MemoryVectorSearcher {
 
       if (candidates.isEmpty) return const MemoryVectorMatchResult();
 
-      final queryText = settings.memoryMode == 'legacy'
+      final queryText =
+          MemoryRetrievalMode.fromValue(settings.memoryMode).isLegacy
           ? legacyVectorQuery(history, currentText)
           : RetrievalQueryBuilder.build(
               currentText: currentText,

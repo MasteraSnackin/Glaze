@@ -313,6 +313,24 @@
             ]
         },
         {
+            "id": "memorybook",
+            "label": "MemoryBook",
+            "terms": [
+                {
+                    "id": "memorybook-embedding-model",
+                    "name": "MemoryBook Embedding Model",
+                    "alt": "Embedding model, Vector model",
+                    "desc": "The model that converts MemoryBook entries and the retrieval query into numerical vectors for semantic search. Different embedding models create different, incompatible vector spaces. After changing the embedding model, you MUST run [[memorybook-reindex|Reindex]]."
+                },
+                {
+                    "id": "memorybook-reindex",
+                    "name": "Reindex MemoryBook",
+                    "alt": "Reindex, Rebuild embeddings",
+                    "desc": "Recreates vectors for every active MemoryBook entry with the current [[memorybook-embedding-model|embedding model]]. Reindexing is mandatory after initial embedding setup and after every model change: old vectors are incompatible with the new model and can produce incorrect retrieval or ranking. Reindexing does not delete or rewrite memories; it only rebuilds their search index."
+                }
+            ]
+        },
+        {
             "id": "lorebooks",
             "label": "Lorebooks",
             "terms": [

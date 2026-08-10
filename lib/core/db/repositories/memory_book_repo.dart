@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../app_db.dart';
 import '../tables.dart';
 import '../../models/memory_book.dart';
+import '../../services/memory_prompt_presets.dart';
 import '../../state/memory_settings_provider.dart';
 import '../../utils/time_helpers.dart';
 import '../../application/sync_repo_interfaces.dart';
@@ -135,6 +136,47 @@ class MemoryBookRepo extends DatabaseAccessor<AppDatabase>
         updatedAt: Value(currentTimestampSeconds()),
       ),
     );
+  }
+
+  /// Repairs prompt selections after the complete set of available presets
+  /// changes. Only the settings JSON of affected existing books is updated.
+  /// Entries, drafts, cursors, and all unrelated settings remain untouched.
+  Future<int> repairPromptPresetSelections(
+    Iterable<String> customPresetKeys,
+  ) async {
+    final safeKeys = {
+      ...MemoryPromptPresets.builtIn.map((preset) => preset.key),
+      ...customPresetKeys,
+    };
+    var repaired = 0;
+    await transaction(() async {
+      final rows = await select(memoryBookRows).get();
+      for (final row in rows) {
+        final Map<String, dynamic> rawSettings;
+        try {
+          final decoded = jsonDecode(row.settingsJson);
+          if (decoded is! Map<String, dynamic>) continue;
+          rawSettings = decoded;
+        } catch (_) {
+          continue;
+        }
+        final normalized = MemoryPromptPresets.normalizeSerializedSelection(
+          rawSettings,
+          safeKeys,
+        );
+        if (identical(normalized, rawSettings)) continue;
+        await (update(
+          memoryBookRows,
+        )..where((table) => table.sessionId.equals(row.sessionId))).write(
+          MemoryBookRowsCompanion(
+            settingsJson: Value(jsonEncode(normalized)),
+            updatedAt: Value(currentTimestampSeconds()),
+          ),
+        );
+        repaired++;
+      }
+    });
+    return repaired;
   }
 
   /// Atomically appends [drafts] to the pending drafts of the memory book

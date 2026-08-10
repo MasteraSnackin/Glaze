@@ -20,6 +20,7 @@ import '../state/lorebook_provider.dart';
 import '../state/memory_settings_provider.dart';
 import '../state/summary_providers.dart';
 import 'memory_injection_service.dart';
+import 'memory_retrieval_mode.dart';
 import 'message_recall_service.dart';
 import 'memory_selector.dart';
 import 'generation_context_inputs.dart';
@@ -438,7 +439,9 @@ class PromptPayloadBuilder {
     String? arcContent;
     String? entitiesContent;
     if (memoryGraphEnabled &&
-        memorySettings.memoryMode != 'fast' &&
+        MemoryRetrievalMode.fromValue(
+          memorySettings.memoryMode,
+        ).supports(MemoryRetrievalCapability.extendedPromptContext) &&
         sessionId != null) {
       try {
         if (ledgerTrackers != null) {
@@ -642,7 +645,9 @@ class PromptPayloadBuilder {
     String? arcContent = materialized?.arcContent;
     String? entitiesContent;
     if (memoryGraphEnabled &&
-        (memoryBook?.settings.memoryMode ?? memSettings.memoryMode) != 'fast' &&
+        MemoryRetrievalMode.fromValue(
+          memoryBook?.settings.memoryMode ?? memSettings.memoryMode,
+        ).supports(MemoryRetrievalCapability.extendedPromptContext) &&
         session != null) {
       try {
         final entities = await _ref

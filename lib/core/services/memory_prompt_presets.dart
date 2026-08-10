@@ -1,4 +1,6 @@
 class MemoryPromptPresets {
+  static const fallbackKey = 'detailed_beats';
+
   static const builtIn = [
     MemoryPromptPreset(
       key: 'detailed_beats',
@@ -32,6 +34,42 @@ class MemoryPromptPresets {
     final all = [...builtIn, ...?custom];
     final match = all.where((p) => p.key == presetKey).firstOrNull;
     return match?.label ?? builtIn.first.label;
+  }
+
+  static MemoryPromptPreset? find(
+    String? presetKey, [
+    List<MemoryPromptPreset>? custom,
+  ]) {
+    return [
+      ...builtIn,
+      ...?custom,
+    ].where((preset) => preset.key == presetKey).firstOrNull;
+  }
+
+  static bool isBuiltIn(String key) =>
+      builtIn.any((preset) => preset.key == key);
+
+  /// Keeps a selected custom key from dangling after a custom preset is
+  /// removed. Unknown keys use the same fallback as [resolve].
+  static String validSelection(
+    String? presetKey, [
+    List<MemoryPromptPreset>? custom,
+  ]) {
+    return find(presetKey, custom)?.key ?? fallbackKey;
+  }
+
+  /// Repairs only a serialized MemoryBook settings prompt selection. Returning
+  /// the original map for valid or missing values keeps every unrelated field
+  /// byte-for-byte equivalent when callers re-encode it.
+  static Map<String, dynamic> normalizeSerializedSelection(
+    Map<String, dynamic> settings,
+    Set<String> availableKeys,
+  ) {
+    final selected = settings['promptPreset'];
+    if (selected is! String || availableKeys.contains(selected)) {
+      return settings;
+    }
+    return {...settings, 'promptPreset': fallbackKey};
   }
 
   static const _detailedBeats = '''
@@ -129,7 +167,11 @@ class MemoryPromptPreset {
     required this.prompt,
   });
 
-  Map<String, dynamic> toJson() => {'key': key, 'label': label, 'prompt': prompt};
+  Map<String, dynamic> toJson() => {
+    'key': key,
+    'label': label,
+    'prompt': prompt,
+  };
 
   factory MemoryPromptPreset.fromJson(Map<String, dynamic> json) {
     return MemoryPromptPreset(
@@ -139,11 +181,15 @@ class MemoryPromptPreset {
     );
   }
 
-  static List<MemoryPromptPreset> fromJsonList(List<Map<String, dynamic>> list) {
+  static List<MemoryPromptPreset> fromJsonList(
+    List<Map<String, dynamic>> list,
+  ) {
     return list.map((m) => MemoryPromptPreset.fromJson(m)).toList();
   }
 
-  static List<Map<String, dynamic>> toJsonList(List<MemoryPromptPreset> presets) {
+  static List<Map<String, dynamic>> toJsonList(
+    List<MemoryPromptPreset> presets,
+  ) {
     return presets.map((p) => p.toJson()).toList();
   }
 }
