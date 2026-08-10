@@ -137,6 +137,7 @@ class MemoryDraftGenerator {
       status: 'pending_approval',
       generatedAt: DateTime.now().millisecondsSinceEpoch,
       updatedAt: DateTime.now().millisecondsSinceEpoch,
+      error: null,
     );
   }
 }

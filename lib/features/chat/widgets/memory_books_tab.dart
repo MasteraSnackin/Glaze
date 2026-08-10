@@ -271,6 +271,7 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
               isGenerating: _ctrl.generatingDrafts[draft.id] == true,
               generatingSince: _ctrl.genStartTimes[draft.id],
               onGenerate: () => _generateDraft(draft.id),
+              onRegenerate: () => _generateDraft(draft.id),
               onCancel: () => _cancelDraft(draft.id),
               onApprove: () => _approveDraft(draft.id),
               onEdit: () => _editDraft(draft),
@@ -318,6 +319,10 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
   }
 
   void _generateDraft(String draftId) {
+    final drafts = _ctrl.book?.pendingDrafts ?? const <MemoryDraft>[];
+    final draftIndex = drafts.indexWhere((draft) => draft.id == draftId);
+    final isRegeneration =
+        draftIndex >= 0 && drafts[draftIndex].content.isNotEmpty;
     _ctrl.generateDraft(
       draftId,
       onStart: () {
@@ -336,7 +341,10 @@ class _MemoryBooksTabState extends ConsumerState<MemoryBooksTab> {
         if (mounted) {
           setState(() {});
           _stopElapsedTimer();
-          GlazeToast.show(context, "${'error_generation'.tr()}: $error");
+          final label = isRegeneration
+              ? 'memory_books_regeneration_failed'.tr()
+              : 'error_generation'.tr();
+          GlazeToast.show(context, '$label: $error');
         }
       },
     );

@@ -19,6 +19,7 @@ class MemoryDraftCard extends StatelessWidget {
   final DateTime? generatingSince;
 
   final VoidCallback onGenerate;
+  final VoidCallback onRegenerate;
   final VoidCallback onCancel;
   final VoidCallback onApprove;
   final VoidCallback onEdit;
@@ -30,6 +31,7 @@ class MemoryDraftCard extends StatelessWidget {
     required this.isGenerating,
     required this.generatingSince,
     required this.onGenerate,
+    required this.onRegenerate,
     required this.onCancel,
     required this.onApprove,
     required this.onEdit,
@@ -130,6 +132,12 @@ class MemoryDraftCard extends StatelessWidget {
                   label: 'memory_books_btn_approve'.tr(),
                   color: _kGreen,
                   onTap: onApprove,
+                ),
+              if (hasContent && !isGenerating)
+                MemoryActionChip(
+                  label: 'memory_books_btn_regenerate'.tr(),
+                  color: _kAmber,
+                  onTap: onRegenerate,
                 ),
               if (hasContent && !isGenerating)
                 MemoryActionChip(

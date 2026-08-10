@@ -11,6 +11,8 @@ import '../../../core/state/pipeline_settings_provider.dart';
 import '../../chat/chat_provider.dart';
 import '../../chat/memory_draft_generator.dart';
 import '../state/memory_active_drafts_provider.dart';
+import 'memory_book_write_queue.dart';
+import 'memory_draft_generation_update.dart';
 import 'memory_settings_mapper.dart';
 
 /// Owns the memory-draft generation lifecycle for a single chat session:
@@ -26,9 +28,9 @@ import 'memory_settings_mapper.dart';
 /// (which pins the shared provider, not this controller directly).
 ///
 /// The controller does not own the [MemoryBook] — the host does. It reads the
-/// book via [bookGetter] and atomically persists updates (book + save) via
-/// [persistAndSet], so there is a single owner of `_book` and a single
-/// `save()` code path.
+/// book via [bookGetter] and atomically applies targeted updates via
+/// [persistMutation], so there is a single owner of `_book` and parallel
+/// completions compose against the freshest state.
 class MemoryDraftGenerationController {
   final WidgetRef _ref;
   final String _charId;
@@ -38,10 +40,10 @@ class MemoryDraftGenerationController {
   /// Returns the host's current [MemoryBook] (or `null` if not loaded).
   final MemoryBook? Function() bookGetter;
 
-  /// Atomically sets the host's `_book` to [book] and persists it. The single
-  /// write path — keeps `_book` ownership in the host and avoids divergent
-  /// save code.
-  final Future<void> Function(MemoryBook book) persistAndSet;
+  /// Applies a targeted update to the freshest host book inside its serialized
+  /// write queue. This prevents parallel completions from competing via stale
+  /// full-book snapshots.
+  final Future<bool> Function(MemoryBookMutation mutation) persistMutation;
 
   final Map<String, bool> _generatingDrafts = {};
   final Set<String> _activeDraftIds = {};
@@ -55,7 +57,7 @@ class MemoryDraftGenerationController {
     required this._sessionId,
     required this._settingsMapper,
     required this.bookGetter,
-    required this.persistAndSet,
+    required this.persistMutation,
   });
   Map<String, bool> get generatingDrafts => Map.unmodifiable(_generatingDrafts);
   Map<String, DateTime> get genStartTimes => Map.unmodifiable(_genStartTimes);
@@ -63,8 +65,7 @@ class MemoryDraftGenerationController {
   /// The global memory settings (singleton, SharedPreferences-backed).
   MemoryGlobalSettings get _globalSettings =>
       _ref.read(memoryGlobalSettingsProvider);
-  PipelineSettings get _pipelineSettings =>
-      _ref.read(pipelineSettingsProvider);
+  PipelineSettings get _pipelineSettings => _ref.read(pipelineSettingsProvider);
 
   MemoryBookSettings get _bookSettings =>
       _settingsMapper.globalToBook(_globalSettings);
@@ -145,46 +146,63 @@ class MemoryDraftGenerationController {
         cancelToken: cancelToken,
       );
 
-      final currentBook = bookGetter();
-      if (currentBook == null) return;
-      final updatedDrafts = [...currentBook.pendingDrafts];
-      updatedDrafts[draftIndex] = result;
-      await persistAndSet(currentBook.copyWith(pendingDrafts: updatedDrafts));
-      _activeDraftIds.remove(draftId);
-      _generatingDrafts.remove(draftId);
-      _genStartTimes.remove(draftId);
-      _stopGenElapsedTimer();
-      if (_generatingDrafts.isEmpty) {
-        _ref.read(memoryActiveDraftsProvider.notifier).markInactive(_sessionId);
-      }
+      if (!_ownsOperation(draftId, cancelToken)) return;
+      await persistMutation((currentBook) {
+        if (!_ownsOperation(draftId, cancelToken)) return null;
+        return applyGeneratedMemoryDraft(
+          currentBook,
+          draftId: draftId,
+          generated: result,
+        );
+      });
+      if (!_ownsOperation(draftId, cancelToken)) return;
       onComplete();
     } catch (e) {
-      final currentBook = bookGetter();
-      if (currentBook == null) return;
-      final updatedDrafts = [...currentBook.pendingDrafts];
-      updatedDrafts[draftIndex] = updatedDrafts[draftIndex].copyWith(
-        status: 'needs_regeneration',
-        error: e.toString(),
-        updatedAt: DateTime.now().millisecondsSinceEpoch,
-      );
-      await persistAndSet(currentBook.copyWith(pendingDrafts: updatedDrafts));
-      _activeDraftIds.remove(draftId);
-      _generatingDrafts.remove(draftId);
-      _genStartTimes.remove(draftId);
-      _stopGenElapsedTimer();
-      if (_generatingDrafts.isEmpty) {
-        _ref.read(memoryActiveDraftsProvider.notifier).markInactive(_sessionId);
-      }
+      if (!_ownsOperation(draftId, cancelToken)) return;
+      // Keep the previous content and keys on failure. If even persisting the
+      // error state fails, still settle and report the generation error.
+      try {
+        await persistMutation((currentBook) {
+          if (!_ownsOperation(draftId, cancelToken)) return null;
+          return applyFailedMemoryDraftGeneration(
+            currentBook,
+            draftId: draftId,
+            error: e.toString(),
+            updatedAt: DateTime.now().millisecondsSinceEpoch,
+          );
+        });
+      } catch (_) {}
+      if (!_ownsOperation(draftId, cancelToken)) return;
       onError(e.toString());
     } finally {
-      _cancelTokens.remove(draftId);
+      if (identical(_cancelTokens[draftId], cancelToken)) {
+        _cancelTokens.remove(draftId);
+        _activeDraftIds.remove(draftId);
+        _generatingDrafts.remove(draftId);
+        _genStartTimes.remove(draftId);
+        _stopGenElapsedTimer();
+        if (_generatingDrafts.isEmpty) {
+          _ref
+              .read(memoryActiveDraftsProvider.notifier)
+              .markInactive(_sessionId);
+        }
+      }
     }
   }
+
+  bool _ownsOperation(String draftId, CancelToken token) =>
+      !token.isCancelled &&
+      _activeDraftIds.contains(draftId) &&
+      identical(_cancelTokens[draftId], token);
+
+  bool isDraftGenerating(String draftId) => _activeDraftIds.contains(draftId);
 
   void cancelDraftGeneration(String draftId) {
     _cancelTokens[draftId]?.cancel();
     _activeDraftIds.remove(draftId);
     _generatingDrafts.remove(draftId);
+    _genStartTimes.remove(draftId);
+    _stopGenElapsedTimer();
     if (_generatingDrafts.isEmpty) {
       _ref.read(memoryActiveDraftsProvider.notifier).markInactive(_sessionId);
     }

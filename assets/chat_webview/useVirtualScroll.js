@@ -175,6 +175,7 @@ class UseVirtualScroll {
         
         this.observer = null;
         this.realObserver = null;
+        this.resizeObserver = null;
         
         this.cache = new VirtualScrollHeightCache(
             () => this.items.length,
@@ -336,9 +337,11 @@ class UseVirtualScroll {
         if (wasInDOM) {
             this.observer.unobserve(item.el);
             this.realObserver.unobserve(item.el);
+            this.resizeObserver?.unobserve(item.el);
             this.container.replaceChild(el, item.el);
             this.observer.observe(el);
             this.realObserver.observe(el);
+            this.resizeObserver?.observe(el);
         }
         item.el = el;
         this.cache.setHeight(item.index, 0); // trigger re-measure
@@ -352,6 +355,7 @@ class UseVirtualScroll {
         if (item.el.parentNode === this.container) {
             this.observer.unobserve(item.el);
             this.realObserver.unobserve(item.el);
+            this.resizeObserver?.unobserve(item.el);
             item.el.remove();
         }
         this.itemMap.delete(id);
@@ -391,7 +395,7 @@ class UseVirtualScroll {
 
     scrollToBottom(behavior = 'auto') {
         const count = this.items.length;
-        if (count === 0) return;
+        if (count === 0) return Promise.resolve();
 
         this._pinnedToBottom = true;
         let effectiveBehavior = behavior;
@@ -416,12 +420,18 @@ class UseVirtualScroll {
         // `setTimeout(…, 50)` left the new message rendered at the bottom while the
         // viewport stayed at the previous offset for ~50ms before snapping down,
         // which read as a janky, non-smooth jump when sending a message.
-        requestAnimationFrame(() => {
+        return new Promise((resolve) => requestAnimationFrame(() => {
             requestAnimationFrame(() => {
-                if (!this.mounted) return;
+                if (!this.mounted) {
+                    resolve();
+                    return;
+                }
                 if (effectiveBehavior === 'smooth') {
                     this.container.scrollTo({ top: this.container.scrollHeight, behavior: 'smooth' });
-                    setTimeout(() => { this.isProgrammaticScrolling = false; }, 500);
+                    setTimeout(() => {
+                        this.isProgrammaticScrolling = false;
+                        resolve();
+                    }, 500);
                 } else {
                     this.container.scrollTop = this.container.scrollHeight;
                     // Re-pin after layout settles (late image/height changes), matching
@@ -429,10 +439,11 @@ class UseVirtualScroll {
                     setTimeout(() => {
                         this.container.scrollTop = this.container.scrollHeight;
                         this.isProgrammaticScrolling = false;
+                        resolve();
                     }, 150);
                 }
             });
-        });
+        }));
     }
 
     scrollToTop() {
@@ -543,6 +554,7 @@ class UseVirtualScroll {
             if (item.el.parentNode === this.container) {
                 this.observer.unobserve(item.el);
                 this.realObserver.unobserve(item.el);
+                this.resizeObserver?.unobserve(item.el);
                 item.el.remove();
             }
         }
@@ -624,6 +636,7 @@ class UseVirtualScroll {
             if (!inRange && inDOM) {
                 this.observer.unobserve(item.el);
                 this.realObserver.unobserve(item.el);
+                this.resizeObserver?.unobserve(item.el);
                 item.el.remove();
             }
         }
@@ -636,6 +649,7 @@ class UseVirtualScroll {
                 this.container.insertBefore(item.el, insertBefore);
                 this.observer.observe(item.el);
                 this.realObserver.observe(item.el);
+                this.resizeObserver?.observe(item.el);
             }
             insertBefore = item.el;
         }
@@ -700,6 +714,34 @@ class UseVirtualScroll {
                 }
             });
         }, { root: this.container, threshold: [0, 0.1, 0.5, 1.0] });
+
+        // IntersectionObserver gives us an initial measurement but does not
+        // report later badge/image/font reflow. Keep cached heights current and
+        // follow that reflow only while the user is still bottom-pinned.
+        if (typeof ResizeObserver === 'function') {
+            this.resizeObserver = new ResizeObserver((entries) => {
+                if (!this.mounted) return;
+                const wasPinned = this._pinnedToBottom;
+                let changed = false;
+                for (const entry of entries) {
+                    const idx = parseInt(entry.target.dataset.index);
+                    const height = entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height;
+                    if (isNaN(idx) || height <= 0) continue;
+                    const previous = this.cache.itemHeights.get(idx);
+                    if (previous == null || Math.abs(previous - height) > 1) {
+                        this.cache.setHeight(idx, height);
+                        changed = true;
+                    }
+                }
+                if (!changed) return;
+                this.updateSpacers();
+                if (wasPinned) {
+                    requestAnimationFrame(() => {
+                        if (this.mounted && this._pinnedToBottom) this.smartScroll();
+                    });
+                }
+            });
+        }
     }
 
     _onContainerScroll() {
@@ -766,6 +808,7 @@ class UseVirtualScroll {
         this.mounted = false;
         if (this.observer) this.observer.disconnect();
         if (this.realObserver) this.realObserver.disconnect();
+        if (this.resizeObserver) this.resizeObserver.disconnect();
         this.container.removeEventListener('scroll', this._onContainerScroll);
     }
 }
