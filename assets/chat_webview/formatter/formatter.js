@@ -205,23 +205,42 @@ export class Formatter {
 
     // 7. Extract Glaze custom markers BEFORE quotes
     const styledSegments = [];
-    const styledRegex = /(==hc:#[0-9a-fA-F]{3,8}==.+?==|==glow:#[0-9a-fA-F]{3,8},\d+==.+?==|==cg:#[0-9a-fA-F]{3,8},#[0-9a-fA-F]{3,8},\d+==.+?==|==grad:#[0-9a-fA-F]{3,8}(?:,#[0-9a-fA-F]{3,8})+==.+?==|==bg:#[0-9a-fA-F]{3,8}==.+?==|==mark==.+?==|==active==.+?==|\*\*[^*\n]+?\*\*|(?<!\*)\*[^*\n]+?\*(?!\*)|__[^_\n]+?__|(?<!\w)_[^_\n]+?_(?!\w)|~~[^~\n]+?~~)/gs;
+    const styledRegex = /(==hc:#[0-9a-fA-F]{3,8}==.+?==|==glow:#[0-9a-fA-F]{3,8},\d+==.+?==|==cg:#[0-9a-fA-F]{3,8},#[0-9a-fA-F]{3,8},\d+==.+?==|==grad:#[0-9a-fA-F]{3,8}(?:,#[0-9a-fA-F]{3,8})+==.+?==|==bg:#[0-9a-fA-F]{3,8}==.+?==|==mark==.+?==|==active==.+?==|\*\*[^*\n]+?\*\*|(?<!\*)\*(?=[^*\n]*[^ \t*\n])[^*\n]+?\*(?!\*)|__[^_\n]+?__|(?<!\w)_[^_\n]+?_(?!\w)|~~[^~\n]+?~~)/gs;
 
     html = html.replace(styledRegex, (match) => {
       const id = this._ph('S_', styledSegments.length);
       styledSegments.push(match);
       return id;
     });
+    // Models occasionally emit `».* *action*`: the first `*` is an orphan
+    // marker, not an empty italic segment. Drop it once the real action is
+    // safely stashed, otherwise it steals that action's opening marker.
+    html = html.replace(/\*([ \t]+)(?=\x01S_\d+\x01)/g, '$1');
 
     // 8. Quote formatting — with unclosed quote handling for streaming
     if (!skipQuotes) {
       const phGroup = '\x01[A-Z_]+\\d+\x01';
-      const quoteRegex = new RegExp(`(${phGroup})|(=[ \\t]*"(?:[^"]|\\\\")*?")|(")((?:[^"]|\\\\")*?)(")|(«)((?:[^»])*?)(»)|(")((?:[^"]*)$)`, 'gm');
+      // Never let a malformed outer « quote consume a styled-segment
+      // placeholder while looking for its closing ». Each placeholder is
+      // restored independently in step 9.
+      const quoteRegex = new RegExp(`(${phGroup})|(=[ \\t]*"(?:[^"]|\\\\")*?")|(")((?:[^"]|\\\\")*?)(")|(«)([^»\x01]*?(?:«[^»\x01]*?»[^»\x01]*?)*?)(»)|(")((?:[^"]*)$)`, 'gm');
       html = html.replace(quoteRegex, (match, placeholder, skipQuote, openQ, closedContent, closeQ, openG, guillemetContent, closeG, openU, unclosedContent) => {
         if (placeholder) return placeholder;
         if (skipQuote) return skipQuote;
         if (openQ !== undefined) return `<span class="chat-quote">${openQ}</span><span class="chat-quote-text">${closedContent}</span><span class="chat-quote">${closeQ}</span>`;
-        if (openG !== undefined) return `<span class="chat-quote">${openG}</span><span class="chat-quote-text">${guillemetContent}</span><span class="chat-quote">${closeG}</span>`;
+        if (openG !== undefined) {
+          // Nested «outer «inner» more outer» — split at inner «» so the
+          // inner quote renders with default (narration) color, while the
+          // outer text keeps the quote color. Inner «» are literal chars,
+          // not separately colored.
+          const parts = guillemetContent.split(/(«[^»]*?»)/);
+          const rendered = parts.map(p => {
+            if (!p) return '';
+            if (/^«[^»]*?»$/.test(p)) return p;
+            return `<span class="chat-quote-text">${p}</span>`;
+          }).join('');
+          return `<span class="chat-quote">${openG}</span>${rendered}<span class="chat-quote">${closeG}</span>`;
+        }
         if (openU !== undefined) return `<span class="chat-quote">${openU}</span><span class="chat-quote-text">${unclosedContent}</span>`;
         return match;
       });

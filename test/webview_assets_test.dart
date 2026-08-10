@@ -416,11 +416,28 @@ void main() {
     test('unmatched emphasis markers cannot consume a later line', () {
       expect(
         formatterFormatterJs,
-        contains(r'(?<!\*)\*[^*\n]+?\*(?!\*)'),
+        contains(r'(?<!\*)\*(?=[^*\n]*[^ \t*\n])[^*\n]+?\*(?!\*)'),
       );
       expect(
         formatterFormatterJs,
         contains(r'html = html.replace(/\*([^*\n]+?)\*/g'),
+      );
+    });
+
+    test('orphan emphasis markers cannot consume the next action segment', () {
+      expect(
+        formatterFormatterJs,
+        contains("html = html.replace(/\\*([ \\t]+)(?=\\x01S_\\d+\\x01)/g, '\$1');"),
+      );
+    });
+
+    test('nested guillemets cannot consume styled-segment placeholders', () {
+      expect(
+        formatterFormatterJs,
+        contains(r'(«)([^»\x01]*?(?:«[^»\x01]*?»[^»\x01]*?)*?)(»)'),
+        reason:
+            'a malformed outer quote must not cross a styled segment while '
+            'searching for its closing guillemet',
       );
     });
   });
