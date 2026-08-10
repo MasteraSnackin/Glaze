@@ -7,6 +7,7 @@ import '../../../core/llm/transport/llm_protocol.dart';
 import '../../../core/models/api_config.dart';
 import '../../../core/models/pipeline_settings.dart';
 import '../../../core/models/studio_config.dart';
+import '../../../core/state/active_studio_preset_provider.dart';
 import '../../../core/state/db_provider.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
@@ -162,14 +163,22 @@ class _StudioSlotsTabState extends ConsumerState<StudioSlotsTab> {
 
   // ── Persistence ────────────────────────────────────────────────────────────
 
-  /// Slot API bindings live on the default Studio preset new sessions inherit;
-  /// the preset row is seeded on the first edit, never just by opening the tab.
+  /// Slot API bindings live on the **active** Studio preset — the one a turn
+  /// resolves through `StudioTurnConfigResolver`. Writing to `default` instead
+  /// would drop the binding for anyone running a different preset, while the
+  /// global model override still applied, sending that model to whatever
+  /// connection the turn fell back to.
+  ///
+  /// The `default` row is seeded on the first edit only when the active id no
+  /// longer resolves, never just by opening the tab.
   Future<void> _saveProfile(
     StudioPreset Function(StudioPreset) mutate, {
     required String slotName,
   }) async {
     final repo = ref.read(studioPresetRepoProvider);
-    final preset = await repo.ensureDefaultSeeded();
+    final activeId = await ref.read(activeStudioPresetProvider.future);
+    final preset =
+        await repo.getById(activeId) ?? await repo.ensureDefaultSeeded();
     await repo.upsert(
       mutate(
         preset,

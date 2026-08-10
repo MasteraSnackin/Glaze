@@ -171,9 +171,9 @@ final studioPresetRepoProvider = Provider<StudioPresetRepo>((ref) {
   return StudioPresetRepo(ref.watch(appDbProvider));
 });
 
-final studioPresetProvider = FutureProvider<StudioPreset?>((ref) async {
-  return ref.watch(studioPresetRepoProvider).getDefault();
-});
+// `studioPresetProvider` — the preset a turn actually runs — lives in
+// `active_studio_preset_provider.dart`: it needs the active-preset id, and that
+// provider already imports this file.
 
 final studioPresetListProvider = FutureProvider<List<StudioPreset>>((
   ref,
