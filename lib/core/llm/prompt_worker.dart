@@ -8,6 +8,7 @@ import '../models/chat_message.dart';
 import '../utils/cast_helpers.dart';
 import 'glaze_matcher.dart';
 import 'memory_budget.dart';
+import 'memory_retrieval_mode.dart';
 import 'memory_excerpt_selector.dart';
 import 'memory_formatting.dart';
 import 'memory_selector.dart';
@@ -242,19 +243,20 @@ PromptResult _buildFromInputs(PromptInputs inputs) {
       if (matched.isNotEmpty) keywordMatched[entry.id] = matched.toList();
     }
 
+    final retrievalMode = MemoryRetrievalMode.fromValue(inputs.memoryMode);
     final budget = MemoryInjectionBudget.composeBudget(
       contextBudgetTokens: inputs.memoryContextBudgetTokens > 0
           ? inputs.memoryContextBudgetTokens
           : null,
       percent: inputs.memoryMaxInjectionBudgetPercent,
-      absoluteCap: inputs.memoryMode == 'legacy'
+      absoluteCap: retrievalMode.isLegacy
           ? null
           : inputs.memoryMaxInjectedTokens,
     );
 
     memorySelection = MemorySelector.select(
       MemorySelectionInput(
-        selectionMode: inputs.memoryMode == 'legacy' ? 'legacy' : 'v2',
+        selectionMode: retrievalMode.isLegacy ? 'legacy' : 'v2',
         entries: inputs.memoryEntries,
         keywordMatchedTerms: keywordMatched,
         maxInjectionTokens: budget,

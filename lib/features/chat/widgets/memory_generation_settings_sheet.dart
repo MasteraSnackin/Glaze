@@ -7,8 +7,8 @@ import '../../../core/llm/memory_budget.dart';
 import '../../../core/llm/model_fetcher.dart';
 import '../../../core/models/memory_book.dart';
 import '../../../core/services/memory_prompt_presets.dart';
+import '../../../core/state/db_provider.dart';
 import '../../../core/state/memory_settings_provider.dart';
-import '../../../core/state/pipeline_settings_provider.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
@@ -116,6 +116,8 @@ class _MemoryGenerationSettingsSheetState
     _batchSize = s.batchSize;
     _useDelayedAutomation = s.useDelayedAutomation;
     _injectionTarget = _migrateInjectionTarget(s.injectionTarget);
+    // Keep the persisted per-book key intact. Global settings may still be
+    // loading; resolution helpers provide a safe display/runtime fallback.
     _promptPreset = s.promptPreset;
     _keyMatchMode = s.keyMatchMode;
     _vectorSearchEnabled = s.vectorSearchEnabled;
@@ -275,7 +277,7 @@ class _MemoryGenerationSettingsSheetState
               style: ButtonStyle(visualDensity: VisualDensity.compact),
             ),
             const SizedBox(height: 12),
-            _sectionLabel('regex_script_settings'.tr()),
+            _sectionLabel('memory_prompt_section'.tr()),
             _promptPresetSelector(),
             const SizedBox(height: 12),
             _sectionLabel('tab_api'.tr()),
@@ -549,11 +551,6 @@ class _MemoryGenerationSettingsSheetState
               label: Text('memory_mode_balanced'.tr()),
               icon: Icon(Icons.tune_rounded),
             ),
-            ButtonSegment(
-              value: 'deep',
-              label: Text('memory_mode_deep'.tr()),
-              icon: Icon(Icons.manage_search_rounded),
-            ),
           ],
           selected: {_memoryMode},
           onSelectionChanged: (s) => setState(() => _memoryMode = s.first),
@@ -565,8 +562,6 @@ class _MemoryGenerationSettingsSheetState
               ? 'memory_mode_legacy_desc'.tr()
               : _memoryMode == 'balanced'
               ? 'memory_mode_balanced_desc'.tr()
-              : _memoryMode == 'deep'
-              ? 'memory_mode_deep_desc'.tr()
               : 'memory_mode_fast_desc'.tr(),
           style: TextStyle(fontSize: 11, color: context.cs.onSurfaceVariant),
         ),
@@ -812,7 +807,7 @@ class _MemoryGenerationSettingsSheetState
           onTap: () async {
             final result = await GlazeBottomSheet.show<String>(
               context,
-              title: 'regex_script_settings'.tr(),
+              title: 'memory_prompt_choose'.tr(),
               items: [
                 ...MemoryPromptPresets.builtIn.map(
                   (p) => BottomSheetItem(
@@ -838,6 +833,7 @@ class _MemoryGenerationSettingsSheetState
                 ),
               ],
             );
+            if (!mounted) return;
             if (result != null) setState(() => _promptPreset = result);
           },
           child: Container(
@@ -863,19 +859,39 @@ class _MemoryGenerationSettingsSheetState
           ),
         ),
         const SizedBox(height: 8),
-        Align(
-          alignment: Alignment.centerRight,
-          child: TextButton.icon(
-            onPressed: _openPromptManager,
-            icon: const Icon(Icons.manage_accounts_rounded, size: 16),
-            label: Text('regex_script_settings'.tr()),
-            style: TextButton.styleFrom(
-              foregroundColor: context.cs.primary,
-              padding: const EdgeInsets.symmetric(horizontal: 12),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            TextButton.icon(
+              key: const Key('memory_view_current_prompt'),
+              onPressed: _viewCurrentPrompt,
+              icon: const Icon(Icons.visibility_outlined, size: 16),
+              label: Text('memory_prompt_view_current'.tr()),
             ),
-          ),
+            TextButton.icon(
+              onPressed: _openPromptManager,
+              icon: const Icon(Icons.tune_rounded, size: 16),
+              label: Text('memory_prompt_manage'.tr()),
+              style: TextButton.styleFrom(
+                foregroundColor: context.cs.primary,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+              ),
+            ),
+          ],
         ),
       ],
+    );
+  }
+
+  Future<void> _viewCurrentPrompt() async {
+    final custom = _customPrompts;
+    final preset =
+        MemoryPromptPresets.find(_promptPreset, custom) ??
+        MemoryPromptPresets.builtIn.first;
+    await GlazeBottomSheet.show<void>(
+      context,
+      title: preset.label,
+      child: MemoryPromptPreviewSheet(preset: preset),
     );
   }
 
@@ -883,55 +899,29 @@ class _MemoryGenerationSettingsSheetState
     final custom = _customPrompts;
     final result = await GlazeBottomSheet.show<List<MemoryPromptPreset>>(
       context,
-      title: "${'theme_custom_font_size'.tr()} ${'label_preset_prompts'.tr()}",
-      child: CustomPromptManagerSheet(customPrompts: custom, onChanged: (_) {}),
+      title: 'memory_prompt_presets_title'.tr(),
+      child: CustomPromptManagerSheet(customPrompts: custom),
     );
-    if (result != null) {
-      final notifier = ref.read(memoryGlobalSettingsProvider.notifier);
-      final current = ref.read(memoryGlobalSettingsProvider);
-      await notifier.save(
-        MemoryGlobalSettings(
-          enabled: current.enabled,
-          memoryMode: current.memoryMode,
-          autoCreateEnabled: current.autoCreateEnabled,
-          autoGenerateEnabled: current.autoGenerateEnabled,
-          maxInjectedEntries: current.maxInjectedEntries,
-          memoryExcerptingEnabled: current.memoryExcerptingEnabled,
-          memoryPackingMode: current.memoryPackingMode,
-          memoryExcerptTokensPerChunk: current.memoryExcerptTokensPerChunk,
-          memoryExcerptChunksPerEntry: current.memoryExcerptChunksPerEntry,
-          chunkFirstTopEntries: current.chunkFirstTopEntries,
-          chunkFirstTopChunks: current.chunkFirstTopChunks,
-          maxInjectedTokens: current.maxInjectedTokens,
-          memoryBudgetPreset: current.memoryBudgetPreset,
-          autoCreateInterval: current.autoCreateInterval,
-          autoCreateLagMessages: current.autoCreateLagMessages,
-          useDelayedAutomation: current.useDelayedAutomation,
-          injectionTarget: current.injectionTarget,
-          batchSize: current.batchSize,
-          parallelJobs: current.parallelJobs,
-          vectorSearchEnabled: current.vectorSearchEnabled,
-          keyMatchMode: current.keyMatchMode,
-          promptPreset: current.promptPreset,
-          diversityAware: current.diversityAware,
-          diversityPenalty: current.diversityPenalty,
-          recencyBoost: current.recencyBoost,
-          recencyHalfLifeDays: current.recencyHalfLifeDays,
-          importanceBoost: current.importanceBoost,
-          importanceWeight: current.importanceWeight,
-          sourceWindowExclusion: current.sourceWindowExclusion,
-          factualContinuityGuardEnabled: current.factualContinuityGuardEnabled,
-          queryIncludeAssistant: current.queryIncludeAssistant,
-          queryRecentTurns: current.queryRecentTurns,
-          queryMaxChars: current.queryMaxChars,
-          cadenceInterval: current.cadenceInterval,
-          consolidationEnabled: current.consolidationEnabled,
-          consolidationThreshold: current.consolidationThreshold,
-          customPrompts: MemoryPromptPreset.toJsonList(result),
+    if (!mounted || result == null) return;
+    final notifier = ref.read(memoryGlobalSettingsProvider.notifier);
+    final current = ref.read(memoryGlobalSettingsProvider);
+    final repo = ref.read(memoryBookRepoProvider);
+    final selected = MemoryPromptPresets.validSelection(_promptPreset, result);
+    await notifier.save(
+      current.copyWith(
+        customPrompts: MemoryPromptPreset.toJsonList(result),
+        promptPreset: MemoryPromptPresets.validSelection(
+          current.promptPreset,
+          result,
         ),
-      );
-      setState(() {});
-    }
+      ),
+    );
+    // Preset definitions are global, while selections are stored per book.
+    // Complete the repair even if this sheet is dismissed during persistence.
+    await repo.repairPromptPresetSelections(result.map((preset) => preset.key));
+    if (!mounted) return;
+    ref.invalidate(memoryBookProvider);
+    setState(() => _promptPreset = selected);
   }
 
   Widget _sectionLabel(String text) {
@@ -1104,11 +1094,7 @@ class _MemoryGenerationSettingsSheetState
               tooltip: 'memory_books_loading_models'.tr(),
               onPressed: _fetchingModels ? null : _fetchModels,
               icon: _fetchingModels
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: GlazeSpinner(),
-                    )
+                  ? const SizedBox(width: 18, height: 18, child: GlazeSpinner())
                   : const Icon(Icons.refresh, size: 18),
             ),
           ],
@@ -1169,6 +1155,7 @@ class _MemoryGenerationSettingsSheetState
 
   Future<void> _fetchModels() async {
     await ref.read(apiListProvider.future);
+    if (!mounted) return;
     final configs = ref.read(apiListProvider).value ?? const [];
     final config = _apiConfigId.isEmpty
         ? ref.read(activeApiConfigProvider)
@@ -1214,11 +1201,12 @@ String _migrateInjectionTarget(String raw) {
 }
 
 String _normalizeMemoryMode(String raw) {
-  if (raw == 'deep') return 'deep';
   if (raw == 'legacy') return 'legacy';
-  // `agentic` was removed in Phase 4 — migrate to `deep` (closest
-  // backward-compatible retrieval depth).
-  if (raw == 'agentic') return 'deep';
+  // Deep is hidden while it is being completed. The intended mode uses a
+  // separate LLM call to select relevant memories and to propose consolidated
+  // or updated entries. Keep accepting persisted `deep`/`agentic` values for
+  // compatibility until that reviewed update workflow is implemented.
+  if (raw == 'deep' || raw == 'agentic') return 'balanced';
   return raw == 'balanced' ? 'balanced' : 'fast';
 }
 

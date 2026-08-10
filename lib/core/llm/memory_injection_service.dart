@@ -19,6 +19,7 @@ import 'memory_diagnostics.dart';
 import 'memory_embedding_service.dart';
 import 'memory_excerpt_selector.dart';
 import 'memory_formatting.dart';
+import 'memory_retrieval_mode.dart';
 import 'message_recall_service.dart';
 import 'memory_selector.dart';
 import 'retrieval_query_builder.dart';
@@ -190,8 +191,13 @@ class MemoryInjectionService {
         .toList();
     if (activeEntries.isEmpty) return finish(const MemorySelection());
 
+    final retrievalMode = MemoryRetrievalMode.fromValue(
+      book.settings.memoryMode,
+    );
+
     final salienceByEntryId = <String, MemorySalience>{};
-    if (_salienceRepo != null && book.settings.memoryMode != 'fast') {
+    if (_salienceRepo != null &&
+        retrievalMode.supports(MemoryRetrievalCapability.salienceEnrichment)) {
       final salienceRows = await _salienceRepo.getBySessionId(sessionId);
       for (final s in salienceRows) {
         salienceByEntryId[s.memoryEntryId] = s;
@@ -200,7 +206,8 @@ class MemoryInjectionService {
 
     // Entity fusion (Phase G3): match entity names/aliases in query text
     var entityOverlapByEntryId = const <String, int>{};
-    if (_entityRepo != null && book.settings.memoryMode != 'fast') {
+    if (_entityRepo != null &&
+        retrievalMode.supports(MemoryRetrievalCapability.entityEnrichment)) {
       final scanText = MemoryCatalogMatcher.selectorScanText(
         book.settings,
         history,
@@ -226,7 +233,7 @@ class MemoryInjectionService {
 
     // Emotional recall (Phase G2): extract emotional context from query
     var queryEmotions = const <String>[];
-    if (book.settings.memoryMode != 'fast') {
+    if (retrievalMode.supports(MemoryRetrievalCapability.emotionEnrichment)) {
       queryEmotions = RetrievalQueryBuilder.extractEmotionalContext(
         MemoryCatalogMatcher.selectorScanText(
           book.settings,
@@ -246,7 +253,8 @@ class MemoryInjectionService {
       ),
       book.settings.keyMatchMode,
     );
-    final catalogMatches = book.settings.memoryMode == 'balanced'
+    final catalogMatches =
+        retrievalMode.supports(MemoryRetrievalCapability.catalogMatching)
         ? await _catalogMatcher.match(
             book: book,
             activeEntries: activeEntries,
@@ -275,14 +283,14 @@ class MemoryInjectionService {
     final budget = MemoryInjectionBudget.describeBudget(
       contextBudgetTokens: contextBudgetTokens,
       percent: book.settings.maxInjectionBudgetPercent,
-      absoluteCap: book.settings.memoryMode == 'legacy'
+      absoluteCap: retrievalMode.isLegacy
           ? null
           : book.settings.maxInjectedTokens,
     );
 
     final selection = MemorySelector.select(
       MemorySelectionInput(
-        selectionMode: book.settings.memoryMode == 'legacy' ? 'legacy' : 'v2',
+        selectionMode: retrievalMode.isLegacy ? 'legacy' : 'v2',
         entries: activeEntries,
         vectorScores: vectorMatches.scores,
         vectorMatchedChunks: vectorMatches.chunksByEntryId,
