@@ -241,4 +241,33 @@ data: [DONE]
     expect(updates, ['first\n', '\nsecond']);
     expect(completed, 'first\n\nsecond');
   });
+
+  test(
+    'preserves UTF-8 text and newlines split across network chunks',
+    () async {
+      const body = '''data: {"choices":[{"delta":{"content":"Привет\\n"}}]}
+
+data: {"choices":[{"delta":{"content":"\\nмир"}}]}
+
+data: [DONE]
+
+''';
+      final bytes = utf8.encode(body);
+      final splitInsideFirstRussianCharacter =
+          bytes.indexOf(utf8.encode('П').first) + 1;
+      final dio = Dio()
+        ..httpClientAdapter = SseAdapter(
+          body,
+          chunkSizes: [splitInsideFirstRussianCharacter, 1, 2, 3],
+        );
+      String? completed;
+
+      await OpenAiChatTransport(dio: dio).stream(
+        request: _req(),
+        onComplete: (text, _, {rawResponseJson}) => completed = text,
+      );
+
+      expect(completed, 'Привет\n\nмир');
+    },
+  );
 }

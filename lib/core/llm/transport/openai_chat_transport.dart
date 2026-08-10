@@ -223,7 +223,7 @@ class OpenAiChatTransport implements ChatTransport {
     }
     final responseStream = responseBody.stream;
     final completer = Completer<void>();
-    StreamSubscription<List<int>>? subscription;
+    StreamSubscription<String>? subscription;
     var buffer = '';
     var fullText = '';
     var fullReasoning = '';
@@ -240,86 +240,88 @@ class OpenAiChatTransport implements ChatTransport {
       }
     }
 
-    subscription = (responseStream as Stream<List<int>>).listen(
-      (chunk) {
-        if (cancelToken?.isCancelled == true) {
-          debugPrint(
-            '[SSE] cancel detected in listen callback, stopping stream',
-          );
-          unawaited(finishAfterCancel());
-          return;
-        }
-        buffer += utf8.decode(chunk, allowMalformed: true);
-        final lines = buffer.split('\n');
-        buffer = lines.removeLast();
-
-        for (final line in lines) {
-          if (cancelToken?.isCancelled == true) {
-            debugPrint(
-              '[SSE] cancel detected while parsing lines, stopping immediately',
-            );
-            buffer = '';
-            unawaited(finishAfterCancel());
-            return;
-          }
-          final data = _sseData(line);
-          if (data == null) continue;
-          if (data == '[DONE]') {
-            if (cancelToken != null && cancelToken.isCancelled) {
+    subscription = utf8.decoder
+        .bind(responseStream)
+        .listen(
+          (chunk) {
+            if (cancelToken?.isCancelled == true) {
               debugPrint(
-                '[SSE] cancel detected at [DONE], suppressing onComplete',
+                '[SSE] cancel detected in listen callback, stopping stream',
               );
-            } else {
-              onComplete?.call(
-                fullText,
-                fullReasoning.isNotEmpty ? fullReasoning : null,
-                rawResponseJson: _buildAggregatedRawResponse(
-                  fullText: fullText,
-                  fullReasoning: fullReasoning,
-                  fallbackRawJsonPayload: lastRawJsonPayload,
-                ),
-              );
-              doneReceived = true;
+              unawaited(finishAfterCancel());
+              return;
             }
-            unawaited(finishAfterCancel());
-            return;
-          }
+            buffer += chunk;
+            final lines = buffer.split('\n');
+            buffer = lines.removeLast();
 
-          lastRawJsonPayload = data;
+            for (final line in lines) {
+              if (cancelToken?.isCancelled == true) {
+                debugPrint(
+                  '[SSE] cancel detected while parsing lines, stopping immediately',
+                );
+                buffer = '';
+                unawaited(finishAfterCancel());
+                return;
+              }
+              final data = _sseData(line);
+              if (data == null) continue;
+              if (data == '[DONE]') {
+                if (cancelToken != null && cancelToken.isCancelled) {
+                  debugPrint(
+                    '[SSE] cancel detected at [DONE], suppressing onComplete',
+                  );
+                } else {
+                  onComplete?.call(
+                    fullText,
+                    fullReasoning.isNotEmpty ? fullReasoning : null,
+                    rawResponseJson: _buildAggregatedRawResponse(
+                      fullText: fullText,
+                      fullReasoning: fullReasoning,
+                      fallbackRawJsonPayload: lastRawJsonPayload,
+                    ),
+                  );
+                  doneReceived = true;
+                }
+                unawaited(finishAfterCancel());
+                return;
+              }
 
-          try {
-            final json = jsonDecode(data) as Map<String, dynamic>;
-            final choice = json['choices']?[0];
-            final delta = choice?['delta'];
+              lastRawJsonPayload = data;
 
-            final contentDelta = delta?['content'] as String? ?? '';
-            // When omitReasoning is set, skip native reasoning_content so
-            // inline <think> parsing in StreamAccumulator is not suppressed
-            // by _hasExternalReasoning. The provider may still emit the
-            // field, but we discard it on the response side.
-            final reasoningDelta = omitReasoning
-                ? null
-                : (delta?['reasoning_content'] as String? ??
-                      delta?['reasoning'] as String?);
+              try {
+                final json = jsonDecode(data) as Map<String, dynamic>;
+                final choice = json['choices']?[0];
+                final delta = choice?['delta'];
 
-            if (contentDelta.isNotEmpty) {
-              fullText += contentDelta;
+                final contentDelta = delta?['content'] as String? ?? '';
+                // When omitReasoning is set, skip native reasoning_content so
+                // inline <think> parsing in StreamAccumulator is not suppressed
+                // by _hasExternalReasoning. The provider may still emit the
+                // field, but we discard it on the response side.
+                final reasoningDelta = omitReasoning
+                    ? null
+                    : (delta?['reasoning_content'] as String? ??
+                          delta?['reasoning'] as String?);
+
+                if (contentDelta.isNotEmpty) {
+                  fullText += contentDelta;
+                }
+                if (reasoningDelta != null && reasoningDelta.isNotEmpty) {
+                  fullReasoning += reasoningDelta;
+                }
+
+                if (contentDelta.isNotEmpty || reasoningDelta != null) {
+                  onUpdate?.call(contentDelta, reasoningDelta);
+                }
+              } catch (_) {}
             }
-            if (reasoningDelta != null && reasoningDelta.isNotEmpty) {
-              fullReasoning += reasoningDelta;
-            }
-
-            if (contentDelta.isNotEmpty || reasoningDelta != null) {
-              onUpdate?.call(contentDelta, reasoningDelta);
-            }
-          } catch (_) {}
-        }
-      },
-      onDone: () => unawaited(finishAfterCancel()),
-      onError: (Object e, StackTrace stack) =>
-          unawaited(finishAfterCancel(e, stack)),
-      cancelOnError: true,
-    );
+          },
+          onDone: () => unawaited(finishAfterCancel()),
+          onError: (Object e, StackTrace stack) =>
+              unawaited(finishAfterCancel(e, stack)),
+          cancelOnError: true,
+        );
 
     if (cancelToken != null) {
       unawaited(
