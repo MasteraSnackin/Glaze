@@ -1340,6 +1340,7 @@
   "catalog_blocked_add_keyword": "Block tag \"{keyword}\"",
   "catalog_clear_tags": "Clear ({count})",
   "catalog_search_tags": "Search tags...",
+  "catalog_add_custom_tag": "Search by tag \"{tag}\"",
   "catalog_searching_tags": "Searching tags...",
   "catalog_nsfl_warning_title": "NSFL Content Warning",
   "catalog_nsfl_warning_desc": "Trust me, you don't want to do this.",

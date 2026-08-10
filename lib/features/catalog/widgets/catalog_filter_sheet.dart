@@ -49,9 +49,10 @@ class _CatalogFilterSheetState extends ConsumerState<CatalogFilterSheet> {
   Set<int> _blockedTagIds = {};
   Set<String> _blockedKeywords = {};
 
+  bool get _isJanitor => widget.provider == CatalogProvider.janitor;
+
   bool get _janitorBlockTagsEnabled =>
-      widget.provider == CatalogProvider.janitor &&
-      ref.read(janitorAccountProvider).isLoggedIn;
+      _isJanitor && ref.read(janitorAccountProvider).isLoggedIn;
 
   @override
   void initState() {
@@ -266,6 +267,12 @@ class _CatalogFilterSheetState extends ConsumerState<CatalogFilterSheet> {
           selectedNames: _selectedTagNames,
           onToggle: _toggleTag,
           onClear: _clearTags,
+          // JanitorAI: `/hampter/tags` only covers the curated tags searched by
+          // id. Custom tags are free text (`custom_tags[]`), so they come from
+          // the same `/tags/suggest` autocomplete the block list uses, and the
+          // raw query can be searched verbatim.
+          fetchSuggestions: _isJanitor ? fetchJanitorTagSuggestions : null,
+          allowCustomTags: _isJanitor,
         ),
         if (_blockList != null)
           FilterCustomSection(
