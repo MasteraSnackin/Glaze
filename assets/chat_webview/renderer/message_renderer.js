@@ -858,6 +858,8 @@ if (messageData.isEditing) classes.push('editing');
         badge.className = `msg-memory-badge ${cls}`;
         badge.textContent = msg.memoryStatus;
       }
+    } else {
+      sectionEl.querySelector('.msg-memory-badge')?.remove();
     }
 
     if (msg.isHidden !== undefined) {

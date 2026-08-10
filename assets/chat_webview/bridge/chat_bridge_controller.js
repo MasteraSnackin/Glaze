@@ -514,6 +514,22 @@ export class Bridge {
     this._updateBatcher.enqueue(msg.id, () => this._executeUpdateMessage(msg));
   }
 
+  // Patch only memory badges when the async memory providers settle. This
+  // deliberately avoids rebuilding message bodies/panels and works for both
+  // mounted and virtualized rows because itemMap retains every row element.
+  patchMemoryStatuses(statusesJson) {
+    const statuses = JSON.parse(statusesJson);
+    for (const [id, status] of Object.entries(statuses)) {
+      const item = this.virtualList.itemMap?.get(id);
+      const section = item?.el;
+      if (!section) continue;
+      const current = section.querySelector('.msg-memory-badge')?.textContent;
+      // REBUILD/STALE come from message-local coverage and outrank book state.
+      if (current === 'REBUILD' || current === 'STALE') continue;
+      this.renderer.updateMessageMeta(section, { id, memoryStatus: status });
+    }
+  }
+
   _executeUpdateMessage(msg) {
     const section = document.querySelector(`[data-message-id="${msg.id}"]`);
     if (!section) return;
@@ -758,10 +774,11 @@ export class Bridge {
   }
 
   scrollToBottom(behavior = 'auto') {
-    this.virtualList.scrollToBottom(behavior);
+    const settled = this.virtualList.scrollToBottom(behavior);
     requestAnimationFrame(() => {
       this._sendToFlutter('onScrollToBottomVisibility', [false]);
     });
+    return settled;
   }
 
   // Arm a one-shot "stick to bottom on the next append" so that sending a

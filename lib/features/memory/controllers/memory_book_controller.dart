@@ -11,6 +11,7 @@ import '../../../core/state/memory_settings_provider.dart';
 import '../../../core/state/pipeline_settings_provider.dart';
 import '../../chat/chat_provider.dart';
 import '../../settings/api_list_provider.dart';
+import 'memory_book_write_queue.dart';
 import 'memory_draft_generation_controller.dart';
 import 'memory_settings_mapper.dart';
 
@@ -29,6 +30,11 @@ class MemoryBookController {
   bool _loading = true;
   bool _isReindexing = false;
   final MemorySettingsMapper _settingsMapper = const MemorySettingsMapper();
+  late final MemoryBookWriteQueue _bookWrites = MemoryBookWriteQueue(
+    readLatest: () => _book,
+    publish: (book) => _book = book,
+    persist: (book) => _ref.read(memoryBookOpsProvider).saveMemoryBook(book),
+  );
   late final MemoryDraftGenerationController _draftGen =
       MemoryDraftGenerationController(
         ref: _ref,
@@ -36,10 +42,7 @@ class MemoryBookController {
         sessionId: _sessionId,
         settingsMapper: _settingsMapper,
         bookGetter: () => _book,
-        persistAndSet: (book) async {
-          _book = book;
-          await save();
-        },
+        persistMutation: _bookWrites.mutate,
       );
 
   MemoryBookController(this._ref, this._sessionId, this._charId);
@@ -68,7 +71,7 @@ class MemoryBookController {
 
   Future<void> save() async {
     if (_book == null) return;
-    await _ref.read(memoryBookOpsProvider).saveMemoryBook(_book!);
+    await _bookWrites.saveLatest();
   }
 
   MemoryBookSettings globalSettingsAsBookSettings() =>
@@ -201,6 +204,9 @@ class MemoryBookController {
 
   Future<void> approveDraft(String draftId) async {
     if (_book == null) return;
+    // The card hides Approve while generating; keep the same invariant at the
+    // controller boundary for stale callbacks or programmatic callers.
+    if (_draftGen.isDraftGenerating(draftId)) return;
     final draftIndex = _book!.pendingDrafts.indexWhere((d) => d.id == draftId);
     if (draftIndex < 0) return;
     final draft = _book!.pendingDrafts[draftIndex];
@@ -233,6 +239,9 @@ class MemoryBookController {
 
   Future<void> deleteDraft(String draftId) async {
     if (_book == null) return;
+    // Invalidate an in-flight request before removing the draft so a late
+    // completion cannot publish it back into the book.
+    _draftGen.cancelDraftGeneration(draftId);
     _book = _book!.copyWith(
       pendingDrafts: _book!.pendingDrafts
           .where((d) => d.id != draftId)
@@ -243,6 +252,9 @@ class MemoryBookController {
 
   Future<void> deleteAllDrafts() async {
     if (_book == null) return;
+    for (final draft in _book!.pendingDrafts) {
+      _draftGen.cancelDraftGeneration(draft.id);
+    }
     _book = _book!.copyWith(pendingDrafts: []);
     await save();
   }
@@ -352,6 +364,9 @@ class MemoryBookController {
 
   Future<void> editDraft(MemoryDraft draft, MemoryEntry result) async {
     if (_book == null) return;
+    // Editing a draft that has an active generation would create ambiguous
+    // last-writer-wins semantics. Delete remains intentionally allowed.
+    if (_draftGen.isDraftGenerating(draft.id)) return;
     final drafts = [..._book!.pendingDrafts];
     final idx = drafts.indexWhere((d) => d.id == draft.id);
     if (idx >= 0) {

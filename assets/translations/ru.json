@@ -1411,6 +1411,7 @@
   "memory_books_badge_hybrid": "гибридный",
   "memory_books_btn_generate": "Генерировать",
   "memory_books_btn_regenerate": "Перегенерировать",
+  "memory_books_regeneration_failed": "Не удалось перегенерировать. Предыдущее содержимое сохранено",
   "memory_books_btn_generate_remaining": "Генерировать оставшиеся",
   "memory_books_btn_generate_batch": "Генерировать пакет",
   "memory_books_btn_approve": "Принять",

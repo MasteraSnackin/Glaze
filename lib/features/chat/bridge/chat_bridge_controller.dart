@@ -257,6 +257,7 @@ class ChatBridgeController {
   void Function()? onLoadMore;
   void Function(bool hidden)? onHeaderScroll;
   void Function(bool visible)? onScrollToBottomVisibility;
+
   /// A rendered message carried a `<script>` while message script execution is
   /// off. Fired at most once per WebView load so the app can offer to enable
   /// execution.
@@ -703,13 +704,18 @@ class ChatBridgeController {
   }) => layout.trackpadScroll(dx: dx, dy: dy, x: x, y: y);
 
   // Memory
-  void updateMemoryBookData({
+  Future<void> updateMemoryBookData({
     required List<Map<String, dynamic>> entries,
     required List<Map<String, dynamic>> pendingDrafts,
+    bool patchMessages = true,
   }) => memory.updateMemoryBookData(
     entries: entries,
     pendingDrafts: pendingDrafts,
+    patchMessages: patchMessages,
   );
+
+  Future<void> patchMemoryStatuses(Map<String, String?> statuses) =>
+      callJs('patchMemoryStatuses', jsonEncode(statuses));
 
   // Ext Blocks
 

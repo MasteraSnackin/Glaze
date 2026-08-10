@@ -183,17 +183,21 @@ class ChatWebViewInitializer {
           ? input.searchCurrentIndex
           : -1,
     );
-    await bridge.setMessages(
-      input.messages,
-      visibleStartIndex: input.visibleStartIndex,
-    );
-    bridge.updateMemoryBookData(
+    // Memory membership is mapper input, not a post-render decoration. Seed it
+    // before mapping so the first layout already includes MEM/PENDING/DRAFT
+    // badges (whose height can otherwise invalidate the opening bottom jump).
+    await bridge.updateMemoryBookData(
       entries: input.memoryEntries
           .map((e) => {'status': e.status, 'messageIds': e.messageIds})
           .toList(),
       pendingDrafts: input.memoryDrafts
           .map((e) => {'messageIds': e.messageIds})
           .toList(),
+      patchMessages: false,
+    );
+    await bridge.setMessages(
+      input.messages,
+      visibleStartIndex: input.visibleStartIndex,
     );
     if (input.bottomInset > 0) {
       await bridge.setBottomPadding(

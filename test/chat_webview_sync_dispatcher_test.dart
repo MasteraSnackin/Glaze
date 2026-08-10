@@ -420,6 +420,36 @@ void main() {
       expect(bridge.overlayBlurCalls, hasLength(1));
       expect(bridge.overlayBlurCalls.single, moved);
     });
+
+    test('patches memory status without requesting message-list sync', () {
+      final dispatcher = ChatWebViewSyncDispatcher(
+        state: ChatWebViewSyncState(),
+      );
+      final bridge = _FakeBridge();
+      final message = _assistant('a1');
+
+      final result = dispatcher.dispatch(
+        bridge: bridge,
+        old: _fields(isGenerating: false, messages: [message]),
+        current: _fields(
+          isGenerating: false,
+          messages: [message],
+          memoryDrafts: const [
+            _MemoryDraft(['a1']),
+          ],
+        ),
+        oldMessages: [message],
+        newMessages: [message],
+        streamingId: '__streaming__',
+        onSyncExtBlockPanels: () async {},
+        appendMessage: (_) async {},
+        buildStreamingPlaceholder: () => _assistant('__streaming__'),
+      );
+
+      expect(result.runMessageSync, isFalse);
+      expect(bridge.memoryUpdates, hasLength(1));
+      expect(bridge.memoryUpdates.single.$2, hasLength(1));
+    });
   });
 }
 
@@ -437,6 +467,7 @@ ChatWebViewWidgetFields _fields({
   bool isPostGenRunning = false,
   String? continuationTargetId,
   List<ChatOverlayBlurRegion> blurRegions = const [],
+  List<dynamic> memoryDrafts = const [],
 }) => ChatWebViewWidgetFields(
   continuationTargetId: continuationTargetId,
   blurRegions: blurRegions,
@@ -480,7 +511,7 @@ ChatWebViewWidgetFields _fields({
   disableSwipeRegeneration: false,
   studioEnabled: false,
   memoryEntries: const [],
-  memoryDrafts: const [],
+  memoryDrafts: memoryDrafts,
   sessionId: sessionId,
   isGenerating: isGenerating,
   isGeneratingImage: false,
@@ -507,6 +538,8 @@ class _FakeBridge implements ChatBridgeController {
   final List<ChatMessage> appendedMessages = [];
   final List<bool> updatedIsLast = [];
   final List<String?> lastMessageIds = [];
+  final List<(List<Map<String, dynamic>>, List<Map<String, dynamic>>, bool)>
+  memoryUpdates = [];
   Completer<void>? appendMessagesCompleter;
   Completer<void>? appendMessageCompleter;
 
@@ -556,6 +589,15 @@ class _FakeBridge implements ChatBridgeController {
   }
 
   @override
+  Future<void> updateMemoryBookData({
+    required List<Map<String, dynamic>> entries,
+    required List<Map<String, dynamic>> pendingDrafts,
+    bool patchMessages = true,
+  }) async {
+    memoryUpdates.add((entries, pendingDrafts, patchMessages));
+  }
+
+  @override
   Future<void> setIdentity({
     String? charName,
     String? charColor,
@@ -568,4 +610,10 @@ class _FakeBridge implements ChatBridgeController {
 
   @override
   dynamic noSuchMethod(Invocation invocation) => null;
+}
+
+class _MemoryDraft {
+  const _MemoryDraft(this.messageIds);
+
+  final List<String> messageIds;
 }

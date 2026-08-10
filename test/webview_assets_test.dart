@@ -32,6 +32,7 @@ void main() {
   late String formatterTextFormatJs;
   late String bridgeIndexJs;
   late String bridgeControllerJs;
+  late String virtualScrollJs;
   late String editControllerJs;
   late String genTimerJs;
   late String interactionDispatchJs;
@@ -59,6 +60,7 @@ void main() {
     ].join('\n');
     bridgeIndexJs = _bridgeAsset('index.js');
     bridgeControllerJs = _bridgeAsset('chat_bridge_controller.js');
+    virtualScrollJs = _asset('useVirtualScroll.js');
     editControllerJs = _bridgeAsset('edit_controller.js');
     genTimerJs = _bridgeAsset('gen_timer.js');
     interactionDispatchJs = _bridgeAsset('interaction_dispatch.js');
@@ -86,6 +88,53 @@ void main() {
         contains('selection.getRangeAt(i).cloneContents()'),
       );
       expect(selectionManagerJs, contains('content.innerText.trim()'));
+    });
+  });
+
+  group('memory badge and virtual-scroll settling', () {
+    test('late memory state patches metadata without a full render', () {
+      final body = _extractBlockBody(
+        bridgeControllerJs,
+        bridgeControllerJs.indexOf('patchMemoryStatuses(statusesJson)'),
+      );
+      expect(body, contains('this.virtualList.itemMap?.get(id)'));
+      expect(body, contains('this.renderer.updateMessageMeta(section'));
+      expect(body, isNot(contains('renderMessage(')));
+      expect(
+        rendererMessageJs,
+        contains("querySelector('.msg-memory-badge')?.remove()"),
+      );
+    });
+
+    test('late height changes re-pin only a still-pinned viewport', () {
+      expect(
+        virtualScrollJs,
+        contains('this.resizeObserver = new ResizeObserver'),
+      );
+      expect(
+        virtualScrollJs,
+        contains('const wasPinned = this._pinnedToBottom'),
+      );
+      expect(
+        virtualScrollJs,
+        contains(
+          'if (this.mounted && this._pinnedToBottom) this.smartScroll()',
+        ),
+      );
+      expect(virtualScrollJs, contains('if (!this._pinnedToBottom) return'));
+    });
+
+    test('scroll-to-bottom resolves after its correction pass', () {
+      final body = _extractBlockBody(
+        virtualScrollJs,
+        virtualScrollJs.indexOf("scrollToBottom(behavior = 'auto')"),
+      );
+      expect(body, contains('return new Promise'));
+      expect(
+        body,
+        contains('this.container.scrollTop = this.container.scrollHeight'),
+      );
+      expect(body, contains('resolve()'));
     });
   });
 
@@ -427,7 +476,9 @@ void main() {
     test('orphan emphasis markers cannot consume the next action segment', () {
       expect(
         formatterFormatterJs,
-        contains("html = html.replace(/\\*([ \\t]+)(?=\\x01S_\\d+\\x01)/g, '\$1');"),
+        contains(
+          "html = html.replace(/\\*([ \\t]+)(?=\\x01S_\\d+\\x01)/g, '\$1');",
+        ),
       );
     });
 
@@ -1100,7 +1151,9 @@ void main() {
 
     test('upward scroll restores a hidden header during generation', () {
       final marker = 'if (this.isGenerating) {';
-      final updateHeaderIdx = bridgeControllerJs.indexOf('const updateHeader = () => {');
+      final updateHeaderIdx = bridgeControllerJs.indexOf(
+        'const updateHeader = () => {',
+      );
       expect(updateHeaderIdx, isNot(-1));
       final idx = bridgeControllerJs.indexOf(marker, updateHeaderIdx);
       expect(idx, isNot(-1));
@@ -1138,7 +1191,9 @@ void main() {
 
     test('post-gen activity does not keep the generation timer running', () {
       expect(bridgeControllerJs, contains('setPostGenRunning(value)'));
-      final postGenIdx = bridgeControllerJs.indexOf('setPostGenRunning(value) {');
+      final postGenIdx = bridgeControllerJs.indexOf(
+        'setPostGenRunning(value) {',
+      );
       expect(postGenIdx, isNot(-1));
       final postGenBody = _extractBlockBody(bridgeControllerJs, postGenIdx);
       expect(postGenBody, isNot(contains('_syncGenerationTimer')));

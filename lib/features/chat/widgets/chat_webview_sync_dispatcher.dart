@@ -216,13 +216,15 @@ class ChatWebViewSyncDispatcher {
   }) {
     if (current.memoryEntries != old.memoryEntries ||
         current.memoryDrafts != old.memoryDrafts) {
-      bridge.updateMemoryBookData(
-        entries: current.memoryEntries
-            .map((e) => {'status': e.status, 'messageIds': e.messageIds})
-            .toList(),
-        pendingDrafts: current.memoryDrafts
-            .map((e) => {'messageIds': e.messageIds})
-            .toList(),
+      unawaited(
+        bridge.updateMemoryBookData(
+          entries: current.memoryEntries
+              .map((e) => {'status': e.status, 'messageIds': e.messageIds})
+              .toList(),
+          pendingDrafts: current.memoryDrafts
+              .map((e) => {'messageIds': e.messageIds})
+              .toList(),
+        ),
       );
     }
   }
