@@ -14,9 +14,7 @@ import '../../../core/state/lorebook_provider.dart';
 import '../../../core/state/active_studio_preset_provider.dart';
 import '../../../core/state/active_selection_provider.dart';
 import '../../../core/state/db_provider.dart';
-import '../../../core/state/preset_resolution.dart';
 import '../../../core/state/summary_providers.dart';
-import '../../../core/state/studio_feature_provider.dart';
 import '../../extensions/providers/extension_presets_provider.dart';
 import '../../extensions/providers/extensions_settings_provider.dart';
 import '../../image_gen/image_gen_provider.dart';
@@ -35,6 +33,22 @@ class MagicDrawerStatsService {
   bool _pendingRecalc = false;
   String? _pendingCharId;
   MagicDrawerStats? _pendingBase;
+  bool _disposed = false;
+
+  bool get isActive => !_disposed;
+
+  void _ensureActive() {
+    if (_disposed) {
+      throw StateError('MagicDrawerStatsService has been disposed');
+    }
+  }
+
+  void dispose() {
+    _disposed = true;
+    _pendingRecalc = false;
+    _pendingCharId = null;
+    _pendingBase = null;
+  }
 
   /// Awaits [future], swallowing failures into `null` so one broken read
   /// cannot take down the whole parallel batch in [computeStats].
@@ -48,13 +62,18 @@ class MagicDrawerStatsService {
   }
 
   Future<String?> _resolveStudioPresetName() async {
-    final studioPreset = await _ref
-        .read(studioPresetRepoProvider)
-        .getById(await _ref.read(activeStudioPresetProvider.future));
+    _ensureActive();
+    final studioPresetRepo = _ref.read(studioPresetRepoProvider);
+    final activeStudioPresetId = await _ref.read(
+      activeStudioPresetProvider.future,
+    );
+    _ensureActive();
+    final studioPreset = await studioPresetRepo.getById(activeStudioPresetId);
     return studioPreset?.name;
   }
 
   Future<MagicDrawerStats> computeStats(String charId) async {
+    _ensureActive();
     final chatState = _ref.read(chatProvider(charId)).value;
     final session = chatState?.session;
     final sessionId = session?.id;
@@ -106,11 +125,17 @@ class MagicDrawerStatsService {
         : _guarded(chatRepo.countByCharacterId(charId), 'session count');
 
     await apiListFuture;
+    _ensureActive();
     final character = await characterFuture;
+    _ensureActive();
     final presets = await presetsFuture ?? const <Preset>[];
+    _ensureActive();
     final personas = await personasFuture ?? const <Persona>[];
+    _ensureActive();
     final lorebooks = await lorebooksFuture ?? const <Lorebook>[];
+    _ensureActive();
     final regexes = await regexesFuture ?? const <PresetRegex>[];
+    _ensureActive();
 
     final activePreset = getEffectivePreset(
       presets,
@@ -119,9 +144,8 @@ class MagicDrawerStatsService {
       _ref.read(activePresetIdProvider),
       _ref.read(presetConnectionsProvider),
     );
-    final studioName = studioNameFuture == null
-        ? null
-        : await studioNameFuture;
+    final studioName = studioNameFuture == null ? null : await studioNameFuture;
+    _ensureActive();
     final activePresetDisplayName = studioName ?? activePreset?.name;
 
     final activePersona = activePersonaId != null
@@ -129,12 +153,15 @@ class MagicDrawerStatsService {
         : personas.firstOrNull;
 
     final summaryContent = summaryFuture == null ? null : await summaryFuture;
+    _ensureActive();
     final summaryChars = summaryContent?.length ?? 0;
     final memoryBook = memoryFuture == null ? null : await memoryFuture;
+    _ensureActive();
     final memoryEntries = memoryBook?.entries.length ?? 0;
     final sessionCount = sessionCountFuture == null
         ? 0
         : await sessionCountFuture ?? 0;
+    _ensureActive();
     final messageCount = session?.messages.length ?? 0;
 
     final extActivePresetName = extSettings.activePresetId == null
@@ -203,6 +230,7 @@ class MagicDrawerStatsService {
     String charId,
     MagicDrawerStats base,
   ) async {
+    _ensureActive();
     final session = base.session;
     final character = base.character;
     final chatApi = base.apiConfig;
@@ -256,7 +284,9 @@ class MagicDrawerStatsService {
         charId: charId,
         session: session,
       );
+      _ensureActive();
       final result = await buildFromInputsInIsolate(inputs);
+      _ensureActive();
       var breakdown = result.breakdown;
 
       final lastVectorTokens = _ref.read(lastVectorLoreTokensProvider(charId));
@@ -308,7 +338,7 @@ class MagicDrawerStatsService {
       return base;
     } finally {
       _isCalculating = false;
-      if (_pendingRecalc) {
+      if (!_disposed && _pendingRecalc) {
         _pendingRecalc = false;
         final cId = _pendingCharId;
         final b = _pendingBase;
@@ -317,6 +347,10 @@ class MagicDrawerStatsService {
         if (cId != null && b != null) {
           unawaited(computeTokenStats(cId, b));
         }
+      } else if (_disposed) {
+        _pendingRecalc = false;
+        _pendingCharId = null;
+        _pendingBase = null;
       }
     }
   }

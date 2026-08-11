@@ -17,6 +17,8 @@ void main() {
         ['msg:1', 'msg:2'],
         ['msg:3'],
       ],
+      retrievalKeys: const ['npc:Алиса'],
+      targetKind: 'main_character_card',
       cardFieldPath: 'personality',
       lorebookEntryId: 'book:entry',
       confidence: 0.85,

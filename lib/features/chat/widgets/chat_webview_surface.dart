@@ -46,8 +46,9 @@ class ChatWebViewSurface extends ConsumerWidget {
     required this.imageGenActions,
     required this.scrollActions,
     required this.miscActions,
-    required this.isMounted,
     required this.isCurrentSession,
+    required this.lifecycleEpoch,
+    required this.isActive,
     required this.sessionSwitching,
     required this.refreshPanel,
     required this.bgImageBytes,
@@ -69,11 +70,12 @@ class ChatWebViewSurface extends ConsumerWidget {
   final ImageGenCallbacks imageGenActions;
   final ScrollCallbacks scrollActions;
   final MiscCallbacks miscActions;
-  final bool Function() isMounted;
 
   /// Prevents an async `onWebViewCreated` continuation from installing
   /// callbacks captured for a session that has already been replaced.
   final bool Function(String? sessionId) isCurrentSession;
+  final int lifecycleEpoch;
+  final bool Function(int epoch) isActive;
   final bool sessionSwitching;
   final Future<void> Function(String sessionId, String messageId) refreshPanel;
   final Uint8List? bgImageBytes;
@@ -198,14 +200,19 @@ class ChatWebViewSurface extends ConsumerWidget {
                 initialUrlRequest: chatWebViewInitialUrlRequest(),
                 initialSettings: chatWebViewInAppSettings(),
                 onWebViewCreated: (controller) async {
+                  final epoch = lifecycleEpoch;
+                  bool callbackIsActive() =>
+                      isActive(epoch) && isCurrentSession(sessionId);
+                  if (!callbackIsActive()) return;
                   PerfDebug.chatWebViewSurfaceCreated();
                   final jsBridgeService = await bridgeHost
                       .buildJsBridgeService();
-                  if (!isMounted() || !isCurrentSession(sessionId)) return;
+                  if (!callbackIsActive() || jsBridgeService == null) return;
                   final bridge = ChatBridgeController(
                     controller,
                     jsBridgeService,
                   );
+                  if (!callbackIsActive()) return;
                   final allowMessageScripts =
                       ref
                           .read(appSettingsProvider)
@@ -216,7 +223,7 @@ class ChatWebViewSurface extends ConsumerWidget {
                     'window.bridge?.setAllowMessageScripts('
                     '$allowMessageScripts)',
                   );
-                  if (!isMounted() || !isCurrentSession(sessionId)) return;
+                  if (!callbackIsActive()) return;
                   onBridgeReady(bridge);
                   PerfDebug.chatWebViewBridgeReady();
 
@@ -262,11 +269,11 @@ class ChatWebViewSurface extends ConsumerWidget {
                   bridge.onLinkClick = callbacks.onLinkClick;
                   bridge.onLoadMore = callbacks.onLoadMore;
                   bridge.onMessageScriptBlocked = () {
-                    if (!isMounted()) return;
+                    if (!callbackIsActive()) return;
                     // ignore: use_build_context_synchronously
                     unawaited(maybeShowMessageScriptsPrompt(context, ref));
                   };
-                  if (!isMounted() || !isCurrentSession(sessionId)) return;
+                  if (!callbackIsActive()) return;
 
                   // The ext-block callbacks run after `await` paths. The
                   // controller is created once per WebView lifetime so
@@ -277,7 +284,7 @@ class ChatWebViewSurface extends ConsumerWidget {
                     sessionId: sessionId,
                     // ignore: use_build_context_synchronously
                     context: context,
-                    isMounted: isMounted,
+                    isMounted: callbackIsActive,
                     refreshPanel: refreshPanel,
                   );
                   bridge.onExtBlocksRunAll = extBlocks.onRunAll();
@@ -288,11 +295,17 @@ class ChatWebViewSurface extends ConsumerWidget {
                   bridge.onExtBlockDelete = extBlocks.onDelete();
 
                   final isAlive = await controller.isLoading() == false;
-                  if (isAlive && isMounted() && isCurrentSession(sessionId)) {
+                  if (!callbackIsActive()) return;
+                  if (isAlive) {
                     await onInitWebView();
+                    if (!callbackIsActive()) return;
                   }
                 },
                 onLoadStop: (controller, url) async {
+                  final epoch = lifecycleEpoch;
+                  bool callbackIsActive() =>
+                      isActive(epoch) && isCurrentSession(sessionId);
+                  if (!callbackIsActive()) return;
                   PerfDebug.chatWebViewLoadStopped();
                   // The init path is also wired through onWebViewCreated. When
                   // load stop wins the race, run init here.
@@ -302,7 +315,9 @@ class ChatWebViewSurface extends ConsumerWidget {
                         'window.bridge?.setAllowMessageScripts('
                         '${ref.read(appSettingsProvider).value?.allowMessageScripts ?? false})',
                       );
+                  if (!callbackIsActive()) return;
                   await onInitWebView();
+                  if (!callbackIsActive()) return;
                 },
                 shouldOverrideUrlLoading: (controller, request) async {
                   return chatWebViewNavigationPolicy(request.request.url);

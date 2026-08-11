@@ -15,6 +15,10 @@ import 'manual_rewrite_job_repo.dart';
 import 'session_lorebook_evolution_repo.dart';
 
 const _maxChatHistoryMessages = 40;
+const _maxEvolutionSnapshotCharacters = 120000;
+const _maxCanonValueCharacters = 2000;
+const _maxLorebookEntryCharacters = 20000;
+const _maxLorebookTotalCharacters = 40000;
 
 final class CardEvolutionClaim {
   const CardEvolutionClaim({
@@ -94,6 +98,9 @@ class CardEvolutionRepo {
     required String ownerId,
     required int now,
     required int leaseSeconds,
+    int throughCollectorOrdinal = 0,
+    String collectorBoundaryHash = '',
+    List<String> reconciliationRunIds = const [],
   }) => db.transaction(() async {
     if (ownerId.isEmpty || leaseSeconds <= 0) {
       return const CardEvolutionClaimOutcome('invalidRequest');
@@ -129,7 +136,10 @@ class CardEvolutionRepo {
         return const CardEvolutionClaimOutcome('busy');
       }
     }
-    final selected = await _selectInput(sessionId);
+    final selected = await _selectInput(
+      sessionId,
+      reconciliationRunIds: reconciliationRunIds,
+    );
     if (selected == null) {
       return const CardEvolutionClaimOutcome('notEligible');
     }
@@ -157,8 +167,8 @@ class CardEvolutionRepo {
               chatHistoryHash: snapshot['chatHistoryHash'] as String,
               effectiveCanonIdentity:
                   snapshot['effectiveCanonIdentity'] as String,
-              predecessorCursorHash: '',
-              predecessorRunOrdinal: 0,
+              predecessorCursorHash: collectorBoundaryHash,
+              predecessorRunOrdinal: throughCollectorOrdinal,
               inputHash: inputHash,
               createdAt: now,
             ),
@@ -268,6 +278,16 @@ class CardEvolutionRepo {
               target.$2 != operation.expectedContentHash;
         })) {
       return const CardEvolutionFinalizeOutcome('invalidLorebookOperation');
+    }
+    final loreOnlyObservationKeys = _loreOnlyObservationKeys(selected);
+    if (cardOperations.any(
+      (operation) => {
+        operation.transition.scopeKey,
+        ...operation.transition.affectedTrackerKeys,
+        ...operation.patches.map((patch) => patch.scopeKey),
+      }.any((key) => loreOnlyObservationKeys.contains(_ledgerGroupKey(key))),
+    )) {
+      return const CardEvolutionFinalizeOutcome('invalidCardObservationTarget');
     }
     final values = {
       for (final field in CardRewriteField.values)
@@ -397,6 +417,32 @@ class CardEvolutionRepo {
     return CardEvolutionFinalizeOutcome('persisted', job);
   });
 
+  /// Records a successful automatic writer cycle that correctly produced no
+  /// operations. This prevents the same three-collector boundary from being
+  /// retried after every subsequent collector while retaining no review job.
+  Future<bool> completeEmptyClaim({
+    required String claimId,
+    required String ownerId,
+    required int now,
+  }) async {
+    final changed =
+        await (db.update(db.cardEvolutionClaims)..where(
+              (row) =>
+                  row.id.equals(claimId) &
+                  row.ownerId.equals(ownerId) &
+                  row.status.equals('claimed') &
+                  row.predecessorRunOrdinal.isBiggerThanValue(0) &
+                  row.leaseExpiresAt.isBiggerThanValue(now),
+            ))
+            .write(
+              CardEvolutionClaimsCompanion(
+                status: const Value('completed'),
+                completedAt: Value(now),
+              ),
+            );
+    return changed == 1;
+  }
+
   /// Releases an uncompleted lease after work outside the transaction fails.
   /// Claims are otherwise retained only for successful idempotency records.
   Future<void> abandonClaim({
@@ -457,6 +503,26 @@ class CardEvolutionRepo {
     );
   });
 
+  /// Builds collector evidence from the exact immutable anchors committed by
+  /// one successful reconciliation. It deliberately does not re-run the
+  /// generic mutable-tail heuristic.
+  Future<CardEvolutionObservationSnapshot?> buildObservationSnapshotForRun(
+    LedgerReconciliationSuccessfulRunRow run,
+  ) => db.transaction(() async {
+    final selected = await _selectInput(run.sessionId, reconciliationRun: run);
+    if (selected == null) return null;
+    final session = await (db.select(
+      db.chatSessions,
+    )..where((row) => row.sessionId.equals(run.sessionId))).getSingleOrNull();
+    if (session == null) return null;
+    final assembled = await _assemble(run.sessionId, session.characterId);
+    if (assembled == null || assembled.$2.requiresBaselineDecision) return null;
+    return CardEvolutionObservationSnapshot(
+      character: assembled.$2.character,
+      selectedInputJson: selected,
+    );
+  });
+
   /// Counts successful Ledger reconciliations for the session. The observation
   /// pass runs on every even count (every 2nd reconciliation cadence).
   Future<int> countSuccessfulReconciliations(String sessionId) async {
@@ -488,7 +554,12 @@ class CardEvolutionRepo {
           );
 
   Future<String?> _selectedInputForClaim(CardEvolutionClaimRow claim) async {
-    final selected = await _selectInput(claim.sessionId);
+    final runIds = await _reconciliationRunIdsForClaim(claim);
+    if (claim.predecessorRunOrdinal > 0 && runIds.length != 3) return null;
+    final selected = await _selectInput(
+      claim.sessionId,
+      reconciliationRunIds: runIds,
+    );
     if (selected == null || computeHash(selected) != claim.inputHash) {
       return null;
     }
@@ -499,7 +570,11 @@ class CardEvolutionRepo {
         : null;
   }
 
-  Future<String?> _selectInput(String sessionId) async {
+  Future<String?> _selectInput(
+    String sessionId, {
+    LedgerReconciliationSuccessfulRunRow? reconciliationRun,
+    List<String> reconciliationRunIds = const [],
+  }) async {
     try {
       final session = await (db.select(
         db.chatSessions,
@@ -511,7 +586,28 @@ class CardEvolutionRepo {
       if (assembled == null || assembled.$2.requiresBaselineDecision) {
         return null;
       }
-      final history = _selectChatHistory(messages: messages);
+      final boundaryRuns = reconciliationRunIds.isEmpty
+          ? <LedgerReconciliationSuccessfulRunRow>[]
+          : await (db.select(
+              db.ledgerReconciliationSuccessfulRuns,
+            )..where((row) => row.id.isIn(reconciliationRunIds))).get();
+      if (boundaryRuns.length != reconciliationRunIds.length) return null;
+      boundaryRuns.sort(
+        (a, b) => reconciliationRunIds
+            .indexOf(a.id)
+            .compareTo(reconciliationRunIds.indexOf(b.id)),
+      );
+      final history = reconciliationRun != null
+          ? _selectReconciliationHistory(
+              messages: messages,
+              run: reconciliationRun,
+            )
+          : boundaryRuns.isNotEmpty
+          ? _selectReconciliationHistories(
+              messages: messages,
+              runs: boundaryRuns,
+            )
+          : _selectChatHistory(messages: messages);
       if (history == null || history.length < 2) {
         return null;
       }
@@ -530,48 +626,399 @@ class CardEvolutionRepo {
       );
       if (lorebookEntries == null) return null;
       final historyJson = _canonicalJson(history);
-      final canonEvidence = _canonEvidence(assembled.$1, assembled.$2);
+      final canonEvidence = _canonEvidence(assembled.$1, assembled.$2, history);
       final writableFields = CardRewritePolicy.nonEmptyEvolutionFields(
         assembled.$2.character,
       );
-      final promotedObservations =
+      final accumulatedObservations =
           await (db.select(db.cardEvolutionObservations)
                 ..where((r) => r.sessionId.equals(sessionId))
-                ..where((r) => r.status.equals('promoted'))
-                ..orderBy([(r) => OrderingTerm.asc(r.createdAt)]))
+                ..where((r) => r.status.isIn(const ['active', 'promoted']))
+                ..orderBy([(r) => OrderingTerm.desc(r.updatedAt)]))
               .get();
-      return _canonicalJson({
+      final rangeTrackerKeys = await _rangeTrackerKeys(
+        sessionId: sessionId,
+        reconciliationRun: reconciliationRun,
+        reconciliationRuns: boundaryRuns,
+        history: history,
+        candidateObservationKeys: {
+          for (final observation in accumulatedObservations)
+            ..._decodeJsonArray(
+              observation.retrievalKeysJson,
+            ).whereType<String>(),
+        },
+      );
+      final availableRetrievalTargets = _retrievalTargets(
+        input: assembled.$1,
+        history: history,
+        lorebookEntries: lorebookEntries,
+        rangeTrackerKeys: rangeTrackerKeys,
+      );
+      final availableKeys = availableRetrievalTargets
+          .map((target) => target['key'])
+          .whereType<String>()
+          .toSet();
+      final relevantObservations = accumulatedObservations.where(
+        (observation) => _observationMatches(
+          observation: observation,
+          availableKeys: availableKeys,
+          input: assembled.$1,
+        ),
+      );
+      final compactObservations = _compactObservations(
+        relevantObservations,
+        availableKeys: availableKeys,
+      );
+      final selected = _canonicalJson({
         'contractVersion': 8,
         'fields': [for (final field in writableFields) field.wireName],
         'chatHistoryHash': computeHash(historyJson),
         'effectiveCanonIdentity': assembled.$2.identity,
         'limits': {
           'maxChatHistoryMessages': _maxChatHistoryMessages,
-          'excludesTrailingUserAssistantPair': true,
+          'excludesTrailingUserAssistantPair': reconciliationRun == null,
+          'reconciliationRunId': reconciliationRun?.id,
+          'reconciliationRunOrdinal': reconciliationRun?.ordinal,
+          'reconciliationRunIds': reconciliationRunIds,
+          'reconciliationRangeHash': reconciliationRun?.rangeHash,
         },
         'chatHistory': history,
         'card': _evolutionCardSnapshot(assembled.$2.character),
         'effectiveCanon': jsonDecode(canonEvidence),
         'injectedLorebookEntries': lorebookEntries,
-        'validatedTargets': [
-          for (final obs in promotedObservations)
-            {
-              'scopeKey': obs.semanticScopeKey,
-              'observedChange': obs.observedChange,
-              'canonicalClaim': obs.canonicalClaim,
-              'evidenceMessageIds': _decodeJsonArray(obs.evidenceMessageIds),
-              'evidenceClusters': _decodeJsonClusters(obs.evidenceClustersJson),
-              'cardFieldPath': obs.cardFieldPath,
-              'lorebookEntryId': obs.lorebookEntryId,
-              'confidence': obs.confidence,
-              'repeatCount': obs.repeatCount,
-              'firstSeenRun': obs.firstSeenRun,
-            },
-        ],
+        'availableObservationRetrievalTargets': availableRetrievalTargets,
+        'accumulatedObservations': compactObservations,
       });
+      return selected.length <= _maxEvolutionSnapshotCharacters
+          ? selected
+          : null;
     } catch (_) {
       return null;
     }
+  }
+
+  List<Map<String, Object?>> _retrievalTargets({
+    required EffectiveCanonAssemblyInput input,
+    required List<Object?> history,
+    required List<Object?> lorebookEntries,
+    required Set<String> rangeTrackerKeys,
+  }) {
+    const maxTargets = 80;
+    final primaryTargets = <String, Map<String, Object?>>{};
+    final extraTargets = <String, Map<String, Object?>>{};
+    final rangeMessages = {
+      for (final message in history)
+        if (message is Map)
+          '${message['messageId']}\u0000${message['swipeId']}\u0000${message['agentSwipeId']}',
+    };
+    for (final key in rangeTrackerKeys) {
+      primaryTargets['ledger_tracker\u0000$key'] = {
+        'kind': 'ledger_tracker',
+        'key': key,
+      };
+    }
+    for (final fact in input.facts) {
+      final sourceIdentity =
+          '${fact.sourceMessageId}\u0000${fact.sourceSwipeId}\u0000${fact.sourceAgentSwipeId}';
+      if (!rangeMessages.contains(sourceIdentity)) {
+        continue;
+      }
+      final factGroup = _ledgerGroupKey(fact.scopeKey);
+      if (factGroup == null) continue;
+      extraTargets['knowledge_fact\u0000${fact.id}'] = {
+        'kind': 'knowledge_fact',
+        'key': factGroup,
+        'factId': fact.id,
+        'scopeKey': fact.scopeKey,
+        'subjectKey': fact.subjectKey,
+        'subjectName': fact.subjectName,
+        'predicate': fact.predicate,
+        'object': _boundedText(fact.object),
+      };
+    }
+    for (final raw in lorebookEntries) {
+      if (raw is! Map ||
+          raw['lorebookId'] is! String ||
+          raw['entryId'] is! String) {
+        continue;
+      }
+      final identity = '${raw['lorebookId']}:${raw['entryId']}';
+      extraTargets['injected_lorebook_entry\u0000$identity'] = {
+        'kind': 'injected_lorebook_entry',
+        'key': identity,
+      };
+    }
+    int compare(Map<String, Object?> a, Map<String, Object?> b) {
+      final kind = (a['kind']! as String).compareTo(b['kind']! as String);
+      return kind != 0
+          ? kind
+          : (a['key']! as String).compareTo(b['key']! as String);
+    }
+
+    final primary = primaryTargets.values.toList()..sort(compare);
+    final extras = extraTargets.values.toList()..sort(compare);
+    // Exact groups from this range are never displaced by fact/lorebook
+    // metadata. Reconciliation itself bounds the primary set.
+    return [
+      ...primary,
+      ...extras.take((maxTargets - primary.length).clamp(0, maxTargets)),
+    ];
+  }
+
+  bool _observationMatches({
+    required CardEvolutionObservationRow observation,
+    required Set<String> availableKeys,
+    required EffectiveCanonAssemblyInput input,
+  }) {
+    final keys = _decodeJsonArray(
+      observation.retrievalKeysJson,
+    ).whereType<String>().map((key) => _ledgerGroupKey(key) ?? key);
+    if (keys.any(availableKeys.contains)) return true;
+    // Legacy best effort is exact and local to identities in this snapshot.
+    // It never treats an unkeyed row as globally relevant.
+    final legacyScope = _ledgerGroupKey(observation.semanticScopeKey);
+    if (legacyScope != null && availableKeys.contains(legacyScope)) return true;
+    if (observation.lorebookEntryId case final String loreId
+        when loreId.isNotEmpty && availableKeys.contains(loreId)) {
+      return true;
+    }
+    return input.facts.any(
+      (fact) =>
+          fact.scopeKey.isNotEmpty &&
+          (_ledgerGroupKey(fact.scopeKey) == legacyScope) &&
+          availableKeys.contains(legacyScope),
+    );
+  }
+
+  Future<Set<String>> _rangeTrackerKeys({
+    required String sessionId,
+    required LedgerReconciliationSuccessfulRunRow? reconciliationRun,
+    List<LedgerReconciliationSuccessfulRunRow> reconciliationRuns = const [],
+    required List<Object?> history,
+    required Set<String> candidateObservationKeys,
+  }) async {
+    final runs = reconciliationRun != null
+        ? [reconciliationRun]
+        : reconciliationRuns.isNotEmpty
+        ? reconciliationRuns
+        : await (db.select(db.ledgerReconciliationSuccessfulRuns)
+                ..where((row) => row.sessionId.equals(sessionId))
+                ..orderBy([(row) => OrderingTerm.desc(row.ordinal)])
+                ..limit(3))
+              .get();
+    final groups = <String>{};
+    for (final run in runs) {
+      try {
+        final result = jsonDecode(run.canonicalResultJson);
+        if (result is! Map || result['export'] is! Map) continue;
+        final ops = (result['export'] as Map)['ops'];
+        if (ops is! List) continue;
+        for (final op in ops) {
+          if (op is! Map || op['key'] is! String) continue;
+          final key = op['key'] as String;
+          final group = _ledgerGroupKey(key);
+          if (group != null) groups.add(group);
+          if (key == 'scene.present_entities' && op['value'] is String) {
+            groups.addAll(_presentEntityGroups(op['value'] as String));
+          }
+        }
+        final sceneState = (result['export'] as Map)['sceneState'];
+        if (sceneState is Map && sceneState['presentEntities'] is List) {
+          for (final raw in sceneState['presentEntities'] as List) {
+            if (raw is Map && raw['name'] is String) {
+              final group = _npcGroup(raw['name'] as String);
+              if (group != null) groups.add(group);
+            }
+          }
+        }
+      } catch (_) {
+        // Fail closed for legacy/malformed ranges.
+      }
+    }
+    final chatText = history
+        .whereType<Map<Object?, Object?>>()
+        .map((message) => message['content'])
+        .whereType<String>()
+        .join('\n');
+    for (final key in candidateObservationKeys) {
+      final group = _ledgerGroupKey(key);
+      if (group == null) continue;
+      final subjects = _groupSearchSubjects(group);
+      if (subjects.any((subject) => _containsExactToken(chatText, subject))) {
+        groups.add(group);
+      }
+    }
+    return groups;
+  }
+
+  static String? _ledgerGroupKey(String key) {
+    if (key.startsWith('npc:') || key.startsWith('arc:')) {
+      final dot = key.lastIndexOf('.');
+      final group = dot > key.indexOf(':') + 1 ? key.substring(0, dot) : key;
+      return CardRewriteScope.tryParse(group)?.key;
+    }
+    if (key.startsWith('relationship:')) {
+      final dot = key.lastIndexOf('.');
+      final group = dot > 'relationship:'.length ? key.substring(0, dot) : key;
+      return CardRewriteScope.tryParse(group)?.key;
+    }
+    return CardRewriteScope.tryParse(key)?.key;
+  }
+
+  static Iterable<String> _presentEntityGroups(String value) sync* {
+    for (final raw in value.split(RegExp(r'[;,\n]+'))) {
+      final group = _npcGroup(raw);
+      if (group != null) yield group;
+    }
+  }
+
+  static String? _npcGroup(String name) {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) return null;
+    final group = 'npc:$trimmed';
+    return CardRewriteScope.tryParse(group)?.key;
+  }
+
+  static Iterable<String> _groupSearchSubjects(String group) sync* {
+    if (group.startsWith('npc:') || group.startsWith('arc:')) {
+      yield group.substring(group.indexOf(':') + 1);
+      return;
+    }
+    if (group.startsWith('relationship:')) {
+      final identities = group.substring('relationship:'.length).split(':');
+      if (identities.length == 2) yield* identities;
+    }
+  }
+
+  static bool _containsExactToken(String text, String subject) {
+    final foldedText = text.toLowerCase();
+    final foldedSubject = subject.toLowerCase();
+    if (foldedSubject.isEmpty) return false;
+    var start = 0;
+    while (true) {
+      final index = foldedText.indexOf(foldedSubject, start);
+      if (index < 0) return false;
+      final before = index == 0
+          ? null
+          : foldedText.substring(0, index).runes.last;
+      final end = index + foldedSubject.length;
+      final after = end == foldedText.length
+          ? null
+          : foldedText.substring(end).runes.first;
+      if (!_isWordRune(before) && !_isWordRune(after)) return true;
+      start = index + 1;
+    }
+  }
+
+  static bool _isWordRune(int? rune) {
+    if (rune == null) return false;
+    final character = String.fromCharCode(rune);
+    return RegExp(r'^[\p{L}\p{N}_]$', unicode: true).hasMatch(character);
+  }
+
+  Future<List<String>> _reconciliationRunIdsForClaim(
+    CardEvolutionClaimRow claim,
+  ) async {
+    if (claim.predecessorRunOrdinal <= 0) return const [];
+    final rows =
+        await (db.select(db.cardEvolutionCollectorRuns)
+              ..where((row) => row.sessionId.equals(claim.sessionId))
+              ..where(
+                (row) => row.collectorOrdinal.isBetweenValues(
+                  claim.predecessorRunOrdinal - 2,
+                  claim.predecessorRunOrdinal,
+                ),
+              )
+              ..where((row) => row.status.equals('completed'))
+              ..orderBy([(row) => OrderingTerm.asc(row.collectorOrdinal)]))
+            .get();
+    if (rows.length != 3 ||
+        rows.last.reconciliationChainHash != claim.predecessorCursorHash) {
+      return const [];
+    }
+    return [for (final row in rows) row.reconciliationRunId];
+  }
+
+  List<Object?>? _selectReconciliationHistories({
+    required List<dynamic> messages,
+    required List<LedgerReconciliationSuccessfulRunRow> runs,
+  }) {
+    final byIdentity = <String, Object?>{};
+    for (final run in runs) {
+      final history = _selectReconciliationHistory(
+        messages: messages,
+        run: run,
+      );
+      if (history == null) return null;
+      for (final item in history) {
+        if (item is Map) {
+          byIdentity['${item['messageId']}\u0000${item['swipeId']}\u0000${item['agentSwipeId']}'] =
+              item;
+        }
+      }
+    }
+    return byIdentity.values.toList();
+  }
+
+  List<Map<String, Object?>> _compactObservations(
+    Iterable<CardEvolutionObservationRow> observations, {
+    required Set<String> availableKeys,
+  }) {
+    const maxCount = 12;
+    const maxCharacters = 8000;
+    final sorted = observations.toList()
+      ..sort((a, b) {
+        final updated = b.updatedAt.compareTo(a.updatedAt);
+        return updated != 0 ? updated : a.id.compareTo(b.id);
+      });
+    final result = <Map<String, Object?>>[];
+    var characters = 0;
+    for (final obs in sorted) {
+      if (result.length == maxCount) break;
+      final clusters = _decodeJsonClusters(obs.evidenceClustersJson);
+      final recentClusters = clusters.length <= 3
+          ? clusters
+          : clusters.sublist(clusters.length - 3);
+      final value = <String, Object?>{
+        'id': obs.id,
+        'status': obs.status,
+        'scopeKey': obs.semanticScopeKey,
+        'observedChange': obs.observedChange,
+        'canonicalClaim': obs.canonicalClaim,
+        'evidenceClusters': recentClusters,
+        'retrievalKeys':
+            _decodeJsonArray(obs.retrievalKeysJson)
+                .whereType<String>()
+                .map((key) => _ledgerGroupKey(key) ?? key)
+                .toSet()
+                .toList()
+              ..sort(),
+        'targetKind': obs.targetKind,
+        'cardFieldPath': obs.cardFieldPath,
+        'lorebookEntryId': obs.lorebookEntryId,
+        'confidence': obs.confidence,
+        'repeatCount': obs.repeatCount,
+        'firstSeenRun': obs.firstSeenRun,
+        'lastConfirmedRun': obs.lastConfirmedRun,
+      };
+      if (_decodeJsonArray(obs.retrievalKeysJson).isEmpty) {
+        final legacyKeys = <String>{};
+        final legacyScope = _ledgerGroupKey(obs.semanticScopeKey);
+        if (legacyScope != null && availableKeys.contains(legacyScope)) {
+          legacyKeys.add(legacyScope);
+        }
+        if (obs.lorebookEntryId != null &&
+            availableKeys.contains(obs.lorebookEntryId)) {
+          legacyKeys.add(obs.lorebookEntryId!);
+        }
+        value['retrievalKeys'] = legacyKeys.toList()..sort();
+      }
+      final size = jsonEncode(value).length;
+      if (characters + size > maxCharacters) continue;
+      result.add(value);
+      characters += size;
+    }
+    return result;
   }
 
   Future<List<Object?>?> _selectInjectedLorebookEntries({
@@ -613,20 +1060,30 @@ class CardEvolutionRepo {
         for (final entry in selected.values) (entry.lorebookId, entry.entryId),
       ],
     );
-    return [
-      for (final entry in selected.values)
-        () {
-          final overlay = overlays['${entry.lorebookId}\u0000${entry.entryId}'];
-          final content = overlay?.content ?? entry.rawContent;
-          return <String, Object?>{
-            'lorebookId': entry.lorebookId,
-            'entryId': entry.entryId,
-            'baseContent': overlay?.baseContent ?? entry.rawContent,
-            'content': content,
-            'expectedContentHash': CardCanonicalizer.scalarSha256(content),
-          };
-        }(),
-    ];
+    final result = <Object?>[];
+    var totalCharacters = 0;
+    for (final entry in selected.values) {
+      final overlay = overlays['${entry.lorebookId}\u0000${entry.entryId}'];
+      final baseContent = overlay?.baseContent ?? entry.rawContent;
+      final content = overlay?.content ?? entry.rawContent;
+      final size = baseContent.length + content.length;
+      // Exact content is required for safe anchored lorebook patching. Omit an
+      // oversized target rather than truncating and weakening CAS validation.
+      if (baseContent.length > _maxLorebookEntryCharacters ||
+          content.length > _maxLorebookEntryCharacters ||
+          totalCharacters + size > _maxLorebookTotalCharacters) {
+        continue;
+      }
+      result.add(<String, Object?>{
+        'lorebookId': entry.lorebookId,
+        'entryId': entry.entryId,
+        'baseContent': baseContent,
+        'content': content,
+        'expectedContentHash': CardCanonicalizer.scalarSha256(content),
+      });
+      totalCharacters += size;
+    }
+    return result;
   }
 
   Future<(EffectiveCanonAssemblyInput, EffectiveCanonAssembly)?> _assemble(
@@ -692,9 +1149,61 @@ class CardEvolutionRepo {
     return result.isEmpty ? null : result;
   }
 
+  List<Object?>? _selectReconciliationHistory({
+    required List<dynamic> messages,
+    required LedgerReconciliationSuccessfulRunRow run,
+  }) {
+    try {
+      final decoded = jsonDecode(run.anchorsJson);
+      if (decoded is! List || decoded.isEmpty) return null;
+      final byId = <String, Map<Object?, Object?>>{};
+      for (final message in messages) {
+        if (message is Map && message['id'] is String) {
+          byId[message['id'] as String] = message;
+        }
+      }
+      final result = <Map<String, Object?>>[];
+      for (final raw in decoded) {
+        if (raw is! Map ||
+            raw['messageId'] is! String ||
+            raw['swipeId'] is! int ||
+            raw['agentSwipeId'] is! int ||
+            raw['role'] is! String ||
+            raw['contentHash'] is! String) {
+          return null;
+        }
+        final message = byId[raw['messageId'] as String];
+        if (message == null || message['role'] != raw['role']) return null;
+        final content = _anchoredContent(
+          message,
+          raw['swipeId'] as int,
+          raw['agentSwipeId'] as int,
+        );
+        if (content == null || computeHash(content) != raw['contentHash']) {
+          return null;
+        }
+        result.add({
+          'messageId': raw['messageId'],
+          'role': raw['role'],
+          'swipeId': raw['swipeId'],
+          'agentSwipeId': raw['agentSwipeId'],
+          'content': content,
+          'contentHash': raw['contentHash'],
+        });
+      }
+      final start = result.length > _maxChatHistoryMessages
+          ? result.length - _maxChatHistoryMessages
+          : 0;
+      return result.sublist(start);
+    } catch (_) {
+      return null;
+    }
+  }
+
   String _canonEvidence(
     EffectiveCanonAssemblyInput input,
     EffectiveCanonAssembly assembly,
+    List<Object?> history,
   ) => _canonicalJson({
     'identity': assembly.identity,
     'revision': {
@@ -702,35 +1211,50 @@ class CardEvolutionRepo {
       'hash': assembly.effectiveRevision.hash,
     },
     'trackers': [
-      for (final tracker in input.committedTrackers)
+      for (final tracker in input.committedTrackers.take(80))
         {
           'name': tracker.name,
-          'value': tracker.value,
+          'value': _boundedText(tracker.value),
           'scope': tracker.scope,
           'provenance': tracker.provenance,
         },
     ],
     'facts': [
-      for (final fact in input.facts)
+      for (final fact
+          in input.facts
+              .where((fact) {
+                return history.any(
+                  (message) =>
+                      message is Map &&
+                      message['messageId'] == fact.sourceMessageId &&
+                      message['swipeId'] == fact.sourceSwipeId &&
+                      message['agentSwipeId'] == fact.sourceAgentSwipeId,
+                );
+              })
+              .take(40))
         {
           'scopeKey': fact.scopeKey,
           'predicate': fact.predicate,
-          'object': fact.object,
+          'object': _boundedText(fact.object),
           'epistemicState': fact.epistemicState.wireName,
           'confidence': fact.confidence,
           'importance': fact.importance,
         },
     ],
     'transitions': [
-      for (final transition in input.transitions)
+      for (final transition in input.transitions.take(40))
         {
           'scopeKey': transition.semanticScopeKey,
-          'canonicalClaim': transition.canonicalClaim,
-          'promotionDestination': transition.promotionDestination,
+          'canonicalClaim': _boundedText(transition.canonicalClaim),
+          'promotionDestination': _boundedText(transition.promotionDestination),
         },
     ],
   });
 }
+
+String _boundedText(String value) => value.length <= _maxCanonValueCharacters
+    ? value
+    : value.substring(0, _maxCanonValueCharacters);
 
 bool _hasEvolutionOperations(
   List<RewriteOperationSnapshot> operations, {
@@ -772,6 +1296,24 @@ Map<String, (String, String)>? _loreTargetsFromInput(String selectedInputJson) {
     return result;
   } catch (_) {
     return null;
+  }
+}
+
+Set<String> _loreOnlyObservationKeys(String selectedInputJson) {
+  try {
+    final input = jsonDecode(selectedInputJson) as Map;
+    final observations = input['accumulatedObservations'];
+    if (observations is! List) return const {};
+    return {
+      for (final observation in observations)
+        if (observation is Map &&
+            observation['targetKind'] == 'injected_lorebook_entry' &&
+            observation['retrievalKeys'] is List)
+          for (final key in observation['retrievalKeys'] as List)
+            if (key is String) key,
+    };
+  } catch (_) {
+    return const {};
   }
 }
 

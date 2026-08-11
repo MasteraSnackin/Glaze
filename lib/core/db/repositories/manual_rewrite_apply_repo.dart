@@ -356,6 +356,40 @@ class ManualRewriteApplyRepo {
     if (jobChanged != 1) {
       throw StateError('Job CAS changed inside apply transaction.');
     }
+    final proposal = await (_db.select(
+      _db.cardEvolutionProposalRuns,
+    )..where((row) => row.rewriteJobId.equals(jobId))).getSingleOrNull();
+    if (proposal != null) {
+      final observationIds = <String>{};
+      try {
+        final selected = jsonDecode(proposal.selectedInputJson);
+        final rawObservations = selected is Map
+            ? selected['accumulatedObservations']
+            : null;
+        if (rawObservations is List) {
+          for (final raw in rawObservations) {
+            if (raw is Map && raw['id'] is String) {
+              observationIds.add(raw['id'] as String);
+            }
+          }
+        }
+      } catch (_) {
+        // Legacy/malformed provenance must not block an otherwise valid apply.
+      }
+      if (observationIds.isNotEmpty) {
+        await (_db.update(_db.cardEvolutionObservations)
+              ..where((row) => row.id.isIn(observationIds))
+              ..where(
+                (row) => row.status.isIn(const ['active', 'promoted']),
+              ))
+            .write(
+              CardEvolutionObservationsCompanion(
+                status: const Value('consumed'),
+                updatedAt: Value(currentTimestampSeconds()),
+              ),
+            );
+      }
+    }
         return const ManualRewriteApplyOutcome.applied();
       });
     } on _ApplyBlocked catch (blocked) {

@@ -4,12 +4,15 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 
 import '../../db/repositories/card_evolution_observation_repo.dart';
+import '../../db/repositories/card_evolution_collector_run_repo.dart';
 import '../../db/repositories/card_evolution_repo.dart';
+import '../../db/app_db.dart';
 import '../../llm/card_rewrite_slot_resolver.dart';
 import '../../llm/aux_retry_runner.dart';
 import '../../models/agent_operation_record.dart';
 import '../../models/card_evolution_observation.dart';
 import '../../utils/id_generator.dart';
+import '../../utils/cast_helpers.dart';
 import '../../utils/time_helpers.dart';
 import 'card_rewrite_operation_parser.dart';
 import 'card_rewrite_prompt_builder.dart';
@@ -33,14 +36,18 @@ class AutomatedCardEvolutionService {
     this.timeoutMs = 180000,
     this.leaseSeconds = 300,
     CardEvolutionObservationRepo? observationRepo,
+    CardEvolutionCollectorRunRepo? collectorRunRepo,
     this.observationPromotionThreshold,
     this.observationMinConfidence,
     this.observationExpiryRuns,
   }) : observationRepo =
-           observationRepo ?? CardEvolutionObservationRepo(repo.db);
+           observationRepo ?? CardEvolutionObservationRepo(repo.db),
+       collectorRunRepo =
+           collectorRunRepo ?? CardEvolutionCollectorRunRepo(repo.db);
 
   final CardEvolutionRepo repo;
   final CardEvolutionObservationRepo observationRepo;
+  final CardEvolutionCollectorRunRepo collectorRunRepo;
   final CardRewriteModelResolver resolveModel;
   final CardRewriteLlmExecutor _executor;
   final bool Function()? isEnabled;
@@ -62,16 +69,92 @@ class AutomatedCardEvolutionService {
     }
     final active = _inFlight[sessionId];
     if (active != null) return active;
-    final future = _run(sessionId, onStage: onStage);
+    final future = _runManual(sessionId, onStage: onStage);
     _inFlight[sessionId] = future;
     return future.whenComplete(() => _inFlight.remove(sessionId));
   }
 
-  Future<CardEvolutionFinalizeOutcome> _run(
+  Future<CardEvolutionFinalizeOutcome> _runManual(
     String sessionId, {
     void Function(AutomatedCardEvolutionStage stage)? onStage,
   }) async {
-    await _maybeRunObservationPass(sessionId, onStage: onStage);
+    // Explicit "Run now" retains its historical convenience: when the current
+    // reconciliation count is even it also refreshes observations. Automatic
+    // cadence never uses this path.
+    try {
+      final count = await repo.countSuccessfulReconciliations(sessionId);
+      if (count > 0 && count.isEven) {
+        onStage?.call(AutomatedCardEvolutionStage.observation);
+        final snapshot = await repo.buildObservationSnapshot(sessionId);
+        if (snapshot != null) {
+          await _runObservationPass(sessionId, snapshot, count ~/ 2);
+          await _checkPromotions(sessionId);
+        }
+      }
+    } catch (_) {
+      // Manual observation refresh is best effort; writer remains available.
+    }
+    return _runWriter(sessionId, onStage: onStage);
+  }
+
+  /// Automatic lane: collect once for this immutable reconciliation, then run
+  /// at most one overdue writer cycle for each completed group of three.
+  Future<CardEvolutionFinalizeOutcome> runAfterReconciliation(
+    LedgerReconciliationSuccessfulRunRow reconciliationRun, {
+    void Function(AutomatedCardEvolutionStage stage)? onStage,
+  }) {
+    if (isEnabled?.call() == false) {
+      return Future.value(const CardEvolutionFinalizeOutcome('disabled'));
+    }
+    final sessionId = reconciliationRun.sessionId;
+    final active = _inFlight[sessionId];
+    if (active != null) return active;
+    final future = _runAutomatic(reconciliationRun, onStage: onStage);
+    _inFlight[sessionId] = future;
+    return future.whenComplete(() => _inFlight.remove(sessionId));
+  }
+
+  Future<CardEvolutionFinalizeOutcome> _runAutomatic(
+    LedgerReconciliationSuccessfulRunRow reconciliationRun, {
+    void Function(AutomatedCardEvolutionStage stage)? onStage,
+  }) async {
+    final collector = await _runCollector(reconciliationRun, onStage: onStage);
+    if (!collector) {
+      return const CardEvolutionFinalizeOutcome('collectorUnavailable');
+    }
+    final delivered = await collectorRunRepo.latestDeliveredWriterBoundary(
+      reconciliationRun.sessionId,
+    );
+    final dueBoundary = delivered + 3;
+    final latest = await collectorRunRepo.latestCompletedOrdinal(
+      reconciliationRun.sessionId,
+    );
+    if (latest < dueBoundary) {
+      return const CardEvolutionFinalizeOutcome('collectorCompleted');
+    }
+    final boundaryRuns = await collectorRunRepo.completedBoundary(
+      reconciliationRun.sessionId,
+      dueBoundary,
+    );
+    if (boundaryRuns.length != 3) {
+      return const CardEvolutionFinalizeOutcome('collectorUnavailable');
+    }
+    return _runWriter(
+      reconciliationRun.sessionId,
+      onStage: onStage,
+      throughCollectorOrdinal: dueBoundary,
+      collectorBoundaryHash: boundaryRuns.last.reconciliationChainHash,
+      collectorBoundaryRuns: boundaryRuns,
+    );
+  }
+
+  Future<CardEvolutionFinalizeOutcome> _runWriter(
+    String sessionId, {
+    void Function(AutomatedCardEvolutionStage stage)? onStage,
+    int throughCollectorOrdinal = 0,
+    String collectorBoundaryHash = '',
+    List<CardEvolutionCollectorRunRow> collectorBoundaryRuns = const [],
+  }) async {
     onStage?.call(AutomatedCardEvolutionStage.cardRewriter);
     final owner = 'evolution-owner-${generateId()}';
     final now = currentTimestampSeconds();
@@ -80,6 +163,11 @@ class AutomatedCardEvolutionService {
       ownerId: owner,
       now: now,
       leaseSeconds: leaseSeconds,
+      throughCollectorOrdinal: throughCollectorOrdinal,
+      collectorBoundaryHash: collectorBoundaryHash,
+      reconciliationRunIds: [
+        for (final run in collectorBoundaryRuns) run.reconciliationRunId,
+      ],
     );
     final claim = claimed.claim;
     if (claim == null) return CardEvolutionFinalizeOutcome(claimed.kind);
@@ -98,6 +186,7 @@ class AutomatedCardEvolutionService {
       token = CancelToken();
       _tokens[sessionId] = token;
       final sharedContext = snapshot.selectedInputJson;
+      final cardContext = _cardWriterContext(sharedContext);
       final allowedCardFields = CardRewritePolicy.nonEmptyEvolutionFields(
         snapshot.character,
       );
@@ -105,11 +194,11 @@ class AutomatedCardEvolutionService {
       final cardOperations = <CardRewriteOperationSnapshot>[];
       String? cardOutput;
       if (allowedCardFields.isNotEmpty) {
-        final validatedTargets = _extractValidatedTargets(
-          snapshot.selectedInputJson,
+        final accumulatedObservations = _extractAccumulatedObservations(
+          cardContext,
         );
         final cardPrompt =
-            '${CardRewriterPromptBuilder.buildEvolution(character: snapshot.character, instruction: 'Use the available non-empty card fields, the 40 latest immutable chat messages, and the current Ledger-backed factual context below to infer durable character evolution. Ledger supports the chat evidence; it does not replace it. Return patches only for fields with a durable, supported change. Change the smallest exact fragments possible; do not rewrite a whole field or card. Do not invent canon.', validatedTargets: validatedTargets)}\n\n# Immutable chat history and effective canon\n${snapshot.selectedInputJson}';
+            '${CardRewriterPromptBuilder.buildEvolution(character: snapshot.character, instruction: 'Independently evaluate the accumulated observation candidates, the available non-empty card fields, the 40 latest immutable chat messages, and the current Ledger-backed factual context. Russian evidence may support an English card patch; preserve exact Ledger identities without translation. Active observations are unconfirmed candidates; promoted observations are stronger evidence. Return an empty operations list when no candidate is durable enough. Change only the smallest exact fragments and do not invent canon.', accumulatedObservations: accumulatedObservations)}\n\n# Immutable chat history and effective canon\n$cardContext';
         final cardOutcome = await _executor(
           config: config,
           prompt: cardPrompt,
@@ -201,6 +290,13 @@ class AutomatedCardEvolutionService {
         lorebookOutput = lorebookOutcome.text;
       }
       if (operations.isEmpty) {
+        if (throughCollectorOrdinal > 0) {
+          finalized = await repo.completeEmptyClaim(
+            claimId: claim.row.id,
+            ownerId: owner,
+            now: currentTimestampSeconds(),
+          );
+        }
         return const CardEvolutionFinalizeOutcome(
           'emptyModelProposal',
           null,
@@ -219,12 +315,6 @@ class AutomatedCardEvolutionService {
         operations: operations,
       );
       finalized = result.isPersisted;
-      if (finalized) {
-        await repo.consumePromotedObservations(
-          sessionId,
-          now: currentTimestampSeconds(),
-        );
-      }
       return result;
     } on CardRewriteModelNotConfigured {
       return const CardEvolutionFinalizeOutcome('modelNotConfigured');
@@ -262,50 +352,71 @@ class AutomatedCardEvolutionService {
     }
   }
 
-  /// Runs the observation pass when the cadence gate is active (every 2nd
-  /// successful reconciliation). Failures are non-blocking: the card writer
-  /// continues without validated targets.
-  Future<void> _maybeRunObservationPass(
-    String sessionId, {
+  Future<bool> _runCollector(
+    LedgerReconciliationSuccessfulRunRow reconciliationRun, {
     void Function(AutomatedCardEvolutionStage stage)? onStage,
   }) async {
+    final sessionId = reconciliationRun.sessionId;
+    String? claimId;
+    String? ownerId;
     try {
-      final count = await repo.countSuccessfulReconciliations(sessionId);
-      if (count == 0 || count % 2 != 0) return;
-      final runOrdinal = count ~/ 2;
+      final snapshot = await repo.buildObservationSnapshotForRun(
+        reconciliationRun,
+      );
+      if (snapshot == null) return false;
+      ownerId = 'collector-owner-${generateId()}';
+      final now = currentTimestampSeconds();
+      final claim = await collectorRunRepo.claim(
+        reconciliationRun: reconciliationRun,
+        characterId: snapshot.character.id,
+        inputHash: computeHash(snapshot.selectedInputJson),
+        ownerId: ownerId,
+        now: now,
+        leaseSeconds: leaseSeconds,
+      );
+      if (claim.kind == 'completed') return true;
+      if (!claim.canRun || claim.row == null) return false;
+      claimId = claim.row!.id;
       onStage?.call(AutomatedCardEvolutionStage.observation);
-      await _runObservationPass(sessionId, runOrdinal);
+      final output = await _runObservationPass(
+        sessionId,
+        snapshot,
+        claim.row!.collectorOrdinal,
+      );
+      if (output == null) return false;
       await _checkPromotions(sessionId);
+      final completed = await collectorRunRepo.complete(
+        id: claimId,
+        ownerId: ownerId,
+        modelOutputHash: computeHash(output),
+        now: currentTimestampSeconds(),
+      );
+      if (completed) claimId = null;
+      return completed;
     } catch (_) {
-      // Observation pass failures are intentionally non-blocking.
+      return false;
+    } finally {
+      if (claimId != null && ownerId != null) {
+        await collectorRunRepo.abandon(id: claimId, ownerId: ownerId);
+      }
     }
   }
 
-  Future<void> _runObservationPass(String sessionId, int runOrdinal) async {
-    final snapshot = await repo.buildObservationSnapshot(sessionId);
-    if (snapshot == null) return;
+  Future<String?> _runObservationPass(
+    String sessionId,
+    CardEvolutionObservationSnapshot snapshot,
+    int runOrdinal,
+  ) async {
     final config = await resolveModel();
-    final active = await observationRepo.getActiveObservations(sessionId);
-    final activeMaps = active
-        .map(
-          (o) => <String, Object?>{
-            'scopeKey': o.semanticScopeKey,
-            'observedChange': o.observedChange,
-            'canonicalClaim': o.canonicalClaim,
-            'repeatCount': o.repeatCount,
-            'firstSeenRun': o.firstSeenRun,
-            'lastConfirmedRun': o.lastConfirmedRun,
-            'confidence': o.confidence,
-            'evidenceClusters': o.evidenceClusters,
-          },
-        )
-        .toList();
+    final activeMaps = _extractAccumulatedObservations(
+      snapshot.selectedInputJson,
+    ).where((observation) => observation['status'] == 'active').toList();
     final prompt =
-        '${CardRewriterPromptBuilder.buildObservationPass(character: snapshot.character, activeObservations: activeMaps, instruction: 'Review the last 40 immutable chat messages and the current Ledger-backed canon below. For each active observation, decide whether the chat history still supports it. Identify any new repeatedly demonstrated shift in preference, attitude, relationship dynamics, or lasting character development. Do not record one-off events or temporary state. Be conservative.')}\n\n# Immutable chat history and effective canon\n${snapshot.selectedInputJson}';
+        '${CardRewriterPromptBuilder.buildObservationPass(character: snapshot.character, activeObservations: activeMaps, instruction: 'Review the last 40 immutable chat messages and the current Ledger-backed canon below. For each active observation, decide whether the chat history still supports it. Identify any new repeatedly demonstrated shift in preference, attitude, relationship dynamics, or lasting character development. Do not record one-off events or temporary state. Be conservative.')}\n\n# Immutable chat history and effective canon\n${_collectorContext(snapshot.selectedInputJson)}';
     final token = CancelToken();
     _tokens['observation-$sessionId'] = token;
     try {
-      if (token.isCancelled) return;
+      if (token.isCancelled) return null;
       final outcome = await _executor(
         config: config,
         prompt: prompt,
@@ -318,15 +429,35 @@ class AutomatedCardEvolutionService {
           outcome.status == AgentOperationStatus.aborted ||
           !outcome.isOk ||
           outcome.text == null) {
-        return;
+        return null;
       }
       final actions = _parseObservationResponse(outcome.text!);
-      if (actions == null) return;
+      if (actions == null) return null;
       final validEvidenceIds = _chatMessageIds(snapshot.selectedInputJson);
-      if (validEvidenceIds == null) return;
+      if (validEvidenceIds == null) return null;
+      final retrievalTargets = _retrievalTargets(snapshot.selectedInputJson);
+      if (retrievalTargets == null) return null;
       final now = currentTimestampSeconds();
       for (final action in actions) {
         if (!validEvidenceIds.containsAll(action.evidenceMessageIds)) continue;
+        if (!retrievalTargets.keys.toSet().containsAll(action.retrievalKeys)) {
+          continue;
+        }
+        final loreIdentity = action.lorebookEntryId;
+        final hasExactLoreTarget =
+            loreIdentity != null &&
+            action.retrievalKeys.contains(loreIdentity) &&
+            retrievalTargets[loreIdentity] == 'injected_lorebook_entry';
+        if ((action.targetKind == 'injected_lorebook_entry' &&
+                !hasExactLoreTarget) ||
+            (action.targetKind == 'main_character_card' &&
+                (loreIdentity != null ||
+                    action.retrievalKeys.any(
+                      (key) =>
+                          retrievalTargets[key] == 'injected_lorebook_entry',
+                    )))) {
+          continue;
+        }
         await _applyObservationAction(
           sessionId: sessionId,
           characterId: snapshot.character.id,
@@ -335,6 +466,7 @@ class AutomatedCardEvolutionService {
           action: action,
         );
       }
+      return outcome.text;
     } finally {
       if (identical(_tokens['observation-$sessionId'], token)) {
         _tokens.remove('observation-$sessionId');
@@ -355,13 +487,19 @@ class AutomatedCardEvolutionService {
           sessionId,
           action.scopeKey,
         );
-        if (existing != null && existing.status == 'active') {
+        if (existing != null &&
+            existing.status == 'active' &&
+            (existing.targetKind == null ||
+                existing.targetKind == action.targetKind) &&
+            existing.lorebookEntryId == action.lorebookEntryId) {
           await observationRepo.confirmObservation(
             id: existing.id,
             runOrdinal: runOrdinal,
             confidence: action.confidence,
             now: now,
             evidenceMessageIds: action.evidenceMessageIds,
+            retrievalKeys: action.retrievalKeys,
+            targetKind: action.targetKind,
           );
         }
         break;
@@ -381,6 +519,8 @@ class AutomatedCardEvolutionService {
               observedChange: action.observedChange,
               canonicalClaim: action.canonicalClaim,
               evidenceClusters: [action.evidenceMessageIds],
+              retrievalKeys: action.retrievalKeys,
+              targetKind: action.targetKind,
               cardFieldPath: action.cardFieldPath,
               lorebookEntryId: action.lorebookEntryId,
               confidence: action.confidence,
@@ -436,12 +576,35 @@ class AutomatedCardEvolutionService {
     }
   }
 
-  static List<Map<String, Object?>> _extractValidatedTargets(
+  static Map<String, String>? _retrievalTargets(String selectedInputJson) {
+    try {
+      final decoded = jsonDecode(selectedInputJson);
+      if (decoded is! Map ||
+          decoded['availableObservationRetrievalTargets'] is! List) {
+        return null;
+      }
+      final result = <String, String>{};
+      for (final target
+          in decoded['availableObservationRetrievalTargets'] as List) {
+        if (target is! Map ||
+            target['key'] is! String ||
+            target['kind'] is! String) {
+          return null;
+        }
+        result[target['key'] as String] = target['kind'] as String;
+      }
+      return result;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static List<Map<String, Object?>> _extractAccumulatedObservations(
     String selectedInputJson,
   ) {
     try {
       final input = jsonDecode(selectedInputJson) as Map;
-      final targets = input['validatedTargets'];
+      final targets = input['accumulatedObservations'];
       if (targets is! List) return const [];
       return [
         for (final target in targets)
@@ -449,6 +612,37 @@ class AutomatedCardEvolutionService {
       ];
     } catch (_) {
       return const [];
+    }
+  }
+
+  static String _cardWriterContext(String selectedInputJson) {
+    try {
+      final input = Map<String, Object?>.from(
+        jsonDecode(selectedInputJson) as Map,
+      );
+      final observations = input['accumulatedObservations'];
+      input['accumulatedObservations'] = observations is List
+          ? [
+              for (final value in observations)
+                if (value is Map &&
+                    value['targetKind'] != 'injected_lorebook_entry')
+                  value,
+            ]
+          : const [];
+      return jsonEncode(input);
+    } catch (_) {
+      return selectedInputJson;
+    }
+  }
+
+  static String _collectorContext(String selectedInputJson) {
+    try {
+      final decoded = Map<String, Object?>.from(
+        jsonDecode(selectedInputJson) as Map,
+      )..remove('card');
+      return jsonEncode(decoded);
+    } catch (_) {
+      return selectedInputJson;
     }
   }
 
@@ -472,6 +666,8 @@ class AutomatedCardEvolutionService {
         final scopeKey = raw['scopeKey'];
         final observedChange = raw['observedChange'];
         final confidence = raw['confidence'];
+        final retrievalKeysRaw = raw['retrievalKeys'];
+        final targetKind = raw['targetKind'];
         if (action is! String ||
             !const {
               'confirm',
@@ -483,7 +679,18 @@ class AutomatedCardEvolutionService {
             scopeKey.isEmpty ||
             !scopes.add(scopeKey) ||
             (action == 'new' &&
-                (observedChange is! String || observedChange.isEmpty))) {
+                (observedChange is! String || observedChange.isEmpty)) ||
+            (action != 'no_evidence' &&
+                (retrievalKeysRaw is! List ||
+                    retrievalKeysRaw.isEmpty ||
+                    retrievalKeysRaw.any(
+                      (value) => value is! String || value.isEmpty,
+                    ))) ||
+            (action != 'no_evidence' &&
+                !const {
+                  'main_character_card',
+                  'injected_lorebook_entry',
+                }.contains(targetKind))) {
           return null;
         }
         final conf = confidence is num ? confidence.toDouble() : 0.5;
@@ -493,12 +700,16 @@ class AutomatedCardEvolutionService {
             ? 1.0
             : conf;
         final evidenceRaw = raw['evidenceMessageIds'];
-        if (evidenceRaw is! List ||
-            evidenceRaw.any((item) => item is! String)) {
+        if (action != 'no_evidence' &&
+            (evidenceRaw is! List ||
+                evidenceRaw.any((item) => item is! String))) {
           return null;
         }
         final evidence = <String>[];
-        for (final item in evidenceRaw.cast<String>()) {
+        for (final item
+            in (evidenceRaw is List
+                ? evidenceRaw.cast<String>()
+                : const <String>[])) {
           if (item.isNotEmpty && !evidence.contains(item)) evidence.add(item);
         }
         if (action != 'no_evidence' && evidence.isEmpty) return null;
@@ -511,6 +722,10 @@ class AutomatedCardEvolutionService {
                 ? raw['canonicalClaim'] as String
                 : null,
             evidenceMessageIds: evidence,
+            retrievalKeys: retrievalKeysRaw is List
+                ? retrievalKeysRaw.cast<String>().toSet().toList()
+                : const [],
+            targetKind: targetKind is String ? targetKind : null,
             cardFieldPath: raw['cardFieldPath'] is String
                 ? raw['cardFieldPath'] as String
                 : null,
@@ -579,6 +794,8 @@ final class _ParsedObservationAction {
     required this.observedChange,
     required this.canonicalClaim,
     required this.evidenceMessageIds,
+    required this.retrievalKeys,
+    required this.targetKind,
     required this.cardFieldPath,
     required this.lorebookEntryId,
     required this.confidence,
@@ -589,6 +806,8 @@ final class _ParsedObservationAction {
   final String observedChange;
   final String? canonicalClaim;
   final List<String> evidenceMessageIds;
+  final List<String> retrievalKeys;
+  final String? targetKind;
   final String? cardFieldPath;
   final String? lorebookEntryId;
   final double confidence;

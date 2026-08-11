@@ -70,18 +70,41 @@ void main() {
     expect(snapshot.transition.chatSessionId, isNull);
   });
 
-  test('canonicalizes title-cased scope subjects from model output', () {
+  test('preserves exact Unicode scope subjects from model output', () {
     final payload = validPayload();
-    (payload['patches'] as List).single['scopeKey'] = 'relationship:Danvi';
+    (payload['patches'] as List).single['scopeKey'] = 'relationship:Lucy:Danvi';
     (payload['transition'] as Map<String, Object?>)['scopeKey'] =
-        'relationship:Danvi';
+        'relationship:Lucy:Danvi';
 
     final result = parsePayload(payload);
 
     expect(result.isSuccess, isTrue, reason: result.detail);
-    expect(result.snapshot!.patches.single.scopeKey, 'relationship:danvi');
-    expect(result.snapshot!.transition.scopeKey, 'relationship:danvi');
+    expect(result.snapshot!.patches.single.scopeKey, 'relationship:Lucy:Danvi');
+    expect(result.snapshot!.transition.scopeKey, 'relationship:Lucy:Danvi');
   });
+
+  test(
+    'accepts nested Unicode relationship identities and rejects unsafe text',
+    () {
+      for (final scope in ['relationship:Гильда:Квинн']) {
+        final payload = validPayload();
+        (payload['patches'] as List).single['scopeKey'] = scope;
+        (payload['transition'] as Map<String, Object?>)['scopeKey'] = scope;
+        expect(parsePayload(payload).isSuccess, isTrue, reason: scope);
+      }
+      for (final scope in [
+        'relationship: Lucy',
+        'relationship:Гильда::Квинн',
+        'relationship:Lucy\u202eevil',
+        'relationship:Lucy\nDanvi',
+      ]) {
+        final payload = validPayload();
+        (payload['patches'] as List).single['scopeKey'] = scope;
+        (payload['transition'] as Map<String, Object?>)['scopeKey'] = scope;
+        expect(parsePayload(payload).isSuccess, isFalse, reason: scope);
+      }
+    },
+  );
 
   test('tolerates markdown fences and surrounding prose', () {
     final fenced =
@@ -141,7 +164,9 @@ void main() {
     (payload['patches'] as List).single['anchorSha256'] = 'not-a-real-hash';
 
     final operations = CardRewriteOperationParser.parseEvolutionBatch(
-      jsonEncode({'operations': [payload]}),
+      jsonEncode({
+        'operations': [payload],
+      }),
     );
 
     expect(operations, hasLength(1));
@@ -321,19 +346,22 @@ void main() {
     );
     final badTransitionScope = validPayload();
     (badTransitionScope['transition']! as Map<String, Object?>)['scopeKey'] =
-        'world:Bad!';
+        'world:Bad:Nested';
     expect(
       rejectionOf(badTransitionScope),
       CardRewriteOperationParseRejection.invalidScope,
     );
   });
 
-  test('accepts a large replacement when its patch contract is otherwise valid', () {
-    final oversized = '${'x' * 12001} {{char}} {{user}}';
-    final payload = validPayload()
-      ..['patches'] = [validPatch()..['value'] = oversized];
-    expect(parsePayload(payload).isSuccess, isTrue);
-  });
+  test(
+    'accepts a large replacement when its patch contract is otherwise valid',
+    () {
+      final oversized = '${'x' * 12001} {{char}} {{user}}';
+      final payload = validPayload()
+        ..['patches'] = [validPatch()..['value'] = oversized];
+      expect(parsePayload(payload).isSuccess, isTrue);
+    },
+  );
 
   test('rejects malformed transitions', () {
     final notObject = validPayload()..['transition'] = 'not-an-object';
@@ -595,7 +623,9 @@ void main() {
       );
 
       final encoded = RewriteOperationSnapshotCodec.encode(snapshot);
-      final decoded = RewriteOperationSnapshotCodec.tryDecode(jsonDecode(encoded));
+      final decoded = RewriteOperationSnapshotCodec.tryDecode(
+        jsonDecode(encoded),
+      );
 
       expect(decoded, isA<LorebookRewriteOperationSnapshot>());
       final lore = decoded! as LorebookRewriteOperationSnapshot;

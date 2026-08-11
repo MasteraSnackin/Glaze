@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:drift/native.dart';
+import 'package:drift/drift.dart' show Value;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/db/repositories/applied_canon_transition_repo.dart';
@@ -22,6 +23,7 @@ import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/core/services/card_rewriter/automated_card_evolution_service.dart';
 import 'package:glaze_flutter/core/services/card_rewriter/card_rewriter_contracts.dart';
 import 'package:glaze_flutter/core/services/card_rewriter/effective_canon_read_repository.dart';
+import 'package:glaze_flutter/core/utils/cast_helpers.dart';
 
 void main() {
   late _Fixture fixture;
@@ -89,6 +91,7 @@ void main() {
   test(
     'promoted observation appears as validated target in card writer prompt',
     () async {
+      await fixture.seedReconciliationRun(ordinal: 1);
       await fixture.observationRepo.insertObservation(
         CardEvolutionObservation(
           id: 'obs-promoted',
@@ -101,6 +104,8 @@ void main() {
           evidenceClusters: const [
             ['a1', 'u1'],
           ],
+          retrievalKeys: const ['npc:Алиса'],
+          targetKind: 'main_character_card',
           cardFieldPath: 'personality',
           confidence: 0.9,
           status: 'promoted',
@@ -123,11 +128,83 @@ void main() {
       expect(cardPrompt, isNotNull);
       expect(
         cardPrompt,
-        contains('Validated targets from observation journal'),
+        contains('Accumulated candidates from observation journal'),
       );
       expect(cardPrompt, contains('character.preference.trust'));
     },
   );
+
+  test(
+    'writer excludes an active observation unrelated to current ranges',
+    () async {
+      await fixture.seedReconciliationRun(ordinal: 1);
+      await fixture.observationRepo.insertObservation(
+        CardEvolutionObservation(
+          id: 'obs-unrelated',
+          sessionId: 'session',
+          characterId: 'character',
+          runOrdinal: 1,
+          semanticScopeKey: 'relationship:Неизвестный',
+          observedChange: 'Must not be globally injected',
+          evidenceClusters: const [
+            ['a1'],
+          ],
+          retrievalKeys: const ['relationship:Неизвестный.секрет'],
+          targetKind: 'main_character_card',
+          confidence: 0.9,
+          status: 'active',
+          firstSeenRun: 1,
+          createdAt: 10,
+          updatedAt: 10,
+        ),
+      );
+      String? cardPrompt;
+      await fixture
+          .service((_, prompt) async {
+            cardPrompt = prompt;
+            return _ok(fixture.cardBatchOutput);
+          })
+          .runOneBatch('session');
+      expect(cardPrompt, isNot(contains('Must not be globally injected')));
+      expect(
+        await fixture.observationRepo.findById('obs-unrelated'),
+        isNotNull,
+      );
+    },
+  );
+
+  test('card writer excludes lorebook-target observations', () async {
+    await fixture.seedReconciliationRun(ordinal: 1);
+    await fixture.observationRepo.insertObservation(
+      CardEvolutionObservation(
+        id: 'npc-lore-only',
+        sessionId: 'session',
+        characterId: 'character',
+        runOrdinal: 1,
+        semanticScopeKey: 'npc:Алиса',
+        observedChange: 'NPC-owned lorebook-only fact',
+        evidenceClusters: const [
+          ['a1'],
+        ],
+        retrievalKeys: const ['npc:Алиса'],
+        targetKind: 'injected_lorebook_entry',
+        lorebookEntryId: 'book:alice',
+        confidence: 0.9,
+        status: 'active',
+        firstSeenRun: 1,
+        createdAt: 1,
+        updatedAt: 1,
+      ),
+    );
+    String? cardPrompt;
+    await fixture
+        .service((_, prompt) async {
+          cardPrompt = prompt;
+          return _ok(fixture.cardBatchOutput);
+        })
+        .runOneBatch('session');
+    expect(cardPrompt, isNot(contains('NPC-owned lorebook-only fact')));
+  });
 
   test('promotion after threshold confirmations', () async {
     await fixture.seedReconciliationRun(ordinal: 1);
@@ -145,6 +222,8 @@ void main() {
           ['a1'],
           ['u1'],
         ],
+        retrievalKeys: const ['npc:Алиса'],
+        targetKind: 'main_character_card',
         cardFieldPath: 'personality',
         confidence: 0.8,
         status: 'active',
@@ -163,15 +242,15 @@ void main() {
           return _ok(fixture.cardBatchOutput);
         })
         .runOneBatch('session');
-    // The observation goes through the full cycle: confirm (repeatCount 3)
-    // → promote → consume (after successful card writer apply).
+    // Proposal persistence is review-only, so promotion remains available
+    // until the user actually applies the proposal.
     final obs = await fixture.observationRepo.findById('obs-1');
     expect(obs, isNotNull);
-    expect(obs!.status, 'consumed');
+    expect(obs!.status, 'promoted');
     expect(obs.repeatCount, 3);
   });
 
-  test('successful apply consumes promoted observations', () async {
+  test('persisted proposal does not consume promoted observations', () async {
     await fixture.observationRepo.insertObservation(
       CardEvolutionObservation(
         id: 'obs-promoted',
@@ -198,7 +277,7 @@ void main() {
     expect(result.kind, 'persisted');
     expect(
       await fixture.observationRepo.getPromotedObservations('session'),
-      isEmpty,
+      hasLength(1),
     );
   });
 
@@ -287,6 +366,8 @@ void main() {
           evidenceClusters: const [
             ['a1'],
           ],
+          retrievalKeys: const ['npc:Алиса'],
+          targetKind: 'main_character_card',
           confidence: 0.7,
           status: 'active',
           firstSeenRun: 1,
@@ -304,6 +385,8 @@ void main() {
                       'action': 'contradict',
                       'scopeKey': 'character.preference.trust',
                       'evidenceMessageIds': ['a2'],
+                      'retrievalKeys': ['npc:Алиса'],
+                      'targetKind': 'main_character_card',
                       'confidence': 0.2,
                     },
                   ],
@@ -386,6 +469,398 @@ void main() {
       );
     },
   );
+
+  test(
+    'automatic collector runs every reconciliation and writer every third',
+    () async {
+      final prompts = <String>[];
+      final service = fixture.service((_, prompt) async {
+        prompts.add(prompt);
+        return prompt.contains('observation journal keeper')
+            ? _ok('{"observations":[]}')
+            : _ok('{"operations":[]}');
+      });
+      for (var ordinal = 1; ordinal <= 3; ordinal++) {
+        final run = await fixture.seedReconciliationRun(ordinal: ordinal);
+        final result = await service.runAfterReconciliation(run);
+        expect(
+          result.kind,
+          ordinal < 3 ? 'collectorCompleted' : 'emptyModelProposal',
+        );
+      }
+      expect(
+        prompts.where((value) => value.contains('observation journal keeper')),
+        hasLength(3),
+      );
+      expect(
+        prompts.where((value) => value.contains('Glaze card rewriter')),
+        hasLength(1),
+      );
+      final collectors = await fixture.db
+          .select(fixture.db.cardEvolutionCollectorRuns)
+          .get();
+      expect(collectors, hasLength(3));
+      expect(collectors.every((run) => run.status == 'completed'), isTrue);
+      final claims = await fixture.db
+          .select(fixture.db.cardEvolutionClaims)
+          .get();
+      expect(claims.single.predecessorRunOrdinal, 3);
+      expect(claims.single.status, 'completed');
+      expect(claims.single.rewriteJobId, isNull);
+    },
+  );
+
+  test(
+    'first high reconciliation ordinal still becomes collector one',
+    () async {
+      final run = await fixture.seedReconciliationRun(ordinal: 40);
+      final result = await fixture
+          .service((_, prompt) async => _ok('{"observations":[]}'))
+          .runAfterReconciliation(run);
+      expect(result.kind, 'collectorCompleted');
+      final collector = await fixture.db
+          .select(fixture.db.cardEvolutionCollectorRuns)
+          .getSingle();
+      expect(collector.collectorOrdinal, 1);
+      expect(collector.reconciliationRunOrdinal, 40);
+    },
+  );
+
+  test('overdue writer uses exact completed collector boundary hash', () async {
+    var writerCalls = 0;
+    final service = fixture.service((_, prompt) async {
+      if (prompt.contains('observation journal keeper')) {
+        return _ok('{"observations":[]}');
+      }
+      writerCalls++;
+      return _ok(writerCalls == 1 ? 'invalid' : '{"operations":[]}');
+    });
+    for (final ordinal in [10, 20, 30, 40]) {
+      await service.runAfterReconciliation(
+        await fixture.seedReconciliationRun(ordinal: ordinal),
+      );
+    }
+    expect(writerCalls, 2);
+    final claim = await fixture.db
+        .select(fixture.db.cardEvolutionClaims)
+        .getSingle();
+    expect(claim.predecessorRunOrdinal, 3);
+    expect(claim.predecessorCursorHash, 'chain-30');
+  });
+
+  test('minimal no_evidence response is accepted', () async {
+    await fixture.seedReconciliationRun(ordinal: 1);
+    await fixture.seedReconciliationRun(ordinal: 2);
+    await fixture.observationRepo.insertObservation(
+      CardEvolutionObservation(
+        id: 'minimal-no-evidence',
+        sessionId: 'session',
+        characterId: 'character',
+        runOrdinal: 1,
+        semanticScopeKey: 'character.preference.trust',
+        observedChange: 'Tracked',
+        evidenceClusters: const [
+          ['a1'],
+        ],
+        retrievalKeys: const ['npc:Алиса'],
+        targetKind: 'main_character_card',
+        confidence: 0.5,
+        status: 'active',
+        firstSeenRun: 1,
+        createdAt: 10,
+        updatedAt: 10,
+      ),
+    );
+    await fixture
+        .service(
+          (_, prompt) async => prompt.contains('observation journal keeper')
+              ? _ok(
+                  '{"observations":[{"action":"no_evidence","scopeKey":"character.preference.trust"}]}',
+                )
+              : _ok(fixture.cardBatchOutput),
+        )
+        .runOneBatch('session');
+    expect(
+      (await fixture.observationRepo.findById(
+        'minimal-no-evidence',
+      ))!.updatedAt,
+      10,
+    );
+  });
+
+  test('tracker fields normalize to one stable NPC group target', () async {
+    final run = await fixture.seedReconciliationRun(
+      ordinal: 1,
+      opKeys: const ['npc:Квинн.location', 'npc:Квинн.current_goal'],
+    );
+    String? collectorPrompt;
+    await fixture
+        .service((_, prompt) async {
+          collectorPrompt = prompt;
+          return _ok('{"observations":[]}');
+        })
+        .runAfterReconciliation(run);
+    expect(collectorPrompt, contains('"key":"npc:Квинн"'));
+    expect(collectorPrompt, isNot(contains('npc:Квинн.location')));
+    expect(collectorPrompt, isNot(contains('npc:Квинн.current_goal')));
+  });
+
+  test(
+    'dormant NPC observation returns only on exact current mention',
+    () async {
+      Future<String> promptFor(
+        List<Map<String, String>> messages,
+        int ordinal,
+      ) async {
+        await fixture.observationRepo.insertObservation(
+          CardEvolutionObservation(
+            id: 'quinn-$ordinal',
+            sessionId: 'session',
+            characterId: 'character',
+            runOrdinal: 1,
+            semanticScopeKey: 'npc:Квинн',
+            observedChange: 'Квинн remembers the old promise',
+            evidenceClusters: const [
+              ['ancient-message'],
+            ],
+            retrievalKeys: const ['npc:Квинн'],
+            targetKind: 'main_character_card',
+            confidence: 0.8,
+            status: 'active',
+            firstSeenRun: 1,
+            createdAt: 1,
+            updatedAt: 1,
+          ),
+        );
+        final run = await fixture.seedReconciliationRun(
+          ordinal: ordinal,
+          messages: messages,
+          opKeys: const ['world:location'],
+        );
+        var prompt = '';
+        await fixture
+            .service((_, value) async {
+              prompt = value;
+              return _ok('{"observations":[]}');
+            })
+            .runAfterReconciliation(run);
+        return prompt;
+      }
+
+      final unrelated = await promptFor(_messages, 1000);
+      expect(unrelated, isNot(contains('Квинн remembers the old promise')));
+      await (fixture.db.delete(
+        fixture.db.cardEvolutionObservations,
+      )..where((row) => row.id.equals('quinn-1000'))).go();
+      const returned = [
+        {'id': 'a1', 'role': 'assistant', 'content': 'Квинн вошла в комнату.'},
+        {'id': 'u1', 'role': 'user', 'content': 'Я приветствую Квинн.'},
+        {'id': 'a2', 'role': 'assistant', 'content': 'assistant 2'},
+        {'id': 'u2', 'role': 'user', 'content': 'user 2'},
+      ];
+      final related = await promptFor(returned, 1001);
+      expect(related, contains('Квинн remembers the old promise'));
+    },
+  );
+
+  test(
+    'NPC mention fallback is token safe and arc groups retrieve directly',
+    () async {
+      await fixture.observationRepo.insertObservation(
+        CardEvolutionObservation(
+          id: 'quinn-token',
+          sessionId: 'session',
+          characterId: 'character',
+          runOrdinal: 1,
+          semanticScopeKey: 'npc:Квинн',
+          observedChange: 'No substring match',
+          evidenceClusters: const [
+            ['old'],
+          ],
+          retrievalKeys: const ['npc:Квинн'],
+          targetKind: 'main_character_card',
+          confidence: 0.8,
+          status: 'active',
+          firstSeenRun: 1,
+          createdAt: 1,
+          updatedAt: 1,
+        ),
+      );
+      await fixture.observationRepo.insertObservation(
+        CardEvolutionObservation(
+          id: 'arc-sponsor',
+          sessionId: 'session',
+          characterId: 'character',
+          runOrdinal: 1,
+          semanticScopeKey: 'arc:Спонсорство',
+          observedChange: 'Arc remains relevant',
+          evidenceClusters: const [
+            ['old'],
+          ],
+          retrievalKeys: const ['arc:Спонсорство'],
+          targetKind: 'main_character_card',
+          confidence: 0.8,
+          status: 'active',
+          firstSeenRun: 1,
+          createdAt: 1,
+          updatedAt: 1,
+        ),
+      );
+      const messages = [
+        {'id': 'a1', 'role': 'assistant', 'content': 'Квинни здесь.'},
+        {'id': 'u1', 'role': 'user', 'content': 'Продолжим.'},
+        {'id': 'a2', 'role': 'assistant', 'content': 'assistant 2'},
+        {'id': 'u2', 'role': 'user', 'content': 'user 2'},
+      ];
+      final run = await fixture.seedReconciliationRun(
+        ordinal: 1,
+        messages: messages,
+        opKeys: const ['arc:Спонсорство.status'],
+      );
+      var prompt = '';
+      await fixture
+          .service((_, value) async {
+            prompt = value;
+            return _ok('{"observations":[]}');
+          })
+          .runAfterReconciliation(run);
+      expect(prompt, contains('Arc remains relevant'));
+      expect(prompt, isNot(contains('No substring match')));
+    },
+  );
+
+  test('observation older than 200 rows is still retrieved', () async {
+    await fixture.observationRepo.insertObservation(
+      CardEvolutionObservation(
+        id: 'old-quinn',
+        sessionId: 'session',
+        characterId: 'character',
+        runOrdinal: 1,
+        semanticScopeKey: 'npc:Квинн',
+        observedChange: 'Old durable Quinn observation',
+        evidenceClusters: const [
+          ['ancient'],
+        ],
+        retrievalKeys: const ['npc:Квинн'],
+        targetKind: 'main_character_card',
+        confidence: 0.9,
+        status: 'active',
+        firstSeenRun: 1,
+        createdAt: 1,
+        updatedAt: 1,
+      ),
+    );
+    for (var index = 0; index < 220; index++) {
+      await fixture.observationRepo.insertObservation(
+        CardEvolutionObservation(
+          id: 'new-$index',
+          sessionId: 'session',
+          characterId: 'character',
+          runOrdinal: 1,
+          semanticScopeKey: 'arc:other-$index',
+          observedChange: 'unrelated $index',
+          evidenceClusters: const [
+            ['new'],
+          ],
+          retrievalKeys: ['arc:other-$index'],
+          targetKind: 'main_character_card',
+          confidence: 0.5,
+          status: 'active',
+          firstSeenRun: 1,
+          createdAt: index + 2,
+          updatedAt: index + 2,
+        ),
+      );
+    }
+    const messages = [
+      {'id': 'a1', 'role': 'assistant', 'content': 'Квинн вернулась.'},
+      {'id': 'u1', 'role': 'user', 'content': 'Привет, Квинн.'},
+      {'id': 'a2', 'role': 'assistant', 'content': 'assistant 2'},
+      {'id': 'u2', 'role': 'user', 'content': 'user 2'},
+    ];
+    final run = await fixture.seedReconciliationRun(
+      ordinal: 1,
+      messages: messages,
+      opKeys: const ['world:location'],
+    );
+    var prompt = '';
+    await fixture
+        .service((_, value) async {
+          prompt = value;
+          return _ok('{"observations":[]}');
+        })
+        .runAfterReconciliation(run);
+    expect(prompt, contains('Old durable Quinn observation'));
+  });
+
+  test(
+    'cadence waits for delivered plus three without skipping a gap',
+    () async {
+      final service = fixture.service(
+        (_, prompt) async => prompt.contains('observation journal keeper')
+            ? _ok('{"observations":[]}')
+            : _ok('{"operations":[]}'),
+      );
+      for (final ordinal in [1, 2]) {
+        final result = await service.runAfterReconciliation(
+          await fixture.seedReconciliationRun(ordinal: ordinal),
+        );
+        expect(result.kind, 'collectorCompleted');
+      }
+      final collectors = await fixture.db
+          .select(fixture.db.cardEvolutionCollectorRuns)
+          .get();
+      await (fixture.db.update(
+        fixture.db.cardEvolutionCollectorRuns,
+      )..where((row) => row.collectorOrdinal.equals(2))).write(
+        const CardEvolutionCollectorRunsCompanion(status: Value('claimed')),
+      );
+      final result = await service.runAfterReconciliation(
+        await fixture.seedReconciliationRun(ordinal: 3),
+      );
+      expect(result.kind, 'collectorUnavailable');
+      expect(
+        await fixture.db.select(fixture.db.cardEvolutionClaims).get(),
+        isEmpty,
+      );
+      expect(collectors, hasLength(2));
+    },
+  );
+
+  test('primary current groups survive retrieval target extras cap', () async {
+    final run = await fixture.seedReconciliationRun(
+      ordinal: 1,
+      opKeys: [
+        for (var index = 0; index < 85; index++) 'arc:Текущий$index.status',
+      ],
+    );
+    var prompt = '';
+    await fixture
+        .service((_, value) async {
+          prompt = value;
+          return _ok('{"observations":[]}');
+        })
+        .runAfterReconciliation(run);
+    expect(prompt, contains('"key":"arc:Текущий0"'));
+    expect(prompt, contains('"key":"arc:Текущий84"'));
+  });
+
+  test('snapshot bounds oversized tracker values deterministically', () async {
+    await fixture.db.customStatement(
+      'UPDATE tracker_rows SET value = ? WHERE session_id = ?',
+      ['Ж' * 50000, 'session'],
+    );
+    final run = await fixture.seedReconciliationRun(ordinal: 1);
+    var prompt = '';
+    await fixture
+        .service((_, value) async {
+          prompt = value;
+          return _ok('{"observations":[]}');
+        })
+        .runAfterReconciliation(run);
+    expect(prompt.length, lessThan(120000));
+    expect(RegExp('Ж{2001}').hasMatch(prompt), isFalse);
+  });
 }
 
 AuxCallOutcome _ok(String text) =>
@@ -423,6 +898,10 @@ final class _Fixture {
       'INSERT INTO chat_sessions (session_id, character_id, session_index, messages_json) VALUES (?, ?, 0, ?)',
       ['session', 'character', jsonEncode(_messages)],
     );
+    await db.customStatement(
+      'INSERT INTO tracker_rows (session_id, name, value) VALUES (?, ?, ?)',
+      ['session', 'npc:Алиса.доверие', 'растёт'],
+    );
     final reader = EffectiveCanonReadRepository(
       db: db,
       characterRepo: characters,
@@ -441,7 +920,27 @@ final class _Fixture {
     return _Fixture(db, repo, observationRepo);
   }
 
-  Future<void> seedReconciliationRun({required int ordinal}) async {
+  Future<LedgerReconciliationSuccessfulRunRow> seedReconciliationRun({
+    required int ordinal,
+    List<Map<String, String>> messages = _messages,
+    List<String> opKeys = const ['npc:Алиса.доверие'],
+    List<String> presentEntities = const [],
+  }) async {
+    await db.customStatement(
+      'UPDATE chat_sessions SET messages_json = ? WHERE session_id = ?',
+      [jsonEncode(messages), 'session'],
+    );
+    final anchors = [
+      for (final message in messages)
+        {
+          'agentSwipeId': 0,
+          'contentHash': computeHash(message['content']!),
+          'messageId': message['id'],
+          'role': message['role'],
+          'swipeId': 0,
+        },
+    ];
+    final anchorsJson = jsonEncode(anchors);
     await db.customStatement(
       'INSERT INTO reconciliation_successful_runs '
       '(id, session_id, ordinal, start_message_id, start_swipe_id, '
@@ -458,12 +957,23 @@ final class _Fixture {
         ordinal,
         'a1',
         'a1',
-        '[]',
-        'range-$ordinal',
+        anchorsJson,
+        computeHash(anchorsJson),
         '[]',
         'canon-stamp-$ordinal',
         'canon-hash-$ordinal',
-        '{"result":"ok"}',
+        jsonEncode({
+          'export': {
+            'ops': [
+              for (final key in opKeys) {'op': 'set', 'key': key, 'value': ''},
+            ],
+            'sceneState': {
+              'presentEntities': [
+                for (final name in presentEntities) {'name': name},
+              ],
+            },
+          },
+        }),
         'content-$ordinal',
         '',
         'chain-$ordinal',
@@ -471,6 +981,9 @@ final class _Fixture {
         ordinal * 10,
       ],
     );
+    return (db.select(
+      db.ledgerReconciliationSuccessfulRuns,
+    )..where((row) => row.id.equals('run-$ordinal'))).getSingle();
   }
 
   String get cardBatchOutput => jsonEncode({
@@ -507,6 +1020,8 @@ final class _Fixture {
         'scopeKey': 'character.preference.trust',
         'observedChange': 'Alice is becoming more trusting',
         'canonicalClaim': 'Alice has become more trusting over time',
+        'retrievalKeys': ['npc:Алиса'],
+        'targetKind': 'main_character_card',
         'evidenceMessageIds': ['a1', 'u1'],
         'cardFieldPath': 'personality',
         'confidence': 0.8,
@@ -520,6 +1035,8 @@ final class _Fixture {
         'action': 'confirm',
         'scopeKey': 'character.preference.trust',
         'observedChange': 'Alice is becoming more trusting',
+        'retrievalKeys': ['npc:Алиса'],
+        'targetKind': 'main_character_card',
         'confidence': 0.85,
         'evidenceMessageIds': ['a2', 'u2'],
       },

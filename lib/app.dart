@@ -11,6 +11,7 @@ import 'package:go_router/go_router.dart';
 import 'package:glaze_flutter/core/llm/prompt_worker.dart';
 import 'package:glaze_flutter/core/llm/tokenizer.dart';
 import 'core/navigation/router.dart';
+import 'core/navigation/rewrite_review_navigation.dart';
 import 'core/services/deep_link_service.dart';
 import 'core/services/generation_notification_service.dart';
 import 'features/chat/bridge/chat_webview_environment.dart';
@@ -95,9 +96,11 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
   /// that the UI already renders empty — so a failure is logged and dropped
   /// rather than escalated.
   void _initInBackground(Future<void> work, String what) {
-    unawaited(work.catchError((Object e) {
-      debugPrint('Glaze init: $what failed — $e');
-    }));
+    unawaited(
+      work.catchError((Object e) {
+        debugPrint('Glaze init: $what failed — $e');
+      }),
+    );
   }
 
   /// Starts the DB-backed providers behind the initial routes now, concurrently
@@ -243,6 +246,21 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
       }
     });
 
+    ref.listen<RewriteReviewNavigationIntent?>(
+      rewriteReviewNavigationIntentProvider,
+      (previous, next) {
+        if (next == null || next.sequence == previous?.sequence) return;
+        final authority =
+            GenerationNotificationService.instance.activeChatContext;
+        if (authority?.charId != next.charId ||
+            authority?.sessionId != next.sessionId ||
+            authority?.revision != next.authorityRevision) {
+          return;
+        }
+        ref.read(routerProvider).push(next.location);
+      },
+    );
+
     final router = ref.watch(routerProvider);
     final themeSettings = ref.watch(themeProvider);
     final uiFont = ref.watch(uiFontFamilyProvider).value;
@@ -290,8 +308,16 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
       // Stretch overscroll without an offscreen layer, so glass surfaces
       // inside scroll views keep their backdrop blur during the stretch.
       scrollBehavior: const GlazeScrollBehavior(),
-      theme: AppTheme.light(preset, fontFamily: uiFont, dynamicScheme: lightScheme),
-      darkTheme: AppTheme.dark(preset, fontFamily: uiFont, dynamicScheme: darkScheme),
+      theme: AppTheme.light(
+        preset,
+        fontFamily: uiFont,
+        dynamicScheme: lightScheme,
+      ),
+      darkTheme: AppTheme.dark(
+        preset,
+        fontFamily: uiFont,
+        dynamicScheme: darkScheme,
+      ),
       themeMode: mode,
       routerConfig: router,
       debugShowCheckedModeBanner: false,

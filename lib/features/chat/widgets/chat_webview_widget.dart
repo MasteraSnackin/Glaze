@@ -203,6 +203,8 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
   Future<void>? _initFuture;
   ChatWebViewWidget? _deferredSwitchFrom;
   bool _bridgeFailureNotified = false;
+  bool _lifecycleActive = true;
+  int _lifecycleEpoch = 0;
   VoidCallback? _clearBridgeRegistry;
   final ChatWebViewSyncState _syncState = ChatWebViewSyncState();
   late final ChatWebViewSyncDispatcher _syncDispatcher =
@@ -298,10 +300,27 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
     overlayContextResolver: () => context,
     currentSessionId: () => widget.sessionId,
     currentCharacterId: () => widget.charId,
+    isActive: () => mounted && _lifecycleActive,
   );
 
   @override
+  void activate() {
+    super.activate();
+    _lifecycleActive = true;
+    ++_lifecycleEpoch;
+  }
+
+  @override
+  void deactivate() {
+    _lifecycleActive = false;
+    ++_lifecycleEpoch;
+    super.deactivate();
+  }
+
+  @override
   void dispose() {
+    _lifecycleActive = false;
+    ++_lifecycleEpoch;
     PerfDebug.chatWebViewWidgetDisposed();
     // Unregister bridge so the service doesn't hold a stale reference.
     _clearBridgeRegistry?.call();
@@ -1096,8 +1115,10 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       imageGenActions: widget.imageGenActions,
       scrollActions: widget.scrollActions,
       miscActions: widget.miscActions,
-      isMounted: () => mounted,
       isCurrentSession: (sessionId) => widget.sessionId == sessionId,
+      lifecycleEpoch: _lifecycleEpoch,
+      isActive: (epoch) =>
+          mounted && _lifecycleActive && epoch == _lifecycleEpoch,
       sessionSwitching: _sessionSwitching,
       refreshPanel: _refreshExtBlocksPanel,
       bgImageBytes: bgImageBytes,

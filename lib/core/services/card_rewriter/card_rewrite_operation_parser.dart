@@ -112,7 +112,7 @@ final class CardRewriteOperationParseResult {
 /// - `field` is a writable [CardRewriteField] equal to [expectedField];
 /// - `patches` is a non-empty list of single-field, non-empty-anchor patches
 ///   whose `scopeKey` parses per [CardRewriteScope], whose `anchorSha256`
-  ///   matches the RECOMPUTED [CardCanonicalizer.scalarSha256] of the anchor;
+///   matches the RECOMPUTED [CardCanonicalizer.scalarSha256] of the anchor;
 /// - the transition is global (`chatSessionId` absent or null) with
 ///   non-empty `id`/`canonicalClaim`/`promotionDestination`, a valid scope
 ///   shared by every patch, and a present `affectedTrackerKeys` list whose
@@ -142,7 +142,10 @@ abstract final class CardRewriteOperationParser {
     String output, {
     Set<CardRewriteField> allowedFields = CardRewritePolicy.evolutionFields,
   }) {
-    return _parseEvolutionBatch(output, allowedFields: allowedFields).operations;
+    return _parseEvolutionBatch(
+      output,
+      allowedFields: allowedFields,
+    ).operations;
   }
 
   /// Describes why a one-call card evolution response could not be screened.
@@ -184,7 +187,9 @@ abstract final class CardRewriteOperationParser {
         );
       }
       final field = _fieldFromWireName(rawOperation['field'] as String);
-      if (field == null || !allowedFields.contains(field) || !fields.add(field)) {
+      if (field == null ||
+          !allowedFields.contains(field) ||
+          !fields.add(field)) {
         return const _EvolutionBatchParse.failure(
           'field is unsupported or repeated',
         );
@@ -367,9 +372,7 @@ abstract final class CardRewriteOperationParser {
           anchor: anchor,
           // The automated batch is still bounded by exact live-anchor checks,
           // but an LLM cannot reliably produce a cryptographic digest.
-          anchorSha256: recomputeAnchorHash
-              ? computedAnchorHash
-              : anchorSha256,
+          anchorSha256: recomputeAnchorHash ? computedAnchorHash : anchorSha256,
           value: value,
         ),
       );
@@ -556,12 +559,10 @@ abstract final class CardRewriteOperationParser {
     return null;
   }
 
-  /// Model-facing subjects are often title-cased display names. Persist scope
-  /// identities canonically so `relationship:Danvi` and
-  /// `relationship:danvi` address the same permitted tracker family.
+  /// Scope identities are exact RP-language Ledger keys. Case folding or
+  /// transliteration would silently retarget a different identity.
   static String? _canonicalScopeKey(String value) {
-    final canonical = value.toLowerCase();
-    return CardRewriteScope.tryParse(canonical)?.key;
+    return CardRewriteScope.tryParse(value)?.key;
   }
 }
 
