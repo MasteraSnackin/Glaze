@@ -64,7 +64,7 @@ void main() {
   test('controller block mappings survive preset canonicalization', () {
     final canonical = StudioPresetCodec.canonicalizePresetJson({
       'id': 'controller-folders',
-      'blocks': const [],
+      'blocks': const <Map<String, dynamic>>[],
       'agentBlockRestoreState': {
         'guard_ru': ['ru_quality', 'ru_dialogue'],
       },
