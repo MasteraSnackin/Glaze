@@ -31,6 +31,10 @@ int _blockTokens(StudioPresetBlock block) => estimateTokens(block.content);
 class StudioBlockRow extends StatelessWidget {
   final StudioPresetBlock block;
 
+  /// The preset that owns [block]. Used to resolve controller macro and
+  /// alternative badges. Null suppresses the badge.
+  final StudioPreset? preset;
+
   /// Index inside the enclosing [ReorderableListView]. Null renders a plain
   /// spacer instead of a drag handle (nested rows inside a group).
   final int? dragIndex;
@@ -55,6 +59,7 @@ class StudioBlockRow extends StatelessWidget {
     super.key,
     required this.block,
     required this.onEdit,
+    this.preset,
     this.dragIndex,
     this.isLast = false,
     this.indent = 0,
@@ -74,6 +79,7 @@ class StudioBlockRow extends StatelessWidget {
             (block.targetAgentId ?? '').isNotEmpty
         ? '→ ${studioAgentShortName(block.targetAgentId!)}'
         : null;
+    final controllerBadge = _controllerBadge();
 
     final Widget trailingWidget;
     if (trailing != null) {
@@ -151,6 +157,13 @@ class StudioBlockRow extends StatelessWidget {
               ],
               if (targetLabel != null) ...[
                 StudioBlockBadge(label: targetLabel),
+                const SizedBox(width: 6),
+              ],
+              if (controllerBadge != null) ...[
+                StudioBlockBadge(
+                  label: controllerBadge,
+                  accent: true,
+                ),
                 const SizedBox(width: 6),
               ],
               Expanded(
@@ -256,6 +269,22 @@ class StudioBlockRow extends StatelessWidget {
             : '← ${studioAgentShortName(block.sourceAgentId)}',
       _ => null,
     };
+  }
+
+  /// Badge for blocks linked to a controller — either the macro block itself
+  /// ("Controller: X") or an alternative block it replaces ("Alt: X").
+  String? _controllerBadge() {
+    final p = preset;
+    if (p == null) return null;
+    final macroSpecId = controllerSpecIdForMacroBlock(block);
+    if (macroSpecId != null) {
+      return 'Controller: ${studioAgentShortName(macroSpecId)}';
+    }
+    final altSpecId = controllerSpecIdForAlternativeBlock(p, block.id);
+    if (altSpecId != null) {
+      return 'Alt: ${studioAgentShortName(altSpecId)}';
+    }
+    return null;
   }
 }
 
@@ -465,22 +494,32 @@ class StudioBlockBadge extends StatelessWidget {
   /// Muted badges use the neutral white tint instead of the accent colour.
   final bool muted;
 
-  const StudioBlockBadge({super.key, required this.label, this.muted = false});
+  /// Accent badges use the secondary colour — used for controller/alternative
+  /// badges to distinguish them from structural badges.
+  final bool accent;
+
+  const StudioBlockBadge({
+    super.key,
+    required this.label,
+    this.muted = false,
+    this.accent = false,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final color = accent ? context.cs.secondary : context.cs.primary;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
         color: muted
             ? Colors.white.withValues(alpha: 0.08)
-            : context.cs.primary.withValues(alpha: 0.18),
+            : color.withValues(alpha: 0.18),
         borderRadius: BorderRadius.circular(6),
       ),
       // Agent names are long enough to squeeze the block title off the row, so
       // a badge never grows past a third of a phone's width.
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 110),
+        constraints: const BoxConstraints(maxWidth: 130),
         child: Text(
           label,
           maxLines: 1,
@@ -489,9 +528,7 @@ class StudioBlockBadge extends StatelessWidget {
             fontSize: 10,
             fontWeight: FontWeight.w700,
             letterSpacing: 0.2,
-            color: muted
-                ? Colors.white.withValues(alpha: 0.4)
-                : context.cs.primary,
+            color: muted ? Colors.white.withValues(alpha: 0.4) : color,
           ),
         ),
       ),
@@ -516,6 +553,10 @@ class StudioBlockGroupRow extends StatefulWidget {
   final void Function(String blockId, StudioPresetBlockGroup group) onMoveBlock;
   final ValueChanged<bool> onToggleGroup;
 
+  /// The preset that owns the group's blocks. Passed down to child
+  /// [StudioBlockRow]s for controller/alternative badge resolution.
+  final StudioPreset? preset;
+
   const StudioBlockGroupRow({
     super.key,
     required this.group,
@@ -528,6 +569,7 @@ class StudioBlockGroupRow extends StatefulWidget {
     required this.onDeleteGroup,
     required this.onMoveBlock,
     required this.onToggleGroup,
+    this.preset,
   });
 
   @override
@@ -677,6 +719,7 @@ class _StudioBlockGroupRowState extends State<StudioBlockGroupRow> {
               StudioBlockRow(
                 key: ValueKey('studio_block_${openingBoundary.id}'),
                 block: openingBoundary,
+                preset: widget.preset,
                 indent: 16,
                 isLast: group.children.isEmpty && closingBoundary == null,
                 onEdit: () => widget.onEdit(openingBoundary),
@@ -687,6 +730,7 @@ class _StudioBlockGroupRowState extends State<StudioBlockGroupRow> {
                 block: header.copyWith(
                   title: 'studio_group_header_prompt'.tr(),
                 ),
+                preset: widget.preset,
                 indent: 16,
                 isLast: group.children.isEmpty && closingBoundary == null,
                 onEdit: () => widget.onEdit(header),
@@ -696,6 +740,7 @@ class _StudioBlockGroupRowState extends State<StudioBlockGroupRow> {
                 StudioBlockRow(
                   key: ValueKey('studio_block_${group.children[i].id}'),
                   block: group.children[i],
+                  preset: widget.preset,
                   moveDragData: group.children[i].id,
                   indent: 16,
                   isLast:
@@ -723,6 +768,7 @@ class _StudioBlockGroupRowState extends State<StudioBlockGroupRow> {
               StudioBlockRow(
                 key: ValueKey('studio_block_${closingBoundary.id}'),
                 block: closingBoundary,
+                preset: widget.preset,
                 indent: 16,
                 isLast: true,
                 onEdit: () => widget.onEdit(closingBoundary),
