@@ -9,12 +9,14 @@ import '../../core/models/studio_preset_block_groups.dart';
 /// remembering their prior state in [StudioPreset.agentEnabledBeforeDependencyOff]
 /// so re-enabling the requirement restores them.
 ///
-/// When a controller has a macro-block (`{{studio_<specId>_brief}}`) inside an
-/// exclusive folder, toggling the controller also manages that block:
-/// - ON: the macro-block becomes the sole enabled child (radio-button), and
-///   the previously enabled sibling id is saved in
-///   [StudioPreset.agentBlockRestoreState] for later restore.
-/// - OFF: the macro-block is disabled and the saved sibling is re-enabled.
+/// When a controller has a macro-block (`{{studio_<specId>_brief}}`) and a
+/// list of alternative block IDs in
+/// [StudioPreset.controllerAlternativeBlockIds], toggling the controller
+/// manages those blocks with a radio-button semantic:
+/// - ON: the macro-block is enabled; the currently-enabled alternative blocks
+///   are saved in [StudioPreset.agentBlockRestoreState] and then disabled.
+///   Blocks NOT in the alternative list (add-ons) are left untouched.
+/// - OFF: the macro-block is disabled and the saved alternatives are restored.
 StudioPreset applyStudioAgentToggle(
   StudioPreset preset,
   String specId,
@@ -46,52 +48,61 @@ StudioPreset applyStudioAgentToggle(
     }
   }
 
-  // Controller radio-folder: manage the macro-block inside an exclusive group.
+  // Controller radio-folder: manage the macro-block and its alternatives.
   var blocks = preset.blocks;
-  final restoreState = Map<String, String>.from(preset.agentBlockRestoreState);
+  final restoreState = Map<String, List<String>>.from(
+    preset.agentBlockRestoreState,
+  );
 
   final macroBlock = findControllerMacroBlock(blocks, specId);
   if (macroBlock != null) {
-    final group = findGroupForBlock(blocks, macroBlock.id);
-    if (group != null && group.exclusive) {
-      // Exclusive folder: radio-button behavior.
-      if (enabled) {
-        // Save the currently enabled sibling (if any) before selecting the
-        // macro-block as the sole enabled child.
-        final currentEnabled = enabledChildInGroup(group);
-        if (currentEnabled != null && currentEnabled != macroBlock.id) {
-          restoreState[specId] = currentEnabled;
-        }
-        blocks = selectExclusiveStudioBlock(blocks, group, macroBlock.id);
-      } else {
-        // Disable the macro-block and restore the previously enabled sibling.
-        blocks = blocks
-            .map(
-              (block) => block.id == macroBlock.id
-                  ? block.copyWith(enabled: false)
-                  : block,
-            )
-            .toList(growable: false);
-        final savedId = restoreState.remove(specId);
-        if (savedId != null) {
-          blocks = blocks
-              .map(
-                (block) => block.id == savedId
-                    ? block.copyWith(enabled: true)
-                    : block,
-              )
-              .toList(growable: false);
+    final alternativeIds =
+        preset.controllerAlternativeBlockIds[specId] ?? const <String>[];
+
+    if (enabled) {
+      // Save which alternatives are currently enabled, then disable them.
+      final saved = <String>[];
+      for (final altId in alternativeIds) {
+        final alt = blocks.where((b) => b.id == altId).firstOrNull;
+        if (alt != null && alt.enabled && altId != macroBlock.id) {
+          saved.add(altId);
         }
       }
+      if (saved.isNotEmpty) {
+        restoreState[specId] = saved;
+      }
+      blocks = blocks
+          .map(
+            (block) {
+              if (block.id == macroBlock.id) {
+                return block.copyWith(enabled: true);
+              }
+              if (alternativeIds.contains(block.id)) {
+                return block.copyWith(enabled: false);
+              }
+              return block;
+            },
+          )
+          .toList(growable: false);
     } else {
-      // No exclusive folder: simply toggle the macro-block on/off.
+      // Disable the macro-block and restore the saved alternatives.
       blocks = blocks
           .map(
             (block) => block.id == macroBlock.id
-                ? block.copyWith(enabled: enabled)
+                ? block.copyWith(enabled: false)
                 : block,
           )
           .toList(growable: false);
+      final savedIds = restoreState.remove(specId);
+      if (savedIds != null) {
+        blocks = blocks
+            .map(
+              (block) => savedIds.contains(block.id)
+                  ? block.copyWith(enabled: true)
+                  : block,
+            )
+            .toList(growable: false);
+      }
     }
   }
 

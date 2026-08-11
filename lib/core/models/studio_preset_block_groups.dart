@@ -47,15 +47,9 @@ const _exclusiveStudioHeaders = <String>{
   'response length controls',
   'text formatting',
   'cot selections',
-  // Controller radio-folders: enabling a controller selects its macro-block
-  // and disables all siblings; disabling restores the previous block.
-  'continuity (pick one)',
-  'agency (pick one)',
-  'dialogue (pick one)',
-  'guard (pick one)',
-  'world (pick one)',
-  'meta (pick one)',
 };
+
+final _studioBriefMacro = RegExp(r'\{\{studio_(\w+)_briefs?\}\}');
 
 const _independentNarrativeStyleTitles = <String>{
   'bratty ass narrative',
@@ -412,6 +406,26 @@ String? enabledChildInGroup(StudioPresetBlockGroup group) {
   for (final block in group.children) {
     if (isIndependentStudioGroupChild(group, block)) continue;
     if (block.enabled) return block.id;
+  }
+  return null;
+}
+
+/// The controller specId whose macro block this block carries, or `null`.
+/// A macro block contains `{{studio_<specId>_brief}}` or
+/// `{{studio_<specId>_briefs}}` in its content.
+String? controllerSpecIdForMacroBlock(StudioPresetBlock block) {
+  final m = _studioBriefMacro.firstMatch(block.content);
+  return m?.group(1);
+}
+
+/// The controller specId for which [blockId] is listed as an alternative,
+/// or `null`. Checks [StudioPreset.controllerAlternativeBlockIds].
+String? controllerSpecIdForAlternativeBlock(
+  StudioPreset preset,
+  String blockId,
+) {
+  for (final entry in preset.controllerAlternativeBlockIds.entries) {
+    if (entry.value.contains(blockId)) return entry.key;
   }
   return null;
 }

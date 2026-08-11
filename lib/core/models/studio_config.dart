@@ -111,11 +111,16 @@ abstract class StudioPreset with _$StudioPreset {
 
     /// Per-agent restore state for the controller radio-folder feature.
     ///
-    /// When a controller is enabled and its macro-block is the only enabled
-    /// child of an exclusive folder, the previously enabled sibling block id
-    /// is saved here so that disabling the controller can restore it.
-    /// Keyed by controller spec id (e.g. `'continuity'`).
-    @Default({}) Map<String, String> agentBlockRestoreState,
+    /// When a controller is enabled, the block IDs that were enabled and are
+    /// listed as its alternatives are saved here so that disabling the
+    /// controller can restore them. Keyed by controller spec id.
+    @Default({}) Map<String, List<String>> agentBlockRestoreState,
+
+    /// Per-controller mapping of specId → list of block IDs that the
+    /// controller replaces. When the controller is toggled ON, these blocks
+    /// are disabled (and saved for restore). When toggled OFF, they are
+    /// restored. Blocks not in this list are left untouched (add-ons).
+    @Default({}) Map<String, List<String>> controllerAlternativeBlockIds,
 
     @Default(StudioRuntimeSettings()) StudioRuntimeSettings runtime,
     @Default(0) int updatedAt,
