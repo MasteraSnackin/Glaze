@@ -48,6 +48,8 @@ class CardEvolutionObservationRepo {
           canonicalClaim: Value(observation.canonicalClaim),
           evidenceMessageIds: jsonEncode(observation.evidenceMessageIds),
           evidenceClustersJson: Value(jsonEncode(observation.evidenceClusters)),
+          retrievalKeysJson: Value(jsonEncode(observation.retrievalKeys)),
+          targetKind: Value(observation.targetKind),
           cardFieldPath: Value(observation.cardFieldPath),
           lorebookEntryId: Value(observation.lorebookEntryId),
           confidence: observation.confidence,
@@ -66,6 +68,8 @@ class CardEvolutionObservationRepo {
     required double confidence,
     required int now,
     required List<String> evidenceMessageIds,
+    List<String>? retrievalKeys,
+    String? targetKind,
   }) => db.transaction(() async {
     final row = await (db.select(
       db.cardEvolutionObservations,
@@ -102,6 +106,12 @@ class CardEvolutionObservationRepo {
         confidence: Value(confidence),
         evidenceClustersJson: Value(jsonEncode(clusters)),
         evidenceMessageIds: Value(jsonEncode(union)),
+        retrievalKeysJson: retrievalKeys == null
+            ? const Value.absent()
+            : Value(jsonEncode(_canonicalEvidence(retrievalKeys))),
+        targetKind: targetKind == null
+            ? const Value.absent()
+            : Value(targetKind),
         updatedAt: Value(now),
       ),
     );
@@ -191,6 +201,8 @@ class CardEvolutionObservationRepo {
       observedChange: row.observedChange,
       canonicalClaim: row.canonicalClaim,
       evidenceClusters: evidenceClusters,
+      retrievalKeys: _decodeStringList(row.retrievalKeysJson),
+      targetKind: row.targetKind,
       cardFieldPath: row.cardFieldPath,
       lorebookEntryId: row.lorebookEntryId,
       confidence: row.confidence,
@@ -224,6 +236,15 @@ class CardEvolutionObservationRepo {
       ];
     } catch (_) {
       return [];
+    }
+  }
+
+  static List<String> _decodeStringList(String encoded) {
+    try {
+      final decoded = jsonDecode(encoded);
+      return decoded is List ? _canonicalEvidence(decoded) : const [];
+    } catch (_) {
+      return const [];
     }
   }
 }

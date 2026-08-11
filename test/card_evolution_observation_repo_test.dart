@@ -28,6 +28,8 @@ void main() {
     expect(found.evidenceClusters, [
       ['msg:1', 'msg:2'],
     ]);
+    expect(found.retrievalKeys, ['npc:Алиса']);
+    expect(found.targetKind, 'main_character_card');
   });
 
   test('confirm bumps repeat count and last confirmed run', () async {
@@ -168,6 +170,8 @@ CardEvolutionObservation _observation({
   evidenceClusters: const [
     ['msg:1', 'msg:2'],
   ],
+  retrievalKeys: const ['npc:Алиса'],
+  targetKind: 'main_character_card',
   cardFieldPath: 'personality',
   confidence: confidence,
   status: 'active',

@@ -21,6 +21,8 @@ abstract class CardEvolutionObservation with _$CardEvolutionObservation {
     required String observedChange,
     String? canonicalClaim,
     required List<List<String>> evidenceClusters,
+    @Default([]) List<String> retrievalKeys,
+    String? targetKind,
     String? cardFieldPath,
     String? lorebookEntryId,
     required double confidence,

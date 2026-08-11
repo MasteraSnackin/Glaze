@@ -122,21 +122,29 @@ class AutomatedCardEvolutionService {
     if (!collector) {
       return const CardEvolutionFinalizeOutcome('collectorUnavailable');
     }
-    final latest = await collectorRunRepo.latestCompletedOrdinal(
-      reconciliationRun.sessionId,
-    );
-    final dueBoundary = (latest ~/ 3) * 3;
     final delivered = await collectorRunRepo.latestDeliveredWriterBoundary(
       reconciliationRun.sessionId,
     );
-    if (dueBoundary == 0 || dueBoundary <= delivered) {
+    final dueBoundary = delivered + 3;
+    final latest = await collectorRunRepo.latestCompletedOrdinal(
+      reconciliationRun.sessionId,
+    );
+    if (latest < dueBoundary) {
       return const CardEvolutionFinalizeOutcome('collectorCompleted');
+    }
+    final boundaryRuns = await collectorRunRepo.completedBoundary(
+      reconciliationRun.sessionId,
+      dueBoundary,
+    );
+    if (boundaryRuns.length != 3) {
+      return const CardEvolutionFinalizeOutcome('collectorUnavailable');
     }
     return _runWriter(
       reconciliationRun.sessionId,
       onStage: onStage,
       throughCollectorOrdinal: dueBoundary,
-      collectorBoundaryHash: reconciliationRun.chainHash,
+      collectorBoundaryHash: boundaryRuns.last.reconciliationChainHash,
+      collectorBoundaryRuns: boundaryRuns,
     );
   }
 
@@ -145,6 +153,7 @@ class AutomatedCardEvolutionService {
     void Function(AutomatedCardEvolutionStage stage)? onStage,
     int throughCollectorOrdinal = 0,
     String collectorBoundaryHash = '',
+    List<CardEvolutionCollectorRunRow> collectorBoundaryRuns = const [],
   }) async {
     onStage?.call(AutomatedCardEvolutionStage.cardRewriter);
     final owner = 'evolution-owner-${generateId()}';
@@ -156,6 +165,9 @@ class AutomatedCardEvolutionService {
       leaseSeconds: leaseSeconds,
       throughCollectorOrdinal: throughCollectorOrdinal,
       collectorBoundaryHash: collectorBoundaryHash,
+      reconciliationRunIds: [
+        for (final run in collectorBoundaryRuns) run.reconciliationRunId,
+      ],
     );
     final claim = claimed.claim;
     if (claim == null) return CardEvolutionFinalizeOutcome(claimed.kind);
@@ -174,6 +186,7 @@ class AutomatedCardEvolutionService {
       token = CancelToken();
       _tokens[sessionId] = token;
       final sharedContext = snapshot.selectedInputJson;
+      final cardContext = _cardWriterContext(sharedContext);
       final allowedCardFields = CardRewritePolicy.nonEmptyEvolutionFields(
         snapshot.character,
       );
@@ -182,10 +195,10 @@ class AutomatedCardEvolutionService {
       String? cardOutput;
       if (allowedCardFields.isNotEmpty) {
         final accumulatedObservations = _extractAccumulatedObservations(
-          snapshot.selectedInputJson,
+          cardContext,
         );
         final cardPrompt =
-            '${CardRewriterPromptBuilder.buildEvolution(character: snapshot.character, instruction: 'Independently evaluate the accumulated observation candidates, the available non-empty card fields, the 40 latest immutable chat messages, and the current Ledger-backed factual context. Active observations are unconfirmed candidates; promoted observations are stronger evidence. Return an empty operations list when no candidate is durable enough. Change only the smallest exact fragments and do not invent canon.', accumulatedObservations: accumulatedObservations)}\n\n# Immutable chat history and effective canon\n${snapshot.selectedInputJson}';
+            '${CardRewriterPromptBuilder.buildEvolution(character: snapshot.character, instruction: 'Independently evaluate the accumulated observation candidates, the available non-empty card fields, the 40 latest immutable chat messages, and the current Ledger-backed factual context. Russian evidence may support an English card patch; preserve exact Ledger identities without translation. Active observations are unconfirmed candidates; promoted observations are stronger evidence. Return an empty operations list when no candidate is durable enough. Change only the smallest exact fragments and do not invent canon.', accumulatedObservations: accumulatedObservations)}\n\n# Immutable chat history and effective canon\n$cardContext';
         final cardOutcome = await _executor(
           config: config,
           prompt: cardPrompt,
@@ -368,7 +381,7 @@ class AutomatedCardEvolutionService {
       final output = await _runObservationPass(
         sessionId,
         snapshot,
-        reconciliationRun.ordinal,
+        claim.row!.collectorOrdinal,
       );
       if (output == null) return false;
       await _checkPromotions(sessionId);
@@ -395,23 +408,11 @@ class AutomatedCardEvolutionService {
     int runOrdinal,
   ) async {
     final config = await resolveModel();
-    final active = await observationRepo.getActiveObservations(sessionId);
-    final activeMaps = active
-        .map(
-          (o) => <String, Object?>{
-            'scopeKey': o.semanticScopeKey,
-            'observedChange': o.observedChange,
-            'canonicalClaim': o.canonicalClaim,
-            'repeatCount': o.repeatCount,
-            'firstSeenRun': o.firstSeenRun,
-            'lastConfirmedRun': o.lastConfirmedRun,
-            'confidence': o.confidence,
-            'evidenceClusters': o.evidenceClusters,
-          },
-        )
-        .toList();
+    final activeMaps = _extractAccumulatedObservations(
+      snapshot.selectedInputJson,
+    ).where((observation) => observation['status'] == 'active').toList();
     final prompt =
-        '${CardRewriterPromptBuilder.buildObservationPass(character: snapshot.character, activeObservations: activeMaps, instruction: 'Review the last 40 immutable chat messages and the current Ledger-backed canon below. For each active observation, decide whether the chat history still supports it. Identify any new repeatedly demonstrated shift in preference, attitude, relationship dynamics, or lasting character development. Do not record one-off events or temporary state. Be conservative.')}\n\n# Immutable chat history and effective canon\n${snapshot.selectedInputJson}';
+        '${CardRewriterPromptBuilder.buildObservationPass(character: snapshot.character, activeObservations: activeMaps, instruction: 'Review the last 40 immutable chat messages and the current Ledger-backed canon below. For each active observation, decide whether the chat history still supports it. Identify any new repeatedly demonstrated shift in preference, attitude, relationship dynamics, or lasting character development. Do not record one-off events or temporary state. Be conservative.')}\n\n# Immutable chat history and effective canon\n${_collectorContext(snapshot.selectedInputJson)}';
     final token = CancelToken();
     _tokens['observation-$sessionId'] = token;
     try {
@@ -434,9 +435,29 @@ class AutomatedCardEvolutionService {
       if (actions == null) return null;
       final validEvidenceIds = _chatMessageIds(snapshot.selectedInputJson);
       if (validEvidenceIds == null) return null;
+      final retrievalTargets = _retrievalTargets(snapshot.selectedInputJson);
+      if (retrievalTargets == null) return null;
       final now = currentTimestampSeconds();
       for (final action in actions) {
         if (!validEvidenceIds.containsAll(action.evidenceMessageIds)) continue;
+        if (!retrievalTargets.keys.toSet().containsAll(action.retrievalKeys)) {
+          continue;
+        }
+        final loreIdentity = action.lorebookEntryId;
+        final hasExactLoreTarget =
+            loreIdentity != null &&
+            action.retrievalKeys.contains(loreIdentity) &&
+            retrievalTargets[loreIdentity] == 'injected_lorebook_entry';
+        if ((action.targetKind == 'injected_lorebook_entry' &&
+                !hasExactLoreTarget) ||
+            (action.targetKind == 'main_character_card' &&
+                (loreIdentity != null ||
+                    action.retrievalKeys.any(
+                      (key) =>
+                          retrievalTargets[key] == 'injected_lorebook_entry',
+                    )))) {
+          continue;
+        }
         await _applyObservationAction(
           sessionId: sessionId,
           characterId: snapshot.character.id,
@@ -466,13 +487,19 @@ class AutomatedCardEvolutionService {
           sessionId,
           action.scopeKey,
         );
-        if (existing != null && existing.status == 'active') {
+        if (existing != null &&
+            existing.status == 'active' &&
+            (existing.targetKind == null ||
+                existing.targetKind == action.targetKind) &&
+            existing.lorebookEntryId == action.lorebookEntryId) {
           await observationRepo.confirmObservation(
             id: existing.id,
             runOrdinal: runOrdinal,
             confidence: action.confidence,
             now: now,
             evidenceMessageIds: action.evidenceMessageIds,
+            retrievalKeys: action.retrievalKeys,
+            targetKind: action.targetKind,
           );
         }
         break;
@@ -492,6 +519,8 @@ class AutomatedCardEvolutionService {
               observedChange: action.observedChange,
               canonicalClaim: action.canonicalClaim,
               evidenceClusters: [action.evidenceMessageIds],
+              retrievalKeys: action.retrievalKeys,
+              targetKind: action.targetKind,
               cardFieldPath: action.cardFieldPath,
               lorebookEntryId: action.lorebookEntryId,
               confidence: action.confidence,
@@ -547,6 +576,29 @@ class AutomatedCardEvolutionService {
     }
   }
 
+  static Map<String, String>? _retrievalTargets(String selectedInputJson) {
+    try {
+      final decoded = jsonDecode(selectedInputJson);
+      if (decoded is! Map ||
+          decoded['availableObservationRetrievalTargets'] is! List) {
+        return null;
+      }
+      final result = <String, String>{};
+      for (final target
+          in decoded['availableObservationRetrievalTargets'] as List) {
+        if (target is! Map ||
+            target['key'] is! String ||
+            target['kind'] is! String) {
+          return null;
+        }
+        result[target['key'] as String] = target['kind'] as String;
+      }
+      return result;
+    } catch (_) {
+      return null;
+    }
+  }
+
   static List<Map<String, Object?>> _extractAccumulatedObservations(
     String selectedInputJson,
   ) {
@@ -560,6 +612,37 @@ class AutomatedCardEvolutionService {
       ];
     } catch (_) {
       return const [];
+    }
+  }
+
+  static String _cardWriterContext(String selectedInputJson) {
+    try {
+      final input = Map<String, Object?>.from(
+        jsonDecode(selectedInputJson) as Map,
+      );
+      final observations = input['accumulatedObservations'];
+      input['accumulatedObservations'] = observations is List
+          ? [
+              for (final value in observations)
+                if (value is Map &&
+                    value['targetKind'] != 'injected_lorebook_entry')
+                  value,
+            ]
+          : const [];
+      return jsonEncode(input);
+    } catch (_) {
+      return selectedInputJson;
+    }
+  }
+
+  static String _collectorContext(String selectedInputJson) {
+    try {
+      final decoded = Map<String, Object?>.from(
+        jsonDecode(selectedInputJson) as Map,
+      )..remove('card');
+      return jsonEncode(decoded);
+    } catch (_) {
+      return selectedInputJson;
     }
   }
 
@@ -583,6 +666,8 @@ class AutomatedCardEvolutionService {
         final scopeKey = raw['scopeKey'];
         final observedChange = raw['observedChange'];
         final confidence = raw['confidence'];
+        final retrievalKeysRaw = raw['retrievalKeys'];
+        final targetKind = raw['targetKind'];
         if (action is! String ||
             !const {
               'confirm',
@@ -594,7 +679,18 @@ class AutomatedCardEvolutionService {
             scopeKey.isEmpty ||
             !scopes.add(scopeKey) ||
             (action == 'new' &&
-                (observedChange is! String || observedChange.isEmpty))) {
+                (observedChange is! String || observedChange.isEmpty)) ||
+            (action != 'no_evidence' &&
+                (retrievalKeysRaw is! List ||
+                    retrievalKeysRaw.isEmpty ||
+                    retrievalKeysRaw.any(
+                      (value) => value is! String || value.isEmpty,
+                    ))) ||
+            (action != 'no_evidence' &&
+                !const {
+                  'main_character_card',
+                  'injected_lorebook_entry',
+                }.contains(targetKind))) {
           return null;
         }
         final conf = confidence is num ? confidence.toDouble() : 0.5;
@@ -604,12 +700,16 @@ class AutomatedCardEvolutionService {
             ? 1.0
             : conf;
         final evidenceRaw = raw['evidenceMessageIds'];
-        if (evidenceRaw is! List ||
-            evidenceRaw.any((item) => item is! String)) {
+        if (action != 'no_evidence' &&
+            (evidenceRaw is! List ||
+                evidenceRaw.any((item) => item is! String))) {
           return null;
         }
         final evidence = <String>[];
-        for (final item in evidenceRaw.cast<String>()) {
+        for (final item
+            in (evidenceRaw is List
+                ? evidenceRaw.cast<String>()
+                : const <String>[])) {
           if (item.isNotEmpty && !evidence.contains(item)) evidence.add(item);
         }
         if (action != 'no_evidence' && evidence.isEmpty) return null;
@@ -622,6 +722,10 @@ class AutomatedCardEvolutionService {
                 ? raw['canonicalClaim'] as String
                 : null,
             evidenceMessageIds: evidence,
+            retrievalKeys: retrievalKeysRaw is List
+                ? retrievalKeysRaw.cast<String>().toSet().toList()
+                : const [],
+            targetKind: targetKind is String ? targetKind : null,
             cardFieldPath: raw['cardFieldPath'] is String
                 ? raw['cardFieldPath'] as String
                 : null,
@@ -690,6 +794,8 @@ final class _ParsedObservationAction {
     required this.observedChange,
     required this.canonicalClaim,
     required this.evidenceMessageIds,
+    required this.retrievalKeys,
+    required this.targetKind,
     required this.cardFieldPath,
     required this.lorebookEntryId,
     required this.confidence,
@@ -700,6 +806,8 @@ final class _ParsedObservationAction {
   final String observedChange;
   final String? canonicalClaim;
   final List<String> evidenceMessageIds;
+  final List<String> retrievalKeys;
+  final String? targetKind;
   final String? cardFieldPath;
   final String? lorebookEntryId;
   final double confidence;

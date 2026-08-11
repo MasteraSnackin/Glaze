@@ -1147,6 +1147,14 @@ class CardEvolutionObservations extends Table {
   TextColumn get evidenceMessageIds => text()();
   TextColumn get evidenceClustersJson =>
       text().withDefault(const Constant('[]'))();
+
+  /// Exact, case-preserving Unicode Ledger keys (or exact injected lorebook
+  /// identities) used to retrieve this row for a later bounded snapshot.
+  TextColumn get retrievalKeysJson =>
+      text().withDefault(const Constant('[]'))();
+
+  /// `main_character_card` or `injected_lorebook_entry`.
+  TextColumn get targetKind => text().nullable()();
   TextColumn get cardFieldPath => text().nullable()();
   TextColumn get lorebookEntryId => text().nullable()();
   RealColumn get confidence => real()();

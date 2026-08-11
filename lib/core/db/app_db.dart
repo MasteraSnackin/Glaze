@@ -75,7 +75,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 116;
+  int get schemaVersion => 117;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -2165,6 +2165,43 @@ class AppDatabase extends _$AppDatabase {
           'SELECT (COUNT(*) / 3) * 3 FROM reconciliation_successful_runs r '
           'WHERE r.session_id = card_evolution_claims.session_id) '
           "WHERE status = 'completed' AND predecessor_run_ordinal = 0",
+        );
+      }
+      if (from < 117) {
+        final columns = await customSelect(
+          "PRAGMA table_info('card_evolution_observations')",
+        ).get();
+        final names = columns
+            .map((column) => column.read<String>('name'))
+            .toSet();
+        if (!names.contains('retrieval_keys_json')) {
+          await m.addColumn(
+            cardEvolutionObservations,
+            cardEvolutionObservations.retrievalKeysJson,
+          );
+        }
+        if (!names.contains('target_kind')) {
+          await m.addColumn(
+            cardEvolutionObservations,
+            cardEvolutionObservations.targetKind,
+          );
+        }
+        // Safe structural backfill only. Rows without an exact target remain
+        // unkeyed and are matched against a snapshot at read time, never
+        // globally injected.
+        await customStatement(
+          "UPDATE card_evolution_observations SET target_kind = "
+          "CASE WHEN lorebook_entry_id IS NOT NULL AND lorebook_entry_id <> '' "
+          "THEN 'injected_lorebook_entry' "
+          "WHEN card_field_path IS NOT NULL AND card_field_path <> '' "
+          "THEN 'main_character_card' ELSE NULL END "
+          'WHERE target_kind IS NULL',
+        );
+        await customStatement(
+          "UPDATE card_evolution_observations "
+          "SET retrieval_keys_json = json_array(lorebook_entry_id) "
+          "WHERE lorebook_entry_id IS NOT NULL AND lorebook_entry_id <> '' "
+          "AND retrieval_keys_json = '[]'",
         );
       }
     },

@@ -64,6 +64,14 @@ class CardEvolutionCollectorRunRepo {
       return CardEvolutionCollectorClaimOutcome('existing', row);
     }
 
+    final nextOrdinalRow = await db
+        .customSelect(
+          'SELECT COALESCE(MAX(collector_ordinal), 0) + 1 AS ordinal '
+          'FROM card_evolution_collector_runs WHERE session_id = ?',
+          variables: [Variable.withString(reconciliationRun.sessionId)],
+        )
+        .getSingle();
+    final collectorOrdinal = nextOrdinalRow.read<int>('ordinal');
     final id = 'evolution-collector-${generateId()}';
     try {
       await db
@@ -73,7 +81,7 @@ class CardEvolutionCollectorRunRepo {
               id: id,
               sessionId: reconciliationRun.sessionId,
               characterId: characterId,
-              collectorOrdinal: reconciliationRun.ordinal,
+              collectorOrdinal: collectorOrdinal,
               reconciliationRunId: reconciliationRun.id,
               reconciliationRunOrdinal: reconciliationRun.ordinal,
               reconciliationChainHash: reconciliationRun.chainHash,
@@ -149,5 +157,33 @@ class CardEvolutionCollectorRunRepo {
         )
         .getSingle();
     return row.read<int>('ordinal');
+  }
+
+  /// Exact three completed collectors ending at [boundary]. Gaps or claimed
+  /// rows fail closed, so a writer never substitutes newer reconciliation data.
+  Future<List<CardEvolutionCollectorRunRow>> completedBoundary(
+    String sessionId,
+    int boundary,
+  ) async {
+    if (boundary < 3) return const [];
+    final rows =
+        await (db.select(db.cardEvolutionCollectorRuns)
+              ..where((row) => row.sessionId.equals(sessionId))
+              ..where(
+                (row) => row.collectorOrdinal.isBetweenValues(
+                  boundary - 2,
+                  boundary,
+                ),
+              )
+              ..where((row) => row.status.equals('completed'))
+              ..orderBy([(row) => OrderingTerm.asc(row.collectorOrdinal)]))
+            .get();
+    if (rows.length != 3 ||
+        rows.indexed.any(
+          (entry) => entry.$2.collectorOrdinal != boundary - 2 + entry.$1,
+        )) {
+      return const [];
+    }
+    return rows;
   }
 }

@@ -78,7 +78,7 @@ void main() {
 
       // user_version matches the Drift schema version (app_db.dart schemaVersion).
       // Update this constant whenever a new migration step is added.
-      expect(version, 116);
+      expect(version, 117);
     });
 
     test(
@@ -232,7 +232,7 @@ void main() {
         final version = await upgraded
             .customSelect('PRAGMA user_version')
             .get();
-        expect(version.first.read<int>('user_version'), 116);
+        expect(version.first.read<int>('user_version'), 117);
         expect(names, contains('variant_group_id'));
         expect(names, contains('hidden'));
       },
@@ -262,7 +262,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 116);
+      expect(version.read<int>('user_version'), 117);
     });
 
     test(
@@ -611,7 +611,7 @@ void main() {
 
     test('current schema includes atomic character fact tables', () async {
       final version = await db.customSelect('PRAGMA user_version').getSingle();
-      expect(version.read<int>('user_version'), 116);
+      expect(version.read<int>('user_version'), 117);
 
       final factColumns = await db
           .customSelect("PRAGMA table_info('character_knowledge_fact_rows')")
@@ -723,7 +723,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 116);
+      expect(version.read<int>('user_version'), 117);
     });
 
     test(
@@ -833,7 +833,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 116);
+      expect(version.read<int>('user_version'), 117);
     });
 
     test('v80 adds Responses API toggle defaulting to off', () async {
@@ -873,7 +873,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 116);
+      expect(version.read<int>('user_version'), 117);
     });
 
     test('v81 adds composite embedding source index', () async {
@@ -907,7 +907,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 116);
+      expect(version.read<int>('user_version'), 117);
     });
 
     test('v82 creates rewrite persistence schema and provenance columns', () async {
@@ -981,7 +981,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 116);
+      expect(version.read<int>('user_version'), 117);
     });
 
     test('v83 rebuilds interim text revision columns without losing rows', () async {
@@ -1433,7 +1433,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 116);
+      expect(version.read<int>('user_version'), 117);
 
       // Rows and payloads survive; legacy statuses pass through or are
       // normalized fail-closed, and new columns carry neutral defaults.
@@ -1638,7 +1638,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 116);
+      expect(version.read<int>('user_version'), 117);
       final row = await upgraded
           .customSelect(
             'SELECT blocks_json FROM studio_preset_rows WHERE preset_id = ?',
@@ -1754,7 +1754,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 116);
+      expect(version.read<int>('user_version'), 117);
       final check = await upgraded.customSelect('PRAGMA integrity_check').get();
       expect(check.single.read<String>('integrity_check'), 'ok');
     });
@@ -2269,6 +2269,60 @@ void main() {
       );
     });
 
+    test('v117 observation retrieval metadata is durable', () async {
+      final columns = await db
+          .customSelect("PRAGMA table_info('card_evolution_observations')")
+          .get();
+      expect(
+        columns.map((row) => row.read<String>('name')),
+        containsAll(['retrieval_keys_json', 'target_kind']),
+      );
+      final retrieval = columns.singleWhere(
+        (row) => row.read<String>('name') == 'retrieval_keys_json',
+      );
+      expect(retrieval.read<String?>('dflt_value'), "'[]'");
+    });
+
+    test('v116 to v117 safely backfills only exact legacy targets', () async {
+      final file = File(
+        '${Directory.systemTemp.path}/glaze_mig_observation_v117_${DateTime.now().microsecondsSinceEpoch}.db',
+      );
+      addTearDown(() async {
+        if (file.existsSync()) await file.delete();
+      });
+      final seeded = AppDatabase.forTesting(
+        NativeDatabase.createInBackground(file),
+      );
+      await seeded.customSelect('SELECT 1').get();
+      await seeded.customStatement(
+        "INSERT INTO card_evolution_observations "
+        "(id,session_id,character_id,run_ordinal,semantic_scope_key,observed_change,evidence_message_ids,confidence,status,first_seen_run,created_at,updated_at,lorebook_entry_id) "
+        "VALUES ('lore','s','c',1,'npc:Люси','fact','[]',.8,'active',1,1,1,'book:entry'),"
+        "('unknown','s','c',1,'relationship:Люси','fact','[]',.8,'active',1,1,1,NULL)",
+      );
+      await seeded.customStatement(
+        'ALTER TABLE card_evolution_observations DROP COLUMN retrieval_keys_json',
+      );
+      await seeded.customStatement(
+        'ALTER TABLE card_evolution_observations DROP COLUMN target_kind',
+      );
+      await seeded.customStatement('PRAGMA user_version = 116');
+      await seeded.close();
+      final upgraded = AppDatabase.forTesting(
+        NativeDatabase.createInBackground(file),
+      );
+      addTearDown(() => upgraded.close());
+      final rows = await upgraded
+          .customSelect(
+            'SELECT id,retrieval_keys_json,target_kind FROM card_evolution_observations ORDER BY id',
+          )
+          .get();
+      expect(rows.first.read<String>('retrieval_keys_json'), '["book:entry"]');
+      expect(rows.first.read<String>('target_kind'), 'injected_lorebook_entry');
+      expect(rows.last.read<String>('retrieval_keys_json'), '[]');
+      expect(rows.last.readNullable<String>('target_kind'), isNull);
+    });
+
     test(
       'v93 session lorebook evolution overlay has the session key',
       () async {
@@ -2364,7 +2418,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 116);
+      expect(version.read<int>('user_version'), 117);
     });
 
     test(
@@ -2461,7 +2515,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 116);
+      expect(version.read<int>('user_version'), 117);
     });
 
     test('v111 resolves the retired session_id_mode default', () async {
@@ -2604,7 +2658,8 @@ void main() {
       final rows = await upgraded
           .customSelect(
             'SELECT id, evidence_message_ids, evidence_clusters_json, repeat_count, '
-            'status FROM card_evolution_observations ORDER BY id',
+            'status, retrieval_keys_json, target_kind '
+            'FROM card_evolution_observations ORDER BY id',
           )
           .get();
       final gilda = rows.singleWhere(
@@ -2614,6 +2669,8 @@ void main() {
       expect(gilda.read<String>('evidence_clusters_json'), '[["m1","m2"]]');
       expect(gilda.read<int>('repeat_count'), 1);
       expect(gilda.read<String>('status'), 'active');
+      expect(gilda.read<String>('retrieval_keys_json'), '[]');
+      expect(gilda.readNullable<String>('target_kind'), isNull);
       final bad = rows.singleWhere((row) => row.read<String>('id') == 'bad');
       expect(bad.read<String>('evidence_message_ids'), '[]');
       expect(bad.read<String>('evidence_clusters_json'), '[]');

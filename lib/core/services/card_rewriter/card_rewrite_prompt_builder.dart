@@ -86,8 +86,9 @@ abstract final class CardRewriterPromptBuilder {
       ..writeln(
         '- scopeKey supports npc:<subject>, relationship:<subject>, '
         'arc:<subject>, world:<subject>, or scene.<subject>. Every patch and '
-        'its transition must use the same scopeKey. Use ASCII lowercase IDs '
-        'only: for example relationship:danvi, never relationship:Danvi.',
+        'its transition must use the same scopeKey. Preserve exact RP-language '
+        'Unicode identities from supplied Ledger keys; never translate, '
+        'transliterate, case-fold, or invent an identity.',
       )
       ..writeln(
         '- Each anchor must occur exactly once in its current field and its '
@@ -161,6 +162,20 @@ abstract final class CardRewriterPromptBuilder {
         'dynamics, or lasting character development ARE observations.',
       )
       ..writeln(
+        '- retrievalKeys must contain exact, stable, case-preserving Unicode '
+        'Ledger GROUP keys (for example npc:Квинн, '
+        'relationship:Гильда:Квинн, arc:Спонсорство) from '
+        'availableObservationRetrievalTargets in the supplied snapshot. Never '
+        'return volatile field suffixes such as .location or .trust. Never '
+        'translate, transliterate, or invent a key.',
+      )
+      ..writeln(
+        '- targetKind is main_character_card for the main character\'s enduring '
+        'traits or relationships, or injected_lorebook_entry for NPC-owned '
+        'facts. NPC-owned facts may target only an existing injected lorebook '
+        'entry; they must never target the main character card.',
+      )
+      ..writeln(
         '- Each observation has a narrow semantic scope key '
         '(e.g. character.preference.X).',
       )
@@ -209,6 +224,8 @@ abstract final class CardRewriterPromptBuilder {
         'Respond with exactly one JSON object and nothing else: '
         '{"observations":[{"action":"new|confirm|no_evidence|contradict","scopeKey":"...",'
         '"observedChange":"...","canonicalClaim":"...",'
+        '"retrievalKeys":["exact Ledger key"],'
+        '"targetKind":"main_character_card|injected_lorebook_entry",'
         '"evidenceMessageIds":[],"cardFieldPath":"personality"|null,'
         '"lorebookEntryId":"bookId:entryId"|null,"confidence":0.0-1.0}]}.',
       )
@@ -231,6 +248,7 @@ abstract final class CardRewriterPromptBuilder {
 
 # Writable targets
 Only the supplied lorebookId/entryId pairs are writable. Do not create, delete, move, rename, or change keys/settings. Do not output card patches. The shared context includes the current card and the card writer's proposed operations. Avoid only card-lorebook duplication: do not patch an entry with a fact already represented in the current card or proposed card operations. Chat history and Ledger are evidence, not alternate durable targets; do not omit a supported lorebook patch merely because Ledger already records the fact.
+NPC-owned facts may patch only an existing supplied injected lorebook entry. Main-character relationships may patch the card instead. Preserve exact RP-language Unicode Ledger identities; never translate or transliterate them.
 
 # Response format
 Respond with exactly one JSON object and nothing else:

@@ -112,7 +112,8 @@ abstract final class CardRewritePolicy {
     CardRewriteField.creatorNotes,
   };
 
-  static bool isWritable(CardRewriteField field) => writableFields.contains(field);
+  static bool isWritable(CardRewriteField field) =>
+      writableFields.contains(field);
 
   static Set<CardRewriteField> nonEmptyEvolutionFields(Character character) => {
     if (character.description?.isNotEmpty == true) CardRewriteField.description,
@@ -133,11 +134,6 @@ final class CardRewriteScope {
   final String subject;
   final String key;
 
-  static final RegExp _colonKey = RegExp(r'^[a-z0-9][a-z0-9_-]*$');
-  static final RegExp _sceneKey = RegExp(
-    r'^[a-z0-9][a-z0-9_-]*(\.[a-z0-9][a-z0-9_-]*)*$',
-  );
-
   static CardRewriteScope? tryParse(String key) {
     for (final entry in const <String, CardRewriteScopeKind>{
       'npc:': CardRewriteScopeKind.npc,
@@ -147,16 +143,64 @@ final class CardRewriteScope {
     }.entries) {
       if (key.startsWith(entry.key)) {
         final subject = key.substring(entry.key.length);
-        return _colonKey.hasMatch(subject)
+        return _safeIdentity(
+              subject,
+              allowDots: false,
+              allowColons: entry.value == CardRewriteScopeKind.relationship,
+            )
             ? CardRewriteScope._(entry.value, subject, key)
             : null;
       }
     }
     if (!key.startsWith('scene.')) return null;
     final subject = key.substring('scene.'.length);
-    return _sceneKey.hasMatch(subject)
+    return _safeIdentity(
+          subject,
+          allowDots: true,
+          requireNonEmptySegments: true,
+        )
         ? CardRewriteScope._(CardRewriteScopeKind.scene, subject, key)
         : null;
+  }
+
+  static bool _safeIdentity(
+    String value, {
+    required bool allowDots,
+    bool allowColons = false,
+    bool requireNonEmptySegments = false,
+  }) {
+    if (value.isEmpty ||
+        value.trim() != value ||
+        value.contains(RegExp(r'\s'))) {
+      return false;
+    }
+    if (!allowColons && value.contains(':')) return false;
+    if (allowColons &&
+        (value.split(':').length != 2 ||
+            value.split(':').any((part) => part.isEmpty))) {
+      return false;
+    }
+    if (requireNonEmptySegments &&
+        value.split('.').any((part) => part.isEmpty)) {
+      return false;
+    }
+    for (var index = 0; index < value.codeUnits.length; index++) {
+      final unit = value.codeUnitAt(index);
+      if (unit < 0x20 ||
+          unit == 0x7f ||
+          (unit >= 0x202a && unit <= 0x202e) ||
+          (unit >= 0x2066 && unit <= 0x2069)) {
+        return false;
+      }
+      if (unit >= 0xd800 && unit <= 0xdbff) {
+        if (++index >= value.codeUnits.length) return false;
+        final low = value.codeUnitAt(index);
+        if (low < 0xdc00 || low > 0xdfff) return false;
+      } else if (unit >= 0xdc00 && unit <= 0xdfff) {
+        return false;
+      }
+    }
+    return allowDots || !value.contains('.');
   }
 }
 
