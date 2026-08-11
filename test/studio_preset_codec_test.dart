@@ -61,6 +61,28 @@ void main() {
     }
   });
 
+  test('controller block mappings survive preset canonicalization', () {
+    final canonical = StudioPresetCodec.canonicalizePresetJson({
+      'id': 'controller-folders',
+      'blocks': const <Map<String, dynamic>>[],
+      'agentBlockRestoreState': {
+        'guard_ru': ['ru_quality', 'ru_dialogue'],
+      },
+      'controllerAlternativeBlockIds': {
+        'guard_ru': ['ru_contract', 'ru_quality'],
+        'guard_en': ['en_contract'],
+      },
+    });
+
+    expect(canonical['agentBlockRestoreState'], {
+      'guard_ru': ['ru_quality', 'ru_dialogue'],
+    });
+    expect(canonical['controllerAlternativeBlockIds'], {
+      'guard_ru': ['ru_contract', 'ru_quality'],
+      'guard_en': ['en_contract'],
+    });
+  });
+
   test('unresolved and ambiguous tracker aliases fail closed', () {
     for (final json in [
       {'id': 'mystery', 'kind': 'tracker_instruction', 'content': 'Task'},

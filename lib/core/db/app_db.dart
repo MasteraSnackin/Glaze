@@ -3153,12 +3153,11 @@ List<Map<String, dynamic>> _legacyStudioPresetMigrationBlocks() {
           '<studio_controller_briefs>\n'
           '<continuity>\n{{studio_continuity_brief}}\n</continuity>\n\n'
           '<agency>\n{{studio_agency_brief}}\n</agency>\n\n'
-          '<narrative>\n{{studio_narrative_brief}}\n</narrative>\n\n'
           '<dialogue>\n{{studio_dialogue_brief}}\n</dialogue>\n\n'
-          '<guard>\n{{studio_guard_brief}}\n</guard>\n\n'
+          '<guard_ru>\n{{studio_guard_ru_brief}}\n</guard_ru>\n\n'
+          '<guard_en>\n{{studio_guard_en_brief}}\n</guard_en>\n\n'
           '<world>\n{{studio_world_brief}}\n</world>\n\n'
-          '<meta>\n{{studio_meta_brief}}\n</meta>\n\n'
-          '<beauty>\n{{studio_beauty_brief}}\n</beauty>\n'
+          '<meta>\n{{studio_meta_brief}}\n</meta>\n'
           '</studio_controller_briefs>',
       'enabled': true,
       'order': 2,

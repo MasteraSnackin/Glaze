@@ -96,14 +96,30 @@ class StudioControllerOntology {
       timeoutMs: 60000,
     ),
     StudioControllerSpec(
-      id: 'guard',
-      name: 'Anti-Loop & Prose Guard',
+      id: 'guard_ru',
+      name: 'Anti-Loop & Prose Guard (RU)',
       purpose:
-          'Enforce anti-loop, anti-echo, banlists, anti-cliche, anti-slop, no-tells, and stable prose quality rules.',
+          'Enforce anti-loop, anti-echo, banlists, anti-cliche, anti-slop, no-tells, and stable Russian prose quality rules.',
       outputContract:
-          'At chat time, output a compact guard checklist and forbidden items for this turn. No rewritten scene prose.',
+          'At chat time, output a compact guard checklist and forbidden items for this turn. Focus on Russian-language prose quality. No rewritten scene prose.',
       laneOwns:
-          'anti-repetition only: forbidden openings/phrases vs the last replies, banned cliches/slop words, and safe structural variation this turn. Structural variation must never force {{user}} movement, decisions, reactions, silence, or other user-controlled progression.',
+          'anti-repetition for Russian prose: forbidden openings/phrases vs the last replies, banned cliches/slop words, and safe structural variation this turn. Structural variation must never force {{user}} movement, decisions, reactions, silence, or other user-controlled progression.',
+      laneSkip:
+          'plot facts, character psychology, agency, pacing targets, dialogue content, and world/NPC texture.',
+      refreshPolicy: 'turn',
+      temperature: 0.2,
+      maxTokens: 1400,
+      timeoutMs: 60000,
+    ),
+    StudioControllerSpec(
+      id: 'guard_en',
+      name: 'Anti-Loop & Prose Guard (EN)',
+      purpose:
+          'Enforce anti-loop, anti-echo, banlists, anti-cliche, anti-slop, no-tells, and stable English prose quality rules.',
+      outputContract:
+          'At chat time, output a compact guard checklist and forbidden items for this turn. Focus on English-language prose quality. No rewritten scene prose.',
+      laneOwns:
+          'anti-repetition for English prose: forbidden openings/phrases vs the last replies, banned cliches/slop words, and safe structural variation this turn. Structural variation must never force {{user}} movement, decisions, reactions, silence, or other user-controlled progression.',
       laneSkip:
           'plot facts, character psychology, agency, pacing targets, dialogue content, and world/NPC texture.',
       refreshPolicy: 'turn',

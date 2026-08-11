@@ -267,6 +267,7 @@ class _StudioBlockSectionListState extends State<StudioBlockSectionList> {
       return StudioBlockGroupRow(
         key: ValueKey('studio_group_${entry.header!.id}'),
         group: entry,
+        preset: widget.preset,
         dragIndex: i,
         isLast: isLast,
         onSelectExclusive: (id) => widget.onSelectExclusive(entry, id),
@@ -282,6 +283,7 @@ class _StudioBlockSectionListState extends State<StudioBlockSectionList> {
     return StudioBlockRow(
       key: ValueKey('studio_block_${block.id}'),
       block: block,
+      preset: widget.preset,
       dragIndex: i,
       isLast: isLast,
       onEdit: () => widget.onEdit(block),
