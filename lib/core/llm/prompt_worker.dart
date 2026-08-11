@@ -17,27 +17,32 @@ import 'prompt_inputs.dart';
 import 'prompt_worker_codec.dart';
 import 'tokenizer.dart';
 
+enum PromptWorkerPriority { foreground, background }
+
 /// Long-lived isolate worker that runs buildPrompt off the main thread.
 ///
 /// The isolate loads its own o200k_base tokenizer once at startup and
 /// maintains a persistent token cache across requests.
 class PromptWorker {
+  /// Overridden by queue timeout tests.
+  static Duration requestTimeout = const Duration(seconds: 60);
+
   static PromptWorker? _instance;
   static Completer<PromptWorker>? _initGuard;
 
-  final Isolate _isolate;
-  final ReceivePort _commandPort;
-  final ReceivePort _responsePort;
-  final SendPort _sendPort;
-  final Map<int, Completer<dynamic>> _pending = {};
+  Isolate? _isolate;
+  ReceivePort? _commandPort;
+  ReceivePort? _responsePort;
+  StreamSubscription<dynamic>? _responseSubscription;
+  SendPort? _sendPort;
+  final List<_PromptWorkerRequest> _queue = [];
+  _PromptWorkerRequest? _active;
+  Timer? _activeTimer;
+  bool _restarting = false;
+  bool _disposed = false;
   int _requestId = 0;
 
-  PromptWorker._(
-    this._isolate,
-    this._commandPort,
-    this._responsePort,
-    this._sendPort,
-  );
+  PromptWorker._();
 
   static Future<PromptWorker> ensureInitialized() async {
     if (_instance != null) return _instance!;
@@ -57,6 +62,13 @@ class PromptWorker {
   }
 
   static Future<PromptWorker> _create() async {
+    final worker = PromptWorker._();
+    await worker._spawnIsolate();
+    await worker._send('init', null);
+    return worker;
+  }
+
+  Future<void> _spawnIsolate() async {
     final appSupportPath = await getAppDataDir();
 
     final commandPort = ReceivePort();
@@ -69,91 +81,207 @@ class PromptWorker {
     ]);
 
     final sendPort = await commandPort.first as SendPort;
-
-    final worker = PromptWorker._(isolate, commandPort, responsePort, sendPort);
-
-    responsePort.listen((message) {
+    _isolate = isolate;
+    _commandPort = commandPort;
+    _responsePort = responsePort;
+    _sendPort = sendPort;
+    _responseSubscription = responsePort.listen((message) {
       if (message is List && message.length == 2) {
         final id = message[0] as int;
         final data = message[1];
-        final completer = worker._pending.remove(id);
-        if (completer != null) {
-          if (data is Map && data.containsKey('error')) {
-            completer.completeError(Exception(data['error'] as String));
-          } else {
-            completer.complete(data);
-          }
-        }
+        _handleResponse(id, data);
       }
     });
-
-    await worker._send('init', null);
-
-    return worker;
   }
 
-  Future<dynamic> _send(String command, dynamic data) async {
-    final id = _requestId++;
+  Future<dynamic> _send(
+    String command,
+    dynamic data, {
+    bool addFirst = false,
+    PromptWorkerPriority priority = PromptWorkerPriority.foreground,
+    Duration? timeout,
+  }) {
+    if (_disposed) {
+      return Future<dynamic>.error(StateError('PromptWorker is disposed'));
+    }
     final completer = Completer<dynamic>();
-    _pending[id] = completer;
-
-    _sendPort.send([id, command, data]);
-    return completer.future.timeout(
-      const Duration(seconds: 60),
-      onTimeout: () {
-        _pending.remove(id);
-        // A synchronous regex (ReDoS) or other runaway computation can hang
-        // the isolate forever. Kill it so it stops burning CPU and so the
-        // next ensureInitialized() respawns a fresh worker — otherwise every
-        // subsequent prompt request would also time out.
-        _killAndInvalidate();
-        throw TimeoutException(
-          'PromptWorker request timed out after 60s',
-          const Duration(seconds: 60),
-        );
-      },
+    final request = _PromptWorkerRequest(
+      id: _requestId++,
+      command: command,
+      data: data,
+      completer: completer,
+      priority: priority,
+      timeout: timeout ?? requestTimeout,
     );
+    if (addFirst) {
+      _queue.insert(0, request);
+    } else if (priority == PromptWorkerPriority.foreground) {
+      final firstBackground = _queue.indexWhere(
+        (queued) => queued.priority == PromptWorkerPriority.background,
+      );
+      _queue.insert(
+        firstBackground < 0 ? _queue.length : firstBackground,
+        request,
+      );
+    } else {
+      _queue.add(request);
+    }
+    _dispatchNext();
+    return completer.future;
   }
 
-  /// Kills the isolate, closes ports, errors out all pending requests, and
-  /// clears the singleton so the next [ensureInitialized] recreates it.
-  void _killAndInvalidate() {
-    _isolate.kill(priority: Isolate.immediate);
-    _commandPort.close();
-    _responsePort.close();
-    for (final c in _pending.values) {
-      if (!c.isCompleted) {
-        c.completeError(
-          TimeoutException('PromptWorker isolate killed after timeout'),
+  void _dispatchNext() {
+    if (_disposed || _restarting || _active != null || _queue.isEmpty) return;
+    final sendPort = _sendPort;
+    if (sendPort == null) return;
+
+    final request = _queue.removeAt(0);
+    _active = request;
+    // Only the request actually executing in the isolate owns a timeout.
+    // Queued requests do not lose their budget while waiting for earlier work.
+    _activeTimer = Timer(request.timeout, () {
+      if (!identical(_active, request)) return;
+      _active = null;
+      if (!request.completer.isCompleted) {
+        request.completer.completeError(
+          TimeoutException(
+            'PromptWorker request timed out after ${request.timeout.inMilliseconds}ms',
+            request.timeout,
+          ),
         );
       }
+      // Synchronous regex/ReDoS cannot be interrupted. Replace the isolate,
+      // but retain requests which have not been dispatched yet.
+      unawaited(_restartAfterTimeout());
+    });
+    sendPort.send([request.id, request.command, request.data]);
+  }
+
+  void _handleResponse(int id, dynamic data) {
+    final request = _active;
+    if (request == null || request.id != id) return;
+    _activeTimer?.cancel();
+    _activeTimer = null;
+    _active = null;
+    if (!request.completer.isCompleted) {
+      if (data is Map && data.containsKey('error')) {
+        request.completer.completeError(Exception(data['error'] as String));
+      } else {
+        request.completer.complete(data);
+      }
     }
-    _pending.clear();
-    if (_instance == this) {
-      _instance = null;
+    _dispatchNext();
+  }
+
+  Future<void> _restartAfterTimeout() async {
+    if (_restarting || _disposed) return;
+    _restarting = true;
+    _closeIsolate();
+    try {
+      await _spawnIsolate();
+      _restarting = false;
+      // Preloading must complete before retained requests are dispatched.
+      await _send(
+        'init',
+        null,
+        addFirst: true,
+        timeout: const Duration(seconds: 60),
+      );
+    } catch (error, stackTrace) {
+      _restarting = false;
+      _failQueued(error, stackTrace);
+      if (_instance == this) _instance = null;
     }
   }
 
-  Future<PromptResult> buildPrompt(PromptPayload payload) async {
+  void _closeIsolate() {
+    _activeTimer?.cancel();
+    _activeTimer = null;
+    unawaited(_responseSubscription?.cancel());
+    _responseSubscription = null;
+    _commandPort?.close();
+    _responsePort?.close();
+    _isolate?.kill(priority: Isolate.immediate);
+    _commandPort = null;
+    _responsePort = null;
+    _isolate = null;
+    _sendPort = null;
+  }
+
+  void _failQueued(Object error, StackTrace stackTrace) {
+    for (final request in _queue) {
+      if (!request.completer.isCompleted) {
+        request.completer.completeError(error, stackTrace);
+      }
+    }
+    _queue.clear();
+  }
+
+  Future<PromptResult> buildPrompt(
+    PromptPayload payload, {
+    PromptWorkerPriority priority = PromptWorkerPriority.foreground,
+  }) async {
     final json = jsonEncode(serializePayload(payload));
-    final response = await _send('buildPrompt', json) as String;
+    final response =
+        await _send('buildPrompt', json, priority: priority) as String;
     return deserializeResult(jsonDecode(response) as Map<String, dynamic>);
   }
 
   /// Builds a complete prompt from raw inputs. This runs memory injection,
   /// lorebook scanning, prompt assembly, and tokenization all in the isolate.
-  Future<PromptResult> buildFromInputs(PromptInputs inputs) async {
+  Future<PromptResult> buildFromInputs(
+    PromptInputs inputs, {
+    PromptWorkerPriority priority = PromptWorkerPriority.background,
+  }) async {
     final json = jsonEncode(inputs.toJson());
-    final response = await _send('buildFromInputs', json) as String;
+    final response =
+        await _send('buildFromInputs', json, priority: priority) as String;
     return deserializeResult(jsonDecode(response) as Map<String, dynamic>);
   }
 
-  void dispose() {
-    _commandPort.close();
-    _responsePort.close();
-    _isolate.kill(priority: Isolate.immediate);
-    _instance = null;
+  /// Test-only command used to exercise queueing and restart semantics.
+  Future<String> debugBlock(
+    Duration duration,
+    String result, {
+    PromptWorkerPriority priority = PromptWorkerPriority.background,
+  }) async {
+    return await _send('debugBlock', {
+          'milliseconds': duration.inMilliseconds,
+          'result': result,
+        }, priority: priority)
+        as String;
   }
+
+  void dispose() {
+    _disposed = true;
+    _closeIsolate();
+    final error = StateError('PromptWorker disposed with pending requests');
+    final active = _active;
+    _active = null;
+    if (active != null && !active.completer.isCompleted) {
+      active.completer.completeError(error);
+    }
+    _failQueued(error, StackTrace.current);
+    if (_instance == this) _instance = null;
+  }
+}
+
+class _PromptWorkerRequest {
+  const _PromptWorkerRequest({
+    required this.id,
+    required this.command,
+    required this.data,
+    required this.completer,
+    required this.priority,
+    required this.timeout,
+  });
+
+  final int id;
+  final String command;
+  final dynamic data;
+  final Completer<dynamic> completer;
+  final PromptWorkerPriority priority;
+  final Duration timeout;
 }
 
 void _isolateEntryPoint(List<dynamic> args) {
@@ -190,6 +318,15 @@ void _isolateEntryPoint(List<dynamic> args) {
           );
           final result2 = _buildFromInputs(inputs);
           responseSendPort.send([id, jsonEncode(serializeResult(result2))]);
+
+        case 'debugBlock':
+          final options = data as Map;
+          final duration = Duration(
+            milliseconds: options['milliseconds'] as int,
+          );
+          final watch = Stopwatch()..start();
+          while (watch.elapsed < duration) {}
+          responseSendPort.send([id, options['result'] as String]);
 
         default:
           responseSendPort.send([

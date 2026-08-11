@@ -2,7 +2,6 @@ import '../../models/character.dart';
 import '../../models/chat_message.dart';
 import '../../models/lorebook.dart';
 import '../history_assembler.dart';
-import '../lorebook_coverage.dart';
 import '../lorebook_merger.dart';
 import '../lorebook_scanner.dart';
 import '../macro_engine.dart';
@@ -20,7 +19,6 @@ final class LorebookContextResolution {
   final List<TriggeredEntry> triggeredEntries;
   final int vectorLoreTokens;
   final Map<String, ScannedEntry> keywordEntries;
-  final Map<String, CoverageEntry> coverageKeywordEntries;
   final Map<String, LorebookEntry> vectorEntries;
 
   const LorebookContextResolution({
@@ -34,7 +32,6 @@ final class LorebookContextResolution {
     required this.triggeredEntries,
     required this.vectorLoreTokens,
     required this.keywordEntries,
-    required this.coverageKeywordEntries,
     required this.vectorEntries,
   });
 }
@@ -112,29 +109,6 @@ final class LorebookContextResolver {
       for (final entry in keywordEntries)
         '${entry.lorebookId}_${entry.id}': entry,
     };
-    final coverageKeywordEntriesByKey = <String, CoverageEntry>{};
-    if (settings.searchType != 'vector') {
-      final coverage = computeLorebookCoverage(
-        history: visibleHistory,
-        char: character,
-        textToScan: textToScan,
-        chatId: sessionId,
-        lorebooks: lorebooks,
-        globalSettings: settings,
-        activations: activations,
-      );
-      for (final entry in coverage.entries) {
-        final isKeywordLike =
-            entry.constant ||
-            (entry.activated &&
-                entry.matchedKeys.isNotEmpty &&
-                !entry.matchedKeys.contains('[vector]'));
-        if (isKeywordLike) {
-          coverageKeywordEntriesByKey['${entry.lorebookId}_${entry.id}'] =
-              entry;
-        }
-      }
-    }
     final vectorEntriesByKey = <String, LorebookEntry>{
       for (final entry in normalizedVectorEntries)
         '${entry.lorebookId}_${entry.id}': entry,
@@ -160,21 +134,6 @@ final class LorebookContextResolver {
             lorebookName: keyword.lorebookName,
             lorebookId: keyword.lorebookId,
             source: keyword.constant ? 'constant' : 'keyword',
-          ),
-        );
-        continue;
-      }
-      final coverageKeyword = coverageKeywordEntriesByKey[key];
-      if (coverageKeyword != null) {
-        triggeredEntries.add(
-          TriggeredEntry(
-            id: coverageKeyword.id,
-            name: coverageKeyword.comment.isNotEmpty
-                ? coverageKeyword.comment
-                : coverageKeyword.id,
-            lorebookName: coverageKeyword.lorebookName,
-            lorebookId: coverageKeyword.lorebookId,
-            source: coverageKeyword.constant ? 'constant' : 'keyword',
           ),
         );
         continue;
@@ -207,7 +166,6 @@ final class LorebookContextResolver {
           ? 0
           : estimateTokens(vectorLoreContent),
       keywordEntries: keywordEntriesByKey,
-      coverageKeywordEntries: coverageKeywordEntriesByKey,
       vectorEntries: vectorEntriesByKey,
     );
   }

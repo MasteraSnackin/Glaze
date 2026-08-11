@@ -6,15 +6,21 @@ import 'prompt_worker.dart';
 ///
 /// The isolate maintains its own o200k_base tokenizer and a persistent
 /// token cache, so repeated calls are fast (cached history tokens).
-Future<PromptResult> buildPromptInIsolate(PromptPayload payload) async {
+Future<PromptResult> buildPromptInIsolate(
+  PromptPayload payload, {
+  PromptWorkerPriority priority = PromptWorkerPriority.foreground,
+}) async {
   final worker = await PromptWorker.ensureInitialized();
-  return worker.buildPrompt(payload);
+  return worker.buildPrompt(payload, priority: priority);
 }
 
 /// Builds a complete prompt from raw inputs in the isolate.
 /// This runs memory injection, lorebook scanning, prompt assembly,
 /// and tokenization all off the main thread.
-Future<PromptResult> buildFromInputsInIsolate(PromptInputs inputs) async {
+Future<PromptResult> buildFromInputsInIsolate(
+  PromptInputs inputs, {
+  PromptWorkerPriority priority = PromptWorkerPriority.background,
+}) async {
   final worker = await PromptWorker.ensureInitialized();
-  return worker.buildFromInputs(inputs);
+  return worker.buildFromInputs(inputs, priority: priority);
 }

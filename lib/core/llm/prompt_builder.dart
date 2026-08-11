@@ -12,7 +12,6 @@ import '../models/lorebook.dart';
 import 'macro_engine.dart';
 import 'history_assembler.dart';
 import 'context_calculator.dart';
-import 'lorebook_coverage.dart';
 import 'lorebook_scanner.dart';
 import 'prompt_block_resolver.dart';
 import 'prompt_regex_applicator.dart';
@@ -224,7 +223,6 @@ PromptResult _buildPromptOnce(PromptPayload payload) {
     preset: preset,
     macroContext: currentMacroCtx,
     keywordEntries: loreContext.keywordEntries,
-    coverageKeywordEntries: loreContext.coverageKeywordEntries,
     vectorEntries: loreContext.vectorEntries,
   );
   // Capture attribution from the actual block assembly path.  This is an
@@ -455,7 +453,6 @@ ExactLorebookManifest _buildExactLorebookManifest({
   required Preset preset,
   required MacroContext macroContext,
   required Map<String, ScannedEntry> keywordEntries,
-  required Map<String, CoverageEntry> coverageKeywordEntries,
   required Map<String, LorebookEntry> vectorEntries,
 }) {
   final promptProvenance = ExactLorebookPromptProvenance(
@@ -478,12 +475,9 @@ ExactLorebookManifest _buildExactLorebookManifest({
   for (var index = 0; index < entries.length; index++) {
     final entry = entries[index];
     final key = '${entry.lorebookId}_${entry.id}';
-    final source =
-        keywordEntries[key]?.constant == true ||
-            coverageKeywordEntries[key]?.constant == true
+    final source = keywordEntries[key]?.constant == true
         ? 'constant'
-        : keywordEntries.containsKey(key) ||
-              coverageKeywordEntries.containsKey(key)
+        : keywordEntries.containsKey(key)
         ? 'keyword'
         : vectorEntries.containsKey(key)
         ? 'vector'
