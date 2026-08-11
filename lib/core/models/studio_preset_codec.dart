@@ -98,6 +98,10 @@ abstract final class StudioPresetCodec {
         enabled[entry.key.toString()] = entry.value == true;
       }
     }
+    final restoreState = _stringListMap(json['agentBlockRestoreState']);
+    final alternativeBlockIds = _stringListMap(
+      json['controllerAlternativeBlockIds'],
+    );
     final presetId = _string(json['id']);
     List<StudioAgent> agents;
     final rawAgents = json['agents'];
@@ -175,6 +179,8 @@ abstract final class StudioPresetCodec {
           fallback: 30,
         ),
         agentEnabled: enabled,
+        agentBlockRestoreState: restoreState,
+        controllerAlternativeBlockIds: alternativeBlockIds,
         runtime: runtime,
         updatedAt: _integer(json['updatedAt']),
       ),
@@ -321,6 +327,8 @@ abstract final class StudioPresetCodec {
       'ledgerApiConfigId': preset.ledgerApiConfigId,
       'maxFinalHistoryMessages': preset.maxFinalHistoryMessages,
       'agentEnabled': preset.agentEnabled,
+      'agentBlockRestoreState': preset.agentBlockRestoreState,
+      'controllerAlternativeBlockIds': preset.controllerAlternativeBlockIds,
       'runtime': encodeRuntime(preset.runtime),
       'updatedAt': preset.updatedAt,
     };
@@ -346,6 +354,17 @@ abstract final class StudioPresetCodec {
 
   static Map<String, dynamic> _jsonMap(Object value) =>
       Map<String, dynamic>.from(jsonDecode(jsonEncode(value)) as Map);
+
+  static Map<String, List<String>> _stringListMap(Object? value) {
+    if (value is! Map) return const {};
+    return {
+      for (final entry in value.entries)
+        if (entry.value is List)
+          entry.key.toString(): [
+            for (final item in entry.value as List) item.toString(),
+          ],
+    };
+  }
 
   static StudioPresetBlock _block(
     Map<String, dynamic> json, {

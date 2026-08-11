@@ -104,9 +104,12 @@ class StudioPresetRepo implements SyncStudioPresetStore {
             ),
             agentEnabledJson: Value(jsonEncode(safeNormalized.agentEnabled)),
             runtimeSettingsJson: Value(
-              jsonEncode(
-                StudioPresetCodec.encodeRuntime(safeNormalized.runtime),
-              ),
+              jsonEncode({
+                ...StudioPresetCodec.encodeRuntime(safeNormalized.runtime),
+                'agentBlockRestoreState': safeNormalized.agentBlockRestoreState,
+                'controllerAlternativeBlockIds':
+                    safeNormalized.controllerAlternativeBlockIds,
+              }),
             ),
             updatedAt: Value(safeNormalized.updatedAt),
           ),
@@ -127,6 +130,10 @@ class StudioPresetRepo implements SyncStudioPresetStore {
     // particular, blocks must still be raw while the codec inspects the Ledger
     // control header; canonicalizing each block first can turn malformed
     // control data into an apparently valid opt-in.
+    final persistedRuntime = _decodeJson(row.runtimeSettingsJson);
+    final runtimeMap = persistedRuntime is Map
+        ? Map<String, dynamic>.from(persistedRuntime)
+        : const <String, dynamic>{};
     final decoded = StudioPresetCodec.decodePreset({
       'id': row.presetId,
       'name': row.name,
@@ -138,7 +145,10 @@ class StudioPresetRepo implements SyncStudioPresetStore {
       'ledgerApiConfigId': row.ledgerApiConfigId,
       'maxFinalHistoryMessages': row.maxFinalHistoryMessages,
       'agentEnabled': _decodeJson(row.agentEnabledJson),
-      'runtime': _decodeJson(row.runtimeSettingsJson),
+      'agentBlockRestoreState': runtimeMap['agentBlockRestoreState'],
+      'controllerAlternativeBlockIds':
+          runtimeMap['controllerAlternativeBlockIds'],
+      'runtime': runtimeMap,
       'updatedAt': row.updatedAt,
     });
     return _normalizePreset(decoded.preset);
