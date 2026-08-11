@@ -109,6 +109,14 @@ abstract class StudioPreset with _$StudioPreset {
     /// Restored when the required agent is re-enabled.
     @Default({}) Map<String, bool> agentEnabledBeforeDependencyOff,
 
+    /// Per-agent restore state for the controller radio-folder feature.
+    ///
+    /// When a controller is enabled and its macro-block is the only enabled
+    /// child of an exclusive folder, the previously enabled sibling block id
+    /// is saved here so that disabling the controller can restore it.
+    /// Keyed by controller spec id (e.g. `'continuity'`).
+    @Default({}) Map<String, String> agentBlockRestoreState,
+
     @Default(StudioRuntimeSettings()) StudioRuntimeSettings runtime,
     @Default(0) int updatedAt,
   }) = _StudioPreset;

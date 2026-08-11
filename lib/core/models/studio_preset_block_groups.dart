@@ -47,6 +47,14 @@ const _exclusiveStudioHeaders = <String>{
   'response length controls',
   'text formatting',
   'cot selections',
+  // Controller radio-folders: enabling a controller selects its macro-block
+  // and disables all siblings; disabling restores the previous block.
+  'continuity (pick one)',
+  'agency (pick one)',
+  'dialogue (pick one)',
+  'guard (pick one)',
+  'world (pick one)',
+  'meta (pick one)',
 };
 
 const _independentNarrativeStyleTitles = <String>{
@@ -367,6 +375,45 @@ List<StudioPresetBlock> selectExclusiveStudioBlock(
             : block,
       )
       .toList(growable: false);
+}
+
+/// Finds the macro block for a controller spec by looking for the
+/// `{{studio_<specId>_brief}}` macro in block content.
+StudioPresetBlock? findControllerMacroBlock(
+  List<StudioPresetBlock> blocks,
+  String specId,
+) {
+  final macro = '{{studio_${specId}_brief}}';
+  final macroPlural = '{{studio_${specId}_briefs}}';
+  for (final block in blocks) {
+    if (block.content.contains(macro) || block.content.contains(macroPlural)) {
+      return block;
+    }
+  }
+  return null;
+}
+
+/// Finds the [StudioPresetBlockGroup] that contains [blockId], or `null` if
+/// the block is standalone or not found.
+StudioPresetBlockGroup? findGroupForBlock(
+  List<StudioPresetBlock> blocks,
+  String blockId,
+) {
+  for (final group in groupStudioPresetBlocks(blocks)) {
+    if (group.standalone?.id == blockId) return group;
+    if (group.children.any((block) => block.id == blockId)) return group;
+  }
+  return null;
+}
+
+/// Returns the id of the currently enabled child in [group], or `null` if
+/// none is enabled. Excludes independent children.
+String? enabledChildInGroup(StudioPresetBlockGroup group) {
+  for (final block in group.children) {
+    if (isIndependentStudioGroupChild(group, block)) continue;
+    if (block.enabled) return block.id;
+  }
+  return null;
 }
 
 /// Replaces a block and preserves the one-enabled invariant of its visual
