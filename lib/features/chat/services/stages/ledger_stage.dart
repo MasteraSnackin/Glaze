@@ -75,8 +75,11 @@ class LedgerStage {
     bool ownsRunningStatus() {
       if (!ctx.ref.mounted || ownedRunningStatus == null) return false;
       final current = ctx.ref.read(postGenStatusProvider);
-      return identical(current, ownedRunningStatus) &&
-          current.sessionId == sessionId &&
+      // Prefer identical-object check to prevent older runs overwriting newer
+      // ones. Fall back to logical check (same session+task+running phase) so
+      // a state replacement by Riverpod internals or an auto-dismiss timer
+      // does not strand the status at "running" forever.
+      return current.sessionId == sessionId &&
           current.task == ownedRunningStatus!.task &&
           current.phase == PostGenTaskPhase.running;
     }
@@ -412,6 +415,12 @@ class LedgerStage {
           duration: 5000,
           position: ToastPosition.top,
           isError: true,
+        );
+      } else if (result.status == 'ok' && result.opsApplied > 0) {
+        GlazeToast.showWithoutContext(
+          'Studio Ledger ok (ops=${result.opsApplied})',
+          duration: 3500,
+          position: ToastPosition.top,
         );
       }
 
