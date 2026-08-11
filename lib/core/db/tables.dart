@@ -1172,6 +1172,56 @@ class CardEvolutionObservations extends Table {
   ];
 }
 
+/// Durable completion/lease journal for the observation collector. A collector
+/// run is tied to one immutable Ledger reconciliation range; valid empty model
+/// responses are still recorded as completed so they are not replayed after a
+/// restart.
+@DataClassName('CardEvolutionCollectorRunRow')
+@TableIndex(
+  name: 'idx_card_evolution_collector_session_ordinal',
+  columns: {#sessionId, #collectorOrdinal},
+  unique: true,
+)
+@TableIndex(
+  name: 'idx_card_evolution_collector_reconciliation',
+  columns: {#sessionId, #reconciliationRunId},
+  unique: true,
+)
+class CardEvolutionCollectorRuns extends Table {
+  @override
+  String get tableName => 'card_evolution_collector_runs';
+  TextColumn get id => text()();
+  TextColumn get sessionId => text()();
+  TextColumn get characterId => text()();
+  IntColumn get collectorOrdinal => integer()();
+  TextColumn get reconciliationRunId => text()();
+  IntColumn get reconciliationRunOrdinal => integer()();
+  TextColumn get reconciliationChainHash => text()();
+  TextColumn get rangeHash => text()();
+  TextColumn get inputHash => text()();
+  TextColumn get ownerId => text()();
+  TextColumn get status => text()();
+  IntColumn get leaseExpiresAt => integer()();
+  TextColumn get modelOutputHash => text().nullable()();
+  IntColumn get createdAt => integer()();
+  IntColumn get completedAt => integer().nullable()();
+  @override
+  Set<Column> get primaryKey => {id};
+  @override
+  List<Set<Column>> get uniqueKeys => [
+    {sessionId, collectorOrdinal},
+    {sessionId, reconciliationRunId},
+  ];
+  @override
+  List<String> get customConstraints => [
+    "CHECK (status IN ('claimed', 'completed'))",
+    "CHECK (id <> '' AND session_id <> '' AND character_id <> '' "
+        "AND collector_ordinal > 0 AND reconciliation_run_id <> '' "
+        "AND reconciliation_run_ordinal > 0 AND reconciliation_chain_hash <> '' "
+        "AND range_hash <> '' AND input_hash <> '' AND owner_id <> '')",
+  ];
+}
+
 /// Immutable canonical lorebook-use manifest at one message variation anchor.
 @DataClassName('LorebookUseManifestRow')
 @TableIndex(

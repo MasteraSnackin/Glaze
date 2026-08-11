@@ -12,6 +12,7 @@ import '../../../../core/models/agent_operation_record.dart';
 import '../../../../core/models/chat_message.dart';
 import '../../../../core/models/pipeline_settings.dart';
 import '../../../../core/models/studio_config.dart';
+import '../../../../core/navigation/rewrite_review_navigation.dart';
 import '../../../../core/services/card_rewriter/automated_card_evolution_service.dart';
 import '../../../../core/state/db_provider.dart';
 import '../../../../core/state/memory_agent_providers.dart';
@@ -290,18 +291,19 @@ class LedgerStage {
           if (reconciliationResult.status == 'ok' &&
               pipeline.cardRewriter.enabled &&
               isCurrent()) {
-            // Card-rewriter runs on every 2nd successful reconciliation
-            // (plan §Automated Card Evolution cadence). Counting via the run
-            // repo head ordinal keeps the cadence durable across rerolls and
-            // app restarts; the single-row checkpoint cannot do this.
             final runHead = await ctx.ref
                 .read(ledgerReconciliationRunRepoProvider)
                 .getHead(sessionId);
-            if (runHead != null && runHead.ordinal % 2 == 0 && isCurrent()) {
+            if (runHead != null && isCurrent()) {
+              final rewriteReviewAuthority =
+                  captureAutomaticRewriteReviewAuthority(
+                    charId: ctx.charId,
+                    sessionId: sessionId,
+                  );
               final rewriteOutcome = await ctx.ref
                   .read(automatedCardEvolutionServiceProvider)
-                  .runOneBatch(
-                    sessionId,
+                  .runAfterReconciliation(
+                    runHead,
                     onStage: (stage) {
                       if (!ctx.ref.mounted || !isCurrent()) return;
                       startStatus(
@@ -311,6 +313,11 @@ class LedgerStage {
                       );
                     },
                   );
+              emitAutomaticRewriteReviewIntent(
+                ctx.ref,
+                outcome: rewriteOutcome,
+                capturedAuthority: rewriteReviewAuthority,
+              );
               if (ctx.ref.mounted && isCurrent()) {
                 final isFailure = const {
                   'modelNotConfigured',

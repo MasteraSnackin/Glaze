@@ -55,6 +55,7 @@ part 'app_db.g.dart';
     CardEvolutionProposalRuns,
     CardEvolutionDebugRuns,
     CardEvolutionObservations,
+    CardEvolutionCollectorRuns,
     CharacterKnowledgeFactRows,
     CharacterSessionBaselineRows,
     CharacterRevisionRows,
@@ -74,7 +75,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 115;
+  int get schemaVersion => 116;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -2150,6 +2151,20 @@ class AppDatabase extends _$AppDatabase {
           "provider_id = 'custom_chat_completion' "
           "WHERE protocol IN ('openai', 'openai_responses', "
           "'openai_compatible') OR provider_id = 'openai_compatible'",
+        );
+      }
+      if (from < 116) {
+        await m.createTable(cardEvolutionCollectorRuns);
+        // Legacy automatic proposals were produced at reconciliation 2/4/6.
+        // Treat each completed proposal as delivery of the latest three-run
+        // boundary already reached, so upgrading never immediately repeats a
+        // proposal the user has reviewed or cancelled.
+        await customStatement(
+          'UPDATE card_evolution_claims '
+          'SET predecessor_run_ordinal = ('
+          'SELECT (COUNT(*) / 3) * 3 FROM reconciliation_successful_runs r '
+          'WHERE r.session_id = card_evolution_claims.session_id) '
+          "WHERE status = 'completed' AND predecessor_run_ordinal = 0",
         );
       }
     },

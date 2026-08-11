@@ -94,6 +94,8 @@ class CardEvolutionRepo {
     required String ownerId,
     required int now,
     required int leaseSeconds,
+    int throughCollectorOrdinal = 0,
+    String collectorBoundaryHash = '',
   }) => db.transaction(() async {
     if (ownerId.isEmpty || leaseSeconds <= 0) {
       return const CardEvolutionClaimOutcome('invalidRequest');
@@ -157,8 +159,8 @@ class CardEvolutionRepo {
               chatHistoryHash: snapshot['chatHistoryHash'] as String,
               effectiveCanonIdentity:
                   snapshot['effectiveCanonIdentity'] as String,
-              predecessorCursorHash: '',
-              predecessorRunOrdinal: 0,
+              predecessorCursorHash: collectorBoundaryHash,
+              predecessorRunOrdinal: throughCollectorOrdinal,
               inputHash: inputHash,
               createdAt: now,
             ),
@@ -397,6 +399,32 @@ class CardEvolutionRepo {
     return CardEvolutionFinalizeOutcome('persisted', job);
   });
 
+  /// Records a successful automatic writer cycle that correctly produced no
+  /// operations. This prevents the same three-collector boundary from being
+  /// retried after every subsequent collector while retaining no review job.
+  Future<bool> completeEmptyClaim({
+    required String claimId,
+    required String ownerId,
+    required int now,
+  }) async {
+    final changed =
+        await (db.update(db.cardEvolutionClaims)..where(
+              (row) =>
+                  row.id.equals(claimId) &
+                  row.ownerId.equals(ownerId) &
+                  row.status.equals('claimed') &
+                  row.predecessorRunOrdinal.isBiggerThanValue(0) &
+                  row.leaseExpiresAt.isBiggerThanValue(now),
+            ))
+            .write(
+              CardEvolutionClaimsCompanion(
+                status: const Value('completed'),
+                completedAt: Value(now),
+              ),
+            );
+    return changed == 1;
+  }
+
   /// Releases an uncompleted lease after work outside the transaction fails.
   /// Claims are otherwise retained only for successful idempotency records.
   Future<void> abandonClaim({
@@ -457,6 +485,26 @@ class CardEvolutionRepo {
     );
   });
 
+  /// Builds collector evidence from the exact immutable anchors committed by
+  /// one successful reconciliation. It deliberately does not re-run the
+  /// generic mutable-tail heuristic.
+  Future<CardEvolutionObservationSnapshot?> buildObservationSnapshotForRun(
+    LedgerReconciliationSuccessfulRunRow run,
+  ) => db.transaction(() async {
+    final selected = await _selectInput(run.sessionId, reconciliationRun: run);
+    if (selected == null) return null;
+    final session = await (db.select(
+      db.chatSessions,
+    )..where((row) => row.sessionId.equals(run.sessionId))).getSingleOrNull();
+    if (session == null) return null;
+    final assembled = await _assemble(run.sessionId, session.characterId);
+    if (assembled == null || assembled.$2.requiresBaselineDecision) return null;
+    return CardEvolutionObservationSnapshot(
+      character: assembled.$2.character,
+      selectedInputJson: selected,
+    );
+  });
+
   /// Counts successful Ledger reconciliations for the session. The observation
   /// pass runs on every even count (every 2nd reconciliation cadence).
   Future<int> countSuccessfulReconciliations(String sessionId) async {
@@ -499,7 +547,10 @@ class CardEvolutionRepo {
         : null;
   }
 
-  Future<String?> _selectInput(String sessionId) async {
+  Future<String?> _selectInput(
+    String sessionId, {
+    LedgerReconciliationSuccessfulRunRow? reconciliationRun,
+  }) async {
     try {
       final session = await (db.select(
         db.chatSessions,
@@ -511,7 +562,12 @@ class CardEvolutionRepo {
       if (assembled == null || assembled.$2.requiresBaselineDecision) {
         return null;
       }
-      final history = _selectChatHistory(messages: messages);
+      final history = reconciliationRun == null
+          ? _selectChatHistory(messages: messages)
+          : _selectReconciliationHistory(
+              messages: messages,
+              run: reconciliationRun,
+            );
       if (history == null || history.length < 2) {
         return null;
       }
@@ -534,10 +590,10 @@ class CardEvolutionRepo {
       final writableFields = CardRewritePolicy.nonEmptyEvolutionFields(
         assembled.$2.character,
       );
-      final promotedObservations =
+      final accumulatedObservations =
           await (db.select(db.cardEvolutionObservations)
                 ..where((r) => r.sessionId.equals(sessionId))
-                ..where((r) => r.status.equals('promoted'))
+                ..where((r) => r.status.isIn(const ['active', 'promoted']))
                 ..orderBy([(r) => OrderingTerm.asc(r.createdAt)]))
               .get();
       return _canonicalJson({
@@ -547,15 +603,20 @@ class CardEvolutionRepo {
         'effectiveCanonIdentity': assembled.$2.identity,
         'limits': {
           'maxChatHistoryMessages': _maxChatHistoryMessages,
-          'excludesTrailingUserAssistantPair': true,
+          'excludesTrailingUserAssistantPair': reconciliationRun == null,
+          'reconciliationRunId': reconciliationRun?.id,
+          'reconciliationRunOrdinal': reconciliationRun?.ordinal,
+          'reconciliationRangeHash': reconciliationRun?.rangeHash,
         },
         'chatHistory': history,
         'card': _evolutionCardSnapshot(assembled.$2.character),
         'effectiveCanon': jsonDecode(canonEvidence),
         'injectedLorebookEntries': lorebookEntries,
-        'validatedTargets': [
-          for (final obs in promotedObservations)
+        'accumulatedObservations': [
+          for (final obs in accumulatedObservations)
             {
+              'id': obs.id,
+              'status': obs.status,
               'scopeKey': obs.semanticScopeKey,
               'observedChange': obs.observedChange,
               'canonicalClaim': obs.canonicalClaim,
@@ -566,6 +627,7 @@ class CardEvolutionRepo {
               'confidence': obs.confidence,
               'repeatCount': obs.repeatCount,
               'firstSeenRun': obs.firstSeenRun,
+              'lastConfirmedRun': obs.lastConfirmedRun,
             },
         ],
       });
@@ -690,6 +752,57 @@ class CardEvolutionRepo {
         : 0;
     final result = stableCandidates.sublist(start, stableCandidates.length);
     return result.isEmpty ? null : result;
+  }
+
+  List<Object?>? _selectReconciliationHistory({
+    required List<dynamic> messages,
+    required LedgerReconciliationSuccessfulRunRow run,
+  }) {
+    try {
+      final decoded = jsonDecode(run.anchorsJson);
+      if (decoded is! List || decoded.isEmpty) return null;
+      final byId = <String, Map<Object?, Object?>>{};
+      for (final message in messages) {
+        if (message is Map && message['id'] is String) {
+          byId[message['id'] as String] = message;
+        }
+      }
+      final result = <Map<String, Object?>>[];
+      for (final raw in decoded) {
+        if (raw is! Map ||
+            raw['messageId'] is! String ||
+            raw['swipeId'] is! int ||
+            raw['agentSwipeId'] is! int ||
+            raw['role'] is! String ||
+            raw['contentHash'] is! String) {
+          return null;
+        }
+        final message = byId[raw['messageId'] as String];
+        if (message == null || message['role'] != raw['role']) return null;
+        final content = _anchoredContent(
+          message,
+          raw['swipeId'] as int,
+          raw['agentSwipeId'] as int,
+        );
+        if (content == null || computeHash(content) != raw['contentHash']) {
+          return null;
+        }
+        result.add({
+          'messageId': raw['messageId'],
+          'role': raw['role'],
+          'swipeId': raw['swipeId'],
+          'agentSwipeId': raw['agentSwipeId'],
+          'content': content,
+          'contentHash': raw['contentHash'],
+        });
+      }
+      final start = result.length > _maxChatHistoryMessages
+          ? result.length - _maxChatHistoryMessages
+          : 0;
+      return result.sublist(start);
+    } catch (_) {
+      return null;
+    }
   }
 
   String _canonEvidence(

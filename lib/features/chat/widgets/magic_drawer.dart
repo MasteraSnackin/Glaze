@@ -208,7 +208,9 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
 
   @override
   void dispose() {
+    ++_statsRequest;
     _debounceTimer?.cancel();
+    _statsService.dispose();
     _scrollController.dispose();
     super.dispose();
   }

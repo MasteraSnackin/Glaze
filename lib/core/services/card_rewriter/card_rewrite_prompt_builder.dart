@@ -15,7 +15,7 @@ abstract final class CardRewriterPromptBuilder {
   static String buildEvolution({
     required Character character,
     required String instruction,
-    List<Map<String, Object?>> validatedTargets = const [],
+    List<Map<String, Object?>> accumulatedObservations = const [],
   }) {
     final writableFields = CardRewritePolicy.nonEmptyEvolutionFields(character);
     final snapshot = Map<String, Object?>.from(
@@ -116,18 +116,18 @@ abstract final class CardRewriterPromptBuilder {
       ..writeln()
       ..writeln('# Canonical character card snapshot (read-only)')
       ..write(jsonEncode(snapshot));
-    if (validatedTargets.isNotEmpty) {
+    if (accumulatedObservations.isNotEmpty) {
       buffer
         ..writeln()
-        ..writeln('# Validated targets from observation journal')
+        ..writeln('# Accumulated candidates from observation journal')
         ..writeln(
-          'These changes have been confirmed durable across multiple '
-          'observation passes. Produce patches for them with priority. You '
-          'may also propose additional changes from the current chat window, '
-          'but validated targets take precedence. A validated target may be '
-          'omitted only when the current chat window clearly contradicts it.',
+          'Evaluate these candidates independently. Status "active" means the '
+          'candidate is not yet confirmed; status "promoted" is a stronger '
+          'signal, but neither status requires a patch. Use repeatCount, '
+          'confidence, evidence clusters, chat, card, and Ledger together. '
+          'Return no patch when evidence is insufficient or already canonical.',
         )
-        ..write(jsonEncode(validatedTargets));
+        ..write(jsonEncode(accumulatedObservations));
     }
     return buffer.toString();
   }

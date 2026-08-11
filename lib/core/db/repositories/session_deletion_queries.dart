@@ -62,6 +62,9 @@ class SessionDeletionQueries {
     await (_db.delete(
       _db.ledgerReconciliationCursors,
     )..where((row) => row.sessionId.equals(sessionId))).go();
+    await (_db.delete(
+      _db.cardEvolutionCollectorRuns,
+    )..where((row) => row.sessionId.equals(sessionId))).go();
     await (_db.delete(_db.cardEvolutionClaims)..where((row) {
           final session = row.sessionId.equals(sessionId);
           return preserveMemoryBookSettings

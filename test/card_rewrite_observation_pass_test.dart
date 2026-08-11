@@ -22,6 +22,7 @@ import 'package:glaze_flutter/core/models/character.dart';
 import 'package:glaze_flutter/core/services/card_rewriter/automated_card_evolution_service.dart';
 import 'package:glaze_flutter/core/services/card_rewriter/card_rewriter_contracts.dart';
 import 'package:glaze_flutter/core/services/card_rewriter/effective_canon_read_repository.dart';
+import 'package:glaze_flutter/core/utils/cast_helpers.dart';
 
 void main() {
   late _Fixture fixture;
@@ -123,7 +124,7 @@ void main() {
       expect(cardPrompt, isNotNull);
       expect(
         cardPrompt,
-        contains('Validated targets from observation journal'),
+        contains('Accumulated candidates from observation journal'),
       );
       expect(cardPrompt, contains('character.preference.trust'));
     },
@@ -163,15 +164,15 @@ void main() {
           return _ok(fixture.cardBatchOutput);
         })
         .runOneBatch('session');
-    // The observation goes through the full cycle: confirm (repeatCount 3)
-    // → promote → consume (after successful card writer apply).
+    // Proposal persistence is review-only, so promotion remains available
+    // until the user actually applies the proposal.
     final obs = await fixture.observationRepo.findById('obs-1');
     expect(obs, isNotNull);
-    expect(obs!.status, 'consumed');
+    expect(obs!.status, 'promoted');
     expect(obs.repeatCount, 3);
   });
 
-  test('successful apply consumes promoted observations', () async {
+  test('persisted proposal does not consume promoted observations', () async {
     await fixture.observationRepo.insertObservation(
       CardEvolutionObservation(
         id: 'obs-promoted',
@@ -198,7 +199,7 @@ void main() {
     expect(result.kind, 'persisted');
     expect(
       await fixture.observationRepo.getPromotedObservations('session'),
-      isEmpty,
+      hasLength(1),
     );
   });
 
@@ -386,6 +387,46 @@ void main() {
       );
     },
   );
+
+  test(
+    'automatic collector runs every reconciliation and writer every third',
+    () async {
+      final prompts = <String>[];
+      final service = fixture.service((_, prompt) async {
+        prompts.add(prompt);
+        return prompt.contains('observation journal keeper')
+            ? _ok('{"observations":[]}')
+            : _ok('{"operations":[]}');
+      });
+      for (var ordinal = 1; ordinal <= 3; ordinal++) {
+        final run = await fixture.seedReconciliationRun(ordinal: ordinal);
+        final result = await service.runAfterReconciliation(run);
+        expect(
+          result.kind,
+          ordinal < 3 ? 'collectorCompleted' : 'emptyModelProposal',
+        );
+      }
+      expect(
+        prompts.where((value) => value.contains('observation journal keeper')),
+        hasLength(3),
+      );
+      expect(
+        prompts.where((value) => value.contains('Glaze card rewriter')),
+        hasLength(1),
+      );
+      final collectors = await fixture.db
+          .select(fixture.db.cardEvolutionCollectorRuns)
+          .get();
+      expect(collectors, hasLength(3));
+      expect(collectors.every((run) => run.status == 'completed'), isTrue);
+      final claims = await fixture.db
+          .select(fixture.db.cardEvolutionClaims)
+          .get();
+      expect(claims.single.predecessorRunOrdinal, 3);
+      expect(claims.single.status, 'completed');
+      expect(claims.single.rewriteJobId, isNull);
+    },
+  );
 }
 
 AuxCallOutcome _ok(String text) =>
@@ -441,7 +482,20 @@ final class _Fixture {
     return _Fixture(db, repo, observationRepo);
   }
 
-  Future<void> seedReconciliationRun({required int ordinal}) async {
+  Future<LedgerReconciliationSuccessfulRunRow> seedReconciliationRun({
+    required int ordinal,
+  }) async {
+    final anchors = [
+      for (final message in _messages)
+        {
+          'agentSwipeId': 0,
+          'contentHash': computeHash(message['content']!),
+          'messageId': message['id'],
+          'role': message['role'],
+          'swipeId': 0,
+        },
+    ];
+    final anchorsJson = jsonEncode(anchors);
     await db.customStatement(
       'INSERT INTO reconciliation_successful_runs '
       '(id, session_id, ordinal, start_message_id, start_swipe_id, '
@@ -458,8 +512,8 @@ final class _Fixture {
         ordinal,
         'a1',
         'a1',
-        '[]',
-        'range-$ordinal',
+        anchorsJson,
+        computeHash(anchorsJson),
         '[]',
         'canon-stamp-$ordinal',
         'canon-hash-$ordinal',
@@ -471,6 +525,9 @@ final class _Fixture {
         ordinal * 10,
       ],
     );
+    return (db.select(
+      db.ledgerReconciliationSuccessfulRuns,
+    )..where((row) => row.id.equals('run-$ordinal'))).getSingle();
   }
 
   String get cardBatchOutput => jsonEncode({
