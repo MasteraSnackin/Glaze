@@ -9,6 +9,7 @@ import 'dart:convert';
 import '../../../core/llm/history_assembler.dart';
 import '../../../core/llm/prompt_builder.dart';
 import '../../../core/llm/prompt_isolate.dart';
+import '../../../core/llm/prompt_worker.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
 import '../providers/prompt_build_providers.dart';
 import '../../../core/llm/transport/anthropic_chat_transport.dart';
@@ -89,7 +90,10 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
       _apiConfig = payload.apiConfig;
       _sessionId = session.id;
 
-      final result = await buildPromptInIsolate(payload);
+      final result = await buildPromptInIsolate(
+        payload,
+        priority: PromptWorkerPriority.background,
+      );
 
       ref.read(cachedTokenBreakdownProvider(widget.charId).notifier).state =
           result.breakdown;

@@ -14,7 +14,6 @@ import '../../../core/state/lorebook_provider.dart';
 import '../../../features/settings/app_settings_provider.dart';
 import '../../../core/state/active_selection_provider.dart';
 import '../../../core/state/active_studio_preset_provider.dart';
-import '../../../core/state/preset_resolution.dart';
 import '../../../core/state/studio_feature_provider.dart';
 import '../../../core/state/summary_providers.dart';
 import '../../../shared/theme/app_colors.dart';
@@ -184,10 +183,12 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
   int _statsRequest = 0;
   Timer? _debounceTimer;
   final _scrollController = ScrollController();
+  late final MagicDrawerStatsService _statsService;
 
   @override
   void initState() {
     super.initState();
+    _statsService = MagicDrawerStatsService(ref);
     // Stale-while-revalidate. The panel is destroyed on every drawer close, so
     // without a cache each open would sit behind the spinner until a full
     // layout read and stats recomputation finished. Paint the previous
@@ -255,9 +256,7 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
 
   Future<void> _loadStats() async {
     final request = ++_statsRequest;
-    final stats = await MagicDrawerStatsService(
-      ref,
-    ).computeStats(widget.charId);
+    final stats = await _statsService.computeStats(widget.charId);
     if (request != _statsRequest) return;
     _stats = stats;
     // The drawer can be closed mid-load, which disposes this state and with it
@@ -283,9 +282,7 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
     final request = _statsRequest;
     MagicDrawerStats updated;
     try {
-      updated = await MagicDrawerStatsService(
-        ref,
-      ).computeTokenStats(widget.charId, _stats);
+      updated = await _statsService.computeTokenStats(widget.charId, _stats);
     } catch (e) {
       debugPrint('[MagicDrawer] _loadTokenStats error: $e');
       return;
@@ -394,7 +391,7 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
       'presets' =>
         _stats.activePresetDisplayName == null
             ? 'label_default'.tr()
-        : _stats.presetTokens > 0
+            : _stats.presetTokens > 0
             ? '${_stats.activePresetDisplayName} • ${_stats.presetTokens} tokens'
             : _stats.activePresetDisplayName,
       'personas' => _stats.activePersona?.name ?? 'label_default'.tr(),
@@ -597,7 +594,7 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
     }
   }
 
-    Future<void> _showAgentOpsLog() async {
+  Future<void> _showAgentOpsLog() async {
     final session = ref.read(chatProvider(widget.charId)).value?.session;
     await AgenticOperationsLogDialog.show(context, sessionId: session?.id);
   }
@@ -625,8 +622,11 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
     switch (result.action) {
       case SessionPickerAction.open:
         final target = result.session!.sessionIndex;
-        final current =
-            ref.read(chatProvider(widget.charId)).value?.session?.sessionIndex;
+        final current = ref
+            .read(chatProvider(widget.charId))
+            .value
+            ?.session
+            ?.sessionIndex;
         if (target == current) return;
         await ref
             .read(chatProvider(widget.charId).notifier)

@@ -79,7 +79,27 @@ List<ScannedEntry> scanLorebooks({
   if (activeLorebooks.isEmpty) return [];
 
   final allRelevantEntries = <ScannedEntry>[];
+  final relevantEntryKeys = <String>{};
   final candidateEntries = <_CandidateEntry>[];
+  final visibleHistory = history
+      .where((message) => !message.isHidden && !message.isTyping)
+      .toList(growable: false);
+  final historyByDepth = <int, String>{};
+  final lowerHistoryByDepth = <int, String>{};
+
+  String historyTextFor(int depth, {required bool caseSensitive}) {
+    final cache = caseSensitive ? historyByDepth : lowerHistoryByDepth;
+    return cache.putIfAbsent(depth, () {
+      final start = visibleHistory.length > depth
+          ? visibleHistory.length - depth
+          : 0;
+      final text = visibleHistory
+          .skip(start)
+          .map((message) => message.content)
+          .join('\n');
+      return caseSensitive ? text : text.toLowerCase();
+    });
+  }
 
   for (final lb in activeLorebooks) {
     final lbSettings = lb.settings;
@@ -121,9 +141,7 @@ List<ScannedEntry> scanLorebooks({
 
   for (final c in candidateEntries) {
     if (c.entry.constant) {
-      if (!allRelevantEntries.any(
-        (e) => e.id == c.entry.id && e.lorebookId == c.lorebookId,
-      )) {
+      if (relevantEntryKeys.add(_candidateKey(c))) {
         allRelevantEntries.add(_toScanned(c));
       }
     }
@@ -144,9 +162,7 @@ List<ScannedEntry> scanLorebooks({
 
     for (final c in candidateEntries) {
       final entry = c.entry;
-      if (allRelevantEntries.any(
-        (e) => e.id == entry.id && e.lorebookId == c.lorebookId,
-      )) {
+      if (relevantEntryKeys.contains(_candidateKey(c))) {
         continue;
       }
       if (entry.constant) continue;
@@ -178,22 +194,13 @@ List<ScannedEntry> scanLorebooks({
                 : temporalDepth
           : scanDepth;
 
-      final visibleHistory = history
-          .where((m) => !m.isHidden && !m.isTyping)
-          .toList();
-
-      final messagesToScan = visibleHistory
-          .skip(
-            visibleHistory.length > effectiveScanDepth
-                ? visibleHistory.length - effectiveScanDepth
-                : 0,
-          )
-          .map((m) => m.content)
-          .join('\n');
-
-      var scanSource = caseSensitive
+      final messagesToScan = historyTextFor(
+        effectiveScanDepth,
+        caseSensitive: caseSensitive,
+      );
+      final scanSource = caseSensitive
           ? '$messagesToScan$scanText'
-          : '${messagesToScan.toLowerCase()}${scanText.toLowerCase()}';
+          : '$messagesToScan${scanText.toLowerCase()}';
 
       bool isStickyActive = false;
       bool isOnCooldown = false;
@@ -260,6 +267,7 @@ List<ScannedEntry> scanLorebooks({
           }
 
           allRelevantEntries.add(_toScanned(c));
+          relevantEntryKeys.add(_candidateKey(c));
 
           if (!entry.preventRecursion && iteration < maxIterations) {
             scanText = '$scanText\n${entry.content.toLowerCase()}';
@@ -322,6 +330,9 @@ ScannedEntry _toScanned(_CandidateEntry c) => ScannedEntry(
   constant: c.entry.constant,
   maxInjectedEntries: c.maxInjectedEntries,
 );
+
+String _candidateKey(_CandidateEntry candidate) =>
+    '${candidate.lorebookId}_${candidate.entry.id}';
 
 class _CandidateEntry {
   final LorebookEntry entry;

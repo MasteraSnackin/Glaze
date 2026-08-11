@@ -9,13 +9,7 @@ import 'retrieval_hints.dart';
 class LorebookEmbeddingService {
   final EmbeddingRepo _repo;
   final EmbeddingService _embeddingService;
-  final String _embeddingTarget;
-
-  LorebookEmbeddingService(
-    this._repo,
-    this._embeddingService, [
-    this._embeddingTarget = 'content',
-  ]);
+  LorebookEmbeddingService(this._repo, this._embeddingService);
 
   Future<void> clearLorebookEmbeddings(String lorebookId) {
     return _repo.deleteBySourceId(lorebookId);
@@ -73,7 +67,7 @@ class LorebookEmbeddingService {
         entry.comment.isNotEmpty ? entry.comment : entry.id,
       );
 
-      final text = _getEmbeddingText(entry, config);
+      final text = _getEmbeddingText(entry, embeddingTarget);
       final hints = extractRetrievalHints(entry);
       final fingerprint = buildEmbeddingFingerprint(entry, text);
       final textHash = computeHash(fingerprint);
@@ -144,7 +138,7 @@ class LorebookEmbeddingService {
 
         for (int j = i + 1; j < indexable.length; j++) {
           final laterEntry = indexable[j];
-          final laterText = _getEmbeddingText(laterEntry, config);
+          final laterText = _getEmbeddingText(laterEntry, embeddingTarget);
           final laterHash = computeHash(
             buildEmbeddingFingerprint(laterEntry, laterText),
           );
@@ -198,8 +192,8 @@ class LorebookEmbeddingService {
     );
   }
 
-  String _getEmbeddingText(LorebookEntry entry, EmbeddingConfig config) {
-    if (_embeddingTarget == 'keys') {
+  String _getEmbeddingText(LorebookEntry entry, String embeddingTarget) {
+    if (embeddingTarget == 'keys') {
       return entry.keys.join(', ');
     }
     return entry.content;

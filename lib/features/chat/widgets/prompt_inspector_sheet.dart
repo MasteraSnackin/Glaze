@@ -31,6 +31,7 @@ class PromptInspectorSheet extends StatefulWidget {
 
 class _PromptInspectorSheetState extends State<PromptInspectorSheet> {
   late String _activeTabId = widget.initialTabId;
+  late final Set<String> _visitedTabs = {_activeTabId};
 
   static const _order = [
     PromptInspectorSheet._tabContext,
@@ -45,14 +46,20 @@ class _PromptInspectorSheetState extends State<PromptInspectorSheet> {
 
   @override
   Widget build(BuildContext context) {
-    // Keep every tab's state alive across switches (each runs its own async
-    // computation on first build) via an IndexedStack.
+    // Preserve visited tabs without eagerly starting every expensive prompt
+    // diagnostic when the inspector opens.
     final body = IndexedStack(
       index: _activeIndex,
       children: [
-        TokenizerSheet(charId: widget.charId, embedded: true),
-        PromptPreviewScreen(charId: widget.charId, embedded: true),
-        CoveragePanel(charId: widget.charId, embedded: true),
+        _visitedTabs.contains(PromptInspectorSheet._tabContext)
+            ? TokenizerSheet(charId: widget.charId, embedded: true)
+            : const SizedBox.shrink(),
+        _visitedTabs.contains(PromptInspectorSheet._tabPreview)
+            ? PromptPreviewScreen(charId: widget.charId, embedded: true)
+            : const SizedBox.shrink(),
+        _visitedTabs.contains(PromptInspectorSheet._tabCoverage)
+            ? CoveragePanel(charId: widget.charId, embedded: true)
+            : const SizedBox.shrink(),
       ],
     );
 
@@ -70,7 +77,10 @@ class _PromptInspectorSheetState extends State<PromptInspectorSheet> {
           GlazeTabItem(label: 'tab_coverage'.tr(), icon: Icons.search),
         ],
         activeIndex: _activeIndex,
-        onChanged: (i) => setState(() => _activeTabId = _order[i]),
+        onChanged: (i) => setState(() {
+          _activeTabId = _order[i];
+          _visitedTabs.add(_activeTabId);
+        }),
       ),
       body: body,
     );
