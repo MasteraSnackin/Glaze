@@ -80,9 +80,10 @@ void main() {
   test('scope grammar accepts only the defined semantic mappings', () {
     for (final key in const [
       'npc:ada',
-      'relationship:ada-lovelace',
+      'relationship:Lucy:Danvi',
       'arc:act_1',
       'world:earth-2',
+      'world:Bad',
       'scene.opening.bridge',
     ]) {
       expect(CardRewriteScope.tryParse(key), isNotNull, reason: key);
@@ -91,7 +92,9 @@ void main() {
       'character:ada',
       'scene:opening',
       'npc:',
-      'world:Bad',
+      'world:Bad:Nested',
+      'relationship:ada-lovelace',
+      'relationship:Lucy::Danvi',
     ]) {
       expect(CardRewriteScope.tryParse(key), isNull, reason: key);
     }

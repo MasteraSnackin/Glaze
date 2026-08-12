@@ -733,24 +733,25 @@ void main() {
   });
 
   group('Studio agent envelope lane ownership', () {
-    const guardAgent = StudioAgent(
-      id: 'guard',
-      name: 'Anti-Loop & Prose Guard',
-    );
-
     test('runtime leaves numeric response budgets to the active preset', () {
-      final guard = StudioControllerOntology.specs.firstWhere(
-        (spec) => spec.id == 'guard',
-      );
-      final envelope = const StudioPromptText().intermediateRuntimeEnvelope(
-        guard,
-        guardAgent,
-      );
+      for (final id in const ['guard_ru', 'guard_en']) {
+        final guard = StudioControllerOntology.specs.firstWhere(
+          (spec) => spec.id == id,
+        );
+        final guardAgent = StudioAgent(id: id, name: guard.name);
+        final envelope = const StudioPromptText().intermediateRuntimeEnvelope(
+          guard,
+          guardAgent,
+        );
 
-      expect(envelope.toLowerCase(), isNot(contains('paragraph')));
-      expect(envelope.toLowerCase(), isNot(contains('word budget')));
-      expect(guard.purpose.toLowerCase(), isNot(contains('paragraph')));
-      expect(guard.outputContract.toLowerCase(), isNot(contains('paragraph')));
+        expect(envelope.toLowerCase(), isNot(contains('paragraph')));
+        expect(envelope.toLowerCase(), isNot(contains('word budget')));
+        expect(guard.purpose.toLowerCase(), isNot(contains('paragraph')));
+        expect(
+          guard.outputContract.toLowerCase(),
+          isNot(contains('paragraph')),
+        );
+      }
     });
   });
 
