@@ -74,12 +74,12 @@ void main() {
     stylessCss = _asset('styles.css').replaceAll('\r\n', '\n');
   });
 
-  group('rendered text copy', () {
-    test('message copy preserves rendered line boundaries', () {
+  group('message copy', () {
+    test('message copy preserves source markdown', () {
       final idx = bridgeControllerJs.indexOf('_extractText(section)');
       final body = bridgeControllerJs.substring(idx, idx + 500);
-      expect(body, contains('root.innerText'));
-      expect(body, isNot(contains('root.textContent')));
+      expect(body, contains("return section.dataset.rawText || '';"));
+      expect(body, isNot(contains('root.innerText')));
     });
 
     test('selection copy serializes cloned rendered ranges', () {
