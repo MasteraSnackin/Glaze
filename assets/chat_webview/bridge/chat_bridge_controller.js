@@ -400,11 +400,6 @@ export class Bridge {
   }
 
   _extractText(section) {
-    const host = section.querySelector('.msg-body .message-content');
-    if (host && host.shadowRoot) {
-      const root = host.shadowRoot.querySelector('.glaze-message');
-      if (root) return root.innerText || '';
-    }
     return section.dataset.rawText || '';
   }
 
