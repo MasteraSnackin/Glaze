@@ -523,6 +523,17 @@ assistant and user text with those labels for both `messages` and
 `previousMessages`; the names are not stored in `ApiConfig`, serialized as a
 wire field, or added globally as `message.name`.
 
+The Prompt Inspector shows the same reshaped conversation in its **formatted**
+view, not just in the raw JSON:
+`features/chat/services/prompt_preview_post_processor.dart` replays the pass
+over the built `PromptMessage` list and returns one `PreviewMessage` per
+outgoing message, each carrying the blocks that were folded into it (so a
+merged card can show the union of their section flags, their joined block
+names, every attachment, and a badge with the block count). It never
+re-implements the rules: it runs the real `postProcessPrompt` over placeholder
+content — one unique token per built message — and reads the tokens back out of
+the result to recover which blocks landed where.
+
 ### Request Types
 
 | Type | State owner | Streaming | Abort |
