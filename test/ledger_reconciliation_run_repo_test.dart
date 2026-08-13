@@ -312,6 +312,54 @@ void main() {
       expect(second.predecessorChainHash, first.chainHash);
     },
   );
+
+  test('message mutation invalidates anchored run suffix, not trigger', () async {
+    await _seedSession(db);
+    final first = _run();
+    expect(await repo.append(first), isA<ReconciliationRunAppended>());
+
+    expect(
+      await repo.invalidateForMessageMutation(
+        sessionId: 'session',
+        messageIds: {'user'},
+        reason: 'message_deleted',
+        createdAt: 2,
+      ),
+      isEmpty,
+    );
+    expect((await repo.getHead('session'))?.id, 'run-1');
+
+    final invalidated = await repo.invalidateForMessageMutation(
+      sessionId: 'session',
+      messageIds: {'message'},
+      reason: 'message_deleted',
+      createdAt: 3,
+    );
+    expect(invalidated, ['run-1']);
+    expect(await repo.getHead('session'), isNull);
+
+    await db.customStatement(
+      "UPDATE chat_sessions SET messages_json = '[{\"id\":\"user\",\"role\":\"user\",\"content\":\"accepted\"}]' WHERE session_id = 'session'",
+    );
+    expect(await repo.validateChain('session'), isA<ReconciliationRunValid>());
+  });
+
+  test(
+    'legacy stale evidence hides logical suffix without breaking chain',
+    () async {
+      await _seedSession(db);
+      expect(await repo.append(_run()), isA<ReconciliationRunAppended>());
+      await db.customStatement(
+        "UPDATE chat_sessions SET messages_json = '[{\"id\":\"user\",\"role\":\"user\",\"content\":\"accepted\"}]' WHERE session_id = 'session'",
+      );
+      expect(
+        await repo.validateChain('session'),
+        isA<ReconciliationRunValid>(),
+      );
+      expect(await repo.readSession('session'), isEmpty);
+      expect(await repo.getHead('session'), isNull);
+    },
+  );
 }
 
 Future<void> _seedSession(AppDatabase db) => db.customStatement(

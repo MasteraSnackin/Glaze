@@ -108,7 +108,19 @@ class AutomatedCardEvolutionService {
     }
     final sessionId = reconciliationRun.sessionId;
     final active = _inFlight[sessionId];
-    if (active != null) return active;
+    if (active != null) {
+      // Do not silently absorb a newer reconciliation while the previous
+      // collector is running. Re-enter after it finishes; the durable backlog
+      // makes this idempotent when the newer callback names the same head.
+      return () async {
+        try {
+          await active;
+        } catch (_) {
+          // A failed active attempt must not discard the newer durable head.
+        }
+        return runAfterReconciliation(reconciliationRun, onStage: onStage);
+      }();
+    }
     final future = _runAutomatic(reconciliationRun, onStage: onStage);
     _inFlight[sessionId] = future;
     return future.whenComplete(() => _inFlight.remove(sessionId));
@@ -118,9 +130,15 @@ class AutomatedCardEvolutionService {
     LedgerReconciliationSuccessfulRunRow reconciliationRun, {
     void Function(AutomatedCardEvolutionStage stage)? onStage,
   }) async {
-    final collector = await _runCollector(reconciliationRun, onStage: onStage);
-    if (!collector) {
-      return const CardEvolutionFinalizeOutcome('collectorUnavailable');
+    final pending = await collectorRunRepo.pendingValidRuns(
+      reconciliationRun.sessionId,
+      currentRun: reconciliationRun,
+    );
+    for (final run in pending) {
+      final collected = await _runCollector(run, onStage: onStage);
+      if (!collected) {
+        return const CardEvolutionFinalizeOutcome('collectorUnavailable');
+      }
     }
     final delivered = await collectorRunRepo.latestDeliveredWriterBoundary(
       reconciliationRun.sessionId,
@@ -382,17 +400,19 @@ class AutomatedCardEvolutionService {
         sessionId,
         snapshot,
         claim.row!.collectorOrdinal,
+        finalize: (output, applyEffects) =>
+            collectorRunRepo.completeWithEffects(
+              id: claimId!,
+              ownerId: ownerId!,
+              modelOutputHash: computeHash(output),
+              now: currentTimestampSeconds(),
+              applyEffects: applyEffects,
+            ),
       );
       if (output == null) return false;
       await _checkPromotions(sessionId);
-      final completed = await collectorRunRepo.complete(
-        id: claimId,
-        ownerId: ownerId,
-        modelOutputHash: computeHash(output),
-        now: currentTimestampSeconds(),
-      );
-      if (completed) claimId = null;
-      return completed;
+      claimId = null;
+      return true;
     } catch (_) {
       return false;
     } finally {
@@ -405,8 +425,10 @@ class AutomatedCardEvolutionService {
   Future<String?> _runObservationPass(
     String sessionId,
     CardEvolutionObservationSnapshot snapshot,
-    int runOrdinal,
-  ) async {
+    int runOrdinal, {
+    Future<bool> Function(String output, Future<void> Function() applyEffects)?
+    finalize,
+  }) async {
     final config = await resolveModel();
     final activeMaps = _extractAccumulatedObservations(
       snapshot.selectedInputJson,
@@ -437,34 +459,46 @@ class AutomatedCardEvolutionService {
       if (validEvidenceIds == null) return null;
       final retrievalTargets = _retrievalTargets(snapshot.selectedInputJson);
       if (retrievalTargets == null) return null;
-      final now = currentTimestampSeconds();
-      for (final action in actions) {
-        if (!validEvidenceIds.containsAll(action.evidenceMessageIds)) continue;
-        if (!retrievalTargets.keys.toSet().containsAll(action.retrievalKeys)) {
-          continue;
+      Future<void> applyEffects() async {
+        final now = currentTimestampSeconds();
+        for (final action in actions) {
+          if (!validEvidenceIds.containsAll(action.evidenceMessageIds)) {
+            continue;
+          }
+          if (!retrievalTargets.keys.toSet().containsAll(
+            action.retrievalKeys,
+          )) {
+            continue;
+          }
+          final loreIdentity = action.lorebookEntryId;
+          final hasExactLoreTarget =
+              loreIdentity != null &&
+              action.retrievalKeys.contains(loreIdentity) &&
+              retrievalTargets[loreIdentity] == 'injected_lorebook_entry';
+          if ((action.targetKind == 'injected_lorebook_entry' &&
+                  !hasExactLoreTarget) ||
+              (action.targetKind == 'main_character_card' &&
+                  (loreIdentity != null ||
+                      action.retrievalKeys.any(
+                        (key) =>
+                            retrievalTargets[key] == 'injected_lorebook_entry',
+                      )))) {
+            continue;
+          }
+          await _applyObservationAction(
+            sessionId: sessionId,
+            characterId: snapshot.character.id,
+            runOrdinal: runOrdinal,
+            now: now,
+            action: action,
+          );
         }
-        final loreIdentity = action.lorebookEntryId;
-        final hasExactLoreTarget =
-            loreIdentity != null &&
-            action.retrievalKeys.contains(loreIdentity) &&
-            retrievalTargets[loreIdentity] == 'injected_lorebook_entry';
-        if ((action.targetKind == 'injected_lorebook_entry' &&
-                !hasExactLoreTarget) ||
-            (action.targetKind == 'main_character_card' &&
-                (loreIdentity != null ||
-                    action.retrievalKeys.any(
-                      (key) =>
-                          retrievalTargets[key] == 'injected_lorebook_entry',
-                    )))) {
-          continue;
-        }
-        await _applyObservationAction(
-          sessionId: sessionId,
-          characterId: snapshot.character.id,
-          runOrdinal: runOrdinal,
-          now: now,
-          action: action,
-        );
+      }
+
+      if (finalize != null) {
+        if (!await finalize(outcome.text!, applyEffects)) return null;
+      } else {
+        await applyEffects();
       }
       return outcome.text;
     } finally {

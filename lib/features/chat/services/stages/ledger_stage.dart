@@ -213,10 +213,15 @@ class LedgerStage {
           ledgerReconciliationCheckpointRepoProvider,
         );
         final checkpoint = await checkpointRepo.get(sessionId);
+        final reconciliationRunRepo = ctx.ref.read(
+          ledgerReconciliationRunRepoProvider,
+        );
+        final previousRunHead = await reconciliationRunRepo.getHead(sessionId);
         final plan = const LedgerReconciliationPlanner().plan(
           messages: messages,
           currentAssistantMessageId: targetMessage.id,
           checkpoint: checkpoint,
+          previousEndMessageId: previousRunHead?.endMessageId,
         );
         if (plan != null && isCurrent()) {
           await _recordReconciliationDiag(
@@ -291,9 +296,7 @@ class LedgerStage {
           if (reconciliationResult.status == 'ok' &&
               pipeline.cardRewriter.enabled &&
               isCurrent()) {
-            final runHead = await ctx.ref
-                .read(ledgerReconciliationRunRepoProvider)
-                .getHead(sessionId);
+            final runHead = await reconciliationRunRepo.getHead(sessionId);
             if (runHead != null && isCurrent()) {
               final rewriteReviewAuthority =
                   captureAutomaticRewriteReviewAuthority(

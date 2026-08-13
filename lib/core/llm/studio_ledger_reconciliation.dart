@@ -28,7 +28,10 @@ class LedgerReconciliationPlan {
 }
 
 class LedgerReconciliationPlanner {
-  static const interval = 6;
+  /// Five newly accepted assistant turns are reviewed when the following
+  /// assistant turn is generated. The trigger itself is never part of the
+  /// review range.
+  static const acceptedAssistantsPerRun = 5;
   static const maxMessages = 20;
 
   const LedgerReconciliationPlanner();
@@ -51,6 +54,7 @@ class LedgerReconciliationPlanner {
     required List<ChatMessage> messages,
     required String currentAssistantMessageId,
     LedgerReconciliationCheckpoint? checkpoint,
+    String? previousEndMessageId,
   }) {
     final currentIndex = messages.indexWhere(
       (message) => message.id == currentAssistantMessageId,
@@ -61,20 +65,25 @@ class LedgerReconciliationPlanner {
         .take(currentIndex)
         .where(_isAcceptedAssistant)
         .toList(growable: false);
-    // Trigger once the Nth assistant has just been generated
-    // (N = interval, 2*interval, ...). acceptedAssistants holds a1..a(N-1);
-    // the freshly generated aN is the current message and is excluded from
-    // the review range so its brand-new snapshot cannot be rewritten. A
-    // reroll of aN produces the same boundary (a1..a(N-1)) and is
-    // deduplicated by the checkpoint; a(N+1) must never re-run or rewrite
-    // the older boundary.
-    if (acceptedAssistants.isEmpty ||
-        (acceptedAssistants.length + 1) % interval != 0) {
+    var previousAcceptedIndex = -1;
+    if (previousEndMessageId != null) {
+      previousAcceptedIndex = acceptedAssistants.indexWhere(
+        (message) => message.id == previousEndMessageId,
+      );
+      // A durable logical head that is no longer in the transcript must not
+      // silently reset cadence to the beginning.
+      if (previousAcceptedIndex < 0) return null;
+    }
+    final firstUnprocessed = previousAcceptedIndex + 1;
+    final unprocessedCount = acceptedAssistants.length - firstUnprocessed;
+    if (unprocessedCount < acceptedAssistantsPerRun) {
       return null;
     }
 
+    final endAssistant =
+        acceptedAssistants[firstUnprocessed + acceptedAssistantsPerRun - 1];
     final endIndex = messages.indexWhere(
-      (message) => message.id == acceptedAssistants.last.id,
+      (message) => message.id == endAssistant.id,
     );
     final plan = _buildPlan(messages: messages, endIndex: endIndex);
     if (plan == null) return null;

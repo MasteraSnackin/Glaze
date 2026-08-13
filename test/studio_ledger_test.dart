@@ -227,7 +227,7 @@ void main() {
 
     const planner = LedgerReconciliationPlanner();
 
-    test('runs on the Nth assistant once for the previous N-1 turns', () {
+    test('runs after each five new assistants and excludes the trigger', () {
       final messages = [
         ..._conversation(5),
         const ChatMessage(id: 'u6', role: 'user', content: 'User turn 6'),
@@ -261,6 +261,26 @@ void main() {
         ),
         isNull,
       );
+      final nextMessages = [
+        ..._conversation(10),
+        const ChatMessage(id: 'u11', role: 'user', content: 'User turn 11'),
+        const ChatMessage(
+          id: 'a11',
+          role: 'assistant',
+          content: 'Assistant turn 11',
+        ),
+      ];
+      final next = planner.plan(
+        messages: nextMessages,
+        currentAssistantMessageId: 'a11',
+        previousEndMessageId: 'a5',
+        checkpoint: checkpoint,
+      );
+      expect(next, isNotNull);
+      expect(next!.endMessage.id, 'a10');
+      expect(next.messageIds, isNot(contains('a11')));
+      // Rolling context remains intentionally overlapping.
+      expect(next.messageIds, contains('a5'));
       expect(
         planner.plan(
           messages: [
@@ -334,14 +354,15 @@ void main() {
       expect(plan.messageIds, isNot(contains('hidden')));
     });
 
-    test('review range is bounded to twenty messages', () {
-      final messages = _conversation(12);
+    test('review range is bounded to twenty physical messages', () {
+      final messages = _conversation(11);
       final plan = planner.plan(
         messages: messages,
-        currentAssistantMessageId: 'a12',
+        currentAssistantMessageId: 'a11',
+        previousEndMessageId: 'a5',
       )!;
       expect(plan.messages, hasLength(20));
-      expect(plan.endMessage.id, 'a11');
+      expect(plan.endMessage.id, 'a10');
     });
 
     test(

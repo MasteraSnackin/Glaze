@@ -307,6 +307,21 @@ class ChatRepo implements SyncChatStore {
     );
   }
 
+  Future<ChatSession?> mutateMessagesWithBeforeWrite({
+    required String sessionId,
+    required List<ChatMessage> Function(List<ChatMessage> messages) mutate,
+    required int updatedAt,
+    required Future<void> Function(ChatSession before, ChatSession after)
+    beforeWrite,
+  }) => _mutateSession(
+    sessionId: sessionId,
+    updatedAt: updatedAt,
+    mutate: (session) => session.copyWith(
+      messages: mutate(List<ChatMessage>.from(session.messages)),
+    ),
+    beforeWrite: beforeWrite,
+  );
+
   /// Atomically transforms one message identified by its durable ID.
   Future<ChatSession?> mutateMessage({
     required String sessionId,
@@ -364,6 +379,17 @@ class ChatRepo implements SyncChatStore {
     required String sessionId,
     required ChatSession? Function(ChatSession session) mutate,
     int? updatedAt,
+  }) => _mutateSession(
+    sessionId: sessionId,
+    mutate: mutate,
+    updatedAt: updatedAt,
+  );
+
+  Future<ChatSession?> _mutateSession({
+    required String sessionId,
+    required ChatSession? Function(ChatSession session) mutate,
+    int? updatedAt,
+    Future<void> Function(ChatSession before, ChatSession after)? beforeWrite,
   }) async {
     return _db.transaction(() async {
       final row = await (_db.select(
@@ -374,6 +400,7 @@ class ChatRepo implements SyncChatStore {
       final current = _toModel(row);
       final updated = mutate(current);
       if (updated == null) return null;
+      if (beforeWrite != null) await beforeWrite(current, updated);
       final messagesJson = jsonEncode(
         updated.messages.map((e) => e.toJson()).toList(),
       );
