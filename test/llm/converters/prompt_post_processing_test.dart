@@ -23,6 +23,67 @@ void main() {
       );
     });
 
+    test('the UI list offers one row per family, no tool duplicates', () {
+      expect(PromptPostProcessing.uiModes, [
+        PromptPostProcessing.none,
+        PromptPostProcessing.merge,
+        PromptPostProcessing.semi,
+        PromptPostProcessing.strict,
+        PromptPostProcessing.single,
+      ]);
+      // Both halves of every pair stay reachable in the engine.
+      for (final mode in PromptPostProcessing.toolModes) {
+        expect(PromptPostProcessing.isValid(mode), isTrue, reason: mode);
+      }
+    });
+
+    test('picking a family stores the tool-preserving half', () {
+      expect(
+        PromptPostProcessing.withTools(PromptPostProcessing.merge),
+        PromptPostProcessing.mergeTools,
+      );
+      expect(
+        PromptPostProcessing.withTools(PromptPostProcessing.semi),
+        PromptPostProcessing.semiTools,
+      );
+      expect(
+        PromptPostProcessing.withTools(PromptPostProcessing.strict),
+        PromptPostProcessing.strictTools,
+      );
+      // No pair exists for these two.
+      expect(
+        PromptPostProcessing.withTools(PromptPostProcessing.single),
+        PromptPostProcessing.single,
+      );
+      expect(
+        PromptPostProcessing.withTools(PromptPostProcessing.none),
+        PromptPostProcessing.none,
+      );
+      // Idempotent, so re-opening the picker never shifts the stored value.
+      expect(
+        PromptPostProcessing.withTools(PromptPostProcessing.mergeTools),
+        PromptPostProcessing.mergeTools,
+      );
+    });
+
+    test('both halves of a pair report the same family', () {
+      for (final pair in const [
+        (PromptPostProcessing.mergeTools, PromptPostProcessing.merge),
+        (PromptPostProcessing.semiTools, PromptPostProcessing.semi),
+        (PromptPostProcessing.strictTools, PromptPostProcessing.strict),
+      ]) {
+        expect(PromptPostProcessing.baseOf(pair.$1), pair.$2);
+        expect(PromptPostProcessing.baseOf(pair.$2), pair.$2);
+      }
+      // An ST config lands on the row it corresponds to, not on "None".
+      expect(PromptPostProcessing.baseOf('claude'), PromptPostProcessing.merge);
+      expect(PromptPostProcessing.baseOf(''), PromptPostProcessing.none);
+      expect(
+        PromptPostProcessing.baseOf('nonsense'),
+        PromptPostProcessing.none,
+      );
+    });
+
     test('an unknown mode degrades to none instead of reshaping', () {
       expect(
         PromptPostProcessing.normalize('nonsense'),

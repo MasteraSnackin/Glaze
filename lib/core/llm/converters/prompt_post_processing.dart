@@ -51,7 +51,7 @@ class PromptPostProcessing {
   static const String strict = 'strict';
   static const String single = 'single';
 
-  /// Selector order, mirroring ST's "With Tools" / "No Tools" option groups.
+  /// Every mode the engine understands, including both halves of each pair.
   static const List<String> all = [
     none,
     mergeTools,
@@ -63,8 +63,38 @@ class PromptPostProcessing {
     single,
   ];
 
+  /// The families the settings UI offers, in selector order.
+  ///
+  /// ST splits its selector into "With Tools" / "No Tools" groups. Glaze
+  /// sends no tool definitions today, so both halves of every pair produce
+  /// byte-identical output and showing them would be three redundant rows.
+  /// The picker offers the family and stores [withTools]; the no-tools halves
+  /// stay reachable for values that arrive from ST or an older config.
+  static const List<String> uiModes = [none, merge, semi, strict, single];
+
   /// Modes that keep `tool_calls` / `tool_call_id` and the `tool` role.
   static const Set<String> toolModes = {mergeTools, semiTools, strictTools};
+
+  /// The tool-preserving half of a family. Picking a mode in the UI resolves
+  /// through here, so a prompt that starts carrying tool traffic keeps it
+  /// instead of silently losing every call the day tools are switched on.
+  /// [single] has no pair — it collapses tool messages along with the rest.
+  static String withTools(String mode) => switch (baseOf(mode)) {
+    merge => mergeTools,
+    semi => semiTools,
+    strict => strictTools,
+    final base => base,
+  };
+
+  /// The family a mode belongs to — `merge_tools` and `merge` both report
+  /// [merge]. Labels and the picker's checkmark key off this, so a config
+  /// imported from ST shows up under the row it actually corresponds to.
+  static String baseOf(String mode) => switch (normalize(mode)) {
+    mergeTools => merge,
+    semiTools => semi,
+    strictTools => strict,
+    final normalized => normalized,
+  };
 
   static bool isValid(String value) => all.contains(value);
 

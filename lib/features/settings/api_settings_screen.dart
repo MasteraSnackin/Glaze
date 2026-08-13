@@ -346,6 +346,11 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
 
   bool get _supportsReasoning => true;
 
+  /// Only a custom endpoint has an unknown message-shape contract — see
+  /// [_buildPromptPostProcessingGroup].
+  bool get _supportsPromptPostProcessing =>
+      _protocol == LlmProtocol.customChatCompletion;
+
   /// Protocols with a dedicated field for the leading system block. The field
   /// is named differently per provider, so the label carries its actual name.
   bool get _supportsSystemInstruction =>
@@ -884,7 +889,14 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   /// insists on — one system block, strictly alternating turns, no tool
   /// traffic. A property of the API, which is why it lives here and not in the
   /// prompt preset.
+  ///
+  /// Offered for custom endpoints only. Every first-party protocol already
+  /// normalizes what its wire format requires inside its own converter (the
+  /// Anthropic and Gemini ones lift the leading system run out and squash
+  /// same-role neighbours), so the control would be a second, redundant knob
+  /// there. A custom endpoint is the one case Glaze cannot know the shape of.
   Widget _buildPromptPostProcessingGroup() {
+    if (!_supportsPromptPostProcessing) return const SizedBox.shrink();
     return MenuGroup(
       compact: true,
       header: 'section_prompt_post_processing'.tr(),
@@ -1499,26 +1511,27 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   }
 
   String _promptPostProcessingLabel(String mode) =>
-      'prompt_post_processing_${PromptPostProcessing.normalize(mode)}'.tr();
+      'prompt_post_processing_${PromptPostProcessing.baseOf(mode)}'.tr();
 
   void _openPromptPostProcessingSelector() {
+    final current = PromptPostProcessing.baseOf(_promptPostProcessing);
     GlazeBottomSheet.show<void>(
       context,
       title: 'label_prompt_post_processing'.tr(),
-      items: PromptPostProcessing.all.map((mode) {
-        final active = mode == _promptPostProcessing;
+      items: PromptPostProcessing.uiModes.map((mode) {
         return BottomSheetItem(
-          label: _promptPostProcessingLabel(mode),
-          hint: mode == PromptPostProcessing.none
-              ? null
-              : 'prompt_post_processing_hint_'
-                        '${PromptPostProcessing.toolModes.contains(mode) ? 'tools' : 'no_tools'}'
-                    .tr(),
-          icon: active ? Icons.check : null,
+          label: 'prompt_post_processing_$mode'.tr(),
+          // Each mode is a mechanical transformation; spelling out what it
+          // does to the messages beats a name nobody can decode at a glance.
+          hint: 'prompt_post_processing_hint_$mode'.tr(),
+          icon: mode == current ? Icons.check : null,
           iconColor: context.cs.primary,
           onTap: () {
             Navigator.of(context, rootNavigator: true).pop();
-            setState(() => _promptPostProcessing = mode);
+            setState(
+              () =>
+                  _promptPostProcessing = PromptPostProcessing.withTools(mode),
+            );
             _scheduleSave();
           },
         );

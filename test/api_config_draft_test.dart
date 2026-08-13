@@ -239,6 +239,39 @@ void main() {
     },
   );
 
+  test('prompt post-processing survives only on custom endpoints', () {
+    // The picker is offered for custom endpoints alone — every first-party
+    // protocol normalizes message shape in its own converter. A mode left
+    // behind by a protocol switch must not keep reshaping prompts unseen.
+    for (final protocol in LlmProtocol.all) {
+      final config = ApiConfig(
+        id: 'api',
+        protocol: protocol,
+        promptPostProcessing: 'merge_tools',
+      );
+      final draft = ApiConfigDraft.fromConfig(config);
+      final expected = protocol == LlmProtocol.customChatCompletion
+          ? 'merge_tools'
+          : 'none';
+
+      for (final values in [draft.values, draft.toConfig(config)]) {
+        expect(values.promptPostProcessing, expected, reason: protocol);
+      }
+    }
+  });
+
+  test('an unknown post-processing mode degrades to none', () {
+    const config = ApiConfig(
+      id: 'api',
+      protocol: LlmProtocol.customChatCompletion,
+      promptPostProcessing: 'nonsense',
+    );
+    expect(
+      ApiConfigDraft.fromConfig(config).values.promptPostProcessing,
+      'none',
+    );
+  });
+
   for (final testCase in <({String protocol, String input, String output})>[
     // Every protocol keeps all six steps now — the collapse to what the API
     // accepts happens at send time (converters/reasoning_effort.dart), not by

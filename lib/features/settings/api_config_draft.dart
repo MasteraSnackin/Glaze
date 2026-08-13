@@ -106,9 +106,12 @@ class ApiConfigDraft {
       frequencyPenalty: supportsPenalties ? values.frequencyPenalty : 0.0,
       presencePenalty: supportsPenalties ? values.presencePenalty : 0.0,
       cacheControlTtl: supportsPromptCache ? values.cacheControlTtl : 'off',
-      promptPostProcessing: PromptPostProcessing.normalize(
-        values.promptPostProcessing,
-      ),
+      // Every first-party protocol normalizes message shape inside its own
+      // converter, so the control is offered for custom endpoints only. Clear
+      // it elsewhere rather than let a hidden setting reshape the prompt.
+      promptPostProcessing: protocol == LlmProtocol.customChatCompletion
+          ? PromptPostProcessing.normalize(values.promptPostProcessing)
+          : PromptPostProcessing.none,
     );
   }
 

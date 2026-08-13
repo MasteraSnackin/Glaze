@@ -488,7 +488,24 @@ It lives on the API connection, not the prompt preset: whether an endpoint
 accepts several system blocks or non-alternating roles is a property of the
 endpoint. (It replaces the preset-level `mergePrompts` flag, which squashed
 adjacent non-assistant *blocks* at build time; DB migration v118 carries the
-active preset's flag over to every connection as `merge`.)
+active preset's flag over to custom connections.)
+
+**Offered for `custom_chat_completion` only.** Every first-party protocol
+already normalizes what its wire format demands inside its own converter — the
+Anthropic and Gemini ones lift the leading system run into the native system
+field, demote mid-prompt system turns to `user`, and squash same-role
+neighbours (equivalent to `semi`). A custom endpoint is the one case Glaze
+cannot know the shape of. `ApiConfigDraft.normalizeValues` clears the mode for
+every other protocol so a hidden control can never reshape a prompt.
+
+The picker shows one row per **family** (`none` / `merge` / `semi` / `strict` /
+`single`) and stores `PromptPostProcessing.withTools(...)`, so a prompt that
+starts carrying tool traffic keeps it rather than silently losing every call.
+Glaze sends no tool definitions today — the agentic-memory service, the only
+consumer, is disabled — which is why both halves of a pair are currently
+indistinguishable. The no-tools halves stay implemented and reachable for
+values imported from ST; `PromptPostProcessing.baseOf(...)` maps either half
+back to its family for labels and the picker's checkmark.
 
 `pickChatTransport` wraps every transport in `PostProcessingChatTransport`, so
 the pass runs exactly once, for every caller, before any provider-specific

@@ -2520,7 +2520,7 @@ void main() {
 
     test('v118 adds prompt post-processing, off unless the active preset '
         'merged prompts', () async {
-      Future<String> upgradeWith(
+      Future<Map<String, String>> upgradeWith(
         Map<String, Object> prefs,
         String? presetJson,
       ) async {
@@ -2535,10 +2535,16 @@ void main() {
           NativeDatabase.createInBackground(file),
         );
         await seeded.customSelect('SELECT 1').get();
-        await seeded.customStatement(
-          'INSERT INTO api_configs (config_id, name) VALUES (?, ?)',
-          ['api', 'Main'],
-        );
+        for (final config in const [
+          ('custom', 'custom_chat_completion'),
+          ('anthropic', 'anthropic'),
+        ]) {
+          await seeded.customStatement(
+            'INSERT INTO api_configs (config_id, name, protocol) '
+            'VALUES (?, ?, ?)',
+            [config.$1, config.$1, config.$2],
+          );
+        }
         if (presetJson != null) {
           await seeded.customStatement(
             'INSERT INTO presets (preset_id, name, data_json) VALUES (?, ?, ?)',
@@ -2556,21 +2562,31 @@ void main() {
           NativeDatabase.createInBackground(file),
         );
         addTearDown(() async => upgraded.close());
-        final row = await upgraded
-            .customSelect('SELECT prompt_post_processing FROM api_configs')
-            .getSingle();
-        return row.read<String>('prompt_post_processing');
+        final rows = await upgraded
+            .customSelect(
+              'SELECT config_id, prompt_post_processing FROM api_configs',
+            )
+            .get();
+        return {
+          for (final row in rows)
+            row.read<String>('config_id'): row.read<String>(
+              'prompt_post_processing',
+            ),
+        };
       }
 
       // No preset selected: nothing to carry over.
-      expect(await upgradeWith(const {}, null), 'none');
+      expect(await upgradeWith(const {}, null), {
+        'custom': 'none',
+        'anthropic': 'none',
+      });
 
       // Active preset never merged: the connection stays untouched.
       expect(
         await upgradeWith(const {
           'activePresetId': 'preset',
         }, '{"id":"preset","name":"Preset","mergePrompts":false}'),
-        'none',
+        {'custom': 'none', 'anthropic': 'none'},
       );
 
       // Active preset merged: adopt the equivalent mode so the prompt shape
@@ -2579,14 +2595,17 @@ void main() {
         await upgradeWith(const {
           'activePresetId': 'preset',
         }, '{"id":"preset","name":"Preset","mergePrompts":true}'),
-        'merge',
+        // The tool-preserving half, matching what the picker stores. Only the
+        // custom connection: first-party protocols normalize in their own
+        // converter and never offer the setting.
+        {'custom': 'merge_tools', 'anthropic': 'none'},
       );
 
       // A dangling preset id must not block the upgrade.
-      expect(
-        await upgradeWith(const {'activePresetId': 'missing'}, null),
-        'none',
-      );
+      expect(await upgradeWith(const {'activePresetId': 'missing'}, null), {
+        'custom': 'none',
+        'anthropic': 'none',
+      });
     });
 
     test('v111 resolves the retired session_id_mode default', () async {

@@ -276,7 +276,7 @@
                 {
                     "id": "prompt-post-processing",
                     "name": "Prompt Post-Processing",
-                    "desc": "Reshapes the finished prompt right before it goes out, for APIs that are picky about message structure. 'Merge consecutive roles' glues neighbouring messages that share a role into one — fewer, longer messages, which some models handle better. 'Semi-strict' additionally turns every system message after the first into a user message, so the conversation alternates. 'Strict' does the same and guarantees the prompt opens on a user message, inserting a filler turn if needed — this is what APIs like Anthropic's require. 'Single user message' folds the entire conversation into one user message. The 'with tools' variants keep tool calls and tool results intact; the others strip them. Leave it on 'None' unless the API complains."
+                    "desc": "Reshapes the finished prompt right before it goes out, for endpoints that are picky about message structure. 'Merge consecutive roles' glues neighbouring messages that share a role into one — fewer, longer messages, which some models handle better. 'Semi-strict' additionally turns every system message after the first into a user message, so the conversation alternates. 'Strict' does the same and guarantees the prompt opens on a user message, inserting a filler turn if needed — this is what APIs like Anthropic's require. 'Single user message' folds the entire conversation into one message. Offered for custom endpoints only: every built-in protocol already normalizes whatever its wire format requires. Leave it on 'None' unless the endpoint complains."
                 },
                 {
                     "id": "preset-noassistant",

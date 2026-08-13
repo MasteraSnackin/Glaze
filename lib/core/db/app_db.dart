@@ -2226,9 +2226,11 @@ class AppDatabase extends _$AppDatabase {
   ///
   /// The two settings sit on different entities, so there is no per-row
   /// mapping. The active preset is the one whose behaviour the user is
-  /// actually living with, so if it had the flag on, every connection adopts
-  /// the equivalent mode (`merge`) and nobody's prompt shape changes silently
-  /// on upgrade.
+  /// actually living with, so if it had the flag on, custom connections adopt
+  /// the equivalent mode and nobody's prompt shape changes silently on
+  /// upgrade. Only custom connections: every first-party protocol squashes
+  /// same-role neighbours inside its own converter anyway, and the setting is
+  /// not offered there.
   Future<void> _carryOverPresetMergePrompts() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -2242,7 +2244,8 @@ class AppDatabase extends _$AppDatabase {
       final decoded = jsonDecode(rows.first.read<String>('data_json'));
       if (decoded is! Map || decoded['mergePrompts'] != true) return;
       await customStatement(
-        "UPDATE api_configs SET prompt_post_processing = 'merge'",
+        "UPDATE api_configs SET prompt_post_processing = 'merge_tools' "
+        "WHERE protocol = 'custom_chat_completion'",
       );
     } on Object catch (e) {
       // A missing/unreadable preset must never block the schema upgrade.
