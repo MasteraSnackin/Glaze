@@ -50,10 +50,20 @@ class PostProcessingChatTransport implements ChatTransport {
     final mode = PromptPostProcessing.normalize(request.promptPostProcessing);
     if (mode == PromptPostProcessing.none) return request;
     return request.withMessages(
-      postProcessPrompt(request.messages, mode),
+      postProcessPrompt(
+        request.messages,
+        mode,
+        charName: request.charName,
+        userName: request.userName,
+      ),
       previousMessages: request.previousMessages == null
           ? null
-          : postProcessPrompt(request.previousMessages!, mode),
+          : postProcessPrompt(
+              request.previousMessages!,
+              mode,
+              charName: request.charName,
+              userName: request.userName,
+            ),
     );
   }
 

@@ -65,6 +65,11 @@ class ChatTransportRequest {
   /// transports themselves always see already-processed messages.
   final String promptPostProcessing;
 
+  /// Effective chat speaker names used by SillyTavern `single` processing.
+  /// Request metadata only: transports do not serialize these as message names.
+  final String? charName;
+  final String? userName;
+
   /// Optional tool definitions for native tool-call support (OpenAI format).
   /// When non-null, the request includes `tools` and `tool_choice` in the body.
   /// Transports that don't support tools will ignore this field.
@@ -92,7 +97,8 @@ class ChatTransportRequest {
       sessionId != null &&
       sessionId!.isNotEmpty &&
       (sessionIdMode == 'always' ||
-          (sessionIdMode == 'openrouter' && endpoint.contains('openrouter.ai')));
+          (sessionIdMode == 'openrouter' &&
+              endpoint.contains('openrouter.ai')));
 
   const ChatTransportRequest({
     required this.endpoint,
@@ -124,6 +130,8 @@ class ChatTransportRequest {
     this.cacheBreakpointMode = 'depth',
     this.sessionIdMode = 'openrouter',
     this.promptPostProcessing = 'none',
+    this.charName,
+    this.userName,
     this.tools,
     this.toolChoice,
     this.useSystemInstruction = true,
@@ -142,6 +150,8 @@ class ChatTransportRequest {
     List<Map<String, dynamic>>? previousMessages,
     List<Map<String, dynamic>>? tools,
     String? toolChoice,
+    String? charName,
+    String? userName,
   }) => ChatTransportRequest(
     endpoint: apiConfig.endpoint,
     apiKey: apiConfig.apiKey,
@@ -172,6 +182,8 @@ class ChatTransportRequest {
     cacheBreakpointMode: apiConfig.cacheBreakpointMode,
     sessionIdMode: apiConfig.sessionIdMode,
     promptPostProcessing: apiConfig.promptPostProcessing,
+    charName: charName,
+    userName: userName,
     tools: tools,
     toolChoice: toolChoice,
     useSystemInstruction: apiConfig.useSystemInstruction,
@@ -214,6 +226,8 @@ class ChatTransportRequest {
     cacheBreakpointMode: cacheBreakpointMode,
     sessionIdMode: sessionIdMode,
     promptPostProcessing: 'none',
+    charName: charName,
+    userName: userName,
     tools: tools,
     toolChoice: toolChoice,
     useSystemInstruction: useSystemInstruction,

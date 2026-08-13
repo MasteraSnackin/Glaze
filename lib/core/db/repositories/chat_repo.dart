@@ -153,34 +153,50 @@ class ChatRepo implements SyncChatStore {
     required ChatMessage message,
     required int updatedAt,
   }) async {
-    return _db.transaction(() async {
-      final row = await (_db.select(
+    while (true) {
+      final snapshot = await (_db.select(
         _db.chatSessions,
       )..where((t) => t.sessionId.equals(sessionId))).getSingleOrNull();
-      if (row == null) return null;
+      if (snapshot == null) return null;
 
       final prepared = await _prepareUserMessageAppend(
-        row.messagesJson,
+        snapshot.messagesJson,
         message,
       );
 
-      await (_db.update(
-        _db.chatSessions,
-      )..where((t) => t.sessionId.equals(sessionId))).write(
-        ChatSessionsCompanion(
-          messagesJson: Value(prepared.messagesJson),
-          draft: const Value(''),
-          updatedAt: Value(updatedAt),
-        ),
+      final result = await _db.transaction<({bool retry, ChatSession? value})>(
+        () async {
+          final current = await (_db.select(
+            _db.chatSessions,
+          )..where((t) => t.sessionId.equals(sessionId))).getSingleOrNull();
+          if (current == null) return (retry: false, value: null);
+          if (current.messagesJson != snapshot.messagesJson) {
+            return (retry: true, value: null);
+          }
+          await (_db.update(
+            _db.chatSessions,
+          )..where((t) => t.sessionId.equals(sessionId))).write(
+            ChatSessionsCompanion(
+              messagesJson: Value(prepared.messagesJson),
+              draft: const Value(''),
+              updatedAt: Value(updatedAt),
+            ),
+          );
+          return (
+            retry: false,
+            value: _toModel(
+              current.copyWith(
+                messagesJson: prepared.messagesJson,
+                draft: const Value(''),
+                updatedAt: updatedAt,
+              ),
+              messages: prepared.messages,
+            ),
+          );
+        },
       );
-
-      final updatedRow = row.copyWith(
-        messagesJson: prepared.messagesJson,
-        draft: const Value(''),
-        updatedAt: updatedAt,
-      );
-      return _toModel(updatedRow, messages: prepared.messages);
-    });
+      if (!result.retry) return result.value;
+    }
   }
 
   /// Atomically appends a user message, clears the draft, and records that the
@@ -199,14 +215,14 @@ class ChatRepo implements SyncChatStore {
     if (expectedPrecedingAssistant.sessionId != sessionId) {
       return null;
     }
-    return _db.transaction(() async {
-      final row = await (_db.select(
+    while (true) {
+      final snapshot = await (_db.select(
         _db.chatSessions,
       )..where((t) => t.sessionId.equals(sessionId))).getSingleOrNull();
-      if (row == null) return null;
+      if (snapshot == null) return null;
 
       final prepared = await _prepareAcceptedUserMessageAppend(
-        messagesJson: row.messagesJson,
+        messagesJson: snapshot.messagesJson,
         message: message,
         expectedPrecedingAssistant: expectedPrecedingAssistant,
       );
@@ -214,54 +230,73 @@ class ChatRepo implements SyncChatStore {
 
       // A retry after a completed transaction must not append the same user
       // message or a second acceptance event.
-      if (!prepared.didAppend)
-        return _toModel(row, messages: prepared.messages);
-
-      final manifest =
-          await (_db.select(_db.lorebookUseManifests)
-                ..where((t) => t.sessionId.equals(sessionId))
-                ..where(
-                  (t) =>
-                      t.messageId.equals(expectedPrecedingAssistant.messageId),
-                )
-                ..where(
-                  (t) => t.swipeId.equals(expectedPrecedingAssistant.swipeId),
-                )
-                ..where(
-                  (t) => t.agentSwipeId.equals(
-                    expectedPrecedingAssistant.agentSwipeId,
-                  ),
-                ))
-              .getSingleOrNull();
-
-      await (_db.update(
-        _db.chatSessions,
-      )..where((t) => t.sessionId.equals(sessionId))).write(
-        ChatSessionsCompanion(
-          messagesJson: Value(prepared.messagesJson),
-          draft: const Value(''),
-          updatedAt: Value(updatedAt),
-        ),
-      );
-
-      if (manifest != null) {
-        await LorebookUseManifestRepo(_db).insertVariationAcceptance(
-          acceptanceId: 'variation:$sessionId:${message.id}',
-          identity: expectedPrecedingAssistant,
-          acceptedByUserMessageId: message.id,
-          acceptedAt: updatedAt,
-        );
+      if (!prepared.didAppend) {
+        return _toModel(snapshot, messages: prepared.messages);
       }
 
-      return _toModel(
-        row.copyWith(
-          messagesJson: prepared.messagesJson,
-          draft: const Value(''),
-          updatedAt: updatedAt,
-        ),
-        messages: prepared.messages,
+      final result = await _db.transaction<({bool retry, ChatSession? value})>(
+        () async {
+          final row = await (_db.select(
+            _db.chatSessions,
+          )..where((t) => t.sessionId.equals(sessionId))).getSingleOrNull();
+          if (row == null) return (retry: false, value: null);
+          if (row.messagesJson != snapshot.messagesJson) {
+            return (retry: true, value: null);
+          }
+
+          final manifest =
+              await (_db.select(_db.lorebookUseManifests)
+                    ..where((t) => t.sessionId.equals(sessionId))
+                    ..where(
+                      (t) => t.messageId.equals(
+                        expectedPrecedingAssistant.messageId,
+                      ),
+                    )
+                    ..where(
+                      (t) =>
+                          t.swipeId.equals(expectedPrecedingAssistant.swipeId),
+                    )
+                    ..where(
+                      (t) => t.agentSwipeId.equals(
+                        expectedPrecedingAssistant.agentSwipeId,
+                      ),
+                    ))
+                  .getSingleOrNull();
+
+          await (_db.update(
+            _db.chatSessions,
+          )..where((t) => t.sessionId.equals(sessionId))).write(
+            ChatSessionsCompanion(
+              messagesJson: Value(prepared.messagesJson),
+              draft: const Value(''),
+              updatedAt: Value(updatedAt),
+            ),
+          );
+
+          if (manifest != null) {
+            await LorebookUseManifestRepo(_db).insertVariationAcceptance(
+              acceptanceId: 'variation:$sessionId:${message.id}',
+              identity: expectedPrecedingAssistant,
+              acceptedByUserMessageId: message.id,
+              acceptedAt: updatedAt,
+            );
+          }
+
+          return (
+            retry: false,
+            value: _toModel(
+              row.copyWith(
+                messagesJson: prepared.messagesJson,
+                draft: const Value(''),
+                updatedAt: updatedAt,
+              ),
+              messages: prepared.messages,
+            ),
+          );
+        },
       );
-    });
+      if (!result.retry) return result.value;
+    }
   }
 
   /// Updates only the draft column, and only if [expectedMessageCount] still
@@ -306,6 +341,21 @@ class ChatRepo implements SyncChatStore {
       ),
     );
   }
+
+  Future<ChatSession?> mutateMessagesWithBeforeWrite({
+    required String sessionId,
+    required List<ChatMessage> Function(List<ChatMessage> messages) mutate,
+    required int updatedAt,
+    required Future<void> Function(ChatSession before, ChatSession after)
+    beforeWrite,
+  }) => _mutateSession(
+    sessionId: sessionId,
+    updatedAt: updatedAt,
+    mutate: (session) => session.copyWith(
+      messages: mutate(List<ChatMessage>.from(session.messages)),
+    ),
+    beforeWrite: beforeWrite,
+  );
 
   /// Atomically transforms one message identified by its durable ID.
   Future<ChatSession?> mutateMessage({
@@ -364,6 +414,17 @@ class ChatRepo implements SyncChatStore {
     required String sessionId,
     required ChatSession? Function(ChatSession session) mutate,
     int? updatedAt,
+  }) => _mutateSession(
+    sessionId: sessionId,
+    mutate: mutate,
+    updatedAt: updatedAt,
+  );
+
+  Future<ChatSession?> _mutateSession({
+    required String sessionId,
+    required ChatSession? Function(ChatSession session) mutate,
+    int? updatedAt,
+    Future<void> Function(ChatSession before, ChatSession after)? beforeWrite,
   }) async {
     return _db.transaction(() async {
       final row = await (_db.select(
@@ -374,6 +435,7 @@ class ChatRepo implements SyncChatStore {
       final current = _toModel(row);
       final updated = mutate(current);
       if (updated == null) return null;
+      if (beforeWrite != null) await beforeWrite(current, updated);
       final messagesJson = jsonEncode(
         updated.messages.map((e) => e.toJson()).toList(),
       );
@@ -1303,7 +1365,8 @@ class ChatRepo implements SyncChatStore {
 }
 
 /// Decoding and encoding a long chat history is CPU-bound. Keep it out of the
-/// UI isolate while the repository transaction protects the read-modify-write.
+/// UI isolate. Callers do this before opening a short compare-and-swap
+/// transaction so an isolate delay cannot occupy the database executor.
 Future<_PreparedUserMessageAppend> _prepareUserMessageAppend(
   String messagesJson,
   ChatMessage message,

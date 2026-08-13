@@ -630,9 +630,20 @@ class _MagicDrawerPanelState extends ConsumerState<MagicDrawerPanel> {
             ?.session
             ?.sessionIndex;
         if (target == current) return;
-        await ref
-            .read(chatProvider(widget.charId).notifier)
-            .switchSession(target);
+        try {
+          await ref
+              .read(chatProvider(widget.charId).notifier)
+              .switchSession(target)
+              .timeout(const Duration(seconds: 30));
+        } catch (error) {
+          if (mounted) {
+            GlazeErrorDialog.show(
+              context,
+              error,
+              prefix: 'Failed to switch chat session',
+            );
+          }
+        }
       case SessionPickerAction.newSession:
         await ref.read(chatProvider(widget.charId).notifier).newSession();
       case SessionPickerAction.importChat:

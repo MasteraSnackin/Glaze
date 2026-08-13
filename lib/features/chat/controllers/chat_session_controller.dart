@@ -45,12 +45,13 @@ class ChatSessionController {
       _setState(
         AsyncData(ChatState(session: session, visibleStartIndex: start)),
       );
-    } catch (_) {
+    } catch (error, stackTrace) {
       if (epoch != _switchEpoch) return;
       final current = _getState().value;
       if (current != null) {
         _setState(AsyncData(current));
       }
+      Error.throwWithStackTrace(error, stackTrace);
     }
   }
 

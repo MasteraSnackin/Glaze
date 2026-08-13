@@ -74,6 +74,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   final String arg;
   bool _buildComplete = false;
   bool _sendInFlight = false;
+  int _sessionChangesInFlight = 0;
 
   /// Reflects the active session's generation state into
   /// [generatingSessionsProvider]. Called on every state transition; membership
@@ -346,34 +347,109 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       _swipeCtrl.setGreeting(messageIndex, direction);
 
   Future<void> switchSession(int sessionIndex) =>
-      _sessionCtrl.switchSession(sessionIndex);
+      _runSessionChange(() => _sessionCtrl.switchSession(sessionIndex));
 
-  Future<void> createNewSession() => _sessionCtrl.createNewSession();
+  Future<void> createNewSession() =>
+      _runSessionChange(_sessionCtrl.createNewSession);
 
   Future<List<ChatSession>> getSessions() => _sessionCtrl.getSessions();
 
-  Future<void> branchSession(int index) => _sessionCtrl.branchSession(index);
+  Future<void> branchSession(int index) =>
+      _runSessionChange(() => _sessionCtrl.branchSession(index));
 
-  Future<void> newSession() => _sessionCtrl.createNewSession();
+  Future<void> newSession() => _runSessionChange(_sessionCtrl.createNewSession);
+
+  Future<void> _runSessionChange(Future<void> Function() operation) async {
+    _sessionChangesInFlight++;
+    try {
+      await operation();
+    } finally {
+      _sessionChangesInFlight--;
+    }
+  }
 
   Future<void> saveDraft(String draftText) => _draftCtrl.saveDraft(draftText);
+
+  /// Starts a send only when this notifier can take ownership immediately and
+  /// resolves true after the user message is durably appended. UI callers keep
+  /// the composer intact on a busy guard or persistence failure.
+  Future<bool> trySendMessage(
+    String text, {
+    String? guidanceText,
+    String? imageDataUrl,
+  }) {
+    if (!ref.mounted ||
+        _sendInFlight ||
+        _sessionChangesInFlight > 0 ||
+        ref.read(editingMessageIdProvider(arg)) != null) {
+      return Future.value(false);
+    }
+    final current = state.value;
+    if (current == null ||
+        current.isGenerating ||
+        current.isGeneratingImage ||
+        current.isPostGenRunning ||
+        _isMemoryDraftActive(current)) {
+      return Future.value(false);
+    }
+
+    final durableAcceptance = Completer<bool>();
+    unawaited(
+      _sendMessage(
+        text,
+        guidanceText: guidanceText,
+        imageDataUrl: imageDataUrl,
+        durableAcceptance: durableAcceptance,
+      ).catchError((Object error, StackTrace stackTrace) {
+        debugPrint('[ChatNotifier] accepted send failed: $error\n$stackTrace');
+        if (!durableAcceptance.isCompleted) {
+          durableAcceptance.complete(false);
+        }
+      }),
+    );
+    return durableAcceptance.future;
+  }
 
   Future<void> sendMessage(
     String text, {
     String? guidanceText,
     String? imageDataUrl,
+  }) => _sendMessage(
+    text,
+    guidanceText: guidanceText,
+    imageDataUrl: imageDataUrl,
+  );
+
+  Future<void> _sendMessage(
+    String text, {
+    String? guidanceText,
+    String? imageDataUrl,
+    Completer<bool>? durableAcceptance,
   }) async {
-    if (!ref.mounted) return;
-    if (_sendInFlight) return;
-    if (ref.read(editingMessageIdProvider(arg)) != null) return;
+    if (!ref.mounted) {
+      durableAcceptance?.complete(false);
+      return;
+    }
+    if (_sendInFlight) {
+      durableAcceptance?.complete(false);
+      return;
+    }
+    if (ref.read(editingMessageIdProvider(arg)) != null) {
+      durableAcceptance?.complete(false);
+      return;
+    }
     final current = state.value;
     if (current == null ||
         current.isGenerating ||
         current.isGeneratingImage ||
         current.isPostGenRunning) {
+      durableAcceptance?.complete(false);
       return;
     }
-    if (_isMemoryDraftActive(current)) return;
+    if (_isMemoryDraftActive(current)) {
+      durableAcceptance?.complete(false);
+      return;
+    }
     _sendInFlight = true;
 
     try {
@@ -432,6 +508,9 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         // The session row is gone — roll the optimistic append back.
         state = AsyncData(current);
         return;
+      }
+      if (durableAcceptance != null && !durableAcceptance.isCompleted) {
+        durableAcceptance.complete(true);
       }
       // Commit the exact visible green/blue swipe, never whichever Ledger call
       // happened to finish most recently.
@@ -524,6 +603,9 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         }
       }
     } finally {
+      if (durableAcceptance != null && !durableAcceptance.isCompleted) {
+        durableAcceptance.complete(false);
+      }
       _sendInFlight = false;
     }
   }

@@ -45,6 +45,8 @@ class AgentStreamRunner {
     String? tagEnd,
     String? headerModel,
     String? headerInline,
+    String? charName,
+    String? userName,
     void Function(String text, String? reasoning)? onFinalResponseUpdate,
     void Function(String text)? onIntermediateUpdate,
   }) async {
@@ -109,6 +111,8 @@ class AgentStreamRunner {
       cacheBreakpointMode: resolved.cacheBreakpointMode,
       sessionIdMode: resolved.sessionIdMode,
       promptPostProcessing: resolved.promptPostProcessing,
+      charName: charName,
+      userName: userName,
       extraRequestParameters: resolved.extraRequestParameters,
     );
     final transport = _pickTransport(resolved.protocol);

@@ -169,6 +169,8 @@ class InfoBlockService {
         apiConfig: apiConfig,
         blockConfig: blockConfig,
         requestMessages: assembly.messages,
+        charName: character?.name,
+        userName: personaModel?.name ?? persona ?? 'User',
         cancelToken: cancelToken,
         onStreamUpdate: onStreamUpdate,
       );
@@ -478,6 +480,8 @@ class InfoBlockService {
     required ApiConfig apiConfig,
     required BlockConfig blockConfig,
     required List<Map<String, dynamic>> requestMessages,
+    required String? charName,
+    required String userName,
     CancelToken? cancelToken,
     void Function(String accumulated)? onStreamUpdate,
   }) async {
@@ -496,6 +500,8 @@ class InfoBlockService {
               : apiConfig.model,
           messages: requestMessages,
           stream: useStream,
+          charName: charName,
+          userName: userName,
         ),
         cancelToken: cancelToken,
         onUpdate: useStream

@@ -132,6 +132,10 @@ class ChatMessageService {
         .map((message) => message.id)
         .where((id) => id.isNotEmpty)
         .toSet();
+    final deletedMessageIds = validIndices
+        .map((index) => session.messages[index].id)
+        .where((id) => id.isNotEmpty)
+        .toSet();
     final newMessages = <ChatMessage>[
       for (var i = 0; i < session.messages.length; i++)
         if (!validIndices.contains(i)) session.messages[i],
@@ -155,6 +159,7 @@ class ChatMessageService {
       deletedIndices: validIndices,
       earliestDeletedIndex: earliestDeletedIndex,
       invalidatedMessageIds: invalidatedMessageIds,
+      deletedMessageIds: deletedMessageIds,
     );
   }
 
@@ -201,6 +206,14 @@ class ChatMessageService {
         session.id,
         invalidatedMessageIds,
       );
+      await _ref
+          .read(ledgerReconciliationRunRepoProvider)
+          .invalidateForMessageMutation(
+            sessionId: session.id,
+            messageIds: plan.deletedMessageIds,
+            reason: 'message_deleted',
+            createdAt: currentTimestampSeconds(),
+          );
       await knowledgeRepo.retractForMessages(session.id, invalidatedMessageIds);
       await memoryBookRepo.deleteForMessages(session.id, invalidatedMessageIds);
       await snapshotRepo.deleteForMessages(session.id, invalidatedMessageIds);
@@ -521,6 +534,14 @@ class ChatMessageService {
           ..[messageIndex] = replacement,
         updatedAt: currentTimestampSeconds(),
       );
+      await _ref
+          .read(ledgerReconciliationRunRepoProvider)
+          .invalidateForMessageMutation(
+            sessionId: session.id,
+            messageIds: {messageId},
+            reason: 'variation_deleted',
+            createdAt: currentTimestampSeconds(),
+          );
 
       if (!removeAgentSwipe) {
         // Manifest anchors are immutable. Green-index compaction would make
@@ -1018,7 +1039,7 @@ class ChatMessageService {
     }
     final messageId = snapshot.messages[messageIndex].id;
     final repo = _ref.read(chatRepoProvider);
-    final durable = await repo.mutateMessages(
+    final durable = await repo.mutateMessagesWithBeforeWrite(
       sessionId: snapshot.id,
       updatedAt: currentTimestampSeconds(),
       mutate: (messages) {
@@ -1027,6 +1048,7 @@ class ChatMessageService {
         final latest = snapshot.copyWith(messages: messages);
         return mutate(latest, latestIndex).messages;
       },
+      beforeWrite: _invalidateChangedReconciliationAnchors,
     );
     if (durable == null) return snapshot;
     ChatSessionService.updateCache(durable);
@@ -1039,16 +1061,62 @@ class ChatMessageService {
     ChatSession Function(ChatSession latest) mutate,
   ) async {
     final repo = _ref.read(chatRepoProvider);
-    final durable = await repo.mutateMessages(
+    final durable = await repo.mutateMessagesWithBeforeWrite(
       sessionId: snapshot.id,
       updatedAt: currentTimestampSeconds(),
       mutate: (messages) =>
           mutate(snapshot.copyWith(messages: messages)).messages,
+      beforeWrite: _invalidateChangedReconciliationAnchors,
     );
     if (durable == null) return snapshot;
     ChatSessionService.updateCache(durable);
     return durable;
   }
+
+  Future<void> _invalidateChangedReconciliationAnchors(
+    ChatSession before,
+    ChatSession after,
+  ) async {
+    final beforeById = {
+      for (final message in before.messages) message.id: message,
+    };
+    final afterById = {
+      for (final message in after.messages) message.id: message,
+    };
+    final beforeIndexById = {
+      for (final entry in before.messages.indexed) entry.$2.id: entry.$1,
+    };
+    final afterIndexById = {
+      for (final entry in after.messages.indexed) entry.$2.id: entry.$1,
+    };
+    final changedIds = <String>{};
+    for (final entry in beforeById.entries) {
+      final next = afterById[entry.key];
+      if (next == null ||
+          beforeIndexById[entry.key] != afterIndexById[entry.key] ||
+          !_sameReconciliationEvidence(entry.value, next)) {
+        if (entry.key.isNotEmpty) changedIds.add(entry.key);
+      }
+    }
+    if (changedIds.isEmpty) return;
+    await _ref
+        .read(ledgerReconciliationRunRepoProvider)
+        .invalidateForMessageMutation(
+          sessionId: before.id,
+          messageIds: changedIds,
+          reason: 'message_evidence_changed',
+          createdAt: currentTimestampSeconds(),
+        );
+  }
+
+  static bool _sameReconciliationEvidence(ChatMessage a, ChatMessage b) =>
+      a.role == b.role &&
+      a.content == b.content &&
+      a.swipeId == b.swipeId &&
+      a.agentSwipeId == b.agentSwipeId &&
+      a.isHidden == b.isHidden &&
+      a.isError == b.isError &&
+      a.isTyping == b.isTyping;
 }
 
 /// Everything a message deletion needs, computed synchronously by
@@ -1074,11 +1142,17 @@ class MessageDeletionPlan {
   /// facts and ext blocks anchored to these ids no longer describe the chat.
   final Set<String> invalidatedMessageIds;
 
+  /// Only physically deleted messages. Reconciliation invalidation matches
+  /// these against immutable anchors; the wider causal suffix is used by the
+  /// mutable Ledger/memory rollback only.
+  final Set<String> deletedMessageIds;
+
   const MessageDeletionPlan({
     required this.session,
     required this.deletedIndices,
     required this.earliestDeletedIndex,
     required this.invalidatedMessageIds,
+    required this.deletedMessageIds,
   });
 }
 

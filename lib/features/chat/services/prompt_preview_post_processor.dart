@@ -63,8 +63,10 @@ const String _tokenSuffix = '\u0000';
 /// as `buildApiMessages` drops them.
 List<PreviewMessage> buildPreviewMessages(
   List<PromptMessage> messages,
-  String mode,
-) {
+  String mode, {
+  String? charName,
+  String? userName,
+}) {
   final normalized = PromptPostProcessing.normalize(mode);
   if (normalized == PromptPostProcessing.none) {
     return [
@@ -82,7 +84,12 @@ List<PreviewMessage> buildPreviewMessages(
       {'role': included[i].role, 'content': '$_tokenPrefix$i$_tokenSuffix'},
   ];
 
-  final processed = postProcessPrompt(tagged, normalized);
+  final processed = postProcessPrompt(
+    tagged,
+    normalized,
+    charName: charName,
+    userName: userName,
+  );
 
   final rows = <PreviewMessage>[];
   for (final message in processed) {
@@ -93,7 +100,7 @@ List<PreviewMessage> buildPreviewMessages(
     final sources = <PromptMessage>[];
     final chunks = <String>[];
     for (final chunk in text.split(_mergeSeparator)) {
-      final index = _tokenIndex(chunk);
+      final index = _tokenIndex(chunk, charName: charName, userName: userName);
       if (index == null || index >= included.length) {
         // Not a token: text the pass itself introduced, i.e. the filler turn.
         chunks.add(chunk);
@@ -101,7 +108,16 @@ List<PreviewMessage> buildPreviewMessages(
       }
       final source = included[index];
       sources.add(source);
-      if (source.content.isNotEmpty) chunks.add(source.content);
+      if (source.content.isNotEmpty) {
+        chunks.add(
+          _displayContent(
+            source,
+            mode: normalized,
+            charName: charName,
+            userName: userName,
+          ),
+        );
+      }
     }
 
     rows.add(
@@ -115,13 +131,38 @@ List<PreviewMessage> buildPreviewMessages(
 }
 
 /// Parses a token back into its source index; null for anything else.
-int? _tokenIndex(String chunk) {
-  if (!chunk.startsWith(_tokenPrefix) || !chunk.endsWith(_tokenSuffix)) {
+int? _tokenIndex(String chunk, {String? charName, String? userName}) {
+  var token = chunk;
+  for (final name in [charName, userName]) {
+    if (name != null && name.isNotEmpty && token.startsWith('$name: ')) {
+      token = token.substring(name.length + 2);
+      break;
+    }
+  }
+  if (!token.startsWith(_tokenPrefix) || !token.endsWith(_tokenSuffix)) {
     return null;
   }
   return int.tryParse(
-    chunk.substring(_tokenPrefix.length, chunk.length - _tokenSuffix.length),
+    token.substring(_tokenPrefix.length, token.length - _tokenSuffix.length),
   );
+}
+
+String _displayContent(
+  PromptMessage source, {
+  required String mode,
+  String? charName,
+  String? userName,
+}) {
+  if (mode != PromptPostProcessing.single) return source.content;
+  final name = switch (source.role) {
+    'assistant' => charName,
+    'user' => userName,
+    _ => null,
+  };
+  if (name == null || name.isEmpty || source.content.startsWith('$name: ')) {
+    return source.content;
+  }
+  return '$name: ${source.content}';
 }
 
 /// Builds the message a row displays. A single source keeps its own metadata;

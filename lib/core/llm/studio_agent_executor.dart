@@ -110,6 +110,8 @@ class StudioAgentExecutor {
         cancelToken: cancelToken,
         apiConfigId: apiConfigId,
         turnConfig: turnConfig,
+        charName: context.macroContext.charName,
+        userName: context.macroContext.userName,
         onIntermediateUpdate: onIntermediateUpdate,
       );
       return StudioStageBrief(
@@ -188,6 +190,8 @@ class StudioAgentExecutor {
           cancelToken: cancelToken,
           apiConfigId: apiConfigId,
           turnConfig: turnConfig,
+          charName: context.macroContext.charName,
+          userName: context.macroContext.userName,
         );
         final text = result.text.trim();
         return StudioStageBrief(
@@ -305,6 +309,8 @@ class StudioAgentExecutor {
       cancelToken: cancelToken,
       apiConfigId: apiConfigId,
       turnConfig: turnConfig,
+      charName: context.macroContext.charName,
+      userName: context.macroContext.userName,
       onFinalResponseUpdate: onFinalResponseUpdate,
     );
   }

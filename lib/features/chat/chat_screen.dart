@@ -473,8 +473,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen>
                 ),
                 if (awaitingTargetSession)
                   const Positioned.fill(
-                    child: IgnorePointer(
-                      child: Center(child: GlazeSpinner()),
+                    child: AbsorbPointer(
+                      child: ColoredBox(
+                        color: Colors.transparent,
+                        child: Center(child: GlazeSpinner()),
+                      ),
                     ),
                   ),
               ],
@@ -1854,6 +1857,7 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                           widget.state.messages,
                                         );
                                     return ChatInputBar(
+                                      key: ValueKey(widget.state.session?.id),
                                       focusNode: widget.drawerCtrl.inputFocus,
                                       initialDraft:
                                           widget.state.session?.draft ?? '',
@@ -1933,48 +1937,66 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                       canSend: () =>
                                           _ensurePersonaSelected() &&
                                           _ensureApiSelected(),
-                                      onSend: (text) {
-                                        if (text.trim().isEmpty) return;
-                                        _webViewStateKey.currentState
-                                            ?.requestScrollToBottomOnAppend();
-                                        ref
+                                      onSend: (text) async {
+                                        if (text.trim().isEmpty) {
+                                          return false;
+                                        }
+                                        final accepted = await ref
                                             .read(
                                               chatProvider(
                                                 widget.charId,
                                               ).notifier,
                                             )
-                                            .sendMessage(text);
+                                            .trySendMessage(text);
+                                        if (accepted) {
+                                          await _webViewStateKey.currentState
+                                              ?.requestScrollToBottomOnAppend();
+                                        }
+                                        return accepted;
                                       },
-                                      onSendWithGuidance: (text, guidance) {
-                                        if (text.trim().isEmpty) return;
-                                        _webViewStateKey.currentState
-                                            ?.requestScrollToBottomOnAppend();
-                                        ref
+                                      onSendWithGuidance: (text, guidance) async {
+                                        if (text.trim().isEmpty) {
+                                          return false;
+                                        }
+                                        final accepted = await ref
                                             .read(
                                               chatProvider(
                                                 widget.charId,
                                               ).notifier,
                                             )
-                                            .sendMessage(
+                                            .trySendMessage(
                                               text,
                                               guidanceText: guidance,
                                             );
+                                        if (accepted) {
+                                          await _webViewStateKey.currentState
+                                              ?.requestScrollToBottomOnAppend();
+                                        }
+                                        return accepted;
                                       },
                                       onSendWithImage:
-                                          (text, guidanceText, imageDataUrl) {
-                                            _webViewStateKey.currentState
-                                                ?.requestScrollToBottomOnAppend();
-                                            ref
+                                          (
+                                            text,
+                                            guidanceText,
+                                            imageDataUrl,
+                                          ) async {
+                                            final accepted = await ref
                                                 .read(
                                                   chatProvider(
                                                     widget.charId,
                                                   ).notifier,
                                                 )
-                                                .sendMessage(
+                                                .trySendMessage(
                                                   text,
                                                   guidanceText: guidanceText,
                                                   imageDataUrl: imageDataUrl,
                                                 );
+                                            if (accepted) {
+                                              await _webViewStateKey
+                                                  .currentState
+                                                  ?.requestScrollToBottomOnAppend();
+                                            }
+                                            return accepted;
                                           },
                                       isGenerating: widget.state.isGenerating,
                                       isGeneratingImage:

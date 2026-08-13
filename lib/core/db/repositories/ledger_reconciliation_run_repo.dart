@@ -323,6 +323,84 @@ class LedgerReconciliationRunRepo {
             ..limit(1))
           .getSingleOrNull();
 
+  /// Logically invalidates the first reconciliation whose immutable evidence
+  /// references one of [messageIds], plus its already-written causal suffix.
+  /// Trigger messages are not anchors, so deleting a trigger does not touch the
+  /// completed range it caused.
+  ///
+  /// Caller owns the surrounding transaction.
+  Future<List<String>> invalidateForMessageMutation({
+    required String sessionId,
+    required Set<String> messageIds,
+    required String reason,
+    required int createdAt,
+  }) async {
+    if (messageIds.isEmpty) return const [];
+    final rows =
+        await (_db.select(_db.ledgerReconciliationSuccessfulRuns)
+              ..where((row) => row.sessionId.equals(sessionId))
+              ..orderBy([(row) => OrderingTerm.asc(row.ordinal)]))
+            .get();
+    final existingInvalidations = await (_db.select(
+      _db.ledgerReconciliationRunInvalidations,
+    )..where((row) => row.sessionId.equals(sessionId))).get();
+    final alreadyInvalidated = existingInvalidations
+        .map((row) => row.runId)
+        .toSet();
+    var firstAffected = -1;
+    for (var i = 0; i < rows.length; i++) {
+      if (alreadyInvalidated.contains(rows[i].id)) continue;
+      try {
+        final anchors = _decodeAnchors(rows[i].anchorsJson);
+        if (anchors.any((anchor) => messageIds.contains(anchor.messageId))) {
+          firstAffected = i;
+          break;
+        }
+      } catch (_) {
+        // Malformed immutable history remains an integrity failure; mutation
+        // invalidation must not disguise it.
+        return const [];
+      }
+    }
+    if (firstAffected < 0) return const [];
+    final affected = rows.sublist(firstAffected);
+    for (final row in affected) {
+      await _db
+          .into(_db.ledgerReconciliationRunInvalidations)
+          .insert(
+            LedgerReconciliationRunInvalidationsCompanion.insert(
+              sessionId: sessionId,
+              runId: row.id,
+              causeMessageId: messageIds.first,
+              reason: reason,
+              createdAt: createdAt,
+            ),
+            mode: InsertMode.insertOrIgnore,
+          );
+    }
+
+    // Observations are aggregates rather than per-collector events, so a
+    // suffix-only rollback cannot reliably subtract confirmations or
+    // promotions derived from invalid evidence. Reset the derived collector
+    // lane and rebuild it from the valid reconciliation backlog.
+    final affectedIds = affected.map((row) => row.id).toSet();
+    final hasAffectedCollector =
+        await (_db.select(_db.cardEvolutionCollectorRuns)
+              ..where((row) => row.sessionId.equals(sessionId))
+              ..where((row) => row.reconciliationRunId.isIn(affectedIds))
+              ..limit(1))
+            .getSingleOrNull();
+    if (hasAffectedCollector != null) {
+      await (_db.delete(
+        _db.cardEvolutionCollectorRuns,
+      )..where((row) => row.sessionId.equals(sessionId))).go();
+      await (_db.delete(
+        _db.cardEvolutionObservations,
+      )..where((row) => row.sessionId.equals(sessionId))).go();
+    }
+    return affectedIds.toList(growable: false);
+  }
+
   /// Copies all reconciliation runs from [fromSessionId] to [toSessionId],
   /// preserving the ordinal chain. Only runs whose endpoint message falls
   /// within the branched slice ([messageIds]) are copied. The chain hashes
@@ -404,7 +482,18 @@ class LedgerReconciliationRunRepo {
       return <LedgerReconciliationSuccessfulRunRow>[];
     }
     final invalidatedIds = invalidated.map((row) => row.runId).toSet();
-    return rows.where((row) => !invalidatedIds.contains(row.id)).toList();
+    final visible = <LedgerReconciliationSuccessfulRunRow>[];
+    for (final row in rows) {
+      if (invalidatedIds.contains(row.id)) continue;
+      // Legacy databases may contain mutations made before production began
+      // recording invalidations. Treat the first such stale row and its
+      // physical suffix as logically unavailable without corrupting physical
+      // hash-chain integrity. A later mutation records explicit suffix
+      // invalidations, allowing newly appended valid rows to be visible again.
+      if (!await _storedRowMatchesCurrentEvidence(row)) break;
+      visible.add(row);
+    }
+    return visible;
   }
 
   Future<List<LedgerReconciliationCursorRow>> readCursors(
@@ -555,8 +644,37 @@ class LedgerReconciliationRunRepo {
           row.endSwipeId == run.end.swipeId &&
           row.endAgentSwipeId == run.end.agentSwipeId &&
           row.contentHash == run.contentHash &&
-          row.chainHash == run.chainHash &&
-          await _anchorsMatchSession(run) &&
+          row.chainHash == run.chainHash;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> _storedRowMatchesCurrentEvidence(
+    LedgerReconciliationSuccessfulRunRow row,
+  ) async {
+    try {
+      final anchors = _decodeAnchors(row.anchorsJson);
+      final refs = _decodeRefs(row.acceptedManifestRefsJson);
+      final result = jsonDecode(row.canonicalResultJson);
+      final ops = jsonDecode(row.opsAppliedJson);
+      if (result is! Map<Object?, Object?> || ops is! List) return false;
+      final run = LedgerReconciliationRun(
+        id: row.id,
+        sessionId: row.sessionId,
+        ordinal: row.ordinal,
+        anchors: anchors,
+        acceptedManifestRefs: refs,
+        effectiveCanonStamp: row.effectiveCanonStamp,
+        effectiveCanonRevision: row.effectiveCanonRevision,
+        effectiveCanonHash: row.effectiveCanonHash,
+        canonicalResult: Map<String, dynamic>.from(result),
+        predecessorChainHash: row.predecessorChainHash,
+        contractVersion: row.contractVersion,
+        opsApplied: List<String>.from(ops),
+        createdAt: row.createdAt,
+      );
+      return await _anchorsMatchSession(run) &&
           await _refsMatchAcceptedManifests(run);
     } catch (_) {
       return false;

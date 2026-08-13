@@ -519,6 +519,8 @@ class StreamGenerationService {
           messages: apiMessages,
           sessionId: session.id,
           previousMessages: previousApiMessages,
+          charName: inputs.character.name,
+          userName: inputs.persona?.name ?? 'User',
         ),
         cancelToken: cancelToken,
         onUpdate: (delta, reasoningDelta) {

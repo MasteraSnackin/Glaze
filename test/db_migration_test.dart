@@ -2518,12 +2518,12 @@ void main() {
       expect(version.read<int>('user_version'), 118);
     });
 
-    test('v118 adds prompt post-processing, off unless the active preset '
-        'merged prompts', () async {
+    test('v118 adds prompt post-processing with none for every config', () async {
       Future<Map<String, String>> upgradeWith(
         Map<String, Object> prefs,
-        String? presetJson,
-      ) async {
+        String? presetJson, {
+        bool removeColumn = true,
+      }) async {
         final file = File(
           '${Directory.systemTemp.path}/glaze_mig_ppp_${DateTime.now().microsecondsSinceEpoch}.db',
         );
@@ -2551,9 +2551,16 @@ void main() {
             ['preset', 'Preset', presetJson],
           );
         }
-        await seeded.customStatement(
-          'ALTER TABLE api_configs DROP COLUMN prompt_post_processing',
-        );
+        if (removeColumn) {
+          await seeded.customStatement(
+            'ALTER TABLE api_configs DROP COLUMN prompt_post_processing',
+          );
+        } else {
+          await seeded.customStatement(
+            "UPDATE api_configs SET prompt_post_processing = 'single' "
+            "WHERE config_id = 'custom'",
+          );
+        }
         await seeded.customStatement('PRAGMA user_version = 117');
         await seeded.close();
 
@@ -2575,13 +2582,13 @@ void main() {
         };
       }
 
-      // No preset selected: nothing to carry over.
+      // No preset selected.
       expect(await upgradeWith(const {}, null), {
         'custom': 'none',
         'anthropic': 'none',
       });
 
-      // Active preset never merged: the connection stays untouched.
+      // An inactive merge setting does not affect connection rows.
       expect(
         await upgradeWith(const {
           'activePresetId': 'preset',
@@ -2589,21 +2596,25 @@ void main() {
         {'custom': 'none', 'anthropic': 'none'},
       );
 
-      // Active preset merged: adopt the equivalent mode so the prompt shape
-      // the user is living with does not change under them.
+      // The legacy preset flag is intentionally not carried over, including
+      // for custom connections.
       expect(
         await upgradeWith(const {
           'activePresetId': 'preset',
         }, '{"id":"preset","name":"Preset","mergePrompts":true}'),
-        // The tool-preserving half, matching what the picker stores. Only the
-        // custom connection: first-party protocols normalize in their own
-        // converter and never offer the setting.
-        {'custom': 'merge_tools', 'anthropic': 'none'},
+        {'custom': 'none', 'anthropic': 'none'},
       );
 
-      // A dangling preset id must not block the upgrade.
+      // A dangling preset id also cannot affect or block the upgrade.
       expect(await upgradeWith(const {'activePresetId': 'missing'}, null), {
         'custom': 'none',
+        'anthropic': 'none',
+      });
+
+      // A partially/previously applied schema change is left intact rather
+      // than trying to add the column again or rewriting existing choices.
+      expect(await upgradeWith(const {}, null, removeColumn: false), {
+        'custom': 'single',
         'anthropic': 'none',
       });
     });

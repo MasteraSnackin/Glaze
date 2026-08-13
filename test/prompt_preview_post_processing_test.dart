@@ -32,12 +32,7 @@ void main() {
     final rows = buildPreviewMessages(built, PromptPostProcessing.none);
 
     expect(rows, hasLength(built.length));
-    expect(contentsOf(rows), [
-      'main prompt',
-      'lore entry',
-      'hi',
-      'hello',
-    ]);
+    expect(contentsOf(rows), ['main prompt', 'lore entry', 'hi', 'hello']);
     expect(rows.every((r) => !r.isMerged), isTrue);
   });
 
@@ -100,14 +95,19 @@ void main() {
   });
 
   test('single collapses the whole prompt into one user row', () {
-    final rows = buildPreviewMessages(built, PromptPostProcessing.single);
+    final rows = buildPreviewMessages(
+      built,
+      PromptPostProcessing.single,
+      charName: 'Character',
+      userName: 'User',
+    );
 
     expect(rows, hasLength(1));
     expect(rows.single.message.role, 'user');
     expect(rows.single.sources, hasLength(built.length));
     expect(
       rows.single.message.content,
-      'main prompt\n\nlore entry\n\nhi\n\nhello',
+      'main prompt\n\nlore entry\n\nUser: hi\n\nCharacter: hello',
     );
   });
 
@@ -148,8 +148,18 @@ void main() {
     PromptPostProcessing.single,
   ]) {
     test('$mode rows match what the request body carries', () {
-      final rows = buildPreviewMessages(built, mode);
-      final sent = postProcessPrompt(buildApiMessages(built), mode);
+      final rows = buildPreviewMessages(
+        built,
+        mode,
+        charName: 'Character',
+        userName: 'User',
+      );
+      final sent = postProcessPrompt(
+        buildApiMessages(built),
+        mode,
+        charName: 'Character',
+        userName: 'User',
+      );
 
       expect(rolesOf(rows), [for (final m in sent) m['role']]);
       expect(contentsOf(rows), [for (final m in sent) m['content']]);

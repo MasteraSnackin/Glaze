@@ -175,6 +175,8 @@ void main() {
       previousMessages: previousMessages,
       tools: tools,
       toolChoice: 'required',
+      charName: 'Character',
+      userName: 'User Name',
     );
 
     expect(request.model, 'override-model');
@@ -184,5 +186,14 @@ void main() {
     expect(request.previousMessages, same(previousMessages));
     expect(request.tools, same(tools));
     expect(request.toolChoice, 'required');
+    expect(request.charName, 'Character');
+    expect(request.userName, 'User Name');
+
+    final rewritten = request.withMessages(const [
+      {'role': 'user', 'content': 'Rewritten'},
+    ]);
+    expect(rewritten.charName, 'Character');
+    expect(rewritten.userName, 'User Name');
+    expect(rewritten.promptPostProcessing, 'none');
   });
 }
