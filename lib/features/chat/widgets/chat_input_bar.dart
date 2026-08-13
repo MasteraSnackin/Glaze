@@ -26,14 +26,17 @@ Border _uiBorder(BuildContext context, ThemePreset preset) {
 }
 
 class ChatInputBar extends ConsumerStatefulWidget {
-  final ValueChanged<String> onSend;
+  /// Returns true only when the host accepted ownership of the send. The
+  /// composer is cleared only in that case.
+  final Future<bool> Function(String text) onSend;
 
   /// Guard invoked right before a send is dispatched. When it returns false the
   /// send is aborted and the composed text/image are kept intact so the host
   /// can show a prerequisite modal (e.g. "no provider selected") without losing
   /// what the user typed. When null, sending is always allowed.
   final bool Function()? canSend;
-  final void Function(String text, String? guidance)? onSendWithGuidance;
+  final Future<bool> Function(String text, String? guidance)?
+  onSendWithGuidance;
   final bool isGenerating;
   final bool isGeneratingImage;
 
@@ -43,7 +46,11 @@ class ChatInputBar extends ConsumerStatefulWidget {
   final bool isPostGenRunning;
   final VoidCallback? onStop;
   final VoidCallback? onMagicDrawer;
-  final void Function(String text, String? guidanceText, String imageDataUrl)?
+  final Future<bool> Function(
+    String text,
+    String? guidanceText,
+    String imageDataUrl,
+  )?
   onSendWithImage;
   final VoidCallback? onFullScreen;
   final VoidCallback? onQuickReplies;
@@ -147,6 +154,7 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
   /// locked and draft persistence is paused so the streamed text is not saved
   /// as the user's draft.
   bool _isImpersonating = false;
+  bool _isDispatchingSend = false;
 
   @override
   void initState() {
@@ -296,8 +304,8 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
     });
   }
 
-  void _handleSend() {
-    if (widget.isEditingMessage) return;
+  Future<void> _handleSend() async {
+    if (widget.isEditingMessage || _isDispatchingSend) return;
     final text = _controller.text;
     final hasImage = _attachedImageDataUrl != null;
     if (text.trim().isEmpty && !hasImage) return;
@@ -305,17 +313,36 @@ class _ChatInputBarState extends ConsumerState<ChatInputBar> {
     // and image so nothing is lost while the host shows its modal.
     if (widget.canSend != null && !widget.canSend!()) return;
     final imageDataUrl = _attachedImageDataUrl;
-    if (imageDataUrl != null) {
-      final guidance =
-          _guidanceMode && _guidanceController.text.trim().isNotEmpty
-          ? _guidanceController.text.trim()
-          : null;
-      widget.onSendWithImage?.call(text, guidance, imageDataUrl);
-    } else if (_guidanceMode && _guidanceController.text.trim().isNotEmpty) {
-      widget.onSendWithGuidance?.call(text, _guidanceController.text.trim());
-    } else {
-      if (text.trim().isEmpty) return;
-      widget.onSend(text);
+    _isDispatchingSend = true;
+    bool accepted;
+    try {
+      if (imageDataUrl != null) {
+        final guidance =
+            _guidanceMode && _guidanceController.text.trim().isNotEmpty
+            ? _guidanceController.text.trim()
+            : null;
+        accepted =
+            await widget.onSendWithImage?.call(text, guidance, imageDataUrl) ??
+            false;
+      } else if (_guidanceMode && _guidanceController.text.trim().isNotEmpty) {
+        accepted =
+            await widget.onSendWithGuidance?.call(
+              text,
+              _guidanceController.text.trim(),
+            ) ??
+            false;
+      } else {
+        if (text.trim().isEmpty) return;
+        accepted = await widget.onSend(text);
+      }
+    } finally {
+      _isDispatchingSend = false;
+    }
+    if (!mounted || !accepted) return;
+    // The user may edit the composer while the durable write is pending. Clear
+    // only the exact payload that was accepted, never newer text.
+    if (_controller.text != text || _attachedImageDataUrl != imageDataUrl) {
+      return;
     }
     _controller.clear();
     _guidanceController.clear();

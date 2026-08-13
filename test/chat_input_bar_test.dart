@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -22,13 +24,17 @@ void main() {
       String initialDraft = '',
       void Function(String? guidance)? onImpersonate,
       VoidCallback? onStop,
+      bool acceptSend = true,
     }) {
       sentMessages = [];
       return ProviderScope(
         child: MaterialApp(
           home: Scaffold(
             body: ChatInputBar(
-              onSend: (text) => sentMessages.add(text),
+              onSend: (text) async {
+                sentMessages.add(text);
+                return acceptSend;
+              },
               isGenerating: false,
               isGeneratingImage: isGeneratingImage,
               focusNode: focusNode,
@@ -119,6 +125,48 @@ void main() {
       await tester.tap(find.byIcon(Icons.send_rounded));
 
       expect(sentMessages, isEmpty);
+    });
+
+    testWidgets('rejected send keeps the composed text', (tester) async {
+      await tester.pumpWidget(
+        buildChatInputBar(initialDraft: 'keep me', acceptSend: false),
+      );
+
+      await tester.tap(find.byIcon(Icons.send_rounded));
+      await tester.pump();
+
+      expect(sentMessages, ['keep me']);
+      final textField = tester.widget<TextField>(find.byType(TextField));
+      expect(textField.controller!.text, 'keep me');
+    });
+
+    testWidgets('pending send does not clear text before durable acceptance', (
+      tester,
+    ) async {
+      final accepted = Completer<bool>();
+      await tester.pumpWidget(
+        ProviderScope(
+          child: MaterialApp(
+            home: Scaffold(
+              body: ChatInputBar(
+                initialDraft: 'wait for db',
+                isGenerating: false,
+                onSend: (_) => accepted.future,
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.byIcon(Icons.send_rounded));
+      await tester.pump();
+      var textField = tester.widget<TextField>(find.byType(TextField));
+      expect(textField.controller!.text, 'wait for db');
+
+      accepted.complete(true);
+      await tester.pump();
+      textField = tester.widget<TextField>(find.byType(TextField));
+      expect(textField.controller!.text, isEmpty);
     });
 
     testWidgets('image generation stop button remains tappable', (
