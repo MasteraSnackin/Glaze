@@ -59,6 +59,12 @@ class ChatTransportRequest {
   /// Controls when `session_id` is sent: `'openrouter' | 'always' | 'off'`.
   final String sessionIdMode;
 
+  /// SillyTavern-style reshaping applied to [messages] before the protocol
+  /// converter runs — see `converters/prompt_post_processing.dart`. Applied
+  /// once, by the decorator `pickChatTransport` wraps every transport in, so
+  /// transports themselves always see already-processed messages.
+  final String promptPostProcessing;
+
   /// Optional tool definitions for native tool-call support (OpenAI format).
   /// When non-null, the request includes `tools` and `tool_choice` in the body.
   /// Transports that don't support tools will ignore this field.
@@ -117,6 +123,7 @@ class ChatTransportRequest {
     this.cacheControlTtl = 'off',
     this.cacheBreakpointMode = 'depth',
     this.sessionIdMode = 'openrouter',
+    this.promptPostProcessing = 'none',
     this.tools,
     this.toolChoice,
     this.useSystemInstruction = true,
@@ -164,9 +171,52 @@ class ChatTransportRequest {
     cacheControlTtl: apiConfig.cacheControlTtl,
     cacheBreakpointMode: apiConfig.cacheBreakpointMode,
     sessionIdMode: apiConfig.sessionIdMode,
+    promptPostProcessing: apiConfig.promptPostProcessing,
     tools: tools,
     toolChoice: toolChoice,
     useSystemInstruction: apiConfig.useSystemInstruction,
     extraRequestParameters: apiConfig.extraRequestParameters,
+  );
+
+  /// Same request with a rewritten conversation. Every other option is carried
+  /// over verbatim except [promptPostProcessing], which resets to `'none'`:
+  /// the reshaping this method exists for has, by definition, already run.
+  ChatTransportRequest withMessages(
+    List<Map<String, dynamic>> messages, {
+    List<Map<String, dynamic>>? previousMessages,
+  }) => ChatTransportRequest(
+    endpoint: endpoint,
+    apiKey: apiKey,
+    model: model,
+    messages: messages,
+    maxTokens: maxTokens,
+    temperature: temperature,
+    topP: topP,
+    topK: topK,
+    frequencyPenalty: frequencyPenalty,
+    presencePenalty: presencePenalty,
+    stream: stream,
+    requestReasoning: requestReasoning,
+    useResponsesApi: useResponsesApi,
+    reasoningEffort: reasoningEffort,
+    omitTemperature: omitTemperature,
+    omitTopP: omitTopP,
+    omitTopK: omitTopK,
+    omitFrequencyPenalty: omitFrequencyPenalty,
+    omitPresencePenalty: omitPresencePenalty,
+    omitReasoning: omitReasoning,
+    omitReasoningEffort: omitReasoningEffort,
+    showNativeReasoning: showNativeReasoning,
+    receiveTimeoutMs: receiveTimeoutMs,
+    sessionId: sessionId,
+    previousMessages: previousMessages ?? this.previousMessages,
+    cacheControlTtl: cacheControlTtl,
+    cacheBreakpointMode: cacheBreakpointMode,
+    sessionIdMode: sessionIdMode,
+    promptPostProcessing: 'none',
+    tools: tools,
+    toolChoice: toolChoice,
+    useSystemInstruction: useSystemInstruction,
+    extraRequestParameters: extraRequestParameters,
   );
 }

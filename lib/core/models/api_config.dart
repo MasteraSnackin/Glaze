@@ -49,6 +49,11 @@ abstract class ApiConfig with _$ApiConfig {
     @Default('off') String cacheControlTtl,
     @Default('depth') String cacheBreakpointMode,
     @Default('openrouter') String sessionIdMode,
+
+    /// SillyTavern-style prompt post-processing applied to the finished
+    /// message array before the protocol converter runs. See
+    /// `lib/core/llm/converters/prompt_post_processing.dart` for the modes.
+    @Default('none') String promptPostProcessing,
     @Default(60000) int firstChunkTimeoutMs,
 
     /// Send the leading run of system blocks in the provider's own field —

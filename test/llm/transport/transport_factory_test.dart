@@ -6,12 +6,17 @@ import 'package:glaze_flutter/core/llm/transport/llm_request_dump.dart';
 import 'package:glaze_flutter/core/llm/transport/openai_chat_transport.dart';
 import 'package:glaze_flutter/core/llm/transport/openai_responses_transport.dart';
 import 'package:glaze_flutter/core/llm/transport/openrouter_chat_transport.dart';
+import 'package:glaze_flutter/core/llm/transport/post_processing_chat_transport.dart';
 import 'package:glaze_flutter/core/llm/transport/transport_factory.dart';
 
-/// The factory wraps every transport for request dumping, so assertions look
-/// at the wrapped implementation rather than the returned object.
-Object _inner(String protocol) =>
-    (pickChatTransport(protocol) as LoggingChatTransport).inner;
+/// The factory wraps every transport twice — prompt post-processing on the
+/// outside, request dumping under it — so assertions unwrap both layers to
+/// reach the protocol implementation.
+Object _inner(String protocol) {
+  final postProcessing =
+      pickChatTransport(protocol) as PostProcessingChatTransport;
+  return (postProcessing.inner as LoggingChatTransport).inner;
+}
 
 void main() {
   test('each protocol resolves to its transport', () {

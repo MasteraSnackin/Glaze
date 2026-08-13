@@ -120,7 +120,6 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
   late final _impersonationPromptCtrl = TextEditingController(
     text: widget.preset?.impersonationPrompt ?? '',
   );
-  late bool _mergePrompts = widget.preset?.mergePrompts ?? false;
   bool _showAdvanced = false;
   int? _expandedBlockIndex;
 
@@ -197,8 +196,6 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
       reasoningEnabled: _parseInlineReasoning,
       reasoningStart: _parseInlineReasoning ? _reasoningStartCtrl.text : null,
       reasoningEnd: _parseInlineReasoning ? _reasoningEndCtrl.text : null,
-      mergePrompts: _mergePrompts,
-      mergeRole: widget.preset?.mergeRole ?? 'system',
       guidedGenerationPrompt: widget.preset?.guidedGenerationPrompt,
       guidedImpersonationPrompt: widget.preset?.guidedImpersonationPrompt,
       impersonationPrompt: _impersonationPromptCtrl.text.trim().isEmpty
@@ -500,19 +497,6 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
                 ),
               ],
               const SizedBox(height: 20),
-              const _SectionLabel('Post-processing'),
-              const SizedBox(height: 8),
-              _SettingsToggle(
-                label: 'label_merge_prompts'.tr(),
-                description: 'desc_merge_prompts'.tr(),
-                value: _mergePrompts,
-                helpTerm: 'preset-merge',
-                onChanged: (v) {
-                  setState(() => _mergePrompts = v);
-                  _scheduleSave();
-                },
-              ),
-              const SizedBox(height: 20),
               const _SectionLabel('Impersonation'),
               const SizedBox(height: 8),
               Text(
@@ -802,8 +786,6 @@ class PresetEditorBodyState extends ConsumerState<PresetEditorBody> {
       reasoningEnabled: _parseInlineReasoning,
       reasoningStart: _parseInlineReasoning ? _reasoningStartCtrl.text : null,
       reasoningEnd: _parseInlineReasoning ? _reasoningEndCtrl.text : null,
-      mergePrompts: _mergePrompts,
-      mergeRole: widget.preset?.mergeRole ?? 'system',
       guidedGenerationPrompt: widget.preset?.guidedGenerationPrompt,
       guidedImpersonationPrompt: widget.preset?.guidedImpersonationPrompt,
       impersonationPrompt: _impersonationPromptCtrl.text.trim().isEmpty

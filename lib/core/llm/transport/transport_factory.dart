@@ -7,6 +7,7 @@ import 'llm_request_dump.dart';
 import 'openai_chat_transport.dart';
 import 'openai_responses_transport.dart';
 import 'openrouter_chat_transport.dart';
+import 'post_processing_chat_transport.dart';
 
 /// Resolves a [ChatTransport] for the given protocol string.
 ///
@@ -35,7 +36,11 @@ ChatTransport pickChatTransport(String protocol) {
       inner = CustomChatCompletionTransport();
   }
   // Diagnostics: dump every outgoing request payload (no-op when disabled).
-  return LoggingChatTransport(inner, label: protocol);
+  // Post-processing wraps the dump rather than the other way round, so what
+  // gets logged is the conversation that actually leaves the device.
+  return PostProcessingChatTransport(
+    LoggingChatTransport(inner, label: protocol),
+  );
 }
 
 ChatTransport pickChatTransportFor(ApiConfig config) =>

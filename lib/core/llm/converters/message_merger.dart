@@ -1,17 +1,17 @@
 /// Pure helpers for "merge into one block" transformations.
 ///
-/// Mirrors the behaviour of `preset.mergePrompts` in `prompt_builder.dart`:
-/// consecutive **non-assistant** messages get squashed into a single message
+/// Consecutive **non-assistant** messages get squashed into a single message
 /// with `mergeRole` as the resulting role. Assistant messages act as fences
 /// and break the merge run.
 ///
-/// No transport calls this today. The preset flag `mergePrompts` drives the
-/// equivalent merge at prompt build time (a per-preset toggle in the preset
-/// editor), and the Gemini transport deliberately does *not* pre-merge — it
-/// mirrors SillyTavern, where only the leading run of genuine `system`
-/// messages is lifted into `systemInstruction` and consecutive same-role turns
-/// are squashed inside `contents`. Pre-merging relabels a leading user turn as
-/// `system`, which would push it into `systemInstruction` too.
+/// No transport calls this today. Prompt reshaping is an API-connection
+/// setting now — see `prompt_post_processing.dart`, which ports SillyTavern's
+/// modes and runs on the finished message array — and the Gemini transport
+/// deliberately does *not* pre-merge: it mirrors ST, where only the leading
+/// run of genuine `system` messages is lifted into `systemInstruction` and
+/// consecutive same-role turns are squashed inside `contents`. Pre-merging
+/// relabels a leading user turn as `system`, which would push it into
+/// `systemInstruction` too.
 ///
 /// Kept because it is a pure, tested helper: reach for it via
 /// `convertGoogleMessagesMerged` if a caller ever wants the collapse-first

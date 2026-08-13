@@ -1,3 +1,4 @@
+import '../../core/llm/converters/prompt_post_processing.dart';
 import '../../core/llm/converters/reasoning_effort.dart';
 import '../../core/llm/transport/llm_protocol.dart';
 import '../../core/models/api_config.dart';
@@ -105,6 +106,12 @@ class ApiConfigDraft {
       frequencyPenalty: supportsPenalties ? values.frequencyPenalty : 0.0,
       presencePenalty: supportsPenalties ? values.presencePenalty : 0.0,
       cacheControlTtl: supportsPromptCache ? values.cacheControlTtl : 'off',
+      // Every first-party protocol normalizes message shape inside its own
+      // converter, so the control is offered for custom endpoints only. Clear
+      // it elsewhere rather than let a hidden setting reshape the prompt.
+      promptPostProcessing: protocol == LlmProtocol.customChatCompletion
+          ? PromptPostProcessing.normalize(values.promptPostProcessing)
+          : PromptPostProcessing.none,
     );
   }
 
@@ -164,6 +171,7 @@ class ApiConfigDraft {
       cacheControlTtl: normalized.cacheControlTtl,
       cacheBreakpointMode: normalized.cacheBreakpointMode,
       sessionIdMode: normalized.sessionIdMode,
+      promptPostProcessing: normalized.promptPostProcessing,
       protocol: normalized.protocol,
       embeddingEndpoint: embeddingEndpoint.trim(),
       embeddingApiKey: embeddingApiKey.trim(),

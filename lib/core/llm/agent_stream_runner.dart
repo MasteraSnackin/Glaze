@@ -108,6 +108,7 @@ class AgentStreamRunner {
       cacheControlTtl: resolved.cacheControlTtl,
       cacheBreakpointMode: resolved.cacheBreakpointMode,
       sessionIdMode: resolved.sessionIdMode,
+      promptPostProcessing: resolved.promptPostProcessing,
       extraRequestParameters: resolved.extraRequestParameters,
     );
     final transport = _pickTransport(resolved.protocol);

@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/llm/converters/reasoning_effort.dart';
+import '../../core/llm/converters/prompt_post_processing.dart';
 import '../../core/llm/transport/llm_protocol.dart';
 import '../../core/llm/transport/transport_factory.dart';
 import '../../core/services/api_connection_tester.dart';
@@ -88,6 +89,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
   String _cacheControlTtl = 'off';
   String _cacheBreakpointMode = 'depth';
   String _sessionIdMode = 'openrouter';
+  String _promptPostProcessing = PromptPostProcessing.none;
   String _protocol = LlmProtocol.openai;
   List<ExtraRequestParameter> _extraRequestParameters = const [];
 
@@ -253,6 +255,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       _cacheControlTtl = values.cacheControlTtl;
       _cacheBreakpointMode = values.cacheBreakpointMode;
       _sessionIdMode = values.sessionIdMode;
+      _promptPostProcessing = values.promptPostProcessing;
       _protocol = values.protocol;
       _extraRequestParameters = values.extraRequestParameters;
       _fetchedModels = [];
@@ -290,6 +293,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
         cacheControlTtl: _cacheControlTtl,
         cacheBreakpointMode: _cacheBreakpointMode,
         sessionIdMode: _sessionIdMode,
+        promptPostProcessing: _promptPostProcessing,
         protocol: _protocol,
         extraRequestParameters: _extraRequestParameters,
       ),
@@ -341,6 +345,11 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       _protocol == LlmProtocol.openrouter;
 
   bool get _supportsReasoning => true;
+
+  /// Only a custom endpoint has an unknown message-shape contract — see
+  /// [_buildPromptPostProcessingGroup].
+  bool get _supportsPromptPostProcessing =>
+      _protocol == LlmProtocol.customChatCompletion;
 
   /// Protocols with a dedicated field for the leading system block. The field
   /// is named differently per provider, so the label carries its actual name.
@@ -575,6 +584,7 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
             label: 'section_advanced'.tr(),
             children: [
               _buildSamplingGroup(),
+              _buildPromptPostProcessingGroup(),
               _buildCacheGroup(),
               _buildReasoningDeliveryGroup(),
               _buildOtherGroup(),
@@ -872,6 +882,33 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       compact: true,
       header: 'section_sampling'.tr(),
       items: items,
+    );
+  }
+
+  /// Reshapes the finished conversation to the message layout a given endpoint
+  /// insists on — one system block, strictly alternating turns, no tool
+  /// traffic. A property of the API, which is why it lives here and not in the
+  /// prompt preset.
+  ///
+  /// Offered for custom endpoints only. Every first-party protocol already
+  /// normalizes what its wire format requires inside its own converter (the
+  /// Anthropic and Gemini ones lift the leading system run out and squash
+  /// same-role neighbours), so the control would be a second, redundant knob
+  /// there. A custom endpoint is the one case Glaze cannot know the shape of.
+  Widget _buildPromptPostProcessingGroup() {
+    if (!_supportsPromptPostProcessing) return const SizedBox.shrink();
+    return MenuGroup(
+      compact: true,
+      header: 'section_prompt_post_processing'.tr(),
+      helpTerm: 'prompt-post-processing',
+      items: [
+        MenuSelectorItem(
+          label: 'label_prompt_post_processing'.tr(),
+          description: 'desc_prompt_post_processing'.tr(),
+          currentValue: _promptPostProcessingLabel(_promptPostProcessing),
+          onTap: _openPromptPostProcessingSelector,
+        ),
+      ],
     );
   }
 
@@ -1471,6 +1508,35 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
     );
     if (resolved == null || resolved == effort) return null;
     return 'reasoning_effort_hint_sent'.tr(namedArgs: {'value': resolved});
+  }
+
+  String _promptPostProcessingLabel(String mode) =>
+      'prompt_post_processing_${PromptPostProcessing.baseOf(mode)}'.tr();
+
+  void _openPromptPostProcessingSelector() {
+    final current = PromptPostProcessing.baseOf(_promptPostProcessing);
+    GlazeBottomSheet.show<void>(
+      context,
+      title: 'label_prompt_post_processing'.tr(),
+      items: PromptPostProcessing.uiModes.map((mode) {
+        return BottomSheetItem(
+          label: 'prompt_post_processing_$mode'.tr(),
+          // Each mode is a mechanical transformation; spelling out what it
+          // does to the messages beats a name nobody can decode at a glance.
+          hint: 'prompt_post_processing_hint_$mode'.tr(),
+          icon: mode == current ? Icons.check : null,
+          iconColor: context.cs.primary,
+          onTap: () {
+            Navigator.of(context, rootNavigator: true).pop();
+            setState(
+              () =>
+                  _promptPostProcessing = PromptPostProcessing.withTools(mode),
+            );
+            _scheduleSave();
+          },
+        );
+      }).toList(),
+    );
   }
 
   void _openReasoningEffortSelector() {

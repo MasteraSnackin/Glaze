@@ -447,6 +447,7 @@ class ResolvedAgentConfig {
   final String cacheControlTtl;
   final String cacheBreakpointMode;
   final String sessionIdMode;
+  final String promptPostProcessing;
   final int contextSize;
   final List<ExtraRequestParameter> extraRequestParameters;
   final String? reasoningTagStart;
@@ -473,6 +474,7 @@ class ResolvedAgentConfig {
     this.cacheControlTtl = 'off',
     this.cacheBreakpointMode = 'depth',
     this.sessionIdMode = 'openrouter',
+    this.promptPostProcessing = 'none',
     this.contextSize = 32000,
     this.extraRequestParameters = const [],
     this.reasoningTagStart,
@@ -504,6 +506,7 @@ class ResolvedAgentConfig {
       cacheControlTtl: config.cacheControlTtl,
       cacheBreakpointMode: config.cacheBreakpointMode,
       sessionIdMode: config.sessionIdMode,
+      promptPostProcessing: config.promptPostProcessing,
       contextSize: config.contextSize,
       extraRequestParameters: config.extraRequestParameters,
       reasoningTagStart: config.reasoningTagStart,
@@ -542,6 +545,7 @@ class ResolvedAgentConfig {
       cacheControlTtl: cacheControlTtl,
       cacheBreakpointMode: cacheBreakpointMode,
       sessionIdMode: sessionIdMode,
+      promptPostProcessing: promptPostProcessing,
       contextSize: contextSize,
       extraRequestParameters: extraRequestParameters,
       reasoningTagStart: reasoningTagStart,
@@ -579,6 +583,7 @@ class ResolvedAgentConfig {
       cacheControlTtl: cacheControlTtl,
       cacheBreakpointMode: cacheBreakpointMode,
       sessionIdMode: sessionIdMode,
+      promptPostProcessing: promptPostProcessing,
       contextSize: contextSize,
       extraRequestParameters:
           extraRequestParameters ?? this.extraRequestParameters,

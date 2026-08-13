@@ -157,6 +157,7 @@ lib/
 │   │   ├── gemini_messages.dart      # Google Gemini shape
 │   │   ├── openrouter_messages.dart  # OpenRouter (Anthropic/OpenAI passthrough)
 │   │   ├── message_merger.dart       # Consecutive same-role message merging
+│   │   ├── prompt_post_processing.dart # SillyTavern prompt post-processing modes (merge/semi/strict/single)
 │   │   ├── attachment_encoder.dart   # Image/file → provider attachment payload
 │   │   ├── cache_breakpoint_marker.dart # Anthropic/OpenRouter cache_control placement
 │   │   ├── thinking_budget.dart      # Extended-thinking budget mapping per protocol
@@ -165,8 +166,9 @@ lib/
 │   │   ├── chat_transport.dart       # Abstract ChatTransport interface
 │   │   ├── chat_transport_request.dart # Shared request value object
 │   │   ├── llm_protocol.dart         # Protocol enum (openai/openai_responses/anthropic/gemini/openrouter)
-│   │   ├── transport_factory.dart    # ApiConfig.protocol → ChatTransport (wraps in LoggingChatTransport)
+│   │   ├── transport_factory.dart    # ApiConfig.protocol → ChatTransport (wraps in PostProcessingChatTransport + LoggingChatTransport)
 │   │   ├── llm_request_dump.dart     # Diagnostics: dump every outgoing LLM request to JSONL (off by default)
+│   │   ├── post_processing_chat_transport.dart # Applies ApiConfig.promptPostProcessing before the protocol converter
 │   │   ├── openai_chat_transport.dart
 │   │   ├── openai_responses_transport.dart # OpenAI Responses API (`/responses`)
 │   │   ├── anthropic_chat_transport.dart
@@ -462,6 +464,56 @@ than capturing it when the provider is built. Runtime injections are converted
 to a detached, immutable `List<RuntimePromptBlock>` before entering core prompt
 code. The two core orchestrators still receive `Ref` for core providers; this is
 a dependency-direction boundary, not a claim that prompt collection is pure.
+
+### Prompt post-processing
+
+**Files:** `core/llm/converters/prompt_post_processing.dart`,
+`core/llm/transport/post_processing_chat_transport.dart`
+
+`ApiConfig.promptPostProcessing` reshapes the finished, OpenAI-shaped message
+array *after* the prompt is built and *before* the protocol converter runs. It
+is a port of SillyTavern's `postProcessPrompt` / `mergeMessages`, and it uses
+ST's own mode identifiers so prompts stay portable:
+
+| Mode | Effect |
+|------|--------|
+| `none` (default) | Nothing — messages go out as built |
+| `merge` | Squashes consecutive same-role messages |
+| `semi` | `merge` + every system message after the first becomes `user` |
+| `strict` | `semi` + a filler user turn so the prompt opens on `user` |
+| `single` | Collapses the whole conversation into one `user` message |
+| `merge_tools` / `semi_tools` / `strict_tools` | Same, keeping tool calls and tool results instead of stripping them |
+
+It lives on the API connection, not the prompt preset: whether an endpoint
+accepts several system blocks or non-alternating roles is a property of the
+endpoint. (It replaces the preset-level `mergePrompts` flag, which squashed
+adjacent non-assistant *blocks* at build time; DB migration v118 carries the
+active preset's flag over to custom connections.)
+
+**Offered for `custom_chat_completion` only.** Every first-party protocol
+already normalizes what its wire format demands inside its own converter — the
+Anthropic and Gemini ones lift the leading system run into the native system
+field, demote mid-prompt system turns to `user`, and squash same-role
+neighbours (equivalent to `semi`). A custom endpoint is the one case Glaze
+cannot know the shape of. `ApiConfigDraft.normalizeValues` clears the mode for
+every other protocol so a hidden control can never reshape a prompt.
+
+The picker shows one row per **family** (`none` / `merge` / `semi` / `strict` /
+`single`) and stores `PromptPostProcessing.withTools(...)`, so a prompt that
+starts carrying tool traffic keeps it rather than silently losing every call.
+Glaze sends no tool definitions today — the agentic-memory service, the only
+consumer, is disabled — which is why both halves of a pair are currently
+indistinguishable. The no-tools halves stay implemented and reachable for
+values imported from ST; `PromptPostProcessing.baseOf(...)` maps either half
+back to its family for labels and the picker's checkmark.
+
+`pickChatTransport` wraps every transport in `PostProcessingChatTransport`, so
+the pass runs exactly once, for every caller, before any provider-specific
+rewrite. `previousMessages` gets the same pass so cache-breakpoint hashes still
+match. Every mode is idempotent, and the rewritten request carries
+`promptPostProcessing: 'none'` so it can never be applied twice. The prompt
+preview builds bodies without a transport, so it calls
+`PostProcessingChatTransport.applyTo` itself.
 
 ### Request Types
 
@@ -938,7 +990,9 @@ expanded rows show `N из M` chunks and chunk indexes. Labels like `121-135` ar
 diagnostics aid for inspecting every outgoing LLM request made while answering a
 single chat turn — studio shards, the main model, the post-cleaner audit +
 cleaner passes, and the agentic-memory writer. `transport_factory.dart` wraps
-every transport from `pickChatTransport` in a `LoggingChatTransport` decorator;
+every transport from `pickChatTransport` in a `LoggingChatTransport` decorator
+(itself wrapped in `PostProcessingChatTransport`, so the dump records the
+post-processed conversation that actually goes out);
 when enabled it appends one JSON object per line (JSONL) to a temp file
 (`glaze_llm_dump.jsonl`, overwritten on app start) before delegating to the
 inner transport. **Off by default** (`LlmRequestDump.enabled = false`): when

@@ -210,7 +210,6 @@ void main() {
           preset: const Preset(
             id: 'preset',
             name: 'Preset',
-            mergePrompts: true,
             regexes: [
               PresetRegex(
                 id: 'regex',

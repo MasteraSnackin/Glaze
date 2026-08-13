@@ -75,7 +75,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 117;
+  int get schemaVersion => 118;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -2204,8 +2204,54 @@ class AppDatabase extends _$AppDatabase {
           "AND retrieval_keys_json = '[]'",
         );
       }
+      if (from < 118) {
+        final columns = await customSelect(
+          "PRAGMA table_info('api_configs')",
+        ).get();
+        final names = columns
+            .map((column) => column.read<String>('name'))
+            .toSet();
+        if (!names.contains('prompt_post_processing')) {
+          await m.addColumn(apiConfigs, apiConfigs.promptPostProcessing);
+          await _carryOverPresetMergePrompts();
+        }
+      }
     },
   );
+
+  /// "Merge Prompts" used to live on the prompt preset and squashed adjacent
+  /// non-assistant blocks at build time. It is an API-connection setting now
+  /// (`prompt_post_processing`), because whether a request may carry several
+  /// system blocks is a property of the endpoint, not of the prompt.
+  ///
+  /// The two settings sit on different entities, so there is no per-row
+  /// mapping. The active preset is the one whose behaviour the user is
+  /// actually living with, so if it had the flag on, custom connections adopt
+  /// the equivalent mode and nobody's prompt shape changes silently on
+  /// upgrade. Only custom connections: every first-party protocol squashes
+  /// same-role neighbours inside its own converter anyway, and the setting is
+  /// not offered there.
+  Future<void> _carryOverPresetMergePrompts() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final activePresetId = prefs.getString('activePresetId');
+      if (activePresetId == null || activePresetId.isEmpty) return;
+      final rows = await customSelect(
+        'SELECT data_json FROM presets WHERE preset_id = ?',
+        variables: [Variable.withString(activePresetId)],
+      ).get();
+      if (rows.isEmpty) return;
+      final decoded = jsonDecode(rows.first.read<String>('data_json'));
+      if (decoded is! Map || decoded['mergePrompts'] != true) return;
+      await customStatement(
+        "UPDATE api_configs SET prompt_post_processing = 'merge_tools' "
+        "WHERE protocol = 'custom_chat_completion'",
+      );
+    } on Object catch (e) {
+      // A missing/unreadable preset must never block the schema upgrade.
+      debugPrint('[migration v118] mergePrompts carry-over skipped: $e');
+    }
+  }
 
   Future<void> _migrateStudioPresetBlocksToExplicitSemantics() async {
     final rows = await customSelect(

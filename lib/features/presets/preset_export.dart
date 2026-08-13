@@ -62,8 +62,6 @@ Future<String> savePresetJson(Preset preset) async {
             })
         .toList(),
     'reasoning': preset.reasoningEnabled,
-    if (preset.mergePrompts) 'mergePrompts': true,
-    if (preset.mergeRole != 'system') 'mergeRole': preset.mergeRole,
   };
 
   final encoded = const JsonEncoder.withIndent('  ').convert(exportJson);
