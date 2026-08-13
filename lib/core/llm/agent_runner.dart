@@ -67,6 +67,8 @@ class AgentRunner {
     ResolvedAgentConfig? preResolvedConfig,
     String? apiConfigId,
     StudioTurnConfigSnapshot? turnConfig,
+    String? charName,
+    String? userName,
     // Explicit budget for a batched run: the group's summed token budget and
     // minimum temperature. Non-null wins over both the global override and the
     // agent spec's own values — an agent carries none of its own (§4).
@@ -95,6 +97,8 @@ class AgentRunner {
         preResolvedConfig: preResolvedConfig,
         apiConfigId: apiConfigId,
         turnConfig: turnConfig,
+        charName: charName,
+        userName: userName,
         batchMaxTokens: batchMaxTokens,
         batchTemperature: batchTemperature,
         onFinalResponseUpdate: onFinalResponseUpdate,
@@ -130,6 +134,8 @@ class AgentRunner {
     ResolvedAgentConfig? preResolvedConfig,
     String? apiConfigId,
     StudioTurnConfigSnapshot? turnConfig,
+    String? charName,
+    String? userName,
     int? batchMaxTokens,
     double? batchTemperature,
     void Function(String text, String? reasoning)? onFinalResponseUpdate,
@@ -230,7 +236,8 @@ class AgentRunner {
                 : studio.studioControllerRequestReasoningOverride
                 ? studio.studioControllerRequestReasoning
                 : null,
-            showNativeReasoning: studio.studioControllerShowNativeReasoningOverride
+            showNativeReasoning:
+                studio.studioControllerShowNativeReasoningOverride
                 ? studio.studioControllerShowNativeReasoning
                 : null,
             omitReasoning: studio.studioControllerDisableReasoning
@@ -259,6 +266,8 @@ class AgentRunner {
       tagEnd: effectiveResolved.reasoningTagEnd,
       headerModel: isFinalResponse ? 'reasoning_model'.tr() : null,
       headerInline: isFinalResponse ? 'reasoning_inline'.tr() : null,
+      charName: charName,
+      userName: userName,
       onFinalResponseUpdate: onFinalResponseUpdate,
       onIntermediateUpdate: onIntermediateUpdate,
     );

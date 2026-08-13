@@ -60,6 +60,8 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
   PromptResult? _result;
   ApiConfig? _apiConfig;
   String? _sessionId;
+  String? _charName;
+  String? _userName;
   Map<String, dynamic>? _requestBody;
   bool _loading = true;
   _SectionFilter _filter = _SectionFilter.all;
@@ -90,6 +92,8 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
       );
       _apiConfig = payload.apiConfig;
       _sessionId = session.id;
+      _charName = payload.character.name;
+      _userName = payload.persona?.name ?? 'User';
 
       final result = await buildPromptInIsolate(
         payload,
@@ -547,36 +551,12 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
       // preview builds bodies directly, so it applies the same pass itself —
       // otherwise the preview would show an unmerged prompt.
       final request = PostProcessingChatTransport.applyTo(
-        ChatTransportRequest(
-          endpoint: cfg.endpoint,
-          apiKey: cfg.apiKey,
-          model: cfg.model,
+        ChatTransportRequest.fromApiConfig(
+          cfg,
           messages: apiMessages,
-          maxTokens: cfg.maxTokens,
-          temperature: cfg.temperature,
-          topP: cfg.topP,
-          topK: cfg.topK,
-          frequencyPenalty: cfg.frequencyPenalty,
-          presencePenalty: cfg.presencePenalty,
-          stream: cfg.stream,
-          requestReasoning: cfg.requestReasoning,
-          useResponsesApi: cfg.useResponsesApi,
-          reasoningEffort: cfg.reasoningEffort,
-          omitTemperature: cfg.omitTemperature,
-          omitTopP: cfg.omitTopP,
-          omitTopK: cfg.omitTopK,
-          omitFrequencyPenalty: cfg.omitFrequencyPenalty,
-          omitPresencePenalty: cfg.omitPresencePenalty,
-          omitReasoning: cfg.omitReasoning,
-          omitReasoningEffort: cfg.omitReasoningEffort,
-          showNativeReasoning: cfg.showNativeReasoning,
           sessionId: _sessionId,
-          cacheControlTtl: cfg.cacheControlTtl,
-          cacheBreakpointMode: cfg.cacheBreakpointMode,
-          sessionIdMode: cfg.sessionIdMode,
-          promptPostProcessing: cfg.promptPostProcessing,
-          useSystemInstruction: cfg.useSystemInstruction,
-          extraRequestParameters: cfg.extraRequestParameters,
+          charName: _charName,
+          userName: _userName,
         ),
       );
 

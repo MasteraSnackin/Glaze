@@ -110,6 +110,8 @@ class StudioBatchCoordinator {
           turnConfig: turnConfig,
           batchMaxTokens: group.batchMaxTokens,
           batchTemperature: group.batchTemperature,
+          charName: context.macroContext.charName,
+          userName: context.macroContext.userName,
         );
         final parsed = _batcher.parseBatchResponse(result.text, group);
         if (_allOk(parsed)) return parsed;

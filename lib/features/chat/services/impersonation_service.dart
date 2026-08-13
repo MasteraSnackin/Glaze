@@ -171,6 +171,8 @@ class ImpersonationService {
         apiConfig,
         messages: apiMessages,
         sessionId: session.id,
+        charName: character?.name ?? 'Character',
+        userName: persona?.name ?? 'User',
       ),
       cancelToken: cancelToken,
       onUpdate: (delta, reasoningDelta) {

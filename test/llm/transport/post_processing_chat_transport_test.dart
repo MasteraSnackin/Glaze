@@ -29,21 +29,28 @@ class _RecordingTransport implements ChatTransport {
 
 ChatTransportRequest _request({
   required String mode,
+  List<Map<String, dynamic>>? messages,
   List<Map<String, dynamic>>? previousMessages,
+  String? charName,
+  String? userName,
 }) => ChatTransportRequest(
   endpoint: 'https://example.test',
   apiKey: 'key',
   model: 'model',
-  messages: [
-    {'role': 'system', 'content': 'a'},
-    {'role': 'system', 'content': 'b'},
-    {'role': 'user', 'content': 'hi'},
-  ],
+  messages:
+      messages ??
+      [
+        {'role': 'system', 'content': 'a'},
+        {'role': 'system', 'content': 'b'},
+        {'role': 'user', 'content': 'hi'},
+      ],
   maxTokens: 100,
   temperature: 0.7,
   topP: 0.9,
   promptPostProcessing: mode,
   previousMessages: previousMessages,
+  charName: charName,
+  userName: userName,
 );
 
 void main() {
@@ -85,6 +92,37 @@ void main() {
     ]);
   });
 
+  test('single labels speakers in current and previous conversations', () {
+    final processed = PostProcessingChatTransport.applyTo(
+      _request(
+        mode: PromptPostProcessing.single,
+        charName: 'Helga',
+        userName: 'Danvi',
+        messages: [
+          {'role': 'user', 'content': 'Current question'},
+          {'role': 'assistant', 'content': 'Current answer'},
+        ],
+        previousMessages: [
+          {'role': 'user', 'content': 'Earlier question'},
+          {'role': 'assistant', 'content': 'Earlier answer'},
+        ],
+      ),
+    );
+
+    expect(processed.messages, [
+      {
+        'role': 'user',
+        'content': 'Danvi: Current question\n\nHelga: Current answer',
+      },
+    ]);
+    expect(processed.previousMessages, [
+      {
+        'role': 'user',
+        'content': 'Danvi: Earlier question\n\nHelga: Earlier answer',
+      },
+    ]);
+  });
+
   test('the processed request cannot be post-processed a second time', () {
     final processed = PostProcessingChatTransport.applyTo(
       _request(mode: PromptPostProcessing.merge),
@@ -104,5 +142,7 @@ void main() {
     expect(processed.maxTokens, original.maxTokens);
     expect(processed.temperature, original.temperature);
     expect(processed.topP, original.topP);
+    expect(processed.charName, original.charName);
+    expect(processed.userName, original.userName);
   });
 }

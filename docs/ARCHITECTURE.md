@@ -486,9 +486,10 @@ ST's own mode identifiers so prompts stay portable:
 
 It lives on the API connection, not the prompt preset: whether an endpoint
 accepts several system blocks or non-alternating roles is a property of the
-endpoint. (It replaces the preset-level `mergePrompts` flag, which squashed
-adjacent non-assistant *blocks* at build time; DB migration v118 carries the
-active preset's flag over to custom connections.)
+endpoint. It replaces the preset-level `mergePrompts` flag, which squashed
+adjacent non-assistant *blocks* at build time. DB migration v118 only adds the
+column with `none`; it deliberately does not infer a connection setting from
+any active preset.
 
 **Offered for `custom_chat_completion` only.** Every first-party protocol
 already normalizes what its wire format demands inside its own converter — the
@@ -514,6 +515,13 @@ match. Every mode is idempotent, and the rewritten request carries
 `promptPostProcessing: 'none'` so it can never be applied twice. The prompt
 preview builds bodies without a transport, so it calls
 `PostProcessingChatTransport.applyTo` itself.
+
+`single` would otherwise erase who spoke each chat turn when all roles become
+one `user` message. Chat-aware callers therefore attach effective `charName`
+and `userName` as request-only metadata. The post-processing decorator prefixes
+assistant and user text with those labels for both `messages` and
+`previousMessages`; the names are not stored in `ApiConfig`, serialized as a
+wire field, or added globally as `message.name`.
 
 ### Request Types
 

@@ -67,10 +67,14 @@ void main() {
         isFinalResponse: true,
         cancelToken: CancelToken(),
         timeoutMs: 100,
+        charName: 'Character',
+        userName: 'User',
       );
 
       expect(result.text, 'complete response');
       expect(transport.request?.receiveTimeoutMs, 0);
+      expect(transport.request?.charName, 'Character');
+      expect(transport.request?.userName, 'User');
     },
   );
 
