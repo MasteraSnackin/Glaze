@@ -434,8 +434,6 @@ class MigrationService {
             json['impersonationPrompt'] as String? ??
             json['impersonation_prompt'] as String?,
         summaryPrompt: json['summaryPrompt'] as String?,
-        mergePrompts: json['mergePrompts'] as bool? ?? false,
-        mergeRole: json['mergeRole'] as String? ?? 'system',
         createdAt: _toInt(json['createdAt']) ?? 0,
       ),
     );

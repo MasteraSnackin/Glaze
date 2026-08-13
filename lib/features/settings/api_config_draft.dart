@@ -1,3 +1,4 @@
+import '../../core/llm/converters/prompt_post_processing.dart';
 import '../../core/llm/converters/reasoning_effort.dart';
 import '../../core/llm/transport/llm_protocol.dart';
 import '../../core/models/api_config.dart';
@@ -105,6 +106,9 @@ class ApiConfigDraft {
       frequencyPenalty: supportsPenalties ? values.frequencyPenalty : 0.0,
       presencePenalty: supportsPenalties ? values.presencePenalty : 0.0,
       cacheControlTtl: supportsPromptCache ? values.cacheControlTtl : 'off',
+      promptPostProcessing: PromptPostProcessing.normalize(
+        values.promptPostProcessing,
+      ),
     );
   }
 
@@ -164,6 +168,7 @@ class ApiConfigDraft {
       cacheControlTtl: normalized.cacheControlTtl,
       cacheBreakpointMode: normalized.cacheBreakpointMode,
       sessionIdMode: normalized.sessionIdMode,
+      promptPostProcessing: normalized.promptPostProcessing,
       protocol: normalized.protocol,
       embeddingEndpoint: embeddingEndpoint.trim(),
       embeddingApiKey: embeddingApiKey.trim(),

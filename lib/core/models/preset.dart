@@ -72,8 +72,6 @@ abstract class Preset with _$Preset {
     String? guidedImpersonationPrompt,
     String? impersonationPrompt,
     String? summaryPrompt,
-    @Default(false) bool mergePrompts,
-    @Default('system') String mergeRole,
     @Default(0) int createdAt,
   }) = _Preset;
 
@@ -172,7 +170,6 @@ String _joinTrimForNormalize(dynamic trim) {
 Map<String, dynamic> _normalizePreset(Map<String, dynamic> json) {
   final n = Map<String, dynamic>.from(json);
   n['reasoningEnabled'] = _coerceBool(n['reasoningEnabled'], false);
-  n['mergePrompts'] = _coerceBool(n['mergePrompts'], false);
   n['createdAt'] = _coerceInt(n['createdAt']) ?? 0;
   return n;
 }

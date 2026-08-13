@@ -19,6 +19,7 @@ import '../../../core/llm/transport/llm_protocol.dart';
 import '../../../core/llm/transport/openai_chat_transport.dart';
 import '../../../core/llm/transport/openai_responses_transport.dart';
 import '../../../core/llm/transport/openrouter_chat_transport.dart';
+import '../../../core/llm/transport/post_processing_chat_transport.dart';
 import '../../../core/llm/tokenizer.dart';
 import '../../../core/models/api_config.dart';
 import '../../../shared/theme/app_colors.dart';
@@ -542,35 +543,41 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
         reasoningHistoryCount: cfg.reasoningHistoryCount,
       );
 
-      final request = ChatTransportRequest(
-        endpoint: cfg.endpoint,
-        apiKey: cfg.apiKey,
-        model: cfg.model,
-        messages: apiMessages,
-        maxTokens: cfg.maxTokens,
-        temperature: cfg.temperature,
-        topP: cfg.topP,
-        topK: cfg.topK,
-        frequencyPenalty: cfg.frequencyPenalty,
-        presencePenalty: cfg.presencePenalty,
-        stream: cfg.stream,
-        requestReasoning: cfg.requestReasoning,
-        useResponsesApi: cfg.useResponsesApi,
-        reasoningEffort: cfg.reasoningEffort,
-        omitTemperature: cfg.omitTemperature,
-        omitTopP: cfg.omitTopP,
-        omitTopK: cfg.omitTopK,
-        omitFrequencyPenalty: cfg.omitFrequencyPenalty,
-        omitPresencePenalty: cfg.omitPresencePenalty,
-        omitReasoning: cfg.omitReasoning,
-        omitReasoningEffort: cfg.omitReasoningEffort,
-        showNativeReasoning: cfg.showNativeReasoning,
-        sessionId: _sessionId,
-        cacheControlTtl: cfg.cacheControlTtl,
-        cacheBreakpointMode: cfg.cacheBreakpointMode,
-        sessionIdMode: cfg.sessionIdMode,
-        useSystemInstruction: cfg.useSystemInstruction,
-        extraRequestParameters: cfg.extraRequestParameters,
+      // The live path applies post-processing in the transport decorator; the
+      // preview builds bodies directly, so it applies the same pass itself —
+      // otherwise the preview would show an unmerged prompt.
+      final request = PostProcessingChatTransport.applyTo(
+        ChatTransportRequest(
+          endpoint: cfg.endpoint,
+          apiKey: cfg.apiKey,
+          model: cfg.model,
+          messages: apiMessages,
+          maxTokens: cfg.maxTokens,
+          temperature: cfg.temperature,
+          topP: cfg.topP,
+          topK: cfg.topK,
+          frequencyPenalty: cfg.frequencyPenalty,
+          presencePenalty: cfg.presencePenalty,
+          stream: cfg.stream,
+          requestReasoning: cfg.requestReasoning,
+          useResponsesApi: cfg.useResponsesApi,
+          reasoningEffort: cfg.reasoningEffort,
+          omitTemperature: cfg.omitTemperature,
+          omitTopP: cfg.omitTopP,
+          omitTopK: cfg.omitTopK,
+          omitFrequencyPenalty: cfg.omitFrequencyPenalty,
+          omitPresencePenalty: cfg.omitPresencePenalty,
+          omitReasoning: cfg.omitReasoning,
+          omitReasoningEffort: cfg.omitReasoningEffort,
+          showNativeReasoning: cfg.showNativeReasoning,
+          sessionId: _sessionId,
+          cacheControlTtl: cfg.cacheControlTtl,
+          cacheBreakpointMode: cfg.cacheBreakpointMode,
+          sessionIdMode: cfg.sessionIdMode,
+          promptPostProcessing: cfg.promptPostProcessing,
+          useSystemInstruction: cfg.useSystemInstruction,
+          extraRequestParameters: cfg.extraRequestParameters,
+        ),
       );
 
       return switch (cfg.protocol) {

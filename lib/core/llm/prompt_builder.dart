@@ -526,8 +526,6 @@ PromptResult _assembleMessages({
   final messages = <PromptMessage>[];
   final assemblyReports = <ExactLorebookInjectionReport>[];
   final attributionBlocks = <StaticBlock>[];
-  String? mergeBuffer;
-  String? mergeRole;
 
   // Keep the attribution declaration alongside each resolved block until its
   // concrete emission site.  Do not recover it from rendered message text.
@@ -631,16 +629,6 @@ PromptResult _assembleMessages({
     if (block.id == 'char_card') injectLoreBefore();
 
     if (block.id == 'chat_history') {
-      if (mergeBuffer != null) {
-        messages.add(
-          PromptMessage(
-            role: mergeRole ?? 'system',
-            blockId: 'preset',
-            content: mergeBuffer,
-          ),
-        );
-        mergeBuffer = null;
-      }
       // worldInfoAfter injects just before chat_history (mirrors JS generationWorker.js:680)
       injectLoreAfter();
 
@@ -721,34 +709,15 @@ PromptResult _assembleMessages({
 
       recordAssembly(blockLoreClassifications[block.id] ?? const {});
 
-      if (preset.mergePrompts && block.role != 'assistant') {
-        if (mergeBuffer != null) {
-          mergeBuffer = '$mergeBuffer\n\n$content';
-        } else {
-          mergeBuffer = content;
-          mergeRole = preset.mergeRole;
-        }
-      } else {
-        if (mergeBuffer != null) {
-          messages.add(
-            PromptMessage(
-              role: mergeRole ?? 'system',
-              blockId: 'preset',
-              content: mergeBuffer,
-            ),
-          );
-          mergeBuffer = null;
-        }
-        messages.add(
-          PromptMessage(
-            role: block.role,
-            blockId: block.id,
-            blockName: block.name,
-            content: content,
-            isSummary: block.isSummary,
-          ),
-        );
-      }
+      messages.add(
+        PromptMessage(
+          role: block.role,
+          blockId: block.id,
+          blockName: block.name,
+          content: content,
+          isSummary: block.isSummary,
+        ),
+      );
 
       // worldInfoAfter injects just after char_card (mirrors JS generationWorker.js:792)
       if (block.id == 'char_card') injectLoreAfter();
@@ -758,15 +727,6 @@ PromptResult _assembleMessages({
   // Fallback: if preset had no char_card block, inject remaining lore at the end
   injectLoreBefore();
   injectLoreAfter();
-  if (mergeBuffer != null) {
-    messages.add(
-      PromptMessage(
-        role: mergeRole ?? 'system',
-        blockId: 'preset',
-        content: mergeBuffer,
-      ),
-    );
-  }
 
   // Memory block injection.
   // - payload.memoryContent set, payload.memorySelection == null:

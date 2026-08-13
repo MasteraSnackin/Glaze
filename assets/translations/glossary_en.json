@@ -274,9 +274,9 @@
                     "desc": "Controls where a block appears in the list of messages sent to the AI. 'Relative' keeps it in its natural order among the blocks. 'Depth' inserts it a fixed number of messages before the end — for example, depth 2 places it just before the last 2 chat messages, giving it strong immediate influence."
                 },
                 {
-                    "id": "preset-merge",
-                    "name": "Merge Prompts",
-                    "desc": "Combines neighboring blocks that share the same role label into one message. Reduces the total message count. Some AI models respond better to fewer, longer messages rather than many short ones. Required for NoAssistant mode."
+                    "id": "prompt-post-processing",
+                    "name": "Prompt Post-Processing",
+                    "desc": "Reshapes the finished prompt right before it goes out, for APIs that are picky about message structure. 'Merge consecutive roles' glues neighbouring messages that share a role into one — fewer, longer messages, which some models handle better. 'Semi-strict' additionally turns every system message after the first into a user message, so the conversation alternates. 'Strict' does the same and guarantees the prompt opens on a user message, inserting a filler turn if needed — this is what APIs like Anthropic's require. 'Single user message' folds the entire conversation into one user message. The 'with tools' variants keep tool calls and tool results intact; the others strip them. Leave it on 'None' unless the API complains."
                 },
                 {
                     "id": "preset-noassistant",

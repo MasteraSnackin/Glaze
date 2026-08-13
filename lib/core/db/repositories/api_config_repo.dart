@@ -83,6 +83,7 @@ class ApiConfigRepo implements SyncApiConfigStore {
     cacheControlTtl: c.cacheControlTtl,
     cacheBreakpointMode: c.cacheBreakpointMode,
     sessionIdMode: c.sessionIdMode,
+    promptPostProcessing: c.promptPostProcessing,
     firstChunkTimeoutMs: c.firstChunkTimeoutMs,
     useSystemInstruction: c.useSystemInstruction,
     extraRequestParameters:
@@ -139,6 +140,7 @@ class ApiConfigRepo implements SyncApiConfigStore {
     cacheControlTtl: Value(m.cacheControlTtl),
     cacheBreakpointMode: Value(m.cacheBreakpointMode),
     sessionIdMode: Value(m.sessionIdMode),
+    promptPostProcessing: Value(m.promptPostProcessing),
     firstChunkTimeoutMs: Value(m.firstChunkTimeoutMs),
     useSystemInstruction: Value(m.useSystemInstruction),
     extraRequestParametersJson: Value(

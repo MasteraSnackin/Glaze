@@ -78,7 +78,7 @@ void main() {
 
       // user_version matches the Drift schema version (app_db.dart schemaVersion).
       // Update this constant whenever a new migration step is added.
-      expect(version, 117);
+      expect(version, 118);
     });
 
     test(
@@ -232,7 +232,7 @@ void main() {
         final version = await upgraded
             .customSelect('PRAGMA user_version')
             .get();
-        expect(version.first.read<int>('user_version'), 117);
+        expect(version.first.read<int>('user_version'), 118);
         expect(names, contains('variant_group_id'));
         expect(names, contains('hidden'));
       },
@@ -262,7 +262,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 117);
+      expect(version.read<int>('user_version'), 118);
     });
 
     test(
@@ -611,7 +611,7 @@ void main() {
 
     test('current schema includes atomic character fact tables', () async {
       final version = await db.customSelect('PRAGMA user_version').getSingle();
-      expect(version.read<int>('user_version'), 117);
+      expect(version.read<int>('user_version'), 118);
 
       final factColumns = await db
           .customSelect("PRAGMA table_info('character_knowledge_fact_rows')")
@@ -723,7 +723,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 117);
+      expect(version.read<int>('user_version'), 118);
     });
 
     test(
@@ -833,7 +833,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 117);
+      expect(version.read<int>('user_version'), 118);
     });
 
     test('v80 adds Responses API toggle defaulting to off', () async {
@@ -873,7 +873,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 117);
+      expect(version.read<int>('user_version'), 118);
     });
 
     test('v81 adds composite embedding source index', () async {
@@ -907,7 +907,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 117);
+      expect(version.read<int>('user_version'), 118);
     });
 
     test('v82 creates rewrite persistence schema and provenance columns', () async {
@@ -981,7 +981,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 117);
+      expect(version.read<int>('user_version'), 118);
     });
 
     test('v83 rebuilds interim text revision columns without losing rows', () async {
@@ -1433,7 +1433,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 117);
+      expect(version.read<int>('user_version'), 118);
 
       // Rows and payloads survive; legacy statuses pass through or are
       // normalized fail-closed, and new columns carry neutral defaults.
@@ -1638,7 +1638,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 117);
+      expect(version.read<int>('user_version'), 118);
       final row = await upgraded
           .customSelect(
             'SELECT blocks_json FROM studio_preset_rows WHERE preset_id = ?',
@@ -1754,7 +1754,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 117);
+      expect(version.read<int>('user_version'), 118);
       final check = await upgraded.customSelect('PRAGMA integrity_check').get();
       expect(check.single.read<String>('integrity_check'), 'ok');
     });
@@ -2418,7 +2418,7 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 117);
+      expect(version.read<int>('user_version'), 118);
     });
 
     test(
@@ -2515,7 +2515,78 @@ void main() {
       final version = await upgraded
           .customSelect('PRAGMA user_version')
           .getSingle();
-      expect(version.read<int>('user_version'), 117);
+      expect(version.read<int>('user_version'), 118);
+    });
+
+    test('v118 adds prompt post-processing, off unless the active preset '
+        'merged prompts', () async {
+      Future<String> upgradeWith(
+        Map<String, Object> prefs,
+        String? presetJson,
+      ) async {
+        final file = File(
+          '${Directory.systemTemp.path}/glaze_mig_ppp_${DateTime.now().microsecondsSinceEpoch}.db',
+        );
+        addTearDown(() async {
+          if (file.existsSync()) await file.delete();
+        });
+
+        final seeded = AppDatabase.forTesting(
+          NativeDatabase.createInBackground(file),
+        );
+        await seeded.customSelect('SELECT 1').get();
+        await seeded.customStatement(
+          'INSERT INTO api_configs (config_id, name) VALUES (?, ?)',
+          ['api', 'Main'],
+        );
+        if (presetJson != null) {
+          await seeded.customStatement(
+            'INSERT INTO presets (preset_id, name, data_json) VALUES (?, ?, ?)',
+            ['preset', 'Preset', presetJson],
+          );
+        }
+        await seeded.customStatement(
+          'ALTER TABLE api_configs DROP COLUMN prompt_post_processing',
+        );
+        await seeded.customStatement('PRAGMA user_version = 117');
+        await seeded.close();
+
+        SharedPreferences.setMockInitialValues(prefs);
+        final upgraded = AppDatabase.forTesting(
+          NativeDatabase.createInBackground(file),
+        );
+        addTearDown(() async => upgraded.close());
+        final row = await upgraded
+            .customSelect('SELECT prompt_post_processing FROM api_configs')
+            .getSingle();
+        return row.read<String>('prompt_post_processing');
+      }
+
+      // No preset selected: nothing to carry over.
+      expect(await upgradeWith(const {}, null), 'none');
+
+      // Active preset never merged: the connection stays untouched.
+      expect(
+        await upgradeWith(const {
+          'activePresetId': 'preset',
+        }, '{"id":"preset","name":"Preset","mergePrompts":false}'),
+        'none',
+      );
+
+      // Active preset merged: adopt the equivalent mode so the prompt shape
+      // the user is living with does not change under them.
+      expect(
+        await upgradeWith(const {
+          'activePresetId': 'preset',
+        }, '{"id":"preset","name":"Preset","mergePrompts":true}'),
+        'merge',
+      );
+
+      // A dangling preset id must not block the upgrade.
+      expect(
+        await upgradeWith(const {'activePresetId': 'missing'}, null),
+        'none',
+      );
     });
 
     test('v111 resolves the retired session_id_mode default', () async {
