@@ -6,6 +6,7 @@ import 'package:gpt_markdown/gpt_markdown.dart';
 
 import 'dart:convert';
 
+import '../../../core/llm/converters/prompt_post_processing.dart';
 import '../../../core/llm/history_assembler.dart';
 import '../../../core/llm/prompt_builder.dart';
 import '../../../core/llm/prompt_isolate.dart';
@@ -22,6 +23,7 @@ import '../../../core/llm/transport/openrouter_chat_transport.dart';
 import '../../../core/llm/transport/post_processing_chat_transport.dart';
 import '../../../core/llm/tokenizer.dart';
 import '../../../core/models/api_config.dart';
+import '../services/prompt_preview_post_processor.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_filter_chip_bar.dart';
 import '../../../shared/widgets/glaze_tab_bar.dart';
@@ -61,6 +63,10 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
   ApiConfig? _apiConfig;
   String? _sessionId;
   Map<String, dynamic>? _requestBody;
+
+  /// The built prompt after the connection's post-processing mode, computed
+  /// once per build rather than per frame. Empty until the first prompt lands.
+  List<PreviewMessage> _previewMessages = const [];
   bool _loading = true;
   _SectionFilter _filter = _SectionFilter.all;
   int _dataTabIndex = 0;
@@ -101,6 +107,10 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
       if (mounted) {
         setState(() {
           _result = result;
+          _previewMessages = buildPreviewMessages(
+            result.messages,
+            _apiConfig?.promptPostProcessing ?? PromptPostProcessing.none,
+          );
           _requestBody = _buildRequestBody();
           _loading = false;
         });
@@ -320,10 +330,8 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
                     padding: const EdgeInsets.fromLTRB(12, 0, 12, 24),
                     sliver: SliverList(
                       delegate: SliverChildBuilderDelegate(
-                        (context, i) => _PromptMessageCard(
-                          message: _filteredMessages[i],
-                          index: i,
-                        ),
+                        (context, i) =>
+                            _PromptMessageCard(row: _filteredMessages[i]),
                         childCount: _filteredMessages.length,
                       ),
                     ),
@@ -437,6 +445,19 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
       items.add(_ParamItem(label: 'label_model'.tr(), value: model));
     }
 
+    // Post-processing reshapes the conversation without leaving a trace in the
+    // body, so the message list would otherwise be the only hint it ran. Shown
+    // only when it is on — every other connection would carry a "None" chip.
+    if (_postProcessingMode != PromptPostProcessing.none) {
+      final base = PromptPostProcessing.baseOf(_postProcessingMode);
+      items.add(
+        _ParamItem(
+          label: 'section_prompt_post_processing'.tr(),
+          value: 'prompt_post_processing_$base'.tr(),
+        ),
+      );
+    }
+
     void add(String label, dynamic value) {
       if (value is Map) {
         value.forEach((k, v) => add('$label.$k', v));
@@ -461,22 +482,27 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
     return items;
   }
 
-  List<PromptMessage> get _filteredMessages {
-    final msgs = _previewMessages;
+  /// Section filters read the post-processed message: a merged row carries the
+  /// union of its sources' flags, so it still shows up under `history` or
+  /// `lorebook` when one of the blocks folded into it was of that kind.
+  List<PreviewMessage> get _filteredMessages {
+    final rows = _previewMessages;
     return switch (_filter) {
-      _SectionFilter.all => msgs,
+      _SectionFilter.all => rows,
       _SectionFilter.system =>
-        msgs
-            .where((m) => m.role == 'system' && !m.isHistory && !m.isLorebook)
+        rows
+            .where(
+              (r) =>
+                  r.message.role == 'system' &&
+                  !r.message.isHistory &&
+                  !r.message.isLorebook,
+            )
             .toList(),
-      _SectionFilter.lorebook => msgs.where((m) => m.isLorebook).toList(),
-      _SectionFilter.history => msgs.where((m) => m.isHistory).toList(),
-      _SectionFilter.depth => msgs.where((m) => m.isDepth).toList(),
+      _SectionFilter.lorebook =>
+        rows.where((r) => r.message.isLorebook).toList(),
+      _SectionFilter.history => rows.where((r) => r.message.isHistory).toList(),
+      _SectionFilter.depth => rows.where((r) => r.message.isDepth).toList(),
     };
-  }
-
-  List<PromptMessage> get _previewMessages {
-    return _result?.messages ?? const [];
   }
 
   void _copyContent() {
@@ -484,7 +510,8 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
     if (_dataTabIndex == 0) {
       if (_previewTabIndex == 0) {
         if (_result == null) return;
-        final json = _previewMessages.map((m) {
+        final json = _previewMessages.map((row) {
+          final m = row.message;
           final map = <String, dynamic>{'role': m.role, 'content': m.content};
           if (m.isLorebook) map['lorebook'] = true;
           if (m.blockName != null) map['block'] = m.blockName;
@@ -618,6 +645,11 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
     if (body == null) return '';
     return const JsonEncoder.withIndent('  ').convert(body);
   }
+
+  /// The connection's post-processing mode, normalized the same way the
+  /// transport decorator normalizes it.
+  String get _postProcessingMode =>
+      PromptPostProcessing.normalize(_apiConfig?.promptPostProcessing);
 
   /// Human-readable name of the active protocol, used as the parameters
   /// section header.
@@ -781,9 +813,8 @@ class _ParamItem extends StatelessWidget {
 }
 
 class _PromptMessageCard extends StatefulWidget {
-  final PromptMessage message;
-  final int index;
-  const _PromptMessageCard({required this.message, required this.index});
+  final PreviewMessage row;
+  const _PromptMessageCard({required this.row});
 
   @override
   State<_PromptMessageCard> createState() => _PromptMessageCardState();
@@ -794,7 +825,8 @@ class _PromptMessageCardState extends State<_PromptMessageCard> {
 
   @override
   Widget build(BuildContext context) {
-    final msg = widget.message;
+    final msg = widget.row.message;
+    final images = widget.row.imagePaths;
     final tokenCount = estimateTokens(msg.content);
 
     return Card(
@@ -816,6 +848,10 @@ class _PromptMessageCardState extends State<_PromptMessageCard> {
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   _buildRoleChip(msg.role),
+                  if (widget.row.isMerged) ...[
+                    const SizedBox(width: 4),
+                    _MergedBadge(count: widget.row.sources.length),
+                  ],
                   if (msg.blockName != null) ...[
                     const SizedBox(width: 8),
                     Flexible(
@@ -877,18 +913,18 @@ class _PromptMessageCardState extends State<_PromptMessageCard> {
                   ),
                 ),
               ],
-              if (!_expanded && msg.hasImage) ...[
-                const SizedBox(height: 8),
-                PromptAttachmentPreview(imagePath: msg.imagePath!),
-              ],
+              // A merge can pull several attachments into one message, so every
+              // source image is listed rather than just the first.
+              if (!_expanded)
+                for (final path in images) ...[
+                  const SizedBox(height: 8),
+                  PromptAttachmentPreview(imagePath: path),
+                ],
               if (_expanded) ...[
                 const SizedBox(height: 8),
-                if (msg.hasImage) ...[
-                  PromptAttachmentPreview(
-                    imagePath: msg.imagePath!,
-                    expanded: true,
-                  ),
-                  if (msg.content.isNotEmpty) const SizedBox(height: 8),
+                for (final path in images) ...[
+                  PromptAttachmentPreview(imagePath: path, expanded: true),
+                  const SizedBox(height: 8),
                 ],
                 if (msg.content.isNotEmpty)
                   Container(
@@ -934,6 +970,43 @@ class _PromptMessageCardState extends State<_PromptMessageCard> {
       child: Text(
         role.toUpperCase(),
         style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: fg),
+      ),
+    );
+  }
+}
+
+/// How many built blocks post-processing folded into this one message.
+/// Without it a merged card reads as one oversized block and nothing on screen
+/// says the connection reshaped the prompt.
+class _MergedBadge extends StatelessWidget {
+  final int count;
+  const _MergedBadge({required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: 'prompt_preview_merged_blocks'.tr(args: ['$count']),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+        decoration: BoxDecoration(
+          color: context.cs.primary.withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.merge_rounded, size: 11, color: context.cs.primary),
+            const SizedBox(width: 2),
+            Text(
+              '$count',
+              style: TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+                color: context.cs.primary,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -1238,6 +1238,7 @@
   "position_after": "После",
   "position_macro": "Макрос",
   "label_messages_count": "Сообщения ({})",
+  "prompt_preview_merged_blocks": "Постобработка объединила в это сообщение блоков: {}",
   "catalog_search_placeholder": "Поиск персонажей...",
   "catalog_total": "{count} персонажей",
   "catalog_empty": "Персонажи не найдены",

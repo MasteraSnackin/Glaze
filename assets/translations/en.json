@@ -1264,6 +1264,7 @@
   "position_after": "After",
   "position_macro": "Macro",
   "label_messages_count": "Messages ({})",
+  "prompt_preview_merged_blocks": "Post-processing merged {} blocks into this message",
   "catalog_provider_chub_hint": "Open character library",
   "janitor_login_info_desc": "Janitor hides most characters from unauthorized users. You can log in using your account, and then Glaze will use your data to load characters. The data is not used for any other purpose. Alternatively, you can keep using the catalog without an account or import characters by link.",
   "janitor_login_button": "Log in with your Janitor.AI account",
