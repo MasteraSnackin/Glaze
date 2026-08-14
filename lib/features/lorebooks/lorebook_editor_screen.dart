@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/llm/embedding_error_labels.dart';
+import '../../core/llm/glaze_matcher.dart';
 import '../../core/models/lorebook.dart';
 import '../../core/state/db_provider.dart';
 import '../../core/state/lorebook_embedding_provider.dart';
@@ -455,8 +456,8 @@ class _LorebookEditorScreenState extends ConsumerState<LorebookEditorScreen> {
     final base = _entries[_editIndex];
     final names = _parseList(_eCharFilter!.text);
     return base.copyWith(
-      keys: _parseList(_eKeys!.text),
-      secondaryKeys: _parseList(_eSecondary!.text),
+      keys: splitLorebookKeys(_eKeys!.text),
+      secondaryKeys: splitLorebookKeys(_eSecondary!.text),
       content: _eContent!.text,
       comment: _eComment!.text.trim(),
       order: int.tryParse(_eOrder!.text) ?? 100,

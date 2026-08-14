@@ -104,7 +104,7 @@ lib/
 │   │   ├── memory_embedding_service.dart   # Indexes memory entries into embedding store
 │   │   ├── memory_injection_service.dart   # Scores + selects memory entries for injection
 │   │   ├── memory_budget.dart         # INV-PS4 token cap for memory injection
-│   │   ├── glaze_matcher.dart         # Pure regex keyword matching (3 whole-word modes)
+│   │   ├── glaze_matcher.dart         # Pure regex keyword matching (3 whole-word modes, ST `/pattern/flags` keys)
 │   │   ├── regex_service.dart         # Applies PresetRegex scripts to a string
 │   │   ├── preset_macro_attribution.dart # Preset macro source attribution (debug)
 │   │   ├── sse_client.dart           # SSE + non-streaming completions via Dio

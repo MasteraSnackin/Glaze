@@ -5,6 +5,101 @@ const glazeBoundaries =
 
 enum WholeWordMode { no, yes, glaze }
 
+/// A key written in SillyTavern's `/pattern/flags` regex form.
+class RegexKey {
+  final String pattern;
+  final bool ignoreCase;
+  final bool multiLine;
+  final bool dotAll;
+
+  const RegexKey({
+    required this.pattern,
+    required this.ignoreCase,
+    required this.multiLine,
+    required this.dotAll,
+  });
+}
+
+/// JS regex flags allowed after the closing delimiter. `g`, `y` and `d` carry
+/// no meaning for a stateless `hasMatch`, so they are parsed and ignored.
+const _jsRegexFlags = 'gimsuyd';
+
+final _regexKeyShape = RegExp(r'^/(.+)/([a-z]*)$', dotAll: true);
+
+/// Parses a key written as `/pattern/flags`, or returns null when the key is a
+/// plain one. A trailing segment that is not a valid flag list keeps the key
+/// literal, so `/home/user` is still matched as text.
+RegexKey? parseRegexKey(String key) {
+  final match = _regexKeyShape.firstMatch(key);
+  if (match == null) return null;
+
+  final flags = match.group(2)!;
+  for (var i = 0; i < flags.length; i++) {
+    if (!_jsRegexFlags.contains(flags[i])) return null;
+  }
+
+  return RegexKey(
+    pattern: match.group(1)!,
+    ignoreCase: flags.contains('i'),
+    multiLine: flags.contains('m'),
+    dotAll: flags.contains('s'),
+  );
+}
+
+/// Splits a comma-separated key list without cutting `/pattern/flags` keys that
+/// contain a comma (e.g. `/Кент(?:а|у){1,2}/g`).
+List<String> splitLorebookKeys(String text) {
+  final keys = <String>[];
+  final buffer = StringBuffer();
+  var inRegex = false;
+  var inCharClass = false;
+  var escaped = false;
+  var segmentEmpty = true;
+
+  void flush() {
+    final key = buffer.toString().trim();
+    if (key.isNotEmpty) keys.add(key);
+    buffer.clear();
+    segmentEmpty = true;
+    inRegex = false;
+    inCharClass = false;
+    escaped = false;
+  }
+
+  for (var i = 0; i < text.length; i++) {
+    final ch = text[i];
+
+    if (inRegex) {
+      buffer.write(ch);
+      if (escaped) {
+        escaped = false;
+      } else if (ch == r'\') {
+        escaped = true;
+      } else if (ch == '[') {
+        inCharClass = true;
+      } else if (ch == ']') {
+        inCharClass = false;
+      } else if (ch == '/' && !inCharClass) {
+        // Closing delimiter — the trailing flags are plain text again.
+        inRegex = false;
+      }
+      continue;
+    }
+
+    if (ch == ',') {
+      flush();
+      continue;
+    }
+
+    if (ch == '/' && segmentEmpty) inRegex = true;
+    buffer.write(ch);
+    if (ch.trim().isNotEmpty) segmentEmpty = false;
+  }
+
+  flush();
+  return keys;
+}
+
 WholeWordMode resolveWholeWords(
   bool? entryValue,
   bool globalValue,
@@ -24,6 +119,22 @@ bool glazeCheckMatch(
   WholeWordMode wholeWords,
 ) {
   if (key.isEmpty) return false;
+
+  // A `/pattern/flags` key is an explicit regex, the form ST exports: the
+  // delimiters and flags are not part of the pattern, and whole-word wrapping
+  // never applies to it. Without this, the whole literal (slashes included)
+  // was compiled as the pattern and could only match text containing `/`.
+  final regexKey = parseRegexKey(key);
+  if (regexKey != null) {
+    final regex = _safeRegex(
+      regexKey.pattern,
+      caseSensitive && !regexKey.ignoreCase,
+      multiLine: regexKey.multiLine,
+      dotAll: regexKey.dotAll,
+    );
+    if (regex != null) return regex.hasMatch(text);
+    // Pathological or uncompilable — fall through to literal matching.
+  }
 
   if (wholeWords == WholeWordMode.glaze) {
     final escaped = RegExp.escape(key);
@@ -52,9 +163,7 @@ bool glazeCheckMatch(
   // pattern can otherwise block the prompt worker until its hard 60s kill.
   // Keep regex compatibility for ordinary keys, but fall back to literal
   // matching for patterns with known catastrophic-backtracking structure.
-  final regex = classifyRegexSafety(pattern) == RegexSafety.pathological
-      ? null
-      : _tryCreateRegex(pattern, caseSensitive);
+  final regex = _safeRegex(pattern, caseSensitive);
   if (regex != null) return regex.hasMatch(text);
 
   final haystack = caseSensitive ? text : text.toLowerCase();
@@ -72,9 +181,34 @@ bool glazeCheckMatch(
   return haystack.contains(needle);
 }
 
-RegExp? _tryCreateRegex(String pattern, bool caseSensitive) {
+RegExp? _safeRegex(
+  String pattern,
+  bool caseSensitive, {
+  bool multiLine = false,
+  bool dotAll = false,
+}) {
+  if (classifyRegexSafety(pattern) == RegexSafety.pathological) return null;
+  return _tryCreateRegex(
+    pattern,
+    caseSensitive,
+    multiLine: multiLine,
+    dotAll: dotAll,
+  );
+}
+
+RegExp? _tryCreateRegex(
+  String pattern,
+  bool caseSensitive, {
+  bool multiLine = false,
+  bool dotAll = false,
+}) {
   try {
-    return RegExp(pattern, caseSensitive: caseSensitive);
+    return RegExp(
+      pattern,
+      caseSensitive: caseSensitive,
+      multiLine: multiLine,
+      dotAll: dotAll,
+    );
   } catch (_) {
     return null;
   }
