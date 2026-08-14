@@ -1,3 +1,6 @@
+import 'dart:convert';
+
+import 'package:crypto/crypto.dart';
 import 'package:drift/drift.dart';
 
 import '../../utils/id_generator.dart';
@@ -11,6 +14,24 @@ final class CardEvolutionCollectorClaimOutcome {
   final CardEvolutionCollectorRunRow? row;
 
   bool get canRun => kind == 'claimed' || kind == 'existing';
+}
+
+final class CardEvolutionCollectorPair {
+  const CardEvolutionCollectorPair(this.first, this.boundary);
+
+  final LedgerReconciliationSuccessfulRunRow first;
+  final LedgerReconciliationSuccessfulRunRow boundary;
+
+  List<LedgerReconciliationSuccessfulRunRow> get runs => [first, boundary];
+
+  String get rangeHash => sha256
+      .convert(
+        utf8.encode(
+          '${first.id}\u001f${first.rangeHash}\u001e'
+          '${boundary.id}\u001f${boundary.rangeHash}',
+        ),
+      )
+      .toString();
 }
 
 /// Durable collector lease and completion journal. A valid empty observation
@@ -27,6 +48,7 @@ class CardEvolutionCollectorRunRepo {
     required String ownerId,
     required int now,
     required int leaseSeconds,
+    String? rangeHash,
   }) => db.transaction(() async {
     final existing =
         await (db.select(db.cardEvolutionCollectorRuns)..where(
@@ -86,7 +108,7 @@ class CardEvolutionCollectorRunRepo {
               reconciliationRunId: reconciliationRun.id,
               reconciliationRunOrdinal: reconciliationRun.ordinal,
               reconciliationChainHash: reconciliationRun.chainHash,
-              rangeHash: reconciliationRun.rangeHash,
+              rangeHash: rangeHash ?? reconciliationRun.rangeHash,
               inputHash: inputHash,
               ownerId: ownerId,
               status: 'claimed',
@@ -136,6 +158,7 @@ class CardEvolutionCollectorRunRepo {
     required String modelOutputHash,
     required int now,
     required Future<void> Function() applyEffects,
+    Future<bool> Function()? validateEvidence,
   }) => db.transaction(() async {
     final claimed =
         await (db.select(db.cardEvolutionCollectorRuns)..where(
@@ -147,6 +170,7 @@ class CardEvolutionCollectorRunRepo {
             ))
             .getSingleOrNull();
     if (claimed == null) return false;
+    if (validateEvidence != null && !await validateEvidence()) return false;
     await applyEffects();
     final changed =
         await (db.update(db.cardEvolutionCollectorRuns)..where(
@@ -218,45 +242,88 @@ class CardEvolutionCollectorRunRepo {
     return 0;
   }
 
-  /// Valid logical reconciliation runs which do not yet have a completed
-  /// collector. This is the durable backlog used to recover runs skipped by a
-  /// crash, a disabled model, or a superseded post-generation callback.
-  Future<List<LedgerReconciliationSuccessfulRunRow>> pendingValidRuns(
+  /// Missing non-overlapping pairs from the valid logical reconciliation
+  /// projection. One collector is anchored to each pair's second run.
+  Future<List<CardEvolutionCollectorPair>> pendingValidPairs(
     String sessionId, {
     LedgerReconciliationSuccessfulRunRow? currentRun,
   }) async {
-    final runs = await LedgerReconciliationRunRepo(db).readSession(sessionId);
-    if (currentRun != null &&
-        currentRun.sessionId == sessionId &&
-        !runs.any((run) => run.id == currentRun.id)) {
-      final invalidated =
-          await (db.select(db.ledgerReconciliationRunInvalidations)..where(
-                (row) =>
-                    row.sessionId.equals(sessionId) &
-                    row.runId.equals(currentRun.id),
-              ))
-              .getSingleOrNull();
-      // The orchestration caller already obtained this row as its current
-      // successful run. Keep that direct hand-off usable for legacy/imported
-      // chains which cannot be projected as a complete backlog; the collector
-      // snapshot still validates the run's live evidence fail-closed.
-      if (invalidated == null) runs.add(currentRun);
+    final runs = await _validOrLegacyRuns(sessionId, currentRun: currentRun);
+    var collectors = await (db.select(
+      db.cardEvolutionCollectorRuns,
+    )..where((row) => row.sessionId.equals(sessionId))).get();
+    final expectedPairs = <String, CardEvolutionCollectorPair>{};
+    for (var index = 0; index + 1 < runs.length; index += 2) {
+      final pair = CardEvolutionCollectorPair(runs[index], runs[index + 1]);
+      expectedPairs[pair.boundary.id] = pair;
     }
-    runs.sort((left, right) => left.ordinal.compareTo(right.ordinal));
-    final collectors =
-        await (db.select(db.cardEvolutionCollectorRuns)..where(
-              (row) =>
-                  row.sessionId.equals(sessionId) &
-                  row.status.equals('completed'),
-            ))
-            .get();
-    final completedIds = collectors
-        .map((row) => row.reconciliationRunId)
-        .toSet();
-    return [
-      for (final run in runs)
-        if (!completedIds.contains(run.id)) run,
-    ];
+    final incompatibleJournal = collectors.any((collector) {
+      final pair = expectedPairs[collector.reconciliationRunId];
+      return pair == null || collector.rangeHash != pair.rangeHash;
+    });
+    if (incompatibleJournal) {
+      // Pre-pair collectors cannot prove that both reconciliations were seen.
+      // Rebuild the durable journal and its aggregate effects conservatively.
+      await db.transaction(() async {
+        await (db.delete(
+          db.cardEvolutionCollectorRuns,
+        )..where((row) => row.sessionId.equals(sessionId))).go();
+        await (db.delete(
+          db.cardEvolutionObservations,
+        )..where((row) => row.sessionId.equals(sessionId))).go();
+      });
+      collectors = const [];
+    }
+    final completedByBoundary = {
+      for (final row in collectors)
+        if (row.status == 'completed') row.reconciliationRunId: row,
+    };
+    final pairs = <CardEvolutionCollectorPair>[];
+    for (var index = 0; index + 1 < runs.length; index += 2) {
+      final boundary = runs[index + 1];
+      final pair = CardEvolutionCollectorPair(runs[index], boundary);
+      final completed = completedByBoundary[boundary.id];
+      if (completed == null || completed.rangeHash != pair.rangeHash) {
+        pairs.add(pair);
+      }
+    }
+    return pairs;
+  }
+
+  /// Resolves collector boundaries back to their exact two-run logical pairs.
+  Future<List<LedgerReconciliationSuccessfulRunRow>> runsForCollectors(
+    String sessionId,
+    List<CardEvolutionCollectorRunRow> collectors,
+  ) async {
+    if (collectors.isEmpty) return const [];
+    final runs = await _validOrLegacyRuns(sessionId);
+    final byBoundary = <String, CardEvolutionCollectorPair>{};
+    for (var index = 0; index + 1 < runs.length; index += 2) {
+      final pair = CardEvolutionCollectorPair(runs[index], runs[index + 1]);
+      byBoundary[pair.boundary.id] = pair;
+    }
+    final result = <LedgerReconciliationSuccessfulRunRow>[];
+    for (final collector in collectors) {
+      final pair = byBoundary[collector.reconciliationRunId];
+      if (pair == null ||
+          pair.boundary.chainHash != collector.reconciliationChainHash ||
+          pair.rangeHash != collector.rangeHash) {
+        return const [];
+      }
+      result.addAll(pair.runs);
+    }
+    return result;
+  }
+
+  Future<List<LedgerReconciliationSuccessfulRunRow>> _validOrLegacyRuns(
+    String sessionId, {
+    LedgerReconciliationSuccessfulRunRow? currentRun,
+  }) async {
+    final runRepo = LedgerReconciliationRunRepo(db);
+    final logical = await runRepo.readSession(sessionId);
+    // Pairing needs an authoritative predecessor. Never infer one from raw
+    // rows when the canonical logical chain cannot be projected.
+    return logical;
   }
 
   /// Exact three completed collectors ending at [boundary]. Gaps or claimed

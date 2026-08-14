@@ -11,6 +11,7 @@ import '../../llm/prompt/exact_lorebook_manifest.dart';
 import '../../utils/cast_helpers.dart';
 import '../../utils/id_generator.dart';
 import '../app_db.dart';
+import 'card_evolution_collector_run_repo.dart';
 import 'manual_rewrite_job_repo.dart';
 import 'session_lorebook_evolution_repo.dart';
 
@@ -523,6 +524,30 @@ class CardEvolutionRepo {
     );
   });
 
+  /// Builds one collector snapshot from two consecutive valid logical
+  /// reconciliations. Both immutable histories remain available as evidence.
+  Future<CardEvolutionObservationSnapshot?> buildObservationSnapshotForRuns(
+    List<LedgerReconciliationSuccessfulRunRow> runs,
+  ) => db.transaction(() async {
+    if (runs.length != 2 || runs[0].sessionId != runs[1].sessionId) return null;
+    final sessionId = runs.first.sessionId;
+    final selected = await _selectInput(
+      sessionId,
+      reconciliationRunIds: [for (final run in runs) run.id],
+    );
+    if (selected == null) return null;
+    final session = await (db.select(
+      db.chatSessions,
+    )..where((row) => row.sessionId.equals(sessionId))).getSingleOrNull();
+    if (session == null) return null;
+    final assembled = await _assemble(sessionId, session.characterId);
+    if (assembled == null || assembled.$2.requiresBaselineDecision) return null;
+    return CardEvolutionObservationSnapshot(
+      character: assembled.$2.character,
+      selectedInputJson: selected,
+    );
+  });
+
   /// Counts successful Ledger reconciliations for the session. The observation
   /// pass runs on every even count (every 2nd reconciliation cadence).
   Future<int> countSuccessfulReconciliations(String sessionId) async {
@@ -555,7 +580,7 @@ class CardEvolutionRepo {
 
   Future<String?> _selectedInputForClaim(CardEvolutionClaimRow claim) async {
     final runIds = await _reconciliationRunIdsForClaim(claim);
-    if (claim.predecessorRunOrdinal > 0 && runIds.length != 3) return null;
+    if (claim.predecessorRunOrdinal > 0 && runIds.length != 6) return null;
     final selected = await _selectInput(
       claim.sessionId,
       reconciliationRunIds: runIds,
@@ -936,7 +961,12 @@ class CardEvolutionRepo {
         rows.last.reconciliationChainHash != claim.predecessorCursorHash) {
       return const [];
     }
-    return [for (final row in rows) row.reconciliationRunId];
+    return [
+      for (final run in await CardEvolutionCollectorRunRepo(
+        db,
+      ).runsForCollectors(claim.sessionId, rows))
+        run.id,
+    ];
   }
 
   List<Object?>? _selectReconciliationHistories({

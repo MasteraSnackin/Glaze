@@ -97,8 +97,8 @@ class AutomatedCardEvolutionService {
     return _runWriter(sessionId, onStage: onStage);
   }
 
-  /// Automatic lane: collect once for this immutable reconciliation, then run
-  /// at most one overdue writer cycle for each completed group of three.
+  /// Automatic lane: collect each completed pair of valid reconciliations,
+  /// then run at most one overdue writer cycle per three collectors.
   Future<CardEvolutionFinalizeOutcome> runAfterReconciliation(
     LedgerReconciliationSuccessfulRunRow reconciliationRun, {
     void Function(AutomatedCardEvolutionStage stage)? onStage,
@@ -130,12 +130,12 @@ class AutomatedCardEvolutionService {
     LedgerReconciliationSuccessfulRunRow reconciliationRun, {
     void Function(AutomatedCardEvolutionStage stage)? onStage,
   }) async {
-    final pending = await collectorRunRepo.pendingValidRuns(
+    final pending = await collectorRunRepo.pendingValidPairs(
       reconciliationRun.sessionId,
       currentRun: reconciliationRun,
     );
-    for (final run in pending) {
-      final collected = await _runCollector(run, onStage: onStage);
+    for (final pair in pending) {
+      final collected = await _runCollector(pair, onStage: onStage);
       if (!collected) {
         return const CardEvolutionFinalizeOutcome('collectorUnavailable');
       }
@@ -157,12 +157,20 @@ class AutomatedCardEvolutionService {
     if (boundaryRuns.length != 3) {
       return const CardEvolutionFinalizeOutcome('collectorUnavailable');
     }
+    final reconciliationRuns = await collectorRunRepo.runsForCollectors(
+      reconciliationRun.sessionId,
+      boundaryRuns,
+    );
+    if (reconciliationRuns.length != 6) {
+      return const CardEvolutionFinalizeOutcome('collectorUnavailable');
+    }
     return _runWriter(
       reconciliationRun.sessionId,
       onStage: onStage,
       throughCollectorOrdinal: dueBoundary,
       collectorBoundaryHash: boundaryRuns.last.reconciliationChainHash,
       collectorBoundaryRuns: boundaryRuns,
+      reconciliationRunIds: [for (final run in reconciliationRuns) run.id],
     );
   }
 
@@ -172,6 +180,7 @@ class AutomatedCardEvolutionService {
     int throughCollectorOrdinal = 0,
     String collectorBoundaryHash = '',
     List<CardEvolutionCollectorRunRow> collectorBoundaryRuns = const [],
+    List<String>? reconciliationRunIds,
   }) async {
     onStage?.call(AutomatedCardEvolutionStage.cardRewriter);
     final owner = 'evolution-owner-${generateId()}';
@@ -183,9 +192,9 @@ class AutomatedCardEvolutionService {
       leaseSeconds: leaseSeconds,
       throughCollectorOrdinal: throughCollectorOrdinal,
       collectorBoundaryHash: collectorBoundaryHash,
-      reconciliationRunIds: [
-        for (final run in collectorBoundaryRuns) run.reconciliationRunId,
-      ],
+      reconciliationRunIds:
+          reconciliationRunIds ??
+          [for (final run in collectorBoundaryRuns) run.reconciliationRunId],
     );
     final claim = claimed.claim;
     if (claim == null) return CardEvolutionFinalizeOutcome(claimed.kind);
@@ -371,16 +380,15 @@ class AutomatedCardEvolutionService {
   }
 
   Future<bool> _runCollector(
-    LedgerReconciliationSuccessfulRunRow reconciliationRun, {
+    CardEvolutionCollectorPair pair, {
     void Function(AutomatedCardEvolutionStage stage)? onStage,
   }) async {
+    final reconciliationRun = pair.boundary;
     final sessionId = reconciliationRun.sessionId;
     String? claimId;
     String? ownerId;
     try {
-      final snapshot = await repo.buildObservationSnapshotForRun(
-        reconciliationRun,
-      );
+      final snapshot = await repo.buildObservationSnapshotForRuns(pair.runs);
       if (snapshot == null) return false;
       ownerId = 'collector-owner-${generateId()}';
       final now = currentTimestampSeconds();
@@ -391,6 +399,7 @@ class AutomatedCardEvolutionService {
         ownerId: ownerId,
         now: now,
         leaseSeconds: leaseSeconds,
+        rangeHash: pair.rangeHash,
       );
       if (claim.kind == 'completed') return true;
       if (!claim.canRun || claim.row == null) return false;
@@ -406,6 +415,15 @@ class AutomatedCardEvolutionService {
               ownerId: ownerId!,
               modelOutputHash: computeHash(output),
               now: currentTimestampSeconds(),
+              validateEvidence: () async {
+                final logical = await collectorRunRepo.runsForCollectors(
+                  sessionId,
+                  [claim.row!],
+                );
+                return logical.length == 2 &&
+                    logical[0].id == pair.first.id &&
+                    logical[1].id == pair.boundary.id;
+              },
               applyEffects: applyEffects,
             ),
       );

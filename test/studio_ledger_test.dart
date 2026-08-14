@@ -124,7 +124,13 @@ List<Tracker> _makeTrackers(
 }
 
 List<ChatMessage> _conversation(int assistantCount) {
-  final messages = <ChatMessage>[];
+  final messages = <ChatMessage>[
+    const ChatMessage(
+      id: 'a0',
+      role: 'assistant',
+      content: 'Opening assistant message',
+    ),
+  ];
   for (var i = 1; i <= assistantCount; i++) {
     messages.add(ChatMessage(id: 'u$i', role: 'user', content: 'User turn $i'));
     messages.add(
@@ -208,6 +214,7 @@ void main() {
   group('Ledger reconciliation', () {
     test('manual plan ends at the requested assistant and stays bounded', () {
       final messages = <ChatMessage>[
+        const ChatMessage(id: 'a0', role: 'assistant', content: 'Opening'),
         for (var i = 1; i <= 12; i++) ...[
           ChatMessage(id: 'u$i', role: 'user', content: 'User $i'),
           ChatMessage(id: 'a$i', role: 'assistant', content: 'Assistant $i'),
@@ -243,6 +250,19 @@ void main() {
       );
       expect(plan, isNotNull);
       expect(plan!.endMessage.id, 'a5');
+      expect(plan.messageIds, [
+        'a0',
+        'u1',
+        'a1',
+        'u2',
+        'a2',
+        'u3',
+        'a3',
+        'u4',
+        'a4',
+        'u5',
+        'a5',
+      ]);
 
       final checkpoint = LedgerReconciliationCheckpoint(
         sessionId: 's',
@@ -279,8 +299,12 @@ void main() {
       expect(next, isNotNull);
       expect(next!.endMessage.id, 'a10');
       expect(next.messageIds, isNot(contains('a11')));
-      // Rolling context remains intentionally overlapping.
+      expect(next.messages, hasLength(18));
+      expect(next.startMessageId, 'u2');
+      // Rolling context remains intentionally overlapping, but chunk 1 is
+      // never split merely to fill the two remaining message slots.
       expect(next.messageIds, contains('a5'));
+      expect(next.messageIds, isNot(contains('a0')));
       expect(
         planner.plan(
           messages: [
@@ -318,7 +342,7 @@ void main() {
         rangeHash: original.rangeHash,
       );
       final changed = [...messages];
-      changed[9] = changed[9].copyWith(content: 'Changed accepted swipe');
+      changed[10] = changed[10].copyWith(content: 'Changed accepted swipe');
       expect(
         planner.plan(
           messages: changed,
@@ -361,7 +385,8 @@ void main() {
         currentAssistantMessageId: 'a11',
         previousEndMessageId: 'a5',
       )!;
-      expect(plan.messages, hasLength(20));
+      expect(plan.messages, hasLength(18));
+      expect(plan.startMessageId, 'u2');
       expect(plan.endMessage.id, 'a10');
     });
 
@@ -401,6 +426,7 @@ void main() {
 
     test('candidate keys include mentioned entity siblings and provenance', () {
       final messages = [
+        const ChatMessage(id: 'a0', role: 'assistant', content: 'Opening.'),
         const ChatMessage(id: 'u1', role: 'user', content: 'Where is Lucy?'),
         const ChatMessage(id: 'a1', role: 'assistant', content: 'Lucy waits.'),
       ];
@@ -442,6 +468,7 @@ void main() {
 
     test('candidate keys and values share a hard bounded set', () {
       final messages = [
+        const ChatMessage(id: 'a0', role: 'assistant', content: 'Opening.'),
         const ChatMessage(id: 'u1', role: 'user', content: 'Continue.'),
         const ChatMessage(id: 'a1', role: 'assistant', content: 'Continued.'),
       ];
