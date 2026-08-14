@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import '../llm/glaze_matcher.dart';
 import '../utils/id_generator.dart';
 import '../utils/time_helpers.dart';
 import '../models/lorebook.dart';
@@ -19,7 +20,7 @@ LorebookEntry _convertSTEntry(dynamic rawEntry, int index) {
 
   List<String> parseKeys(dynamic v) {
     if (v is List) return v.map((k) => k.toString().trim()).where((k) => k.isNotEmpty).toList();
-    if (v is String && v.isNotEmpty) return v.split(',').map((k) => k.trim()).where((k) => k.isNotEmpty).toList();
+    if (v is String && v.isNotEmpty) return splitLorebookKeys(v);
     return [];
   }
 
