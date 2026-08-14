@@ -28,10 +28,11 @@ class LedgerReconciliationPlan {
 }
 
 class LedgerReconciliationPlanner {
-  /// Five newly accepted assistant turns are reviewed when the following
-  /// assistant turn is generated. The trigger itself is never part of the
-  /// review range.
-  static const acceptedAssistantsPerRun = 5;
+  /// Five accepted interaction chunks are reviewed when the following
+  /// assistant turn is generated. The chat-opening assistant belongs to the
+  /// first `assistant-user-assistant` chunk; later chunks are `user-assistant`.
+  /// The next turn is only the acceptance trigger and is never reviewed.
+  static const acceptedChunksPerRun = 5;
   static const maxMessages = 20;
 
   const LedgerReconciliationPlanner();
@@ -47,7 +48,10 @@ class LedgerReconciliationPlanner {
       (message) => message.id == endAssistantMessageId,
     );
     if (endIndex < 0 || !_isAcceptedAssistant(messages[endIndex])) return null;
-    return _buildPlan(messages: messages, endIndex: endIndex);
+    final chunks = _parseCompletedChunks(messages.take(endIndex + 1));
+    if (chunks == null || chunks.isEmpty) return null;
+    if (chunks.last.endAssistant.id != endAssistantMessageId) return null;
+    return _buildPlan(chunks: chunks, mandatoryStart: chunks.length - 1);
   }
 
   LedgerReconciliationPlan? plan({
@@ -59,33 +63,35 @@ class LedgerReconciliationPlanner {
     final currentIndex = messages.indexWhere(
       (message) => message.id == currentAssistantMessageId,
     );
-    if (currentIndex < 0) return null;
-
-    final acceptedAssistants = messages
-        .take(currentIndex)
-        .where(_isAcceptedAssistant)
-        .toList(growable: false);
-    var previousAcceptedIndex = -1;
-    if (previousEndMessageId != null) {
-      previousAcceptedIndex = acceptedAssistants.indexWhere(
-        (message) => message.id == previousEndMessageId,
-      );
-      // A durable logical head that is no longer in the transcript must not
-      // silently reset cadence to the beginning.
-      if (previousAcceptedIndex < 0) return null;
-    }
-    final firstUnprocessed = previousAcceptedIndex + 1;
-    final unprocessedCount = acceptedAssistants.length - firstUnprocessed;
-    if (unprocessedCount < acceptedAssistantsPerRun) {
+    if (currentIndex < 0 || !_isAcceptedAssistant(messages[currentIndex])) {
       return null;
     }
 
-    final endAssistant =
-        acceptedAssistants[firstUnprocessed + acceptedAssistantsPerRun - 1];
-    final endIndex = messages.indexWhere(
-      (message) => message.id == endAssistant.id,
+    final chunks = _parseCompletedChunks(
+      messages.take(currentIndex),
+      allowTrailingUser: true,
     );
-    final plan = _buildPlan(messages: messages, endIndex: endIndex);
+    if (chunks == null) return null;
+    var previousChunkIndex = -1;
+    if (previousEndMessageId != null) {
+      previousChunkIndex = chunks.indexWhere(
+        (chunk) => chunk.endAssistant.id == previousEndMessageId,
+      );
+      // A durable logical head that is no longer in the transcript must not
+      // silently reset cadence to the beginning.
+      if (previousChunkIndex < 0) return null;
+    }
+    final firstUnprocessed = previousChunkIndex + 1;
+    final unprocessedCount = chunks.length - firstUnprocessed;
+    if (unprocessedCount < acceptedChunksPerRun) {
+      return null;
+    }
+
+    final mandatoryEnd = firstUnprocessed + acceptedChunksPerRun;
+    final plan = _buildPlan(
+      chunks: chunks.sublist(0, mandatoryEnd),
+      mandatoryStart: firstUnprocessed,
+    );
     if (plan == null) return null;
     final end = plan.endMessage;
     final hash = plan.rangeHash;
@@ -99,18 +105,30 @@ class LedgerReconciliationPlanner {
   }
 
   LedgerReconciliationPlan? _buildPlan({
-    required List<ChatMessage> messages,
-    required int endIndex,
+    required List<_LedgerReviewChunk> chunks,
+    required int mandatoryStart,
   }) {
-    final end = messages[endIndex];
-    final startIndex = endIndex + 1 > maxMessages
-        ? endIndex + 1 - maxMessages
-        : 0;
-    final range = messages
-        .sublist(startIndex, endIndex + 1)
-        .where(_isReviewable)
+    if (chunks.isEmpty ||
+        mandatoryStart < 0 ||
+        mandatoryStart >= chunks.length) {
+      return null;
+    }
+    var start = mandatoryStart;
+    var count = chunks
+        .skip(mandatoryStart)
+        .fold<int>(0, (sum, chunk) => sum + chunk.messages.length);
+    if (count > maxMessages) return null;
+    while (start > 0) {
+      final older = chunks[start - 1];
+      if (count + older.messages.length > maxMessages) break;
+      start--;
+      count += older.messages.length;
+    }
+    final range = chunks
+        .sublist(start)
+        .expand((chunk) => chunk.messages)
         .toList(growable: false);
-    if (range.isEmpty) return null;
+    final end = chunks.last.endAssistant;
 
     final hash = sha256
         .convert(
@@ -146,6 +164,41 @@ class LedgerReconciliationPlanner {
       !message.isError &&
       !message.isHidden &&
       message.content.trim().isNotEmpty;
+
+  List<_LedgerReviewChunk>? _parseCompletedChunks(
+    Iterable<ChatMessage> source, {
+    bool allowTrailingUser = false,
+  }) {
+    final messages = source.where(_isReviewable).toList(growable: false);
+    if (messages.isEmpty || !_isAcceptedAssistant(messages.first)) return null;
+    final chunks = <_LedgerReviewChunk>[];
+    var index = 1;
+    while (index < messages.length) {
+      final user = messages[index];
+      if (user.role != 'user') return null;
+      if (index + 1 >= messages.length) {
+        return allowTrailingUser ? chunks : null;
+      }
+      final assistant = messages[index + 1];
+      if (!_isAcceptedAssistant(assistant)) return null;
+      chunks.add(
+        _LedgerReviewChunk([
+          if (chunks.isEmpty) messages.first,
+          user,
+          assistant,
+        ]),
+      );
+      index += 2;
+    }
+    return chunks;
+  }
+}
+
+final class _LedgerReviewChunk {
+  const _LedgerReviewChunk(this.messages);
+
+  final List<ChatMessage> messages;
+  ChatMessage get endAssistant => messages.last;
 }
 
 class StudioLedgerReconciliationPrompt {

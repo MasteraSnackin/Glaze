@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:drift/native.dart';
-import 'package:drift/drift.dart' show Value;
+import 'package:drift/drift.dart' show OrderingTerm, Value;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/db/repositories/applied_canon_transition_repo.dart';
@@ -14,6 +14,7 @@ import 'package:glaze_flutter/core/db/repositories/character_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/character_revision_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/character_session_baseline_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/ledger_raw_tracker_state_reader.dart';
+import 'package:glaze_flutter/core/db/repositories/ledger_reconciliation_run_repo.dart';
 import 'package:glaze_flutter/core/db/repositories/manual_rewrite_job_repo.dart';
 import 'package:glaze_flutter/core/llm/aux_llm_client.dart';
 import 'package:glaze_flutter/core/llm/aux_retry_runner.dart';
@@ -471,7 +472,7 @@ void main() {
   );
 
   test(
-    'automatic collector runs every reconciliation and writer every third',
+    'automatic collector runs every second reconciliation and writer every third collector',
     () async {
       final prompts = <String>[];
       final service = fixture.service((_, prompt) async {
@@ -480,12 +481,12 @@ void main() {
             ? _ok('{"observations":[]}')
             : _ok('{"operations":[]}');
       });
-      for (var ordinal = 1; ordinal <= 3; ordinal++) {
+      for (var ordinal = 1; ordinal <= 6; ordinal++) {
         final run = await fixture.seedReconciliationRun(ordinal: ordinal);
         final result = await service.runAfterReconciliation(run);
         expect(
           result.kind,
-          ordinal < 3 ? 'collectorCompleted' : 'emptyModelProposal',
+          ordinal < 6 ? 'collectorCompleted' : 'emptyModelProposal',
         );
       }
       expect(
@@ -500,6 +501,7 @@ void main() {
           .select(fixture.db.cardEvolutionCollectorRuns)
           .get();
       expect(collectors, hasLength(3));
+      expect(collectors.map((run) => run.reconciliationRunOrdinal), [2, 4, 6]);
       expect(collectors.every((run) => run.status == 'completed'), isTrue);
       final claims = await fixture.db
           .select(fixture.db.cardEvolutionClaims)
@@ -511,8 +513,9 @@ void main() {
   );
 
   test(
-    'first high reconciliation ordinal still becomes collector one',
+    'first high logical reconciliation pair becomes collector one',
     () async {
+      await fixture.seedReconciliationRun(ordinal: 39);
       final run = await fixture.seedReconciliationRun(ordinal: 40);
       final result = await fixture
           .service((_, prompt) async => _ok('{"observations":[]}'))
@@ -522,7 +525,7 @@ void main() {
           .select(fixture.db.cardEvolutionCollectorRuns)
           .getSingle();
       expect(collector.collectorOrdinal, 1);
-      expect(collector.reconciliationRunOrdinal, 40);
+      expect(collector.reconciliationRunOrdinal, 2);
     },
   );
 
@@ -535,7 +538,7 @@ void main() {
       writerCalls++;
       return _ok(writerCalls == 1 ? 'invalid' : '{"operations":[]}');
     });
-    for (final ordinal in [10, 20, 30, 40]) {
+    for (final ordinal in [10, 20, 30, 40, 50, 60, 70, 80]) {
       await service.runAfterReconciliation(
         await fixture.seedReconciliationRun(ordinal: ordinal),
       );
@@ -545,7 +548,10 @@ void main() {
         .select(fixture.db.cardEvolutionClaims)
         .getSingle();
     expect(claim.predecessorRunOrdinal, 3);
-    expect(claim.predecessorCursorHash, 'chain-30');
+    final boundary = await (fixture.db.select(
+      fixture.db.cardEvolutionCollectorRuns,
+    )..where((row) => row.collectorOrdinal.equals(3))).getSingle();
+    expect(claim.predecessorCursorHash, boundary.reconciliationChainHash);
   });
 
   test('minimal no_evidence response is accepted', () async {
@@ -589,8 +595,9 @@ void main() {
   });
 
   test('tracker fields normalize to one stable NPC group target', () async {
+    await fixture.seedReconciliationRun(ordinal: 1);
     final run = await fixture.seedReconciliationRun(
-      ordinal: 1,
+      ordinal: 2,
       opKeys: const ['npc:Квинн.location', 'npc:Квинн.current_goal'],
     );
     String? collectorPrompt;
@@ -632,6 +639,11 @@ void main() {
             updatedAt: 1,
           ),
         );
+        await fixture.seedReconciliationRun(
+          ordinal: ordinal - 1,
+          messages: messages,
+          opKeys: const ['world:location'],
+        );
         final run = await fixture.seedReconciliationRun(
           ordinal: ordinal,
           messages: messages,
@@ -652,13 +664,22 @@ void main() {
       await (fixture.db.delete(
         fixture.db.cardEvolutionObservations,
       )..where((row) => row.id.equals('quinn-1000'))).go();
+      await fixture.db.transaction(
+        () => LedgerReconciliationRunRepo(fixture.db)
+            .invalidateForMessageMutation(
+              sessionId: 'session',
+              messageIds: const {'a1'},
+              reason: 'test_evidence_change',
+              createdAt: 1001,
+            ),
+      );
       const returned = [
         {'id': 'a1', 'role': 'assistant', 'content': 'Квинн вошла в комнату.'},
         {'id': 'u1', 'role': 'user', 'content': 'Я приветствую Квинн.'},
         {'id': 'a2', 'role': 'assistant', 'content': 'assistant 2'},
         {'id': 'u2', 'role': 'user', 'content': 'user 2'},
       ];
-      final related = await promptFor(returned, 1001);
+      final related = await promptFor(returned, 1002);
       expect(related, contains('Квинн remembers the old promise'));
     },
   );
@@ -712,8 +733,13 @@ void main() {
         {'id': 'a2', 'role': 'assistant', 'content': 'assistant 2'},
         {'id': 'u2', 'role': 'user', 'content': 'user 2'},
       ];
-      final run = await fixture.seedReconciliationRun(
+      await fixture.seedReconciliationRun(
         ordinal: 1,
+        messages: messages,
+        opKeys: const ['arc:Спонсорство.status'],
+      );
+      final run = await fixture.seedReconciliationRun(
+        ordinal: 2,
         messages: messages,
         opKeys: const ['arc:Спонсорство.status'],
       );
@@ -778,8 +804,13 @@ void main() {
       {'id': 'a2', 'role': 'assistant', 'content': 'assistant 2'},
       {'id': 'u2', 'role': 'user', 'content': 'user 2'},
     ];
-    final run = await fixture.seedReconciliationRun(
+    await fixture.seedReconciliationRun(
       ordinal: 1,
+      messages: messages,
+      opKeys: const ['world:location'],
+    );
+    final run = await fixture.seedReconciliationRun(
+      ordinal: 2,
       messages: messages,
       opKeys: const ['world:location'],
     );
@@ -801,7 +832,7 @@ void main() {
             ? _ok('{"observations":[]}')
             : _ok('{"operations":[]}'),
       );
-      for (final ordinal in [1, 2]) {
+      for (final ordinal in [1, 2, 3, 4]) {
         final result = await service.runAfterReconciliation(
           await fixture.seedReconciliationRun(ordinal: ordinal),
         );
@@ -815,8 +846,11 @@ void main() {
       )..where((row) => row.collectorOrdinal.equals(2))).write(
         const CardEvolutionCollectorRunsCompanion(status: Value('claimed')),
       );
+      await service.runAfterReconciliation(
+        await fixture.seedReconciliationRun(ordinal: 5),
+      );
       final result = await service.runAfterReconciliation(
-        await fixture.seedReconciliationRun(ordinal: 3),
+        await fixture.seedReconciliationRun(ordinal: 6),
       );
       expect(result.kind, 'collectorUnavailable');
       expect(
@@ -828,8 +862,9 @@ void main() {
   );
 
   test('primary current groups survive retrieval target extras cap', () async {
+    await fixture.seedReconciliationRun(ordinal: 1);
     final run = await fixture.seedReconciliationRun(
-      ordinal: 1,
+      ordinal: 2,
       opKeys: [
         for (var index = 0; index < 85; index++) 'arc:Текущий$index.status',
       ],
@@ -930,56 +965,51 @@ final class _Fixture {
       'UPDATE chat_sessions SET messages_json = ? WHERE session_id = ?',
       [jsonEncode(messages), 'session'],
     );
-    final anchors = [
+    final anchors = <ReconciliationAnchor>[
       for (final message in messages)
-        {
-          'agentSwipeId': 0,
-          'contentHash': computeHash(message['content']!),
-          'messageId': message['id'],
-          'role': message['role'],
-          'swipeId': 0,
-        },
+        ReconciliationAnchor(
+          agentSwipeId: 0,
+          contentHash: computeHash(message['content']!),
+          messageId: message['id']!,
+          role: message['role']!,
+          swipeId: 0,
+        ),
     ];
-    final anchorsJson = jsonEncode(anchors);
-    await db.customStatement(
-      'INSERT INTO reconciliation_successful_runs '
-      '(id, session_id, ordinal, start_message_id, start_swipe_id, '
-      'start_agent_swipe_id, end_message_id, end_swipe_id, '
-      'end_agent_swipe_id, anchors_json, range_hash, '
-      'accepted_manifest_refs_json, effective_canon_stamp, '
-      'effective_canon_revision, effective_canon_hash, '
-      'canonical_result_json, content_hash, predecessor_chain_hash, '
-      'chain_hash, contract_version, ops_applied_json, created_at) '
-      'VALUES (?, ?, ?, ?, 0, 0, ?, 0, 0, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, 1, ?, ?)',
-      [
-        'run-$ordinal',
-        'session',
-        ordinal,
-        'a1',
-        'a1',
-        anchorsJson,
-        computeHash(anchorsJson),
-        '[]',
-        'canon-stamp-$ordinal',
-        'canon-hash-$ordinal',
-        jsonEncode({
-          'export': {
-            'ops': [
-              for (final key in opKeys) {'op': 'set', 'key': key, 'value': ''},
+    final existing =
+        await (db.select(db.ledgerReconciliationSuccessfulRuns)
+              ..where((row) => row.sessionId.equals('session'))
+              ..orderBy([(row) => OrderingTerm.desc(row.ordinal)])
+              ..limit(1))
+            .getSingleOrNull();
+    final run = LedgerReconciliationRun(
+      id: 'run-$ordinal',
+      sessionId: 'session',
+      ordinal: (existing?.ordinal ?? 0) + 1,
+      anchors: anchors,
+      acceptedManifestRefs: const [],
+      effectiveCanonStamp: 'canon-stamp-$ordinal',
+      effectiveCanonRevision: 1,
+      effectiveCanonHash: 'canon-hash-$ordinal',
+      canonicalResult: {
+        'export': {
+          'ops': [
+            for (final key in opKeys) {'op': 'set', 'key': key, 'value': ''},
+          ],
+          'sceneState': {
+            'presentEntities': [
+              for (final name in presentEntities) {'name': name},
             ],
-            'sceneState': {
-              'presentEntities': [
-                for (final name in presentEntities) {'name': name},
-              ],
-            },
           },
-        }),
-        'content-$ordinal',
-        '',
-        'chain-$ordinal',
-        '[]',
-        ordinal * 10,
-      ],
+        },
+      },
+      predecessorChainHash: existing?.chainHash ?? '',
+      contractVersion: 1,
+      opsApplied: const [],
+      createdAt: ordinal * 10,
+    );
+    expect(
+      await LedgerReconciliationRunRepo(db).append(run),
+      isA<ReconciliationRunAppended>(),
     );
     return (db.select(
       db.ledgerReconciliationSuccessfulRuns,
