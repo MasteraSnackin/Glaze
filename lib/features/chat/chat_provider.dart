@@ -509,6 +509,9 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         state = AsyncData(current);
         return;
       }
+      // The append is now durable, so later setup work must not keep the
+      // composer blocked if a tracker or post-generation stage stalls.
+      _sendInFlight = false;
       if (durableAcceptance != null && !durableAcceptance.isCompleted) {
         durableAcceptance.complete(true);
       }

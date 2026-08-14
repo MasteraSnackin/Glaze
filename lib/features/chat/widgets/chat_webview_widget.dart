@@ -242,8 +242,8 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
 
   /// Polls for the bridge (set by the surface's `onWebViewCreated`) and runs
   /// the idempotent init once it exists. Bounded so it can never spin forever.
-  /// If the bridge never appears (e.g. WebView2 not installed on Windows), an
-  /// error dialog is shown so the user is not left with a blank screen.
+  /// A timeout diagnoses an incomplete native initialization; it cannot infer
+  /// the installation state of WebView2, which is also hit by lifecycle races.
   Future<void> _kickInitWhenReady() async {
     for (var i = 0; i < 50; i++) {
       if (!mounted) return;
@@ -254,20 +254,19 @@ class ChatWebViewWidgetState extends ConsumerState<ChatWebViewWidget>
       }
       await Future<void>.delayed(const Duration(milliseconds: 100));
     }
-    // Bridge never appeared after 5 seconds of polling — the native WebView
-    // could not be created (e.g. WebView2 Runtime missing on Windows, or
-    // environment setup failed at app startup). Show a diagnostic dialog
-    // instead of leaving a blank page.
+    // Bridge never appeared after 5 seconds of polling. This can be an actual
+    // platform failure, but can also be a native-view lifecycle race during a
+    // rapid route change, so do not claim a missing runtime without evidence.
     if (!mounted || _bridgeFailureNotified) return;
     _bridgeFailureNotified = true;
     debugPrint(
       '[ChatWebView] bridge was not created after 5s — '
-      'native WebView failed to initialize (WebView2 missing?)',
+      'native WebView did not finish initializing',
     );
     GlazeErrorDialog.show(
       context,
-      'Chat view could not be initialized. '
-      'On Windows, ensure "Microsoft Edge WebView2 Runtime" is installed.',
+      'Chat view is still initializing. Please return to the chat once more. '
+      'If this keeps happening, restart Glaze and check the diagnostic log.',
       prefix: 'Chat view failed to load',
     );
   }
