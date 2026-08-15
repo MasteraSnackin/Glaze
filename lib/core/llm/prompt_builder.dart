@@ -676,8 +676,11 @@ PromptResult _assembleMessages({
         );
       }
     } else {
-      final content = block.content.trim();
-      final accountingContent = block.contentForAccounting.trim();
+      // Content goes out as the author wrote it — no trimming. Trimming here
+      // would collapse a spaces-and-newlines block back to empty and drop it
+      // one line below, which is exactly what SillyTavern does not do.
+      final content = block.content;
+      final accountingContent = block.contentForAccounting;
 
       // setvar-only blocks: no LLM-visible text, but definitions count toward preset.
       if (content.isEmpty) {
@@ -889,7 +892,7 @@ PromptResult _assembleMessages({
         }
       }
       historySeen++;
-    } else if (msg.content.trim().isNotEmpty) {
+    } else if (msg.content.isNotEmpty) {
       finalMessages.add(msg);
     }
   }

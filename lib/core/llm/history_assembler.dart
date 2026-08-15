@@ -98,7 +98,7 @@ class PromptMessage {
     return {
       'role': role,
       'content': [
-        if (content.trim().isNotEmpty) {'type': 'text', 'text': content},
+        if (content.isNotEmpty) {'type': 'text', 'text': content},
         {
           'type': 'image_url',
           'image_url': {'url': imagePath},
@@ -142,8 +142,10 @@ List<Map<String, dynamic>> buildApiMessages(
   List<PromptMessage> messages, {
   int reasoningHistoryCount = 0,
 }) {
+  // Same emptiness rule as the block resolver: only a zero-length string counts
+  // as empty. Spaces and newlines are content and go out to the provider.
   final included = messages
-      .where((message) => message.content.trim().isNotEmpty || message.hasImage)
+      .where((message) => message.content.isNotEmpty || message.hasImage)
       .toList();
   final result = included.map((message) => message.toApiMap()).toList();
   if (reasoningHistoryCount == 0 || reasoningHistoryCount < -1) return result;
