@@ -62,12 +62,23 @@ void main() {
   test('merge drops the empty blocks the request drops', () {
     final rows = buildPreviewMessages(const [
       PromptMessage(role: 'system', content: 'kept'),
-      PromptMessage(role: 'system', content: '   '),
+      PromptMessage(role: 'system', content: ''),
     ], PromptPostProcessing.merge);
 
     expect(rows, hasLength(1));
     expect(rows.single.message.content, 'kept');
     expect(rows.single.sources, hasLength(1));
+  });
+
+  test('merge keeps a whitespace-only block, matching the request', () {
+    final rows = buildPreviewMessages(const [
+      PromptMessage(role: 'system', content: 'kept'),
+      PromptMessage(role: 'system', content: '   '),
+    ], PromptPostProcessing.merge);
+
+    expect(rows, hasLength(1));
+    expect(rows.single.message.content, 'kept\n\n   ');
+    expect(rows.single.sources, hasLength(2));
   });
 
   test('semi relabels every system block after the first', () {

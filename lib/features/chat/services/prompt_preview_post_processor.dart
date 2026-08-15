@@ -76,7 +76,7 @@ List<PreviewMessage> buildPreviewMessages(
   }
 
   final included = messages
-      .where((message) => message.content.trim().isNotEmpty || message.hasImage)
+      .where((message) => message.content.isNotEmpty || message.hasImage)
       .toList();
 
   final tagged = [

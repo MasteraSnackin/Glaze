@@ -98,7 +98,12 @@ ResolvedContent? resolveBlockContent({
     notifyObj.varsChanged = true;
   }
 
-  if (macroResult.text.trim().isEmpty) {
+  // Emptiness is measured the way SillyTavern measures it: a block is empty
+  // only when nothing at all is left, not when nothing *printable* is left.
+  // A block holding just spaces or newlines is content the author put there on
+  // purpose, so it survives and reaches the model (ST: `openai.js` `getChat`,
+  // which keeps any string a JS truthiness check accepts).
+  if (macroResult.text.isEmpty) {
     final setvarPayload = setvarDefinitionsForAccounting(content);
     if (setvarPayload.isEmpty) return null;
     return ResolvedContent(
