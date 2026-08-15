@@ -32,6 +32,13 @@ class SyncSerialization {
     return sha256.convert(utf8.encode(json)).toString();
   }
 
+  static String computeStudioConfigHash(Map<String, dynamic> json) {
+    final content = Map<String, dynamic>.from(json)
+      ..remove('createdAt')
+      ..remove('updatedAt');
+    return computeSyncHash(content);
+  }
+
   /// Device-local / derived fields excluded so parity does not false-conflict.
   static const _memoryBookSettingsHashKeys = {
     'enabled',
@@ -190,5 +197,21 @@ class SyncSerialization {
     } catch (_) {
       return null;
     }
+  }
+
+  static Future<Map<String, dynamic>> readRequiredCloudEntity(
+    CloudAdapter adapter,
+    SyncManifestEntry entry,
+  ) async {
+    final raw = await adapter.download(entry.path);
+    if (raw.isEmpty) {
+      throw StateError('Empty cloud entity: ${entry.key}');
+    }
+    if (raw.length > maxSyncPayloadBytes) {
+      throw Exception(
+        'Payload exceeds ${maxSyncPayloadBytes ~/ 1024 ~/ 1024}MB limit',
+      );
+    }
+    return jsonDecode(raw) as Map<String, dynamic>;
   }
 }

@@ -28,6 +28,7 @@ class SyncManifestBuilder implements SyncManifestProvider {
   final SyncCharacterFolderStore? _characterFolderStore;
   final SyncMemoryGraphStore? _memoryGraphStore;
   final SyncCharacterKnowledgeStore? _characterKnowledgeStore;
+  final SyncReconciliationStateStore? _reconciliationStateStore;
   final SyncImageStore? _imageStore;
 
   static const _manifestKey = 'gz_sync_manifest_v2';
@@ -54,6 +55,7 @@ class SyncManifestBuilder implements SyncManifestProvider {
     this._characterFolderStore,
     this._memoryGraphStore,
     this._characterKnowledgeStore,
+    this._reconciliationStateStore,
     this._imageStore,
   });
 
@@ -277,7 +279,7 @@ class SyncManifestBuilder implements SyncManifestProvider {
     for (final config in studioConfigs) {
       final id = config.sessionId;
       final json = config.toJson();
-      final hash = SyncSerialization.computeSyncHash(json);
+      final hash = SyncSerialization.computeStudioConfigHash(json);
       final key = entryKey('studio_config', id);
       final prevEntry = previous.entries[key];
       final cloudEntry = cloudManifest?.entries[key];
@@ -402,6 +404,53 @@ class SyncManifestBuilder implements SyncManifestProvider {
           updatedAt: updatedAt,
           hash: hash,
         );
+      }
+    }
+
+    if (_reconciliationStateStore != null) {
+      final sessionIds = await _reconciliationStateStore.getAllSessionIds();
+      for (final sessionId in sessionIds) {
+        final state = await _reconciliationStateStore.getBySessionId(sessionId);
+        if (state == null) continue;
+        final hash = SyncSerialization.computeSyncHash(state);
+        final key = entryKey('reconciliation_state', sessionId);
+        final prevEntry = previous.entries[key];
+        final cloudEntry = cloudManifest?.entries[key];
+        final updatedAt = _resolveUpdatedAt(
+          hash: hash,
+          prevEntry: prevEntry,
+          cloudEntry: cloudEntry,
+          now: now,
+        );
+        entries[key] = SyncManifestEntry(
+          type: 'reconciliation_state',
+          id: sessionId,
+          path: cloudPath('reconciliation_state', sessionId),
+          updatedAt: updatedAt,
+          hash: hash,
+        );
+      }
+      final chatSessionIds = sessions
+          .map((session) => session.sessionId)
+          .toSet();
+      for (final previousEntry in previous.entries.values) {
+        if (previousEntry.type != 'reconciliation_state' ||
+            entries.containsKey(previousEntry.key) ||
+            !chatSessionIds.contains(previousEntry.id)) {
+          continue;
+        }
+        final cloudEntry = cloudManifest?.entries[previousEntry.key];
+        if (cloudEntry == null ||
+            cloudEntry.deleted ||
+            cloudEntry.hash != previousEntry.hash ||
+            await isDeleted(previousEntry.type, previousEntry.id) ||
+            await isDeleted('chat', previousEntry.id)) {
+          continue;
+        }
+        // A cloud state may normalize to no durable runs (for example, stale
+        // legacy anchors). Keep its accepted manifest marker so it is not
+        // downloaded and rejected again on every pull.
+        entries[previousEntry.key] = cloudEntry;
       }
     }
 
@@ -677,5 +726,14 @@ class SyncManifestBuilder implements SyncManifestProvider {
   Future<void> clearDeleted() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_deletedKey);
+  }
+
+  @override
+  Future<bool> isDeleted(String type, String id) async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_deletedKey);
+    if (raw == null) return false;
+    final deleted = (jsonDecode(raw) as List).cast<Map<String, dynamic>>();
+    return deleted.any((row) => row['type'] == type && row['id'] == id);
   }
 }
