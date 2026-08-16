@@ -112,6 +112,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   @override
   Future<ChatState> build() async {
     ref.keepAlive();
+    _sessionCtrl = _createSessionController(ref);
     // Mirror this character's generation state into the global registry so the
     // chat list can show a live "typing" indicator for the session without
     // building its full state. Generation outlives the chat screen
@@ -267,16 +268,19 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     writes: _sessionWrites,
   );
 
-  late final _sessionCtrl = ChatSessionController(
-    ref: ref,
-    charId: arg,
-    setState: (s) {
-      state = s;
-    },
-    getState: () => state,
-    invalidateHistory: _invalidateHistory,
-    fixupSwipesWithImageResults: _fixupSwipesWithImageResults,
-  );
+  late ChatSessionController _sessionCtrl;
+
+  ChatSessionController _createSessionController(Ref buildRef) =>
+      ChatSessionController(
+        ref: buildRef,
+        charId: arg,
+        setState: (s) {
+          state = s;
+        },
+        getState: () => state,
+        invalidateHistory: _invalidateHistory,
+        fixupSwipesWithImageResults: _fixupSwipesWithImageResults,
+      );
 
   late final _draftCtrl = ChatDraftController(
     ref: ref,
@@ -427,6 +431,15 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     Completer<bool>? durableAcceptance,
   }) async {
     if (!ref.mounted) {
+      durableAcceptance?.complete(false);
+      return;
+    }
+    await _sessionWrites.settle();
+    if (!ref.mounted) {
+      durableAcceptance?.complete(false);
+      return;
+    }
+    if (ref.read(editingMessageIdProvider(arg)) != null) {
       durableAcceptance?.complete(false);
       return;
     }
@@ -663,6 +676,9 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
         state.value?.isPostGenRunning == true) {
       await abortGeneration();
     }
+    await _sessionWrites.settle();
+    if (!ref.mounted) return;
+    if (ref.read(editingMessageIdProvider(arg)) != null) return;
     final current = state.value;
     if (current == null ||
         current.session == null ||
@@ -779,6 +795,9 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   Future<void> impersonate({String? guidanceText}) async {
     if (!ref.mounted) return;
     if (ref.read(editingMessageIdProvider(arg)) != null) return;
+    await _sessionWrites.settle();
+    if (!ref.mounted) return;
+    if (ref.read(editingMessageIdProvider(arg)) != null) return;
     final current = state.value;
     if (current == null ||
         current.session == null ||
@@ -867,6 +886,9 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
   }
 
   Future<void> continueMessage() async {
+    if (!ref.mounted) return;
+    if (ref.read(editingMessageIdProvider(arg)) != null) return;
+    await _sessionWrites.settle();
     if (!ref.mounted) return;
     if (ref.read(editingMessageIdProvider(arg)) != null) return;
     final current = state.value;
