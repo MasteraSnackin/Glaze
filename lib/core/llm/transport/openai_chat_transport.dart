@@ -141,19 +141,25 @@ class OpenAiChatTransport implements ChatTransport {
     if (r.maxTokens > 0) {
       body['max_tokens'] = r.maxTokens;
     }
-    if (!r.omitTemperature && r.temperature > 0) {
+    // The omit* flags are the ONLY switch for these — never suppress a
+    // parameter because of its value. `temperature: 0` and `top_p: 1` are
+    // settings the user can pick in the UI, and dropping them silently made
+    // the slider a no-op with no trace in the prompt inspector.
+    if (!r.omitTemperature) {
       body['temperature'] = r.temperature;
     }
-    if (!r.omitTopP && r.topP > 0 && r.topP < 1) {
+    if (!r.omitTopP) {
       body['top_p'] = r.topP;
     }
+    // top_k is the exception: 0 is not a legal value upstream (Anthropic and
+    // Gemini both require >= 1), so 0 keeps meaning "not set".
     if (!r.omitTopK && r.topK > 0) {
       body['top_k'] = r.topK;
     }
-    if (!r.omitFrequencyPenalty && r.frequencyPenalty != 0) {
+    if (!r.omitFrequencyPenalty) {
       body['frequency_penalty'] = r.frequencyPenalty;
     }
-    if (!r.omitPresencePenalty && r.presencePenalty != 0) {
+    if (!r.omitPresencePenalty) {
       body['presence_penalty'] = r.presencePenalty;
     }
     if (!r.omitReasoning && r.requestReasoning && !r.omitReasoningEffort) {

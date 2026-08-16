@@ -211,10 +211,13 @@ class AnthropicChatTransport implements ChatTransport {
       body['session_id'] = request.sessionId;
     }
 
-    if (!request.omitTemperature && request.temperature > 0) {
+    // Gated on the omit* flags only — see the note in
+    // `OpenAiChatTransport.buildBody`. top_k keeps its `> 0` guard because
+    // Anthropic rejects `top_k: 0`.
+    if (!request.omitTemperature) {
       body['temperature'] = request.temperature;
     }
-    if (!request.omitTopP && request.topP > 0 && request.topP < 1) {
+    if (!request.omitTopP) {
       body['top_p'] = request.topP;
     }
     if (!request.omitTopK && request.topK > 0) {

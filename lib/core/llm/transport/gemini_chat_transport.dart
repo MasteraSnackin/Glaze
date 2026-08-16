@@ -109,10 +109,13 @@ class GeminiChatTransport implements ChatTransport {
     if (request.maxTokens > 0) {
       generationConfig['maxOutputTokens'] = request.maxTokens;
     }
-    if (!request.omitTemperature && request.temperature > 0) {
+    // Gated on the omit* flags only — see the note in
+    // `OpenAiChatTransport.buildBody`. topK keeps its `> 0` guard because
+    // Gemini rejects `topK: 0`.
+    if (!request.omitTemperature) {
       generationConfig['temperature'] = request.temperature;
     }
-    if (!request.omitTopP && request.topP > 0 && request.topP < 1) {
+    if (!request.omitTopP) {
       generationConfig['topP'] = request.topP;
     }
     if (!request.omitTopK && request.topK > 0) {

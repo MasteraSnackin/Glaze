@@ -287,6 +287,10 @@ class AuxLlmClient {
           maxTokens: maxTokens,
           temperature: temperature,
           topP: 1.0,
+          // Aux calls pin their own temperature and deliberately don't steer
+          // top_p. Say so explicitly — the transports no longer treat 1.0 as
+          // "unset".
+          omitTopP: true,
           stream: false,
           requestReasoning: requestReasoning,
           useResponsesApi: config.useResponsesApi,
@@ -378,6 +382,8 @@ class AuxLlmClient {
           maxTokens: maxTokens,
           temperature: temperature,
           topP: 1.0,
+          // See `_callOnce` — top_p is intentionally not steered here.
+          omitTopP: true,
           stream: true,
           requestReasoning: requestReasoning,
           useResponsesApi: config.useResponsesApi,

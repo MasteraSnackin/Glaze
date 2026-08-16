@@ -10,7 +10,10 @@ void main() {
       id: 'api',
       name: 'Name',
       providerId: 'provider',
-      protocol: LlmProtocol.openai,
+      // OpenRouter supports every sampling field, so this round-trip exercises
+      // them all. Official OpenAI would legitimately clear top_k — that is
+      // covered by its own case below.
+      protocol: LlmProtocol.openrouter,
       endpoint: 'https://example.test',
       apiKey: 'secret',
       model: 'model',
@@ -303,47 +306,34 @@ void main() {
   }
 
   for (final testCase
-      in <
-        ({
-          String protocol,
-          bool keepsOpenAiOptions,
-          bool keepsPenalties,
-          bool keepsPromptCache,
-        })
-      >[
+      in <({String protocol, bool keepsPenalties, bool keepsPromptCache})>[
         (
           protocol: LlmProtocol.openai,
-          keepsOpenAiOptions: true,
           keepsPenalties: true,
           keepsPromptCache: false,
         ),
         (
           protocol: LlmProtocol.customChatCompletion,
-          keepsOpenAiOptions: true,
           keepsPenalties: true,
           keepsPromptCache: true,
         ),
         (
           protocol: LlmProtocol.openaiResponses,
-          keepsOpenAiOptions: true,
           keepsPenalties: false,
           keepsPromptCache: false,
         ),
         (
           protocol: LlmProtocol.openrouter,
-          keepsOpenAiOptions: true,
           keepsPenalties: true,
           keepsPromptCache: true,
         ),
         (
           protocol: LlmProtocol.anthropic,
-          keepsOpenAiOptions: false,
           keepsPenalties: false,
           keepsPromptCache: true,
         ),
         (
           protocol: LlmProtocol.gemini,
-          keepsOpenAiOptions: false,
           keepsPenalties: false,
           keepsPromptCache: false,
         ),
@@ -352,10 +342,6 @@ void main() {
       final config = ApiConfig(
         id: 'api',
         protocol: testCase.protocol,
-        omitTemperature: true,
-        omitTopP: true,
-        omitReasoning: true,
-        omitReasoningEffort: true,
         frequencyPenalty: 1.5,
         presencePenalty: -1.5,
         cacheControlTtl: '1h',
@@ -363,16 +349,54 @@ void main() {
       final draft = ApiConfigDraft.fromConfig(config);
 
       for (final values in [draft.values, draft.toConfig(config)]) {
-        expect(values.omitTemperature, testCase.keepsOpenAiOptions);
-        expect(values.omitTopP, testCase.keepsOpenAiOptions);
-        expect(values.omitReasoning, testCase.keepsOpenAiOptions);
-        expect(values.omitReasoningEffort, testCase.keepsOpenAiOptions);
         expect(values.frequencyPenalty, testCase.keepsPenalties ? 1.5 : 0.0);
         expect(values.presencePenalty, testCase.keepsPenalties ? -1.5 : 0.0);
         expect(
           values.cacheControlTtl,
           testCase.keepsPromptCache ? '1h' : 'off',
         );
+      }
+    });
+
+    // Official OpenAI and the Responses API have no top_k and hide the
+    // slider, so a value carried over from another protocol must be cleared
+    // rather than kept and sent from a control the user cannot see.
+    test('${testCase.protocol} clears top_k when the protocol has none', () {
+      final draft = ApiConfigDraft.fromConfig(
+        ApiConfig(id: 'api', protocol: testCase.protocol, topK: 40),
+      );
+      final supportsTopK =
+          testCase.protocol == LlmProtocol.customChatCompletion ||
+          testCase.protocol == LlmProtocol.openrouter ||
+          testCase.protocol == LlmProtocol.anthropic ||
+          testCase.protocol == LlmProtocol.gemini;
+
+      for (final values in [draft.values, draft.toConfig(draft.values)]) {
+        expect(values.topK, supportsTopK ? 40 : 0);
+      }
+    });
+
+    // Sampling and reasoning switches used to be cleared for anything that
+    // wasn't OpenAI-shaped, even though the Anthropic and Gemini transports
+    // have always honored them. They must survive on every protocol.
+    test('${testCase.protocol} keeps the omit switches', () {
+      final config = ApiConfig(
+        id: 'api',
+        protocol: testCase.protocol,
+        omitTemperature: true,
+        omitTopP: true,
+        omitTopK: true,
+        omitReasoning: true,
+        omitReasoningEffort: true,
+      );
+      final draft = ApiConfigDraft.fromConfig(config);
+
+      for (final values in [draft.values, draft.toConfig(config)]) {
+        expect(values.omitTemperature, isTrue);
+        expect(values.omitTopP, isTrue);
+        expect(values.omitTopK, isTrue);
+        expect(values.omitReasoning, isTrue);
+        expect(values.omitReasoningEffort, isTrue);
       }
     });
   }

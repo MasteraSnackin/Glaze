@@ -130,6 +130,30 @@ wire formats collapse `max` to `high` and `min` to `minimal` (GPT-5 family) or
 budget. Never widen a stored preset's effort by rewriting it on protocol
 switch — resolve it at the transport instead.
 
+`showNativeReasoning` is a **display** control and must never change what is
+requested. On the Responses API it selects `reasoning.summary` only; the
+`reasoning` block itself and its `effort` stay governed by
+`requestReasoning` / `omitReasoning` / `omitReasoningEffort`, exactly as on
+Chat Completions.
+
+## Sampling parameters
+
+The `omit*` flags on `ApiConfig` are the **only** switch for `temperature`,
+`top_p`, `frequency_penalty` and `presence_penalty`. Never gate a parameter on
+its value: `temperature: 0` and `top_p: 1` are settings a user can pick, and
+suppressing them makes the slider a silent no-op that the prompt inspector
+cannot show. `top_k` is the single exception — Anthropic and Gemini reject
+`0`, so `0` keeps meaning "not set".
+
+The flags are protocol-agnostic; every transport honors them. What *is*
+protocol-bound is which parameters exist at all, and `ApiConfigDraft.
+normalizeValues` is the one place that decides it: it clears a value the
+active protocol has no field for (penalties outside the OpenAI wire formats,
+`top_k` on official OpenAI and the Responses API). Keep that list in step with
+the `_supports*` getters in `api_settings_screen.dart` — a value the editor
+hides but normalization keeps will still go on the wire from a control the
+user can no longer see.
+
 Provider notes:
 - OpenAI-compatible/custom transports omit `reasoning_effort` when reasoning is omitted.
 - Anthropic/Gemini transports omit their native thinking config when reasoning is omitted.
