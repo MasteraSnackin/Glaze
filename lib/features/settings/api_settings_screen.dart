@@ -365,11 +365,9 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
       _isResponses ||
       (_protocol == LlmProtocol.customChatCompletion && _customUseResponsesApi);
 
-  bool get _showsOmitSamplingControls =>
-      _protocol == LlmProtocol.openai ||
-      _protocol == LlmProtocol.customChatCompletion ||
-      _protocol == LlmProtocol.openaiResponses ||
-      _protocol == LlmProtocol.openrouter;
+  // Every protocol accepts temperature and top_p, and every transport honors
+  // the matching omit* flag, so the include toggles are shown unconditionally —
+  // they used to be OpenAI-shaped only.
 
   bool get _hideSamplingWhileReasoningAnthropic =>
       _protocol == LlmProtocol.anthropic && _requestReasoning;
@@ -705,13 +703,11 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
             max: 2,
             divisions: 200,
             editableValue: true,
-            included: _showsOmitSamplingControls ? !_omitTemperature : null,
-            onIncludedChanged: _showsOmitSamplingControls
-                ? (v) {
-                    setState(() => _omitTemperature = !v);
-                    _scheduleSave();
-                  }
-                : null,
+            included: !_omitTemperature,
+            onIncludedChanged: (v) {
+              setState(() => _omitTemperature = !v);
+              _scheduleSave();
+            },
             onChanged: (v) {
               setState(() => _temperature = v);
               _scheduleSave();
@@ -806,13 +802,11 @@ class _ApiSettingsScreenState extends ConsumerState<ApiSettingsScreen> {
           max: 1,
           divisions: 100,
           editableValue: true,
-          included: _showsOmitSamplingControls ? !_omitTopP : null,
-          onIncludedChanged: _showsOmitSamplingControls
-              ? (v) {
-                  setState(() => _omitTopP = !v);
-                  _scheduleSave();
-                }
-              : null,
+          included: !_omitTopP,
+          onIncludedChanged: (v) {
+            setState(() => _omitTopP = !v);
+            _scheduleSave();
+          },
           onChanged: (v) {
             setState(() => _topP = v);
             _scheduleSave();

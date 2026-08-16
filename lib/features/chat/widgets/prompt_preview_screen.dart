@@ -10,6 +10,7 @@ import '../../../core/llm/converters/prompt_post_processing.dart';
 import '../../../core/llm/history_assembler.dart';
 import '../../../core/llm/prompt_builder.dart';
 import '../../../core/llm/prompt_isolate.dart';
+import '../../../core/llm/raw_response_text.dart';
 import '../../../core/llm/prompt_worker.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
 import '../providers/prompt_build_providers.dart';
@@ -366,18 +367,10 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
                   ).convert(decoded);
                 } catch (_) {}
               } else {
-                // Pretty/preview view: extract just the assistant text content.
-                try {
-                  final decoded = jsonDecode(raw) as Map<String, dynamic>;
-                  final choices = decoded['choices'] as List?;
-                  final content =
-                      choices?.firstOrNull?['message']?['content'] ??
-                      choices?.firstOrNull?['delta']?['content'] ??
-                      decoded['content'];
-                  if (content is String && content.isNotEmpty) {
-                    displayString = content;
-                  }
-                } catch (_) {}
+                // Pretty/preview view: just the assistant text, whichever
+                // protocol shape the payload came back in. Falls through to
+                // the raw JSON when nothing could be extracted.
+                displayString = extractAssistantText(raw) ?? raw;
               }
               return _buildRawView(displayString, topPad);
             }
@@ -540,18 +533,9 @@ class _PromptPreviewScreenState extends ConsumerState<PromptPreviewScreen> {
           textToCopy = raw;
         }
       } else {
-        // Pretty view: copy just the assistant text.
-        try {
-          final decoded = jsonDecode(raw) as Map<String, dynamic>;
-          final choices = decoded['choices'] as List?;
-          final content =
-              choices?.firstOrNull?['message']?['content'] ??
-              choices?.firstOrNull?['delta']?['content'] ??
-              decoded['content'];
-          textToCopy = content is String ? content : raw;
-        } catch (_) {
-          textToCopy = raw;
-        }
+        // Pretty view: copy just the assistant text — same extraction the
+        // view uses, so what's copied matches what's on screen.
+        textToCopy = extractAssistantText(raw) ?? raw;
       }
     }
 

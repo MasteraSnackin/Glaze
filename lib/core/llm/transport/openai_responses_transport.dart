@@ -48,22 +48,24 @@ class OpenAiResponsesTransport implements ChatTransport {
     if (request.maxTokens > 0) {
       body['max_output_tokens'] = request.maxTokens;
     }
-    // Same guards as the Chat Completions body. `frequency_penalty`,
-    // `presence_penalty` and `top_k` have no Responses equivalent and are
-    // dropped; reasoning models reject sampling outright, which is what the
-    // omit toggles are for.
-    if (!request.omitTemperature && request.temperature > 0) {
+    // Same rule as the Chat Completions body: the omit toggles are the only
+    // switch, never the value. `frequency_penalty`, `presence_penalty` and
+    // `top_k` have no Responses equivalent and are dropped; reasoning models
+    // reject sampling outright, which is what the omit toggles are for.
+    if (!request.omitTemperature) {
       body['temperature'] = request.temperature;
     }
-    if (!request.omitTopP && request.topP > 0 && request.topP < 1) {
+    if (!request.omitTopP) {
       body['top_p'] = request.topP;
     }
 
-    final showReasoning =
-        request.requestReasoning &&
-        !request.omitReasoning &&
-        (request.showNativeReasoning ?? true);
-    if (showReasoning) {
+    // `showNativeReasoning` decides whether a summary is *displayed*, so it
+    // only controls `summary`. Whether reasoning is requested at all — and at
+    // which effort — stays with requestReasoning/omitReasoning, exactly as on
+    // Chat Completions. Conflating the two used to drop `effort` whenever the
+    // user hid the reasoning block.
+    final wantsReasoning = request.requestReasoning && !request.omitReasoning;
+    if (wantsReasoning) {
       final effort = request.omitReasoningEffort
           ? null
           : resolveReasoningEffort(
@@ -71,10 +73,13 @@ class OpenAiResponsesTransport implements ChatTransport {
               effort: request.reasoningEffort,
               model: request.model,
             );
-      body['reasoning'] = <String, dynamic>{
-        'summary': 'auto',
+      final reasoning = <String, dynamic>{
+        if (request.showNativeReasoning ?? true) 'summary': 'auto',
         'effort': ?effort,
       };
+      if (reasoning.isNotEmpty) {
+        body['reasoning'] = reasoning;
+      }
     }
 
     if (request.shouldSendOpenAiSessionId) {

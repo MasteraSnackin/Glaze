@@ -448,6 +448,9 @@ class ResolvedAgentConfig {
   final double presencePenalty;
   final bool omitTemperature;
   final bool omitTopP;
+  final bool omitTopK;
+  final bool omitFrequencyPenalty;
+  final bool omitPresencePenalty;
   final bool requestReasoning;
   final bool showNativeReasoning;
   final bool useResponsesApi;
@@ -475,6 +478,9 @@ class ResolvedAgentConfig {
     this.presencePenalty = 0.0,
     this.omitTemperature = false,
     this.omitTopP = false,
+    this.omitTopK = false,
+    this.omitFrequencyPenalty = false,
+    this.omitPresencePenalty = false,
     this.requestReasoning = false,
     this.showNativeReasoning = true,
     this.useResponsesApi = false,
@@ -507,6 +513,9 @@ class ResolvedAgentConfig {
       presencePenalty: config.presencePenalty,
       omitTemperature: config.omitTemperature,
       omitTopP: config.omitTopP,
+      omitTopK: config.omitTopK,
+      omitFrequencyPenalty: config.omitFrequencyPenalty,
+      omitPresencePenalty: config.omitPresencePenalty,
       requestReasoning: config.requestReasoning,
       showNativeReasoning: config.showNativeReasoning,
       useResponsesApi: config.useResponsesApi,
@@ -546,6 +555,9 @@ class ResolvedAgentConfig {
       presencePenalty: presencePenalty,
       omitTemperature: omitTemperature,
       omitTopP: omitTopP,
+      omitTopK: omitTopK,
+      omitFrequencyPenalty: omitFrequencyPenalty,
+      omitPresencePenalty: omitPresencePenalty,
       requestReasoning: requestReasoning ?? this.requestReasoning,
       showNativeReasoning: showNativeReasoning ?? this.showNativeReasoning,
       useResponsesApi: useResponsesApi ?? this.useResponsesApi,
@@ -571,6 +583,9 @@ class ResolvedAgentConfig {
     double? presencePenalty,
     bool? omitTemperature,
     bool? omitTopP,
+    bool? omitTopK,
+    bool? omitFrequencyPenalty,
+    bool? omitPresencePenalty,
     List<ExtraRequestParameter>? extraRequestParameters,
   }) {
     return ResolvedAgentConfig(
@@ -584,6 +599,11 @@ class ResolvedAgentConfig {
       presencePenalty: presencePenalty ?? this.presencePenalty,
       omitTemperature: omitTemperature ?? this.omitTemperature,
       omitTopP: omitTopP ?? this.omitTopP,
+      // Studio has no per-slot switches for these three, so they keep whatever
+      // the underlying ApiConfig said instead of being dropped.
+      omitTopK: omitTopK ?? this.omitTopK,
+      omitFrequencyPenalty: omitFrequencyPenalty ?? this.omitFrequencyPenalty,
+      omitPresencePenalty: omitPresencePenalty ?? this.omitPresencePenalty,
       requestReasoning: requestReasoning,
       showNativeReasoning: showNativeReasoning,
       useResponsesApi: useResponsesApi,

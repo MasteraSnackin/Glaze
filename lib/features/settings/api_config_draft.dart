@@ -65,17 +65,24 @@ class ApiConfigDraft {
     final reasoningEffort = isValidReasoningEffort(values.reasoningEffort)
         ? values.reasoningEffort
         : 'medium';
-    // Sampling omit-toggles: both OpenAI wire formats plus OpenRouter.
-    final supportsOpenAiOptions =
-        protocol == LlmProtocol.openai ||
-        protocol == LlmProtocol.customChatCompletion ||
-        protocol == LlmProtocol.openaiResponses ||
-        protocol == LlmProtocol.openrouter;
+    // Sampling and reasoning omit-toggles are NOT protocol-bound: every
+    // protocol accepts temperature/top_p, and the Anthropic and Gemini
+    // transports have always honored the flags. Clearing them here was the
+    // only thing stopping those two from using the toggles at all.
     // The Responses API has no penalties and no body-level cache_control.
     final supportsPenalties =
         protocol == LlmProtocol.openai ||
         protocol == LlmProtocol.customChatCompletion ||
         protocol == LlmProtocol.openrouter;
+    // Official OpenAI and the Responses API have no `top_k`, and their editors
+    // hide the slider. Clear the stored value too — otherwise a top_k carried
+    // over from another protocol keeps going on the wire from a control the
+    // user can no longer see, and the endpoint rejects the request.
+    final supportsTopK =
+        protocol == LlmProtocol.customChatCompletion ||
+        protocol == LlmProtocol.openrouter ||
+        protocol == LlmProtocol.anthropic ||
+        protocol == LlmProtocol.gemini;
     // OpenRouter kept a live TTL out of reach: the UI hid the control and this
     // forced it to 'off', so `buildRouterRequest` never placed cache markers
     // for Claude-through-OR.
@@ -97,12 +104,7 @@ class ApiConfigDraft {
           (protocol == LlmProtocol.customChatCompletion &&
               values.useResponsesApi),
       reasoningEffort: reasoningEffort,
-      omitTemperature: supportsOpenAiOptions ? values.omitTemperature : false,
-      omitTopP: supportsOpenAiOptions ? values.omitTopP : false,
-      omitReasoning: supportsOpenAiOptions ? values.omitReasoning : false,
-      omitReasoningEffort: supportsOpenAiOptions
-          ? values.omitReasoningEffort
-          : false,
+      topK: supportsTopK ? values.topK : 0,
       frequencyPenalty: supportsPenalties ? values.frequencyPenalty : 0.0,
       presencePenalty: supportsPenalties ? values.presencePenalty : 0.0,
       cacheControlTtl: supportsPromptCache ? values.cacheControlTtl : 'off',

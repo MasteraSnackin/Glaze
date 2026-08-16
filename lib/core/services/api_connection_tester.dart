@@ -54,6 +54,15 @@ class ApiConnectionTester {
             topK: 0,
             frequencyPenalty: 0.0,
             presencePenalty: 0.0,
+            // This is a reachability probe, not a generation. Send the
+            // smallest legal body: any sampling parameter here is one more
+            // thing a strict endpoint can reject, which would read as a
+            // connection failure.
+            omitTemperature: true,
+            omitTopP: true,
+            omitTopK: true,
+            omitFrequencyPenalty: true,
+            omitPresencePenalty: true,
             stream: false,
             useResponsesApi: useResponsesApi,
           ),

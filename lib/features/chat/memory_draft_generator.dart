@@ -93,6 +93,8 @@ class MemoryDraftGenerator {
         maxTokens: maxTokens,
         temperature: temperature,
         topP: 1.0,
+        // Drafting pins its own temperature and doesn't steer top_p.
+        omitTopP: true,
         stream: false,
         useResponsesApi: useResponsesApi,
       ),

@@ -321,6 +321,8 @@ Future<Lorebook> rebuildLorebookWithActiveLlm(
       maxTokens: 0,
       temperature: 0.2,
       topP: 1.0,
+      // Rebuilding pins its own temperature and doesn't steer top_p.
+      omitTopP: true,
       stream: false,
       useResponsesApi: config.useResponsesApi,
       // Disable the transport's default HTTP receive timeout (0 → no cap). This
