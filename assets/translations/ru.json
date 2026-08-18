@@ -1249,6 +1249,7 @@
   "catalog_comments_error": "Не удалось загрузить комментарии",
   "action_retry": "Повторить",
   "catalog_loading_char": "Загрузка персонажа...",
+  "catalog_janitor_closed_prompt": "Промпт карточки закрыт. Загрузите её, чтобы прочитать промпт.",
   "catalog_import": "Импортировать в библиотеку",
   "catalog_import_options_title": "Параметры импорта",
   "catalog_import_with_lorebooks": "Персонаж + лорбуки",

@@ -1184,6 +1184,7 @@
   "catalog_comments_error": "Couldn't load comments",
   "action_retry": "Retry",
   "catalog_loading_char": "Loading character...",
+  "catalog_janitor_closed_prompt": "This card's prompt is closed. Import it to read the prompt.",
   "catalog_import": "Import to library",
   "catalog_import_options_title": "Import options",
   "catalog_import_with_lorebooks": "Character + lorebooks",
