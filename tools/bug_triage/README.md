@@ -8,14 +8,23 @@ to act on.
 ## What it does (once per day)
 
 1. Fetches Discord forum posts (active + archived-public threads) via the REST
-   API — no persistent gateway connection.
+   API — no persistent gateway connection. **Closed posts are skipped**: locked
+   threads always, posts carrying an ignored forum tag, and archived ones only
+   if `DISCORD_SKIP_ARCHIVED=true` (Discord auto-archives for inactivity, which
+   is not the same as closed).
 2. Fetches all Trello cards from the main board.
 3. For any Discord post **not yet on the board**, creates a card in the "new
    bugs" list, with a back-link to the Discord thread in the description.
 4. If nothing needs auditing, **exits before calling the LLM** (no token spend).
-5. For each card without the `audited` label, runs a DeepSeek agent that greps /
-   reads the checked-out source, then posts a structured audit as a comment and
-   applies the `audited` label.
+5. For each card **in the audited list(s)** without the `audited` label, runs a
+   DeepSeek agent over that ONE report — title, original post and replies
+   together — that greps / reads the checked-out source, then posts a structured
+   audit as a comment and applies the `audited` label. Cards elsewhere on the
+   board are never touched.
+
+Reports that cannot be judged from text (screenshot-only posts, missing repro
+steps) get a **NEED MORE INFO** comment naming what to ask instead of a guess.
+A post with no readable text at all skips the LLM entirely.
 
 De-dup has no external database: each mirrored card carries a hidden
 `discord-thread:<id>` marker in its description, and that's the source of truth.
@@ -54,6 +63,14 @@ auditor.py        Pydantic AI agent (DeepSeek) + structured BugAudit output
 | `TRELLO_AUDITED_LABEL_ID` | label id meaning "AI audited" | — |
 | `DISCORD_GUILD_ID` | your server id | — |
 | `DISCORD_FORUM_CHANNEL_ID` | the bug-report forum channel id | — |
+| `DISCORD_IGNORED_TAG_IDS` | forum tag ids meaning closed (comma-separated) | empty |
+| `DISCORD_SKIP_ARCHIVED` | treat archived threads as closed | `false` |
+| `TRELLO_AUDIT_LIST_IDS` | lists eligible for audit (comma-separated) | the new-bug list |
+| `MAX_NEW_CARDS_PER_RUN` | cap on cards created per run (0 = unlimited) | `25` |
+| `MAX_AUDITS_PER_RUN` | cap on DeepSeek audits per run (0 = unlimited) | `15` |
+
+The connection check prints the forum's tag names with their ids, so run it
+once and copy the closed/solved tag id into `DISCORD_IGNORED_TAG_IDS`.
 
 Finding IDs:
 - Trello: append `.json` to a board URL, or hit
@@ -70,5 +87,10 @@ DRY_RUN=true python triage.py   # dry-run: fetches + logs, no writes
 
 ## Schedule
 
-Daily at 06:00 UTC (`.github/workflows/bug-triage.yml`). Trigger manually from
+Daily at 18:00 UTC (`.github/workflows/bug-triage.yml`). Trigger manually from
 the Actions tab ("Run workflow"), optionally with **dry run** checked.
+
+> **Scheduled runs only fire from the repository's default branch** (`stable`).
+> On `nightly` or a feature branch the cron is inert — only `workflow_dispatch`
+> works there. The daily 18:00 UTC run starts once this file reaches `stable`
+> through the normal `nightly` → `staging` → `stable` promotion.

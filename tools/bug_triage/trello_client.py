@@ -30,6 +30,7 @@ class Card:
     id: str
     name: str
     desc: str
+    list_id: str
     label_ids: tuple[str, ...]
 
     @property
@@ -56,13 +57,14 @@ class TrelloClient:
         raw = self._req(
             "GET",
             f"/boards/{self._board_id}/cards",
-            fields="name,desc,idLabels",
+            fields="name,desc,idList,idLabels",
         )
         return [
             Card(
                 id=c["id"],
                 name=c.get("name", ""),
                 desc=c.get("desc", ""),
+                list_id=c.get("idList", ""),
                 label_ids=tuple(c.get("idLabels", [])),
             )
             for c in raw  # type: ignore[union-attr]

@@ -42,11 +42,34 @@ def check_discord(cfg: Config) -> bool:
         kind = "forum" if c.get("type") == 15 else f"type={c.get('type')} (NOT a forum?)"
         _line(OK, "Discord forum channel", f"{c.get('name')} [{kind}]")
 
-        posts = DiscordClient(
-            cfg.discord_bot_token, cfg.discord_guild_id, cfg.discord_forum_channel_id
-        ).fetch_posts()
-        empty = sum(1 for p in posts if not p.body)
-        _line(OK, "Discord forum read", f"{len(posts)} post(s), {empty} with empty body")
+        dc = DiscordClient(
+            cfg.discord_bot_token,
+            cfg.discord_guild_id,
+            cfg.discord_forum_channel_id,
+            ignored_tag_ids=cfg.discord_ignored_tag_ids,
+            skip_archived=cfg.discord_skip_archived,
+        )
+
+        tags = dc.available_tags()
+        if tags:
+            listed = ", ".join(f"{t.get('name')}={t.get('id')}" for t in tags)
+            _line(OK, "Discord forum tags", listed)
+            _line(OK, "Ignored tag ids",
+                  ", ".join(cfg.discord_ignored_tag_ids) or
+                  "(none set — put closed/solved tag ids in DISCORD_IGNORED_TAG_IDS)")
+        else:
+            _line(OK, "Discord forum tags", "none configured on the channel")
+
+        threads = dc._threads()
+        closed = sum(1 for t in threads if dc.is_closed(t)[0])
+        _line(OK, "Discord closed filter",
+              f"{closed} of {len(threads)} thread(s) treated as closed "
+              f"(skip_archived={cfg.discord_skip_archived})")
+
+        posts = dc.fetch_posts()
+        empty = sum(1 for p in posts if not p.has_text)
+        _line(OK, "Discord forum read",
+              f"{len(posts)} open post(s), {empty} without readable text")
         if posts and empty == len(posts):
             _line(BAD, "Discord message content",
                   "all bodies empty → enable MESSAGE CONTENT INTENT")

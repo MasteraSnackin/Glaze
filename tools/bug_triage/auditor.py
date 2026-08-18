@@ -4,6 +4,9 @@ A DeepSeek-backed Pydantic AI agent gets two read-only tools to explore the
 checked-out repo (ripgrep search + file read) and must return a *structured*
 audit. It never edits code, never opens PRs — the orchestrator only posts its
 output as a Trello comment for a human to act on.
+
+One report is audited per agent run: title, original post and replies travel
+together, but threads are never mixed.
 """
 
 from __future__ import annotations
@@ -13,7 +16,7 @@ from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, Field
-from pydantic_ai import Agent, RunContext
+from pydantic_ai import Agent
 from pydantic_ai.models.openai import OpenAIModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
@@ -25,7 +28,9 @@ _MAX_RG_MATCHES = 60
 
 _SYSTEM_PROMPT = """\
 You are a bug-triage engineer for Glaze, a Flutter (Dart) LLM roleplay frontend.
-You receive a single bug report copied from Discord or a Trello card.
+You receive ONE bug report at a time: its title, the original post, and any
+replies from the thread. Judge them together — a reply often carries the repro
+steps or the correction that the title alone is missing.
 
 Your job: investigate the CURRENT source code using the `search_code` and
 `read_file` tools, then produce a structured audit. Rules:
@@ -34,6 +39,11 @@ Your job: investigate the CURRENT source code using the `search_code` and
 - Prefer concrete file:line references over vague statements.
 - Propose a fix as a description, NOT as a patch. Do not invent files.
 - Be concise. A human will read this in a Trello comment.
+
+You CANNOT see images. When a report leans on screenshots, or the text is too
+vague to tell what actually went wrong, set `needs_more_info` to true and put
+the specific questions a human should ask in `missing_info`. Never guess the
+contents of an attachment, and never invent repro steps that were not reported.
 """
 
 
@@ -49,6 +59,17 @@ class BugAudit(BaseModel):
     proposed_fix: str = Field(description="Fix direction in prose, no code patch.")
     relevant_files: list[str] = Field(default_factory=list)
     confidence: Literal["low", "medium", "high"]
+    needs_more_info: bool = Field(
+        default=False,
+        description=(
+            "True when the report cannot be judged from text alone — e.g. it "
+            "relies on screenshots you cannot see, or lacks repro steps."
+        ),
+    )
+    missing_info: str = Field(
+        default="",
+        description="What exactly to ask the reporter, when needs_more_info is true.",
+    )
     notes: str = Field(default="", description="Anything a human should double-check.")
 
 
@@ -107,22 +128,30 @@ def build_agent(api_key: str, base_url: str, model_name: str) -> Agent[None, Bug
 
 def format_comment(audit: BugAudit, source_url: str | None) -> str:
     """Render the audit as a Trello comment (markdown-ish)."""
-    files = "\n".join(f"- {f}" for f in audit.relevant_files) or "- (none identified)"
     src = f"\nSource: {source_url}" if source_url else ""
+
+    if audit.needs_more_info:
+        asks = audit.missing_info.strip() or (
+            "The report relies on context that is not readable from text "
+            "(screenshots?). Ask the reporter for steps to reproduce."
+        )
+        return (
+            f"\u26a0\ufe0f **NEED MORE INFO** \u2014 automated triage could not "
+            f"judge this report.{src}\n\n"
+            f"**What was understood**\n{audit.summary}\n\n"
+            f"**What is missing**\n{asks}\n\n"
+            f"*(No audit was performed. Nothing was changed.)*"
+        )
+
+    files = "\n".join(f"- {f}" for f in audit.relevant_files) or "- (none identified)"
     verdict = "actionable" if audit.is_actionable else "NOT clearly actionable"
-    return f"""\
-🤖 **Automated audit** (DeepSeek) — {verdict}, severity **{audit.severity}**, confidence **{audit.confidence}**{src}
-
-**Summary**
-{audit.summary}
-
-**Suspected root cause**
-{audit.root_cause}
-
-**Proposed fix (needs human approval — nothing was changed)**
-{audit.proposed_fix}
-
-**Relevant files**
-{files}
-
-{('**Notes:** ' + audit.notes) if audit.notes else ''}""".rstrip()
+    notes = f"\n**Notes:** {audit.notes}" if audit.notes else ""
+    return (
+        f"\U0001f916 **Automated audit** (DeepSeek) \u2014 {verdict}, severity "
+        f"**{audit.severity}**, confidence **{audit.confidence}**{src}\n\n"
+        f"**Summary**\n{audit.summary}\n\n"
+        f"**Suspected root cause**\n{audit.root_cause}\n\n"
+        f"**Proposed fix (needs human approval \u2014 nothing was changed)**\n"
+        f"{audit.proposed_fix}\n\n"
+        f"**Relevant files**\n{files}{notes}"
+    )
