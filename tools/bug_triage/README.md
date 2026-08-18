@@ -9,9 +9,9 @@ to act on.
 
 1. Fetches Discord forum posts (active + archived-public threads) via the REST
    API — no persistent gateway connection. **Closed posts are skipped**: locked
-   threads always, posts carrying an ignored forum tag, and archived ones only
-   if `DISCORD_SKIP_ARCHIVED=true` (Discord auto-archives for inactivity, which
-   is not the same as closed).
+   threads, archived (closed) threads, and posts carrying an ignored forum tag.
+   Note Discord also auto-archives inactive posts, so a quiet-but-open report is
+   dropped too; set `DISCORD_SKIP_ARCHIVED=false` to triage those as well.
 2. Fetches all Trello cards from the main board.
 3. For any Discord post **not yet on the board**, creates a card in the "new
    bugs" list, with a back-link to the Discord thread in the description.
@@ -64,7 +64,7 @@ auditor.py        Pydantic AI agent (DeepSeek) + structured BugAudit output
 | `DISCORD_GUILD_ID` | your server id | — |
 | `DISCORD_FORUM_CHANNEL_ID` | the bug-report forum channel id | — |
 | `DISCORD_IGNORED_TAG_IDS` | forum tag ids meaning closed (comma-separated) | empty |
-| `DISCORD_SKIP_ARCHIVED` | treat archived threads as closed | `false` |
+| `DISCORD_SKIP_ARCHIVED` | treat archived threads as closed | `true` |
 | `TRELLO_AUDIT_LIST_IDS` | lists eligible for audit (comma-separated) | the new-bug list |
 | `MAX_NEW_CARDS_PER_RUN` | cap on cards created per run (0 = unlimited) | `25` |
 | `MAX_AUDITS_PER_RUN` | cap on DeepSeek audits per run (0 = unlimited) | `15` |

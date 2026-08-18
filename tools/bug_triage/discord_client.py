@@ -9,8 +9,10 @@ are handled separately:
   * locked      — a moderator closed the post. Always skipped.
   * tagged      — forum tags like "Solved"/"Duplicate"; skipped when their ids
                   are listed in DISCORD_IGNORED_TAG_IDS.
-  * archived    — often just inactivity, NOT a decision, so kept by default;
-                  set DISCORD_SKIP_ARCHIVED=true to treat it as closed too.
+  * archived    — how a closed forum post presents itself; skipped by default.
+                  Note Discord also auto-archives inactive posts, so this drops
+                  quiet-but-open reports too; DISCORD_SKIP_ARCHIVED=false keeps
+                  them.
 
 Attachments are counted but never downloaded: the auditor cannot see images, so
 a report that leans on screenshots is flagged for a human instead of guessed at.
@@ -53,7 +55,7 @@ class DiscordClient:
         guild_id: str,
         forum_channel_id: str,
         ignored_tag_ids: tuple[str, ...] = (),
-        skip_archived: bool = False,
+        skip_archived: bool = True,
     ):
         self._guild_id = guild_id
         self._forum_channel_id = forum_channel_id
@@ -107,7 +109,7 @@ class DiscordClient:
         if hit:
             return True, f"tagged {sorted(hit)}"
         if self._skip_archived and meta.get("archived"):
-            return True, "archived"
+            return True, "archived (closed)"
         return False, ""
 
     @staticmethod

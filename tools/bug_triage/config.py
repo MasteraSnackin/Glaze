@@ -61,7 +61,8 @@ class Config:
     discord_forum_channel_id: str
     # Forum tag ids that mean "closed" (e.g. Solved / Duplicate / Won't fix).
     discord_ignored_tag_ids: tuple[str, ...]
-    # Discord auto-archives inactive threads, so archived != closed by default.
+    # Closed forum posts show up as archived, so they are skipped like locked
+    # ones. Set DISCORD_SKIP_ARCHIVED=false to also triage auto-archived posts.
     discord_skip_archived: bool
 
     # --- Behaviour ---
@@ -87,7 +88,7 @@ class Config:
             discord_guild_id=_require("DISCORD_GUILD_ID"),
             discord_forum_channel_id=_require("DISCORD_FORUM_CHANNEL_ID"),
             discord_ignored_tag_ids=_csv("DISCORD_IGNORED_TAG_IDS"),
-            discord_skip_archived=_optional("DISCORD_SKIP_ARCHIVED", "false").lower()
+            discord_skip_archived=_optional("DISCORD_SKIP_ARCHIVED", "true").lower()
             in ("1", "true", "yes"),
             dry_run=_optional("DRY_RUN", "false").lower() in ("1", "true", "yes"),
             max_new_cards_per_run=int(_optional("MAX_NEW_CARDS_PER_RUN", "25")),
