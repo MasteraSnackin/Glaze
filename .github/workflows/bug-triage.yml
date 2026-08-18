@@ -1,0 +1,51 @@
+name: Bug triage (Discord + Trello)
+
+on:
+  schedule:
+    # Once a day, 18:00 UTC. Cron is UTC-only.
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Run without creating cards / posting comments"
+        type: boolean
+        default: false
+
+# Read-only on the repo: the agent physically cannot push code or open a PR.
+permissions:
+  contents: read
+
+concurrency:
+  group: bug-triage
+  cancel-in-progress: false
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (agent needs the source to audit)
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: pip install -r tools/bug_triage/requirements.txt
+
+      - name: Run triage
+        working-directory: tools/bug_triage
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          DEEPSEEK_MODEL: ${{ vars.DEEPSEEK_MODEL }}
+          TRELLO_KEY: ${{ secrets.TRELLO_KEY }}
+          TRELLO_TOKEN: ${{ secrets.TRELLO_TOKEN }}
+          TRELLO_BOARD_ID: ${{ vars.TRELLO_BOARD_ID }}
+          TRELLO_NEW_BUG_LIST_ID: ${{ vars.TRELLO_NEW_BUG_LIST_ID }}
+          TRELLO_AUDITED_LABEL_ID: ${{ vars.TRELLO_AUDITED_LABEL_ID }}
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_GUILD_ID: ${{ vars.DISCORD_GUILD_ID }}
+          DISCORD_FORUM_CHANNEL_ID: ${{ vars.DISCORD_FORUM_CHANNEL_ID }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: python triage.py
