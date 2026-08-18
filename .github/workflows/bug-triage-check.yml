@@ -6,9 +6,6 @@ name: Bug triage — connection check
 on:
   push:
     branches: [feat/bug-triage-agent]
-    paths:
-      - "tools/bug_triage/**"
-      - ".github/workflows/bug-triage-check.yml"
   workflow_dispatch:
 
 permissions:
