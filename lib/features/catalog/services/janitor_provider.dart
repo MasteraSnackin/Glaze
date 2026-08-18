@@ -436,7 +436,12 @@ DownloadedCharacter _convertToGlaze(Map<String, dynamic> m) {
     charData: CharacterData(
       name: (m['name'] ?? m['chat_name'] ?? 'Unknown') as String,
       description: '',
-      personality: (m['personality'] ?? m['description'] ?? '') as String,
+      // Only take the real definition field. A CLOSED card hides `personality`,
+      // so falling back to `description` here would dump the public bio/blurb
+      // (often HTML) into the prompt. The bio is already surfaced via
+      // creatorNotes below; leaving personality empty correctly signals that the
+      // definition is unavailable without local extraction.
+      personality: (m['personality'] ?? '') as String,
       scenario: (m['scenario'] ?? '') as String,
       firstMes: (m['first_message'] ?? m['first_mes'] ?? '') as String,
       mesExample:

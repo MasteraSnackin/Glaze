@@ -94,11 +94,21 @@ class _CatalogDetailLauncherState
 
   Character _toCharacter(DownloadedCharacter d) {
     final data = d.charData;
+    // A closed JanitorAI definition hides the real prompt (it isn't in the
+    // public card, only in the blurb which we keep out of personality). Show a
+    // hint in the preview's prompt slot instead of a blank field. Display-only:
+    // _doImport imports `downloaded` (empty personality), not this preview
+    // object, so the hint text is never written to the library.
+    final janitorClosed =
+        widget.provider == CatalogProvider.janitor && !_definitionPublic;
+    final personality = janitorClosed && data.personality.trim().isEmpty
+        ? 'catalog_janitor_closed_prompt'.tr()
+        : data.personality;
     return Character(
       id: 'preview:${widget.item.id}',
       name: data.name.isEmpty ? widget.item.name : data.name,
       description: data.description,
-      personality: data.personality,
+      personality: personality,
       scenario: data.scenario,
       firstMes: data.firstMes,
       mesExample: data.mesExample,

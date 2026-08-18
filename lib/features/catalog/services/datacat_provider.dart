@@ -249,35 +249,122 @@ Future<CatalogSearchResult> datacatSearch({
   );
 }
 
+/// The active, non-placeholder primary content variant of a DataCat row. For
+/// Saucepan cards with a hidden definition, DataCat's "Character Repair" job
+/// exposes the recovered body here (with `description` overloaded to carry it).
+Map<String, dynamic>? _pickRecoveryVariant(Map<String, dynamic> char) {
+  final variants = char['content_variants'];
+  if (variants is! List) return null;
+  for (final v in variants) {
+    if (v is Map && v['isPrimary'] == true && v['isRecoveryPlaceholder'] != true) {
+      final content = v['content'];
+      if (content is Map) return content.cast<String, dynamic>();
+    }
+  }
+  return null;
+}
+
+/// Recovery-sourced `chara_card_v2_json` bodies carry edge
+/// `##DESCRIPTION START##`-style delimiter lines; strip them.
+String _stripDatacatMarkers(String text) {
+  if (text.isEmpty) return text;
+  return text
+      .replaceFirst(RegExp(r'^\s*##[A-Z _]*(?:START|END)##[ \t]*\r?\n?'), '')
+      .replaceFirst(RegExp(r'\r?\n?[ \t]*##[A-Z _]*(?:START|END)##\s*$'), '')
+      .trim();
+}
+
+/// Maps a DataCat `/api/characters/{id}` row into a [CharacterData].
+///
+/// Field placement is source-dependent, ported from `buildV2FromDatacat` in the
+/// SillyTavern-CharacterLibrary reference. For JanitorAI-source rows the real
+/// definition is in `personality` and the website blurb (often HTML) is in
+/// `description`; Saucepan rows overload `description` / recovery variants. We
+/// keep the definition in [CharacterData.personality] and the blurb in
+/// [CharacterData.creatorNotes] — consistent with the JanitorAI provider, so the
+/// blurb never lands in the prompt body.
+CharacterData _datacatCharacterData(Map<String, dynamic> char) {
+  String s(dynamic v) => v == null ? '' : v.toString();
+  String pick(List<String> xs) =>
+      xs.firstWhere((e) => e.trim().isNotEmpty, orElse: () => '');
+
+  final isSaucepan = char['primary_content_source_kind'] == 'saucepan';
+  final recovered = _pickRecoveryVariant(char);
+  final v2Data = (char['chara_card_v2_json'] is Map &&
+          (char['chara_card_v2_json'] as Map)['data'] is Map)
+      ? ((char['chara_card_v2_json'] as Map)['data'] as Map).cast<String, dynamic>()
+      : const <String, dynamic>{};
+  final companion = (char['companion_snapshot'] is Map)
+      ? (char['companion_snapshot'] as Map).cast<String, dynamic>()
+      : const <String, dynamic>{};
+
+  final definition = isSaucepan
+      ? pick([
+          s(recovered?['description']), s(recovered?['personality']),
+          s(v2Data['description']), s(char['description']),
+        ])
+      : pick([
+          s(char['personality']), s(recovered?['personality']),
+          _stripDatacatMarkers(s(v2Data['description'])),
+        ]);
+  final scenario =
+      pick([s(char['scenario']), s(recovered?['scenario']), s(v2Data['scenario'])]);
+  final firstMes = pick([
+    s(char['first_message']), s(recovered?['first_message']), s(v2Data['first_mes']),
+  ]);
+  final creatorNotes = isSaucepan
+      ? pick([s(companion['full_description']), s(v2Data['creator_notes'])])
+      : pick([s(char['description']), s(v2Data['creator_notes'])]);
+
+  // Multiple first messages ("alternate greetings"). The top-level field is
+  // often an empty [] while the real list lives in chara_card_v2_json; pick the
+  // first NON-EMPTY list rather than the first non-null (mirrors the reference).
+  final altG = [
+    char['alternate_greetings'],
+    recovered?['alternate_greetings'],
+    v2Data['alternate_greetings'],
+  ].firstWhere(
+    (a) => a is List && a.isNotEmpty,
+    orElse: () => const <dynamic>[],
+  );
+  final name = pick([s(char['chat_name']), s(char['chatName']), s(char['name'])]);
+
+  return CharacterData(
+    name: name.isEmpty ? 'Unknown' : name,
+    description: '',
+    personality: definition,
+    scenario: scenario,
+    firstMes: firstMes,
+    mesExample:
+        pick([s(char['example_dialogs']), s(char['mes_example']), s(v2Data['mes_example'])]),
+    creatorNotes: creatorNotes,
+    systemPrompt: s(v2Data['system_prompt']),
+    postHistoryInstructions: s(v2Data['post_history_instructions']),
+    alternateGreetings: altG is List ? altG.whereType<String>().toList() : const [],
+    tags: const [],
+    creator: pick([s(char['creator_name']), s(char['creatorName'])]),
+    creatorId: pick([s(char['creator_id']), s(char['creatorId'])]),
+    characterBook: v2Data['character_book'],
+  );
+}
+
 Future<DownloadedCharacter> datacatGetCharacter(String uuid) async {
   final token = await _getToken();
   final ts = DateTime.now().millisecondsSinceEpoch;
+  // Read the plain character endpoint, NOT `/download`: since DataCat added bot
+  // protection, `/download` is gated behind a Cloudflare Turnstile "download
+  // lease" and returns HTTP 403 (`turnstile.action = character-card-download`,
+  // `lease.leaseValid = false`). `/api/characters/{id}` returns the full
+  // definition ungated — the same endpoint the site's card modal and the
+  // SillyTavern-CharacterLibrary reference use.
   final data = await catalogGet(
-    '$_base/api/characters/$uuid/download?t=$ts&variant=janitor_core',
+    '$_base/api/characters/$uuid?t=$ts&sourceKind=janitor',
     _authHeaders(token),
   );
-  final raw = (data['data'] ?? data) as Map<String, dynamic>;
-  final meta = (data['metadata'] ?? <String, dynamic>{}) as Map<String, dynamic>;
+  final char = (data['character'] ?? data) as Map<String, dynamic>;
   return DownloadedCharacter(
-    charData: CharacterData(
-      name: (raw['name'] ?? raw['chatName'] ?? raw['chat_name'] ?? 'Unknown') as String,
-      description: (raw['description'] ?? '') as String,
-      personality: (raw['personality'] ?? '') as String,
-      scenario: (raw['scenario'] ?? '') as String,
-      firstMes: (raw['first_mes'] ?? raw['first_message'] ?? '') as String,
-      mesExample: (raw['mes_example'] ?? '') as String,
-      creatorNotes: (raw['creator_notes'] ?? meta['raw_description_html'] ?? '') as String,
-      systemPrompt: (raw['system_prompt'] ?? '') as String,
-      postHistoryInstructions: (raw['post_history_instructions'] ?? '') as String,
-      alternateGreetings: raw['alternate_greetings'] is List
-          ? (raw['alternate_greetings'] as List).whereType<String>().toList()
-          : <String>[],
-      tags: [],
-      creator: (meta['janitor_creator_name'] ?? raw['creator'] ?? '') as String,
-      creatorId: (meta['janitor_creator_id'] ?? raw['creator_id'] ?? raw['creatorId'] ?? '') as String,
-      characterBook: raw['character_book'],
-    ),
-    avatarUrl: _resolveAvatarUrl(_pickAvatarSource(raw, meta)),
+    charData: _datacatCharacterData(char),
+    avatarUrl: _resolveAvatarUrl(_pickAvatarSource(char, {})),
   );
 }
 
