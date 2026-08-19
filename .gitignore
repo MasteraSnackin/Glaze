@@ -202,3 +202,7 @@ opencode.jsonc
 .opencode.json
 .opencode.jsonc
 .opencode/
+
+# Python bytecode (tools/bug_triage)
+__pycache__/
+*.pyc
