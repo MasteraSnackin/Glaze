@@ -19,23 +19,27 @@ act on.
    threads found in step 1 — it is never scanned for work of its own, so a card
    written by hand (in any list, anywhere on the board) is never commented on
    or labelled.
-3. For any Discord post **not yet linked to a card**, first checks whether a
-   human already wrote a card for that same bug: one DeepSeek call compares the
-   thread against the cards that carry no marker yet. On a match it writes the
-   hidden marker + Discord back-link into that card (appended — the human's
-   text is never overwritten) and **creates no duplicate**; otherwise it
-   creates a card in the "new bugs" list. The matcher is deliberately
-   conservative: below 0.7 confidence it answers "no match", because a missed
-   link only costs a duplicate a human can merge, while a wrong link puts a
-   Discord thread on someone else's card. Set `MATCH_EXISTING_CARDS=false` to
-   skip the check entirely.
+3. For any Discord post **not yet linked to a card**, checks whether the board
+   already tracks that same bug: one DeepSeek call compares the thread against
+   the existing cards — both the ones a human typed in and the ones earlier
+   forum threads produced, including cards created moments ago in the same run.
+   On a match it appends the hidden marker + Discord back-link to that card
+   (the existing text is never overwritten) and **creates no duplicate**;
+   otherwise it creates a card in the "new bugs" list. Candidates are shown to
+   the model oldest first and it is told to pick the smallest matching number,
+   so a second report always joins **the card that reported the bug first**.
+   The matcher is deliberately conservative: below 0.7 confidence it answers
+   "no match", because a missed link only costs a duplicate a human can merge,
+   while a wrong link hangs a thread on an unrelated card. Set
+   `MATCH_EXISTING_CARDS=false` to skip the check entirely.
 4. If every open thread already carries the `audited` label, **exits before
    calling the LLM** (no token spend).
 5. For each remaining thread, runs a DeepSeek agent over that ONE report —
    title, original post and replies, read live from Discord, so replies added
-   after the card was mirrored are included — that greps / reads the
-   checked-out source, then posts a structured audit as a comment on the
-   thread's card and applies the `audited` label.
+   after the card was mirrored are included — that greps / reads the source,
+   then posts a structured audit as a comment on the thread's card and applies
+   the `audited` label. A card that collected several duplicate threads is
+   audited once, on the first of them.
 
 Reports that cannot be judged from text (screenshot-only posts, missing repro
 steps) get a **NEED MORE INFO** comment naming what to ask instead of a guess.
@@ -43,9 +47,17 @@ A post with no readable text at all skips the LLM entirely.
 
 De-dup has no external database: each card that tracks a thread carries a hidden
 `discord-thread:<id>` marker in its description, and that's the source of truth.
-Cards written by hand get that marker the first time the matcher recognises
-their bug in the forum, and behave like mirrored ones from then on — including
-getting audited, if they don't already carry the `audited` label.
+A card can carry **several** markers — that is what a duplicate looks like on the
+board. Cards written by hand get their first marker when the matcher recognises
+their bug in the forum, and behave like mirrored ones from then on, including
+getting audited if they don't already carry the `audited` label.
+
+**The audited source is always `nightly`.** The workflow checks the triage code
+out from the branch the run was started on, and `nightly` separately into
+`audit-src/`, which is what the agent greps and reads (`AUDIT_REPO_ROOT`).
+Scheduled runs fire only from the default branch (`stable`), which trails
+nightly by hundreds of commits — auditing that tree would judge reports against
+code the fix has long since left.
 
 ## Architecture
 

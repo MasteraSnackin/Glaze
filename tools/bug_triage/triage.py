@@ -8,18 +8,21 @@ picked up, commented on or labelled by this agent.
 Flow (only the audit step touches the LLM):
   1. Pull the open Discord forum posts.
   2. Pull Trello cards ONCE, to index them by their `discord-thread:<id>`
-     marker. That index answers two questions per thread and nothing else:
+     markers. That index answers two questions per thread and nothing else:
      does it already have a card, and was that card already audited?
-  3. Any thread with no matching card -> check whether a human already wrote
-     a card for that same bug (matcher.py, one DeepSeek call over the cards
-     that carry no marker yet). On a hit, write the marker + back-link into
-     that card; otherwise create a new card.
+  3. Any thread with no card of its own -> check whether one of the board's
+     cards already reports that same bug (matcher.py, one DeepSeek call).
+     Candidates include cards a human typed in AND cards earlier threads
+     produced, so a second thread about a known bug lands on the card that
+     reported it first instead of opening a duplicate. On a hit, append the
+     marker + back-link to that card; otherwise create a new card.
   4. EARLY EXIT: if every thread already carries the audited label, stop
      before the (far more expensive) audit agent is ever built. A run with no
      new threads and nothing to audit spends zero tokens.
   5. For each remaining thread: run the agent on that ONE report (title +
      post + replies, read live from Discord), post the result as a comment on
-     its card, then apply the "audited" label.
+     its card, then apply the "audited" label. A card that collected several
+     threads is audited once, on the first of them.
 
 Nothing here ever modifies source code or opens a PR.
 """
@@ -106,7 +109,7 @@ def main() -> int:
     posts = discord.fetch_posts()
     cards = trello.fetch_cards()
     by_thread: dict[str, Card] = {
-        c.discord_thread_id: c for c in cards if c.discord_thread_id
+        tid: c for c in cards for tid in c.discord_thread_ids
     }
     print(f"[triage] discord posts={len(posts)} trello cards={len(cards)} "
           f"already-linked-threads={len(by_thread)}")
@@ -118,52 +121,66 @@ def main() -> int:
               f"{cfg.max_new_cards_per_run} this run (MAX_NEW_CARDS_PER_RUN)")
         new_posts = new_posts[: cfg.max_new_cards_per_run]
 
-    # Cards a human wrote by hand: candidates for "this bug is already on the
-    # board". A card claimed by one thread drops out for the rest of the run.
-    unlinked = [c for c in cards if not c.discord_thread_id]
+    # Every card on the board is a candidate for "this bug is already tracked" —
+    # one a human typed in, or one an earlier thread produced. Cards created
+    # during this run join the pool too, so two duplicate threads in the same
+    # batch also end up on one card.
+    candidates = list(cards)
     matcher = None  # built lazily: no new threads -> no lookup, no tokens
 
     for post in new_posts:
         hit = None
-        if cfg.match_existing_cards and unlinked:
+        if cfg.match_existing_cards and candidates:
             if matcher is None:
                 matcher = build_matcher(
                     cfg.deepseek_api_key, cfg.deepseek_base_url, cfg.deepseek_model
                 )
             hit = find_existing_card(
-                matcher, post, unlinked, cfg.max_match_candidates
+                matcher, post, candidates, cfg.max_match_candidates
             )
 
         if hit is not None:
             desc = _linked_desc(hit, post)
             trello.set_desc(hit.id, desc)
+            also = f" (now tracks {len(hit.discord_thread_ids) + 1} threads)"
             print(f"[triage] linked thread {post.thread_id} to existing card "
-                  f"{hit.id}: {hit.name!r} (no duplicate created)")
-            by_thread[post.thread_id] = replace(hit, desc=desc)
-            unlinked.remove(hit)
+                  f"{hit.id}: {hit.name!r}{also}")
+            linked = replace(hit, desc=desc)
+            by_thread[post.thread_id] = linked
+            candidates[candidates.index(hit)] = linked
             continue
 
         body = _card_body(post)
         new_id = trello.create_card(cfg.trello_new_bug_list_id, post.title, body)
         print(f"[triage] created card for thread {post.thread_id}: {post.title!r}")
-        by_thread[post.thread_id] = Card(
+        fresh = Card(
             id=new_id,
             name=post.title,
             desc=body,
             list_id=cfg.trello_new_bug_list_id,
             label_ids=(),
         )
+        by_thread[post.thread_id] = fresh
+        candidates.append(fresh)
 
     # --- Step 4: which threads still need an audit? -------------------------
     # Driven by the forum, never by the board: a thread is a candidate only if
-    # its own card is missing the audited label. Threads whose card creation was
-    # capped above simply wait for the next run.
-    to_audit: list[tuple[ForumPost, Card]] = [
-        (p, by_thread[p.thread_id])
-        for p in posts
-        if p.thread_id in by_thread
-        and cfg.trello_audited_label_id not in by_thread[p.thread_id].label_ids
-    ]
+    # its card is missing the audited label. Threads whose card creation was
+    # capped above simply wait for the next run. Duplicates share a card, and a
+    # card is audited once — the later threads add their link, not a second
+    # audit of the same bug.
+    to_audit: list[tuple[ForumPost, Card]] = []
+    claimed: set[str] = set()
+    for p in posts:
+        card = by_thread.get(p.thread_id)
+        if card is None or cfg.trello_audited_label_id in card.label_ids:
+            continue
+        if card.id in claimed:
+            print(f"[triage] thread {p.thread_id} shares card {card.id} with an "
+                  f"earlier thread — no second audit")
+            continue
+        claimed.add(card.id)
+        to_audit.append((p, card))
 
     # --- Step 5: early exit before spending any tokens ---------------------
     if not to_audit:

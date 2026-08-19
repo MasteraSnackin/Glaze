@@ -11,6 +11,7 @@ together, but threads are never mixed.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 from typing import Literal
@@ -20,8 +21,13 @@ from pydantic_ai import Agent, PromptedOutput
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
-# Repo root = two levels up from this file (tools/bug_triage/auditor.py).
-REPO_ROOT = Path(__file__).resolve().parents[2]
+# The tree the agent is allowed to grep and read. Defaults to this checkout
+# (two levels up from tools/bug_triage/auditor.py); CI points AUDIT_REPO_ROOT at
+# a separate nightly checkout, so a scheduled run started from stable still
+# judges reports against current code rather than a months-old tree.
+REPO_ROOT = Path(
+    os.environ.get("AUDIT_REPO_ROOT") or Path(__file__).resolve().parents[2]
+).resolve()
 
 _MAX_FILE_BYTES = 40_000
 _MAX_RG_MATCHES = 60
