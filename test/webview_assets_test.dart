@@ -38,6 +38,7 @@ void main() {
   late String interactionDispatchJs;
   late String panelHostJs;
   late String htmlSanitizerJs;
+  late String cssSanitizerJs;
   late String selectionManagerJs;
   late String swipeHandlerJs;
   late String glazeSdkJs;
@@ -66,6 +67,7 @@ void main() {
     interactionDispatchJs = _bridgeAsset('interaction_dispatch.js');
     panelHostJs = _bridgeAsset('panel_host.js');
     htmlSanitizerJs = _bridgeAsset('html_sanitizer.js');
+    cssSanitizerJs = _bridgeAsset('css_sanitizer.js');
     selectionManagerJs = _bridgeAsset('selection_manager.js');
     swipeHandlerJs = _bridgeAsset('swipe_gesture_handler.js');
     glazeSdkJs = _asset('glaze_sdk.js');
@@ -311,15 +313,12 @@ void main() {
         "'meta'",
         "'link'",
         "'base'",
-        "'style'",
         "name.startsWith('on')",
         "name === 'srcdoc'",
         "compact.startsWith('javascript:')",
         'SAFE_IMAGE_DATA_URL',
-        'hasUnsafeCssUrl',
         'isSafeDataUrl',
-        'EXT_BLOCK_STYLE_PROPERTIES',
-        'UNSAFE_CSS',
+        'sanitizeStyleDeclaration',
       ]) {
         expect(htmlSanitizerJs, contains(token));
       }
@@ -329,7 +328,114 @@ void main() {
       expect(bridgeControllerJs, contains('_renderExtBlockImageHtml'));
       expect(bridgeControllerJs, contains('data-action="image-click"'));
       expect(bridgeControllerJs, contains('data-action="img-download"'));
-      expect(htmlSanitizerJs, contains("'style'"));
+      expect(htmlSanitizerJs, contains('SAFE_IMAGE_DATA_URL'));
+    });
+  });
+
+  group('CSS survives with message scripts disabled', () {
+    test('sanitizers keep <style> and delegate CSS to the CSS policy', () {
+      expect(
+        htmlSanitizerJs,
+        contains(
+          "import { sanitizeCssText, sanitizeStyleDeclaration } "
+          "from './css_sanitizer.js'",
+        ),
+      );
+      final blocked = _extractBlockBody(
+        htmlSanitizerJs,
+        htmlSanitizerJs.indexOf('const BLOCKED_ELEMENTS'),
+        open: '[',
+        close: ']',
+      );
+      expect(blocked, contains("'script'"));
+      expect(blocked, isNot(contains("'style'")));
+      expect(htmlSanitizerJs, contains('sanitizeCssText(element.textContent'));
+      // Message HTML is written into a per-message shadow root (already
+      // scoped); ExtBlock HTML lands in the light DOM and must stay pinned to
+      // the block body.
+      expect(
+        htmlSanitizerJs,
+        contains("const EXT_BLOCK_CSS_SCOPE = '.ext-block-content'"),
+      );
+      expect(htmlSanitizerJs, contains("return sanitizeHtml(html, '')"));
+      expect(
+        htmlSanitizerJs,
+        contains('return sanitizeHtml(html, EXT_BLOCK_CSS_SCOPE)'),
+      );
+    });
+
+    test('inline styles are filtered by policy, not an allowlist', () {
+      expect(cssSanitizerJs, isNot(contains('EXT_BLOCK_STYLE_PROPERTIES')));
+      final body = _extractBlockBody(
+        htmlSanitizerJs,
+        htmlSanitizerJs.indexOf('function sanitizeStyleAttribute'),
+      );
+      expect(body, contains('sanitizeStyleDeclaration(element.style)'));
+    });
+
+    test('CSS policy parses without applying or fetching anything', () {
+      // A constructed stylesheet is never attached to a document and drops
+      // @import by spec; the inert-document fallback has no browsing context.
+      expect(cssSanitizerJs, contains('new CSSStyleSheet()'));
+      expect(cssSanitizerJs, contains('sheet.replaceSync(css)'));
+      expect(
+        cssSanitizerJs,
+        contains("document.implementation.createHTMLDocument('glaze-css')"),
+      );
+      expect(cssSanitizerJs, contains('holder.remove()'));
+    });
+
+    test('CSS policy rejects network, script and overlay primitives', () {
+      final allowed = _extractBlockBody(
+        cssSanitizerJs,
+        cssSanitizerJs.indexOf('function isAllowedDeclaration'),
+      );
+      expect(allowed, contains('BLOCKED_PROPERTIES.has(name)'));
+      expect(allowed, contains('isUnsafeValue(text)'));
+      expect(allowed, contains("name === 'position'"));
+      expect(allowed, contains(r'/\bfixed\b/i.test(text)'));
+      expect(allowed, contains("name.startsWith('--')"));
+      for (final token in [
+        'url',
+        'image-set',
+        'expression',
+        'javascript',
+        'vbscript',
+      ]) {
+        expect(cssSanitizerJs, contains(token));
+      }
+      for (final property in ['behavior', '-moz-binding']) {
+        expect(
+          _extractBlockBody(
+            cssSanitizerJs,
+            cssSanitizerJs.indexOf('const BLOCKED_PROPERTIES'),
+            open: '[',
+            close: ']',
+          ),
+          contains("'$property'"),
+        );
+      }
+    });
+
+    test('only style, keyframe and grouping rules are re-emitted', () {
+      final body = _extractBlockBody(
+        cssSanitizerJs,
+        cssSanitizerJs.indexOf('function serializeRule('),
+      );
+      expect(body, contains("isInstanceOf(rule, 'CSSStyleRule')"));
+      expect(body, contains("isInstanceOf(rule, 'CSSKeyframesRule')"));
+      expect(body, contains("isInstanceOf(rule, 'CSSGroupingRule')"));
+      // Everything else (@import, @font-face, @page, @namespace) is dropped.
+      expect(body.trimRight(), endsWith("return '';\n}"));
+    });
+
+    test('ExtBlock selectors are scoped, selector lists stay intact', () {
+      final body = _extractBlockBody(
+        cssSanitizerJs,
+        cssSanitizerJs.indexOf('function scopeSelector'),
+      );
+      expect(body, contains(r'`${scope} ${selector}`'));
+      expect(cssSanitizerJs, contains('function splitSelectorList'));
     });
   });
 
@@ -1431,14 +1537,19 @@ String _extractTextareaWheelListener(String src) {
 
 /// Extracts the body of a JS method/class block starting from [fromIndex].
 /// Walks braces to find the matching close.
-String _extractBlockBody(String src, int fromIndex) {
-  int start = src.indexOf('{', fromIndex);
+String _extractBlockBody(
+  String src,
+  int fromIndex, {
+  String open = '{',
+  String close = '}',
+}) {
+  int start = src.indexOf(open, fromIndex);
   if (start == -1) return '';
   int depth = 0;
   for (int i = start; i < src.length; i++) {
-    if (src[i] == '{') {
+    if (src[i] == open) {
       depth++;
-    } else if (src[i] == '}') {
+    } else if (src[i] == close) {
       depth--;
       if (depth == 0) return src.substring(start, i + 1);
     }
