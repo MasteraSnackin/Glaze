@@ -24,7 +24,7 @@ import re
 import sys
 
 from pydantic import BaseModel, Field
-from pydantic_ai import Agent
+from pydantic_ai import Agent, PromptedOutput
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
@@ -81,7 +81,8 @@ def build_matcher(api_key: str, base_url: str, model_name: str) -> Agent[None, C
     )
     return Agent(
         model,
-        output_type=CardMatch,
+        # Prompted JSON rather than a forced output tool — see auditor.py.
+        output_type=PromptedOutput(CardMatch),
         system_prompt=_SYSTEM_PROMPT,
         retries=2,
     )
