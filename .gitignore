@@ -205,3 +205,7 @@ opencode.jsonc
 
 # Local deepwork progress state
 .slim/deepwork/
+
+# Python bytecode (tools/bug_triage)
+__pycache__/
+*.pyc
