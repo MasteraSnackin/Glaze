@@ -1,5 +1,7 @@
-"""Trello REST access. The board is the source of truth; we never store state
-elsewhere.
+"""Trello REST access. The board holds the triage state (which Discord thread
+already has a card, and whether it was audited); we never store state elsewhere.
+It is not a work queue — the agent only ever acts on cards that carry a Discord
+marker, and finds them by walking the forum, not the board.
 
 De-dup contract: every card created from a Discord post carries a hidden marker
 line in its description:
@@ -76,6 +78,14 @@ class TrelloClient:
             return "dry-run-card-id"
         card = self._req("POST", "/cards", idList=list_id, name=name, desc=desc)
         return card["id"]  # type: ignore[index]
+
+    def set_desc(self, card_id: str, desc: str) -> None:
+        """Overwrite a card's description — used to write the Discord marker
+        and back-link into a card a human created for the same bug."""
+        if self._dry_run:
+            print(f"[dry-run] would rewrite desc of {card_id}")
+            return
+        self._req("PUT", f"/cards/{card_id}", desc=desc)
 
     def add_comment(self, card_id: str, text: str) -> None:
         if self._dry_run:
