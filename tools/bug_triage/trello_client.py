@@ -1,5 +1,7 @@
-"""Trello REST access. The board is the source of truth; we never store state
-elsewhere.
+"""Trello REST access. The board holds the triage state (which Discord thread
+already has a card, and whether it was audited); we never store state elsewhere.
+It is not a work queue — the agent only ever acts on cards that carry a Discord
+marker, and finds them by walking the forum, not the board.
 
 De-dup contract: every card created from a Discord post carries a hidden marker
 line in its description:

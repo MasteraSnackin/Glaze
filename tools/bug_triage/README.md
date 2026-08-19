@@ -1,9 +1,11 @@
 # Bug-triage agent
 
 A daily, **read-only** agent that keeps the Trello board in sync with the Discord
-bug-report forum and drops an AI audit on each open bug. It **never** changes
-code or opens PRs — it only creates Trello cards and posts comments for a human
-to act on.
+bug-report forum and drops an AI audit on each open bug. The **Discord forum is
+the only work queue**; Trello is consulted purely to cross-check those threads
+(has this one a card? was that card already audited?). It **never** changes code
+or opens PRs — it only creates Trello cards and posts comments for a human to
+act on.
 
 ## What it does (once per day)
 
@@ -12,15 +14,20 @@ to act on.
    threads, archived (closed) threads, and posts carrying an ignored forum tag.
    Note Discord also auto-archives inactive posts, so a quiet-but-open report is
    dropped too; set `DISCORD_SKIP_ARCHIVED=false` to triage those as well.
-2. Fetches all Trello cards from the main board.
+2. Fetches the Trello cards once and indexes them by their
+   `discord-thread:<id>` marker. The board is **only a cross-check** for the
+   threads found in step 1 — it is never scanned for work of its own, so a card
+   written by hand (in any list, anywhere on the board) is never commented on
+   or labelled.
 3. For any Discord post **not yet on the board**, creates a card in the "new
    bugs" list, with a back-link to the Discord thread in the description.
-4. If nothing needs auditing, **exits before calling the LLM** (no token spend).
-5. For each card **in the audited list(s)** without the `audited` label, runs a
-   DeepSeek agent over that ONE report — title, original post and replies
-   together — that greps / reads the checked-out source, then posts a structured
-   audit as a comment and applies the `audited` label. Cards elsewhere on the
-   board are never touched.
+4. If every open thread already carries the `audited` label, **exits before
+   calling the LLM** (no token spend).
+5. For each remaining thread, runs a DeepSeek agent over that ONE report —
+   title, original post and replies, read live from Discord, so replies added
+   after the card was mirrored are included — that greps / reads the
+   checked-out source, then posts a structured audit as a comment on the
+   thread's card and applies the `audited` label.
 
 Reports that cannot be judged from text (screenshot-only posts, missing repro
 steps) get a **NEED MORE INFO** comment naming what to ask instead of a guess.
@@ -36,7 +43,7 @@ via Pydantic AI). Polling, card creation and de-dup are plain deterministic code
 — cheaper and more reliable than handing those to the model.
 
 ```
-triage.py         orchestrator + early-exit
+triage.py         orchestrator (Discord-driven) + early-exit
 config.py         env-var loading (fails fast on missing secrets)
 discord_client.py read-only forum access (REST)
 trello_client.py  cards / comments / labels (source of truth)
@@ -65,7 +72,6 @@ auditor.py        Pydantic AI agent (DeepSeek) + structured BugAudit output
 | `DISCORD_FORUM_CHANNEL_ID` | the bug-report forum channel id | — |
 | `DISCORD_IGNORED_TAG_IDS` | forum tag ids meaning closed (comma-separated) | empty |
 | `DISCORD_SKIP_ARCHIVED` | treat archived threads as closed | `true` |
-| `TRELLO_AUDIT_LIST_IDS` | lists eligible for audit (comma-separated) | the new-bug list |
 | `MAX_NEW_CARDS_PER_RUN` | cap on cards created per run (0 = unlimited) | `25` |
 | `MAX_AUDITS_PER_RUN` | cap on DeepSeek audits per run (0 = unlimited) | `15` |
 

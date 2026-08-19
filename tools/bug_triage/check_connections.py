@@ -97,7 +97,9 @@ def check_trello(cfg: Config) -> bool:
             cfg.trello_key, cfg.trello_token, cfg.trello_board_id
         ).fetch_cards()
         linked = sum(1 for c in cards if c.discord_thread_id)
-        _line(OK, "Trello cards read", f"{len(cards)} card(s), {linked} discord-linked")
+        _line(OK, "Trello cards read",
+              f"{len(cards)} card(s), {linked} discord-linked "
+              f"(only discord-linked cards are ever touched)")
 
         lst = requests.get(
             f"https://api.trello.com/1/lists/{cfg.trello_new_bug_list_id}",
