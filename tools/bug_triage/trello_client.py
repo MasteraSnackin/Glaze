@@ -3,13 +3,15 @@ already has a card, and whether it was audited); we never store state elsewhere.
 It is not a work queue — the agent only ever acts on cards that carry a Discord
 marker, and finds them by walking the forum, not the board.
 
-De-dup contract: every card created from a Discord post carries a hidden marker
+De-dup contract: every card that tracks a Discord post carries a hidden marker
 line in its description:
 
     discord-thread:<thread_id>
 
-so "is this bug already on the board?" is just a substring scan over card
-descriptions — survives workflow restarts with no external DB.
+so "is this bug already on the board?" is just a scan over card descriptions —
+survives workflow restarts with no external DB. A card can carry SEVERAL such
+markers: when two forum threads turn out to report the same bug, the later ones
+are appended to the card that reported it first instead of opening duplicates.
 """
 
 from __future__ import annotations
@@ -36,9 +38,22 @@ class Card:
     label_ids: tuple[str, ...]
 
     @property
-    def discord_thread_id(self) -> str | None:
-        m = _MARKER_RE.search(self.desc)
-        return m.group(1) if m else None
+    def discord_thread_ids(self) -> tuple[str, ...]:
+        """Every Discord thread this card tracks, in the order they were linked."""
+        return tuple(m.group(1) for m in _MARKER_RE.finditer(self.desc))
+
+    @property
+    def created_at(self) -> int:
+        """Creation time as a unix timestamp.
+
+        Trello ids are Mongo ObjectIds: the first four bytes are the creation
+        time. That is what makes "the card that reported it first" answerable
+        without another API call.
+        """
+        try:
+            return int(self.id[:8], 16)
+        except ValueError:
+            return 0
 
 
 class TrelloClient:
