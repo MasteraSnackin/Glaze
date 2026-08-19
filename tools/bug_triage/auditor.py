@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, Field
-from pydantic_ai import Agent
+from pydantic_ai import Agent, PromptedOutput
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
@@ -90,7 +90,12 @@ def build_agent(api_key: str, base_url: str, model_name: str) -> Agent[None, Bug
     )
     agent: Agent[None, BugAudit] = Agent(
         model,
-        output_type=BugAudit,
+        # PromptedOutput, not the default forced output tool: DeepSeek's
+        # thinking models reject `tool_choice` pinned to a specific tool
+        # ("Thinking mode does not support this tool_choice", HTTP 400). Asking
+        # for the JSON in the prompt keeps `search_code` / `read_file` as
+        # ordinary optional tools, which those models do accept.
+        output_type=PromptedOutput(BugAudit),
         system_prompt=_SYSTEM_PROMPT,
         retries=2,
     )
