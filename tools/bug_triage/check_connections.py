@@ -96,7 +96,7 @@ def check_trello(cfg: Config) -> bool:
         cards = TrelloClient(
             cfg.trello_key, cfg.trello_token, cfg.trello_board_id
         ).fetch_cards()
-        linked = sum(1 for c in cards if c.discord_thread_id)
+        linked = sum(1 for c in cards if c.discord_thread_ids)
         _line(OK, "Trello cards read",
               f"{len(cards)} card(s), {linked} discord-linked "
               f"(only discord-linked cards are ever touched)")
