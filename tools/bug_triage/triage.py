@@ -10,9 +10,13 @@ Flow (only the audit step touches the LLM):
   2. Pull Trello cards ONCE, to index them by their `discord-thread:<id>`
      marker. That index answers two questions per thread and nothing else:
      does it already have a card, and was that card already audited?
-  3. Any thread with no matching card -> create a card (with back-link).
+  3. Any thread with no matching card -> check whether a human already wrote
+     a card for that same bug (matcher.py, one DeepSeek call over the cards
+     that carry no marker yet). On a hit, write the marker + back-link into
+     that card; otherwise create a new card.
   4. EARLY EXIT: if every thread already carries the audited label, stop
-     before calling DeepSeek.
+     before the (far more expensive) audit agent is ever built. A run with no
+     new threads and nothing to audit spends zero tokens.
   5. For each remaining thread: run the agent on that ONE report (title +
      post + replies, read live from Discord), post the result as a comment on
      its card, then apply the "audited" label.
@@ -23,10 +27,12 @@ Nothing here ever modifies source code or opens a PR.
 from __future__ import annotations
 
 import sys
+from dataclasses import replace
 
 from auditor import build_agent, format_comment
 from config import Config
 from discord_client import DiscordClient, ForumPost
+from matcher import build_matcher, find_existing_card
 from trello_client import Card, TrelloClient, marker_for
 
 # Below this much readable text a report cannot be audited at all, so we skip
@@ -52,6 +58,19 @@ def _card_body(post: ForumPost) -> str:
     footer.append(marker_for(post.thread_id))
 
     return "\n\n".join(parts) + "\n\n" + "\n".join(footer)
+
+
+def _linked_desc(card: Card, post: ForumPost) -> str:
+    """A human-written card's description with the Discord link glued on.
+
+    Only the footer is appended — whatever a human typed stays untouched, so
+    linking a card can never destroy the report they wrote.
+    """
+    return (
+        f"{card.desc.rstrip()}\n\n---\n"
+        f"Also reported on Discord: {post.url}\n"
+        f"{marker_for(post.thread_id)}"
+    )
 
 
 def _report_text(post: ForumPost) -> str:
@@ -99,15 +118,38 @@ def main() -> int:
               f"{cfg.max_new_cards_per_run} this run (MAX_NEW_CARDS_PER_RUN)")
         new_posts = new_posts[: cfg.max_new_cards_per_run]
 
+    # Cards a human wrote by hand: candidates for "this bug is already on the
+    # board". A card claimed by one thread drops out for the rest of the run.
+    unlinked = [c for c in cards if not c.discord_thread_id]
+    matcher = None  # built lazily: no new threads -> no lookup, no tokens
+
     for post in new_posts:
-        new_id = trello.create_card(
-            cfg.trello_new_bug_list_id, post.title, _card_body(post)
-        )
+        hit = None
+        if cfg.match_existing_cards and unlinked:
+            if matcher is None:
+                matcher = build_matcher(
+                    cfg.deepseek_api_key, cfg.deepseek_base_url, cfg.deepseek_model
+                )
+            hit = find_existing_card(
+                matcher, post, unlinked, cfg.max_match_candidates
+            )
+
+        if hit is not None:
+            desc = _linked_desc(hit, post)
+            trello.set_desc(hit.id, desc)
+            print(f"[triage] linked thread {post.thread_id} to existing card "
+                  f"{hit.id}: {hit.name!r} (no duplicate created)")
+            by_thread[post.thread_id] = replace(hit, desc=desc)
+            unlinked.remove(hit)
+            continue
+
+        body = _card_body(post)
+        new_id = trello.create_card(cfg.trello_new_bug_list_id, post.title, body)
         print(f"[triage] created card for thread {post.thread_id}: {post.title!r}")
         by_thread[post.thread_id] = Card(
             id=new_id,
             name=post.title,
-            desc=_card_body(post),
+            desc=body,
             list_id=cfg.trello_new_bug_list_id,
             label_ids=(),
         )

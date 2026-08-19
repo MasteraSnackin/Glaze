@@ -47,5 +47,11 @@ jobs:
           DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
           DISCORD_GUILD_ID: ${{ vars.DISCORD_GUILD_ID }}
           DISCORD_FORUM_CHANNEL_ID: ${{ vars.DISCORD_FORUM_CHANNEL_ID }}
+          DISCORD_IGNORED_TAG_IDS: ${{ vars.DISCORD_IGNORED_TAG_IDS }}
+          DISCORD_SKIP_ARCHIVED: ${{ vars.DISCORD_SKIP_ARCHIVED }}
+          MATCH_EXISTING_CARDS: ${{ vars.MATCH_EXISTING_CARDS }}
+          MAX_MATCH_CANDIDATES: ${{ vars.MAX_MATCH_CANDIDATES }}
+          MAX_NEW_CARDS_PER_RUN: ${{ vars.MAX_NEW_CARDS_PER_RUN }}
+          MAX_AUDITS_PER_RUN: ${{ vars.MAX_AUDITS_PER_RUN }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: python triage.py
