@@ -26,8 +26,20 @@ jobs:
     # but it must never sit on a runner for hours if a call hangs.
     timeout-minutes: 60
     steps:
-      - name: Checkout (agent needs the source to audit)
+      # The tooling comes from the branch this run was started on, so a fix
+      # can be dispatched from its own branch before it is merged.
+      - name: Checkout (triage tooling)
         uses: actions/checkout@v4
+
+      # The audited source is always nightly, whatever branch started the run.
+      # Scheduled runs only fire from the default branch (stable), which trails
+      # nightly by hundreds of commits — auditing that would judge reports
+      # against code the fix has long since left.
+      - name: Checkout nightly (the source the agent reads)
+        uses: actions/checkout@v4
+        with:
+          ref: nightly
+          path: audit-src
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -40,6 +52,7 @@ jobs:
       - name: Run triage
         working-directory: tools/bug_triage
         env:
+          AUDIT_REPO_ROOT: ${{ github.workspace }}/audit-src
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           DEEPSEEK_MODEL: ${{ vars.DEEPSEEK_MODEL }}
           TRELLO_KEY: ${{ secrets.TRELLO_KEY }}

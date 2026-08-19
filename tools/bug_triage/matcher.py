@@ -1,18 +1,19 @@
 """Duplicate check: is this Discord thread already a card on the board?
 
 New threads are not blindly mirrored. Before creating a card, the thread is
-compared against the cards that carry no `discord-thread:` marker yet — the
-ones a human typed in by hand — and a DeepSeek call decides whether any of them
-reports the SAME bug. On a match the orchestrator writes the marker and the
-back-link into that card instead of opening a duplicate.
+compared against the cards already on the board — the ones a human typed in by
+hand and the ones earlier forum threads produced alike — and a DeepSeek call
+decides whether any of them reports the SAME bug. On a match the orchestrator
+writes the marker and the back-link into that card instead of opening a
+duplicate, so two people reporting one bug in two threads land on one card.
 
 Two guards keep this cheap and quiet:
   * candidates are pre-ranked by shared words and cut to the top N, so the
     prompt stays small on a busy board;
   * the model must answer with a card number and a confidence, and anything
     below _MIN_CONFIDENCE is treated as "no match" — a missed link costs one
-    duplicate card, a wrong link corrupts a human's card, so we bias to the
-    cheap mistake.
+    duplicate card, a wrong link puts a thread on the wrong card, so we bias to
+    the cheap mistake.
 
 This agent gets NO tools: it only compares text. Source-code investigation is
 the auditor's job.
@@ -42,7 +43,10 @@ You decide whether a bug reported on Discord is ALREADY tracked by one of the
 existing Trello cards you are shown.
 
 Answer with the number of the single card that reports the SAME bug, or 0 if
-none of them does.
+none of them does. The cards are listed oldest first, and some of them were
+themselves written from an earlier Discord thread — that is fine: a second
+thread about the same bug belongs on the card that reported it first. If more
+than one card reports this bug, answer with the SMALLEST matching number.
 
 The same bug means the same faulty behaviour: same symptom in the same feature,
 even when the wording, language or level of detail differs. It is NOT enough
@@ -50,11 +54,16 @@ that two reports touch the same screen, the same feature area, or are both
 crashes. Two different bugs in the same widget are two different bugs.
 
 Be conservative. A missed match only costs a duplicate card that a human can
-merge; a wrong match writes a Discord link into an unrelated card. If you are
+merge; a wrong match hangs a Discord thread on an unrelated card. If you are
 unsure, answer 0. Set `confidence` to how sure you are that the card you picked
 is the same bug (0.0-1.0); when you answer 0, confidence is ignored.
 """
 
+_MARKER_LINE_RE = re.compile(
+    r"^(?:---|discord-thread:\d+|(?:Also )?[Rr]eported on Discord:.*|"
+    r"Attachments:.*)$\n?",
+    re.MULTILINE,
+)
 _WORD_RE = re.compile(r"[^\W\d_]+", re.UNICODE)
 _STOP = {
     "when", "with", "that", "this", "from", "have", "does", "doesn", "there",
@@ -100,17 +109,30 @@ def shortlist(post: ForumPost, cards: list[Card], limit: int) -> list[Card]:
 
     Pure lexical pre-ranking — it only decides what the model gets to look at
     when a board has more cards than fit in one prompt, never whether something
-    is a match.
+    is a match. Whatever survives the cut is handed over oldest first, so
+    "answer with the smallest matching number" means "the card that reported
+    this bug first".
     """
-    if limit and len(cards) > limit:
+    picked = list(cards)
+    if limit and len(picked) > limit:
         wanted = _tokens(f"{post.title}\n{post.body}")
         ranked = sorted(
-            cards,
+            picked,
             key=lambda c: len(wanted & _tokens(f"{c.name}\n{c.desc}")),
             reverse=True,
         )
-        return ranked[:limit]
-    return list(cards)
+        picked = ranked[:limit]
+    return sorted(picked, key=lambda c: c.created_at)
+
+
+def _strip_markers(desc: str) -> str:
+    """Card text without the bookkeeping footer.
+
+    The `discord-thread:` markers and back-links say nothing about what the bug
+    is, and on a card that already collected several reports they would crowd
+    out the part the model has to judge.
+    """
+    return _MARKER_LINE_RE.sub("", desc).strip()
 
 
 def _trim(text: str, limit: int) -> str:
@@ -129,7 +151,7 @@ def _prompt(post: ForumPost, candidates: list[Card]) -> str:
     ]
     for i, c in enumerate(candidates, start=1):
         lines.append(f"{i}. {c.name}")
-        desc = _trim(c.desc, _MAX_CARD_DESC_CHARS)
+        desc = _trim(_strip_markers(c.desc), _MAX_CARD_DESC_CHARS)
         if desc:
             lines.append(f"   {desc}")
     lines.append("")
