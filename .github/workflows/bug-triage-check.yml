@@ -37,4 +37,6 @@ jobs:
           DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
           DISCORD_GUILD_ID: ${{ vars.DISCORD_GUILD_ID }}
           DISCORD_FORUM_CHANNEL_ID: ${{ vars.DISCORD_FORUM_CHANNEL_ID }}
+          DISCORD_IGNORED_TAG_IDS: ${{ vars.DISCORD_IGNORED_TAG_IDS }}
+          DISCORD_SKIP_ARCHIVED: ${{ vars.DISCORD_SKIP_ARCHIVED }}
         run: python check_connections.py

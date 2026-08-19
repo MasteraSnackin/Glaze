@@ -79,6 +79,14 @@ class TrelloClient:
         card = self._req("POST", "/cards", idList=list_id, name=name, desc=desc)
         return card["id"]  # type: ignore[index]
 
+    def set_desc(self, card_id: str, desc: str) -> None:
+        """Overwrite a card's description — used to write the Discord marker
+        and back-link into a card a human created for the same bug."""
+        if self._dry_run:
+            print(f"[dry-run] would rewrite desc of {card_id}")
+            return
+        self._req("PUT", f"/cards/{card_id}", desc=desc)
+
     def add_comment(self, card_id: str, text: str) -> None:
         if self._dry_run:
             print(f"[dry-run] would comment on {card_id}: {text[:80]}...")

@@ -18,7 +18,13 @@ def _require(name: str) -> str:
 
 
 def _optional(name: str, default: str = "") -> str:
-    return os.environ.get(name, default).strip()
+    """An unset *or empty* var falls back to the default.
+
+    Empty matters: GitHub Actions expands an undefined `vars.X` to an empty
+    string, so without this an unconfigured variable would silently mean
+    "model = ''" or "matching off" instead of the documented default.
+    """
+    return os.environ.get(name, "").strip() or default
 
 
 def _csv(name: str) -> tuple[str, ...]:
@@ -52,6 +58,12 @@ class Config:
 
     # --- Behaviour ---
     dry_run: bool  # if true: don't create cards / post comments, just log
+    # Before mirroring a new thread, ask the model whether an existing
+    # (human-written) card already tracks that bug; on a hit the thread is
+    # linked to that card instead of opening a duplicate.
+    match_existing_cards: bool
+    # How many unlinked cards may be shown to the model in one lookup.
+    max_match_candidates: int
     # Per-run ceilings so a first run over a long-lived forum can't flood the
     # board or the token budget in one go. 0 = unlimited.
     max_new_cards_per_run: int
@@ -75,6 +87,9 @@ class Config:
             discord_skip_archived=_optional("DISCORD_SKIP_ARCHIVED", "true").lower()
             in ("1", "true", "yes"),
             dry_run=_optional("DRY_RUN", "false").lower() in ("1", "true", "yes"),
+            match_existing_cards=_optional("MATCH_EXISTING_CARDS", "true").lower()
+            in ("1", "true", "yes"),
+            max_match_candidates=int(_optional("MAX_MATCH_CANDIDATES", "20")),
             max_new_cards_per_run=int(_optional("MAX_NEW_CARDS_PER_RUN", "25")),
             max_audits_per_run=int(_optional("MAX_AUDITS_PER_RUN", "15")),
         )
