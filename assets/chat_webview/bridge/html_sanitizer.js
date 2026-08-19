@@ -1,6 +1,8 @@
+import { sanitizeCssText, sanitizeStyleDeclaration } from './css_sanitizer.js';
+
 const BLOCKED_ELEMENTS = new Set([
   'script', 'iframe', 'object', 'embed', 'form', 'math', 'meta',
-  'link', 'base', 'style',
+  'link', 'base',
   // Preserve formatter-generated static <svg><path> icons, but reject SVG
   // features that can load resources, embed HTML, or trigger animation.
   'foreignobject', 'animate', 'animatemotion', 'animatetransform', 'set',
@@ -12,19 +14,11 @@ const URL_ATTRIBUTES = new Set([
 ]);
 
 const SAFE_IMAGE_DATA_URL = /^data:image\/(?:png|jpe?g|webp|gif|avif);base64,/i;
-const CSS_URL = /url\(\s*(['"]?)(.*?)\1\s*\)/gi;
-const UNSAFE_CSS = /@import|expression\s*\(|behavior\s*:|-moz-binding\s*:/i;
-const EXT_BLOCK_STYLE_PROPERTIES = new Set([
-  'color', 'background', 'background-color', 'background-image',
-  'font', 'font-family', 'font-size', 'font-style', 'font-weight',
-  'line-height', 'letter-spacing', 'text-align', 'text-decoration',
-  'text-shadow', 'white-space', 'word-break', 'overflow-wrap',
-  'border', 'border-color', 'border-radius', 'border-style', 'border-width',
-  'padding', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left',
-  'display', 'gap', 'row-gap', 'column-gap', 'align-items',
-  'justify-content', 'flex-direction', 'flex-wrap', 'opacity',
-  '-webkit-background-clip', '-webkit-text-fill-color',
-]);
+
+// ExtBlock HTML is inserted into the light DOM, so its `<style>` rules are
+// pinned to the block body instead of leaking into the app chrome. Message
+// HTML needs no prefix — it is written into a per-message shadow root.
+const EXT_BLOCK_CSS_SCOPE = '.ext-block-content';
 
 function isSafeDataUrl(element, attributeName, value) {
   if (!SAFE_IMAGE_DATA_URL.test(value)) return false;
@@ -33,44 +27,38 @@ function isSafeDataUrl(element, attributeName, value) {
     (localName === 'img' || localName === 'source');
 }
 
-function hasUnsafeCssUrl(css) {
-  if (UNSAFE_CSS.test(String(css || ''))) return true;
-  CSS_URL.lastIndex = 0;
-  // Inline CSS does not need network resources. Reject every url(), including
-  // remote images, so untrusted HTML cannot beacon or exploit parser-specific
-  // URL scheme quirks. Gradients and ordinary color styling remain available.
-  return CSS_URL.test(String(css || ''));
+// Message and ExtBlock CSS keeps working while message scripts are disabled;
+// the declaration-level policy lives in css_sanitizer.js.
+function sanitizeStyleAttribute(element) {
+  sanitizeStyleDeclaration(element.style);
+  if (!element.getAttribute('style')) element.removeAttribute('style');
 }
 
-function sanitizeStyleAttribute(element) {
-  const raw = element.getAttribute('style') || '';
-  if (hasUnsafeCssUrl(raw)) {
-    element.removeAttribute('style');
+function sanitizeStyleElement(element, cssScope) {
+  const safe = sanitizeCssText(element.textContent, cssScope);
+  if (!safe) {
+    element.remove();
     return;
   }
-  // Message and ExtBlock HTML live in the privileged parent document. Keep
-  // local visual formatting, but reject layout primitives that can cover or
-  // impersonate the app UI (position/z-index/inset etc.).
-  const safe = [];
-  for (const declaration of raw.split(';')) {
-    const colon = declaration.indexOf(':');
-    if (colon <= 0) continue;
-    const property = declaration.slice(0, colon).trim().toLowerCase();
-    const value = declaration.slice(colon + 1).trim();
-    if (!EXT_BLOCK_STYLE_PROPERTIES.has(property) || !value) continue;
-    safe.push(`${property}: ${value}`);
+  // media/type/nonce/blocking attributes carry no styling the block needs.
+  for (const attribute of Array.from(element.attributes)) {
+    element.removeAttribute(attribute.name);
   }
-  if (safe.length) element.setAttribute('style', safe.join('; '));
-  else element.removeAttribute('style');
+  element.textContent = safe;
 }
 
-function sanitizeHtml(html) {
+function sanitizeHtml(html, cssScope) {
   const template = document.createElement('template');
   template.innerHTML = String(html == null ? '' : html);
 
   for (const element of Array.from(template.content.querySelectorAll('*'))) {
-    if (BLOCKED_ELEMENTS.has(element.localName.toLowerCase())) {
+    const localName = element.localName.toLowerCase();
+    if (BLOCKED_ELEMENTS.has(localName)) {
       element.remove();
+      continue;
+    }
+    if (localName === 'style') {
+      sanitizeStyleElement(element, cssScope);
       continue;
     }
     for (const attribute of Array.from(element.attributes)) {
@@ -109,9 +97,9 @@ function sanitizeHtml(html) {
 }
 
 export function sanitizeMessageHtml(html) {
-  return sanitizeHtml(html);
+  return sanitizeHtml(html, '');
 }
 
 export function sanitizeExtBlockHtml(html) {
-  return sanitizeHtml(html);
+  return sanitizeHtml(html, EXT_BLOCK_CSS_SCOPE);
 }
