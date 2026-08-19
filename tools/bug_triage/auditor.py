@@ -17,7 +17,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent
-from pydantic_ai.models.openai import OpenAIModel
+from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
 # Repo root = two levels up from this file (tools/bug_triage/auditor.py).
@@ -84,7 +84,7 @@ def _safe_path(rel: str) -> Path | None:
 
 
 def build_agent(api_key: str, base_url: str, model_name: str) -> Agent[None, BugAudit]:
-    model = OpenAIModel(
+    model = OpenAIChatModel(
         model_name,
         provider=OpenAIProvider(base_url=base_url, api_key=api_key),
     )
