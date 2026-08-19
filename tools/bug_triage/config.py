@@ -18,24 +18,18 @@ def _require(name: str) -> str:
 
 
 def _optional(name: str, default: str = "") -> str:
-    return os.environ.get(name, default).strip()
+    """An unset *or empty* var falls back to the default.
+
+    Empty matters: GitHub Actions expands an undefined `vars.X` to an empty
+    string, so without this an unconfigured variable would silently mean
+    "model = ''" or "matching off" instead of the documented default.
+    """
+    return os.environ.get(name, "").strip() or default
 
 
 def _csv(name: str) -> tuple[str, ...]:
     raw = _optional(name)
     return tuple(x.strip() for x in raw.split(",") if x.strip())
-
-
-def _audit_lists() -> tuple[str, ...]:
-    """Lists whose cards may be audited (comma-separated ids).
-
-    Falls back to the new-bug list alone, which is the intended scope: the AI
-    must never comment on unrelated cards elsewhere on the board.
-    """
-    raw = _optional("TRELLO_AUDIT_LIST_IDS")
-    if raw:
-        return tuple(x.strip() for x in raw.split(",") if x.strip())
-    return (_require("TRELLO_NEW_BUG_LIST_ID"),)
 
 
 @dataclass(frozen=True)
@@ -51,9 +45,6 @@ class Config:
     trello_board_id: str
     trello_new_bug_list_id: str  # where freshly-discovered bugs land
     trello_audited_label_id: str  # label meaning "AI already audited this"
-    # Only cards in these lists are ever audited. Defaults to the new-bug list,
-    # so the rest of the board is never touched.
-    trello_audit_list_ids: tuple[str, ...]
 
     # --- Discord ---
     discord_bot_token: str
@@ -67,6 +58,12 @@ class Config:
 
     # --- Behaviour ---
     dry_run: bool  # if true: don't create cards / post comments, just log
+    # Before mirroring a new thread, ask the model whether an existing
+    # (human-written) card already tracks that bug; on a hit the thread is
+    # linked to that card instead of opening a duplicate.
+    match_existing_cards: bool
+    # How many unlinked cards may be shown to the model in one lookup.
+    max_match_candidates: int
     # Per-run ceilings so a first run over a long-lived forum can't flood the
     # board or the token budget in one go. 0 = unlimited.
     max_new_cards_per_run: int
@@ -83,7 +80,6 @@ class Config:
             trello_board_id=_require("TRELLO_BOARD_ID"),
             trello_new_bug_list_id=_require("TRELLO_NEW_BUG_LIST_ID"),
             trello_audited_label_id=_require("TRELLO_AUDITED_LABEL_ID"),
-            trello_audit_list_ids=_audit_lists(),
             discord_bot_token=_require("DISCORD_BOT_TOKEN"),
             discord_guild_id=_require("DISCORD_GUILD_ID"),
             discord_forum_channel_id=_require("DISCORD_FORUM_CHANNEL_ID"),
@@ -91,6 +87,9 @@ class Config:
             discord_skip_archived=_optional("DISCORD_SKIP_ARCHIVED", "true").lower()
             in ("1", "true", "yes"),
             dry_run=_optional("DRY_RUN", "false").lower() in ("1", "true", "yes"),
+            match_existing_cards=_optional("MATCH_EXISTING_CARDS", "true").lower()
+            in ("1", "true", "yes"),
+            max_match_candidates=int(_optional("MAX_MATCH_CANDIDATES", "20")),
             max_new_cards_per_run=int(_optional("MAX_NEW_CARDS_PER_RUN", "25")),
             max_audits_per_run=int(_optional("MAX_AUDITS_PER_RUN", "15")),
         )
