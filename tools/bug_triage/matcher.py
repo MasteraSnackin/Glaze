@@ -25,7 +25,7 @@ import sys
 
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent
-from pydantic_ai.models.openai import OpenAIModel
+from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from discord_client import ForumPost
@@ -75,7 +75,7 @@ class CardMatch(BaseModel):
 
 
 def build_matcher(api_key: str, base_url: str, model_name: str) -> Agent[None, CardMatch]:
-    model = OpenAIModel(
+    model = OpenAIChatModel(
         model_name,
         provider=OpenAIProvider(base_url=base_url, api_key=api_key),
     )
