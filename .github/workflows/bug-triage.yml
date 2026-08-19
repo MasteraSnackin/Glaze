@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     # A thinking model auditing a dozen reports takes minutes, not seconds —
     # but it must never sit on a runner for hours if a call hangs.
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - name: Checkout (agent needs the source to audit)
         uses: actions/checkout@v4
