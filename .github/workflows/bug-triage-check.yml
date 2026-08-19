@@ -39,4 +39,4 @@ jobs:
           DISCORD_FORUM_CHANNEL_ID: ${{ vars.DISCORD_FORUM_CHANNEL_ID }}
           DISCORD_IGNORED_TAG_IDS: ${{ vars.DISCORD_IGNORED_TAG_IDS }}
           DISCORD_SKIP_ARCHIVED: ${{ vars.DISCORD_SKIP_ARCHIVED }}
-        run: python check_connections.py
+        run: python -u check_connections.py
