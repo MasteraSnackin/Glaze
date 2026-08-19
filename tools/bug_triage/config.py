@@ -26,18 +26,6 @@ def _csv(name: str) -> tuple[str, ...]:
     return tuple(x.strip() for x in raw.split(",") if x.strip())
 
 
-def _audit_lists() -> tuple[str, ...]:
-    """Lists whose cards may be audited (comma-separated ids).
-
-    Falls back to the new-bug list alone, which is the intended scope: the AI
-    must never comment on unrelated cards elsewhere on the board.
-    """
-    raw = _optional("TRELLO_AUDIT_LIST_IDS")
-    if raw:
-        return tuple(x.strip() for x in raw.split(",") if x.strip())
-    return (_require("TRELLO_NEW_BUG_LIST_ID"),)
-
-
 @dataclass(frozen=True)
 class Config:
     # --- DeepSeek (OpenAI-compatible) ---
@@ -51,9 +39,6 @@ class Config:
     trello_board_id: str
     trello_new_bug_list_id: str  # where freshly-discovered bugs land
     trello_audited_label_id: str  # label meaning "AI already audited this"
-    # Only cards in these lists are ever audited. Defaults to the new-bug list,
-    # so the rest of the board is never touched.
-    trello_audit_list_ids: tuple[str, ...]
 
     # --- Discord ---
     discord_bot_token: str
@@ -83,7 +68,6 @@ class Config:
             trello_board_id=_require("TRELLO_BOARD_ID"),
             trello_new_bug_list_id=_require("TRELLO_NEW_BUG_LIST_ID"),
             trello_audited_label_id=_require("TRELLO_AUDITED_LABEL_ID"),
-            trello_audit_list_ids=_audit_lists(),
             discord_bot_token=_require("DISCORD_BOT_TOKEN"),
             discord_guild_id=_require("DISCORD_GUILD_ID"),
             discord_forum_channel_id=_require("DISCORD_FORUM_CHANNEL_ID"),
