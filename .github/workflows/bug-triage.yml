@@ -22,6 +22,9 @@ concurrency:
 jobs:
   triage:
     runs-on: ubuntu-latest
+    # A thinking model auditing a dozen reports takes minutes, not seconds —
+    # but it must never sit on a runner for hours if a call hangs.
+    timeout-minutes: 60
     steps:
       - name: Checkout (agent needs the source to audit)
         uses: actions/checkout@v4
@@ -54,4 +57,6 @@ jobs:
           MAX_NEW_CARDS_PER_RUN: ${{ vars.MAX_NEW_CARDS_PER_RUN }}
           MAX_AUDITS_PER_RUN: ${{ vars.MAX_AUDITS_PER_RUN }}
           DRY_RUN: ${{ inputs.dry_run }}
-        run: python triage.py
+        # -u: unbuffered, so progress shows up in the Actions log live
+        # instead of arriving in one block when the process exits.
+        run: python -u triage.py
