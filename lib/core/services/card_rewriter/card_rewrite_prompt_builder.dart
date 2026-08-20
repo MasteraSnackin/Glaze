@@ -67,13 +67,34 @@ abstract final class CardRewriterPromptBuilder {
         'compact while allowing it to grow gradually when necessary.',
       )
       ..writeln(
+        'Minimal means the smallest exact anchors, not the fewest patches. When '
+        'one durable change makes multiple fragments in the same writable field '
+        'outdated or mutually contradictory, include a separate minimal patch '
+        'for every directly conflicting fragment in that field. Do not update '
+        'only the first occurrence while leaving the rest of the card describing '
+        'the obsolete state as current canon.',
+      )
+      ..writeln(
+        'Audit every supplied writable field for the same contradiction. When '
+        'a durable change invalidates current assertions in more than one field, '
+        'emit one operation per affected field and patch every directly '
+        'conflicting fragment. For a relationship-status transition, preserve '
+        'historical facts such as when a proposal occurred, but rewrite any '
+        'timeline, scenario, appearance, motivation, or relationship sentence '
+        'that still presents the obsolete status as current.',
+      )
+      ..writeln(
         'The card is a long-term character reference, not an event log. Keep '
         'one-off actions, recent scene beats, invitations, travel, meals, and '
-        'the current state of a relationship in Ledger. Do not patch the card '
+        'temporary relationship moods or scene-level dynamics in Ledger. Do not '
+        'patch the card '
         'merely because {{user}} and the character went somewhere or did '
         'something together. Patch it only when the evidence establishes a '
         'lasting change in personality, relationship pattern, enduring goal, '
-        'boundary, worldview, or baseline premise that future scenes need.',
+        'boundary, worldview, or baseline premise that future scenes need. A '
+        'durable relationship-status transition such as an engagement forming '
+        'or ending, marriage, divorce, or an enduring alliance or enmity changes '
+        'the baseline premise and belongs in the card when supported.',
       )
       ..writeln(
         'For example, accepting a drink is a Ledger event; a repeatedly '
@@ -101,7 +122,13 @@ abstract final class CardRewriterPromptBuilder {
         'canonical card field you are patching.',
       )
       ..writeln(
-        '- Preserve every {{...}} macro token byte-for-byte in a replacement.',
+        '- Preserve every {{...}} macro token byte-for-byte in a replacement. '
+        'Never replace {{user}} with a character name or persona name.',
+      )
+      ..writeln(
+        '- Strict character boundary: a patch modifying one character\'s profile '
+        'MUST NOT insert description or background for other characters, the user, '
+        'or third parties. Each character\'s section must remain strictly about that character.',
       )
       ..writeln(
         '- Treat the immutable chat history and Ledger facts as evidence for '
@@ -123,10 +150,17 @@ abstract final class CardRewriterPromptBuilder {
         ..writeln('# Accumulated candidates from observation journal')
         ..writeln(
           'Evaluate these candidates independently. Status "active" means the '
-          'candidate is not yet confirmed; status "promoted" is a stronger '
-          'signal, but neither status requires a patch. Use repeatCount, '
-          'confidence, evidence clusters, chat, card, and Ledger together. '
-          'Return no patch when evidence is insufficient or already canonical.',
+          'candidate alone is not yet confirmed and remains discretionary. '
+          'Status "promoted" is stronger confirmed evidence. Use repeatCount, '
+          'confidence, evidence clusters, chat, card, and Ledger together. When '
+          'the supplied immutable chat or Ledger confirms a durable candidate '
+          'that directly contradicts supplied card text, emit the smallest valid '
+          'patch that resolves the contradiction regardless of whether the '
+          'candidate status is "active" or "promoted", unless no writable field '
+          'or valid character-boundary-preserving anchor can do so. An empty '
+          'operations list is not valid for such a confirmed, resolvable '
+          'contradiction. Return no patch only when evidence is insufficient or '
+          'the durable fact is already canonical.',
         )
         ..write(jsonEncode(accumulatedObservations));
     }

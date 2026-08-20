@@ -96,6 +96,12 @@ void main() {
 
     expect(prompt, contains('Prefer replacing or refining an existing outdated'));
     expect(prompt, contains('Append only when no existing fragment'));
+    expect(prompt, contains('smallest exact anchors, not the fewest patches'));
+    expect(prompt, contains('every directly conflicting fragment'));
+    expect(prompt, contains('obsolete state as current canon'));
+    expect(prompt, contains('every supplied writable field'));
+    expect(prompt, contains('one operation per affected field'));
+    expect(prompt, contains('timeline, scenario, appearance, motivation'));
   });
 
   test('evolution prompt keeps one-off events in Ledger', () {
@@ -107,6 +113,41 @@ void main() {
     expect(prompt, contains('long-term character reference, not an event log'));
     expect(prompt, contains('accepting a drink is a Ledger event'));
     expect(prompt, contains('Do not turn a single event into a permanent'));
+  });
+
+  test('evolution prompt treats durable relationship status as card canon', () {
+    final prompt = CardRewriterPromptBuilder.buildEvolution(
+      character: character(),
+      instruction: 'Reflect durable changes.',
+    );
+
+    expect(prompt, contains('temporary relationship moods'));
+    expect(prompt, contains('engagement forming or ending'));
+    expect(prompt, contains('changes the baseline premise'));
+    expect(prompt, isNot(contains('current state of a relationship in Ledger')));
+  });
+
+  test('chat-confirmed active contradiction cannot produce an empty proposal', () {
+    final prompt = CardRewriterPromptBuilder.buildEvolution(
+      character: character().copyWith(
+        personality: 'Ada is newly engaged to Richard.',
+      ),
+      instruction: 'Reflect durable changes.',
+      accumulatedObservations: const [
+        {
+          'status': 'active',
+          'key': 'relationship.ada.richard.engagement_broken',
+          'canonicalClaim': 'The engagement has permanently ended.',
+        },
+      ],
+    );
+
+    expect(prompt, contains('Ada is newly engaged to Richard.'));
+    expect(prompt, contains('relationship.ada.richard.engagement_broken'));
+    expect(prompt, contains('directly contradicts supplied card text'));
+    expect(prompt, contains('regardless of whether the candidate status'));
+    expect(prompt, contains('smallest valid patch'));
+    expect(prompt, contains('An empty operations list is not valid'));
   });
 
   test(

@@ -7,6 +7,10 @@ import '../../core/db/repositories/manual_rewrite_job_repo.dart';
 import '../../core/db/app_db.dart' show RewriteJobRow;
 import '../../core/models/character.dart';
 import '../../core/services/card_rewriter/card_rewriter_contracts.dart';
+import '../../core/state/db_provider.dart';
+import '../chat/chat_provider.dart';
+import '../chat/chat_session_service.dart';
+import '../chat_history/chat_history_provider.dart';
 import '../../shared/theme/app_colors.dart';
 import '../../shared/widgets/glass_surface.dart';
 import '../../shared/widgets/glaze_bottom_sheet.dart';
@@ -117,13 +121,15 @@ class _ReviewBody extends ConsumerWidget {
               'lorebook:${lore.lorebookId}/${lore.entryId}',
             _ => 'invalid operation',
           };
-          final locked = operation is CardRewriteOperationSnapshot &&
+          final locked =
+              operation is CardRewriteOperationSnapshot &&
               lockOverlap(operation, lockedNames).isNotEmpty;
           return RewriteOperationRailTile(
             index: i,
             view: view,
             scopeKey: scopeKey,
-            invalid: view.operation.validationStatus == 'invalid' ||
+            invalid:
+                view.operation.validationStatus == 'invalid' ||
                 operation == null,
             locked: locked,
             selected: ui.selectedOperationId == view.operation.id,
@@ -134,7 +140,11 @@ class _ReviewBody extends ConsumerWidget {
     return Column(
       children: [
         _StatusStrip(snapshot: snapshot, freshness: ui.freshness),
-        _JobActions(job: snapshot.job, jobId: jobId),
+        _JobActions(
+          job: snapshot.job,
+          jobId: jobId,
+          backLocation: backLocation,
+        ),
         Expanded(
           child: LayoutBuilder(
             builder: (context, constraints) {
@@ -258,6 +268,8 @@ class _OperationItem extends ConsumerWidget {
         onEdit: snapshot == null
             ? null
             : () => _edit(context, controller, view, snapshot),
+        onDeletePatch: (patchIndex) =>
+            _confirmDeletePatch(context, controller, view, patchIndex),
       ),
     );
   }
@@ -278,6 +290,20 @@ class _OperationItem extends ConsumerWidget {
     final values = value.split('\n\n');
     final result = await controller.saveEdit(view, values);
     if (context.mounted) _showOutcome(context, result);
+  }
+
+  void _confirmDeletePatch(
+    BuildContext context,
+    RewriteReviewController controller,
+    ManualRewriteOperationView view,
+    int patchIndex,
+  ) {
+    _showDeletePatchConfirmation(context, () async {
+      final result = await controller.deletePatch(view, patchIndex);
+      if (context.mounted && result != 'updated') {
+        _showOutcome(context, result);
+      }
+    });
   }
 }
 
@@ -305,9 +331,8 @@ class _LorebookOperationItem extends ConsumerWidget {
       rewriteReviewUiProvider(operation.rewriteJobId).notifier,
     );
     final reviewable = operation.status == 'reviewable';
-    final canApprove = enabled &&
-        reviewable &&
-        operation.validationStatus == 'valid';
+    final canApprove =
+        enabled && reviewable && operation.validationStatus == 'valid';
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: InkWell(
@@ -327,13 +352,19 @@ class _LorebookOperationItem extends ConsumerWidget {
             children: [
               Row(
                 children: [
-                  Text('#${index + 1}', style: const TextStyle(fontWeight: FontWeight.w800)),
+                  Text(
+                    '#${index + 1}',
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       'Lorebook ${snapshot.lorebookId} / ${snapshot.entryId}',
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+                      style: const TextStyle(
+                        fontFamily: 'monospace',
+                        fontSize: 12,
+                      ),
                     ),
                   ),
                   if (reviewable && enabled) ...[
@@ -344,14 +375,19 @@ class _LorebookOperationItem extends ConsumerWidget {
                                 view,
                                 'approved',
                               );
-                              if (context.mounted) _showOutcome(context, result);
+                              if (context.mounted) {
+                                _showOutcome(context, result);
+                              }
                             }
                           : null,
                       child: Text('rewrite_btn_approve'.tr()),
                     ),
                     TextButton(
                       onPressed: () async {
-                        final result = await controller.decide(view, 'rejected');
+                        final result = await controller.decide(
+                          view,
+                          'rejected',
+                        );
                         if (context.mounted) _showOutcome(context, result);
                       },
                       child: Text('rewrite_btn_reject'.tr()),
@@ -427,32 +463,34 @@ class _ApplyFooter extends ConsumerWidget {
         borderRadius: BorderRadius.circular(16),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
-           child: Wrap(
-             alignment: WrapAlignment.end,
-             crossAxisAlignment: WrapCrossAlignment.center,
-             spacing: 8,
-             runSpacing: 8,
-             children: [
-               Text('rewrite_apply_summary'.tr(namedArgs: {'count': '$approved'})),
-               TextButton.icon(
-                 onPressed: canApproveAll
-                     ? () => _approveAll(context, ref)
-                     : null,
+          child: Wrap(
+            alignment: WrapAlignment.end,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              Text(
+                'rewrite_apply_summary'.tr(namedArgs: {'count': '$approved'}),
+              ),
+              TextButton.icon(
+                onPressed: canApproveAll
+                    ? () => _approveAll(context, ref)
+                    : null,
                 icon: const Icon(Icons.done_all_rounded),
-                 label: Text('rewrite_approve_all'.tr()),
-               ),
-               if (approved == 0)
-                 TextButton.icon(
-                   onPressed: enabled
-                       ? () => _rejectAndClose(context, ref, hasPending)
-                       : null,
-                   icon: const Icon(Icons.close_rounded),
-                   label: const Text('Reject and close'),
-                   style: TextButton.styleFrom(
-                     foregroundColor: context.cs.error,
-                   ),
-                 ),
-               FilledButton.icon(
+                label: Text('rewrite_approve_all'.tr()),
+              ),
+              if (approved == 0)
+                TextButton.icon(
+                  onPressed: enabled
+                      ? () => _rejectAndClose(context, ref, hasPending)
+                      : null,
+                  icon: const Icon(Icons.close_rounded),
+                  label: const Text('Reject and close'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: context.cs.error,
+                  ),
+                ),
+              FilledButton.icon(
                 onPressed: canApply ? () => _confirm(context, ref) : null,
                 icon: const Icon(Icons.done_all_rounded),
                 label: Text('rewrite_apply'.tr()),
@@ -515,6 +553,20 @@ class _ApplyFooter extends ConsumerWidget {
                 context,
                 'rewrite_apply_result'.tr(namedArgs: {'result': outcome.kind}),
               );
+              if (outcome.isApplied) {
+                final session = await ref
+                    .read(chatRepoProvider)
+                    .getById(snapshot.job.chatSessionId);
+                if (session != null && context.mounted) {
+                  ChatSessionService.clearCache();
+                  ref.invalidate(chatProvider(snapshot.job.characterId));
+                  ref.invalidate(chatProvider(session.characterId));
+                  ref.invalidate(chatHistoryProvider);
+                  context.go(
+                    '/chat/${session.characterId}?session=${session.sessionIndex}',
+                  );
+                }
+              }
             }
           },
         ),
@@ -576,16 +628,27 @@ class _StatusStrip extends StatelessWidget {
 /// optimistic state here: the watched job row is the source of truth after a
 /// cancel or retry request completes.
 class _JobActions extends ConsumerWidget {
-  const _JobActions({required this.job, required this.jobId});
+  const _JobActions({
+    required this.job,
+    required this.jobId,
+    required this.backLocation,
+  });
 
   final RewriteJobRow job;
   final String jobId;
+  final String backLocation;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final generating = job.status == 'generating';
+    final pending = job.status == 'pending';
     final failed = job.status == 'failed';
-    if (!generating && !failed) return const SizedBox.shrink();
+    final cancelled = job.status == 'cancelled';
+    final automated = isAutomatedEvolutionJob(job);
+    final canReplaceAutomated = automated && (pending || failed || cancelled);
+    if (!generating && !failed && !canReplaceAutomated) {
+      return const SizedBox.shrink();
+    }
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
       child: GlassSurface(
@@ -600,28 +663,47 @@ class _JobActions extends ConsumerWidget {
               Text(
                 generating
                     ? 'rewrite_generating_hint'.tr()
+                    : pending
+                    ? 'rewrite_regenerate_hint'.tr()
                     : 'rewrite_failed_hint'.tr(),
                 style: TextStyle(
                   fontSize: 12,
                   color: context.cs.onSurfaceVariant,
                 ),
               ),
-              if (failed)
+              if (failed && !automated)
                 OutlinedButton.icon(
                   key: const Key('rewrite-retry-button'),
                   onPressed: () => _retry(context, ref),
                   icon: const Icon(Icons.refresh_rounded, size: 18),
                   label: Text('rewrite_retry'.tr()),
                 ),
-              OutlinedButton.icon(
-                key: const Key('rewrite-cancel-button'),
-                onPressed: () => _cancel(context, ref),
-                icon: const Icon(Icons.close_rounded, size: 18),
-                label: Text('rewrite_cancel'.tr()),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: context.cs.error,
+              if (canReplaceAutomated) ...[
+                OutlinedButton.icon(
+                  key: const Key('rewrite-regenerate-button'),
+                  onPressed: () => _regenerate(context, ref),
+                  icon: const Icon(Icons.refresh_rounded, size: 18),
+                  label: Text('rewrite_regenerate'.tr()),
                 ),
-              ),
+                OutlinedButton.icon(
+                  key: const Key('rewrite-delete-button'),
+                  onPressed: () => _delete(context, ref),
+                  icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                  label: Text('rewrite_delete'.tr()),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: context.cs.error,
+                  ),
+                ),
+              ] else
+                OutlinedButton.icon(
+                  key: const Key('rewrite-cancel-button'),
+                  onPressed: () => _cancel(context, ref),
+                  icon: const Icon(Icons.close_rounded, size: 18),
+                  label: Text('rewrite_cancel'.tr()),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: context.cs.error,
+                  ),
+                ),
             ],
           ),
         ),
@@ -647,6 +729,41 @@ class _JobActions extends ConsumerWidget {
             .tr(namedArgs: {'result': result}),
       );
     }
+  }
+
+  Future<void> _delete(BuildContext context, WidgetRef ref) async {
+    final outcome = await ref
+        .read(rewriteReviewUiProvider(jobId).notifier)
+        .deleteAutomatedProposal(job);
+    if (!context.mounted) return;
+    if (outcome.isDeleted) {
+      context.go(backLocation);
+    } else {
+      GlazeToast.show(
+        context,
+        'rewrite_delete_result'.tr(namedArgs: {'result': outcome.kind}),
+      );
+    }
+  }
+
+  Future<void> _regenerate(BuildContext context, WidgetRef ref) async {
+    final outcome = await ref
+        .read(rewriteReviewUiProvider(jobId).notifier)
+        .regenerateAutomatedProposal(job);
+    if (!context.mounted) return;
+    final replacement = outcome.job;
+    if (outcome.kind == 'persisted' && replacement != null) {
+      context.go(
+        '/character/${Uri.encodeComponent(replacement.characterId)}/rewrite/'
+        '${Uri.encodeComponent(replacement.id)}',
+      );
+      return;
+    }
+    GlazeToast.show(
+      context,
+      'rewrite_regenerate_result'.tr(namedArgs: {'result': outcome.kind}),
+    );
+    context.go(backLocation);
   }
 }
 
@@ -708,4 +825,33 @@ void _showOutcome(BuildContext context, String outcome) {
       'rewrite_action_result'.tr(namedArgs: {'result': outcome}),
     );
   }
+}
+
+void _showDeletePatchConfirmation(
+  BuildContext context,
+  Future<void> Function() onDelete,
+) {
+  GlazeBottomSheet.show<void>(
+    context,
+    title: 'rewrite_delete_patch_confirm_title'.tr(),
+    bigInfo: BottomSheetBigInfo(
+      icon: Icons.delete_outline_rounded,
+      description: 'rewrite_delete_patch_confirm_body'.tr(),
+    ),
+    items: [
+      BottomSheetItem(
+        label: 'rewrite_delete_patch'.tr(),
+        centered: true,
+        onTap: () async {
+          Navigator.of(context, rootNavigator: true).pop();
+          await onDelete();
+        },
+      ),
+      BottomSheetItem(
+        label: 'btn_cancel'.tr(),
+        centered: true,
+        onTap: () => Navigator.of(context, rootNavigator: true).pop(),
+      ),
+    ],
+  );
 }
