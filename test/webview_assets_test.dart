@@ -618,6 +618,52 @@ void main() {
       expect(chunk, isNot(contains('loading="lazy"')));
     });
 
+    test('the block switcher renders only for more than one image', () {
+      // The count is `variants.length > 1` on both the switcher and the data
+      // attributes, so a single-image block keeps its historical markup.
+      expect(formatterFormatterJs, contains('imggen-variants'));
+      expect(formatterFormatterJs, contains("data-action=\"img-variant-prev\""));
+      expect(formatterFormatterJs, contains("data-action=\"img-variant-next\""));
+      expect(
+        RegExp(r'variants\.length > 1').allMatches(formatterFormatterJs).length,
+        greaterThanOrEqualTo(3),
+      );
+      expect(formatterFormatterJs, contains('data-variants='));
+      expect(formatterFormatterJs, contains('data-variant-index='));
+    });
+
+    test('the payload parser mirrors the Dart codec', () {
+      expect(
+        formatterFormatterJs,
+        contains('export function parseImageResultPayload('),
+      );
+      expect(formatterFormatterJs, contains("IMG_VARIANT_SEPARATOR = ';;'"));
+      expect(formatterFormatterJs, contains("IMG_VARIANT_ACTIVE_MARKER = '*'"));
+    });
+
+    test('paging a block swaps the picture in the page', () {
+      expect(interactionDispatchJs, contains('_stepImageVariant('));
+      expect(interactionDispatchJs, contains("'img-variant-prev'"));
+      expect(interactionDispatchJs, contains("'img-variant-next'"));
+      // The lightbox and the download button read data-src, so it moves too.
+      expect(interactionDispatchJs, contains('img.dataset.src = src'));
+      expect(
+        interactionDispatchJs,
+        contains("_sendToFlutter('onImgVariant'"),
+      );
+    });
+
+    test('the switcher is small and see-through', () {
+      final css = rendererJs;
+      final start = css.indexOf('.imggen-variants {');
+      expect(start, isNot(-1));
+      final rule = css.substring(start, css.indexOf('}', start));
+      expect(rule, contains('position: absolute'));
+      expect(rule, contains('height: 18px'));
+      expect(rule, contains('opacity: 0.45'));
+      expect(rule, contains('rgba(0, 0, 0, 0.38)'));
+    });
+
     test('a failed generated image re-requests itself', () {
       expect(rendererJs, contains('export function retryFailedLocalImages('));
       expect(rendererJs, contains('retryFailedLocalImages(root)'));

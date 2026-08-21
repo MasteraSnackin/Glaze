@@ -299,6 +299,8 @@ class ChatBridgeController {
     int? blockIndex,
   )?
   onImgOptions;
+  void Function(String messageId, int blockIndex, int variantIndex)?
+  onImgVariant;
   void Function()? onImgCancel;
   void Function()? onStop;
   void Function(String messageId)? onExtBlocksRunAll;
@@ -467,6 +469,14 @@ class ChatBridgeController {
             data['messageId'] as String? ?? '',
             _blockIndex(data['imgIndex']),
           );
+        case 'onImgVariant':
+          final messageId = data['messageId'] as String? ?? '';
+          final blockIndex = _blockIndex(data['imgIndex']);
+          final variantIndex = _blockIndex(data['variantIndex']);
+          if (messageId.isEmpty || blockIndex == null || variantIndex == null) {
+            return;
+          }
+          onImgVariant?.call(messageId, blockIndex, variantIndex);
         case 'onPanelEvent':
           final panelId = data['panelId'] as String? ?? '';
           final event = data['event'] as String? ?? 'action';

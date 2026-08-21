@@ -199,6 +199,15 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     instruction,
     blockIndex: blockIndex,
   );
+  Future<void> selectImageVariant(
+    String messageId,
+    int blockIndex,
+    int variantIndex,
+  ) async => _imageRecoverySvc.selectImageVariant(
+    messageId,
+    blockIndex,
+    variantIndex,
+  );
   final Set<String> _queuedImageRetries = <String>{};
   Future<void> retryImageGenerationForMessage(
     String messageId, {

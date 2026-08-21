@@ -246,6 +246,53 @@ export const SHADOW_STYLE = `
     margin: 6px 0;
     max-width: 100%;
   }
+  /* Block-level image switcher: the message switcher, shrunk and made
+     see-through so it sits on the picture without covering it. Only rendered
+     when the block holds more than one image. */
+  .glaze-message .imggen-variants {
+    position: absolute;
+    left: 8px;
+    bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 1px;
+    height: 18px;
+    padding: 0 2px;
+    border-radius: 9px;
+    background: rgba(0, 0, 0, 0.38);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    color: rgba(255, 255, 255, 0.92);
+    font-size: 10px;
+    line-height: 1;
+    opacity: 0.45;
+    transition: opacity 0.15s;
+  }
+  .glaze-message .imggen-result-wrapper:hover .imggen-variants { opacity: 1; }
+  .glaze-message .imggen-variant-btn {
+    width: 16px;
+    height: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
+    background: none;
+    color: inherit;
+    cursor: pointer;
+  }
+  .glaze-message .imggen-variant-btn svg {
+    width: 12px;
+    height: 12px;
+    fill: currentColor;
+    pointer-events: none;
+  }
+  .glaze-message .imggen-variant-btn:active { opacity: 0.6; }
+  .glaze-message .imggen-variant-count {
+    min-width: 20px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+
   .glaze-message .imggen-result {
     max-width: 100%;
     border-radius: 10px;

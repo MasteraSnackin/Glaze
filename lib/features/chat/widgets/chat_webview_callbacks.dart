@@ -144,6 +144,10 @@ class ChatWebViewCallbacks {
     imageGenActions.onImgOptions?.call(src, instruction, messageId, blockIndex);
   }
 
+  void onImgVariant(String messageId, int blockIndex, int variantIndex) {
+    imageGenActions.onImgVariant?.call(messageId, blockIndex, variantIndex);
+  }
+
   void onImgCancel() {
     imageGenActions.onImgCancel?.call();
   }

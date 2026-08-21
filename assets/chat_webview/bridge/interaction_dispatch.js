@@ -179,6 +179,48 @@ export class InteractionDispatch {
     return { instr, messageId, imgIndex };
   }
 
+  // Pages one image block through the images it carries. The swap happens
+  // here — the pictures are already in the page — and Flutter is told only so
+  // the choice survives a reload. Like a message swipe, the ends are hard: the
+  // first image does not wrap around to the last.
+  _stepImageVariant(e, el, direction) {
+    const wrapper = e.composedPath().find(
+      (node) => node.classList?.contains('imggen-result-wrapper'),
+    );
+    if (!wrapper) return;
+    const variants = (wrapper.dataset.variants || '').split(';;').filter(Boolean);
+    if (variants.length < 2) return;
+
+    const current = parseInt(wrapper.dataset.variantIndex, 10);
+    const from = Number.isInteger(current) ? current : 0;
+    const next = from + direction;
+    if (next < 0 || next >= variants.length) return;
+
+    const img = wrapper.querySelector('img.imggen-result');
+    const src = variants[next];
+    if (img) {
+      img.src = src;
+      img.dataset.src = src;
+      // A retry counter from the previous image must not carry over.
+      delete img.dataset.retryAttempt;
+    }
+    const options = wrapper.querySelector('.imggen-options-btn');
+    if (options) options.dataset.src = src;
+    const count = wrapper.querySelector('.imggen-variant-count');
+    if (count) count.textContent = `${next + 1}/${variants.length}`;
+    wrapper.dataset.variantIndex = String(next);
+
+    const section = e.composedPath().find((node) => node.dataset?.messageId);
+    const messageId = section ? section.dataset.messageId : '';
+    const rawIndex = parseInt(el.dataset.imgIndex, 10);
+    if (!messageId || !Number.isInteger(rawIndex) || rawIndex < 0) return;
+    this.bridge._sendToFlutter('onImgVariant', [JSON.stringify({
+      messageId,
+      imgIndex: rawIndex,
+      variantIndex: next,
+    })]);
+  }
+
   get _actionMap() {
     const bridge = this.bridge;
     return {
@@ -290,6 +332,8 @@ export class InteractionDispatch {
         bridge._sendToFlutter('onImgRegen', [instr, messageId, imgIndex]);
       },
       'img-stop': (e, el) => bridge._sendToFlutter('onImgCancel', []),
+      'img-variant-prev': (e, el) => this._stepImageVariant(e, el, -1),
+      'img-variant-next': (e, el) => this._stepImageVariant(e, el, 1),
       'img-options': (e, el) => {
         const { instr, messageId, imgIndex } = this._extractImgInstruction(el, e.composedPath());
         bridge._sendToFlutter('onImgOptions', [JSON.stringify({

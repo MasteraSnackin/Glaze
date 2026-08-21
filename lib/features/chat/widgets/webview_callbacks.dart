@@ -22,6 +22,8 @@ typedef EditFocusCallback = void Function(String id, bool focused);
 /// handler then falls back to acting on the whole message.
 typedef ImgActionCallback =
     void Function(String instruction, String messageId, int? blockIndex);
+typedef ImgVariantCallback =
+    void Function(String messageId, int blockIndex, int variantIndex);
 typedef ImgOptionsCallback =
     void Function(
       String src,
@@ -82,6 +84,7 @@ class ImageGenCallbacks {
   final ImgActionCallback? onImgFind;
   final ImgActionCallback? onImgRegen;
   final ImgOptionsCallback? onImgOptions;
+  final ImgVariantCallback? onImgVariant;
   final ImgVoidCallback? onImgCancel;
   final ImageClickCallback? onImgDownload;
 
@@ -91,6 +94,7 @@ class ImageGenCallbacks {
     this.onImgFind,
     this.onImgRegen,
     this.onImgOptions,
+    this.onImgVariant,
     this.onImgCancel,
     this.onImgDownload,
   });

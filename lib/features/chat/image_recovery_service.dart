@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:collection/collection.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
@@ -201,33 +202,64 @@ class ImageRecoveryService {
   /// Turns only the failed blocks back into pending tags, leaving the images
   /// that did arrive in place. This is what the error card's regenerate button
   /// runs: retrying one block must not throw away its finished siblings.
-  static String resetImgErrorTagsToGen(String text) {
-    return text.replaceAllMapped(ImgGenPatterns.imgErrorRegex, (m) {
-      final data = m.group(1) ?? '';
-      String instruction = '';
-      try {
-        final parsed = jsonDecode(data);
-        instruction = (parsed['instruction'] ?? '') as String;
-      } catch (_) {}
-      if (instruction.isNotEmpty) {
-        return '[IMG:GEN:$instruction]';
-      }
-      return '[IMG:GEN]';
-    });
-  }
+  /// Only the failed blocks go back to pending; finished images stay.
+  static String resetImgErrorTagsToGen(String text) =>
+      ImageTagMarkup.resetImageErrorTags(text);
 
-  static String resetImgTagsToGen(String text) {
-    var result = resetImgErrorTagsToGen(text);
-    result = result.replaceAllMapped(ImgGenPatterns.imgResultRegex, (m) {
-      final raw = m.group(1) ?? '';
-      final pipeIdx = raw.indexOf('|');
-      final instr = pipeIdx != -1 ? raw.substring(pipeIdx + 1) : '';
-      if (instr.isNotEmpty) {
-        return '[IMG:GEN:$instr]';
-      }
-      return '[IMG:GEN]';
-    });
-    return result;
+  /// Every block of the message goes back to pending, keeping its prompt and
+  /// the images it already holds.
+  static String resetImgTagsToGen(String text) =>
+      ImageTagMarkup.resetErrorTags(text);
+
+  /// Puts another image of one block on screen — the block-level counterpart
+  /// of a message swipe.
+  ///
+  /// The page has already swapped the picture when this arrives, so the write
+  /// only has to make the choice durable: the active swipe of the message is
+  /// rewritten in place, exactly like a regeneration does, and no swipe is
+  /// added for it.
+  Future<void> selectImageVariant(
+    String messageId,
+    int blockIndex,
+    int variantIndex,
+  ) async {
+    final current = _getState().value;
+    final session = current?.session;
+    if (current == null || session == null) return;
+
+    final message = session.messages.firstWhereOrNull((m) => m.id == messageId);
+    if (message == null || message.role != 'assistant') return;
+    if (ImageTagMarkup.setImageBlockVariant(
+          message.content,
+          blockIndex,
+          variantIndex,
+        ) ==
+        message.content) {
+      return;
+    }
+
+    final updated = await _ref
+        .read(chatRepoProvider)
+        .mutateMessage(
+          sessionId: session.id,
+          messageId: messageId,
+          updatedAt: currentTimestampSeconds(),
+          mutate: (stored) {
+            if (stored.role != 'assistant') return null;
+            final content = ImageTagMarkup.setImageBlockVariant(
+              stored.content,
+              blockIndex,
+              variantIndex,
+            );
+            if (content == stored.content) return null;
+            return ImageGenProcessor.replaceActiveImageContent(stored, content);
+          },
+        );
+    if (updated == null) return;
+    ChatSessionService.updateCache(updated);
+    final liveState = _getState().value;
+    if (liveState == null || liveState.session?.id != updated.id) return;
+    _setState(AsyncData(liveState.copyWith(session: updated)));
   }
 
   Future<void> retryImageGeneration() async {

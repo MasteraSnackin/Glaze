@@ -201,7 +201,9 @@ void main() {
       final result = ImageRecoveryService.resetImgTagsToGen(text);
 
       expect(result, isNot(contains('[IMG:RESULT:')));
-      expect(result, contains('[IMG:GEN:{"prompt":"kept"}]'));
+      // The finished image rides along in the pending tag, so the retry adds a
+      // variant to that block instead of replacing its only picture.
+      expect(result, contains('[IMG:GEN:@/kept.png|{"prompt":"kept"}]'));
       expect(result, contains('[IMG:GEN:{"prompt":"lost"}]'));
     });
   });

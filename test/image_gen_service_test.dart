@@ -312,19 +312,21 @@ void main() {
       expect(result, isNot(contains('[IMG:ERROR')));
     });
 
+    // The pending tag carries the image the block already produced, so the
+    // regeneration adds a variant to the block instead of dropping the old one.
     test('converts [IMG:RESULT:] with instruction back to [IMG:GEN:]', () {
       final result = ImageTagMarkup.resetErrorTags(
         '[IMG:RESULT:/path/to/img.png|{"prompt":"scene"}]',
       );
-      expect(result, contains('[IMG:GEN:{"prompt":"scene"}]'));
+      expect(result, contains('[IMG:GEN:@/path/to/img.png|{"prompt":"scene"}]'));
       expect(result, isNot(contains('[IMG:RESULT')));
     });
 
-    test('converts [IMG:RESULT:] without instruction to bare [IMG:GEN]', () {
+    test('converts [IMG:RESULT:] without instruction to [IMG:GEN]', () {
       final result = ImageTagMarkup.resetErrorTags(
         '[IMG:RESULT:/path/to/img.png]',
       );
-      expect(result, contains('[IMG:GEN]'));
+      expect(result, contains('[IMG:GEN:@/path/to/img.png]'));
       expect(result, isNot(contains('[IMG:RESULT')));
     });
 
@@ -337,7 +339,7 @@ void main() {
           '[IMG:ERROR:$errorJson] and [IMG:RESULT:/img.png|{"prompt":"second"}]';
       final result = ImageTagMarkup.resetErrorTags(text);
       expect(result, contains('[IMG:GEN:{"prompt":"first"}]'));
-      expect(result, contains('[IMG:GEN:{"prompt":"second"}]'));
+      expect(result, contains('[IMG:GEN:@/img.png|{"prompt":"second"}]'));
       expect(result, isNot(contains('[IMG:ERROR')));
       expect(result, isNot(contains('[IMG:RESULT')));
     });
@@ -448,7 +450,7 @@ void main() {
     test('rerolling a finished image only touches that image', () {
       final result = ImageTagMarkup.resetImageBlockAt(message, 0);
 
-      expect(result, startsWith('[IMG:GEN:{"prompt":"one"}]'));
+      expect(result, startsWith('[IMG:GEN:@/one.png|{"prompt":"one"}]'));
       expect(result, contains('[IMG:ERROR:'));
       expect(ImageTagMarkup.pendingImageGenTagCount(result), 2);
     });
