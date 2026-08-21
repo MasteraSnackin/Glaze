@@ -271,7 +271,7 @@ class ImageRecoveryService {
                 !ImageTagMarkup.hasImageGenTags(content)) {
               return null;
             }
-            return ImageGenProcessor.appendImageRegenerationSwipe(
+            return ImageGenProcessor.resetImageContentInPlace(
               message,
               content,
             );
@@ -392,7 +392,7 @@ class ImageRecoveryService {
             if (message.role != 'assistant') return null;
             final content = reset(message.content);
             if (content == message.content) return null;
-            return ImageGenProcessor.appendImageRegenerationSwipe(
+            return ImageGenProcessor.resetImageContentInPlace(
               message,
               content,
             );

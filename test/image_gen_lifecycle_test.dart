@@ -105,43 +105,46 @@ void main() {
   });
 
   group('Imagen green swipes', () {
-    test('regeneration appends a selected swipe and preserves old image', () {
+    test('regeneration rewrites the active swipe instead of adding one', () {
       final message = ChatMessage(
         id: 'assistant',
         role: 'assistant',
-        content: '[IMG:RESULT:/old.png|{"prompt":"scene"}]',
-        swipes: const ['[IMG:RESULT:/old.png|{"prompt":"scene"}]'],
+        content: 'She smiles. [IMG:RESULT:/old.png|{"prompt":"scene"}]',
+        isError: true,
+        swipes: const ['She smiles. [IMG:RESULT:/old.png|{"prompt":"scene"}]'],
         swipesMeta: [
           <String, dynamic>{
+            'isError': true,
             'agentSwipes': [
               const AgentSwipe(
-                content: '[IMG:RESULT:/old.png|{"prompt":"scene"}]',
+                content: 'She smiles. [IMG:RESULT:/old.png|{"prompt":"scene"}]',
               ).toJson(),
             ],
             'agentSwipeId': 0,
           },
         ],
         agentSwipes: const [
-          AgentSwipe(content: '[IMG:RESULT:/old.png|{"prompt":"scene"}]'),
+          AgentSwipe(
+            content: 'She smiles. [IMG:RESULT:/old.png|{"prompt":"scene"}]',
+          ),
         ],
       );
 
-      final result = ImageGenProcessor.appendImageRegenerationSwipe(
+      final result = ImageGenProcessor.resetImageContentInPlace(
         message,
-        '[IMG:GEN:{"prompt":"scene"}]',
+        'She smiles. [IMG:GEN:{"prompt":"scene"}]',
       );
 
-      expect(result.swipes, [
-        '[IMG:RESULT:/old.png|{"prompt":"scene"}]',
-        '[IMG:GEN:{"prompt":"scene"}]',
-      ]);
-      expect(result.swipeId, 1);
-      expect(result.swipesMeta, hasLength(2));
+      expect(result.swipes, ['She smiles. [IMG:GEN:{"prompt":"scene"}]']);
+      expect(result.swipeId, 0);
+      expect(result.content, 'She smiles. [IMG:GEN:{"prompt":"scene"}]');
       expect(result.agentSwipes.single.content, contains('[IMG:GEN:'));
+      expect(result.isError, isFalse);
+      expect(result.swipesMeta.single.containsKey('isError'), isFalse);
       expect(
         AgentSwipe.fromJson(
           Map<String, dynamic>.from(
-            (result.swipesMeta[1]['agentSwipes'] as List).single as Map,
+            (result.swipesMeta[0]['agentSwipes'] as List).single as Map,
           ),
         ).content,
         contains('[IMG:GEN:'),

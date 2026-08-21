@@ -116,6 +116,15 @@ regenerates the tapped image only and leaves the other images of the message
 untouched. A missing index (markdown images) disables the generation actions
 rather than falling back to the whole message.
 
+### INV-IG7: Regenerating an image never adds a message swipe
+
+`ImageRecoveryService` resets the retried blocks through
+`ImageGenProcessor.resetImageContentInPlace()`, which rewrites the swipe the
+user is looking at (content, `swipes[swipeId]`, its agent swipe and metadata)
+and clears the error flag left by the failed block. Rerolling a picture must
+not grow the reply's swipe count or duplicate the text around the image — only
+a text generation creates swipes.
+
 ---
 
 ## 3. Summary Generation Invariants
