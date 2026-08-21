@@ -106,8 +106,32 @@ NavigationActionPolicy chatWebViewNavigationPolicy(WebUri? url) {
   return NavigationActionPolicy.CANCEL;
 }
 
+/// Path served by a `/__glaze_file__` URL, or null when [source] is not one.
+///
+/// The loopback port is picked per app launch, so such a URL is only valid for
+/// the session that produced it. One must never reach storage — and one that
+/// did (message text edited in the page used to be saved back verbatim) has to
+/// be readable again, which is what unwrapping it here restores.
+String? chatWebViewLocalFilePathOf(String? source) {
+  if (source == null || !source.contains('/__glaze_file__')) return null;
+  final uri = Uri.tryParse(source);
+  if (uri == null || uri.path != '/__glaze_file__') return null;
+  final path = uri.queryParameters['path'];
+  return path == null || path.isEmpty ? null : path;
+}
+
+/// [source] with a `/__glaze_file__` URL turned back into the path it serves;
+/// anything else is returned unchanged. Text coming back from the page runs
+/// through this before it is stored.
+String restoreChatWebViewLocalFilePath(String source) =>
+    chatWebViewLocalFilePathOf(source) ?? source;
+
 String? chatWebViewResolveLocalFileUrl(String? source) {
   if (source == null || source.isEmpty) return source;
+  // A URL from an earlier session carries the file it used to serve; resolve
+  // that file for this session instead of handing the page a dead port.
+  final stored = chatWebViewLocalFilePathOf(source);
+  if (stored != null) return chatWebViewResolveLocalFileUrl(stored);
   if (source.startsWith('data:') ||
       source.startsWith('http://') ||
       source.startsWith('https://')) {
