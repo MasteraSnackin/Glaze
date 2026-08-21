@@ -265,7 +265,12 @@ class ImageGenService {
     _saveSeq++;
     final path = p.join(dir.path, '$name.$extension');
     await File(path).writeAsBytes(bytes);
-    return path;
+    // Stored relative to the Glaze data root, never as the absolute path it
+    // was just written to: the root moves under an installed app (a new iOS
+    // container UUID, a database carried between desktop build channels) and
+    // an absolute path silently stops pointing at a file, while a relative one
+    // is re-joined onto the current root by resolveGlazeFilePath.
+    return p.url.join('generated', '$name.$extension');
   }
 
   static int _saveSeq = 0;

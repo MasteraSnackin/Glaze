@@ -1153,7 +1153,7 @@ feature-local adapters to `SyncService`.
 - `image_prompt_builder.dart` — `[STYLE: …]` block, reference descriptions, reference instruction
 - `reference_matcher.dart` — alias / word-boundary matching of the reference library against a prompt
 - `image_reference_collector.dart` — avatars + matched references + context images, clipped per model
-- `image_tag_markup.dart` — pure `[IMG:GEN]`/`[IMG:RESULT]`/`[IMG:ERROR]` tag text transforms (extracted from ImageGenService), including `ImageBlockPayload`: the images one block carries, which of them is visible, and the instruction that produced them (INV-IG8)
+- `image_tag_markup.dart` — pure image-block text transforms (extracted from ImageGenService): the stored `<img data-iig-…>` element of a finished block (INV-IG9), the `[IMG:GEN]`/`[IMG:ERROR]` tags of one that has no picture yet, the `[IMG:RESULT]` of older messages, and `ImageBlockPayload`: the images one block carries, which of them is visible, and the instruction that produced them (INV-IG8)
 - `image_gen_provider.dart` — manages settings + generation state
 - `image_gen_models.dart` — Freezed data models for image generation
 - `image_gen_constants.dart` — per-provider model / ratio / resolution tables (re-exported by the models file)
@@ -1227,7 +1227,7 @@ per block via `InfoBlocksRepository.updateStatus()`.
 | `BlockType` | Handler | Notes |
 |---|---|---|
 | `infoblock` | `blocks/infoblock_handler.dart` | Calls `InfoBlockService`; injects last N results into prompt context |
-| `imageGen` | `blocks/image_gen_block_handler.dart` | Reads `[img gen:…]` tag, calls `ImageGenService`, saves via `ImageStorageService`; result stored as `[IMG:RESULT:<path>]` |
+| `imageGen` | `blocks/image_gen_block_handler.dart` | Reads `[img gen:…]` tag, calls `ImageGenService`, saves via `ImageStorageService`; result stored as an `<img data-iig-…>` element whose `src` is relative to the data root (INV-IG9) |
 | `jsRunner` | `blocks/js_runner_block_handler.dart` | Runs JS through the Chat WebView via `JsBlockExecutor`; absent bridges produce a bounded unavailable error. |
 | `interactive` | `blocks/interactive_block_handler.dart` | LLM → strip code-fence → sandboxed iframe island under the assistant message. JS inside the panel has access to `window.glaze.*` |
 

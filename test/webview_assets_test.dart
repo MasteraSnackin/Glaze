@@ -641,6 +641,45 @@ void main() {
       expect(formatterFormatterJs, contains("IMG_VARIANT_ACTIVE_MARKER = '*'"));
     });
 
+    test('the stored <img data-iig-…> block renders as an image block', () {
+      // INV-IG9: the form every finished block is written in. It is pulled out
+      // with the other image tags in step 5c, so it gets the options button,
+      // the switcher and its data-img-index — not the bare <img> that step 6
+      // would leave.
+      expect(
+        formatterFormatterJs,
+        contains('export function parseImageResultElement('),
+      );
+      expect(formatterFormatterJs, contains('IIG_ELEMENT_REGEX'));
+      expect(formatterFormatterJs, contains("data-iig-variants"));
+      expect(formatterFormatterJs, contains("data-iig-index"));
+      expect(
+        RegExp(
+          r'html = html\.replace\(IIG_ELEMENT_REGEX[\s\S]*?'
+          r"imgBlocks\.push\(\{\s*type: 'result'",
+        ).hasMatch(formatterFormatterJs),
+        isTrue,
+      );
+      // An element with no image yet is a *pending* block and must fall
+      // through to the [IMG:GEN] handling instead.
+      expect(
+        formatterFormatterJs,
+        contains("if (!src || src.startsWith('[IMG:GEN')) return null;"),
+      );
+    });
+
+    test('an ext block renders the stored element with its own controls', () {
+      expect(
+        bridgeControllerJs,
+        contains('_extBlockLegacyImageTokens(block.content)'),
+      );
+      expect(
+        bridgeControllerJs,
+        contains("import { parseImageResultElement } from "
+            "'../formatter/formatter.js';"),
+      );
+    });
+
     test('paging a block swaps the picture in the page', () {
       expect(interactionDispatchJs, contains('_stepImageVariant('));
       expect(interactionDispatchJs, contains("'img-variant-prev'"));

@@ -189,6 +189,19 @@ class ChatBridgeController {
     return ImageTagMarkup.rewriteResultPaths(text, resolveLocalFileUrl);
   }
 
+  /// Inverse of [resolveImgResults] for text on its way back from the page.
+  ///
+  /// The page holds the images as `/__glaze_file__` URLs on a loopback port
+  /// that only exists for this app launch. Saving one (an edited message used
+  /// to be stored exactly as the page had it) leaves a picture that is broken
+  /// from the next start onwards — and stays broken across a restart, because
+  /// the port is gone. Every text the WebView hands back is therefore put into
+  /// its stored spelling first: the served file, relative to the data root.
+  String restoreImgResults(String text) => ImageTagMarkup.rewriteResultPaths(
+    text,
+    restoreChatWebViewLocalFilePath,
+  );
+
   String? resolveLocalFileUrl(String? source) {
     return chatWebViewResolveLocalFileUrl(source);
   }
@@ -440,7 +453,7 @@ class ChatBridgeController {
             data['id'] as String? ?? '',
             data['isUser'] as bool? ?? false,
             data['isSystem'] as bool? ?? false,
-            data['content'] as String? ?? '',
+            restoreImgResults(data['content'] as String? ?? ''),
           );
         case 'onSwipe':
           onSwipe?.call(
@@ -455,7 +468,7 @@ class ChatBridgeController {
         case 'onSelectionAction':
           onSelectionAction?.call(
             data['action'] as String? ?? 'copy',
-            data['text'] as String? ?? '',
+            restoreImgResults(data['text'] as String? ?? ''),
           );
         case 'onPanelResize':
           final panelId = data['panelId'] as String? ?? '';
@@ -496,7 +509,7 @@ class ChatBridgeController {
     final s = args[1] as String? ?? '';
     switch (name) {
       case 'onEditSave':
-        onEditSave?.call(id, s);
+        onEditSave?.call(id, restoreImgResults(s));
       case 'onRegenerate':
         onRegenerate?.call(id, s);
     }
