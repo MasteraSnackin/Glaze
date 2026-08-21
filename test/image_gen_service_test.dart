@@ -148,14 +148,19 @@ void main() {
   });
 
   group('replaceTagWithResult', () {
-    test('replaces [IMG:GEN:json] with [IMG:RESULT:path|instruction]', () {
+    test('replaces [IMG:GEN:json] with the stored <img> element', () {
       final result = ImageTagMarkup.replaceTagWithResult(
         'Hello [IMG:GEN:{"prompt":"test"}]',
         0,
         '/path/to/image.png',
       );
-      expect(result, contains('[IMG:RESULT:/path/to/image.png|'));
+      expect(
+        result,
+        'Hello <img data-iig-instruction=\'{"prompt":"test"}\' '
+            'src="/path/to/image.png">',
+      );
       expect(result, isNot(contains('[IMG:GEN')));
+      expect(result, isNot(contains('[IMG:RESULT')));
     });
 
     test('replaces HTML data-iig-instruction tag', () {
@@ -166,8 +171,9 @@ void main() {
         0,
         '/saved/img.png',
       );
-      expect(result, contains('[IMG:RESULT:/saved/img.png|'));
-      expect(result, isNot(contains('data-iig-instruction')));
+      expect(result, contains('src="/saved/img.png"'));
+      expect(result, contains(r'{"style":"manga","prompt":"test"}'));
+      expect(result, isNot(contains('[IMG:GEN')));
     });
 
     test('replaces whole HTML img tag with src IMG:GEN', () {
@@ -178,8 +184,8 @@ void main() {
         0,
         '/saved/img.png',
       );
-      expect(result, contains('[IMG:RESULT:/saved/img.png|'));
-      expect(result, isNot(contains('<img')));
+      expect(result, contains('src="/saved/img.png"'));
+      expect(result, isNot(contains('[IMG:GEN')));
       expect(result, contains('caption'));
     });
 
@@ -189,7 +195,7 @@ void main() {
         0,
         '/img1.png',
       );
-      expect(result, contains('[IMG:RESULT:/img1.png|'));
+      expect(result, contains('src="/img1.png"'));
       expect(result, contains('[IMG:GEN:{"prompt":"second"}]'));
     });
 
@@ -201,7 +207,7 @@ void main() {
 
       final result = ImageTagMarkup.replaceTagWithResult(html, 0, '/img1.png');
 
-      expect(result, contains('[IMG:RESULT:/img1.png|'));
+      expect(result, contains('src="/img1.png"'));
       expect(result, contains('caption'));
       expect(result, contains(r'{"prompt":"second"}'));
       expect(ImageTagMarkup.pendingImageGenTagCount(result), 1);
@@ -223,7 +229,7 @@ void main() {
         0,
         '/img2.png',
       );
-      expect(settled, contains('[IMG:RESULT:/img2.png|'));
+      expect(settled, contains('src="/img2.png"'));
       expect(settled, contains(r'{"prompt":"second"}'));
       expect(ImageTagMarkup.pendingImageGenTagCount(settled), 0);
     });
@@ -471,7 +477,12 @@ void main() {
         '/found.png',
       );
 
-      expect(result, contains('[IMG:RESULT:/found.png|{"prompt":"two"}]'));
+      expect(
+        result,
+        contains(
+          '<img data-iig-instruction=\'{"prompt":"two"}\' src="/found.png">',
+        ),
+      );
       expect(result, contains('[IMG:RESULT:/one.png|{"prompt":"one"}]'));
       expect(result, contains('[IMG:GEN:{"prompt":"three"}]'));
     });
@@ -599,14 +610,18 @@ void main() {
       expect(prompt, 'cinematic manga, A group enters');
     });
 
-    test('replaceTagWithResult on HTML removes entire img tag', () {
+    test('replaceTagWithResult on HTML replaces the whole img tag', () {
       const html = """<div>
   <img data-iig-instruction='{"style":"manga","prompt":"test"}' src="[IMG:GEN]">
   <i>caption</i>
 </div>""";
       final result = ImageTagMarkup.replaceTagWithResult(html, 0, '/img.png');
-      expect(result, contains('[IMG:RESULT:/img.png|'));
-      expect(result, isNot(contains('data-iig-instruction')));
+      expect(result, contains('src="/img.png"'));
+      expect(result, isNot(contains('[IMG:GEN')));
+      // The element that carried the instruction is gone, replaced whole by
+      // the one that carries the image — the surrounding card is untouched.
+      expect(result, isNot(contains('src="[IMG:GEN]"')));
+      expect(ImageTagMarkup.pendingImageGenTagCount(result), 0);
       expect(result, contains('caption'));
     });
 

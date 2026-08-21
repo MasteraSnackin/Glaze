@@ -9,6 +9,7 @@ import 'package:path/path.dart' as p;
 import '../../core/constants/image_gen_patterns.dart';
 import '../../core/models/chat_message.dart';
 import '../../core/state/db_provider.dart';
+import '../../core/utils/platform_paths.dart';
 import '../../core/utils/time_helpers.dart';
 import '../image_gen/services/image_tag_markup.dart';
 import 'services/image_gen_processor.dart';
@@ -145,22 +146,26 @@ class ImageRecoveryService {
       ImgGenPatterns.imgSrcGenRegex,
       '[IMG:ERROR:${jsonEncode({'error': 'Generation interrupted'})}]',
     );
-    result = result.replaceAllMapped(ImgGenPatterns.htmlIigTagRegex, (m) {
-      final instruction = m.group(1) ?? '';
+    // Only elements still waiting for a picture; the same element with an
+    // image in its `src` is a finished block, which an interrupted generation
+    // must never turn into an error card.
+    String interrupted(Match m) {
+      if (!ImgGenPatterns.isPendingIigElement(m.group(0)!)) return m.group(0)!;
       final errorJson = jsonEncode({
         'error': 'Generation interrupted',
-        'instruction': instruction,
+        'instruction': m.group(1) ?? '',
       });
       return '[IMG:ERROR:$errorJson]';
-    });
-    result = result.replaceAllMapped(ImgGenPatterns.htmlIigTagDoubleRegex, (m) {
-      final instruction = m.group(1) ?? '';
-      final errorJson = jsonEncode({
-        'error': 'Generation interrupted',
-        'instruction': instruction,
-      });
-      return '[IMG:ERROR:$errorJson]';
-    });
+    }
+
+    result = result.replaceAllMapped(
+      ImgGenPatterns.htmlIigTagRegex,
+      interrupted,
+    );
+    result = result.replaceAllMapped(
+      ImgGenPatterns.htmlIigTagDoubleRegex,
+      interrupted,
+    );
     result = result.replaceAllMapped(ImgGenPatterns.imgGenRegex, (m) {
       final instruction = m.group(1) ?? '';
       final errorJson = instruction.isNotEmpty
@@ -175,26 +180,20 @@ class ImageRecoveryService {
   }
 
   static String replaceFirstImgErrorOrGen(String text, String resultPath) {
+    final replacement = ImageTagMarkup.encodeResultElement(
+      ImageBlockPayload(paths: [resultPath]),
+    );
     if (ImgGenPatterns.imgErrorRegex.hasMatch(text)) {
-      return text.replaceFirst(
-        ImgGenPatterns.imgErrorRegex,
-        '[IMG:RESULT:$resultPath]',
-      );
+      return text.replaceFirst(ImgGenPatterns.imgErrorRegex, replacement);
     }
     if (ImgGenPatterns.imgGenHtmlRegex.hasMatch(text)) {
-      return text.replaceFirst(
-        ImgGenPatterns.imgGenHtmlRegex,
-        '[IMG:RESULT:$resultPath]',
-      );
+      return text.replaceFirst(ImgGenPatterns.imgGenHtmlRegex, replacement);
     }
     if (text.contains('[IMG:GEN]')) {
-      return text.replaceFirst('[IMG:GEN]', '[IMG:RESULT:$resultPath]');
+      return text.replaceFirst('[IMG:GEN]', replacement);
     }
     if (ImgGenPatterns.imgGenRegex.hasMatch(text)) {
-      return text.replaceFirst(
-        ImgGenPatterns.imgGenRegex,
-        '[IMG:RESULT:$resultPath]',
-      );
+      return text.replaceFirst(ImgGenPatterns.imgGenRegex, replacement);
     }
     return text;
   }
@@ -281,7 +280,8 @@ class ImageRecoveryService {
     final hasRetryableContent =
         ImageTagMarkup.hasImageGenTags(lastMsg.content) ||
         lastMsg.content.contains('[IMG:ERROR:') ||
-        lastMsg.content.contains('[IMG:RESULT:');
+        lastMsg.content.contains('[IMG:RESULT:') ||
+        ImageTagMarkup.scanResultElements(lastMsg.content).isNotEmpty;
     if (!hasRetryableContent) return;
 
     final resetContent = resetImgTagsToGen(lastMsg.content);
@@ -543,8 +543,15 @@ class ImageRecoveryService {
       }
     }
 
+    // Stored paths are relative to the Glaze data root while the directory
+    // listing is absolute, so both sides are compared on the resolved path —
+    // without that every file reads as unclaimed and an image already shown in
+    // the message can be attached to a second block.
+    final claimedAbsolute = claimedPaths
+        .map((path) => resolveGlazeFilePath(path) ?? path)
+        .toSet();
     final unclaimed =
-        files.where((f) => !claimedPaths.contains(f.path)).toList()..sort(
+        files.where((f) => !claimedAbsolute.contains(f.path)).toList()..sort(
           (a, b) => b.lastAccessedSync().compareTo(a.lastAccessedSync()),
         );
 
@@ -569,7 +576,8 @@ class ImageRecoveryService {
 
     if (bestMatch == null) return;
 
-    final foundPath = bestMatch.path;
+    // Stored relative to the data root, like every other image path.
+    final foundPath = relativeGlazeFilePath(bestMatch.path);
 
     final updatedContent = attach(msg.content, foundPath);
     if (updatedContent == msg.content) return;

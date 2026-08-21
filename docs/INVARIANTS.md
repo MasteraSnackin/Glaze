@@ -118,16 +118,46 @@ rather than falling back to the whole message.
 
 ### INV-IG8: A block keeps every image it generates
 
-`ImageBlockPayload` (image_tag_markup.dart) is the single codec for the tag
-payload: `[IMG:RESULT:/a.png;;*/b.png|<instruction>]` lists the images of one
-block oldest first and marks the visible one with `*`; a pending block carries
-them through a regeneration behind `@`, and an error card behind its
-`variants` string. A block with one image keeps the historical
-`path|instruction` spelling, so older messages parse unchanged. Only the
-visible image counts as context for the next generation
-(`extractImageResultPaths`), the WebView formatter parses the same format
-(`parseImageResultPayload`), and `rewriteResultPaths` resolves every variant so
-the switcher can page through them without a round trip to Dart.
+`ImageBlockPayload` (image_tag_markup.dart) is the single codec for a block's
+images: they are listed oldest first and the visible one is marked, so a
+regeneration appends rather than overwrites. A pending block carries them
+through behind `@` (`[IMG:GEN:@/a.png;;/b.png|<instruction>]`) and an error
+card behind its `variants` string. Only the visible image counts as context for
+the next generation (`extractImageResultPaths`), and `rewriteResultPaths`
+resolves every variant so the switcher can page through them without a round
+trip to Dart.
+
+### INV-IG9: An image block is stored as an `<img>` element with a relative src
+
+A finished block is written by `ImageTagMarkup.encodeResultElement()` only:
+
+```html
+<img data-iig-instruction='{"prompt":"…"}'
+     data-iig-variants='generated/a.jpg;;generated/b.jpg'
+     data-iig-index='1' src="generated/b.jpg">
+```
+
+* `src` is the visible image and is always **relative to the Glaze data root**
+  (`_saveGeneratedImage`, `findImageOnDisk`, `restoreChatWebViewLocalFilePath`
+  all store it that way, `resolveGlazeFilePath` joins it back onto the current
+  root). An absolute path stops resolving when that root moves — a new iOS
+  container UUID, a database copied between desktop build channels — and a
+  loopback `/__glaze_file__` URL, whose port only exists for one app launch,
+  breaks the picture permanently. Neither may reach storage: every text the
+  WebView hands back (`onEditSave`, `onMessageContext`, `onSelectionAction`)
+  goes through `ChatBridgeController.restoreImgResults()` first, and
+  `chatWebViewResolveLocalFileUrl` unwraps a URL that was stored by an older
+  build instead of requiring a migration.
+* the block's other images ride along in `data-iig-variants` so `src` stays one
+  plain path, readable by anything that renders HTML.
+* `[IMG:RESULT:…]` is still **read** everywhere a block is read — older
+  messages keep rendering, resetting and regenerating unchanged — but it is
+  never written any more. The same `<img data-iig-instruction…>` element with
+  no image in its `src` is a *pending* block, which is what keeps
+  `scanPendingTags()` and `scanResultElements()` from ever claiming the same
+  element (`ImgGenPatterns.isPendingIigElement`).
+* the WebView formatter parses the element with `parseImageResultElement()`,
+  the mirror of the Dart writer.
 
 ### INV-IG7: Regenerating an image never adds a message swipe
 
@@ -902,9 +932,11 @@ builder. Blocks with `dependsOnPrevious = false` (default) are launched without
 ### INV-EG7: Image-gen block results are stored via `ImageStorageService`; content holds the path token
 
 After `ImageGenService.generateImage()` succeeds, the image bytes are saved to disk
-through `ImageStorageService`. `InfoBlock.content` is set to `[IMG:RESULT:<path>]`
-(same format as inline img-gen). The WebView bridge renders this token as an `<img>`
-element inside the ext-blocks panel.
+through `ImageStorageService`. `InfoBlock.content` is set to the stored image
+block — an `<img data-iig-…>` element whose `src` is relative to the Glaze data
+root, same format as inline img-gen (INV-IG9). The WebView bridge renders it
+with the panel's own image controls inside the ext-blocks panel, and still
+reads the `[IMG:RESULT:<path>]` of blocks written before that form.
 
 ### INV-EG8: JS Runner / interactive panel code runs in a sandboxed iframe with null origin ✅ ENFORCED
 
@@ -1065,7 +1097,7 @@ Before merging any structural PR:
   - [ ] Block chain does not start on aborted or errored generation (INV-EG4)
   - [ ] Extension cancel token is separate from chat cancel token (INV-EG5)
   - [ ] `dependsOnPrevious` blocks await the preceding block; output is chained (INV-EG6)
-  - [ ] Image-gen block results stored via ImageStorageService; content = `[IMG:RESULT:<path>]` (INV-EG7)
+  - [ ] Image-gen block results stored via ImageStorageService; content = the `<img data-iig-…>` element (INV-EG7, INV-IG9)
   - [ ] JS Runner / interactive panel code runs in null-origin iframe (INV-EG8)
   - [ ] Bridge `glaze.*` calls gated by preset capabilities (INV-JS1)
   - [ ] Variable writes are atomic + JSON-validated + ≤ 64 KiB (INV-JS2)

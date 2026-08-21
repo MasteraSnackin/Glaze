@@ -4,7 +4,6 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 
-import '../../../../core/constants/image_gen_patterns.dart';
 import '../../../../core/db/repositories/info_blocks_repository.dart';
 import '../../../../core/models/character.dart';
 import '../../../../core/models/persona.dart';
@@ -202,13 +201,21 @@ class ImagePixelRenderer {
           'extblock_${DateTime.now().millisecondsSinceEpoch}.$extension';
       final filePath = p.join(dir.path, filename);
       await File(filePath).writeAsBytes(imageBytes);
+      // Stored relative to the Glaze data root, so the block keeps its picture
+      // when that root moves — same reason as _saveGeneratedImage.
+      final storedPath = p.url.join('generated', filename);
 
-      final hasResultToken = ImgGenPatterns.imgResultRegex.hasMatch(
-        sourceContent,
-      );
-      final content = hasResultToken
-          ? ImageTagMarkup.replaceExtBlockImageResult(sourceContent, filePath)
-          : ImageTagMarkup.replaceTagWithResult(sourceContent, 0, filePath);
+      // The block's first image block, whatever state it is in: a pending tag
+      // on the first run, and the finished block itself on a rerun — which is
+      // what makes the new picture land in the block that already has one
+      // instead of being dropped for want of a pending tag.
+      final content = ImageTagMarkup.scanImageBlocks(sourceContent).isEmpty
+          ? sourceContent
+          : ImageTagMarkup.replaceImageBlockWithResult(
+              sourceContent,
+              0,
+              storedPath,
+            );
       await repo.updateContent(placeholderId, content);
       await repo.updateStatus(placeholderId, BlockRunStatus.done);
 

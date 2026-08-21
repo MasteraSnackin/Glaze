@@ -298,7 +298,7 @@ for block in blocks:
 | `BlockType` | Engine | Notes |
 |---|---|---|
 | `infoblock` | `InfoBlockService` (LLM) | Result stored in `InfoBlock.content` |
-| `imageGen` | `ImageGenService` (LLM agent → image API) | `[IMG:RESULT:<path>]` token in `InfoBlock.content` |
+| `imageGen` | `ImageGenService` (LLM agent → image API) | `<img data-iig-…>` element with a data-root-relative `src` in `InfoBlock.content` (INV-IG9) |
 | `jsRunner` | `JsEngineService` (preferred) → `ChatBridgeController.runJsBlock` (fallback) | Script output becomes the block content; null origin iframe (INV-EG8) |
 | `interactive` | `PanelHostService` (LLM agent → sandboxed iframe panel) | HTML persisted to `InfoBlock.content`; panel is rendered as a live iframe island |
 

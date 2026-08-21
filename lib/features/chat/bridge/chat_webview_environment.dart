@@ -7,6 +7,7 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:path/path.dart' as p;
 
 import '../../../core/constants/build_channel.dart';
+import '../../../core/utils/image_src.dart';
 import '../../../core/utils/platform_paths.dart';
 import 'chat_webview_settings.dart';
 
@@ -106,8 +107,26 @@ NavigationActionPolicy chatWebViewNavigationPolicy(WebUri? url) {
   return NavigationActionPolicy.CANCEL;
 }
 
+/// [source] with a chat-WebView local-file URL turned back into the path it
+/// serves, spelled relative to the Glaze data root; anything else comes back
+/// unchanged.
+///
+/// The loopback port is picked per app launch, so a `/__glaze_file__` URL is
+/// only valid for the session that produced it. One must never reach storage —
+/// a message that stored one showed a broken picture from the next start
+/// onwards — so every text the page hands back is put into its stored spelling
+/// first, and an already-stored URL is unwrapped here rather than migrated.
+String restoreChatWebViewLocalFilePath(String source) {
+  final served = glazeFilePathFromLoopbackUrl(source);
+  return relativeGlazeFilePath(served ?? source);
+}
+
 String? chatWebViewResolveLocalFileUrl(String? source) {
   if (source == null || source.isEmpty) return source;
+  // A URL from an earlier session carries the file it used to serve; resolve
+  // that file for this session instead of handing the page a dead port.
+  final stored = glazeFilePathFromLoopbackUrl(source);
+  if (stored != null) return chatWebViewResolveLocalFileUrl(stored);
   if (source.startsWith('data:') ||
       source.startsWith('http://') ||
       source.startsWith('https://')) {
@@ -388,6 +407,16 @@ String? _sourceToFilePath(String source) {
     }
   }
   if (source.startsWith('/') || RegExp(r'^[a-zA-Z]:[\\/]').hasMatch(source)) {
+    return source;
+  }
+  // Image paths are stored relative to the Glaze data root
+  // (`generated/imggen_….jpg`), which is what keeps them valid after the root
+  // moves. Only the media directories are candidates; every other relative
+  // string still fails closed here, and the joined path is checked against the
+  // data root afterwards like any absolute one.
+  final segments = p.split(source.replaceAll('\\', '/'));
+  if (segments.length > 1 &&
+      _allowedGlazeMediaDirectories.contains(segments.first)) {
     return source;
   }
   return null;

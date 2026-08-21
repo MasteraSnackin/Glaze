@@ -37,6 +37,73 @@ export function parseImageResultPayload(payload) {
   return { paths, activeIndex, instruction };
 }
 
+/**
+ * Matches one `<img …data-iig-instruction…>` element, the stored form of an
+ * image block. Whether it is finished or still waiting is decided by its
+ * `src` (see `parseImageResultElement`), not by the pattern.
+ */
+const IIG_ELEMENT_REGEX = /<img\s[^>]*?data-iig-instruction\s*=\s*(?:"[^"]*"|'[^']*')[^>]*>/gi;
+
+const ATTRIBUTE_PAIR_REGEX = /([A-Za-z_:][-A-Za-z0-9_:.]*)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]*))/g;
+
+/** Attributes of one `<img …>` element, lower-cased names to raw values. */
+function imgAttributes(tag) {
+  const body = String(tag == null ? '' : tag).replace(/^<\s*[A-Za-z][-A-Za-z0-9]*/i, '');
+  // Null-prototype: an attribute called `constructor` or `toString` must not
+  // read as already present, and must not reach an inherited value.
+  const attributes = Object.create(null);
+  ATTRIBUTE_PAIR_REGEX.lastIndex = 0;
+  let match;
+  while ((match = ATTRIBUTE_PAIR_REGEX.exec(body)) !== null) {
+    const name = match[1].toLowerCase();
+    if (name in attributes) continue;
+    const value = match[2] !== undefined ? match[2]
+      : match[3] !== undefined ? match[3]
+      : match[4] !== undefined ? match[4] : '';
+    attributes[name] = value;
+  }
+  return attributes;
+}
+
+function unescapeAttribute(value) {
+  const raw = String(value == null ? '' : value);
+  if (raw.indexOf('&') === -1) return raw;
+  return raw
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&');
+}
+
+/**
+ * Reads the stored `<img data-iig-…>` form of a finished image block — the JS
+ * half of ImageTagMarkup.encodeResultElement in image_tag_markup.dart. The
+ * visible image is the element's `src`, the block's other images ride along in
+ * `data-iig-variants`. Returns null while the block is still waiting for its
+ * picture (no `src`, or the `[IMG:GEN…]` placeholder in it), which the caller
+ * reads as "not a result".
+ */
+export function parseImageResultElement(tag) {
+  const attributes = imgAttributes(tag);
+  const src = unescapeAttribute(attributes.src || '').trim();
+  if (!src || src.startsWith('[IMG:GEN')) return null;
+  const instruction = unescapeAttribute(attributes['data-iig-instruction'] || '');
+  const variants = unescapeAttribute(attributes['data-iig-variants'] || '');
+  const paths = [];
+  for (const entry of variants.split(IMG_VARIANT_SEPARATOR)) {
+    if (entry) paths.push(entry);
+  }
+  if (!paths.length) paths.push(src);
+  const declared = parseInt(attributes['data-iig-index'], 10);
+  const fallback = paths.indexOf(src);
+  let activeIndex = Number.isNaN(declared) ? fallback : declared;
+  if (!(activeIndex >= 0)) activeIndex = 0;
+  if (activeIndex > paths.length - 1) activeIndex = paths.length - 1;
+  return { paths, activeIndex, instruction };
+}
+
 export class Formatter {
   constructor() {
     this.cache = new Map();
@@ -181,7 +248,25 @@ export class Formatter {
     });
 
     // 5c. Glaze image gen tags
+    //
+    // The stored `<img data-iig-…>` element comes first: it is the form every
+    // finished block is written in, and pulling it out here (rather than
+    // letting step 6 treat it as an ordinary HTML tag) is what gives it the
+    // options button, the variant switcher and its `data-img-index`.
     const imgBlocks = [];
+    html = html.replace(IIG_ELEMENT_REGEX, (match) => {
+      const parsed = parseImageResultElement(match);
+      if (!parsed) return match;
+      const id = this._ph('IG_', imgBlocks.length, true);
+      imgBlocks.push({
+        type: 'result',
+        path: parsed.paths[parsed.activeIndex] || parsed.paths[0] || '',
+        paths: parsed.paths,
+        activeIndex: parsed.activeIndex,
+        instruction: parsed.instruction,
+      });
+      return '\n\n' + id + '\n\n';
+    });
     html = html.replace(/\[IMG:GEN(?::(.*?))?\]/g, (match, instruction) => {
       const id = this._ph('IG_', imgBlocks.length, true);
       imgBlocks.push({ type: 'gen', instruction: instruction || '' });

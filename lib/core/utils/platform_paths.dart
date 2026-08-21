@@ -64,6 +64,45 @@ String? resolveGlazeFilePath(String? path) {
   return path;
 }
 
+/// [path] spelled relative to the Glaze data root when it lives inside it.
+///
+/// The inverse of [resolveGlazeFilePath], and the spelling every image path is
+/// stored in: a relative path survives the data root moving under it — a new
+/// iOS container UUID, a database copied between the desktop build channels —
+/// where an absolute one silently stops pointing at a file. Paths outside the
+/// data root (and anything that is already relative, or a URL) come back
+/// unchanged.
+String relativeGlazeFilePath(String path) {
+  if (path.isEmpty) return path;
+  if (_urlSchemeRegex.hasMatch(path)) return path;
+  final normalized = path.replaceAll('\\', '/');
+  if (!p.isAbsolute(path)) return normalized;
+
+  final base = _cachedAppDataDir;
+  if (base != null) {
+    final relative = p.relative(path, from: base);
+    if (!p.isAbsolute(relative) && !relative.startsWith('..')) {
+      return relative.replaceAll('\\', '/');
+    }
+  }
+  // No base cached yet (very early startup), or the file belongs to another
+  // installed build channel: the data-root name still tells us where it sat,
+  // and [resolveGlazeFilePath] rebases that suffix onto the current root.
+  final match = RegExp(
+    r'/(?:Glaze|Glaze-staging|Glaze-nightly)/',
+    caseSensitive: false,
+  ).allMatches(normalized).lastOrNull;
+  if (match != null) {
+    final suffix = normalized.substring(match.end);
+    if (suffix.isNotEmpty) return suffix;
+  }
+  return path;
+}
+
+/// A URL scheme, which a stored image path can also be (`data:`, `https:`).
+/// Two characters minimum, so a Windows drive letter is not read as one.
+final RegExp _urlSchemeRegex = RegExp(r'^[a-zA-Z][a-zA-Z0-9+.-]+:');
+
 /// Returns the on-disk path to the 512px thumbnail JPG for a stored avatar
 /// path when that thumbnail exists, otherwise the resolved full-resolution
 /// avatar path (or `null` when there is no avatar).

@@ -10,6 +10,7 @@ import { TrackpadScroll } from './trackpad_scroll.js';
 import { InteractionDispatch } from './interaction_dispatch.js';
 import { PanelHost } from './panel_host.js';
 import { sanitizeExtBlockHtml } from './html_sanitizer.js';
+import { parseImageResultElement } from '../formatter/formatter.js';
 import { ICON } from '../renderer/icon_library.js';
 
 export class Bridge {
@@ -1694,6 +1695,26 @@ export class Bridge {
     return `<span class="ext-block-image-wrapper img-result-wrapper"><img src="${src}" class="ext-block-image" loading="eager" decoding="sync" data-action="image-click" data-src="${src}"><button class="img-download-btn" data-action="img-download" data-src="${src}" title="Save image">⤓</button></span>`;
   }
 
+  /**
+   * Rewrites the stored `<img data-iig-…>` form of a finished image block into
+   * the `[IMG:RESULT:…]` token this panel already renders — with the download
+   * button and the viewer action the bare element would not carry. Purely a
+   * render-time normalization; the block's stored content is untouched.
+   */
+  _extBlockLegacyImageTokens(content) {
+    const text = String(content == null ? '' : content);
+    if (text.indexOf('data-iig-instruction') === -1) return text;
+    return text.replace(
+      /<img\s[^>]*?data-iig-instruction\s*=\s*(?:"[^"]*"|'[^']*')[^>]*>/gi,
+      (tag) => {
+        const parsed = parseImageResultElement(tag);
+        if (!parsed) return tag;
+        const src = parsed.paths[parsed.activeIndex] || parsed.paths[0] || '';
+        return src ? `[IMG:RESULT:${src}]` : tag;
+      },
+    );
+  }
+
   _fillExtBlockBody(body, block) {
     const hasContent = block.content && block.content.trim().length > 0;
     if (!hasContent && block.status !== 'pending') {
@@ -1705,12 +1726,13 @@ export class Bridge {
     }
     if (!hasContent) return;
 
+    const content = this._extBlockLegacyImageTokens(block.content);
     const imgResultRegex = /\[IMG:RESULT:([^\]]+)\]/;
-    const hasImgResult = imgResultRegex.test(block.content);
-    const hasHtmlMarkup = /<[a-z][\s\S]*>/i.test(block.content);
+    const hasImgResult = imgResultRegex.test(content);
+    const hasHtmlMarkup = /<[a-z][\s\S]*>/i.test(content);
 
     if (hasImgResult && hasHtmlMarkup) {
-      let html = block.content.replace(
+      let html = content.replace(
         /\[IMG:RESULT:([^\]]+)\]/g,
         (match, payload) => this._renderExtBlockImageHtml(payload),
       );
@@ -1719,14 +1741,14 @@ export class Bridge {
       htmlEl.innerHTML = sanitizeExtBlockHtml(html);
       body.appendChild(htmlEl);
     } else if (hasImgResult) {
-      const imgMatch = block.content.match(imgResultRegex);
+      const imgMatch = content.match(imgResultRegex);
       const wrapper = document.createElement('span');
       wrapper.innerHTML = sanitizeExtBlockHtml(this._renderExtBlockImageHtml(imgMatch[1]));
       body.appendChild(wrapper.firstElementChild);
     } else {
       const html = document.createElement('div');
       html.className = 'ext-block-content';
-      html.innerHTML = sanitizeExtBlockHtml(block.content);
+      html.innerHTML = sanitizeExtBlockHtml(content);
       body.appendChild(html);
     }
   }

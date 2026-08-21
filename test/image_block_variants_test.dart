@@ -59,7 +59,12 @@ void main() {
     test('a finished image is appended and put on screen', () {
       const text = 'x [IMG:GEN:@/a.png|{"prompt":"cat"}] y';
       final out = ImageTagMarkup.replaceTagWithResult(text, 0, '/b.png');
-      expect(out, 'x [IMG:RESULT:/a.png;;*/b.png|{"prompt":"cat"}] y');
+      expect(
+        out,
+        'x <img data-iig-instruction=\'{"prompt":"cat"}\' '
+            "data-iig-variants='/a.png;;/b.png' data-iig-index='1' "
+            'src="/b.png"> y',
+      );
 
       final block = ImageTagMarkup.scanImageBlocks(out).single;
       expect(block.paths, ['/a.png', '/b.png']);
@@ -75,7 +80,9 @@ void main() {
       final finished = ImageTagMarkup.replaceTagWithResult(pending, 0, '/c.png');
       expect(
         finished,
-        '[IMG:RESULT:/a.png;;/b.png;;*/c.png|{"prompt":"cat"}]',
+        '<img data-iig-instruction=\'{"prompt":"cat"}\' '
+            "data-iig-variants='/a.png;;/b.png;;/c.png' data-iig-index='2' "
+            'src="/c.png">',
       );
     });
 
@@ -107,7 +114,12 @@ void main() {
 
     test('puts another image of the block on screen', () {
       final out = ImageTagMarkup.setImageBlockVariant(text, 0, 2);
-      expect(out, 'a [IMG:RESULT:/a.png;;/b.png;;*/c.png|{"prompt":"cat"}] b');
+      expect(
+        out,
+        'a <img data-iig-instruction=\'{"prompt":"cat"}\' '
+            "data-iig-variants='/a.png;;/b.png;;/c.png' data-iig-index='2' "
+            'src="/c.png"> b',
+      );
       expect(ImageTagMarkup.scanImageBlocks(out).single.imagePath, '/c.png');
     });
 
