@@ -1608,6 +1608,15 @@ class _ChatBodyState extends ConsumerState<_ChatBody>
                                 .cancelImageGeneration();
                           },
                           onImgDownload: _downloadImage,
+                          onImgVariant: (messageId, blockIndex, variantIndex) {
+                            ref
+                                .read(chatProvider(widget.charId).notifier)
+                                .selectImageVariant(
+                                  messageId,
+                                  blockIndex,
+                                  variantIndex,
+                                );
+                          },
                           onImgOptions: _showImageOptionsSheet,
                         ),
                         scrollActions: ScrollCallbacks(

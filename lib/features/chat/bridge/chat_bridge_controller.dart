@@ -11,6 +11,7 @@ import '../../../core/models/chat_message.dart';
 import '../../../core/models/persona.dart';
 import '../../../core/models/preset.dart';
 import '../../extensions/services/js_bridge_service.dart';
+import '../../image_gen/services/image_tag_markup.dart';
 import 'chat_webview_environment.dart';
 import 'chat_message_mapper.dart';
 import 'bridge_handlers.dart';
@@ -185,15 +186,7 @@ class ChatBridgeController {
   // private state of the host.
 
   Future<String> resolveImgResults(String text) async {
-    return text.replaceAllMapped(
-      RegExp(r'\[IMG:RESULT:([^\]|]+)(\|[^\]]*)?\]'),
-      (match) {
-        final path = match.group(1) ?? '';
-        final suffix = match.group(2) ?? '';
-        final resolved = resolveLocalFileUrl(path);
-        return resolved == null ? '' : '[IMG:RESULT:$resolved$suffix]';
-      },
-    );
+    return ImageTagMarkup.rewriteResultPaths(text, resolveLocalFileUrl);
   }
 
   String? resolveLocalFileUrl(String? source) {
@@ -306,6 +299,8 @@ class ChatBridgeController {
     int? blockIndex,
   )?
   onImgOptions;
+  void Function(String messageId, int blockIndex, int variantIndex)?
+  onImgVariant;
   void Function()? onImgCancel;
   void Function()? onStop;
   void Function(String messageId)? onExtBlocksRunAll;
@@ -474,6 +469,14 @@ class ChatBridgeController {
             data['messageId'] as String? ?? '',
             _blockIndex(data['imgIndex']),
           );
+        case 'onImgVariant':
+          final messageId = data['messageId'] as String? ?? '';
+          final blockIndex = _blockIndex(data['imgIndex']);
+          final variantIndex = _blockIndex(data['variantIndex']);
+          if (messageId.isEmpty || blockIndex == null || variantIndex == null) {
+            return;
+          }
+          onImgVariant?.call(messageId, blockIndex, variantIndex);
         case 'onPanelEvent':
           final panelId = data['panelId'] as String? ?? '';
           final event = data['event'] as String? ?? 'action';

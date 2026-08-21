@@ -200,6 +200,7 @@ class _ChatWebViewSurfaceState extends ConsumerState<ChatWebViewSurface> {
     bridge.onImgFind = callbacks.onImgFind;
     bridge.onImgRegen = callbacks.onImgRegen;
     bridge.onImgOptions = callbacks.onImgOptions;
+    bridge.onImgVariant = callbacks.onImgVariant;
     bridge.onImgCancel = callbacks.onImgCancel;
     bridge.onStop = callbacks.onStop;
     bridge.onLinkClick = callbacks.onLinkClick;

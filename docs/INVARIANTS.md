@@ -116,6 +116,28 @@ regenerates the tapped image only and leaves the other images of the message
 untouched. A missing index (markdown images) disables the generation actions
 rather than falling back to the whole message.
 
+### INV-IG8: A block keeps every image it generates
+
+`ImageBlockPayload` (image_tag_markup.dart) is the single codec for the tag
+payload: `[IMG:RESULT:/a.png;;*/b.png|<instruction>]` lists the images of one
+block oldest first and marks the visible one with `*`; a pending block carries
+them through a regeneration behind `@`, and an error card behind its
+`variants` string. A block with one image keeps the historical
+`path|instruction` spelling, so older messages parse unchanged. Only the
+visible image counts as context for the next generation
+(`extractImageResultPaths`), the WebView formatter parses the same format
+(`parseImageResultPayload`), and `rewriteResultPaths` resolves every variant so
+the switcher can page through them without a round trip to Dart.
+
+### INV-IG7: Regenerating an image never adds a message swipe
+
+`ImageRecoveryService` resets the retried blocks through
+`ImageGenProcessor.resetImageContentInPlace()`, which rewrites the swipe the
+user is looking at (content, `swipes[swipeId]`, its agent swipe and metadata)
+and clears the error flag left by the failed block. Rerolling a picture must
+not grow the reply's swipe count or duplicate the text around the image — only
+a text generation creates swipes.
+
 ---
 
 ## 3. Summary Generation Invariants

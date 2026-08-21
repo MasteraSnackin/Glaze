@@ -3,6 +3,39 @@ import { renderStyledSegment } from './text_format.js';
 
 // Vertical 3-dot "options" icon (ported from Glaze useMessageImageGen.js).
 const OPTIONS_SVG = '<svg viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>';
+const VARIANT_PREV_SVG = '<svg viewBox="0 0 24 24"><path d="M15.4 7.4 14 6l-6 6 6 6 1.4-1.4-4.6-4.6z"/></svg>';
+const VARIANT_NEXT_SVG = '<svg viewBox="0 0 24 24"><path d="M8.6 7.4 10 6l6 6-6 6-1.4-1.4 4.6-4.6z"/></svg>';
+
+/** Separator between the images one block carries, mirroring the Dart codec. */
+const IMG_VARIANT_SEPARATOR = ';;';
+
+/** Marks the image on screen inside a multi-image payload. */
+const IMG_VARIANT_ACTIVE_MARKER = '*';
+
+/**
+ * Splits an `[IMG:RESULT:…]` payload into its images, the one on screen and
+ * the instruction — the JS half of ImageBlockPayload in image_tag_markup.dart.
+ * A single-image block keeps the historical `path|instruction` spelling, so
+ * messages written before block variants existed parse unchanged.
+ */
+export function parseImageResultPayload(payload) {
+  const raw = String(payload == null ? '' : payload);
+  const pipeIdx = raw.indexOf('|');
+  const head = pipeIdx === -1 ? raw : raw.substring(0, pipeIdx);
+  const instruction = pipeIdx === -1 ? '' : raw.substring(pipeIdx + 1);
+  const paths = [];
+  let activeIndex = 0;
+  for (const entry of head.split(IMG_VARIANT_SEPARATOR)) {
+    if (!entry) continue;
+    if (entry.startsWith(IMG_VARIANT_ACTIVE_MARKER)) {
+      activeIndex = paths.length;
+      paths.push(entry.substring(IMG_VARIANT_ACTIVE_MARKER.length));
+    } else {
+      paths.push(entry);
+    }
+  }
+  return { paths, activeIndex, instruction };
+}
 
 export class Formatter {
   constructor() {
@@ -156,10 +189,14 @@ export class Formatter {
     });
     html = html.replace(/\[IMG:RESULT:(.*?)\]/g, (match, payload) => {
       const id = this._ph('IG_', imgBlocks.length, true);
-      const pipeIdx = payload.indexOf('|');
-      const path = pipeIdx !== -1 ? payload.substring(0, pipeIdx) : payload;
-      const instruction = pipeIdx !== -1 ? payload.substring(pipeIdx + 1) : '';
-      imgBlocks.push({ type: 'result', path, instruction });
+      const parsed = parseImageResultPayload(payload);
+      imgBlocks.push({
+        type: 'result',
+        path: parsed.paths[parsed.activeIndex] || parsed.paths[0] || '',
+        paths: parsed.paths,
+        activeIndex: parsed.activeIndex,
+        instruction: parsed.instruction,
+      });
       return '\n\n' + id + '\n\n';
     });
     html = html.replace(/\[IMG:ERROR:(.*?)\]/g, (match, data) => {
@@ -409,7 +446,26 @@ export class Formatter {
       if (block.type === 'result') {
         const src = this._imageSrc(block.path);
         const encInstr = encodeURIComponent(block.instruction || '');
-        return `<span class="imggen-result-wrapper"><img src="${src}" class="imggen-result" loading="lazy" data-action="image-click" data-src="${src}"><button class="imggen-options-btn" type="button" data-action="img-options" data-src="${src}" data-instruction="${encInstr}" data-img-index="${at}" title="Options">${OPTIONS_SVG}</button></span>`;
+        const variants = (block.paths || []).map((p) => this._imageSrc(p));
+        const activeIndex = variants.length > 1 ? (block.activeIndex || 0) : 0;
+        // The switcher only exists once the block holds a second image, so a
+        // single-image block renders exactly as it always did.
+        const switcher = variants.length > 1
+          ? `<span class="imggen-variants"><button class="imggen-variant-btn" type="button" data-action="img-variant-prev" data-img-index="${at}" title="Previous image">${VARIANT_PREV_SVG}</button><span class="imggen-variant-count">${activeIndex + 1}/${variants.length}</span><button class="imggen-variant-btn" type="button" data-action="img-variant-next" data-img-index="${at}" title="Next image">${VARIANT_NEXT_SVG}</button></span>`
+          : '';
+        // The whole list rides along on the wrapper so paging through the
+        // block swaps the picture in place, with no round trip to Flutter.
+        const variantAttrs = variants.length > 1
+          ? ` data-variants="${this._escapeHtml(variants.join(IMG_VARIANT_SEPARATOR))}" data-variant-index="${activeIndex}"`
+          : '';
+        // loading="eager" (not "lazy"): a just-generated image lands at the
+        // bottom edge of the WebView, where Android/iOS keep resizing the
+        // viewport around the input bar. A lazy image there can be evaluated
+        // while the row is still off-screen and never come back for it, and
+        // the picture the user just waited for shows as a broken tag. These
+        // are local files, so eager loading costs nothing — same reasoning as
+        // _renderExtBlockImageHtml in the bridge controller.
+        return `<span class="imggen-result-wrapper"${variantAttrs}><img src="${src}" class="imggen-result" loading="eager" decoding="async" data-action="image-click" data-src="${src}"><button class="imggen-options-btn" type="button" data-action="img-options" data-src="${src}" data-instruction="${encInstr}" data-img-index="${at}" title="Options">${OPTIONS_SVG}</button>${switcher}</span>`;
       }
       if (block.type === 'gen') {
         const start = Date.now();

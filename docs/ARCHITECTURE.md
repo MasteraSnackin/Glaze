@@ -1153,7 +1153,7 @@ feature-local adapters to `SyncService`.
 - `image_prompt_builder.dart` — `[STYLE: …]` block, reference descriptions, reference instruction
 - `reference_matcher.dart` — alias / word-boundary matching of the reference library against a prompt
 - `image_reference_collector.dart` — avatars + matched references + context images, clipped per model
-- `image_tag_markup.dart` — pure `[IMG:GEN]`/`[IMG:RESULT]`/`[IMG:ERROR]` tag text transforms (extracted from ImageGenService)
+- `image_tag_markup.dart` — pure `[IMG:GEN]`/`[IMG:RESULT]`/`[IMG:ERROR]` tag text transforms (extracted from ImageGenService), including `ImageBlockPayload`: the images one block carries, which of them is visible, and the instruction that produced them (INV-IG8)
 - `image_gen_provider.dart` — manages settings + generation state
 - `image_gen_models.dart` — Freezed data models for image generation
 - `image_gen_constants.dart` — per-provider model / ratio / resolution tables (re-exported by the models file)
@@ -1165,6 +1165,16 @@ feature-local adapters to `SyncService`.
   `gemini_image_provider.dart`, `naistera_image_provider.dart`, `openrouter_image_provider.dart`,
   `a1111_image_provider.dart`
 - UI: `widgets/image_gen_sheet.dart`, `widgets/image_content_renderer.dart`
+
+### Image variants
+
+Regenerating a picture appends to its block instead of replacing it: the block
+keeps every image it has produced and the message shows one of them. The chat
+formatter renders a small translucent `‹ n/N ›` switcher on the picture once a
+block holds a second image; paging swaps the `<img>` in the page (every variant
+is resolved to a servable URL up front) and reports the choice back through
+`onImgVariant`, which rewrites the active swipe in place — no message swipe is
+created for it (INV-IG7, INV-IG8).
 
 ### Reference handling
 
