@@ -409,7 +409,14 @@ export class Formatter {
       if (block.type === 'result') {
         const src = this._imageSrc(block.path);
         const encInstr = encodeURIComponent(block.instruction || '');
-        return `<span class="imggen-result-wrapper"><img src="${src}" class="imggen-result" loading="lazy" data-action="image-click" data-src="${src}"><button class="imggen-options-btn" type="button" data-action="img-options" data-src="${src}" data-instruction="${encInstr}" data-img-index="${at}" title="Options">${OPTIONS_SVG}</button></span>`;
+        // loading="eager" (not "lazy"): a just-generated image lands at the
+        // bottom edge of the WebView, where Android/iOS keep resizing the
+        // viewport around the input bar. A lazy image there can be evaluated
+        // while the row is still off-screen and never come back for it, and
+        // the picture the user just waited for shows as a broken tag. These
+        // are local files, so eager loading costs nothing — same reasoning as
+        // _renderExtBlockImageHtml in the bridge controller.
+        return `<span class="imggen-result-wrapper"><img src="${src}" class="imggen-result" loading="eager" decoding="async" data-action="image-click" data-src="${src}"><button class="imggen-options-btn" type="button" data-action="img-options" data-src="${src}" data-instruction="${encInstr}" data-img-index="${at}" title="Options">${OPTIONS_SVG}</button></span>`;
       }
       if (block.type === 'gen') {
         const start = Date.now();

@@ -177,5 +177,19 @@ void main() {
       expect(source, contains("request.method != 'HEAD'"));
       expect(source, contains("HttpHeaders.allowHeader, 'GET, HEAD'"));
     });
+
+    test('every server dispatches its requests concurrently and guarded', () {
+      // Awaiting a handler inside the accept loop served the page one file at
+      // a time, and a failure after the headers were sent used to escape the
+      // loop and kill the server for the rest of the session.
+      expect(
+        RegExp(
+          r'await for \(final request in server\) \{\s*'
+          r'unawaited\(_handleServerRequest\(',
+        ).allMatches(source).length,
+        3,
+      );
+      expect(source, contains('Future<void> _handleServerRequest('));
+    });
   });
 }

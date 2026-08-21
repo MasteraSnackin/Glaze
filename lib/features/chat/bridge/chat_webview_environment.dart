@@ -232,50 +232,80 @@ Future<void> _startChatWebViewBundleServer() async {
 
 Future<void> _serveChatWebViewBundleAssets(HttpServer server) async {
   await for (final request in server) {
-    try {
-      final path = _safeAssetPath(request.uri.path);
-      if (path == null) {
-        request.response.statusCode = HttpStatus.forbidden;
-        await request.response.close();
-        continue;
-      }
-
-      // Asset keys always use forward slashes regardless of platform.
-      final assetKey =
-          'assets/chat_webview/${path.replaceAll(Platform.pathSeparator, '/')}';
-      ByteData data;
-      try {
-        data = await rootBundle.load(assetKey);
-      } catch (_) {
-        request.response.statusCode = HttpStatus.notFound;
-        await request.response.close();
-        continue;
-      }
-
-      request.response.headers.contentType = _contentTypeFor(path);
-      request.response.add(
-        data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
-      );
-      await request.response.close();
-    } catch (_) {
-      request.response.statusCode = HttpStatus.internalServerError;
-      await request.response.close();
-    }
+    unawaited(_handleServerRequest(request, _serveBundleAsset));
   }
+}
+
+Future<void> _serveBundleAsset(HttpRequest request) async {
+  final path = _safeAssetPath(request.uri.path);
+  if (path == null) {
+    request.response.statusCode = HttpStatus.forbidden;
+    await request.response.close();
+    return;
+  }
+
+  // Asset keys always use forward slashes regardless of platform.
+  final assetKey =
+      'assets/chat_webview/${path.replaceAll(Platform.pathSeparator, '/')}';
+  ByteData data;
+  try {
+    data = await rootBundle.load(assetKey);
+  } catch (_) {
+    request.response.statusCode = HttpStatus.notFound;
+    await request.response.close();
+    return;
+  }
+
+  request.response.headers.contentType = _contentTypeFor(path);
+  request.response.add(
+    data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes),
+  );
+  await request.response.close();
 }
 
 Future<void> _serveChatWebViewLocalFiles(HttpServer server) async {
   await for (final request in server) {
+    unawaited(_handleServerRequest(request, _serveLocalFile));
+  }
+}
+
+Future<void> _serveLocalFile(HttpRequest request) async {
+  if (request.uri.path != '/__glaze_file__') {
+    request.response.statusCode = HttpStatus.notFound;
+    await request.response.close();
+    return;
+  }
+  await _serveGlazeDataFile(request);
+}
+
+/// Runs one request handler in isolation.
+///
+/// Two reasons this is not inlined in the `await for` loops. Awaiting the
+/// handler there served the page one file at a time, so a single slow or
+/// half-abandoned response (the chat re-renders a message body while its image
+/// is still downloading) held back every other avatar and generated image
+/// behind it — long enough for a freshly generated image to render as a broken
+/// tag. And a failure raised after the headers were already on the wire made
+/// the recovery path throw again, which escaped the loop and tore the whole
+/// server down, so every later request failed too. Handlers now run
+/// concurrently, and a late failure is answered as far as the response still
+/// allows and then dropped.
+Future<void> _handleServerRequest(
+  HttpRequest request,
+  Future<void> Function(HttpRequest request) handler,
+) async {
+  try {
+    await handler(request);
+  } catch (_) {
     try {
-      if (request.uri.path != '/__glaze_file__') {
-        request.response.statusCode = HttpStatus.notFound;
-        await request.response.close();
-        continue;
-      }
-      await _serveGlazeDataFile(request);
-    } catch (_) {
       request.response.statusCode = HttpStatus.internalServerError;
+    } catch (_) {
+      // Headers already sent — the status can no longer be changed.
+    }
+    try {
       await request.response.close();
+    } catch (_) {
+      // Connection already gone.
     }
   }
 }
@@ -296,29 +326,28 @@ Directory _chatWebViewAssetDirectory() {
 
 Future<void> _serveChatWebViewAssets(HttpServer server, Directory root) async {
   await for (final request in server) {
-    try {
-      final path = _safeAssetPath(request.uri.path);
-      if (path == null) {
-        request.response.statusCode = HttpStatus.forbidden;
-        await request.response.close();
-        continue;
-      }
-
-      final file = File('${root.path}${Platform.pathSeparator}$path');
-      if (!file.existsSync()) {
-        request.response.statusCode = HttpStatus.notFound;
-        await request.response.close();
-        continue;
-      }
-
-      request.response.headers.contentType = _contentTypeFor(path);
-      await request.response.addStream(file.openRead());
-      await request.response.close();
-    } catch (_) {
-      request.response.statusCode = HttpStatus.internalServerError;
-      await request.response.close();
-    }
+    unawaited(_handleServerRequest(request, (r) => _serveAssetFile(r, root)));
   }
+}
+
+Future<void> _serveAssetFile(HttpRequest request, Directory root) async {
+  final path = _safeAssetPath(request.uri.path);
+  if (path == null) {
+    request.response.statusCode = HttpStatus.forbidden;
+    await request.response.close();
+    return;
+  }
+
+  final file = File('${root.path}${Platform.pathSeparator}$path');
+  if (!file.existsSync()) {
+    request.response.statusCode = HttpStatus.notFound;
+    await request.response.close();
+    return;
+  }
+
+  request.response.headers.contentType = _contentTypeFor(path);
+  await request.response.addStream(file.openRead());
+  await request.response.close();
 }
 
 Future<void> _serveGlazeDataFile(HttpRequest request) async {

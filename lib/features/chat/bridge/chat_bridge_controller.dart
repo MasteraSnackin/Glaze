@@ -11,6 +11,7 @@ import '../../../core/models/chat_message.dart';
 import '../../../core/models/persona.dart';
 import '../../../core/models/preset.dart';
 import '../../extensions/services/js_bridge_service.dart';
+import '../../image_gen/services/image_tag_markup.dart';
 import 'chat_webview_environment.dart';
 import 'chat_message_mapper.dart';
 import 'bridge_handlers.dart';
@@ -185,15 +186,7 @@ class ChatBridgeController {
   // private state of the host.
 
   Future<String> resolveImgResults(String text) async {
-    return text.replaceAllMapped(
-      RegExp(r'\[IMG:RESULT:([^\]|]+)(\|[^\]]*)?\]'),
-      (match) {
-        final path = match.group(1) ?? '';
-        final suffix = match.group(2) ?? '';
-        final resolved = resolveLocalFileUrl(path);
-        return resolved == null ? '' : '[IMG:RESULT:$resolved$suffix]';
-      },
-    );
+    return ImageTagMarkup.rewriteResultPaths(text, resolveLocalFileUrl);
   }
 
   String? resolveLocalFileUrl(String? source) {

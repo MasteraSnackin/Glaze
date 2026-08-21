@@ -279,6 +279,30 @@ class ImageTagMarkup {
         .toList();
   }
 
+  /// Rewrites the file path inside every `[IMG:RESULT:…]` tag with [resolve],
+  /// dropping the whole tag when it returns null.
+  ///
+  /// The payload is split exactly like the WebView formatter does — the tag
+  /// ends at the first `]`, the path ends at the first `|` — so an instruction
+  /// JSON carrying a `]` cannot leave the two sides disagreeing about which
+  /// substring is the path. A stricter pattern skipped such a tag, and the raw
+  /// filesystem path then reached the page as `file://…`, which the chat
+  /// WebView (an https / loopback origin) cannot load at all: the message
+  /// rendered a broken image.
+  static String rewriteResultPaths(
+    String text,
+    String? Function(String path) resolve,
+  ) {
+    return text.replaceAllMapped(ImgGenPatterns.imgResultRegex, (match) {
+      final payload = match.group(1) ?? '';
+      final pipeIdx = payload.indexOf('|');
+      final path = pipeIdx == -1 ? payload : payload.substring(0, pipeIdx);
+      final suffix = pipeIdx == -1 ? '' : payload.substring(pipeIdx);
+      final resolved = resolve(path);
+      return resolved == null ? '' : '[IMG:RESULT:$resolved$suffix]';
+    });
+  }
+
   /// Strips optional `|instructionJson` suffix from [IMG:RESULT:…] payloads.
   static String normalizeImageResultPayload(String payload) {
     final pipeIdx = payload.indexOf('|');

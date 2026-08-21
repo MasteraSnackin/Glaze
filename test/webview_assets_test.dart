@@ -603,6 +603,30 @@ void main() {
   });
 
   // ─── markdown image options button ────────────────────────────────────────
+  group('generated image (formatter/formatter.js, renderer/markdown.js)', () {
+    test('the result image loads eagerly', () {
+      // A lazy image at the bottom edge of the WebView can be evaluated while
+      // the row is still off-screen and never fetched, leaving the picture the
+      // user waited for as a broken tag.
+      final imgIdx = formatterFormatterJs.indexOf('class="imggen-result"');
+      expect(imgIdx, isNot(-1));
+      final chunk = formatterFormatterJs.substring(
+        formatterFormatterJs.lastIndexOf('<img', imgIdx),
+        formatterFormatterJs.indexOf('>', imgIdx),
+      );
+      expect(chunk, contains('loading="eager"'));
+      expect(chunk, isNot(contains('loading="lazy"')));
+    });
+
+    test('a failed generated image re-requests itself', () {
+      expect(rendererJs, contains('export function retryFailedLocalImages('));
+      expect(rendererJs, contains('retryFailedLocalImages(root)'));
+      expect(rendererJs, contains("querySelectorAll('img.imggen-result')"));
+      // A fresh query string keeps a cached failure from being replayed.
+      expect(rendererJs, contains('__glaze_retry='));
+    });
+  });
+
   group('markdown image card (formatter/formatter.js)', () {
     test('the card is stashed whole, not emitted as raw HTML mid-pipeline', () {
       // Raw HTML emitted before the tag extraction gets torn apart: <img>,
