@@ -12,7 +12,9 @@ import '../../settings/app_settings_provider.dart';
 import '../catalog_models.dart';
 import '../catalog_provider.dart';
 import '../services/chub_provider.dart';
-import '../services/datacat_provider.dart';
+// `ExtractionResult` here is DataCat's own; the one this file uses is
+// JanitorExtractor's, so the DataCat name is hidden to keep it unambiguous.
+import '../services/datacat_provider.dart' hide ExtractionResult;
 import '../services/janitor_extractor.dart';
 import '../services/janitor_provider.dart';
 import '../services/janitor_public_lorebook.dart';

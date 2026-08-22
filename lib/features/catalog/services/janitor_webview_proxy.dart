@@ -669,7 +669,7 @@ class JanitorWebViewProxy {
         method: 'POST',
         body: jsonEncode({
           'character_id': characterId,
-          if (personaId != null) 'persona_id': personaId,
+          'persona_id': ?personaId,
         }),
       );
       final chatJson = jsonDecode(chatBody);
@@ -837,7 +837,7 @@ class JanitorWebViewProxy {
               ? parsed['personas'] as List
               : (parsed is Map && parsed['data'] is List)
                   ? parsed['data'] as List
-                  : const [];
+                  : const <dynamic>[];
       for (final p in list) {
         if (p is Map && p['name'] == _userMacroName && p['id'] != null) {
           _log('reusing {{user}} persona ${p['id']}');
