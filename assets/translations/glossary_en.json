@@ -411,6 +411,36 @@
             ]
         },
         {
+            "id": "extraction",
+            "label": "Import & Extraction",
+            "terms": [
+                {
+                    "id": "janitor-extraction",
+                    "name": "JanitorAI Extraction",
+                    "alt": "Hidden card, Capture",
+                    "desc": "Janitor AI sits behind Cloudflare and never hands out a closed character card through its public API. Glaze works around this the way a browser would: it drives a hidden WebView carrying your signed-in Janitor.AI session, so every request passes Cloudflare exactly as it would in a real tab.\n\nTo recover a card, Glaze creates a throwaway proxy preset, opens a fresh chat with the character, sends a message and intercepts the generateAlpha response — the assembled prompt, which contains the character card wrapped in tags. The chat, the persona and the preset are removed again afterwards, and the account's generation settings are restored.\n\nIt needs the “Extract lorebooks and characters locally using Janitor.AI account” option in Settings and a signed-in account. A character whose creator forbade proxies can never be captured: Janitor AI refuses to assemble its prompt at all, and only the public part of such a card can be imported. The same capture is what recovers closed lorebooks — see [[janitor-closed-lorebook]]."
+                },
+                {
+                    "id": "janitor-closed-lorebook",
+                    "name": "Closed Lorebook Extraction",
+                    "alt": "Private lorebook, Hidden lorebook",
+                    "desc": "Closed lorebooks are processed on the Janitor AI server, so pulling them out in their original form is impossible. As a workaround Glaze sends the character card, the catalog description and whatever else you picked into the chat. That text reaches the Janitor AI server, where it triggers lorebook entries; the server injects those entries into the prompt, Glaze intercepts the generateAlpha response and isolates the entries, discarding everything else.\n\nAfter that you can do two things:\n•  download the extracted content as a plain .txt file (no keys or rules);\n•  send the entries to your active model — together with the card and the description as context — and have it build a proper [[lorebook]] for you.\n\nIf the character uses a generic lorebook (a universe lorebook, a sex-positions lorebook…), this method may not trigger every entry automatically. The only way to pull those is to type the keys yourself during entry collection; that same text is then also passed to the model during the build for extra context.\n\nSeveral closed lorebooks are merged into a single one — the capture assembles the whole prompt at once, so their entries arrive mixed together with no way to tell which book each came from. See [[janitor-extract-context]] and [[lorebook-key-context]]."
+                },
+                {
+                    "id": "janitor-extract-context",
+                    "name": "Extraction Context",
+                    "alt": "Trigger context",
+                    "desc": "What Glaze stuffs into the message it sends into the Janitor AI chat to make the closed lorebook fire. Everything you select is concatenated into one latest user turn, so every keyword stays inside Janitor's scan depth. More text means more entries triggered — and a larger prompt.\n\nThe character card is the strongest trigger: it names the people, places and items the entries are keyed on. The catalog description and the scenario add public context, the first message(s) add the opening scene, and lorebook descriptions add the book's own summary. Custom text is where you type keys the character never says on its own — the only way to reach entries of a generic or universe lorebook. Tap a source to see the exact text it sends and its token count.\n\nThis is a different choice from [[lorebook-key-context]], which is about what the model reads afterwards. See [[janitor-closed-lorebook]]."
+                },
+                {
+                    "id": "lorebook-key-context",
+                    "name": "Context for Key Inference",
+                    "alt": "Build context",
+                    "desc": "Extraction returns the lorebook's text, not its trigger keys — those stay on the Janitor AI server and are never sent. The build model has to infer them, and this is the context it gets to do it with: the character card, the catalog description, the scenario, the first message(s), the descriptions of the attached lorebooks and any notes of your own.\n\nIt is only read, never written back: nothing selected here becomes an entry. It only shapes the [[lorebook-keys]] the model assigns to the entries that were recovered, so sources naming the same people and places as the entries give noticeably better keys. The selection you made for [[janitor-extract-context]] is carried over here after the extraction, and you can change it before building."
+                }
+            ]
+        },
+        {
             "id": "interface",
             "label": "Interface",
             "terms": [

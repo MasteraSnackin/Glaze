@@ -12,14 +12,37 @@ import '../../../core/services/file_export_service.dart';
 import '../../../core/state/lorebook_provider.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_bottom_sheet.dart';
+import '../../../shared/widgets/glaze_error_block.dart';
+import '../../../shared/widgets/menu_group.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
 import '../../../shared/widgets/glaze_toast.dart';
+import '../../../shared/widgets/sheet_view.dart';
+import '../../glossary/glossary_sheet.dart';
 import '../../settings/app_settings_provider.dart';
 import '../janitor_account_provider.dart';
 import '../services/janitor_extractor.dart';
 import '../services/janitor_lorebook_rebuilder.dart';
+import '../services/janitor_provider.dart';
 import '../services/janitor_public_lorebook.dart';
+import '../services/janitor_separate.dart';
+import '../services/janitor_webview_proxy.dart';
+import 'janitor_build_widgets.dart';
 import 'janitor_lorebooks_tab.dart';
+
+/// Glossary term the sheet's header help button opens.
+const String _kHelpTermExtraction = 'janitor-extraction';
+
+/// The three stages of the closed-lorebook flow, named in the sheet header so
+/// it is always clear which one is on screen and how far the flow goes.
+enum _Phase { collect, build, save }
+
+extension _PhaseLabel on _Phase {
+  String get label => switch (this) {
+    _Phase.collect => 'catalog_lorebooks_phase_collect'.tr(),
+    _Phase.build => 'catalog_lorebooks_phase_build'.tr(),
+    _Phase.save => 'catalog_lorebooks_phase_save'.tr(),
+  };
+}
 
 /// Opens the lorebook capture sheet for a JanitorAI character.
 ///
@@ -39,29 +62,13 @@ Future<void> showJanitorLorebookCaptureSheet(
   return showModalBottomSheet<void>(
     context: context,
     useRootNavigator: true,
-    useSafeArea: true,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
     barrierColor: Colors.black54,
-    builder: (ctx) => DraggableScrollableSheet(
-      initialChildSize: 0.9,
-      minChildSize: 0.5,
-      maxChildSize: 0.95,
-      expand: false,
-      builder: (_, scrollController) => Container(
-        decoration: BoxDecoration(
-          color: ctx.cs.surface,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-        ),
-        child: SingleChildScrollView(
-          controller: scrollController,
-          child: JanitorLorebookCapture(
-            args: args,
-            characterId: characterId,
-            initialExtraction: initialExtraction,
-          ),
-        ),
-      ),
+    builder: (_) => JanitorLorebookCapture(
+      args: args,
+      characterId: characterId,
+      initialExtraction: initialExtraction,
     ),
   );
 }
@@ -74,8 +81,14 @@ Future<void> showJanitorLorebookCaptureSheet(
 ///   SillyTavern World Info `.json`.
 /// - **Closed lorebooks** are recovered by capturing the assembled prompt via
 ///   the proxy ([JanitorExtractor.extract]) and rebuilt into structured entries
-///   with the active LLM ([JanitorExtractor.buildLorebook]). Context-source
-///   checkboxes pick what the build LLM may use to infer trigger keys.
+///   with the active LLM ([JanitorExtractor.buildLorebook]).
+///
+/// Two separate context selections drive that, exactly as in JAR:
+/// *extraction context* (`exSources`) picks what is sent **into the JanitorAI
+/// chat** to make entries fire, and *key-inference context* (`useSources`)
+/// picks what the build LLM may read to infer trigger keys. The second one only
+/// appears once entries have actually been collected — until then there is
+/// nothing to build.
 class JanitorLorebookCapture extends ConsumerStatefulWidget {
   final JanitorLorebookArgs args;
 
@@ -101,14 +114,30 @@ class JanitorLorebookCapture extends ConsumerStatefulWidget {
       _JanitorLorebookCaptureState();
 }
 
-/// Which context blocks the build LLM may use to infer trigger keys.
+/// A selection of context blocks, used for both the extraction trigger and the
+/// build LLM's key inference. Defaults are JAR's: name-dense, cheap sources on,
+/// the bulky ones opt-in.
 class _ContextSources {
   bool card = true;
   bool catalog = true;
   bool scenario = true;
   bool greetings = false;
-  bool lorebookDescs = true;
   bool extra = false;
+
+  /// The one default that differs between the two selections — see the fields
+  /// it is constructed for.
+  bool lorebookDescs;
+
+  _ContextSources({this.lorebookDescs = false});
+
+  void copyFrom(_ContextSources other) {
+    card = other.card;
+    catalog = other.catalog;
+    scenario = other.scenario;
+    greetings = other.greetings;
+    lorebookDescs = other.lorebookDescs;
+    extra = other.extra;
+  }
 }
 
 class _JanitorLorebookCaptureState
@@ -123,15 +152,28 @@ class _JanitorLorebookCaptureState
   String? _extractError;
   ExtractionResult? _extraction;
 
-  // Build.
-  final _sources = _ContextSources();
-  final _extraController = TextEditingController();
+  /// What is stuffed into the message sent into the JanitorAI chat to make the
+  /// closed lorebook fire (JAR's `exSources`).
+  final _extractSources = _ContextSources();
+  final _extractExtraController = TextEditingController();
+
+  /// What the build LLM may read to infer trigger keys (JAR's `useSources`).
+  /// Lorebook descriptions are on by default here — they are a summary of the
+  /// very entries being keyed, which is worth reading but a poor trigger.
+  final _buildSources = _ContextSources(lorebookDescs: true);
+  final _buildExtraController = TextEditingController();
+
+  /// Key-inference context derivable from the catalog metadata alone, so the
+  /// sources can be previewed and chosen before the capture runs. Computed once
+  /// — the metadata does not change while the sheet is open.
+  late final _previewCtx = ref
+      .read(janitorExtractorProvider)
+      .contextFromMeta(widget.args.meta);
   final _nameController = TextEditingController();
   bool _building = false;
   String? _buildError;
   LorebookBuildException? _buildDebug;
   Lorebook? _built;
-  List<Map<String, String>>? _previewMessages;
   Timer? _timer;
   int _elapsed = 0;
 
@@ -150,18 +192,25 @@ class _JanitorLorebookCaptureState
     final loggedIn = ref.watch(janitorAccountProvider).isLoggedIn;
     final enabled =
         ref.watch(appSettingsProvider).value?.extractJanitorLocally ?? false;
-    return loggedIn && enabled && !_extracting;
+    return loggedIn && enabled && !_proxyForbidden && !_extracting;
   }
 
-  /// The character lists at least one "advanced" (Nine API / JS) lorebook. Those
-  /// inject their entries inline, so the content can't be separated mechanically
-  /// — it must be mined from the full captured prompt with the LLM. When true the
-  /// heuristic "extracted content" + "download txt" path is dropped (it would be
-  /// misleading) and the build goes straight through the LLM.
-  bool get _hasAdvanced => hasAdvancedLorebook(widget.args.meta);
+  /// The creator locked this character to JanitorAI's own model, so the capture
+  /// the rebuild depends on can never run. Known from the catalog metadata, no
+  /// request needed — the button stays off instead of failing on press.
+  bool get _proxyForbidden => !janitorAllowsProxy(widget.args.meta);
 
   /// Id of the JS lorebook currently being rebuilt by the LLM (per-row spinner).
   String? _jsBuildingId;
+
+  /// Public scripts converted into entries during this session, by book id.
+  ///
+  /// A public script is a public lorebook whose entries simply aren't readable
+  /// until an LLM has rebuilt them — so until it is converted, its content
+  /// cannot be subtracted from the closed lorebook the way a plain public book's
+  /// is, and the same entries turn up in both. Once converted they can, and are:
+  /// see [_publicScriptContents].
+  final Map<String, Lorebook> _convertedScripts = {};
 
   @override
   void initState() {
@@ -178,7 +227,8 @@ class _JanitorLorebookCaptureState
   @override
   void dispose() {
     _timer?.cancel();
-    _extraController.dispose();
+    _extractExtraController.dispose();
+    _buildExtraController.dispose();
     _nameController.dispose();
     super.dispose();
   }
@@ -200,7 +250,7 @@ class _JanitorLorebookCaptureState
       items: [
         BottomSheetItem(
           icon: Icons.bookmark_add_outlined,
-          label: 'Save to Glaze',
+          label: 'catalog_lorebooks_save'.tr(),
           onTap: () async {
             Navigator.of(context, rootNavigator: true).pop();
             await _saveLorebook(
@@ -210,7 +260,7 @@ class _JanitorLorebookCaptureState
         ),
         BottomSheetItem(
           icon: Icons.download_outlined,
-          label: 'Export .json (SillyTavern)',
+          label: 'catalog_lorebooks_export'.tr(),
           onTap: () async {
             Navigator.of(context, rootNavigator: true).pop();
             await _exportJson(
@@ -231,14 +281,11 @@ class _JanitorLorebookCaptureState
   void _downloadJs(PublicLorebook book) {
     GlazeBottomSheet.show<void>(
       context,
-      title: 'Scripted lorebook',
+      title: 'catalog_lorebooks_scripted_title'.tr(),
       bigInfo: BottomSheetBigInfo(
         icon: Icons.code_rounded,
-        description:
-            "This is an advanced (scripted) lorebook. Its entries are generated "
-            "by JavaScript, so it can't be downloaded as-is — it has to be sent "
-            "to your active LLM to be rebuilt into keyed World Info entries.",
-        buttonText: 'Rebuild with LLM',
+        description: 'catalog_lorebooks_scripted_desc'.tr(),
+        buttonText: 'catalog_lorebooks_scripted_btn'.tr(),
         onButtonTap: () {
           Navigator.of(context, rootNavigator: true).pop();
           _buildJs(book);
@@ -261,14 +308,35 @@ class _JanitorLorebookCaptureState
             characterId: widget.characterId,
           );
       if (!mounted) return;
-      setState(() => _jsBuildingId = null);
+      setState(() {
+        _jsBuildingId = null;
+        _convertedScripts[book.id] = lb;
+      });
       _offerSaveExport(lb);
     } catch (e) {
       if (!mounted) return;
       setState(() => _jsBuildingId = null);
-      GlazeToast.show(context, 'Build failed: $e');
+      GlazeToast.show(context, 'catalog_lorebooks_build_failed'.tr(args: ['$e']));
     }
   }
+
+  /// The entry text of every public script converted so far — subtracted from
+  /// the closed lorebook exactly like a downloadable public book's entries.
+  List<String> get _publicScriptContents => _convertedScripts.values
+      .expand((b) => b.entries)
+      .map((e) => e.content.trim())
+      .where((c) => c.isNotEmpty)
+      .toList();
+
+  /// [text] with the entries of any converted public script cut out.
+  ///
+  /// The capture subtracts what was known at the time; a script converted
+  /// *after* it would otherwise leave its entries sitting in the closed lorebook
+  /// as well. Applied wherever the extracted text is read — shown, built,
+  /// previewed, downloaded — rather than written back, so converting one more
+  /// script needs no re-capture.
+  String _withoutPublicScripts(String text) =>
+      withoutPublicEntries(text, _publicScriptContents);
 
   /// Bottom sheet offering Save-to-Glaze / Export-.json for a built [Lorebook].
   void _offerSaveExport(Lorebook book) {
@@ -277,7 +345,7 @@ class _JanitorLorebookCaptureState
       items: [
         BottomSheetItem(
           icon: Icons.bookmark_add_outlined,
-          label: 'Save to Glaze',
+          label: 'catalog_lorebooks_save'.tr(),
           onTap: () async {
             Navigator.of(context, rootNavigator: true).pop();
             await _saveLorebook(book);
@@ -285,7 +353,7 @@ class _JanitorLorebookCaptureState
         ),
         BottomSheetItem(
           icon: Icons.download_outlined,
-          label: 'Export .json (SillyTavern)',
+          label: 'catalog_lorebooks_export'.tr(),
           onTap: () async {
             Navigator.of(context, rootNavigator: true).pop();
             await _exportJson(glazeLorebookToTavernJson(book), book.name);
@@ -301,11 +369,15 @@ class _JanitorLorebookCaptureState
       if (mounted) {
         GlazeToast.show(
           context,
-          'Saved "${book.name}" (${book.entries.length} entries)',
+          'catalog_lorebooks_saved'.tr(
+            args: [book.name, '${book.entries.length}'],
+          ),
         );
       }
     } catch (e) {
-      if (mounted) GlazeToast.show(context, 'Save failed: $e');
+      if (mounted) {
+        GlazeToast.show(context, 'catalog_lorebooks_save_failed'.tr(args: ['$e']));
+      }
     }
   }
 
@@ -317,9 +389,19 @@ class _JanitorLorebookCaptureState
         filename: '${safe.isEmpty ? 'lorebook' : safe}.json',
         subfolder: 'Lorebooks',
       );
-      if (mounted) GlazeToast.show(context, 'Exported $name.json');
+      if (mounted) {
+        GlazeToast.show(
+          context,
+          'catalog_lorebooks_exported'.tr(args: ['$name.json']),
+        );
+      }
     } catch (e) {
-      if (mounted) GlazeToast.show(context, 'Export failed: $e');
+      if (mounted) {
+        GlazeToast.show(
+          context,
+          'catalog_lorebooks_export_failed'.tr(args: ['$e']),
+        );
+      }
     }
   }
 
@@ -331,13 +413,14 @@ class _JanitorLorebookCaptureState
   /// into one — a single action covers them all, no per-row button.
   Future<void> _extractAll() async {
     if (_extracting) return;
+    final extra =
+        _extractSources.extra ? _extractExtraController.text.trim() : '';
     setState(() {
       _extracting = true;
       _extractError = null;
       _extractPhase = null;
       _extraction = null;
       _built = null;
-      _previewMessages = null;
       _buildError = null;
       _buildDebug = null;
     });
@@ -346,6 +429,15 @@ class _JanitorLorebookCaptureState
           .read(janitorExtractorProvider)
           .extract(
             widget.args.sourceUrl,
+            extraPublicContents: _publicScriptContents,
+            trigger: JanitorTriggerContext(
+              card: _extractSources.card,
+              catalog: _extractSources.catalog,
+              scenario: _extractSources.scenario,
+              greetings: _extractSources.greetings,
+              lorebookDescs: _extractSources.lorebookDescs,
+              extra: extra,
+            ),
             onPhase: (p) {
               if (mounted) setState(() => _extractPhase = p);
             },
@@ -353,13 +445,23 @@ class _JanitorLorebookCaptureState
       if (!mounted) return;
       setState(() {
         _extraction = result;
+        // Carry the extraction choice into the build, like JAR's
+        // `runLoreExtract`: the sources that made the entries fire are usually
+        // the ones that describe them best. Still editable before building.
+        _buildSources.copyFrom(_extractSources);
+        _buildExtraController.text = extra;
         if (_nameController.text.trim().isEmpty) {
           _nameController.text =
               '${result.character.charData.name} — Closed Lorebook';
         }
       });
     } catch (e) {
-      if (mounted) setState(() => _extractError = e.toString());
+      // JanitorAI refusing to assemble the prompt (creator locked the card to
+      // their own model) is a permanent answer, not a failure worth retrying —
+      // quote its wording and say what it means for these books.
+      if (mounted) {
+        setState(() => _extractError = _extractErrorText(e));
+      }
     } finally {
       if (mounted) {
         setState(() {
@@ -367,6 +469,18 @@ class _JanitorLorebookCaptureState
         });
       }
     }
+  }
+
+  /// The message shown under the rebuild button. A [JanitorRefusedException]
+  /// gets JanitorAI's own sentence plus what it means for these books; anything
+  /// else is reported verbatim.
+  String _extractErrorText(Object e) {
+    if (e is JanitorAuthException) {
+      return 'catalog_janitor_session_expired'.tr();
+    }
+    if (e is! JanitorRefusedException) return e.toString();
+    final explain = 'catalog_janitor_refused_body'.tr();
+    return '${e.message}.\n$explain';
   }
 
   Future<void> _build() async {
@@ -383,24 +497,22 @@ class _JanitorLorebookCaptureState
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() => _elapsed++);
     });
-    final fromFull = ex.hasAdvancedLorebook;
     try {
       final book = await ref
           .read(janitorExtractorProvider)
           .buildLorebook(
-            lorebookText: fromFull ? ex.fullPromptText : ex.lorebookText,
+            lorebookText: _withoutPublicScripts(ex.lorebookText),
             name: _nameController.text.trim().isEmpty
                 ? '${ex.character.charData.name} — Closed Lorebook'
                 : _nameController.text.trim(),
-            card: _sources.card ? ex.cardContext : '',
-            catalog: _sources.catalog ? ex.catalogContext : '',
-            scenario: _sources.scenario ? ex.scenarioContext : '',
-            greetings: _sources.greetings ? ex.greetingsContext : '',
-            lorebookDescs: _sources.lorebookDescs
+            card: _buildSources.card ? ex.cardContext : '',
+            catalog: _buildSources.catalog ? ex.catalogContext : '',
+            scenario: _buildSources.scenario ? ex.scenarioContext : '',
+            greetings: _buildSources.greetings ? ex.greetingsContext : '',
+            lorebookDescs: _buildSources.lorebookDescs
                 ? ex.lorebookDescsContext
                 : '',
-            extra: _sources.extra ? _extraController.text.trim() : '',
-            fromFullPrompt: fromFull,
+            extra: _buildSources.extra ? _buildExtraController.text.trim() : '',
             characterId: widget.characterId,
           );
       if (mounted) setState(() => _built = book);
@@ -417,22 +529,31 @@ class _JanitorLorebookCaptureState
     }
   }
 
+  /// [book] under the name currently in the world-info field, or unchanged when
+  /// the field is empty or already matches.
+  Lorebook _named(Lorebook book) {
+    final name = _nameController.text.trim();
+    return name.isEmpty || name == book.name ? book : book.copyWith(name: name);
+  }
+
+  /// Show the exact messages the build would send, in their own sheet — the
+  /// prompt carries the whole extracted text, far too much to unfold inline.
   void _preview() {
     final ex = _extraction;
     if (ex == null) return;
-    final fromFull = ex.hasAdvancedLorebook;
-    setState(() {
-      _previewMessages = buildLorebookMessages(
-        fromFull ? ex.fullPromptText : ex.lorebookText,
-        card: _sources.card ? ex.cardContext : '',
-        catalog: _sources.catalog ? ex.catalogContext : '',
-        scenario: _sources.scenario ? ex.scenarioContext : '',
-        greetings: _sources.greetings ? ex.greetingsContext : '',
-        lorebookDescs: _sources.lorebookDescs ? ex.lorebookDescsContext : '',
-        extra: _sources.extra ? _extraController.text.trim() : '',
-        fromFullPrompt: fromFull,
-      );
-    });
+    showJanitorPromptPreviewSheet(
+      context,
+      buildLorebookMessages(
+        _withoutPublicScripts(ex.lorebookText),
+        card: _buildSources.card ? ex.cardContext : '',
+        catalog: _buildSources.catalog ? ex.catalogContext : '',
+        scenario: _buildSources.scenario ? ex.scenarioContext : '',
+        greetings: _buildSources.greetings ? ex.greetingsContext : '',
+        lorebookDescs:
+            _buildSources.lorebookDescs ? ex.lorebookDescsContext : '',
+        extra: _buildSources.extra ? _buildExtraController.text.trim() : '',
+      ),
+    );
   }
 
   /// Export the isolated lorebook text verbatim as a plain .txt file. Without an
@@ -442,9 +563,9 @@ class _JanitorLorebookCaptureState
   Future<void> _downloadExtracted() async {
     final ex = _extraction;
     if (ex == null) return;
-    final text = ex.lorebookText.trim();
+    final text = _withoutPublicScripts(ex.lorebookText).trim();
     if (text.isEmpty) {
-      GlazeToast.show(context, 'No lorebook text to download.');
+      GlazeToast.show(context, 'catalog_lorebooks_nothing_to_download'.tr());
       return;
     }
     final name = _nameController.text.trim().isEmpty
@@ -457,389 +578,634 @@ class _JanitorLorebookCaptureState
         filename: '${safe.isEmpty ? 'lorebook' : safe}.txt',
         subfolder: 'Lorebooks',
       );
-      if (mounted) GlazeToast.show(context, 'Exported $name.txt');
+      if (mounted) {
+        GlazeToast.show(
+          context,
+          'catalog_lorebooks_exported'.tr(args: ['$name.txt']),
+        );
+      }
     } catch (e) {
-      if (mounted) GlazeToast.show(context, 'Export failed: $e');
+      if (mounted) {
+        GlazeToast.show(
+          context,
+          'catalog_lorebooks_export_failed'.tr(args: ['$e']),
+        );
+      }
     }
   }
 
   // ─── Build ──────────────────────────────────────────────────────────────────
 
+  /// Whether this character has a closed-lorebook flow to run at all. Without
+  /// closed books the sheet is just the list of public ones.
+  bool get _hasFlow => !_loadingPublic && _closedBooks.isNotEmpty;
+
+  /// Which stage of the closed-lorebook flow is on screen, derived from what
+  /// has been produced so far rather than tracked separately.
+  _Phase get _phase => !_hasFlow
+      ? _Phase.collect
+      : _built != null
+      ? _Phase.save
+      : _extraction != null
+      ? _Phase.build
+      : _Phase.collect;
+
+  /// One step back through the flow, the way the header arrow goes.
+  void _stepBack() {
+    if (_built != null) {
+      _restartBuild();
+    } else {
+      _restartCollection();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final cs = context.cs;
     final closed = _closedBooks;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const _SheetHandle(),
-          Text(
-            'catalog_lorebooks_title'.tr(),
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
-              color: cs.onSurface,
+    return SheetView(
+      title: 'catalog_lorebooks_title'.tr(),
+      startExpanded: true,
+      actions: [
+        SheetViewAction(
+          icon: const Icon(Icons.help_outline_rounded, size: 20),
+          tooltip: 'menu_glossary'.tr(),
+          onPressed: () => GlossarySheet.show(
+            context,
+            initialTerm: _kHelpTermExtraction,
+          ),
+        ),
+      ],
+      headerBottom: _hasFlow ? _phaseStrip(cs) : null,
+      // No horizontal padding on the list: MenuGroup carries its own 16 px
+      // margin, and the loose text between groups is padded individually.
+      body: _loadingPublic
+          ? const _SheetLoading()
+          : Builder(
+              builder: (inner) => ListView(
+                padding: EdgeInsets.only(
+                  top: MediaQuery.paddingOf(inner).top + 12,
+                  bottom: MediaQuery.paddingOf(inner).bottom + 24,
+                ),
+                children: [
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 240),
+                    switchInCurve: Curves.easeOutCubic,
+                    switchOutCurve: Curves.easeInCubic,
+                    transitionBuilder: (child, anim) =>
+                        FadeTransition(opacity: anim, child: child),
+                    // The outgoing stage is taken out of the layout (top-anchored
+                    // and unconstrained in height) so the sheet takes the height
+                    // of the stage arriving, instead of jumping to the taller of
+                    // the two for the length of the fade.
+                    layoutBuilder: (current, previous) => Stack(
+                      alignment: Alignment.topCenter,
+                      children: [
+                        for (final child in previous)
+                          Positioned(left: 0, right: 0, top: 0, child: child),
+                        ?current,
+                      ],
+                    ),
+                    child: KeyedSubtree(
+                      key: ValueKey(_phase),
+                      child: _stageContent(cs, closed),
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-          const SizedBox(height: 12),
-          _PublicSection(
-            loading: _loadingPublic,
-            books: _public,
-            onDownload: _downloadPublic,
-            onDownloadJs: _downloadJs,
-            buildingId: _jsBuildingId,
-          ),
-          // Closed / private lorebooks live at the very end: each is shown with a
-          // Rebuild button and a "must be rebuilt from prompt" hint, and the
-          // rebuild captures the assembled prompt + runs the LLM build below.
-          if (!_loadingPublic && closed.isNotEmpty) ...[
-            const SizedBox(height: 20),
-            _buildClosedSection(cs, closed),
-          ],
-        ],
-      ),
     );
   }
 
-  Widget _buildClosedSection(ColorScheme cs, List<PublicLorebook> closed) {
+  /// The one stage that is on screen. Only the first stage lists the character's
+  /// lorebooks: past it they are settled reference material, and the flow is
+  /// about the text recovered from them.
+  Widget _stageContent(ColorScheme cs, List<PublicLorebook> closed) {
+    final children = switch (_phase) {
+      _Phase.collect => [
+        _PublicSection(
+          books: _public,
+          onDownload: _downloadPublic,
+          onDownloadJs: _downloadJs,
+          buildingId: _jsBuildingId,
+        ),
+        if (closed.isNotEmpty) ..._closedSection(cs, closed),
+      ],
+      _Phase.build => _buildBlock(cs, _extraction!),
+      _Phase.save => _buildResult(_built!),
+    };
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: children,
+    );
+  }
+
+  /// The flow's stages, named under the sheet title, with a back arrow into the
+  /// previous one. Replaces a per-stage "go back" button: the way back belongs
+  /// with the label that says where you are, not in the middle of the content.
+  Widget _phaseStrip(ColorScheme cs) {
+    final phase = _phase;
+    final showBack = phase != _Phase.collect;
+    final canGoBack = showBack && !_building && !_extracting;
+    return Row(
       children: [
-        _SectionTitle('Closed lorebooks', cs: cs),
-        const SizedBox(height: 4),
-        Text(
-          'These lorebooks are private — they can only be recovered by capturing '
-          'the assembled prompt through your Janitor.AI session and rebuilding it '
-          'into keyed entries with your active LLM. Multiple closed lorebooks are '
-          'merged into one.',
-          style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+        // On the first stage there is nowhere to go back to, so the arrow does
+        // not merely hide — it takes no width, and the stage labels sit at the
+        // left edge. It grows and fades in when a step back appears.
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 200),
+          switchInCurve: Curves.easeOutCubic,
+          switchOutCurve: Curves.easeInCubic,
+          transitionBuilder: (child, anim) => SizeTransition(
+            sizeFactor: anim,
+            axis: Axis.horizontal,
+            alignment: Alignment.centerLeft,
+            child: FadeTransition(opacity: anim, child: child),
+          ),
+          child: showBack
+              ? Padding(
+                  key: const ValueKey(true),
+                  padding: const EdgeInsets.only(right: 6),
+                  child: SizedBox(
+                    width: 34,
+                    height: 34,
+                    child: Material(
+                      color: Colors.transparent,
+                      shape: const CircleBorder(),
+                      child: InkWell(
+                        customBorder: const CircleBorder(),
+                        onTap: canGoBack ? _stepBack : null,
+                        child: Icon(
+                          Icons.arrow_back_rounded,
+                          size: 20,
+                          color: cs.onSurfaceVariant.withValues(
+                            alpha: canGoBack ? 1 : 0.3,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                )
+              : const SizedBox(key: ValueKey(false), height: 34),
         ),
-        if (_hasAdvanced) ...[
-          const SizedBox(height: 8),
-          _AdvancedNotice(cs: cs),
-        ],
-        const SizedBox(height: 10),
-        for (final b in closed) ...[
-          _ClosedRow(book: b),
-          const SizedBox(height: 8),
-        ],
-        const SizedBox(height: 4),
-        // A single action for every closed book: the capture assembles the whole
-        // prompt at once, so all closed lorebooks are rebuilt together (not one
-        // per row).
-        _RebuildAllButton(
-          count: closed.length,
-          rebuilding: _extracting,
-          onRebuild: _canRebuild ? _extractAll : null,
-          cs: cs,
+        Expanded(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Row(
+              children: [
+                for (final (i, p) in _Phase.values.indexed) ...[
+                  if (i > 0)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      child: Icon(
+                        Icons.chevron_right_rounded,
+                        size: 16,
+                        color: cs.onSurfaceVariant.withValues(alpha: 0.3),
+                      ),
+                    ),
+                  AnimatedDefaultTextStyle(
+                    duration: const Duration(milliseconds: 220),
+                    curve: Curves.easeOutCubic,
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: p == phase ? FontWeight.w700 : FontWeight.w500,
+                      color: p == phase
+                          ? cs.primary
+                          : cs.onSurfaceVariant.withValues(
+                              // Stages already passed stay legible; ones not
+                              // reached yet are only a hint of what follows.
+                              alpha: p.index < phase.index ? 0.7 : 0.35,
+                            ),
+                    ),
+                    child: Text(p.label),
+                  ),
+                ],
+              ],
+            ),
+          ),
         ),
-        const SizedBox(height: 8),
-        _buildExtractStatus(cs),
-        if (_extraction != null) ...[
-          const SizedBox(height: 16),
-          _buildBuildBlock(cs),
-        ],
       ],
     );
   }
 
-  /// Why the Rebuild button is disabled (opt-in / login) plus the live capture
-  /// phase and any capture error. The single Rebuild action for all closed
-  /// lorebooks lives just above.
+  /// Stage 1 of the closed-lorebook flow: what the character has, what will be
+  /// sent to make its entries fire, and the action that runs the capture. The
+  /// later stages are [_buildBlock] and [_buildResult].
+  List<Widget> _closedSection(ColorScheme cs, List<PublicLorebook> closed) {
+    return [
+      // The list itself is reference material, not a control — collapsed by
+      // default so the flow below starts at the top of the sheet.
+      MenuCollapsibleSection(
+        label: '${'catalog_lorebooks_closed'.tr()} · ${closed.length}',
+        helpTerm: 'janitor-closed-lorebook',
+        children: [
+          MenuGroup(
+            items: [
+              _GroupNote(
+                closed.length > 1
+                    ? 'catalog_lorebooks_closed_hint_many'.tr(
+                        args: ['${closed.length}'],
+                      )
+                    : 'catalog_lorebooks_closed_hint_one'.tr(),
+              ),
+              for (final b in closed) _ClosedRow(book: b),
+            ],
+          ),
+        ],
+      ),
+      // The extraction context sits ABOVE the action, like JAR's extract block:
+      // what is sent into the chat to make entries fire is chosen before the
+      // capture runs.
+      _extractContextGroup(),
+      // A single action for every closed book: the capture assembles the whole
+      // prompt at once, so all closed lorebooks are collected together (not one
+      // per row).
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+        child: ActionTile(
+          icon: Icons.auto_fix_high_rounded,
+          expand: true,
+          primary: true,
+          busy: _extracting,
+          // The capture's live phase reads inside the button it belongs to —
+          // one busy control, not a button plus a status line under it.
+          label: _extracting
+              ? (_extractPhase ?? 'catalog_lorebooks_extracting'.tr())
+              : 'catalog_lorebooks_collect_btn'.tr(),
+          onTap: _canRebuild ? _extractAll : null,
+        ),
+      ),
+      _buildExtractStatus(cs),
+    ];
+  }
+
+  /// Back to stage 1: drop the capture (and anything built from it) so the
+  /// extraction context can be picked again. Deliberately does not re-run the
+  /// capture — the whole point of coming back is to change what is sent.
+  void _restartCollection() {
+    setState(() {
+      _extraction = null;
+      _built = null;
+      _buildError = null;
+      _buildDebug = null;
+      _extractError = null;
+      _extractPhase = null;
+    });
+  }
+
+  /// Back to stage 2: keep the collected entries, drop the built lorebook so
+  /// the key-inference context can be changed and the build re-run.
+  void _restartBuild() {
+    setState(() {
+      _built = null;
+      _buildError = null;
+      _buildDebug = null;
+    });
+  }
+
+  /// Why the collect action is unavailable (proxies forbidden, opt-in off, not
+  /// logged in), plus any capture error. The live phase is not here — it reads
+  /// inside the button.
   Widget _buildExtractStatus(ColorScheme cs) {
     final loggedIn = ref.watch(janitorAccountProvider).isLoggedIn;
     final enabled =
         ref.watch(appSettingsProvider).value?.extractJanitorLocally ?? false;
-
+    // Proxies forbidden outranks the other two: enabling the opt-in or logging
+    // in would not make the capture possible.
+    final hint = _proxyForbidden
+        ? '${const JanitorRefusedException.proxyForbidden().message}. '
+              '${'catalog_janitor_refused_body'.tr()}'
+        : !enabled
+        ? 'catalog_lorebooks_need_optin'.tr()
+        : !loggedIn
+        ? 'catalog_lorebooks_need_login'.tr()
+        : null;
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (!enabled)
-          _Hint(
-            'Enable "Extract lorebooks and characters locally using Janitor.AI '
-            'account" in Settings to rebuild closed lorebooks.',
-            cs: cs,
-          )
-        else if (!loggedIn)
-          _Hint('Log in to Janitor.AI (catalog menu) to rebuild.', cs: cs),
-        if (_extracting && _extractPhase != null) ...[
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              SizedBox(
-                width: 14,
-                height: 14,
-                child: GlazeSpinner(color: cs.primary),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  _extractPhase!,
-                  style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
-                ),
-              ),
-            ],
+        if (hint != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: _Hint(hint, cs: cs),
           ),
-        ],
-        if (_extractError != null) ...[
-          const SizedBox(height: 8),
-          Text(
-            _extractError!,
-            style: const TextStyle(color: Colors.redAccent, fontSize: 12),
+        if (_extractError != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: GlazeErrorBlock(message: _extractError!),
           ),
-        ],
       ],
     );
   }
 
-  Widget _buildBuildBlock(ColorScheme cs) {
-    final ex = _extraction!;
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: cs.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            ex.hasAdvancedLorebook
-                ? 'Advanced (JS) lorebook — its entries are injected inline, so '
-                      'the full prompt (${estimateTokens(ex.fullPromptText)} '
-                      'tokens) is mined with the LLM.'
-                : ex.hasLorebook
-                ? 'Extracted content · ${estimateTokens(ex.lorebookText)} tokens'
-                : 'No closed lorebook text was found.',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              color: cs.onSurface,
+  /// Stage 2 — everything between a finished capture and a built lorebook: what
+  /// was recovered, the context selection that feeds key inference, and the
+  /// build / preview actions.
+  ///
+  /// Laid out as Glaze menu groups (see `docs/UI_KIT.md`) and kept at feature
+  /// parity with JAR's build block — the same six context sources, each with
+  /// its token count and its exact content one tap away, plus custom text.
+  List<Widget> _buildBlock(ColorScheme cs, ExtractionResult ex) {
+    final loreText = _withoutPublicScripts(ex.lorebookText);
+    final hasLore = loreText.trim().isNotEmpty;
+    return [
+      MenuGroup(
+        header: 'catalog_lorebooks_build_title'.tr(),
+        helpTerm: 'lorebook',
+        description: hasLore
+            ? 'catalog_lorebooks_build_extracted'.tr(
+                args: ['${estimateTokens(loreText)}'],
+              )
+            : 'catalog_lorebooks_build_none'.tr(),
+        items: [
+          // What the capture actually recovered, verbatim — the same look at
+          // the material JAR gives before the build runs.
+          if (hasLore)
+            DisclosureRow(
+              label: 'catalog_lorebooks_extracted_content'.tr(),
+              subtitle: 'catalog_lorebooks_extracted_content_sub'.tr(),
+              content: loreText,
             ),
-          ),
-          if (ex.hasExtractable) ...[
-            // For an advanced lorebook the heuristic "extracted content" is
-            // meaningless (the entries are inline), so skip the txt-download path
-            // and go straight to the LLM build.
-            if (ex.hasLorebook && !ex.hasAdvancedLorebook) ...[
-              const SizedBox(height: 12),
-              OutlinedButton.icon(
-                onPressed: _downloadExtracted,
-                icon: const Icon(Icons.notes_rounded, size: 16),
-                label: const Text('Download extracted content as txt'),
+          // Say when the field diff found lore the separator alone would have
+          // dropped — otherwise the recovery is invisible and reads as the
+          // model having invented entries out of the extracted text.
+          if (ex.injected.isNotEmpty)
+            _GroupNote(
+              'catalog_lorebooks_injected_note'.tr(
+                args: ['${ex.injected.length}'],
               ),
-              const _OrDivider(),
-            ] else
-              const SizedBox(height: 12),
-            _SectionTitle('Build with LLM', cs: cs),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _nameController,
-              style: TextStyle(fontSize: 13, color: cs.onSurface),
-              decoration: _fieldDecoration(cs, 'World info name (optional)'),
+              top: 4,
             ),
-            const SizedBox(height: 12),
-            Text(
-              'Context sent for key inference (never output as entries). '
-              'Tap a block to see exactly what will be sent:',
-              style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
+          // Without an LLM the real entry boundaries and keys can't be
+          // recovered, so the raw text is offered as-is instead.
+          if (hasLore)
+            MenuItem(
+              icon: Icons.notes_rounded,
+              label: 'catalog_lorebooks_download_txt'.tr(),
+              subtitle: 'catalog_lorebooks_download_txt_sub'.tr(),
+              onTap: _downloadExtracted,
             ),
-            const SizedBox(height: 8),
-            _contextBlocks(cs, ex),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                ElevatedButton(
-                  onPressed: _building ? null : _build,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: cs.primary,
-                    foregroundColor: cs.onPrimary,
-                  ),
-                  child: _building
-                      ? Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const SizedBox(
-                              width: 14,
-                              height: 14,
-                              child: GlazeSpinner(color: Colors.white),
-                            ),
-                            const SizedBox(width: 8),
-                            Text('Building… ${_elapsed}s'),
-                          ],
-                        )
-                      : const Text('Build lorebook'),
-                ),
-                const SizedBox(width: 12),
-                OutlinedButton(
-                  onPressed: _building ? null : _preview,
-                  child: const Text('Preview prompt'),
-                ),
-              ],
-            ),
-            if (_buildError != null) ...[
-              const SizedBox(height: 8),
-              Text(
-                _buildError!,
-                style: const TextStyle(color: Colors.redAccent, fontSize: 12),
-              ),
-            ],
-            if (_buildDebug != null) ...[
-              const SizedBox(height: 8),
-              _LlmDebugPanel(error: _buildDebug!, cs: cs),
-            ],
-            if (_previewMessages != null) ...[
-              const SizedBox(height: 12),
-              _PromptPreview(messages: _previewMessages!, cs: cs),
-            ],
-            if (_built != null) ...[
-              const SizedBox(height: 12),
-              _buildResult(cs, _built!),
-            ],
-          ],
         ],
       ),
-    );
-  }
-
-  Widget _buildResult(ColorScheme cs, Lorebook book) {
-    return Container(
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: cs.surface,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: cs.primary.withValues(alpha: 0.4)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Built ${book.entries.length} entries',
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-              color: cs.onSurface,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Wrap(
+      if (hasLore) ...[
+        _keyContextGroup(ex),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          child: Wrap(
             spacing: 8,
             runSpacing: 8,
             children: [
-              ElevatedButton.icon(
-                onPressed: () => _saveLorebook(book),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: cs.primary,
-                  foregroundColor: cs.onPrimary,
-                ),
-                icon: const Icon(Icons.bookmark_add_outlined, size: 16),
-                label: const Text('Save to Glaze'),
+              ActionTile(
+                icon: Icons.auto_awesome_rounded,
+                label: _building
+                    ? 'catalog_lorebooks_building'.tr(args: ['$_elapsed'])
+                    : 'catalog_lorebooks_build_btn'.tr(),
+                primary: true,
+                busy: _building,
+                onTap: _build,
               ),
-              OutlinedButton.icon(
-                onPressed: () =>
-                    _exportJson(glazeLorebookToTavernJson(book), book.name),
-                icon: const Icon(Icons.download_outlined, size: 16),
-                label: const Text('Export .json'),
+              ActionTile(
+                icon: Icons.visibility_outlined,
+                label: 'catalog_lorebooks_preview_btn'.tr(),
+                onTap: _building ? null : _preview,
               ),
             ],
           ),
-          const SizedBox(height: 10),
-          _JsonView(
-            json: const JsonEncoder.withIndent(
-              '  ',
-            ).convert(glazeLorebookToTavernJson(book)),
-            cs: cs,
+        ),
+        // A build is one long non-streaming request over the whole extracted
+        // text; on a slow model it sits silent for minutes. Say so next to the
+        // button rather than let it read as a hang.
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                Icons.schedule_rounded,
+                size: 14,
+                color: cs.onSurfaceVariant.withValues(alpha: 0.6),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'catalog_lorebooks_build_patience'.tr(),
+                  style: TextStyle(
+                    fontSize: 12,
+                    height: 1.35,
+                    color: cs.onSurfaceVariant.withValues(alpha: 0.6),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        if (_buildError != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: GlazeErrorBlock(message: _buildError!),
+          ),
+        if (_buildDebug != null) ...[
+          _LlmDebugPanel(error: _buildDebug!, cs: cs),
+          const SizedBox(height: 12),
+        ],
+      ],
+    ];
+  }
+
+  /// The built lorebook and its two destinations. The world-info name lives
+  /// here rather than next to the build controls: it is a property of the book
+  /// being filed away, so it is asked for at the moment it is used — the name
+  /// under which it is saved to the library or written to a `.json`.
+  List<Widget> _buildResult(Lorebook book) {
+    return [
+      MenuGroup(
+        header: 'catalog_lorebooks_built'.tr(args: ['${book.entries.length}']),
+        items: [
+          MenuFieldItem(
+            label: 'catalog_lorebooks_world_name'.tr(),
+            controller: _nameController,
+            placeholder: book.name,
+          ),
+          MenuItem(
+            icon: Icons.bookmark_add_outlined,
+            label: 'catalog_lorebooks_save'.tr(),
+            onTap: () => _saveLorebook(_named(book)),
+          ),
+          MenuItem(
+            icon: Icons.download_outlined,
+            label: 'catalog_lorebooks_export'.tr(),
+            subtitle: 'catalog_lorebooks_export_sub'.tr(),
+            onTap: () {
+              final named = _named(book);
+              _exportJson(glazeLorebookToTavernJson(named), named.name);
+            },
           ),
         ],
       ),
-    );
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+        child: ContentPane(
+          mono: true,
+          maxHeight: 220,
+          text: const JsonEncoder.withIndent(
+            '  ',
+          ).convert(glazeLorebookToTavernJson(book)),
+        ),
+      ),
+    ];
   }
 
-  /// Context sources rendered as collapsible blocks: each keeps its on/off
-  /// toggle but also reveals the exact text that will be sent to the build LLM
-  /// (the recovered card, the catalog/scenario/greetings, the public lorebook
-  /// descriptions). A source with no content is shown disabled with a
-  /// "Content is empty" hint; custom text is always available (the user types
-  /// it).
-  Widget _contextBlocks(ColorScheme cs, ExtractionResult ex) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _ContextBlock(
-          label: 'Character card',
-          content: ex.cardContext,
-          value: _sources.card,
-          onChanged: (v) => setState(() => _sources.card = v),
-          cs: cs,
+  /// JAR's `#loreExtractBlock`: what Glaze sends **into the JanitorAI chat** so
+  /// the closed lorebook's entries fire. The contents shown are the ones that
+  /// will actually be sent — all derived from the character's catalog metadata,
+  /// except the card, which the capture is what recovers.
+  Widget _extractContextGroup() {
+    return MenuGroup(
+      header: 'catalog_lorebooks_extract_title'.tr(),
+      helpTerm: 'janitor-extract-context',
+      description: 'catalog_lorebooks_extract_hint'.tr(),
+      items: [
+        ContextSourceTile(
+          label: 'catalog_ctx_card'.tr(),
+          content: _extraction?.cardContext ?? '',
+          // The card only exists inside the assembled prompt, so before the
+          // capture there is nothing to show — but the capture's first send
+          // reveals it in time for the trigger, so the switch stays live.
+          emptyNote: 'catalog_ctx_card_pending'.tr(),
+          pending: _extraction == null,
+          value: _extractSources.card,
+          onChanged: (v) => setState(() => _extractSources.card = v),
         ),
-        _ContextBlock(
-          label: 'Card description on site',
-          content: ex.catalogContext,
-          value: _sources.catalog,
-          onChanged: (v) => setState(() => _sources.catalog = v),
-          cs: cs,
+        ContextSourceTile(
+          label: 'catalog_ctx_catalog'.tr(),
+          content: _previewCtx.catalog,
+          value: _extractSources.catalog,
+          onChanged: (v) => setState(() => _extractSources.catalog = v),
         ),
-        _ContextBlock(
-          label: 'Scenario',
-          content: ex.scenarioContext,
-          value: _sources.scenario,
-          onChanged: (v) => setState(() => _sources.scenario = v),
-          cs: cs,
+        ContextSourceTile(
+          label: 'catalog_ctx_scenario'.tr(),
+          content: _previewCtx.scenario,
+          value: _extractSources.scenario,
+          onChanged: (v) => setState(() => _extractSources.scenario = v),
         ),
-        _ContextBlock(
-          label: 'First message(s)',
-          content: ex.greetingsContext,
-          value: _sources.greetings,
-          onChanged: (v) => setState(() => _sources.greetings = v),
-          cs: cs,
+        ContextSourceTile(
+          label: 'catalog_ctx_greetings'.tr(),
+          content: _previewCtx.greetings,
+          value: _extractSources.greetings,
+          onChanged: (v) => setState(() => _extractSources.greetings = v),
         ),
-        _ContextBlock(
-          label: 'Lorebook descriptions',
-          content: ex.lorebookDescsContext,
-          value: _sources.lorebookDescs,
-          onChanged: (v) => setState(() => _sources.lorebookDescs = v),
-          cs: cs,
+        ContextSourceTile(
+          label: 'catalog_ctx_lorebook_descs'.tr(),
+          content: buildLorebookDescsContext(_public),
+          value: _extractSources.lorebookDescs,
+          onChanged: (v) => setState(() => _extractSources.lorebookDescs = v),
         ),
-        _CustomContextBlock(
-          value: _sources.extra,
-          controller: _extraController,
-          onChanged: (v) => setState(() => _sources.extra = v),
-          decoration: _fieldDecoration(cs, 'Optional custom context…'),
-          cs: cs,
+        MenuSwitchItem(
+          label: 'catalog_ctx_extra'.tr(),
+          description: 'catalog_ctx_extra_desc'.tr(),
+          value: _extractSources.extra,
+          onChanged: (v) => setState(() => _extractSources.extra = v),
         ),
+        if (_extractSources.extra)
+          MenuFieldItem(
+            label: 'catalog_ctx_extra_label'.tr(),
+            controller: _extractExtraController,
+            maxLines: 4,
+            placeholder: 'catalog_ctx_extra_ph'.tr(),
+          ),
       ],
     );
   }
 
-  InputDecoration _fieldDecoration(ColorScheme cs, String hint) =>
-      InputDecoration(
-        hintText: hint,
-        hintStyle: TextStyle(color: cs.onSurfaceVariant, fontSize: 13),
-        filled: true,
-        fillColor: cs.surface,
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 12,
-          vertical: 10,
+  /// JAR's `#useSources`: the six context sources the build LLM may read to
+  /// infer trigger keys (never emitted as entries). Only reachable after a
+  /// capture, so every source is shown with the text the capture recovered.
+  Widget _keyContextGroup(ExtractionResult ex) {
+    return MenuGroup(
+      header: 'catalog_lorebooks_key_context_title'.tr(),
+      helpTerm: 'lorebook-key-context',
+      description: 'catalog_lorebooks_key_context_hint'.tr(),
+      items: [
+        ContextSourceTile(
+          label: 'catalog_ctx_card'.tr(),
+          content: ex.cardContext,
+          value: _buildSources.card,
+          onChanged: (v) => setState(() => _buildSources.card = v),
         ),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide.none,
+        ContextSourceTile(
+          label: 'catalog_ctx_catalog'.tr(),
+          content: ex.catalogContext,
+          value: _buildSources.catalog,
+          onChanged: (v) => setState(() => _buildSources.catalog = v),
         ),
-      );
+        ContextSourceTile(
+          label: 'catalog_ctx_scenario'.tr(),
+          content: ex.scenarioContext,
+          value: _buildSources.scenario,
+          onChanged: (v) => setState(() => _buildSources.scenario = v),
+        ),
+        ContextSourceTile(
+          label: 'catalog_ctx_greetings'.tr(),
+          content: ex.greetingsContext,
+          value: _buildSources.greetings,
+          onChanged: (v) => setState(() => _buildSources.greetings = v),
+        ),
+        ContextSourceTile(
+          label: 'catalog_ctx_lorebook_descs'.tr(),
+          content: ex.lorebookDescsContext,
+          value: _buildSources.lorebookDescs,
+          onChanged: (v) => setState(() => _buildSources.lorebookDescs = v),
+        ),
+        MenuSwitchItem(
+          label: 'catalog_ctx_extra'.tr(),
+          description: 'catalog_ctx_extra_desc'.tr(),
+          value: _buildSources.extra,
+          onChanged: (v) => setState(() => _buildSources.extra = v),
+        ),
+        if (_buildSources.extra)
+          MenuFieldItem(
+            label: 'catalog_ctx_extra_label'.tr(),
+            controller: _buildExtraController,
+            maxLines: 4,
+            placeholder: 'catalog_ctx_extra_ph'.tr(),
+          ),
+      ],
+    );
+  }
 }
 
 // ─── Sub-widgets ──────────────────────────────────────────────────────────────
 
+/// What the sheet shows until the character's lorebooks are known: nothing can
+/// be listed and no stage can be entered yet, so the whole sheet is the wait.
+class _SheetLoading extends StatelessWidget {
+  const _SheetLoading();
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = context.cs;
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(width: 44, height: 44, child: GlazeSpinner(color: cs.primary)),
+          const SizedBox(height: 18),
+          Text(
+            'catalog_lorebooks_loading'.tr(),
+            style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _PublicSection extends StatelessWidget {
-  final bool loading;
   final List<PublicLorebook> books;
   final void Function(PublicLorebook) onDownload;
   final void Function(PublicLorebook) onDownloadJs;
   final String? buildingId;
   const _PublicSection({
-    required this.loading,
     required this.books,
     required this.onDownload,
     required this.onDownloadJs,
@@ -849,69 +1215,77 @@ class _PublicSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = context.cs;
-    if (loading) {
-      return Row(
-        children: [
-          SizedBox(
-            width: 16,
-            height: 16,
-            child: GlazeSpinner(color: cs.primary),
-          ),
-          const SizedBox(width: 12),
-          Text(
-            'Loading lorebooks…',
-            style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
-          ),
-        ],
-      );
-    }
     // Everything downloadable goes under the single "Public lorebooks" headline:
     //  - JSON books map 1:1 and download whole (no LLM);
-    //  - "advanced" / Nine API books are public but shipped as a script, so their
-    //    download opens a rebuild explanation and is converted with the LLM.
+    //  - "advanced" / Nine API books are public but shipped as a script, so they
+    //    carry a Convert action instead and are rebuilt with the LLM.
     // Private/locked books are NOT shown here — they belong to the closed section.
     final json = books.where((b) => b.accessible && !b.isJs).toList();
     final js = books.where((b) => b.isJs).toList();
+    final hasClosed = books.any((b) => !b.accessible && !b.isJs);
+    // With both kinds attached a flat list would mix two different actions
+    // (download vs. convert), so it splits into "Lorebooks" and "Scripts"
+    // sub-groups. With only one kind there is nothing to tell apart and the rows
+    // stay flat under the section headline.
+    final split = json.isNotEmpty && js.isNotEmpty;
     if (json.isEmpty && js.isEmpty) {
       // No downloadable books. Stay silent when there are closed books (the
       // closed section carries the messaging); otherwise say there are none.
-      final hasClosed = books.any((b) => !b.accessible && !b.isJs);
       if (hasClosed) return const SizedBox.shrink();
-      return Text(
-        'No public lorebooks attached.',
-        style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
-      );
-    }
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _SectionTitle('Public lorebooks', cs: cs),
-        const SizedBox(height: 4),
-        Text(
-          js.isEmpty
-              ? 'Downloaded whole from Janitor.AI — no LLM needed.'
-              : 'Downloaded whole from Janitor.AI. Scripted (advanced) books are '
-                    'rebuilt into entries with your active LLM.',
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+        child: Text(
+          'catalog_lorebooks_none'.tr(),
           style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
         ),
-        const SizedBox(height: 10),
-        for (final b in json) ...[
-          _PublicRow(book: b, onDownload: () => onDownload(b)),
-          const SizedBox(height: 8),
-        ],
-        for (final b in js) ...[
-          _PublicRow(
-            book: b,
-            onDownload: () => onDownloadJs(b),
-            building: buildingId == b.id,
-          ),
-          const SizedBox(height: 8),
-        ],
+      );
+    }
+    // Collapsed by default: these rows are a catalogue of what the character
+    // carries, not part of the extraction flow, and that flow should start at
+    // the top of the sheet. The count keeps the fact of them visible.
+    return MenuCollapsibleSection(
+      label: '${'catalog_lorebooks_public'.tr()} · ${json.length + js.length}',
+      helpTerm: 'lorebook',
+      children: [
+        MenuGroup(
+          items: [
+            _GroupNote(
+              [
+                'catalog_lorebooks_public_hint'.tr(),
+                // Public entries are subtracted from the closed-lorebook text,
+                // so the two sections never carry the same content twice.
+                if (hasClosed) 'catalog_lorebooks_public_hint_closed'.tr(),
+                // Unsplit, the scripted caveat has no sub-group header to live
+                // under, so it rides along with the section note.
+                if (js.isNotEmpty && !split)
+                  'catalog_lorebooks_public_hint_scripted'.tr(),
+              ].join(' '),
+            ),
+            if (split) MenuSubHeader('catalog_lorebooks_group_books'.tr()),
+            for (final b in json)
+              _PublicRow(book: b, onDownload: () => onDownload(b)),
+            if (split) ...[
+              MenuSubHeader('catalog_lorebooks_group_scripts'.tr()),
+              _GroupNote('catalog_lorebooks_group_scripts_note'.tr(), top: 2),
+            ],
+            for (final b in js)
+              _PublicRow(
+                book: b,
+                onDownload: () => onDownloadJs(b),
+                building: buildingId == b.id,
+              ),
+          ],
+        ),
       ],
     );
   }
 }
 
+/// One public lorebook as a menu row: title, what it is, its description, and
+/// the action it actually supports — a download affordance for a JSON book, a
+/// Convert button for a scripted one (which becomes a spinner while its rebuild
+/// runs). The row stays tappable and does the same thing, so the button labels
+/// the action rather than being the only way to reach it.
 class _PublicRow extends StatelessWidget {
   final PublicLorebook book;
   final VoidCallback? onDownload;
@@ -922,84 +1296,42 @@ class _PublicRow extends StatelessWidget {
     this.building = false,
   });
 
-  IconData get _icon =>
-      book.isJs ? Icons.code_rounded : Icons.menu_book_rounded;
-
-  String get _subtitle => book.isJs
-      ? 'Scripted (advanced) — rebuild with LLM'
-      : '${book.entryCount} entries';
-
   @override
   Widget build(BuildContext context) {
     final cs = context.cs;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: cs.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        children: [
-          Icon(_icon, size: 18, color: cs.primary),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  book.title.isEmpty ? 'Lorebook' : book.title,
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: cs.onSurface,
-                  ),
-                ),
-                Text(
-                  _subtitle,
-                  style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
-                ),
-                if (book.description.trim().isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    book.description.trim(),
-                    maxLines: 6,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 11,
-                      height: 1.35,
-                      color: cs.onSurfaceVariant.withValues(alpha: 0.85),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          if (building)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: SizedBox(
-                width: 18,
-                height: 18,
-                child: GlazeSpinner(color: cs.primary),
-              ),
+    final desc = book.description.trim();
+    return MenuItem(
+      icon: book.isJs ? Icons.code_rounded : Icons.menu_book_rounded,
+      label: book.title.isEmpty ? 'Lorebook' : book.title,
+      subtitle: [
+        book.isJs
+            ? 'catalog_lorebook_kind_scripted'.tr()
+            : 'catalog_lorebook_kind_public'.tr(args: ['${book.entryCount}']),
+        if (desc.isNotEmpty) desc,
+      ].join('\n'),
+      trailing: book.isJs
+          ? ActionTile(
+              icon: Icons.auto_fix_high_rounded,
+              label: 'catalog_lorebooks_convert_btn'.tr(),
+              compact: true,
+              primary: true,
+              busy: building,
+              onTap: onDownload,
             )
-          else
-            IconButton(
-              onPressed: onDownload,
-              icon: const Icon(Icons.download_rounded, size: 20),
-              color: cs.primary,
-              tooltip: 'Download',
-            ),
-        ],
-      ),
+          : building
+          ? SizedBox(
+              width: 18,
+              height: 18,
+              child: GlazeSpinner(color: cs.primary),
+            )
+          : Icon(Icons.download_rounded, size: 20, color: cs.primary),
+      onTap: building ? () {} : (onDownload ?? () {}),
     );
   }
 }
 
-/// One **closed** (private) lorebook row: a lock icon, the title and the
-/// "must be rebuilt from prompt" hint. Info-only — the rebuild action is a
-/// single shared button below the list (see [_RebuildAllButton]), because the
-/// capture recovers every closed book at once and merges them into one.
+/// A closed lorebook as a menu row. There is no per-row action — one capture
+/// recovers every closed book at once — so it is a plain row, not a [MenuItem].
 class _ClosedRow extends StatelessWidget {
   final PublicLorebook book;
   const _ClosedRow({required this.book});
@@ -1007,42 +1339,44 @@ class _ClosedRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = context.cs;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: cs.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(8),
-      ),
+    final desc = book.description.trim();
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.lock_outline, size: 18, color: cs.onSurfaceVariant),
-          const SizedBox(width: 10),
+          Icon(
+            Icons.lock_outline,
+            size: 22,
+            color: cs.onSurfaceVariant.withValues(alpha: 0.6),
+          ),
+          const SizedBox(width: 16),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   book.title.isEmpty ? 'Lorebook' : book.title,
+                  style: TextStyle(fontSize: 16, color: cs.onSurfaceVariant),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'catalog_lorebook_kind_closed'.tr(),
                   style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: cs.onSurface,
+                    fontSize: 12,
+                    color: cs.onSurfaceVariant.withValues(alpha: 0.45),
                   ),
                 ),
-                Text(
-                  'Must be rebuilt from the prompt',
-                  style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
-                ),
-                if (book.description.trim().isNotEmpty) ...[
+                if (desc.isNotEmpty) ...[
                   const SizedBox(height: 4),
                   Text(
-                    book.description.trim(),
+                    desc,
                     maxLines: 6,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 11,
+                      fontSize: 12,
                       height: 1.35,
-                      color: cs.onSurfaceVariant.withValues(alpha: 0.85),
+                      color: cs.onSurfaceVariant.withValues(alpha: 0.45),
                     ),
                   ),
                 ],
@@ -1055,277 +1389,111 @@ class _ClosedRow extends StatelessWidget {
   }
 }
 
-/// The single "rebuild all closed lorebooks" action. One capture recovers every
-/// closed book at once, so there is exactly one button for the whole section
-/// (not one per row). Shows a spinner while the capture + LLM rebuild runs and
-/// is disabled when the user hasn't opted in / logged in.
-class _RebuildAllButton extends StatelessWidget {
-  final int count;
-  final bool rebuilding;
-  final VoidCallback? onRebuild;
-  final ColorScheme cs;
-  const _RebuildAllButton({
-    required this.count,
-    required this.rebuilding,
-    required this.onRebuild,
-    required this.cs,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: double.infinity,
-      child: ElevatedButton.icon(
-        onPressed: rebuilding ? null : onRebuild,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: cs.primary,
-          foregroundColor: cs.onPrimary,
-          padding: const EdgeInsets.symmetric(vertical: 12),
-        ),
-        icon: rebuilding
-            ? const SizedBox(
-                width: 16,
-                height: 16,
-                child: GlazeSpinner(color: Colors.white),
-              )
-            : const Icon(Icons.auto_fix_high_rounded, size: 18),
-        label: Text(
-          rebuilding
-              ? 'Rebuilding…'
-              : count > 1
-              ? 'Rebuild all closed lorebooks ($count)'
-              : 'Rebuild closed lorebook',
-        ),
-      ),
-    );
-  }
+/// Opens the exact messages the build LLM would receive as a sheet of their
+/// own. Port of JAR's `#promptPreview`, promoted out of an inline disclosure:
+/// the prompt carries the whole extracted lorebook, so reading it inside the
+/// capture sheet meant scrolling the flow away to get to it.
+void showJanitorPromptPreviewSheet(
+  BuildContext context,
+  List<Map<String, String>> messages,
+) {
+  showModalBottomSheet<void>(
+    context: context,
+    useRootNavigator: true,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    barrierColor: Colors.black54,
+    builder: (_) => _PromptPreviewSheet(messages: messages),
+  );
 }
 
-/// A context source rendered as a collapsible block: the header carries the
-/// include/exclude toggle and a char count; expanding it reveals the exact text
-/// that will be sent to the build LLM for this source.
-class _ContextBlock extends StatelessWidget {
-  final String label;
-  final String content;
-  final bool value;
-  final ValueChanged<bool> onChanged;
-  final ColorScheme cs;
-  const _ContextBlock({
-    required this.label,
-    required this.content,
-    required this.value,
-    required this.onChanged,
-    required this.cs,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final text = content.trim();
-    final empty = text.isEmpty;
-    // An empty source can't contribute anything, so it is shown disabled with a
-    // "Content is empty" hint and is not expandable.
-    if (empty) {
-      return Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        decoration: BoxDecoration(
-          color: cs.surface,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(6, 4, 12, 4),
-          child: Row(
-            children: [
-              const SizedBox(
-                width: 24,
-                height: 24,
-                child: Checkbox(
-                  value: false,
-                  onChanged: null,
-                  visualDensity: VisualDensity.compact,
-                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: cs.onSurfaceVariant.withValues(alpha: 0.6),
-                  ),
-                ),
-              ),
-              Text(
-                'Content is empty',
-                style: TextStyle(fontSize: 10, color: cs.onSurfaceVariant),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
-        color: cs.surface,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Theme(
-        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-        child: ExpansionTile(
-          tilePadding: const EdgeInsets.symmetric(horizontal: 6),
-          minTileHeight: 44,
-          // The Checkbox consumes its own taps, so toggling inclusion does not
-          // expand/collapse the tile.
-          leading: SizedBox(
-            width: 24,
-            height: 24,
-            child: Checkbox(
-              value: value,
-              onChanged: (v) => onChanged(v ?? false),
-              visualDensity: VisualDensity.compact,
-              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-          ),
-          title: Text(
-            label,
-            style: TextStyle(fontSize: 13, color: cs.onSurface),
-          ),
-          subtitle: Text(
-            '${estimateTokens(text)} tokens',
-            style: TextStyle(fontSize: 10, color: cs.onSurfaceVariant),
-          ),
-          childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-          children: [
-            Container(
-              width: double.infinity,
-              constraints: const BoxConstraints(maxHeight: 180),
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: cs.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: SingleChildScrollView(
-                child: SelectableText(
-                  text,
-                  style: TextStyle(
-                    fontSize: 11,
-                    height: 1.4,
-                    color: cs.onSurfaceVariant,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Custom-text context source: like [_ContextBlock] but its body is an editable
-/// field (the user supplies the content rather than it being derived).
-class _CustomContextBlock extends StatelessWidget {
-  final bool value;
-  final TextEditingController controller;
-  final ValueChanged<bool> onChanged;
-  final InputDecoration decoration;
-  final ColorScheme cs;
-  const _CustomContextBlock({
-    required this.value,
-    required this.controller,
-    required this.onChanged,
-    required this.decoration,
-    required this.cs,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      decoration: BoxDecoration(
-        color: cs.surface,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Theme(
-        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-        child: ExpansionTile(
-          tilePadding: const EdgeInsets.symmetric(horizontal: 6),
-          minTileHeight: 44,
-          initiallyExpanded: value,
-          leading: SizedBox(
-            width: 24,
-            height: 24,
-            child: Checkbox(
-              value: value,
-              onChanged: (v) => onChanged(v ?? false),
-              visualDensity: VisualDensity.compact,
-              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-            ),
-          ),
-          title: Text(
-            'Custom text',
-            style: TextStyle(fontSize: 13, color: cs.onSurface),
-          ),
-          childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
-          children: [
-            TextField(
-              controller: controller,
-              maxLines: 3,
-              style: TextStyle(fontSize: 13, color: cs.onSurface),
-              decoration: decoration,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _PromptPreview extends StatelessWidget {
+class _PromptPreviewSheet extends StatelessWidget {
   final List<Map<String, String>> messages;
-  final ColorScheme cs;
-  const _PromptPreview({required this.messages, required this.cs});
+  const _PromptPreviewSheet({required this.messages});
+
+  String get _plainText =>
+      messages.map((m) => '### ${m['role']}\n${m['content']}').join('\n\n');
 
   @override
   Widget build(BuildContext context) {
-    final text = messages
-        .map((m) => '### ${m['role']}\n${m['content']}')
-        .join('\n\n');
-    return Theme(
-      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-      child: ExpansionTile(
-        tilePadding: EdgeInsets.zero,
-        title: Text(
-          'Prompt sent to the build LLM',
-          style: TextStyle(fontSize: 12, color: cs.onSurface),
+    return SheetView(
+      // Deliberately not expanded: the preview is something you glance at
+      // beside the build controls, not a screen you move into.
+      title: 'catalog_lorebooks_prompt_preview'.tr(),
+      actions: [
+        SheetViewAction(
+          icon: const Icon(Icons.copy_rounded, size: 20),
+          tooltip: 'action_copy'.tr(),
+          onPressed: () async {
+            await Clipboard.setData(ClipboardData(text: _plainText));
+            if (context.mounted) {
+              GlazeToast.show(context, 'chat_copied'.tr());
+            }
+          },
         ),
-        childrenPadding: const EdgeInsets.only(bottom: 8),
-        children: [
-          Container(
-            width: double.infinity,
-            constraints: const BoxConstraints(maxHeight: 240),
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: cs.surface,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: SingleChildScrollView(
-              child: SelectableText(
-                text,
-                style: TextStyle(
-                  fontSize: 11,
-                  height: 1.4,
-                  color: cs.onSurfaceVariant,
-                  fontFamily: 'monospace',
-                ),
-              ),
-            ),
+      ],
+      body: Builder(
+        builder: (inner) => ListView(
+          padding: EdgeInsets.only(
+            top: MediaQuery.paddingOf(inner).top + 12,
+            bottom: MediaQuery.paddingOf(inner).bottom + 24,
           ),
-        ],
+          children: [
+            for (final m in messages)
+              MenuGroup(
+                header: m['role'] ?? '',
+                description: 'catalog_ctx_tokens'.tr(
+                  args: ['${estimateTokens(m['content'] ?? '')}'],
+                ),
+                // No inner scroll view: the message is laid out in full and the
+                // sheet's own list scrolls it, so a long prompt reads as one
+                // continuous document instead of a stack of tiny panes.
+                items: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 6, 16, 14),
+                    child: SelectableText(
+                      m['content'] ?? '',
+                      style: TextStyle(
+                        fontSize: 11,
+                        height: 1.45,
+                        fontFamily: 'monospace',
+                        color: context.cs.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+          ],
+        ),
       ),
     );
   }
+}
+
+/// A muted note rendered as the first row inside a [MenuGroup] — the group's
+/// `description` slot needs a header, and these groups are titled by the
+/// collapsible section wrapping them instead.
+class _GroupNote extends StatelessWidget {
+  final String text;
+
+  /// Space above the note. Defaults to the gap a note needs when it opens a
+  /// group; a note sitting directly under a sub-header passes a smaller one, the
+  /// header having already spaced itself off whatever came before.
+  final double top;
+  const _GroupNote(this.text, {this.top = 14});
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: EdgeInsets.fromLTRB(16, top, 16, 4),
+    child: Text(
+      text,
+      style: const TextStyle(
+        color: Color(0xFF99A2AD),
+        fontSize: 12,
+        height: 1.35,
+      ),
+    ),
+  );
 }
 
 /// Collapsible diagnostics for a failed LLM build: the raw provider payload,
@@ -1348,87 +1516,48 @@ class _LlmDebugPanel extends StatelessWidget {
       if ((error.reasoning ?? '').isNotEmpty)
         ('Reasoning stream', error.reasoning!),
     ];
-    return Theme(
-      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-      child: ExpansionTile(
-        tilePadding: EdgeInsets.zero,
-        initiallyExpanded: true,
-        leading: Icon(Icons.bug_report_outlined, size: 18, color: cs.primary),
-        title: Text(
-          'LLM response (debug)',
-          style: TextStyle(fontSize: 12, color: cs.onSurface),
-        ),
-        childrenPadding: const EdgeInsets.only(bottom: 8),
-        children: [
-          for (final (label, body) in sections) ...[
-            Row(
+    return MenuCollapsibleSection(
+      label: 'catalog_lorebooks_llm_debug'.tr(),
+      children: [
+        for (final (label, body) in sections)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Expanded(
-                  child: Text(
-                    '$label · ${estimateTokens(body)} tokens',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: cs.onSurfaceVariant,
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '$label · ${'catalog_ctx_tokens'.tr(args: ['${estimateTokens(body)}'])}',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: cs.onSurfaceVariant,
+                        ),
+                      ),
                     ),
-                  ),
+                    IconButton(
+                      visualDensity: VisualDensity.compact,
+                      tooltip: 'Copy',
+                      icon: const Icon(Icons.copy_rounded, size: 14),
+                      color: cs.onSurfaceVariant,
+                      onPressed: () async {
+                        await Clipboard.setData(ClipboardData(text: body));
+                        if (context.mounted) {
+                          GlazeToast.show(context, 'Copied $label');
+                        }
+                      },
+                    ),
+                  ],
                 ),
-                IconButton(
-                  visualDensity: VisualDensity.compact,
-                  tooltip: 'Copy',
-                  icon: const Icon(Icons.copy_rounded, size: 14),
-                  color: cs.onSurfaceVariant,
-                  onPressed: () async {
-                    await Clipboard.setData(ClipboardData(text: body));
-                    if (context.mounted) {
-                      GlazeToast.show(context, 'Copied $label');
-                    }
-                  },
-                ),
+                ContentPane(text: body, mono: true, maxHeight: 200),
               ],
             ),
-            Container(
-              width: double.infinity,
-              constraints: const BoxConstraints(maxHeight: 200),
-              padding: const EdgeInsets.all(10),
-              margin: const EdgeInsets.only(bottom: 8),
-              decoration: BoxDecoration(
-                color: cs.surface,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: SingleChildScrollView(
-                child: SelectableText(
-                  body,
-                  style: TextStyle(
-                    fontSize: 11,
-                    height: 1.4,
-                    color: cs.onSurfaceVariant,
-                    fontFamily: 'monospace',
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ],
-      ),
+          ),
+      ],
     );
   }
-}
-
-class _SectionTitle extends StatelessWidget {
-  final String text;
-  final ColorScheme cs;
-  const _SectionTitle(this.text, {required this.cs});
-
-  @override
-  Widget build(BuildContext context) => Text(
-    text,
-    style: TextStyle(
-      fontSize: 14,
-      fontWeight: FontWeight.w700,
-      color: cs.onSurface,
-    ),
-  );
 }
 
 class _Hint extends StatelessWidget {
@@ -1451,144 +1580,3 @@ class _Hint extends StatelessWidget {
   );
 }
 
-/// Prominent banner shown when the character has an "advanced" (JS) lorebook:
-/// the content can't be separated mechanically, so it must be collected via the
-/// LLM. Port of JAR's `advancedNotice` (`.hint.warn`).
-class _AdvancedNotice extends StatelessWidget {
-  final ColorScheme cs;
-  const _AdvancedNotice({required this.cs});
-
-  @override
-  Widget build(BuildContext context) => Container(
-    width: double.infinity,
-    padding: const EdgeInsets.all(10),
-    decoration: BoxDecoration(
-      color: cs.primary.withValues(alpha: 0.08),
-      borderRadius: BorderRadius.circular(8),
-      border: Border(left: BorderSide(color: cs.primary, width: 2)),
-    ),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(Icons.code_rounded, size: 16, color: cs.primary),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            'This character uses JS (advanced) lorebooks. The lorebook '
-            'content must be collected with an LLM.',
-            style: TextStyle(fontSize: 12, height: 1.35, color: cs.onSurface),
-          ),
-        ),
-      ],
-    ),
-  );
-}
-
-/// Collapsible pretty-printed JSON of a built lorebook (SillyTavern World Info
-/// shape). Port of JAR's `worldInfoPre` result block.
-class _JsonView extends StatelessWidget {
-  final String json;
-  final ColorScheme cs;
-  const _JsonView({required this.json, required this.cs});
-
-  @override
-  Widget build(BuildContext context) => Theme(
-    data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-    child: ExpansionTile(
-      tilePadding: EdgeInsets.zero,
-      title: Text(
-        'Lorebook JSON',
-        style: TextStyle(fontSize: 12, color: cs.onSurface),
-      ),
-      childrenPadding: const EdgeInsets.only(bottom: 8),
-      children: [
-        Row(
-          children: [
-            const Spacer(),
-            IconButton(
-              visualDensity: VisualDensity.compact,
-              tooltip: 'Copy',
-              icon: const Icon(Icons.copy_rounded, size: 14),
-              color: cs.onSurfaceVariant,
-              onPressed: () async {
-                await Clipboard.setData(ClipboardData(text: json));
-                if (context.mounted) GlazeToast.show(context, 'Copied JSON');
-              },
-            ),
-          ],
-        ),
-        Container(
-          width: double.infinity,
-          constraints: const BoxConstraints(maxHeight: 240),
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            color: cs.surface,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: SingleChildScrollView(
-            child: SelectableText(
-              json,
-              style: TextStyle(
-                fontSize: 11,
-                height: 1.4,
-                color: cs.onSurfaceVariant,
-                fontFamily: 'monospace',
-              ),
-            ),
-          ),
-        ),
-      ],
-    ),
-  );
-}
-
-class _OrDivider extends StatelessWidget {
-  const _OrDivider();
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = context.cs;
-    final line = Expanded(
-      child: Divider(color: cs.onSurfaceVariant.withValues(alpha: 0.3)),
-    );
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      child: Row(
-        children: [
-          line,
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10),
-            child: Text(
-              'OR',
-              style: TextStyle(
-                fontSize: 11,
-                letterSpacing: 1.2,
-                fontWeight: FontWeight.w600,
-                color: cs.onSurfaceVariant,
-              ),
-            ),
-          ),
-          line,
-        ],
-      ),
-    );
-  }
-}
-
-/// The grab handle at the top of the capture sheet.
-class _SheetHandle extends StatelessWidget {
-  const _SheetHandle();
-
-  @override
-  Widget build(BuildContext context) => Center(
-        child: Container(
-          width: 36,
-          height: 4,
-          margin: const EdgeInsets.only(bottom: 12),
-          decoration: BoxDecoration(
-            color: context.cs.onSurfaceVariant.withValues(alpha: 0.4),
-            borderRadius: BorderRadius.circular(2),
-          ),
-        ),
-      );
-}

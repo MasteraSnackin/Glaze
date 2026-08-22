@@ -187,6 +187,14 @@ class CharacterDetailScreen extends ConsumerStatefulWidget {
   /// lorebooks (it starts immediately in [CatalogImportMode.character] when it
   /// has none).
   final Future<void> Function({CatalogImportMode mode})? onImport;
+
+  /// Asked once when the Import button is tapped, before the mode is chosen.
+  /// Returning false aborts the tap — the source uses it to explain that this
+  /// character cannot be imported the way the user expects (JanitorAI cards
+  /// that forbid proxies), so the warning lands on the first tap instead of
+  /// after the options sheet.
+  final Future<bool> Function()? onBeforeImport;
+
   final bool importing;
 
   /// Current phase label while [importing] (e.g. local extraction progress).
@@ -202,6 +210,7 @@ class CharacterDetailScreen extends ConsumerStatefulWidget {
     this.janitorReviewCharId,
     this.janitorLorebookArgs,
     this.onImport,
+    this.onBeforeImport,
     this.importing = false,
     this.importPhase,
   });
@@ -570,12 +579,15 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
 
   /// Import FAB tap. When the previewed character ships attached lorebooks the
   /// user first picks what to pull; otherwise the import starts immediately.
-  void _handleImportTap() {
+  Future<void> _handleImportTap() async {
     if (widget.importing) return;
+    final gate = widget.onBeforeImport;
+    if (gate != null && !await gate()) return;
+    if (!mounted) return;
     if (_previewHasLorebooks) {
       _showImportOptions();
     } else {
-      widget.onImport?.call(mode: CatalogImportMode.character);
+      await widget.onImport?.call(mode: CatalogImportMode.character);
     }
   }
 

@@ -99,6 +99,28 @@ void main() {
       ]);
       expect(sep.lorebookText, isNot(contains('Northern Keep')));
     });
+
+    // A public *script* has no readable entries until an LLM converts it, which
+    // can happen after the capture — so the same subtraction has to work on
+    // already-isolated text.
+    test('withoutPublicEntries cuts entries out of isolated text', () {
+      final sep = separate(payload, extractCard(payload));
+      expect(sep.lorebookText, contains('Northern Keep'));
+
+      final scrubbed = withoutPublicEntries(sep.lorebookText, [
+        'The Northern Keep is an ancient fortress carved into the cliffs. '
+            'It has stood for a thousand winters.',
+      ]);
+
+      expect(scrubbed, isNot(contains('Northern Keep')));
+      expect(scrubbed, contains('Frostfang Blade'));
+      expect(scrubbed, isNot(contains('\n\n\n')));
+    });
+
+    test('withoutPublicEntries leaves the text alone with nothing to cut', () {
+      final sep = separate(payload, extractCard(payload));
+      expect(withoutPublicEntries(sep.lorebookText, const []), sep.lorebookText);
+    });
   });
 
   group('restoreMacros', () {
