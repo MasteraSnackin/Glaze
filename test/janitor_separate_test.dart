@@ -100,4 +100,43 @@ void main() {
       expect(sep.lorebookText, isNot(contains('Northern Keep')));
     });
   });
+
+  group('restoreMacros', () {
+    test('swaps the baked character name back to {{char}}', () {
+      final out = restoreMacros(
+        'Aria draws her sword. Aria is loyal.',
+        charNames: ['Aria'],
+      );
+      expect(out, '{{char}} draws her sword. {{char}} is loyal.');
+    });
+
+    test('swaps the baked persona name back to {{user}}', () {
+      final out = restoreMacros(
+        'Aria bows to Cole.',
+        charNames: ['Aria'],
+        userName: 'Cole',
+      );
+      expect(out, '{{char}} bows to {{user}}.');
+    });
+
+    test('a longer name wins over the shorter one it contains', () {
+      final out = restoreMacros(
+        'Aria Blackwood signs the letter.',
+        charNames: ['Aria', 'Aria Blackwood'],
+      );
+      expect(out, '{{char}} signs the letter.');
+    });
+
+    test('very short names are left alone', () {
+      // "Al" would match inside "Always", "also", "already"…
+      final out = restoreMacros('Al always arrives early.', charNames: ['Al']);
+      expect(out, 'Al always arrives early.');
+    });
+
+    test('no names to swap leaves the text untouched', () {
+      const text = 'Nothing to substitute here.';
+      expect(restoreMacros(text), text);
+      expect(restoreMacros(text, charNames: ['', '  ']), text);
+    });
+  });
 }

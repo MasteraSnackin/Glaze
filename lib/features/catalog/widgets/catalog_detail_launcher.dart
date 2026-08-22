@@ -12,10 +12,14 @@ import '../../settings/app_settings_provider.dart';
 import '../catalog_models.dart';
 import '../catalog_provider.dart';
 import '../services/chub_provider.dart';
-import '../services/datacat_provider.dart';
+// `ExtractionResult` here is DataCat's own; the one this file uses is
+// JanitorExtractor's, so the DataCat name is hidden to keep it unambiguous.
+import '../services/datacat_provider.dart' hide ExtractionResult;
 import '../services/janitor_extractor.dart';
 import '../services/janitor_provider.dart';
+import '../services/janitor_public_lorebook.dart';
 import '../services/janny_provider.dart';
+import 'janitor_lorebook_capture_sheet.dart';
 import 'janitor_lorebooks_tab.dart';
 
 /// Fetches a catalog item's full character data and presents
@@ -122,19 +126,60 @@ class _CatalogDetailLauncherState
     );
   }
 
-  Future<void> _doImport({bool includeLorebooks = false}) async {
+  /// The JanitorAI lorebook context, when this preview has one. Lorebook work
+  /// (downloading the public books, capturing and rebuilding the closed one)
+  /// runs in the capture sheet, which owns the context choices the automatic
+  /// rebuild would have to guess at.
+  JanitorLorebookArgs? get _lorebookArgs =>
+      widget.provider == CatalogProvider.janitor
+          ? JanitorLorebookArgs(
+              characterId: widget.item.id,
+              sourceUrl: _sourceUrl() ?? widget.item.id,
+              meta: _janitorMeta ?? const {},
+              definitionPublic: _definitionPublic,
+            )
+          : null;
+
+  /// Whether any of the character's lorebooks needs the capture sheet: a closed
+  /// (private) book, or a scripted "advanced" one. Public JSON books download
+  /// whole during the import itself, so a character with only those never opens
+  /// the sheet.
+  bool get _hasCapturableLorebooks {
+    final meta = _janitorMeta;
+    if (meta == null) return false;
+    return hasAdvancedLorebook(meta) ||
+        lorebookScriptRefs(meta).any((ref) => !ref.isPublic);
+  }
+
+  Future<void> _doImport({
+    CatalogImportMode mode = CatalogImportMode.character,
+  }) async {
     final downloaded = _downloaded;
     if (downloaded == null || _importing) return;
+
+    // Lorebooks only: nothing is added to the character library, so hand
+    // straight over to the capture sheet without an import at all.
+    final lorebookArgs = _lorebookArgs;
+    if (mode == CatalogImportMode.lorebooks) {
+      if (lorebookArgs == null) return;
+      await showJanitorLorebookCaptureSheet(context, args: lorebookArgs);
+      return;
+    }
+
     setState(() {
       _importing = true;
       _importPhase = null;
     });
     try {
       final String importedCharId;
+      // Kept so the capture sheet can start from this pass instead of running a
+      // second one (see JanitorLorebookCapture.initialExtraction).
+      ExtractionResult? extraction;
+      // A closed JanitorAI card with the opt-in on: the card itself only exists
+      // inside the assembled prompt, so it is captured locally via the proxy.
+      // The lorebook is NOT rebuilt here — that is the capture sheet's job below
+      // when the user asked for lorebooks too.
       if (_useLocalExtraction) {
-        // Closed JanitorAI card + opt-in: capture the hidden card and closed
-        // lorebook locally via the proxy, then rebuild the lorebook with the
-        // active LLM (a lorebook failure still keeps the character).
         final extractor = ref.read(janitorExtractorProvider);
         final result = await extractor.extract(
           _sourceUrl() ?? widget.item.id,
@@ -142,22 +187,23 @@ class _CatalogDetailLauncherState
             if (mounted) setState(() => _importPhase = p);
           },
         );
+        extraction = result;
         final commit = await extractor.commit(
           result,
+          rebuildLorebook: false,
+          attachPublicLorebooks: mode.importsLorebooks,
+          janitorMeta: _janitorMeta,
           onPhase: (p) {
             if (mounted) setState(() => _importPhase = p);
           },
         );
         importedCharId = commit.glazeCharacterId;
-        if (mounted && commit.lorebookError != null) {
-          GlazeErrorDialog.show(
-            context,
-            'Character imported, but the closed lorebook could not be rebuilt: '
-            '${commit.lorebookError}',
-          );
-        }
       } else {
-        if (includeLorebooks && mounted) {
+        // Public definition: a plain catalog import. Public lorebooks are
+        // attached here (they download whole, no capture needed); closed ones
+        // still go through the capture sheet.
+        final attachPublic = mode.importsLorebooks;
+        if (attachPublic && mounted) {
           setState(() => _importPhase = 'catalog_import_lorebooks_phase'.tr());
         }
         importedCharId = await ref
@@ -165,13 +211,26 @@ class _CatalogDetailLauncherState
             .importCharacter(
               downloaded,
               sourceUrl: _sourceUrl(),
-              attachLorebooks: includeLorebooks,
+              attachLorebooks: attachPublic,
               janitorMeta: _janitorMeta,
             );
       }
-      if (mounted) {
-        Navigator.of(context, rootNavigator: true).pop(importedCharId);
+      if (!mounted) return;
+      // Character + lorebooks: open the capture sheet over the preview, scoped
+      // to the character we just imported so the books land on it, and close the
+      // preview once the user is done with it.
+      if (mode.importsLorebooks &&
+          lorebookArgs != null &&
+          _hasCapturableLorebooks) {
+        await showJanitorLorebookCaptureSheet(
+          context,
+          args: lorebookArgs,
+          characterId: importedCharId,
+          initialExtraction: extraction,
+        );
+        if (!mounted) return;
       }
+      Navigator.of(context, rootNavigator: true).pop(importedCharId);
     } catch (e) {
       if (mounted) {
         setState(() => _importing = false);
@@ -206,14 +265,7 @@ class _CatalogDetailLauncherState
           ? widget.item.id
           : null,
       // JanitorAI previews get a Lorebooks tab (public + closed lorebooks).
-      janitorLorebookArgs: widget.provider == CatalogProvider.janitor
-          ? JanitorLorebookArgs(
-              characterId: widget.item.id,
-              sourceUrl: _sourceUrl() ?? widget.item.id,
-              meta: _janitorMeta ?? const {},
-              definitionPublic: _definitionPublic,
-            )
-          : null,
+      janitorLorebookArgs: _lorebookArgs,
       onImport: _doImport,
       importing: _importing,
       importPhase: _importPhase,

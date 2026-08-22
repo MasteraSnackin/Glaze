@@ -14,6 +14,7 @@ import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_error_dialog.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
 import '../../../shared/widgets/glaze_toast.dart';
+import '../../catalog/catalog_models.dart';
 import '../../character_list/character_detail_screen.dart';
 import '../picks_models.dart';
 import '../picks_provider.dart';
@@ -98,10 +99,12 @@ class _PicksDetailLauncherState extends ConsumerState<PicksDetailLauncher> {
     }
   }
 
-  // [includeLorebooks] is unused here — Picks characters have no attached
-  // lorebooks tab, so the import-options sheet never appears. The named
-  // parameter is kept to satisfy CharacterDetailScreen.onImport's signature.
-  Future<void> _doImport({bool includeLorebooks = false}) async {
+  // [mode] is unused here — Picks characters have no lorebooks tab, so the
+  // import-options sheet never appears and the mode is always "character". The
+  // named parameter is kept to satisfy CharacterDetailScreen.onImport.
+  Future<void> _doImport({
+    CatalogImportMode mode = CatalogImportMode.character,
+  }) async {
     if (_character == null || _importing) return;
     setState(() => _importing = true);
 

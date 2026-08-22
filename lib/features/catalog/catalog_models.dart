@@ -47,6 +47,23 @@ abstract class CatalogTag with _$CatalogTag {
 
 enum CatalogProvider { janitor, janny, datacat, chub }
 
+/// What the Import button pulls in. The character and its lorebooks are
+/// separate jobs — a lorebook may need a prompt capture and an LLM rebuild the
+/// user did not ask for — so the import sheet lets them pick.
+enum CatalogImportMode {
+  /// The character card only.
+  character,
+
+  /// The lorebooks only; nothing is added to the character library.
+  lorebooks,
+
+  /// The character, then its lorebooks scoped to it.
+  characterAndLorebooks;
+
+  bool get importsCharacter => this != CatalogImportMode.lorebooks;
+  bool get importsLorebooks => this != CatalogImportMode.character;
+}
+
 class CatalogSearchResult {
   final List<CatalogItem> characters;
   final int total;

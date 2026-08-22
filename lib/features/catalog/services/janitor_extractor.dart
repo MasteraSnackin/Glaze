@@ -116,30 +116,71 @@ class JanitorExtractor {
       final publicBooks = await fetchPublicLorebooks(meta);
       final publicContents = publicEntryContents(publicBooks);
 
-      final payload = await proxy.captureGenerateAlpha(
+      final capture = await proxy.captureGenerateAlpha(
         characterId: characterId,
         triggerText: firstMessageMeta,
         onPhase: onPhase,
       );
+      final payload = capture.payload;
 
       onPhase?.call('separating');
-      final card = extractCard(payload);
-      final sep = separate(payload, card, publicContents);
+      final rawCard = extractCard(payload);
+      final sep = separate(payload, rawCard, publicContents);
       final advanced = hasAdvancedLorebook(meta);
-      final fullPrompt = advanced
-          ? stripLeadingJailbreak(getSystemContent(payload))
-          : '';
 
       final name = extractCharName(payload).isNotEmpty
           ? extractCharName(payload)
           : (meta?['name'] ?? 'Unknown').toString();
-      final scenario = extractScenario(payload).isNotEmpty
+
+      // JanitorAI expands {{char}} / {{user}} before assembling the prompt, so
+      // every captured field carries baked names. Put the macros back so the
+      // imported card and its lorebook stay portable. `{{user}}` is normally
+      // already intact (the capture binds a persona named `{{user}}`);
+      // [bakedUserName] is set only when that persona could not be created.
+      final charNames = <String>{
+        name,
+        (meta?['name'] ?? '').toString(),
+        (meta?['chat_name'] ?? '').toString(),
+      }.where((n) => n.trim().isNotEmpty).toList();
+      String macro(String text) => restoreMacros(
+            text,
+            charNames: charNames,
+            userName: capture.bakedUserName,
+          );
+
+      final card = macro(rawCard);
+      final lorebookText = macro(sep.lorebookText);
+      final fullPrompt = advanced
+          ? macro(stripLeadingJailbreak(getSystemContent(payload)))
+          : '';
+      final scenario = macro(extractScenario(payload).isNotEmpty
           ? extractScenario(payload)
-          : (meta?['scenario'] ?? '').toString();
-      final firstMes = extractFirstMessage(payload).isNotEmpty
-          ? extractFirstMessage(payload)
-          : firstMessageMeta;
-      final example = extractExample(payload);
+          : (meta?['scenario'] ?? '').toString());
+      final example = macro(extractExample(payload));
+
+      // Greetings, best source first: the chat object the capture created (it
+      // carries them verbatim even when a closed card withholds them from
+      // /hampter/characters), then the catalog metadata, then the assistant turn
+      // in the captured prompt — which is the character's opening line and the
+      // only place a fully withheld greeting survives.
+      final greetingList = <String>[
+        ...capture.greetings,
+        if (meta?['first_message'] is String)
+          (meta!['first_message'] as String),
+        if (meta?['first_messages'] is List)
+          ...(meta!['first_messages'] as List)
+              .whereType<String>(),
+        extractFirstMessage(payload),
+      ]
+          .map(macro)
+          .map((g) => g.trim())
+          .where((g) => g.isNotEmpty)
+          .toSet()
+          .toList();
+      final firstMes = greetingList.isEmpty ? '' : greetingList.first;
+      final alternateGreetings =
+          greetingList.length > 1 ? greetingList.sublist(1) : const <String>[];
+
       final tags = (meta?['custom_tags'] is List)
           ? (meta!['custom_tags'] as List).map((e) => e.toString()).toList()
           : <String>[];
@@ -156,21 +197,19 @@ class JanitorExtractor {
           tags: tags,
           creator: (meta?['creator_name'] ?? meta?['creator'] ?? '').toString(),
           creatorId: (meta?['creator_id'] ?? '').toString(),
+          alternateGreetings: alternateGreetings,
         ),
         avatarUrl: avatar,
       );
 
-      final greetings = [
-        firstMes,
-        ...downloaded.charData.alternateGreetings,
-      ].where((g) => g.trim().isNotEmpty).join('\n\n---\n\n');
+      final greetings = greetingList.join('\n\n---\n\n');
 
       return ExtractionResult(
         characterId: characterId,
         sourceUrl: url,
         character: downloaded,
-        lorebookText: sep.lorebookText,
-        entryBlockCount: sep.entries.length,
+        lorebookText: lorebookText,
+        entryBlockCount: splitEntries(lorebookText).length,
         cardContext: card,
         catalogContext: catalog,
         scenarioContext: scenario,
@@ -188,14 +227,38 @@ class JanitorExtractor {
   /// is lorebook text) rebuild it with the active LLM and persist it scoped to
   /// the new character. A lorebook failure does not discard the character — it
   /// is reported via [CommitResult.lorebookError].
+  ///
+  /// Pass `rebuildLorebook: false` to import the character only. The import
+  /// flow uses that when the user picked "character" (or is going to drive the
+  /// lorebook capture themselves in the lorebook sheet, which owns the context
+  /// choices the automatic rebuild has to guess at); with
+  /// `attachPublicLorebooks: true` the character's *public* books — which
+  /// download whole and need neither a capture nor an LLM — are still pulled in
+  /// and scoped to the new character.
   Future<CommitResult> commit(
     ExtractionResult result, {
     void Function(String phase)? onPhase,
+    bool rebuildLorebook = true,
+    bool attachPublicLorebooks = false,
+    Map<String, dynamic>? janitorMeta,
   }) async {
     onPhase?.call('importing character');
     final glazeId = await _ref
         .read(catalogProvider.notifier)
-        .importCharacter(result.character, sourceUrl: result.sourceUrl);
+        .importCharacter(
+          result.character,
+          sourceUrl: result.sourceUrl,
+          attachLorebooks: attachPublicLorebooks,
+          janitorMeta: janitorMeta,
+        );
+
+    if (!rebuildLorebook) {
+      return CommitResult(
+        glazeCharacterId: glazeId,
+        characterName: result.character.charData.name,
+        lorebookEntryCount: 0,
+      );
+    }
 
     if (!result.hasExtractable) {
       return CommitResult(
