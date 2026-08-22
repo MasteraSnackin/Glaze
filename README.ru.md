@@ -97,6 +97,8 @@ flutter test
 
 - [SillyImages](https://github.com/0xl0cal/sillyimages) — референс для реализации inline-генерации изображений и её провайдеров.
 - [SillyTavern-CharacterLibrary](https://github.com/Sillyanonymous/SillyTavern-CharacterLibrary) — референс для JanitorAI через браузер.
+- [Marinara Engine](https://github.com/Pasta-Devs/Marinara-Engine) — референс для Glaze Studio.
+- [Lumiverse](https://github.com/prolix-oc/Lumiverse) — референс для Glaze Studio.
 
 ## 📜 Лицензия
 
