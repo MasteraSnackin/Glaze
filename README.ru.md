@@ -93,6 +93,13 @@ flutter run
 flutter test
 ```
 
+## 🙏 Благодарности
+
+- [SillyImages](https://github.com/0xl0cal/sillyimages) — референс для реализации inline-генерации изображений и её провайдеров.
+- [SillyTavern-CharacterLibrary](https://github.com/Sillyanonymous/SillyTavern-CharacterLibrary) — референс для извлечения JanitorAI через браузер.
+- [Marinara Engine](https://github.com/Pasta-Devs/Marinara-Engine) — референс для Glaze Studio.
+- [Lumiverse](https://github.com/prolix-oc/Lumiverse) — референс для Glaze Studio.
+
 ## 📜 Лицензия
 
 Этот проект распространяется по лицензии [GNU Affero General Public License v3.0](LICENSE).
