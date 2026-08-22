@@ -145,8 +145,8 @@ Primary technical references: `docs/ARCHITECTURE.md`, `docs/INVARIANTS.md`, `doc
 
 - [SillyImages](https://github.com/0xl0cal/sillyimages) — reference for the inline image generation implementation and its providers.
 - [SillyTavern-CharacterLibrary](https://github.com/Sillyanonymous/SillyTavern-CharacterLibrary) — reference for JanitorAI extraction through a browser.
-- [Marinara Engine](https://github.com/Pasta-Devs/Marinara-Engine) — reference for Glaze Studio.
-- [Lumiverse](https://github.com/prolix-oc/Lumiverse) — reference for Glaze Studio.
+- [Marinara Engine](https://github.com/Pasta-Devs/Marinara-Engine) — inspiration for the agentic workflow.
+- [Lumiverse](https://github.com/prolix-oc/Lumiverse) — inspiration for the agentic workflow.
 
 ## 📜 License
 
