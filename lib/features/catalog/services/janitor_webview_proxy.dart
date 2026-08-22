@@ -288,6 +288,52 @@ const String _captureUserScript = r'''
         await new Promise((r) => setTimeout(r, 300));
       }
     };
+    // The text currently sitting in the tagged composer ('' when it is gone).
+    const composerText = () => {
+      const t = document.querySelector('[data-glaze-composer]');
+      if (!t) return '';
+      return (t.value !== undefined && t.value !== null ? t.value : t.textContent) || '';
+    };
+    const waitComposerCleared = async (ms) => {
+      const until = Date.now() + ms;
+      while (Date.now() < until) {
+        await new Promise((r) => setTimeout(r, 400));
+        if (!composerText().trim()) return true;
+      }
+      return false;
+    };
+    // A compact snapshot of the composer area for the error message: which text
+    // boxes exist, which one we drove, and what buttons sit next to it. Enough
+    // to tell "an overlay is up" from "we typed into the wrong box".
+    const describeComposer = () => {
+      try {
+        const areas = [];
+        const nodes = document.querySelectorAll('textarea, div[contenteditable="true"]');
+        for (let i = 0; i < nodes.length && i < 6; i++) {
+          const t = nodes[i];
+          areas.push({
+            ph: (t.placeholder || '').slice(0, 20),
+            shown: t.offsetParent !== null,
+            chosen: t.hasAttribute('data-glaze-composer'),
+            value: ((t.value !== undefined && t.value !== null ? t.value : t.textContent) || '').slice(0, 12),
+            disabled: !!t.disabled,
+          });
+        }
+        const btns = [];
+        const all = document.querySelectorAll('button');
+        for (let i = 0; i < all.length && btns.length < 8; i++) {
+          const b = all[i];
+          if (b.offsetParent === null) continue;
+          btns.push({
+            label: ((b.getAttribute('aria-label') || b.textContent || '').trim()).slice(0, 20),
+            disabled: !!b.disabled,
+          });
+        }
+        return JSON.stringify({ overlay: !!findOverlay(), areas: areas, buttons: btns });
+      } catch (e) {
+        return 'unreadable';
+      }
+    };
     window.__glazeSend = async (text) => {
       // 0) A modal overlay (persona picker, disclaimer, promo popup…) can sit
       //    over the composer and swallow the interaction; clear it before we
@@ -307,7 +353,14 @@ const String _captureUserScript = r'''
         stop.click();
         await new Promise((r) => setTimeout(r, 300));
       }
-      // 2) Type the message into the now-idle composer.
+      // 2) Type the message into the now-idle composer. Tag it so the
+      //    "did it actually send?" check below reads THIS box and not whichever
+      //    hidden textarea (character notes, drawers) comes first in the DOM.
+      const stale = document.querySelectorAll('[data-glaze-composer]');
+      for (let i = 0; i < stale.length; i++) {
+        stale[i].removeAttribute('data-glaze-composer');
+      }
+      el.setAttribute('data-glaze-composer', '1');
       el.focus();
       setReactValue(el, text);
       // 3) Poll for the enabled send button (it enables a few frames after React
@@ -324,8 +377,23 @@ const String _captureUserScript = r'''
         btn = findSendButton(el);
         if (btn) break;
       }
-      if (btn) { btn.click(); } else { pressEnter(el); }
-      return { ok: true, sent: btn ? 'click' : 'enter' };
+      // 4) Send, then VERIFY. The composer clears on a real send, so text still
+      //    sitting in it means the send was swallowed — a modal that reopened, a
+      //    disabled composer, or a click React never saw. Without this check a
+      //    swallowed send is indistinguishable from a model that never answered:
+      //    the Dart side just waits out its whole timeout.
+      let how;
+      if (btn) { btn.click(); how = 'click'; } else { pressEnter(el); how = 'enter'; }
+      let cleared = await waitComposerCleared(3000);
+      if (!cleared && btn) {
+        // The click didn't take. Some layouts only send on Enter; and a fresh
+        // overlay may have eaten the click, so clear it and try the key path.
+        await dismissModals(2000);
+        pressEnter(el);
+        how += '+enter';
+        cleared = await waitComposerCleared(3000);
+      }
+      return { ok: true, sent: how, cleared: cleared, diag: cleared ? '' : describeComposer() };
     };
     // Whether the chat composer has hydrated (React mounted a visible input).
     // The Dart side POLLS this instead of sleeping a fixed interval: how long
@@ -560,25 +628,41 @@ class JanitorWebViewProxy {
     // Without this, an account on JLLM ("janitor") never assembles a proxy
     // prompt — the send just runs on Janitor's own model.
     phase('configuring proxy');
-    final profileSnapshot = await _enterExtractionMode();
+    final apiSettingsSnapshot = await _enterExtractionMode();
     String? chatId;
     String? personaId;
     String? bakedUserName;
+    Map<String, dynamic>? profileNameSnapshot;
     try {
-      // 1) Ensure a persona literally named `{{user}}`. JanitorAI substitutes the
+      // 1) Close the first-chat profile gate. An account whose profile has no
+      //    name gets the "set up your profile" modal instead of a reply on its
+      //    first chat, and that modal eats the message we send. The gate is on
+      //    the profile name, so seeding one stops it appearing; the original is
+      //    put back in the finally. Same fix SillyTavern-CharacterLibrary uses —
+      //    prevention rather than dismissing a mandatory modal that comes back.
+      phase('checking profile');
+      final seeded = await _seedProfileName();
+      profileNameSnapshot = seeded.snapshot;
+
+      // 2) Ensure a persona literally named `{{user}}`. JanitorAI substitutes the
       //    ACTIVE persona's name into the assembled prompt, so a persona with
       //    that name makes the substitution a no-op and the macro survives in the
       //    captured card / lorebook entries. When the persona can't be created we
       //    remember the name that WILL be baked in, so the caller can swap it back.
       phase('preparing persona');
       personaId = await _ensureUserMacroPersona();
+      // The seeded sentinel is swapped back unconditionally: it is a random hex
+      // run that can never occur in genuine card text, and JanitorAI may bake the
+      // profile name in even with a persona bound. Without a seed, only the
+      // persona-less path needs the account's own name swapped.
+      bakedUserName = seeded.sentinel ??
+          (personaId == null ? await _activePersonaName() : null);
       if (personaId == null) {
-        bakedUserName = await _activePersonaName();
         _log('no {{user}} persona — baked name fallback: '
             '${bakedUserName ?? 'unknown'}');
       }
 
-      // 2) Create a fresh chat for this character, bound to that persona.
+      // 3) Create a fresh chat for this character, bound to that persona.
       phase('creating chat');
       final chatBody = await _fetchLocked(
         'https://janitorai.com/hampter/chats',
@@ -594,7 +678,7 @@ class JanitorWebViewProxy {
         throw Exception('Could not create chat (no id in response).');
       }
 
-      // 3) The chat's embedded character carries the greetings verbatim even when
+      // 4) The chat's embedded character carries the greetings verbatim even when
       //    the character endpoint withholds them for a closed card, so read them
       //    here rather than reconstructing them from the prompt.
       final greetings = await _fetchChatGreetings(chatId);
@@ -602,7 +686,7 @@ class JanitorWebViewProxy {
       final controller = _controller;
       if (controller == null) throw Exception('WebView not available.');
 
-      // 4) Install the capture hook at document start, then open the chat.
+      // 5) Install the capture hook at document start, then open the chat.
       phase('opening chat');
       await controller.removeAllUserScripts();
       await controller.addUserScript(
@@ -641,12 +725,12 @@ class JanitorWebViewProxy {
           _log('composer never appeared — sending anyway');
         }
 
-        // 5) Send "." → capture the card.
+        // 6) Send "." → capture the card.
         phase('triggering (card)');
         final dot = await _captureOneSend('.', const Duration(seconds: 60));
-        final card = dot != null ? extractCard(dot) : '';
+        final card = dot.payload != null ? extractCard(dot.payload!) : '';
 
-        // 6) Send card (+ first message) → maximise lorebook triggers.
+        // 7) Send card (+ first message) → maximise lorebook triggers.
         final parts = <String>[
           if (card.isNotEmpty) card,
           if (triggerText.trim().isNotEmpty) triggerText.trim(),
@@ -656,9 +740,12 @@ class JanitorWebViewProxy {
         await _resetCapture();
         final full =
             await _captureOneSend(trigger, const Duration(seconds: 120));
-        final result = full ?? dot;
+        final result = full.payload ?? dot.payload;
         if (result == null) {
-          throw Exception('Timed out waiting for a generateAlpha capture.');
+          // Prefer the concrete reason the send failed over a bare timeout.
+          throw Exception(full.problem ??
+              dot.problem ??
+              'Timed out waiting for a generateAlpha capture.');
         }
         phase('captured');
         return JanitorCaptureResult(
@@ -682,9 +769,12 @@ class JanitorWebViewProxy {
       if (personaId != null) {
         await _deletePersona(personaId);
       }
-      if (profileSnapshot != null) {
-        phase('restoring profile');
-        await _restoreProfile(profileSnapshot);
+      if (profileNameSnapshot != null) {
+        await _restoreProfileName(profileNameSnapshot);
+      }
+      if (apiSettingsSnapshot != null) {
+        phase('restoring settings');
+        await _restoreProfile(apiSettingsSnapshot);
       }
     }
   }
@@ -724,6 +814,8 @@ class JanitorWebViewProxy {
   }
 
   static const String _personasUrl = 'https://janitorai.com/hampter/personas';
+  static const String _profileUrl =
+      'https://janitorai.com/hampter/profiles/mine';
 
   /// The macro we want left untouched in the captured prompt. JanitorAI
   /// substitutes a persona's `name` verbatim, so a persona named exactly this
@@ -793,13 +885,63 @@ class JanitorWebViewProxy {
     }
   }
 
+  /// Seeds the account's profile name when it is empty, so the first-chat
+  /// profile modal never opens and swallows the message we are about to send.
+  ///
+  /// Returns the [snapshot] to hand [_restoreProfileName] (null when nothing was
+  /// changed) and the [sentinel] that is now standing in for the user's name —
+  /// a random hex run, so swapping it back to `{{user}}` afterwards can never
+  /// hit genuine card text.
+  Future<({Map<String, dynamic>? snapshot, String? sentinel})>
+      _seedProfileName() async {
+    try {
+      final body = await _fetchLocked(_profileUrl);
+      final parsed = jsonDecode(body);
+      if (parsed is! Map) return (snapshot: null, sentinel: null);
+      final priorName = (parsed['name'] is String) ? parsed['name'] as String : '';
+      final priorAppearance =
+          (parsed['profile'] is String) ? parsed['profile'] as String : '';
+      if (priorName.trim().isNotEmpty) return (snapshot: null, sentinel: null);
+
+      final sentinel = _randomString(24).toUpperCase();
+      await _fetchLocked(
+        _profileUrl,
+        method: 'PATCH',
+        body: jsonEncode({'name': sentinel, 'profile': priorAppearance}),
+      );
+      _log('seeded an empty profile name (first-chat modal gate)');
+      return (
+        snapshot: {'name': priorName, 'profile': priorAppearance},
+        sentinel: sentinel,
+      );
+    } catch (e) {
+      // Non-fatal: the modal may not appear at all, and the send has its own
+      // overlay dismissal as a second line of defence.
+      _log('profile name seed failed: $e');
+      return (snapshot: null, sentinel: null);
+    }
+  }
+
+  /// Puts the profile name back the way [_seedProfileName] found it.
+  Future<void> _restoreProfileName(Map<String, dynamic> snapshot) async {
+    try {
+      await _fetchLocked(
+        _profileUrl,
+        method: 'PATCH',
+        body: jsonEncode(snapshot),
+      );
+      _log('restored profile name');
+    } catch (e) {
+      _log('profile name restore failed: $e');
+    }
+  }
+
   /// The name JanitorAI will bake into `{{user}}` when no persona of ours is
   /// bound to the chat — the account's own persona/display name. Null when it
   /// can't be read.
   Future<String?> _activePersonaName() async {
     try {
-      final body =
-          await _fetchLocked('https://janitorai.com/hampter/profiles/mine');
+      final body = await _fetchLocked(_profileUrl);
       final parsed = jsonDecode(body);
       if (parsed is Map) {
         for (final key in const ['name', 'user_name']) {
@@ -1019,17 +1161,46 @@ class JanitorWebViewProxy {
   }
 
   /// Drives one `__glazeSend(text)` and polls `window.__glazeAlpha` until a
-  /// payload appears or [timeout] elapses. Returns null on timeout.
-  Future<Map<String, dynamic>?> _captureOneSend(String text, Duration timeout) async {
+  /// payload appears or [timeout] elapses.
+  ///
+  /// [problem] describes a send that visibly did not leave the composer (an
+  /// overlay swallowed the click, the box stayed disabled, React ignored the
+  /// synthetic key). The poll still runs its full course afterwards — the check
+  /// is a heuristic and a send can succeed with text left behind — but when
+  /// nothing arrives the caller can say what actually went wrong instead of
+  /// reporting a bare timeout.
+  Future<({Map<String, dynamic>? payload, String? problem})> _captureOneSend(
+    String text,
+    Duration timeout,
+  ) async {
     final controller = _controller;
-    if (controller == null) return null;
+    if (controller == null) {
+      return (payload: null, problem: 'WebView not available.');
+    }
+
+    String? problem;
     try {
-      await controller.callAsyncJavaScript(
+      final res = await controller.callAsyncJavaScript(
         functionBody: 'return await window.__glazeSend(${jsonEncode(text)});',
       );
+      final value = res?.value;
+      if (res?.error != null) {
+        problem = 'The send script failed: ${res!.error}';
+      } else if (value is Map) {
+        if (value['ok'] != true) {
+          problem = 'Could not reach the chat composer '
+              '(${value['reason'] ?? 'unknown'}).';
+        } else if (value['cleared'] == false) {
+          problem = 'The message would not send — it stayed in the composer '
+              '(${value['diag'] ?? 'no detail'}).';
+        }
+        _log('send sent=${value['sent']} cleared=${value['cleared']}');
+      }
     } catch (e) {
-      _log('send error: $e');
+      problem = 'Send failed: $e';
     }
+    if (problem != null) _log(problem);
+
     final deadline = DateTime.now().add(timeout);
     while (DateTime.now().isBefore(deadline)) {
       await Future<void>.delayed(const Duration(milliseconds: 700));
@@ -1039,12 +1210,16 @@ class JanitorWebViewProxy {
         );
         if (res is String && res.isNotEmpty && res != 'null') {
           final decoded = jsonDecode(res);
-          if (decoded is Map<String, dynamic>) return decoded;
-          if (decoded is Map) return Map<String, dynamic>.from(decoded);
+          if (decoded is Map<String, dynamic>) {
+            return (payload: decoded, problem: null);
+          }
+          if (decoded is Map) {
+            return (payload: Map<String, dynamic>.from(decoded), problem: null);
+          }
         }
       } catch (_) {}
     }
-    return null;
+    return (payload: null, problem: problem);
   }
 
   /// Whether a JanitorAI account session is present (a JWT lives in the shared
