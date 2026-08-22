@@ -148,6 +148,11 @@ Glaze Studio was informed by prior work from:
 - [Marinara Engine](https://github.com/Pasta-Devs/Marinara-Engine)
 - [Lumiverse](https://github.com/prolix-oc/Lumiverse)
 
+## 🙏 Credits
+
+- [SillyImages](https://github.com/0xl0cal/sillyimages) — reference for the inline image generation implementation and its providers.
+- [SillyTavern-CharacterLibrary](https://github.com/Sillyanonymous/SillyTavern-CharacterLibrary) — reference for JanitorAI through a browser.
+
 ## 📜 License
 
 This project is licensed under the [GNU Affero General Public License v3.0](LICENSE).
