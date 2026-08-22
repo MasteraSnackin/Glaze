@@ -16,6 +16,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/models/character.dart';
 import '../../core/services/chat_import_export.dart';
 import '../../shared/widgets/glaze_spinner.dart';
+import '../catalog/catalog_models.dart';
 import '../catalog/services/janitor_provider.dart';
 import '../catalog/services/janitor_public_lorebook.dart';
 import '../catalog/widgets/janitor_comments_section.dart';
@@ -181,9 +182,11 @@ class CharacterDetailScreen extends ConsumerStatefulWidget {
   /// extraction + LLM build of the closed lorebook.
   final JanitorLorebookArgs? janitorLorebookArgs;
 
-  /// Runs the import. [includeLorebooks] is chosen via the import-options bottom
-  /// sheet when the previewed character has attached lorebooks.
-  final Future<void> Function({bool includeLorebooks})? onImport;
+  /// Runs the import in the given [CatalogImportMode], chosen via the
+  /// import-options bottom sheet when the previewed character has attached
+  /// lorebooks (it starts immediately in [CatalogImportMode.character] when it
+  /// has none).
+  final Future<void> Function({CatalogImportMode mode})? onImport;
   final bool importing;
 
   /// Current phase label while [importing] (e.g. local extraction progress).
@@ -566,19 +569,23 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
   }
 
   /// Import FAB tap. When the previewed character ships attached lorebooks the
-  /// user first picks whether to pull them along; otherwise the import starts
-  /// immediately.
+  /// user first picks what to pull; otherwise the import starts immediately.
   void _handleImportTap() {
     if (widget.importing) return;
     if (_previewHasLorebooks) {
       _showImportOptions();
     } else {
-      widget.onImport?.call();
+      widget.onImport?.call(mode: CatalogImportMode.character);
     }
   }
 
   void _showImportOptions() {
     final rootNav = Navigator.of(context, rootNavigator: true);
+    void run(CatalogImportMode mode) {
+      rootNav.pop();
+      widget.onImport?.call(mode: mode);
+    }
+
     GlazeBottomSheet.show<void>(
       context,
       title: 'catalog_import_options_title'.tr(),
@@ -587,19 +594,21 @@ class _CharacterDetailScreenState extends ConsumerState<CharacterDetailScreen> {
           icon: Icons.auto_stories_outlined,
           label: 'catalog_import_with_lorebooks'.tr(),
           hint: 'catalog_import_with_lorebooks_hint'.tr(),
-          onTap: () {
-            rootNav.pop();
-            widget.onImport?.call(includeLorebooks: true);
-          },
+          onTap: () => run(CatalogImportMode.characterAndLorebooks),
         ),
         BottomSheetItem(
           icon: Icons.person_outline_rounded,
           label: 'catalog_import_char_only'.tr(),
           hint: 'catalog_import_char_only_hint'.tr(),
-          onTap: () {
-            rootNav.pop();
-            widget.onImport?.call(includeLorebooks: false);
-          },
+          onTap: () => run(CatalogImportMode.character),
+        ),
+        // Lorebooks on their own: the character is already in the library (or
+        // the user only wants the world info), so nothing is added to it.
+        BottomSheetItem(
+          icon: Icons.menu_book_outlined,
+          label: 'catalog_import_lorebooks_only'.tr(),
+          hint: 'catalog_import_lorebooks_only_hint'.tr(),
+          onTap: () => run(CatalogImportMode.lorebooks),
         ),
       ],
     );

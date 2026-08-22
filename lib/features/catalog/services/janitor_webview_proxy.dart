@@ -316,7 +316,9 @@ const String _captureUserScript = r'''
       //    on the first send of a fresh chat), so clear it once more first.
       await dismissModals();
       let btn = null;
-      const deadline = Date.now() + 15000;
+      // Generous: on a slow phone React can take many seconds to enable the
+      // button after it ingests the value, and giving up early loses the run.
+      const deadline = Date.now() + 30000;
       while (Date.now() < deadline) {
         await new Promise((r) => setTimeout(r, 200));
         btn = findSendButton(el);
@@ -325,8 +327,38 @@ const String _captureUserScript = r'''
       if (btn) { btn.click(); } else { pressEnter(el); }
       return { ok: true, sent: btn ? 'click' : 'enter' };
     };
+    // Whether the chat composer has hydrated (React mounted a visible input).
+    // The Dart side POLLS this instead of sleeping a fixed interval: how long
+    // hydration takes depends on the device and the network, so any constant is
+    // either too short on a slow phone or wasted time on a fast one.
+    window.__glazeComposerReady = () => !!findInput();
   })();
 ''';
+
+/// Everything one capture run recovers: the assembled `generateAlpha` [payload]
+/// plus the material that only exists around it.
+///
+/// [greetings] come from the chat object JanitorAI creates for the capture
+/// (`GET /hampter/chats/{id}` → `character.first_messages`), which carries the
+/// greetings verbatim even when the character endpoint withholds them — the same
+/// source SillyTavern-CharacterLibrary reads. Index 0 is the primary greeting,
+/// the rest are alternates.
+///
+/// [bakedUserName] is set only when the throwaway `{{user}}` persona could NOT be
+/// created: JanitorAI then substitutes the account's own persona/display name
+/// into the prompt, and the caller swaps that name back to the macro. It is null
+/// on the normal path, where the persona makes the substitution a no-op.
+class JanitorCaptureResult {
+  final Map<String, dynamic> payload;
+  final List<String> greetings;
+  final String? bakedUserName;
+
+  const JanitorCaptureResult({
+    required this.payload,
+    this.greetings = const [],
+    this.bakedUserName,
+  });
+}
 
 /// Thrown when the proxy could not obtain a CF-cleared response.
 class JanitorCfException implements Exception {
@@ -477,17 +509,23 @@ class JanitorWebViewProxy {
   /// triggered (closed) lorebook entries. Port of the SillyTavern
   /// `janitor-lorebook` plugin's `runFromUrl`/`_autoTrigger`.
   ///
-  /// Pipeline (serialized through [_gate]): create a fresh chat, navigate the
-  /// offscreen WebView to it with [_captureUserScript] installed, send `"."` to
-  /// surface the card, then re-send the card text (+ optional [triggerText],
-  /// e.g. the first message) to maximise lorebook keyword matches, and return
-  /// the captured payload. Throws on timeout / login / CF failure.
-  Future<Map<String, dynamic>> captureGenerateAlpha({
+  /// Pipeline (serialized through [_gate]): ensure a persona named `{{user}}`,
+  /// create a fresh chat bound to it, navigate the offscreen WebView to it with
+  /// [_captureUserScript] installed, send `"."` to surface the card, then re-send
+  /// the card text (+ optional [triggerText], e.g. the first message) to maximise
+  /// lorebook keyword matches, and return the captured payload. The chat, the
+  /// persona and the throwaway proxy preset are all removed afterwards, and the
+  /// account's API settings are restored. Throws on timeout / login / CF failure.
+  ///
+  /// The run is serialized on purpose: it mutates shared account state (selected
+  /// proxy preset, generation settings, persona), so two captures overlapping
+  /// would restore each other's snapshots and leave the account misconfigured.
+  Future<JanitorCaptureResult> captureGenerateAlpha({
     required String characterId,
     String triggerText = '',
     void Function(String phase)? onPhase,
   }) {
-    final completer = Completer<Map<String, dynamic>>();
+    final completer = Completer<JanitorCaptureResult>();
     _gate = _gate.then((_) async {
       try {
         completer.complete(
@@ -499,7 +537,7 @@ class JanitorWebViewProxy {
     return completer.future;
   }
 
-  Future<Map<String, dynamic>> _captureLocked(
+  Future<JanitorCaptureResult> _captureLocked(
     String characterId,
     String triggerText,
     void Function(String phase)? onPhase,
@@ -523,24 +561,48 @@ class JanitorWebViewProxy {
     // prompt — the send just runs on Janitor's own model.
     phase('configuring proxy');
     final profileSnapshot = await _enterExtractionMode();
+    String? chatId;
+    String? personaId;
+    String? bakedUserName;
     try {
-      // 1) Create a fresh chat for this character.
+      // 1) Ensure a persona literally named `{{user}}`. JanitorAI substitutes the
+      //    ACTIVE persona's name into the assembled prompt, so a persona with
+      //    that name makes the substitution a no-op and the macro survives in the
+      //    captured card / lorebook entries. When the persona can't be created we
+      //    remember the name that WILL be baked in, so the caller can swap it back.
+      phase('preparing persona');
+      personaId = await _ensureUserMacroPersona();
+      if (personaId == null) {
+        bakedUserName = await _activePersonaName();
+        _log('no {{user}} persona — baked name fallback: '
+            '${bakedUserName ?? 'unknown'}');
+      }
+
+      // 2) Create a fresh chat for this character, bound to that persona.
       phase('creating chat');
       final chatBody = await _fetchLocked(
         'https://janitorai.com/hampter/chats',
         method: 'POST',
-        body: jsonEncode({'character_id': characterId}),
+        body: jsonEncode({
+          'character_id': characterId,
+          if (personaId != null) 'persona_id': personaId,
+        }),
       );
       final chatJson = jsonDecode(chatBody);
-      final chatId = (chatJson is Map ? chatJson['id'] : null)?.toString();
+      chatId = (chatJson is Map ? chatJson['id'] : null)?.toString();
       if (chatId == null || chatId.isEmpty) {
         throw Exception('Could not create chat (no id in response).');
       }
 
+      // 3) The chat's embedded character carries the greetings verbatim even when
+      //    the character endpoint withholds them for a closed card, so read them
+      //    here rather than reconstructing them from the prompt.
+      final greetings = await _fetchChatGreetings(chatId);
+
       final controller = _controller;
       if (controller == null) throw Exception('WebView not available.');
 
-      // 2) Install the capture hook at document start, then open the chat.
+      // 4) Install the capture hook at document start, then open the chat.
       phase('opening chat');
       await controller.removeAllUserScripts();
       await controller.addUserScript(
@@ -571,15 +633,20 @@ class JanitorWebViewProxy {
         await _awaitLoad();
         await _waitForClearance();
 
-        // Give the React chat app time to hydrate before driving the input.
-        await Future<void>.delayed(const Duration(milliseconds: 2500));
+        // Wait for the React chat app to actually mount its composer instead of
+        // sleeping a constant: hydration takes as long as the device and the
+        // network make it take.
+        phase('waiting for chat UI');
+        if (!await _waitForComposer(const Duration(seconds: 60))) {
+          _log('composer never appeared — sending anyway');
+        }
 
-        // 3) Send "." → capture the card.
+        // 5) Send "." → capture the card.
         phase('triggering (card)');
         final dot = await _captureOneSend('.', const Duration(seconds: 60));
         final card = dot != null ? extractCard(dot) : '';
 
-        // 4) Send card (+ first message) → maximise lorebook triggers.
+        // 6) Send card (+ first message) → maximise lorebook triggers.
         final parts = <String>[
           if (card.isNotEmpty) card,
           if (triggerText.trim().isNotEmpty) triggerText.trim(),
@@ -594,17 +661,196 @@ class JanitorWebViewProxy {
           throw Exception('Timed out waiting for a generateAlpha capture.');
         }
         phase('captured');
-        return result;
+        return JanitorCaptureResult(
+          payload: result,
+          greetings: greetings,
+          bakedUserName: bakedUserName,
+        );
       } finally {
         try {
           await controller.removeAllUserScripts();
         } catch (_) {}
       }
     } finally {
+      // Clean up everything the capture created, in dependency order: the chat
+      // references the persona, the persona outlives neither. Each step is
+      // best-effort — a failure here must not mask the capture's own result.
+      if (chatId != null) {
+        phase('deleting chat');
+        await _deleteChat(chatId);
+      }
+      if (personaId != null) {
+        await _deletePersona(personaId);
+      }
       if (profileSnapshot != null) {
         phase('restoring profile');
         await _restoreProfile(profileSnapshot);
       }
+    }
+  }
+
+  /// Polls the injected `__glazeComposerReady()` until the chat composer exists
+  /// or [timeout] elapses. Returns whether it appeared.
+  Future<bool> _waitForComposer(Duration timeout) async {
+    final controller = _controller;
+    if (controller == null) return false;
+    final deadline = DateTime.now().add(timeout);
+    while (DateTime.now().isBefore(deadline)) {
+      try {
+        final res = await controller.evaluateJavascript(
+          source: 'window.__glazeComposerReady ? '
+              '!!window.__glazeComposerReady() : false',
+        );
+        if (res == true) return true;
+      } catch (_) {}
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+    }
+    return false;
+  }
+
+  /// Deletes the chat created for a capture. It exists only so JanitorAI would
+  /// assemble the prompt; leaving it behind adds one dead entry to the account's
+  /// chat list per extraction.
+  Future<void> _deleteChat(String chatId) async {
+    try {
+      await _fetchLocked(
+        'https://janitorai.com/hampter/chats/$chatId',
+        method: 'DELETE',
+      );
+      _log('deleted capture chat $chatId');
+    } catch (e) {
+      _log('chat delete failed: $e');
+    }
+  }
+
+  static const String _personasUrl = 'https://janitorai.com/hampter/personas';
+
+  /// The macro we want left untouched in the captured prompt. JanitorAI
+  /// substitutes a persona's `name` verbatim, so a persona named exactly this
+  /// turns the substitution into `{{user}}` -> `{{user}}`.
+  static const String _userMacroName = '{{user}}';
+
+  /// Finds (or creates) a persona literally named `{{user}}` and returns its id.
+  /// Idempotent — a leftover persona from an interrupted run is reused instead of
+  /// piling up duplicates. Returns null when the account's personas can neither
+  /// be listed nor created; the capture then falls back to swapping the baked
+  /// name back to the macro (see [JanitorCaptureResult.bakedUserName]).
+  Future<String?> _ensureUserMacroPersona() async {
+    try {
+      final body = await _fetchLocked(_personasUrl);
+      final parsed = jsonDecode(body);
+      final list = parsed is List
+          ? parsed
+          : (parsed is Map && parsed['personas'] is List)
+              ? parsed['personas'] as List
+              : (parsed is Map && parsed['data'] is List)
+                  ? parsed['data'] as List
+                  : const [];
+      for (final p in list) {
+        if (p is Map && p['name'] == _userMacroName && p['id'] != null) {
+          _log('reusing {{user}} persona ${p['id']}');
+          return p['id'].toString();
+        }
+      }
+    } catch (e) {
+      // A failed list is not fatal — fall through and try to create one.
+      _log('could not list personas: $e');
+    }
+    try {
+      // Body mirrors the JanitorAI web client's POST exactly (empty
+      // appearance/avatar, null group/pronouns) so the server accepts it.
+      final body = await _fetchLocked(
+        _personasUrl,
+        method: 'POST',
+        body: jsonEncode({
+          'appearance': '',
+          'avatar': '',
+          'groupId': null,
+          'name': _userMacroName,
+          'pronouns': null,
+        }),
+      );
+      final parsed = jsonDecode(body);
+      final id = (parsed is Map ? (parsed['id'] ?? parsed['data']?['id']) : null)
+          ?.toString();
+      if (id != null && id.isNotEmpty) {
+        _log('created {{user}} persona $id');
+        return id;
+      }
+    } catch (e) {
+      _log('could not create {{user}} persona: $e');
+    }
+    return null;
+  }
+
+  /// Deletes the throwaway `{{user}}` persona. Best-effort.
+  Future<void> _deletePersona(String personaId) async {
+    try {
+      await _fetchLocked('$_personasUrl/$personaId', method: 'DELETE');
+      _log('deleted persona $personaId');
+    } catch (e) {
+      _log('persona delete failed: $e');
+    }
+  }
+
+  /// The name JanitorAI will bake into `{{user}}` when no persona of ours is
+  /// bound to the chat — the account's own persona/display name. Null when it
+  /// can't be read.
+  Future<String?> _activePersonaName() async {
+    try {
+      final body =
+          await _fetchLocked('https://janitorai.com/hampter/profiles/mine');
+      final parsed = jsonDecode(body);
+      if (parsed is Map) {
+        for (final key in const ['name', 'user_name']) {
+          final v = parsed[key];
+          if (v is String && v.trim().isNotEmpty) return v.trim();
+        }
+      }
+    } catch (e) {
+      _log('could not read profile name: $e');
+    }
+    return null;
+  }
+
+  /// Greetings from the chat's embedded character (`first_message` +
+  /// `first_messages`). A closed card withholds these from
+  /// `/hampter/characters/{id}`, but the chat object still carries them.
+  /// Index 0 is the primary greeting. Empty on any failure.
+  Future<List<String>> _fetchChatGreetings(String chatId) async {
+    try {
+      final body =
+          await _fetchLocked('https://janitorai.com/hampter/chats/$chatId');
+      final parsed = jsonDecode(body);
+      if (parsed is! Map) return const [];
+      final nested = parsed['data'];
+      final character = parsed['character'] ??
+          (nested is Map ? nested['character'] : null);
+      if (character is! Map) return const [];
+
+      final out = <String>[];
+      void add(dynamic g) {
+        final text = g is String
+            ? g
+            : (g is Map ? (g['first_message'] ?? g['message'] ?? '') : '')
+                .toString();
+        final trimmed = text.trim();
+        // JanitorAI pads the array with nulls and invisible-character
+        // placeholders that would import as blank greetings.
+        if (trimmed.isEmpty) return;
+        if (!RegExp(r'[\p{L}\p{N}]', unicode: true).hasMatch(trimmed)) return;
+        if (out.contains(trimmed)) return;
+        out.add(trimmed);
+      }
+
+      add(character['first_message']);
+      final list = character['first_messages'];
+      if (list is List) list.forEach(add);
+      _log('chat greetings: ${out.length}');
+      return out;
+    } catch (e) {
+      _log('chat greetings fetch failed: $e');
+      return const [];
     }
   }
 
@@ -635,6 +881,13 @@ class JanitorWebViewProxy {
       final originalGen = settings['generation_settings'] is Map
           ? Map<String, dynamic>.from(settings['generation_settings'] as Map)
           : null;
+      // An account with no proxy presets of its own was on JLLM before we
+      // touched it: there is no previous selection to put back, so the restore
+      // must explicitly return it to JLLM instead of leaving our (deleted)
+      // dummy selected in proxy mode.
+      final hadOwnPresets = (before is Map && before['proxy_configs'] is List)
+          ? (before['proxy_configs'] as List).isNotEmpty
+          : false;
 
       // Create the throwaway preset, then re-read to resolve the server-assigned
       // id (the POST body only carries our client_id).
@@ -679,6 +932,7 @@ class JanitorWebViewProxy {
         'source': originalSource,
         'generationSettings': originalGen,
         'dummyServerId': dummyServerId,
+        'hadOwnPresets': hadOwnPresets,
       };
     } catch (e) {
       _log('enterExtractionMode failed (capture proceeds anyway): $e');
@@ -694,13 +948,40 @@ class JanitorWebViewProxy {
 
   /// Restores the original selection / source / generation settings and deletes
   /// the injected dummy preset.
+  ///
+  /// Two cases the naive "put back what was there" misses, and both leave the
+  /// account broken for the user's own chats:
+  ///  * the account had **no proxy presets** — there is nothing to re-select, so
+  ///    it goes back to JLLM (`source: janitor`, no selected preset) rather than
+  ///    staying in proxy mode pointed at the preset we are about to delete;
+  ///  * the account had **no readable generation settings** — we still forced
+  ///    `context_length: 0` on it, so a skipped restore would leave every real
+  ///    chat with a zero context. A sane default goes back instead.
+  static const int _defaultContextLength = 4096;
+
   Future<void> _restoreProfile(Map<String, dynamic> snapshot) async {
+    final hadOwnPresets = snapshot['hadOwnPresets'] == true;
+    final originalGen = snapshot['generationSettings'];
+
     final patch = <String, dynamic>{
-      'selected_proxy_config_id': snapshot['selectedProxyConfigId'],
+      'selected_proxy_config_id':
+          hadOwnPresets ? snapshot['selectedProxyConfigId'] : null,
     };
-    if (snapshot['source'] != null) patch['source'] = snapshot['source'];
-    if (snapshot['generationSettings'] != null) {
-      patch['generation_settings'] = snapshot['generationSettings'];
+    if (!hadOwnPresets) {
+      patch['source'] = 'janitor'; // JLLM
+    } else if (snapshot['source'] != null) {
+      patch['source'] = snapshot['source'];
+    }
+
+    if (originalGen is Map && originalGen['context_length'] is num) {
+      patch['generation_settings'] = originalGen;
+    } else {
+      patch['generation_settings'] = {
+        ...?(originalGen is Map ? Map<String, dynamic>.from(originalGen) : null),
+        'context_length': _defaultContextLength,
+      };
+      _log('no original context_length — restoring the '
+          '$_defaultContextLength default');
     }
     try {
       await _patchApiSettings(patch);

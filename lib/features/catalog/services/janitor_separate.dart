@@ -240,6 +240,42 @@ String extractFirstMessage(Map<String, dynamic> payload) {
   return '';
 }
 
+/// Shortest name that may be swapped back to a macro. A one- or two-letter
+/// name matches everywhere and would shred the text.
+const int _minMacroNeedle = 3;
+
+/// Puts the `{{char}}` / `{{user}}` macros back into captured text.
+///
+/// JanitorAI expands macros **before** it assembles the prompt, so everything we
+/// capture carries real names where the card's macros used to be. `{{user}}` is
+/// normally handled upstream (the capture binds a persona literally named
+/// `{{user}}`, making the substitution a no-op) — [userName] is only for the
+/// fallback path where that persona could not be created, and is the name that
+/// got baked in instead. [charNames] are the character's names as JanitorAI
+/// knows them (`name`, `chat_name`, the persona-tag name); each is swapped back
+/// to `{{char}}`. Names shorter than [_minMacroNeedle] are left alone.
+String restoreMacros(
+  String text, {
+  List<String> charNames = const [],
+  String? userName,
+}) {
+  if (text.isEmpty) return text;
+  var out = text;
+  // Longest first: swapping "Anna" before "Anna Lee" would leave "{{char}} Lee".
+  final chars = charNames
+      .map((n) => n.trim())
+      .where((n) => n.length >= _minMacroNeedle)
+      .toSet()
+      .toList()
+    ..sort((a, b) => b.length.compareTo(a.length));
+  for (final name in chars) {
+    out = out.replaceAll(name, '{{char}}');
+  }
+  final user = userName?.trim() ?? '';
+  if (user.length >= _minMacroNeedle) out = out.replaceAll(user, '{{user}}');
+  return out;
+}
+
 /// Isolates the closed-lorebook text from [payload]. Pass the known card text
 /// (e.g. [extractCard]) as [knownCard] to scrub any card lines that leaked past
 /// wrapper stripping, and the verbatim entry contents of the character's PUBLIC
