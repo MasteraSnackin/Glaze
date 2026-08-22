@@ -117,18 +117,59 @@ const String _captureUserScript = r'''
       o && Array.isArray(o.messages) &&
       o.messages.some((m) => m && m.role === 'system' && typeof m.content === 'string');
 
+    // Every `/generateAlpha` round trip we observe, matched or not. A capture
+    // that times out is otherwise indistinguishable between "the request never
+    // fired", "it fired and the server refused" and "the body wasn't a prompt";
+    // the Dart side reads this log on timeout and reports which one happened.
+    window.__glazeAlphaLog = [];
+    const noteAlpha = (entry) => {
+      try {
+        entry.t = Math.round(performance.now());
+        window.__glazeAlphaLog.push(entry);
+        // Bounded: a long capture must not grow the page's memory unbounded.
+        while (window.__glazeAlphaLog.length > 12) window.__glazeAlphaLog.shift();
+      } catch (e) {}
+    };
+    // Records one response body and, when it is the assembled prompt, keeps it.
+    const takeAlpha = (via, status, text) => {
+      let j = null;
+      try { j = JSON.parse(text); } catch (e) {}
+      const matched = !!looksLikePayload(j);
+      if (matched) window.__glazeAlpha = j;
+      noteAlpha({
+        via: via,
+        status: status,
+        matched: matched,
+        body: matched ? '' : (text || '').slice(0, 300),
+      });
+    };
+    const isAlphaUrl = (u) =>
+      typeof u === 'string' && u.indexOf('/generateAlpha') >= 0;
+
     // --- fetch hook ---
     const origFetch = window.fetch ? window.fetch.bind(window) : null;
     if (origFetch) {
       window.fetch = async function (...args) {
-        const res = await origFetch(...args);
+        let alpha = false;
         try {
           const a0 = args[0];
-          const url = (a0 && a0.url) ? a0.url : (typeof a0 === 'string' ? a0 : '');
-          if (typeof url === 'string' && url.indexOf('/generateAlpha') >= 0) {
-            res.clone().json().then((j) => {
-              if (looksLikePayload(j)) window.__glazeAlpha = j;
-            }).catch(() => {});
+          alpha = isAlphaUrl((a0 && a0.url) ? a0.url : a0);
+        } catch (e) {}
+        let res;
+        try {
+          res = await origFetch(...args);
+        } catch (e) {
+          // A transport-level failure never reaches the `load` path below, so
+          // log it here or the timeout would look like silence.
+          if (alpha) noteAlpha({ via: 'fetch', status: 0, matched: false, body: 'network error: ' + e });
+          throw e;
+        }
+        try {
+          if (alpha) {
+            const status = res.status;
+            res.clone().text()
+              .then((txt) => takeAlpha('fetch', status, txt))
+              .catch((e) => noteAlpha({ via: 'fetch', status: status, matched: false, body: 'unreadable body: ' + e }));
           }
         } catch (e) {}
         return res;
@@ -149,10 +190,15 @@ const String _captureUserScript = r'''
           OrigXHR.prototype.send = function () {
             this.addEventListener('load', function () {
               try {
-                if (typeof this.__glazeUrl === 'string' &&
-                    this.__glazeUrl.indexOf('/generateAlpha') >= 0) {
-                  const j = JSON.parse(this.responseText);
-                  if (looksLikePayload(j)) window.__glazeAlpha = j;
+                if (isAlphaUrl(this.__glazeUrl)) {
+                  takeAlpha('xhr', this.status, this.responseText);
+                }
+              } catch (e) {}
+            });
+            this.addEventListener('error', function () {
+              try {
+                if (isAlphaUrl(this.__glazeUrl)) {
+                  noteAlpha({ via: 'xhr', status: this.status || 0, matched: false, body: 'network error' });
                 }
               } catch (e) {}
             });
@@ -418,11 +464,20 @@ const String _captureUserScript = r'''
 /// on the normal path, where the persona makes the substitution a no-op.
 class JanitorCaptureResult {
   final Map<String, dynamic> payload;
+
+  /// The assembled prompt from the capture's FIRST send (a bare `"."`), kept as
+  /// the "before the trigger fired" snapshot the field diff subtracts from
+  /// [payload] — see `janitor_field_diff.dart`. Null when the second send never
+  /// produced a payload of its own, in which case [payload] IS the probe and
+  /// diffing it against itself would say nothing.
+  final Map<String, dynamic>? probePayload;
+
   final List<String> greetings;
   final String? bakedUserName;
 
   const JanitorCaptureResult({
     required this.payload,
+    this.probePayload,
     this.greetings = const [],
     this.bakedUserName,
   });
@@ -434,6 +489,50 @@ class JanitorCfException implements Exception {
   JanitorCfException(this.status);
   @override
   String toString() => 'JanitorCfException(status=$status)';
+}
+
+/// Thrown when janitorai.com rejected the session itself (HTTP 401).
+///
+/// The account cookie/JWT the offscreen WebView holds went stale — the user is
+/// still "logged in" as far as Glaze knows, but every account call now fails.
+/// Only a fresh login fixes it, so the UI asks for one instead of reporting a
+/// generic HTTP error.
+class JanitorAuthException implements Exception {
+  const JanitorAuthException();
+
+  @override
+  String toString() => 'Janitor.AI session expired (401)';
+}
+
+/// Thrown when JanitorAI itself refused to assemble the prompt: `/generateAlpha`
+/// answered with an HTTP error instead of a payload.
+///
+/// The common case is [isProxyForbidden] — the creator restricted the character
+/// to JanitorAI's own model, so the proxy preset the capture installs is
+/// rejected and no closed card or lorebook can ever be recovered for it. That is
+/// a permanent property of the character, not a transient failure, so the UI
+/// says so up front instead of offering a retry.
+class JanitorRefusedException implements Exception {
+  /// HTTP status of the refused `/generateAlpha` response (0 = transport error).
+  final int status;
+
+  /// The server's own wording, e.g. `Proxies are forbidden for this character`.
+  final String message;
+
+  const JanitorRefusedException(this.status, this.message);
+
+  /// The refusal a character with `allow_proxy: false` is going to produce,
+  /// built from its catalog metadata before any capture runs. The wording is
+  /// JanitorAI's own, so it reads identically whether it was predicted here or
+  /// read off a real 403.
+  const JanitorRefusedException.proxyForbidden()
+      : status = 403,
+        message = 'Proxies are forbidden for this character';
+
+  bool get isProxyForbidden => message.toLowerCase().contains('prox');
+
+  @override
+  String toString() => message.isEmpty ? 'generateAlpha failed ($status)' : message;
 }
 
 /// Persistent offscreen WebView that runs janitorai.com API requests from
@@ -580,8 +679,10 @@ class JanitorWebViewProxy {
   /// Pipeline (serialized through [_gate]): ensure a persona named `{{user}}`,
   /// create a fresh chat bound to it, navigate the offscreen WebView to it with
   /// [_captureUserScript] installed, send `"."` to surface the card, then re-send
-  /// the card text (+ optional [triggerText], e.g. the first message) to maximise
-  /// lorebook keyword matches, and return the captured payload. The chat, the
+  /// the card text (+ optional [triggerText], e.g. the catalog description) to
+  /// maximise lorebook keyword matches, and return the captured payload. Pass
+  /// `includeCard: false` to leave the recovered card out of that second send —
+  /// the user deselected it as a trigger source. The chat, the
   /// persona and the throwaway proxy preset are all removed afterwards, and the
   /// account's API settings are restored. Throws on timeout / login / CF failure.
   ///
@@ -591,13 +692,14 @@ class JanitorWebViewProxy {
   Future<JanitorCaptureResult> captureGenerateAlpha({
     required String characterId,
     String triggerText = '',
+    bool includeCard = true,
     void Function(String phase)? onPhase,
   }) {
     final completer = Completer<JanitorCaptureResult>();
     _gate = _gate.then((_) async {
       try {
-        completer.complete(
-            await _captureLocked(characterId, triggerText, onPhase));
+        completer.complete(await _captureLocked(
+            characterId, triggerText, includeCard, onPhase));
       } catch (e, st) {
         completer.completeError(e, st);
       }
@@ -608,6 +710,7 @@ class JanitorWebViewProxy {
   Future<JanitorCaptureResult> _captureLocked(
     String characterId,
     String triggerText,
+    bool includeCard,
     void Function(String phase)? onPhase,
   ) async {
     void phase(String p) {
@@ -728,11 +831,14 @@ class JanitorWebViewProxy {
         // 6) Send "." → capture the card.
         phase('triggering (card)');
         final dot = await _captureOneSend('.', const Duration(seconds: 60));
+        // A refusal applies to the character, not to this particular message —
+        // the second send would be refused identically, so stop here.
+        if (dot.refusal != null) throw _refusalError(characterId, dot.refusal!);
         final card = dot.payload != null ? extractCard(dot.payload!) : '';
 
-        // 7) Send card (+ first message) → maximise lorebook triggers.
+        // 7) Send card (+ the selected context) → maximise lorebook triggers.
         final parts = <String>[
-          if (card.isNotEmpty) card,
+          if (includeCard && card.isNotEmpty) card,
           if (triggerText.trim().isNotEmpty) triggerText.trim(),
         ];
         final trigger = parts.isEmpty ? '.' : parts.join('\n\n');
@@ -742,6 +848,8 @@ class JanitorWebViewProxy {
             await _captureOneSend(trigger, const Duration(seconds: 120));
         final result = full.payload ?? dot.payload;
         if (result == null) {
+          final refusal = full.refusal ?? dot.refusal;
+          if (refusal != null) throw _refusalError(characterId, refusal);
           // Prefer the concrete reason the send failed over a bare timeout.
           throw Exception(full.problem ??
               dot.problem ??
@@ -750,6 +858,10 @@ class JanitorWebViewProxy {
         phase('captured');
         return JanitorCaptureResult(
           payload: result,
+          // Only a real second capture leaves a usable BEFORE snapshot: when the
+          // trigger send produced nothing we fell back to the probe's own
+          // payload above, and it cannot be both sides of the diff.
+          probePayload: full.payload != null ? dot.payload : null,
           greetings: greetings,
           bakedUserName: bakedUserName,
         );
@@ -1153,15 +1265,113 @@ class JanitorWebViewProxy {
     await _fetchLocked('$_proxyConfigsUrl/$serverId', method: 'DELETE');
   }
 
-  /// Clears the last captured payload so the next send's capture is unambiguous.
+  /// Clears the last captured payload — and the `/generateAlpha` log that
+  /// explains a timeout — so the next send's capture is unambiguous.
   Future<void> _resetCapture() async {
     try {
-      await _controller?.evaluateJavascript(source: 'window.__glazeAlpha = null;');
+      await _controller?.evaluateJavascript(
+        source: 'window.__glazeAlpha = null; window.__glazeAlphaLog = [];',
+      );
     } catch (_) {}
   }
 
+  /// Characters JanitorAI has already refused to assemble a prompt for, by
+  /// character id. A refusal is a property of the card (its creator disabled
+  /// proxies), so it holds for the whole session: the UI checks this before
+  /// starting a capture that is guaranteed to fail, and explains instead.
+  final Map<String, JanitorRefusedException> _refusals = {};
+
+  /// The refusal already recorded for [characterId], if any.
+  JanitorRefusedException? refusalFor(String characterId) =>
+      _refusals[characterId];
+
+  /// The error to throw for [refusal], remembering it against [characterId]
+  /// when it is a property of the character.
+  ///
+  /// A 401 is not: the session went stale mid-capture, and it would be wrong to
+  /// mark the character as unextractable — after a fresh login it works. Those
+  /// become a [JanitorAuthException] and are never cached.
+  Object _refusalError(String characterId, JanitorRefusedException refusal) {
+    if (refusal.status == 401) return const JanitorAuthException();
+    _refusals[characterId] = refusal;
+    return refusal;
+  }
+
+  /// Reads the injected `/generateAlpha` log.
+  Future<List<dynamic>> _readAlphaLog() async {
+    try {
+      final res = await _controller?.evaluateJavascript(
+        source: 'JSON.stringify(window.__glazeAlphaLog || [])',
+      );
+      if (res is String && res.isNotEmpty && res != 'null') {
+        final decoded = jsonDecode(res);
+        if (decoded is List) return decoded;
+      }
+    } catch (_) {}
+    return const [];
+  }
+
+  /// The refusal in [log], if JanitorAI answered `/generateAlpha` with an HTTP
+  /// error. Reads the server's own wording out of the JSON body (`message` /
+  /// `error` / `detail`) so the UI can quote it verbatim; falls back to the raw
+  /// body when it isn't JSON. Returns null while every entry is a 2xx — those
+  /// are "the body wasn't a prompt", which is a different problem.
+  JanitorRefusedException? _refusalIn(List<dynamic> log) {
+    for (final entry in log.reversed) {
+      if (entry is! Map) continue;
+      if (entry['matched'] == true) continue;
+      final status = (entry['status'] as num?)?.toInt() ?? 0;
+      if (status > 0 && status < 400) continue;
+      final body = (entry['body'] ?? '').toString();
+      String message = '';
+      try {
+        final decoded = jsonDecode(body);
+        if (decoded is Map) {
+          for (final key in const ['message', 'error', 'detail']) {
+            final v = decoded[key];
+            if (v is String && v.trim().isNotEmpty) {
+              message = v.trim();
+              break;
+            }
+          }
+        }
+      } catch (_) {}
+      if (message.isEmpty) {
+        message = body.replaceAll(RegExp(r'\s+'), ' ').trim();
+      }
+      return JanitorRefusedException(status, message);
+    }
+    return null;
+  }
+
+  /// Turns the log into one sentence a user can act on. Called only when a send
+  /// produced no payload: the three failures that look identical from the
+  /// outside — the request never fired, it fired and the server refused, it
+  /// returned something that is not an assembled prompt — are told apart here.
+  Future<String> _describeAlphaTimeout() async {
+    final log = await _readAlphaLog();
+    if (log.isEmpty) {
+      return 'No /generateAlpha request left the page — the message was sent '
+          'but JanitorAI never asked the server to assemble a prompt '
+          '(generation refused, or the chat is still busy).';
+    }
+    // Newest first: the last attempt is the one that should have produced the
+    // payload. Two is enough context without dumping a wall of HTML.
+    final parts = <String>[];
+    for (final entry in log.reversed.take(2)) {
+      if (entry is! Map) continue;
+      final status = entry['status'];
+      final matched = entry['matched'] == true;
+      final body = (entry['body'] ?? '').toString().replaceAll(RegExp(r'\s+'), ' ');
+      parts.add(matched
+          ? '$status returned a prompt that arrived too late'
+          : '$status: ${body.isEmpty ? 'empty body' : body}');
+    }
+    return 'JanitorAI answered /generateAlpha with ${parts.join(' | ')}';
+  }
+
   /// Drives one `__glazeSend(text)` and polls `window.__glazeAlpha` until a
-  /// payload appears or [timeout] elapses.
+  /// payload appears, JanitorAI refuses, or [timeout] elapses.
   ///
   /// [problem] describes a send that visibly did not leave the composer (an
   /// overlay swallowed the click, the box stayed disabled, React ignored the
@@ -1169,13 +1379,26 @@ class JanitorWebViewProxy {
   /// is a heuristic and a send can succeed with text left behind — but when
   /// nothing arrives the caller can say what actually went wrong instead of
   /// reporting a bare timeout.
-  Future<({Map<String, dynamic>? payload, String? problem})> _captureOneSend(
+  ///
+  /// [refusal] is set when `/generateAlpha` came back with an HTTP error. That
+  /// is a final answer, so the poll stops there rather than sitting out the rest
+  /// of its timeout waiting for a payload that will never arrive.
+  Future<
+      ({
+        Map<String, dynamic>? payload,
+        String? problem,
+        JanitorRefusedException? refusal,
+      })> _captureOneSend(
     String text,
     Duration timeout,
   ) async {
     final controller = _controller;
     if (controller == null) {
-      return (payload: null, problem: 'WebView not available.');
+      return (
+        payload: null,
+        problem: 'WebView not available.',
+        refusal: null,
+      );
     }
 
     String? problem;
@@ -1211,15 +1434,35 @@ class JanitorWebViewProxy {
         if (res is String && res.isNotEmpty && res != 'null') {
           final decoded = jsonDecode(res);
           if (decoded is Map<String, dynamic>) {
-            return (payload: decoded, problem: null);
+            return (payload: decoded, problem: null, refusal: null);
           }
           if (decoded is Map) {
-            return (payload: Map<String, dynamic>.from(decoded), problem: null);
+            return (
+              payload: Map<String, dynamic>.from(decoded),
+              problem: null,
+              refusal: null,
+            );
           }
         }
       } catch (_) {}
+      // An HTTP error on /generateAlpha is JanitorAI's final answer (the
+      // character forbids proxies, the account is rate-limited…). Waiting out
+      // the remaining minute cannot change it, so stop as soon as one lands.
+      final refusal = _refusalIn(await _readAlphaLog());
+      if (refusal != null) {
+        _log('generateAlpha refused: ${refusal.status} ${refusal.message}');
+        return (payload: null, problem: refusal.message, refusal: refusal);
+      }
     }
-    return (payload: null, problem: problem);
+    // Nothing arrived. Say why, keeping any earlier send-side problem in front
+    // of it — a swallowed send explains the silence that follows.
+    final diag = await _describeAlphaTimeout();
+    _log(diag);
+    return (
+      payload: null,
+      problem: problem == null ? diag : '$problem $diag',
+      refusal: null,
+    );
   }
 
   /// Whether a JanitorAI account session is present (a JWT lives in the shared
@@ -1346,6 +1589,12 @@ class JanitorWebViewProxy {
     }
     if (result.status < 0) {
       throw Exception('WebView fetch failed');
+    }
+    // 401 is the session, not the request: the capture creates a persona, a
+    // chat and a proxy preset on the account, and all of them start failing at
+    // once when the JWT goes stale. Say which one it is.
+    if (result.status == 401) {
+      throw const JanitorAuthException();
     }
     if (result.status >= 400) {
       throw Exception('HTTP ${result.status}');

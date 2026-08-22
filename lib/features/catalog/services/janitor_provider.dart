@@ -260,6 +260,14 @@ bool janitorDefinitionPublic(Map<String, dynamic> meta) {
   return personality.isNotEmpty || scenario.isNotEmpty;
 }
 
+/// Whether the creator allows this character to run on an external (proxy)
+/// model. `/hampter/characters/{id}` returns `allow_proxy: false` for a card
+/// locked to JanitorAI's own model — JanitorAI then refuses to assemble the
+/// prompt (`403 Proxies are forbidden for this character`), so the closed card
+/// and its closed lorebooks can never be captured. Absent field = allowed.
+bool janitorAllowsProxy(Map<String, dynamic>? meta) =>
+    meta == null || meta['allow_proxy'] != false;
+
 Future<DownloadedCharacter> janitorFetchCharacter(String id) async {
   final data = await janitorFetchCharacterMeta(id);
   return _convertToGlaze(data);

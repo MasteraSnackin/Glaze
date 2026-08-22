@@ -7,6 +7,7 @@ import '../../../core/models/lorebook.dart';
 import '../../../core/state/lorebook_provider.dart';
 import '../catalog_models.dart';
 import '../catalog_provider.dart';
+import 'janitor_field_diff.dart';
 import 'janitor_lorebook_rebuilder.dart';
 import 'janitor_provider.dart';
 import 'janitor_public_lorebook.dart';
@@ -26,15 +27,10 @@ class ExtractionResult {
   final String cardContext;
   final String catalogContext;
 
-  /// True when the character has at least one "advanced" (Nine API / JS)
-  /// lorebook. Those inject their entries inline inside the persona, so the
-  /// mechanical [lorebookText] misses them — [fullPromptText] is rebuilt with the
-  /// LLM in full-prompt mode instead. See [JanitorExtractor.buildLorebook].
-  final bool hasAdvancedLorebook;
-
-  /// The full captured system prompt (leading jailbreak stripped), used as the
-  /// extraction material when [hasAdvancedLorebook] is true.
-  final String fullPromptText;
+  /// Text the field diff recovered from fields the character owns — the
+  /// scenario, the persona, the example dialogue, the first message. Already
+  /// part of [lorebookText]; kept apart so the UI can say where it came from.
+  final List<InjectedBlock> injected;
 
   /// Extra context the lorebook-build LLM may use to infer better trigger keys
   /// (never emitted as entries). See `buildLorebookMessages`.
@@ -53,16 +49,47 @@ class ExtractionResult {
     this.scenarioContext = '',
     this.greetingsContext = '',
     this.lorebookDescsContext = '',
-    this.hasAdvancedLorebook = false,
-    this.fullPromptText = '',
+    this.injected = const [],
   });
 
+  /// Whether there is any recovered text to rebuild into entries.
   bool get hasLorebook => lorebookText.trim().isNotEmpty;
+}
 
-  /// Whether there is anything to rebuild: either mechanically-separated closed
-  /// lorebook text, or a full prompt to mine for inline advanced-lorebook entries.
-  bool get hasExtractable =>
-      hasLorebook || (hasAdvancedLorebook && fullPromptText.trim().isNotEmpty);
+/// Which blocks of the character's public context are stuffed into the message
+/// Glaze sends into the JanitorAI chat to make the closed lorebook fire.
+///
+/// The lorebook itself lives on JanitorAI's server: it only reveals an entry
+/// when something in the recent chat matches that entry's keys, so the trigger
+/// message is the one lever the extraction has. Port of JAR's `exSources`, with
+/// the same defaults — the card, the catalog description and the scenario are
+/// dense with names and cheap; greetings and lorebook descriptions are opt-in.
+class JanitorTriggerContext {
+  /// The character card recovered by the capture's first send, re-sent so its
+  /// names and places match as many entry keys as possible.
+  final bool card;
+
+  /// The character's catalog page: name, tags, description, scenario and the
+  /// titles of the lorebooks attached to it.
+  final bool catalog;
+  final bool scenario;
+  final bool greetings;
+
+  /// Titles + page descriptions of the attached lorebooks.
+  final bool lorebookDescs;
+
+  /// Free-form text the user writes — the only way to reach entries of a
+  /// generic/universe lorebook the character never names on its own.
+  final String extra;
+
+  const JanitorTriggerContext({
+    this.card = true,
+    this.catalog = true,
+    this.scenario = true,
+    this.greetings = false,
+    this.lorebookDescs = false,
+    this.extra = '',
+  });
 }
 
 /// Summary returned after persisting an [ExtractionResult] to the DB.
@@ -94,9 +121,15 @@ class JanitorExtractor {
   /// Phase 1: capture the assembled prompt for [url] and separate it into the
   /// recovered card + isolated lorebook text. Marks the catalog active so the
   /// proxy WebView stays up for the duration.
+  ///
+  /// [trigger] picks which blocks of the character's public context are stuffed
+  /// into the message that fires the closed lorebook — the more keywords it
+  /// carries, the more entries JanitorAI's server injects into the prompt.
   Future<ExtractionResult> extract(
     String url, {
+    JanitorTriggerContext trigger = const JanitorTriggerContext(),
     void Function(String phase)? onPhase,
+    List<String> extraPublicContents = const [],
   }) async {
     final characterId = _parseCharacterId(url);
     final proxy = JanitorWebViewProxy.instance;
@@ -106,19 +139,46 @@ class JanitorExtractor {
       // use both as LLM context and as extra trigger text for keyword matches.
       onPhase?.call('fetching metadata');
       final meta = await _fetchMeta(characterId);
-      final catalog = _buildCatalogContext(meta);
-      final firstMessageMeta = (meta?['first_message'] ?? '').toString();
+      // `allow_proxy: false` means the creator locked the card to JanitorAI's
+      // own model: /generateAlpha would answer 403 and nothing could be
+      // captured. Stop on the metadata instead of driving the whole capture to
+      // reach the same refusal a minute later.
+      if (!janitorAllowsProxy(meta)) {
+        throw const JanitorRefusedException.proxyForbidden();
+      }
+      final metaCtx = contextFromMeta(meta);
+      final catalog = metaCtx.catalog;
 
       // Fetch the character's public lorebooks once: their verbatim entry
       // contents are subtracted from the closed-lorebook text (so public
       // content never leaks into the closed book), and their titles/page
       // descriptions feed the build LLM's key inference.
       final publicBooks = await fetchPublicLorebooks(meta);
-      final publicContents = publicEntryContents(publicBooks);
+      // A public *script* has no entries to subtract until someone converts it
+      // with the LLM; when the caller already did, it passes them in here so its
+      // entries are cut out of the closed lorebook like any other public book's.
+      final publicContents = [
+        ...publicEntryContents(publicBooks),
+        ...extraPublicContents,
+      ];
+      final lorebookDescs = buildLorebookDescsContext(publicBooks);
+
+      // The trigger message: everything the user selected, concatenated into a
+      // single latest user turn so every keyword stays within JanitorAI's
+      // server-side scan depth. The card is added by the capture itself (it
+      // only exists inside the assembled prompt, which the first send reveals).
+      final triggerText = [
+        if (trigger.catalog) metaCtx.catalog,
+        if (trigger.scenario) metaCtx.scenario,
+        if (trigger.greetings) metaCtx.greetings,
+        if (trigger.lorebookDescs) lorebookDescs,
+        trigger.extra,
+      ].map((s) => s.trim()).where((s) => s.isNotEmpty).join('\n\n');
 
       final capture = await proxy.captureGenerateAlpha(
         characterId: characterId,
-        triggerText: firstMessageMeta,
+        triggerText: triggerText,
+        includeCard: trigger.card,
         onPhase: onPhase,
       );
       final payload = capture.payload;
@@ -126,7 +186,6 @@ class JanitorExtractor {
       onPhase?.call('separating');
       final rawCard = extractCard(payload);
       final sep = separate(payload, rawCard, publicContents);
-      final advanced = hasAdvancedLorebook(meta);
 
       final name = extractCharName(payload).isNotEmpty
           ? extractCharName(payload)
@@ -149,14 +208,37 @@ class JanitorExtractor {
           );
 
       final card = macro(rawCard);
-      final lorebookText = macro(sep.lorebookText);
-      final fullPrompt = advanced
-          ? macro(stripLeadingJailbreak(getSystemContent(payload)))
-          : '';
       final scenario = macro(extractScenario(payload).isNotEmpty
           ? extractScenario(payload)
           : (meta?['scenario'] ?? '').toString());
       final example = macro(extractExample(payload));
+
+      // Lore a script wrote INTO the character's own fields never reaches the
+      // separator (it drops those blocks whole, and never reads the first
+      // message at all). Recover it by diffing the captured prompt against the
+      // capture's own "." probe, and — for a public definition only — the probe
+      // against the catalog's clean fields. Everything is compared after macro
+      // restoration, so the captured text (names expanded) lines up with the
+      // catalog metadata (macros intact).
+      final definitionPublic = meta != null && janitorDefinitionPublic(meta);
+      final probePayload = capture.probePayload;
+      final probeFields = probePayload == null
+          ? null
+          : PromptFields.fromPayload(probePayload, restore: macro);
+      final cleanFields =
+          definitionPublic ? PromptFields.fromMeta(meta) : null;
+      final separated = macro(sep.lorebookText);
+      final scan = scanInjectedFields(
+        capture: PromptFields.fromPayload(payload, restore: macro),
+        probe: probeFields,
+        clean: cleanFields,
+        publicContents: publicContents,
+        existing: separated,
+      );
+      final lorebookText = [separated, scan.text]
+          .map((t) => t.trim())
+          .where((t) => t.isNotEmpty)
+          .join('\n\n');
 
       // Greetings, best source first: the chat object the capture created (it
       // carries them verbatim even when a closed card withholds them from
@@ -204,19 +286,35 @@ class JanitorExtractor {
 
       final greetings = greetingList.join('\n\n---\n\n');
 
+      // The card and scenario play two different parts, and the captured text
+      // is only right for one of them. For the IMPORT it is the truth (a closed
+      // card exists nowhere else). As CONTEXT for the build it is the yardstick
+      // the model uses to decide what is NOT lore — and the captured copy has
+      // the injected lore baked into it, so handing it over would teach the
+      // model to throw that lore away. Use the catalog's clean copy wherever
+      // there is one; a closed card has none, and there the captured text is
+      // still better than nothing.
+      final cardContext = cleanFields != null &&
+              cleanFields.persona.trim().isNotEmpty
+          ? cleanFields.persona
+          : card;
+      final scenarioContext = cleanFields != null &&
+              cleanFields.scenario.trim().isNotEmpty
+          ? cleanFields.scenario
+          : scenario;
+
       return ExtractionResult(
         characterId: characterId,
         sourceUrl: url,
         character: downloaded,
         lorebookText: lorebookText,
         entryBlockCount: splitEntries(lorebookText).length,
-        cardContext: card,
+        cardContext: cardContext,
         catalogContext: catalog,
-        scenarioContext: scenario,
+        scenarioContext: scenarioContext,
         greetingsContext: greetings,
-        lorebookDescsContext: buildLorebookDescsContext(publicBooks),
-        hasAdvancedLorebook: advanced,
-        fullPromptText: fullPrompt,
+        lorebookDescsContext: lorebookDescs,
+        injected: scan.blocks,
       );
     } finally {
       proxy.setActive(false);
@@ -260,7 +358,7 @@ class JanitorExtractor {
       );
     }
 
-    if (!result.hasExtractable) {
+    if (!result.hasLorebook) {
       return CommitResult(
         glazeCharacterId: glazeId,
         characterName: result.character.charData.name,
@@ -268,22 +366,17 @@ class JanitorExtractor {
       );
     }
 
-    // An advanced (Nine API) lorebook injects entries inline in the persona, so
-    // the mechanical separation misses them — feed the full prompt to the LLM and
-    // let it pull the entries out using the context blocks as the base card.
-    final fromFull = result.hasAdvancedLorebook;
     try {
       onPhase?.call('rebuilding lorebook (LLM)');
       final lorebook = await rebuildLorebookWithActiveLlm(
         _ref,
-        lorebookText: fromFull ? result.fullPromptText : result.lorebookText,
+        lorebookText: result.lorebookText,
         name: '${result.character.charData.name} — Closed Lorebook',
         card: result.cardContext,
         catalog: result.catalogContext,
         scenario: result.scenarioContext,
         greetings: result.greetingsContext,
         lorebookDescs: result.lorebookDescsContext,
-        fromFullPrompt: fromFull,
         characterId: glazeId,
       );
       onPhase?.call('saving lorebook');
@@ -317,7 +410,6 @@ class JanitorExtractor {
     String greetings = '',
     String lorebookDescs = '',
     String extra = '',
-    bool fromFullPrompt = false,
     String? characterId,
   }) => rebuildLorebookWithActiveLlm(
     _ref,
@@ -329,8 +421,26 @@ class JanitorExtractor {
     greetings: greetings,
     lorebookDescs: lorebookDescs,
     extra: extra,
-    fromFullPrompt: fromFullPrompt,
     characterId: characterId,
+  );
+
+  /// The key-inference context that is knowable from the character's catalog
+  /// metadata alone, before any capture has run.
+  ///
+  /// The character card is deliberately absent: it only exists inside the
+  /// assembled prompt, so it is recovered by the capture itself. Everything
+  /// else is public, which is what lets the capture sheet offer the same
+  /// context selection *before* the rebuild — JAR's `exSources`, whose choices
+  /// are carried straight into the build.
+  ///
+  /// Lorebook descriptions are not included here: the caller already has the
+  /// public books and can pass them through `buildLorebookDescsContext`.
+  ({String catalog, String scenario, String greetings}) contextFromMeta(
+    Map<String, dynamic>? meta,
+  ) => (
+    catalog: _buildCatalogContext(meta),
+    scenario: _htmlToText((meta?['scenario'] ?? '').toString()),
+    greetings: _htmlToText((meta?['first_message'] ?? '').toString()),
   );
 
   /// Rebuilds a public **JavaScript** lorebook (a JanitorAI "advanced" / Nine

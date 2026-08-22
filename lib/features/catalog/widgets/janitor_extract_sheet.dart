@@ -255,10 +255,10 @@ class _Preview extends StatelessWidget {
           Text('First message: ${estimateTokens(card.firstMes)} tokens',
               style: value()),
           Text(
-            'Closed lorebook: ${result.hasLorebook ? 'extracted content, ${estimateTokens(result.lorebookText)} tokens' : result.hasAdvancedLorebook ? 'advanced (inline) — full prompt ${estimateTokens(result.fullPromptText)} tokens' : 'none found'}',
+            'Closed lorebook: ${result.hasLorebook ? 'extracted content, ${estimateTokens(result.lorebookText)} tokens' : 'none found'}',
             style: value(),
           ),
-          if (result.hasLorebook && !result.hasAdvancedLorebook) ...[
+          if (result.hasLorebook) ...[
             const SizedBox(height: 8),
             Text('Extracted content (preview):', style: label()),
             const SizedBox(height: 4),
