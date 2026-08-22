@@ -141,17 +141,12 @@ test/                       # Unit, characterization, extension, and asset-guard
 
 Primary technical references: `docs/ARCHITECTURE.md`, `docs/INVARIANTS.md`, `docs/rules/`, `docs/WORKFLOW.md`, and `docs/BUILD_NOTES.md` for Windows build and dependency-override context.
 
-## 🙏 Studio References
-
-Glaze Studio was informed by prior work from:
-
-- [Marinara Engine](https://github.com/Pasta-Devs/Marinara-Engine)
-- [Lumiverse](https://github.com/prolix-oc/Lumiverse)
-
 ## 🙏 Credits
 
 - [SillyImages](https://github.com/0xl0cal/sillyimages) — reference for the inline image generation implementation and its providers.
 - [SillyTavern-CharacterLibrary](https://github.com/Sillyanonymous/SillyTavern-CharacterLibrary) — reference for JanitorAI through a browser.
+- [Marinara Engine](https://github.com/Pasta-Devs/Marinara-Engine) — reference for Glaze Studio.
+- [Lumiverse](https://github.com/prolix-oc/Lumiverse) — reference for Glaze Studio.
 
 ## 📜 License
 
