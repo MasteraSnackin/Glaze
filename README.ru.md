@@ -93,6 +93,11 @@ flutter run
 flutter test
 ```
 
+## 🙏 Благодарности
+
+- [SillyImages](https://github.com/0xl0cal/sillyimages) — референс для реализации inline-генерации изображений и её провайдеров.
+- [SillyTavern-CharacterLibrary](https://github.com/Sillyanonymous/SillyTavern-CharacterLibrary) — референс для JanitorAI через браузер.
+
 ## 📜 Лицензия
 
 Этот проект распространяется по лицензии [GNU Affero General Public License v3.0](LICENSE).
