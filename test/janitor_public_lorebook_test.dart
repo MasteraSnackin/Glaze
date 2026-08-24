@@ -95,6 +95,45 @@ void main() {
     });
   });
 
+  group('book partitioning', () {
+    // One of each kind the capture sheet can render: a downloadable plain book,
+    // a public scripted (advanced) one, and a closed/private one.
+    const closed = PublicLorebook(id: 'closed', title: 'Secret Lore');
+    const js = PublicLorebook(
+      id: 'js',
+      title: 'Advanced Lore',
+      isJs: true,
+      jsSource: 'const x = 1;',
+    );
+    const plain = PublicLorebook(
+      id: 'json',
+      title: 'World Lore',
+      accessible: true,
+      entryCount: 2,
+    );
+    const books = [closed, js, plain];
+
+    test('splits plain, scripted and closed books', () {
+      expect(publicJsonBooks(books).map((b) => b.id), ['json']);
+      expect(publicJsBooks(books).map((b) => b.id), ['js']);
+      expect(closedLorebooks(books).map((b) => b.id), ['closed']);
+    });
+
+    test('the downloadable set is plain books first, then scripted ones', () {
+      // The order the Public section renders — and the order "Download all"
+      // converts and saves in. Closed books are never part of it.
+      expect(downloadablePublicBooks(books).map((b) => b.id), ['json', 'js']);
+    });
+
+    test('a scripted book counts as downloadable, not closed', () {
+      // `accessible` only tracks JSON entries; a scripted book is public by
+      // virtue of having its source, so it belongs to the public section.
+      expect(js.accessible, isFalse);
+      expect(downloadablePublicBooks([js]).map((b) => b.id), ['js']);
+      expect(closedLorebooks([js]), isEmpty);
+    });
+  });
+
   group('janitorScriptToTavernJson', () {
     test('emits a SillyTavern World Info book keyed by uid', () {
       final wi = janitorScriptToTavernJson(_entries(), name: 'World Lore');

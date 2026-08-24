@@ -183,8 +183,15 @@ class _JanitorLorebookCaptureState
   /// Public JSON books and public "advanced" (JS) books are excluded — those are
   /// downloadable and live under the Public section. Matches JAR's
   /// `renderPublicBooks` private grouping (`!accessible && !isJs`).
-  List<PublicLorebook> get _closedBooks =>
-      _public.where((b) => !b.accessible && !b.isJs).toList();
+  List<PublicLorebook> get _closedBooks => closedLorebooks(_public);
+
+  /// The character's plain public books (1:1 conversion) and its public
+  /// scripted ones (LLM rebuild) — the two halves the Public section renders,
+  /// and together everything "Download all" works through.
+  List<PublicLorebook> get _jsonBooks => publicJsonBooks(_public);
+  List<PublicLorebook> get _jsBooks => publicJsBooks(_public);
+  List<PublicLorebook> get _downloadableBooks =>
+      downloadablePublicBooks(_public);
 
   /// Whether closed-lorebook extraction is currently possible: the user opted in
   /// and is logged into Janitor.AI, and no capture is already running.
@@ -202,6 +209,14 @@ class _JanitorLorebookCaptureState
 
   /// Id of the JS lorebook currently being rebuilt by the LLM (per-row spinner).
   String? _jsBuildingId;
+
+  /// "Download all" run state: true while the batch converts + saves, with
+  /// [_savedAllDone] of [_savedAllTotal] books already through. Mutually
+  /// exclusive with the per-row actions in both directions — one LLM rebuild at
+  /// a time, and no per-row save landing in the middle of the batch.
+  bool _savingAll = false;
+  int _savedAllDone = 0;
+  int _savedAllTotal = 0;
 
   /// Public scripts converted into entries during this session, by book id.
   ///
@@ -245,6 +260,7 @@ class _JanitorLorebookCaptureState
   // ─── Public lorebook actions ───────────────────────────────────────────────
 
   void _downloadPublic(PublicLorebook book) {
+    if (_savingAll) return;
     GlazeBottomSheet.show<void>(
       context,
       items: [
@@ -279,6 +295,7 @@ class _JanitorLorebookCaptureState
   /// [_buildJs]. Port of JAR's public JS "Build .json" affordance, reframed as a
   /// download that opens a rebuild explanation.
   void _downloadJs(PublicLorebook book) {
+    if (_savingAll) return;
     GlazeBottomSheet.show<void>(
       context,
       title: 'catalog_lorebooks_scripted_title'.tr(),
@@ -297,6 +314,7 @@ class _JanitorLorebookCaptureState
   /// Rebuild a public **JavaScript** lorebook into keyed entries with the active
   /// LLM, then offer the same Save/Export destinations as a public JSON book.
   Future<void> _buildJs(PublicLorebook book) async {
+    if (_savingAll) return;
     setState(() => _jsBuildingId = book.id);
     try {
       final lb = await ref
@@ -318,6 +336,72 @@ class _JanitorLorebookCaptureState
       setState(() => _jsBuildingId = null);
       GlazeToast.show(context, 'catalog_lorebooks_build_failed'.tr(args: ['$e']));
     }
+  }
+
+  /// Convert **every** public lorebook of the section and save it to Glaze in
+  /// one pass — the section's bulk action, for the common case of wanting all
+  /// of them rather than tapping through each row's destination sheet.
+  ///
+  /// Plain books map 1:1; scripted ones go through the same LLM rebuild
+  /// [_buildJs] runs (and are recorded in [_convertedScripts] just the same, so
+  /// their entries stop being counted as closed-lorebook text). A script
+  /// already converted this session is reused instead of paying for a second
+  /// rebuild. One book failing never aborts the rest — the summary toast names
+  /// what did not make it.
+  Future<void> _downloadAllPublic() async {
+    if (_savingAll || _jsBuildingId != null) return;
+    final books = _downloadableBooks;
+    if (books.isEmpty) return;
+    setState(() {
+      _savingAll = true;
+      _savedAllDone = 0;
+      _savedAllTotal = books.length;
+    });
+    var saved = 0;
+    final failed = <String>[];
+    try {
+      for (final book in books) {
+        try {
+          final converted = _convertedScripts[book.id];
+          final lb = !book.isJs
+              ? book.toLorebook(characterId: widget.characterId)
+              : converted ??
+                    await ref
+                        .read(janitorExtractorProvider)
+                        .buildLorebookFromJs(
+                          jsSource: book.jsSource,
+                          name: book.title.isNotEmpty
+                              ? book.title
+                              : 'Janitor Lorebook',
+                          meta: widget.args.meta,
+                          characterId: widget.characterId,
+                        );
+          // The sheet can be closed mid-run: stop before writing anything more,
+          // whatever was already saved stays saved.
+          if (!mounted) return;
+          await ref.read(lorebooksProvider.notifier).addLorebook(lb);
+          if (!mounted) return;
+          if (book.isJs) _convertedScripts[book.id] = lb;
+          saved++;
+        } catch (e) {
+          debugPrint('[janitor-lorebook] save-all ${book.id} failed: $e');
+          failed.add(book.title.isEmpty ? book.id : book.title);
+        }
+        if (!mounted) return;
+        setState(() => _savedAllDone++);
+      }
+    } finally {
+      if (mounted) setState(() => _savingAll = false);
+    }
+    if (!mounted) return;
+    GlazeToast.show(
+      context,
+      failed.isEmpty
+          ? 'catalog_lorebooks_saved_all'.tr(args: ['$saved'])
+          : 'catalog_lorebooks_saved_all_partial'.tr(
+              args: ['$saved', '${books.length}', failed.join(', ')],
+            ),
+    );
   }
 
   /// The entry text of every public script converted so far — subtracted from
@@ -687,7 +771,11 @@ class _JanitorLorebookCaptureState
           books: _public,
           onDownload: _downloadPublic,
           onDownloadJs: _downloadJs,
+          onDownloadAll: _downloadAllPublic,
           buildingId: _jsBuildingId,
+          savingAll: _savingAll,
+          savedAllDone: _savedAllDone,
+          savedAllTotal: _savedAllTotal,
         ),
         if (closed.isNotEmpty) ..._closedSection(cs, closed),
       ],
@@ -1204,12 +1292,25 @@ class _PublicSection extends StatelessWidget {
   final List<PublicLorebook> books;
   final void Function(PublicLorebook) onDownload;
   final void Function(PublicLorebook) onDownloadJs;
+
+  /// Convert + save every book of the section in one pass.
+  final VoidCallback onDownloadAll;
   final String? buildingId;
+
+  /// The batch is running: rows stop offering their own action (one save flow
+  /// at a time) and the bulk button reads `done/total`.
+  final bool savingAll;
+  final int savedAllDone;
+  final int savedAllTotal;
   const _PublicSection({
     required this.books,
     required this.onDownload,
     required this.onDownloadJs,
+    required this.onDownloadAll,
     required this.buildingId,
+    required this.savingAll,
+    required this.savedAllDone,
+    required this.savedAllTotal,
   });
 
   @override
@@ -1220,9 +1321,9 @@ class _PublicSection extends StatelessWidget {
     //  - "advanced" / Nine API books are public but shipped as a script, so they
     //    carry a Convert action instead and are rebuilt with the LLM.
     // Private/locked books are NOT shown here — they belong to the closed section.
-    final json = books.where((b) => b.accessible && !b.isJs).toList();
-    final js = books.where((b) => b.isJs).toList();
-    final hasClosed = books.any((b) => !b.accessible && !b.isJs);
+    final json = publicJsonBooks(books);
+    final js = publicJsBooks(books);
+    final hasClosed = closedLorebooks(books).isNotEmpty;
     // With both kinds attached a flat list would mix two different actions
     // (download vs. convert), so it splits into "Lorebooks" and "Scripts"
     // sub-groups. With only one kind there is nothing to tell apart and the rows
@@ -1263,7 +1364,10 @@ class _PublicSection extends StatelessWidget {
             ),
             if (split) MenuSubHeader('catalog_lorebooks_group_books'.tr()),
             for (final b in json)
-              _PublicRow(book: b, onDownload: () => onDownload(b)),
+              _PublicRow(
+                book: b,
+                onDownload: savingAll ? null : () => onDownload(b),
+              ),
             if (split) ...[
               MenuSubHeader('catalog_lorebooks_group_scripts'.tr()),
               _GroupNote('catalog_lorebooks_group_scripts_note'.tr(), top: 2),
@@ -1271,8 +1375,32 @@ class _PublicSection extends StatelessWidget {
             for (final b in js)
               _PublicRow(
                 book: b,
-                onDownload: () => onDownloadJs(b),
+                onDownload: savingAll ? null : () => onDownloadJs(b),
                 building: buildingId == b.id,
+              ),
+            // The bulk action closes the group: with a single book it would
+            // only duplicate that row, so it appears from two on.
+            if (json.length + js.length > 1)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
+                child: ActionTile(
+                  icon: Icons.library_add_rounded,
+                  expand: true,
+                  primary: true,
+                  busy: savingAll,
+                  // Progress reads inside the button that owns it, like the
+                  // capture action — one busy control, no status line under it.
+                  label: savingAll
+                      ? 'catalog_lorebooks_download_all_busy'.tr(
+                          args: ['$savedAllDone', '$savedAllTotal'],
+                        )
+                      : 'catalog_lorebooks_download_all'.tr(
+                          args: ['${json.length + js.length}'],
+                        ),
+                  // A single JS rebuild in flight owns the LLM: let it finish
+                  // rather than queue a second one behind it.
+                  onTap: buildingId == null ? onDownloadAll : null,
+                ),
               ),
           ],
         ),
