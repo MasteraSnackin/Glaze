@@ -693,7 +693,7 @@ class StudioPresetRows extends Table {
   TextColumn get cleanerApiConfigId => text().withDefault(const Constant(''))();
   TextColumn get ledgerApiConfigId => text().withDefault(const Constant(''))();
   IntColumn get maxFinalHistoryMessages =>
-      integer().withDefault(const Constant(30))();
+      integer().withDefault(const Constant(50))();
   TextColumn get agentEnabledJson => text().withDefault(const Constant('{}'))();
   TextColumn get executionMode =>
       text().withDefault(const Constant('legacy'))();
@@ -814,6 +814,8 @@ class ApiConfigs extends Table {
   TextColumn get embeddingModel => text().nullable()();
   IntColumn get embeddingMaxChunkTokens =>
       integer().withDefault(const Constant(512))();
+  IntColumn get embeddingRequestsPerMinute =>
+      integer().withDefault(const Constant(50))();
   TextColumn get cacheControlTtl => text().withDefault(const Constant('off'))();
   TextColumn get cacheBreakpointMode =>
       text().withDefault(const Constant('depth'))();

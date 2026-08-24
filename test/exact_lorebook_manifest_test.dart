@@ -53,6 +53,37 @@ void main() {
     expect(restored.canonicalHash, value.canonicalHash);
   });
 
+  test('durable roundtrip serializes nested character filters', () {
+    final value = ExactLorebookManifest(
+      entries: [
+        ExactLorebookManifestEntry.fromMergedEntry(
+          entry: const LorebookEntry(
+            id: 'filtered',
+            lorebookId: 'book',
+            content: 'lore',
+            position: 'matchGlobal',
+            characterFilter: LorebookCharacterFilter(
+              names: ['Character'],
+            ),
+          ),
+          source: 'keyword',
+          classification: 'lorebooksMacro',
+          injectionIndex: 0,
+          renderedContent: 'lore',
+        ),
+      ],
+      promptProvenance: const ExactLorebookPromptProvenance(
+        characterId: 'character',
+        presetSnapshotHash: 'preset-hash',
+      ),
+      providerMessagesHash: 'provider-hash',
+    );
+
+    final restored = ExactLorebookManifest.decodeDurable(value.toJson());
+
+    expect(restored.entries.single.entry.characterFilter?.names, ['Character']);
+  });
+
   test('durable decoder fails closed for malformed contract fields', () {
     final valid = Map<String, dynamic>.from(manifest().toJson());
     final missingHash = Map<String, dynamic>.from(valid)
@@ -93,6 +124,37 @@ void main() {
 
     expect(confirmed.entries, hasLength(1));
     expect(confirmed.entries.single.entryId, 'entry-0');
+  });
+
+  test('Studio classification confirmation retains only emitted slots', () {
+    final value = ExactLorebookManifest(
+      entries: [
+        entry(0),
+        ExactLorebookManifestEntry.fromMergedEntry(
+          entry: const LorebookEntry(
+            id: 'macro',
+            lorebookId: 'book',
+            content: 'macro lore',
+            position: 'lorebooksMacro',
+          ),
+          source: 'vector',
+          classification: 'lorebooksMacro',
+          injectionIndex: 1,
+          renderedContent: 'macro lore',
+        ),
+      ],
+      promptProvenance: const ExactLorebookPromptProvenance(
+        characterId: 'character',
+        presetSnapshotHash: 'preset-hash',
+      ),
+      providerMessagesHash: 'provider-hash',
+    );
+
+    final confirmed = value.confirmedForClassifications({'lorebooksMacro'});
+
+    expect(confirmed.entries, hasLength(1));
+    expect(confirmed.entries.single.entryId, 'macro');
+    expect(confirmed.entries.single.injectionIndex, 0);
   });
 
   test('empty explicit report does not retain an entry', () {

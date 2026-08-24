@@ -19,8 +19,8 @@ const _maxChatHistoryMessages = 40;
 const _writerCollectorBatchSize = 2;
 const _writerReconciliationRunCount = _writerCollectorBatchSize * 2;
 const _maxCanonValueCharacters = 2000;
-const _maxLorebookEntryCharacters = 20000;
-const _maxLorebookTotalCharacters = 40000;
+const _maxLorebookEntryCharacters = 60000;
+const _maxLorebookTotalCharacters = 600000;
 
 /// Why the canonical writer/collector input could not be selected. Every bail
 /// point in [CardEvolutionRepo._selectInput] maps to exactly one value so a
@@ -322,6 +322,32 @@ class CardEvolutionRepo {
     ownerId: ownerId,
     now: now,
   )).snapshot;
+
+  /// Extends a live claim without allowing an expired or different owner to
+  /// reclaim it. Long writer and repair calls use this before starting more
+  /// remote work so finalization cannot lose ownership mid-cycle.
+  Future<bool> renewClaimLease({
+    required String claimId,
+    required String ownerId,
+    required int now,
+    required int leaseSeconds,
+  }) async {
+    if (ownerId.isEmpty || leaseSeconds <= 0) return false;
+    final changed =
+        await (db.update(db.cardEvolutionClaims)..where(
+              (row) =>
+                  row.id.equals(claimId) &
+                  row.ownerId.equals(ownerId) &
+                  row.status.equals('claimed') &
+                  row.leaseExpiresAt.isBiggerThanValue(now),
+            ))
+            .write(
+              CardEvolutionClaimsCompanion(
+                leaseExpiresAt: Value(now + leaseSeconds),
+              ),
+            );
+    return changed == 1;
+  }
 
   /// Same contract as [readPromptSnapshot] but keeps the reason the snapshot
   /// could not be produced, so an early writer bail stays attributable.

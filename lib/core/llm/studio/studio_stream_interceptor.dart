@@ -13,10 +13,10 @@ class StudioStreamInterceptor {
   StudioStreamInterceptor._();
 
   /// Compute the set of visible message IDs that form the Studio final
-  /// generator's source window. Takes the last [finalContextSize] non-hidden
-  /// messages from [history], but also enforces the final limiter's token
-  /// cap: messages are accumulated from the end until either the count or the
-  /// token budget is reached, whichever comes first.
+  /// generator's stable source window. When a persisted boundary exists, only
+  /// messages from that boundary onward are visible. Without one, an initial
+  /// safe window is derived from completed chunks while any trailing user turn
+  /// remains visible.
   ///
   /// This mirrors [StudioHistoryLimiter.limitFinalHistory] so that memory
   /// source-window exclusion stays in sync with what the final generator
@@ -26,6 +26,7 @@ class StudioStreamInterceptor {
     int finalContextSize, {
     int reasoningHistoryCount = 0,
     bool excludeReasoningFromContextBudget = false,
+    String? historyWindowStartMessageId,
   }) {
     final limited = StudioHistoryLimiter.limitFinalHistory(
       _asPromptHistory(history),
@@ -35,11 +36,72 @@ class StudioStreamInterceptor {
       ),
       reasoningHistoryCount: reasoningHistoryCount,
       excludeReasoningFromContextBudget: excludeReasoningFromContextBudget,
+      historyWindowStartMessageId: historyWindowStartMessageId,
     );
     return limited
         .map((message) => message.sourceMessageId)
         .whereType<String>()
         .toSet();
+  }
+
+  /// Plans a boundary advance after an assistant reply has been committed.
+  static StudioHistoryWindowPlan planCompletedHistoryWindow(
+    List<ChatMessage> history, {
+    required int finalContextSize,
+    String? historyWindowStartMessageId,
+    int reasoningHistoryCount = 0,
+    bool excludeReasoningFromContextBudget = false,
+  }) {
+    final promptHistory = _asPromptHistory(history);
+    final currentStart = promptHistory.indexWhere(
+      (message) => message.sourceMessageId == historyWindowStartMessageId,
+    );
+    final bootstrap = currentStart >= 0
+        ? (window: promptHistory.sublist(currentStart), dropped: 0)
+        : _bootstrapCompletedTurnWindow(
+            promptHistory,
+            finalContextSize: finalContextSize,
+            reasoningHistoryCount: reasoningHistoryCount,
+            excludeReasoningFromContextBudget:
+                excludeReasoningFromContextBudget,
+          );
+    final plan = StudioHistoryLimiter.planCompletedWindow(
+      bootstrap.window,
+      maxMessages: finalContextSize,
+      reasoningHistoryCount: reasoningHistoryCount,
+      excludeReasoningFromContextBudget: excludeReasoningFromContextBudget,
+    );
+    if (bootstrap.dropped == 0) return plan;
+    return StudioHistoryWindowPlan(
+      messages: plan.messages,
+      droppedMessageCount: bootstrap.dropped + plan.droppedMessageCount,
+      didRotate: true,
+    );
+  }
+
+  static ({List<PromptMessage> window, int dropped})
+  _bootstrapCompletedTurnWindow(
+    List<PromptMessage> history, {
+    required int finalContextSize,
+    required int reasoningHistoryCount,
+    required bool excludeReasoningFromContextBudget,
+  }) {
+    if (history.isEmpty || history.last.role != 'assistant') {
+      return (window: history, dropped: 0);
+    }
+    final requestWindow = StudioHistoryLimiter.limitFinalHistory(
+      history.sublist(0, history.length - 1),
+      StudioPreset(
+        id: 'completed-window-bootstrap',
+        maxFinalHistoryMessages: finalContextSize,
+      ),
+      reasoningHistoryCount: reasoningHistoryCount,
+      excludeReasoningFromContextBudget: excludeReasoningFromContextBudget,
+    );
+    return (
+      window: [...requestWindow, history.last],
+      dropped: history.length - 1 - requestWindow.length,
+    );
   }
 
   /// Uses the tracker limiter exactly, including its 1..200 count clamp.

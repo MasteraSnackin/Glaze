@@ -1,4 +1,8 @@
+import 'dart:convert';
+
 import '../../models/chat_message.dart' show ChatMessage, TriggeredEntry;
+import '../../models/studio_config.dart';
+import '../../utils/cast_helpers.dart';
 import '../../models/ledger_prompt_injection_mode.dart';
 import '../../models/ledger_prompt_injection_policy.dart';
 import '../generation_context_inputs.dart';
@@ -9,6 +13,7 @@ import '../prompt/memory_block_injector.dart' show finalizeMemoryCoverage;
 import '../prompt/memory_context_resolver.dart';
 import '../prompt/recalled_messages_resolver.dart';
 import '../prompt/effective_canon_prompt_materializer.dart';
+import '../prompt/exact_lorebook_manifest.dart';
 import '../prompt/selective_ledger_projection_filter.dart';
 import 'studio_context.dart';
 
@@ -25,6 +30,13 @@ final class StudioContextPreparer {
         ),
     String consumerPath = 'studio',
     bool disableSourceWindowExclusion = false,
+
+    /// When non-empty, overrides `inputs.apiConfig.reasoningTagStart/End` in
+    /// the [MacroContext]. Passed from the Studio preset's
+    /// `runtime.reasoningTagStart/End`.
+    String? reasoningTagStartOverride,
+    String? reasoningTagEndOverride,
+    StudioPreset? studioPreset,
   }) {
     final visibleLedgerMessages = inputs.history
         .where(
@@ -74,8 +86,12 @@ final class StudioContextPreparer {
       charMesExample: inputs.character.mesExample,
       userName: inputs.persona?.name ?? 'User',
       personaPrompt: inputs.persona?.prompt,
-      reasoningStart: inputs.apiConfig.reasoningTagStart,
-      reasoningEnd: inputs.apiConfig.reasoningTagEnd,
+      reasoningStart: (reasoningTagStartOverride?.isNotEmpty == true)
+          ? reasoningTagStartOverride
+          : inputs.apiConfig.reasoningTagStart,
+      reasoningEnd: (reasoningTagEndOverride?.isNotEmpty == true)
+          ? reasoningTagEndOverride
+          : inputs.apiConfig.reasoningTagEnd,
       sessionVars: inputs.sessionVars,
       globalVars: inputs.globalVars,
       charId: inputs.character.id,
@@ -98,6 +114,46 @@ final class StudioContextPreparer {
       macroContext: baseMacroContext,
       preScannedEntries: inputs.preScannedEntries,
     );
+    final exactLorebookManifest = studioPreset == null
+        ? null
+        : buildExactLorebookManifest(
+            entries: lore.mergedEntries,
+            characterId: inputs.character.id,
+            personaId: inputs.persona?.id ?? '',
+            sessionId: inputs.sessionId ?? '',
+            presetSnapshotHash: computeHash(jsonEncode(studioPreset.toJson())),
+            macroContext: baseMacroContext,
+            sourceByEntryKey: {
+              for (final entry in lore.mergedEntries)
+                '${entry.lorebookId}_${entry.id}':
+                    lore
+                            .keywordEntries['${entry.lorebookId}_${entry.id}']
+                            ?.constant ==
+                        true
+                    ? 'constant'
+                    : lore.keywordEntries.containsKey(
+                        '${entry.lorebookId}_${entry.id}',
+                      )
+                    ? 'keyword'
+                    : 'vector',
+            },
+            classificationByEntryKey: {
+              for (final entry in lore.mergedEntries)
+                '${entry.lorebookId}_${entry.id}':
+                    entry.position == 'matchGlobal'
+                    ? inputs.lorebookSettings.injectionPosition
+                    : entry.position,
+            },
+            effectiveCanonProvenance:
+                inputs.effectiveCanonRevisionNumber == null ||
+                    inputs.effectiveCanonRevisionHash == null
+                ? null
+                : ExactLorebookEffectiveCanonProvenance(
+                    revisionNumber: inputs.effectiveCanonRevisionNumber!,
+                    revisionHash: inputs.effectiveCanonRevisionHash!,
+                    cacheIdentity: inputs.effectiveCanonCacheIdentity,
+                  ),
+          );
 
     final memory = inputs.memorySelection == null
         ? null
@@ -249,6 +305,7 @@ final class StudioContextPreparer {
         ledgerInjectionIdentity:
             ledger?.injectionCacheIdentity ??
             '${ledgerPromptInjectionPolicy.identity}/${inputs.effectiveCanonCacheIdentity}',
+        exactLorebookManifest: exactLorebookManifest,
       ),
     );
   }
