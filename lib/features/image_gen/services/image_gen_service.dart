@@ -12,6 +12,7 @@ import 'image_gen_dispatcher.dart';
 import 'image_prompt_builder.dart';
 import 'image_reference_collector.dart';
 import 'image_tag_markup.dart';
+import 'reference_matcher.dart';
 
 /// Turns `[IMG:GEN]` tags in a message into generated images.
 ///
@@ -188,7 +189,7 @@ class ImageGenService {
     String? instructionImageSize,
     CancelToken? cancelToken,
   }) async {
-    final references = await _references.collect(
+    final collected = await _references.collect(
       settings: settings,
       prompt: prompt,
       character: character,
@@ -196,12 +197,40 @@ class ImageGenService {
       recentImageContexts: recentImageContexts,
     );
 
+    final isNaistera = settings.apiType == ImageGenApiType.naistera;
+    final descriptionsMode = isNaistera
+        ? settings.naisteraCharacterDescriptionsMode
+        : CharacterDescriptionsMode.asIs;
+
+    // Outside "as-is" the avatars travel without their caption: the
+    // descriptions are carried by the prompt block instead, so leaving them on
+    // the images would send each one twice.
+    final references = descriptionsMode == CharacterDescriptionsMode.asIs
+        ? collected
+        : _withoutAvatarDescriptions(collected);
+
     var finalPrompt = buildFinalGenerationPrompt(
       prompt: prompt,
       tagStyle: tagStyle,
       settings: settings,
       references: references,
+      // NovelAI parses the whole prompt as tags — the [STYLE: ...] wrapper
+      // would reach the sampler verbatim.
+      wrapStyle:
+          !(isNaistera &&
+              NaisteraConstants.isNovelAIModel(settings.naisteraModel)),
     );
+    if (isNaistera && settings.sendRefDescriptions) {
+      finalPrompt = appendPromptBlock(
+        finalPrompt,
+        buildCharacterDescriptionPromptBlock(
+          mode: descriptionsMode,
+          references: references,
+          charDescription: _appearanceOf(character?.name, settings),
+          userDescription: _appearanceOf(persona?.name, settings),
+        ),
+      );
+    }
     finalPrompt = withReferenceInstruction(
       finalPrompt,
       settings,
@@ -218,6 +247,31 @@ class ImageGenService {
       instructionImageSize: instructionImageSize,
       cancelToken: cancelToken,
     );
+  }
+
+  /// Appearance blurb for a character or persona: the description of the
+  /// reference-library entry whose aliases name them. Glaze has no separate
+  /// appearance field, and a library entry is exactly where a user writes one.
+  static String _appearanceOf(String? name, ImageGenSettings settings) {
+    final target = normalizeTriggerText(name ?? '');
+    if (target.isEmpty) return '';
+    for (final ref in settings.references) {
+      if (!ref.enabled) continue;
+      if (!parseReferenceAliases(ref.name).contains(target)) continue;
+      final description = ref.description.trim();
+      if (description.isNotEmpty) return description;
+    }
+    return '';
+  }
+
+  static List<Map<String, String>> _withoutAvatarDescriptions(
+    List<Map<String, String>> references,
+  ) {
+    return references.map((ref) {
+      final source = ref['source'];
+      if (source != 'char' && source != 'user') return ref;
+      return {...ref, 'description': ''};
+    }).toList();
   }
 
   String _formatError(DioException e) {

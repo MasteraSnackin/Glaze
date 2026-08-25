@@ -2,7 +2,7 @@ import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 
-import '../image_gen_constants.dart';
+import '../image_gen_models.dart';
 import 'image_gen_http.dart';
 
 /// Naistera image client.
@@ -31,6 +31,9 @@ class NaisteraImageProvider {
     required String prompt,
     required String aspectRatio,
     List<Map<String, String>>? references,
+    // Whether the selected model round-trips reference images: decided by the
+    // caller from the fetched catalog rather than by the shipped deny-list.
+    bool supportsReferences = true,
     CancelToken? cancelToken,
   }) async {
     final normalizedModel = NaisteraConstants.normalizeModel(model);
@@ -39,7 +42,9 @@ class NaisteraImageProvider {
       'aspect_ratio': aspectRatio,
       'model': normalizedModel,
     };
-    final referenceObjects = _referenceObjects(references, normalizedModel);
+    final referenceObjects = supportsReferences
+        ? _referenceObjects(references)
+        : const <Map<String, String>>[];
     if (referenceObjects.isNotEmpty) {
       body['reference_objects'] = referenceObjects;
     }
@@ -69,26 +74,72 @@ class NaisteraImageProvider {
   /// is a full data URL — the collector hands over bare base64 plus its mime.
   static List<Map<String, String>> _referenceObjects(
     List<Map<String, String>>? references,
-    String normalizedModel,
   ) {
-    if (references == null ||
-        references.isEmpty ||
-        !NaisteraConstants.supportsReferences(normalizedModel)) {
-      return const [];
-    }
+    if (references == null || references.isEmpty) return const [];
     final objects = <Map<String, String>>[];
     for (final ref in references) {
       final image = ref['image'] ?? '';
       if (image.isEmpty) continue;
       final mime = ref['mime'] ?? 'image/png';
       objects.add({
-        'image': image.startsWith('data:')
-            ? image
-            : 'data:$mime;base64,$image',
+        'image': image.startsWith('data:') ? image : 'data:$mime;base64,$image',
         'description': ref['description'] ?? '',
       });
     }
     return objects;
+  }
+
+  /// Loads the model catalog from `GET {base}/api/models`.
+  ///
+  /// Ported from https://github.com/0xl0cal/sillyimages
+  /// (`NaisteraProvider.fetchModels`): the token decides which tier of models
+  /// comes back, hidden and deprecated entries are dropped, and reference
+  /// support is read off each entry instead of a hardcoded deny-list. When the
+  /// authenticated request cannot be made at all, the public catalog is tried
+  /// once without the token.
+  Future<List<NaisteraModelInfo>> fetchModels({
+    required String apiKey,
+    CancelToken? cancelToken,
+  }) async {
+    final base = baseUrl.replaceAll(RegExp(r'/+$'), '');
+    final url = '$base/api/models';
+
+    Map<String, dynamic> payload;
+    try {
+      payload = await _http.getJson(
+        url: url,
+        apiKey: apiKey,
+        cancelToken: cancelToken,
+      );
+    } on DioException catch (error) {
+      if (apiKey.isEmpty ||
+          CancelToken.isCancel(error) ||
+          error.response != null) {
+        rethrow;
+      }
+      // No response at all (connection refused, TLS, CORS-style block) — the
+      // public catalog still tells us which models exist.
+      payload = await _http.getJson(url: url, cancelToken: cancelToken);
+    }
+
+    final models = payload['models'];
+    if (models is! List) return const [];
+    final catalog = <NaisteraModelInfo>[];
+    for (final raw in models) {
+      if (raw is! Map) continue;
+      final model = Map<String, dynamic>.from(raw);
+      final id = (model['id'] ?? '').toString().trim();
+      if (id.isEmpty) continue;
+      if (model['visible'] == false || model['deprecated'] == true) continue;
+      catalog.add(
+        NaisteraModelInfo(
+          id: id,
+          name: (model['name'] ?? id).toString(),
+          references: model['references'] != false,
+        ),
+      );
+    }
+    return catalog;
   }
 
   Future<Map<String, dynamic>> _pollJob(
@@ -135,8 +186,6 @@ class NaisteraImageProvider {
     if (dataUrl.startsWith('http://') || dataUrl.startsWith('https://')) {
       return ImageGenHttp.downloadImage(dataUrl, cancelToken: cancelToken);
     }
-    return ImageGenHttp.base64ToBytes(
-      ImageGenHttp.stripBase64Prefix(dataUrl),
-    );
+    return ImageGenHttp.base64ToBytes(ImageGenHttp.stripBase64Prefix(dataUrl));
   }
 }

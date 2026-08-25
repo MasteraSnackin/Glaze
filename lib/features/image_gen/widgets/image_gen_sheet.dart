@@ -20,6 +20,7 @@ import '../image_gen_capabilities.dart';
 import '../image_gen_models.dart';
 import '../image_gen_provider.dart';
 import '../services/image_gen_connection_service.dart';
+import '../services/naistera_image_provider.dart';
 import 'a1111_fields.dart';
 import 'connection_fields.dart';
 import 'model_fields.dart';
@@ -27,6 +28,7 @@ import 'openrouter_fields.dart';
 import 'reference_library_section.dart';
 import 'rows.dart' as rows;
 import 'style_library_sheet.dart';
+import 'xai_fields.dart';
 
 class ImageGenSheet extends ConsumerStatefulWidget {
   const ImageGenSheet({super.key, this.charId});
@@ -82,6 +84,8 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
       before.customEndpoint != after.customEndpoint ||
       before.customApiKey != after.customApiKey ||
       before.naisteraApiKey != after.naisteraApiKey ||
+      before.xai.apiKey != after.xai.apiKey ||
+      before.xai.endpoint != after.xai.endpoint ||
       before.routmyApiKey != after.routmyApiKey ||
       before.ruRoutmyApiKey != after.ruRoutmyApiKey ||
       before.openrouter.apiKey != after.openrouter.apiKey ||
@@ -256,7 +260,7 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
               ],
             ),
             if (s.apiType == ImageGenApiType.naistera &&
-                !NaisteraConstants.supportsReferences(s.naisteraModel))
+                !s.naisteraSupportsReferences)
               Container(
                 margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 padding: const EdgeInsets.all(12),
@@ -378,6 +382,8 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
         return buildRoutmyConnectionFields(s, isRu: false, onUpdate: _update);
       case ImageGenApiType.ruRoutmy:
         return buildRoutmyConnectionFields(s, isRu: true, onUpdate: _update);
+      case ImageGenApiType.xai:
+        return buildXaiConnectionFields(s, _update);
       case ImageGenApiType.openrouter:
         return buildOpenRouterConnectionFields(s, _update);
       case ImageGenApiType.electronhub:
@@ -404,7 +410,21 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
     final showOptions = _showOptionsCallback();
     switch (s.apiType) {
       case ImageGenApiType.naistera:
-        return buildNaisteraModelFields(s, _update, showOptions);
+        return buildNaisteraModelFields(
+          s,
+          isFetching: _isFetchingModels,
+          onFetchModels: _onFetchModels,
+          onUpdate: _update,
+          showOptions: showOptions,
+        );
+      case ImageGenApiType.xai:
+        return buildXaiModelFields(
+          s,
+          isFetching: _isFetchingModels,
+          onFetchModels: _onFetchModels,
+          onUpdate: _update,
+          showOptions: showOptions,
+        );
       case ImageGenApiType.routmy:
         return buildRoutmyModelFields(
           s,
@@ -485,9 +505,12 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
         return _connectionService.fetchElectronHubModels(_settings);
       case ImageGenApiType.a1111:
         return _connectionService.fetchA1111Models(_settings);
+      case ImageGenApiType.xai:
+        return _connectionService.fetchXaiModels(_settings);
+      case ImageGenApiType.naistera:
+        return _fetchNaisteraModels();
       case ImageGenApiType.openai:
       case ImageGenApiType.gemini:
-      case ImageGenApiType.naistera:
       case ImageGenApiType.routmy:
       case ImageGenApiType.ruRoutmy:
         return _connectionService.fetchOpenAiModels(
@@ -498,8 +521,21 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
     }
   }
 
+  /// Loads the Naistera catalog and stores it in the settings, so reference
+  /// support and the model labels follow the API instead of the shipped list.
+  Future<List<String>> _fetchNaisteraModels() async {
+    final catalog = await NaisteraImageProvider().fetchModels(
+      apiKey: _settings.naisteraApiKey,
+    );
+    if (catalog.isEmpty) return const [];
+    _update(_settings.copyWith(naisteraModels: catalog));
+    return catalog.map((model) => model.id).toList();
+  }
+
   bool _isSelectedModel(String model) => switch (_settings.apiType) {
     ImageGenApiType.openrouter => _settings.openrouter.model == model,
+    ImageGenApiType.xai => _settings.xai.model == model,
+    ImageGenApiType.naistera => _settings.naisteraModel == model,
     ImageGenApiType.electronhub => _settings.electronhub.model == model,
     ImageGenApiType.a1111 => _settings.a1111.model == model,
     _ => _settings.customModel == model,
@@ -523,6 +559,10 @@ class _ImageGenSheetState extends ConsumerState<ImageGenSheet> {
         _update(
           _settings.copyWith(a1111: _settings.a1111.copyWith(model: model)),
         );
+      case ImageGenApiType.xai:
+        _update(_settings.copyWith(xai: _settings.xai.copyWith(model: model)));
+      case ImageGenApiType.naistera:
+        _update(_settings.copyWith(naisteraModel: model));
       default:
         _update(_settings.copyWith(customModel: model));
     }

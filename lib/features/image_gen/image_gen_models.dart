@@ -8,6 +8,7 @@ part 'image_gen_models.freezed.dart';
 
 enum ImageGenApiType {
   openai,
+  xai,
   gemini,
   naistera,
   routmy,
@@ -21,6 +22,7 @@ extension ImageGenApiTypeLabel on ImageGenApiType {
   /// Provider name shown in the settings sheet.
   String get label => switch (this) {
     ImageGenApiType.openai => 'OpenAI',
+    ImageGenApiType.xai => 'xAI Imagine',
     ImageGenApiType.gemini => 'Gemini',
     ImageGenApiType.naistera => 'Naistera',
     ImageGenApiType.routmy => 'rout.my',
@@ -29,6 +31,49 @@ extension ImageGenApiTypeLabel on ImageGenApiType {
     ImageGenApiType.electronhub => 'Electron Hub',
     ImageGenApiType.a1111 => 'AUTOMATIC1111 / Forge',
   };
+}
+
+/// How the character / persona appearance descriptions reach a Naistera
+/// prompt.
+///
+/// Ported from https://github.com/0xl0cal/sillyimages
+/// (`naisteraCharacterDescriptionsMode`).
+enum CharacterDescriptionsMode {
+  /// Never append them.
+  none,
+
+  /// `Character descriptions:` block with one `- {{char}}: ...` line each.
+  asIs,
+
+  /// NovelAI character prompts — one `\| description` line per character,
+  /// persona first.
+  characterPrompt,
+}
+
+/// One model of the Naistera catalog as served by `GET /api/models`.
+///
+/// The catalog is fetched in the settings sheet and persisted, so reference
+/// support follows what the API says instead of a hardcoded deny-list.
+@freezed
+abstract class NaisteraModelInfo with _$NaisteraModelInfo {
+  const factory NaisteraModelInfo({
+    required String id,
+    @Default('') String name,
+    @Default(true) bool references,
+  }) = _NaisteraModelInfo;
+}
+
+/// xAI Imagine connection and per-model parameters.
+@freezed
+abstract class XaiImageSettings with _$XaiImageSettings {
+  const factory XaiImageSettings({
+    @Default('') String apiKey,
+    @Default('') String endpoint,
+    @Default('grok-imagine-image-2.0') String model,
+    @Default('1:1') String aspectRatio,
+    @Default('1k') String resolution,
+    @Default('medium') String quality,
+  }) = _XaiImageSettings;
 }
 
 /// One entry of the shared reference library: an image plus the trigger names
@@ -113,6 +158,7 @@ abstract class A1111ImageSettings with _$A1111ImageSettings {
 abstract class ImageGenSettings with _$ImageGenSettings {
   const factory ImageGenSettings({
     @Default(false) bool enabled,
+
     /// Fire every image tag of a message at the same time. Off by default:
     /// the images of one message are generated one at a time, each finished
     /// from start to end before the next one starts.
@@ -129,6 +175,12 @@ abstract class ImageGenSettings with _$ImageGenSettings {
     @Default('') String naisteraApiKey,
     @Default('grok') String naisteraModel,
     @Default('1:1') String naisteraAspectRatio,
+
+    /// Catalog last loaded from `GET /api/models`. Empty until the user hits
+    /// refresh — [NaisteraConstants.models] is the fallback shortlist.
+    @Default([]) List<NaisteraModelInfo> naisteraModels,
+    @Default(CharacterDescriptionsMode.asIs)
+    CharacterDescriptionsMode naisteraCharacterDescriptionsMode,
     @Default('') String routmyApiKey,
     @Default('google/gemini-3.1-flash-image-preview') String routmyModel,
     @Default('1:1') String routmyAspectRatio,
@@ -139,6 +191,7 @@ abstract class ImageGenSettings with _$ImageGenSettings {
     @Default('1:1') String ruRoutmyAspectRatio,
     @Default('1K') String ruRoutmyImageSize,
     @Default('standard') String ruRoutmyQuality,
+    @Default(XaiImageSettings()) XaiImageSettings xai,
     @Default(OpenRouterImageSettings()) OpenRouterImageSettings openrouter,
     @Default(ElectronHubImageSettings()) ElectronHubImageSettings electronhub,
     @Default(A1111ImageSettings()) A1111ImageSettings a1111,
@@ -165,6 +218,30 @@ abstract class ImageGenSettings with _$ImageGenSettings {
     if (!refInstructionEnabled) return '';
     final raw = refInstruction.trim();
     return raw.isEmpty ? defaultReferenceInstruction : raw;
+  }
+
+  /// Reference support of the selected Naistera model: the fetched catalog
+  /// when it knows the model, the shipped deny-list otherwise.
+  bool get naisteraSupportsReferences {
+    final id = NaisteraConstants.normalizeModel(naisteraModel);
+    for (final model in naisteraModels) {
+      if (model.id == id || model.id == naisteraModel) return model.references;
+    }
+    return NaisteraConstants.supportsReferences(naisteraModel);
+  }
+
+  /// Human-readable label of a Naistera model id — the catalog name when it is
+  /// known, then the shipped shortlist, then the raw id.
+  String naisteraModelLabel(String id) {
+    for (final model in naisteraModels) {
+      if (model.id == id) {
+        return model.name.trim().isEmpty ? model.id : model.name;
+      }
+    }
+    for (final model in NaisteraConstants.models) {
+      if (model.$1 == id) return model.$2;
+    }
+    return id;
   }
 
   /// Active style, or null when "no style" is selected.

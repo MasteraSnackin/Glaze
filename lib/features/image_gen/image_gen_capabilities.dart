@@ -245,8 +245,15 @@ int providerMaxReferences(ImageGenSettings settings) {
       return geminiCapabilities(settings.customModel).maxReferences;
     case ImageGenApiType.openrouter:
       return openRouterCapabilities(settings.openrouter.model).maxReferences;
+    case ImageGenApiType.xai:
+      // Unlike the upstream extension — which hides the reference UI for
+      // generation-only models but still attaches references to the request —
+      // an unsupported model reports 0 here, so nothing reaches /v1/images/edits.
+      return XaiConstants.supportsReferences(settings.xai.model)
+          ? XaiConstants.maxReferences
+          : 0;
     case ImageGenApiType.naistera:
-      return NaisteraConstants.supportsReferences(settings.naisteraModel)
+      return settings.naisteraSupportsReferences
           ? maxGenerationReferenceImages
           : 0;
     case ImageGenApiType.routmy:

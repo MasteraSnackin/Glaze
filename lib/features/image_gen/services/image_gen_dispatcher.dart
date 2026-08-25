@@ -11,6 +11,7 @@ import 'naistera_image_provider.dart';
 import 'openai_image_provider.dart';
 import 'openrouter_image_provider.dart';
 import 'routmy_image_provider.dart';
+import 'xai_image_provider.dart';
 
 /// Routes a prepared prompt + reference set to the configured provider client.
 ///
@@ -39,6 +40,15 @@ class ImageGenDispatcher {
           llmEndpoint,
           llmApiKey,
           instructionAspectRatio,
+          cancelToken,
+        );
+      case ImageGenApiType.xai:
+        return _xai(
+          settings,
+          prompt,
+          references,
+          instructionAspectRatio,
+          instructionImageSize,
           cancelToken,
         );
       case ImageGenApiType.electronhub:
@@ -80,6 +90,7 @@ class ImageGenDispatcher {
             settings.naisteraAspectRatio,
           ),
           references: references.isEmpty ? null : references,
+          supportsReferences: settings.naisteraSupportsReferences,
           cancelToken: cancelToken,
         );
       case ImageGenApiType.routmy:
@@ -139,6 +150,36 @@ class ImageGenDispatcher {
           _sizeForAspect(instructionAspectRatio, model) ?? settings.openaiSize,
       quality: settings.openaiQuality,
       referenceImages: _imagesOf(references),
+      cancelToken: cancelToken,
+    );
+  }
+
+  Future<Uint8List> _xai(
+    ImageGenSettings settings,
+    String prompt,
+    List<Map<String, String>> references,
+    String? instructionAspectRatio,
+    String? instructionImageSize,
+    CancelToken? cancelToken,
+  ) {
+    final config = settings.xai;
+    return XaiImageProvider(baseUrl: config.endpoint).generate(
+      apiKey: config.apiKey,
+      model: config.model,
+      prompt: prompt,
+      aspectRatio: _validOverride(
+        instructionAspectRatio,
+        XaiConstants.aspectRatios,
+        config.aspectRatio,
+      ),
+      // The tag writes `1K` / `2K`; xAI spells them lowercase.
+      resolution: _validOverride(
+        instructionImageSize?.toLowerCase(),
+        XaiConstants.resolutions,
+        config.resolution,
+      ),
+      quality: config.quality,
+      references: references,
       cancelToken: cancelToken,
     );
   }
