@@ -27,6 +27,10 @@ def _optional(name: str, default: str = "") -> str:
     return os.environ.get(name, "").strip() or default
 
 
+def _flag(name: str, default: str) -> bool:
+    return _optional(name, default).lower() in ("1", "true", "yes")
+
+
 def _csv(name: str) -> tuple[str, ...]:
     raw = _optional(name)
     return tuple(x.strip() for x in raw.split(",") if x.strip())
@@ -38,6 +42,9 @@ class Config:
     deepseek_api_key: str
     deepseek_base_url: str
     deepseek_model: str
+    # Multimodal sibling, used for any report that carries a picture. Same API,
+    # same tools — it just has eyes. Text-only reports stay on the cheap model.
+    deepseek_vision_model: str
 
     # --- Trello ---
     trello_key: str
@@ -45,6 +52,9 @@ class Config:
     trello_board_id: str
     trello_new_bug_list_id: str  # where freshly-discovered bugs land
     trello_audited_label_id: str  # label meaning "AI already audited this"
+    # Lists the board sweep never touches — Done / Released / Ideas columns a
+    # human keeps for themselves.
+    trello_skip_list_ids: tuple[str, ...]
 
     # --- Discord ---
     discord_bot_token: str
@@ -69,27 +79,58 @@ class Config:
     max_new_cards_per_run: int
     max_audits_per_run: int
 
+    # --- Vision ---
+    # Master switch. Off = images are never downloaded and the vision model is
+    # never built; the pipeline behaves exactly as it did before.
+    vision_enabled: bool
+    # Pictures shown to the model per report. Each one costs up to 384 tokens,
+    # and the fifth screenshot of the same dialog rarely adds anything.
+    max_images_per_audit: int
+    # Images larger than this are skipped rather than uploaded.
+    max_image_bytes: int
+
+    # --- Board passes (they read the board as a queue, not just as an index) --
+    # Re-open cards whose audit ended "NEED MORE INFO" because it could not see
+    # the screenshot, and run them again with the vision model.
+    reaudit_image_blocked: bool
+    max_reaudits_per_run: int
+    # Audit cards that were never mirrored from Discord: no `discord-thread:`
+    # marker, no audited label — someone typed them straight onto the board.
+    audit_board_cards: bool
+    max_board_audits_per_run: int
+
     @staticmethod
     def load() -> "Config":
         return Config(
             deepseek_api_key=_require("DEEPSEEK_API_KEY"),
             deepseek_base_url=_optional("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
             deepseek_model=_optional("DEEPSEEK_MODEL", "deepseek-chat"),
+            deepseek_vision_model=_optional(
+                "DEEPSEEK_VISION_MODEL", "deepseek-v4-flash-vision-exp"
+            ),
             trello_key=_require("TRELLO_KEY"),
             trello_token=_require("TRELLO_TOKEN"),
             trello_board_id=_require("TRELLO_BOARD_ID"),
             trello_new_bug_list_id=_require("TRELLO_NEW_BUG_LIST_ID"),
             trello_audited_label_id=_require("TRELLO_AUDITED_LABEL_ID"),
+            trello_skip_list_ids=_csv("TRELLO_SKIP_LIST_IDS"),
             discord_bot_token=_require("DISCORD_BOT_TOKEN"),
             discord_guild_id=_require("DISCORD_GUILD_ID"),
             discord_forum_channel_id=_require("DISCORD_FORUM_CHANNEL_ID"),
             discord_ignored_tag_ids=_csv("DISCORD_IGNORED_TAG_IDS"),
-            discord_skip_archived=_optional("DISCORD_SKIP_ARCHIVED", "true").lower()
-            in ("1", "true", "yes"),
-            dry_run=_optional("DRY_RUN", "false").lower() in ("1", "true", "yes"),
-            match_existing_cards=_optional("MATCH_EXISTING_CARDS", "true").lower()
-            in ("1", "true", "yes"),
+            discord_skip_archived=_flag("DISCORD_SKIP_ARCHIVED", "true"),
+            dry_run=_flag("DRY_RUN", "false"),
+            match_existing_cards=_flag("MATCH_EXISTING_CARDS", "true"),
             max_match_candidates=int(_optional("MAX_MATCH_CANDIDATES", "20")),
             max_new_cards_per_run=int(_optional("MAX_NEW_CARDS_PER_RUN", "25")),
             max_audits_per_run=int(_optional("MAX_AUDITS_PER_RUN", "15")),
+            vision_enabled=_flag("VISION_ENABLED", "true"),
+            max_images_per_audit=int(_optional("MAX_IMAGES_PER_AUDIT", "4")),
+            max_image_bytes=int(_optional("MAX_IMAGE_BYTES", "8000000")),
+            reaudit_image_blocked=_flag("REAUDIT_IMAGE_BLOCKED", "true"),
+            max_reaudits_per_run=int(_optional("MAX_REAUDITS_PER_RUN", "10")),
+            audit_board_cards=_flag("AUDIT_BOARD_CARDS", "true"),
+            max_board_audits_per_run=int(
+                _optional("MAX_BOARD_AUDITS_PER_RUN", "10")
+            ),
         )

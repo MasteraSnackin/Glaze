@@ -1,28 +1,26 @@
 """Orchestrator. Runs once per invocation (the workflow schedules it daily).
 
-Discord is the only work queue: the run walks the open forum threads and uses
-Trello purely to cross-check them. The board is never scanned for work of its
-own, so a card written by hand — anywhere on the board, in any list — is never
-picked up, commented on or labelled by this agent.
+Discord is still the primary work queue, but it is no longer the only one: after
+the forum is mirrored and audited, the board itself is swept twice — once for
+cards whose earlier audit gave up on a screenshot, once for cards nobody
+mirrored from Discord at all.
 
-Flow (only the audit step touches the LLM):
+Flow (only the audit passes touch the LLM):
   1. Pull the open Discord forum posts.
-  2. Pull Trello cards ONCE, to index them by their `discord-thread:<id>`
-     markers. That index answers two questions per thread and nothing else:
-     does it already have a card, and was that card already audited?
-  3. Any thread with no card of its own -> check whether one of the board's
-     cards already reports that same bug (matcher.py, one DeepSeek call).
-     Candidates include cards a human typed in AND cards earlier threads
-     produced, so a second thread about a known bug lands on the card that
-     reported it first instead of opening a duplicate. On a hit, append the
-     marker + back-link to that card; otherwise create a new card.
-  4. EARLY EXIT: if every thread already carries the audited label, stop
-     before the (far more expensive) audit agent is ever built. A run with no
-     new threads and nothing to audit spends zero tokens.
-  5. For each remaining thread: run the agent on that ONE report (title +
-     post + replies, read live from Discord), post the result as a comment on
-     its card, then apply the "audited" label. A card that collected several
-     threads is audited once, on the first of them.
+  2. Pull Trello cards ONCE, and index them by their `discord-thread:<id>`
+     markers: does this thread already have a card, and was that card audited?
+  3. mirror.py — any thread with no card of its own either joins the card that
+     already reports that bug (one DeepSeek text call) or gets a new one.
+  4. EARLY EXIT: nothing to audit in any of the three passes -> stop before the
+     agents are ever built. A quiet day still spends zero tokens.
+  5. Pass 1 (discord): every open thread whose card lacks the audited label.
+     A report carrying screenshots goes to the vision model with the pictures
+     attached; a text-only report stays on the cheap text model.
+  6. Pass 2 (reaudit): cards whose recorded verdict was "blocked on images" —
+     the backlog the text-only era left behind — judged again with their
+     pictures. Retires itself per card once a vision verdict exists.
+  7. Pass 3 (board): cards with no Discord marker and no audited label, i.e.
+     hand-written ones. Title, description, comments and attached images.
 
 Nothing here ever modifies source code or opens a PR.
 """
@@ -30,65 +28,42 @@ Nothing here ever modifies source code or opens a PR.
 from __future__ import annotations
 
 import sys
-from dataclasses import replace
 
-from auditor import build_agent, format_comment
+import mirror
+from audit_pass import AuditPass
 from config import Config
 from discord_client import DiscordClient, ForumPost
-from matcher import build_matcher, find_existing_card
-from trello_client import Card, TrelloClient, marker_for
-
-# Below this much readable text a report cannot be audited at all, so we skip
-# the LLM entirely and ask a human for details instead of burning tokens.
-_MIN_REPORT_CHARS = 15
+from images import ImageLoader
+from runner import AuditRunner
+from trello_client import Card, TrelloClient
 
 
-def _card_body(post: ForumPost) -> str:
-    """Title/body/replies of one thread, plus the de-dup marker footer."""
-    parts = [post.body.strip() or "(no text in the original post)"]
+def _audit_queue(
+    posts: list[ForumPost],
+    by_thread: dict[str, Card],
+    audited_label_id: str,
+) -> list[tuple[ForumPost, Card]]:
+    """Threads still needing a first audit, one entry per card.
 
-    if post.replies:
-        parts.append("**Replies from the thread:**")
-        parts.extend(f"- {r}" for r in post.replies)
-
-    footer = ["---"]
-    if post.attachment_count:
-        footer.append(
-            f"Attachments: {post.attachment_count} — images are NOT readable by "
-            f"the triage agent."
-        )
-    footer.append(f"Reported on Discord: {post.url}")
-    footer.append(marker_for(post.thread_id))
-
-    return "\n\n".join(parts) + "\n\n" + "\n".join(footer)
-
-
-def _linked_desc(card: Card, post: ForumPost) -> str:
-    """A human-written card's description with the Discord link glued on.
-
-    Only the footer is appended — whatever a human typed stays untouched, so
-    linking a card can never destroy the report they wrote.
+    Driven by the forum, never by the board: a thread is a candidate only if its
+    card is missing the audited label. Threads whose card creation was capped
+    during mirroring simply wait for the next run. Duplicates share a card, and
+    a card is audited once — the later threads add their link, not a second
+    audit of the same bug.
     """
-    return (
-        f"{card.desc.rstrip()}\n\n---\n"
-        f"Also reported on Discord: {post.url}\n"
-        f"{marker_for(post.thread_id)}"
-    )
-
-
-def _report_text(post: ForumPost) -> str:
-    """The human-written part of a thread — what the auditor has to read."""
-    return "\n".join([post.body, *post.replies]).strip()
-
-
-def _unreadable_comment(source_url: str) -> str:
-    return (
-        f"⚠️ **NEED MORE INFO** — this report carries no readable "
-        f"text.\nSource: {source_url}\n\n"
-        f"It looks like screenshots or attachments only. Please add: what you "
-        f"did, what you expected, and what happened instead.\n\n"
-        f"*(No audit was performed. Nothing was changed.)*"
-    )
+    queue: list[tuple[ForumPost, Card]] = []
+    claimed: set[str] = set()
+    for p in posts:
+        card = by_thread.get(p.thread_id)
+        if card is None or audited_label_id in card.label_ids:
+            continue
+        if card.id in claimed:
+            print(f"[triage] thread {p.thread_id} shares card {card.id} with an "
+                  f"earlier thread — no second audit")
+            continue
+        claimed.add(card.id)
+        queue.append((p, card))
+    return queue
 
 
 def main() -> int:
@@ -105,128 +80,51 @@ def main() -> int:
         cfg.trello_key, cfg.trello_token, cfg.trello_board_id, dry_run=cfg.dry_run
     )
 
-    # --- Step 1+2: the forum is the queue, the board is only the cross-check --
+    # --- Step 1+2: the forum queue and the board index ----------------------
     posts = discord.fetch_posts()
     cards = trello.fetch_cards()
-    by_thread: dict[str, Card] = {
-        tid: c for c in cards for tid in c.discord_thread_ids
-    }
-    print(f"[triage] discord posts={len(posts)} trello cards={len(cards)} "
-          f"already-linked-threads={len(by_thread)}")
+    by_thread: dict[str, Card] = {tid: c for c in cards for tid in c.discord_thread_ids}
+    images_seen = sum(len(p.images) for p in posts)
+    print(f"[triage] discord posts={len(posts)} (images={images_seen}) "
+          f"trello cards={len(cards)} already-linked-threads={len(by_thread)}")
 
     # --- Step 3: mirror new Discord posts into Trello -----------------------
-    new_posts = [p for p in posts if p.thread_id not in by_thread]
-    if cfg.max_new_cards_per_run and len(new_posts) > cfg.max_new_cards_per_run:
-        print(f"[triage] {len(new_posts)} new thread(s); capped to "
-              f"{cfg.max_new_cards_per_run} this run (MAX_NEW_CARDS_PER_RUN)")
-        new_posts = new_posts[: cfg.max_new_cards_per_run]
+    mirror.mirror(cfg, trello, posts, cards, by_thread)
 
-    # Every card on the board is a candidate for "this bug is already tracked" —
-    # one a human typed in, or one an earlier thread produced. Cards created
-    # during this run join the pool too, so two duplicate threads in the same
-    # batch also end up on one card.
-    candidates = list(cards)
-    matcher = None  # built lazily: no new threads -> no lookup, no tokens
+    # --- Step 4: is there anything to audit at all? -------------------------
+    queue = _audit_queue(posts, by_thread, cfg.trello_audited_label_id)
+    if cfg.max_audits_per_run and len(queue) > cfg.max_audits_per_run:
+        print(f"[triage] {len(queue)} thread(s) pending; auditing "
+              f"{cfg.max_audits_per_run} this run (MAX_AUDITS_PER_RUN)")
+        queue = queue[: cfg.max_audits_per_run]
 
-    for post in new_posts:
-        hit = None
-        if cfg.match_existing_cards and candidates:
-            if matcher is None:
-                matcher = build_matcher(
-                    cfg.deepseek_api_key, cfg.deepseek_base_url, cfg.deepseek_model
-                )
-            hit = find_existing_card(
-                matcher, post, candidates, cfg.max_match_candidates
-            )
+    # Building the passes costs nothing — both agents are lazy — so the board
+    # scan below can reuse the very cache the passes will run on.
+    passes = AuditPass(
+        cfg,
+        trello,
+        AuditRunner(
+            cfg,
+            ImageLoader(cfg.trello_key, cfg.trello_token, cfg.max_image_bytes),
+        ),
+    )
 
-        if hit is not None:
-            desc = _linked_desc(hit, post)
-            trello.set_desc(hit.id, desc)
-            also = f" (now tracks {len(hit.discord_thread_ids) + 1} threads)"
-            print(f"[triage] linked thread {post.thread_id} to existing card "
-                  f"{hit.id}: {hit.name!r}{also}")
-            linked = replace(hit, desc=desc)
-            by_thread[post.thread_id] = linked
-            candidates[candidates.index(hit)] = linked
-            continue
-
-        body = _card_body(post)
-        new_id = trello.create_card(cfg.trello_new_bug_list_id, post.title, body)
-        print(f"[triage] created card for thread {post.thread_id}: {post.title!r}")
-        fresh = Card(
-            id=new_id,
-            name=post.title,
-            desc=body,
-            list_id=cfg.trello_new_bug_list_id,
-            label_ids=(),
-        )
-        by_thread[post.thread_id] = fresh
-        candidates.append(fresh)
-
-    # --- Step 4: which threads still need an audit? -------------------------
-    # Driven by the forum, never by the board: a thread is a candidate only if
-    # its card is missing the audited label. Threads whose card creation was
-    # capped above simply wait for the next run. Duplicates share a card, and a
-    # card is audited once — the later threads add their link, not a second
-    # audit of the same bug.
-    to_audit: list[tuple[ForumPost, Card]] = []
-    claimed: set[str] = set()
-    for p in posts:
-        card = by_thread.get(p.thread_id)
-        if card is None or cfg.trello_audited_label_id in card.label_ids:
-            continue
-        if card.id in claimed:
-            print(f"[triage] thread {p.thread_id} shares card {card.id} with an "
-                  f"earlier thread — no second audit")
-            continue
-        claimed.add(card.id)
-        to_audit.append((p, card))
-
-    # --- Step 5: early exit before spending any tokens ---------------------
-    if not to_audit:
+    if not queue and not passes.has_work(cards):
         print("[triage] nothing new to audit — exiting before LLM.")
         return 0
 
-    if cfg.max_audits_per_run and len(to_audit) > cfg.max_audits_per_run:
-        print(f"[triage] {len(to_audit)} thread(s) pending; auditing "
-              f"{cfg.max_audits_per_run} this run (MAX_AUDITS_PER_RUN)")
-        to_audit = to_audit[: cfg.max_audits_per_run]
+    # --- Steps 5-7: the three audit passes ---------------------------------
+    passes.discord(queue)
 
-    agent = None  # built lazily: unreadable-only batches never need the LLM
-    failures = 0
+    posts_by_thread = {p.thread_id: p for p in posts}
+    if cfg.reaudit_image_blocked:
+        passes.image_blocked(cards, posts_by_thread)
+    if cfg.audit_board_cards:
+        passes.board(cards)
 
-    for post, card in to_audit:
-        # Cheap path: nothing to read -> ask a human, don't call DeepSeek.
-        if len(_report_text(post)) < _MIN_REPORT_CHARS:
-            trello.add_comment(card.id, _unreadable_comment(post.url))
-            trello.add_label(card.id, cfg.trello_audited_label_id)
-            print(f"[triage] NEED MORE INFO (no text) for thread {post.thread_id}")
-            continue
-
-        if agent is None:
-            print(f"[triage] using model {cfg.deepseek_model}")
-            agent = build_agent(
-                cfg.deepseek_api_key, cfg.deepseek_base_url, cfg.deepseek_model
-            )
-
-        # Read from the thread, not from the card: replies posted after the
-        # card was mirrored are part of the report the agent sees.
-        prompt = f"Bug title: {post.title}\n\nBug report:\n{_card_body(post)}"
-        try:
-            result = agent.run_sync(prompt)
-        except Exception as e:  # noqa: BLE001 — one bad thread must not sink the run
-            print(f"[triage] audit FAILED for thread {post.thread_id}: {e}",
-                  file=sys.stderr)
-            failures += 1
-            continue
-
-        trello.add_comment(card.id, format_comment(result.output, post.url))
-        trello.add_label(card.id, cfg.trello_audited_label_id)
-        flag = " [NEED MORE INFO]" if result.output.needs_more_info else ""
-        print(f"[triage] audited thread {post.thread_id}: {post.title!r}{flag}")
-
-    if failures:
-        print(f"[triage] completed with {failures} audit failure(s).", file=sys.stderr)
+    if passes.failures:
+        print(f"[triage] completed with {passes.failures} audit failure(s).",
+              file=sys.stderr)
         return 1
     return 0
 
