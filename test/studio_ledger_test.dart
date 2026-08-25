@@ -147,6 +147,20 @@ List<ChatMessage> _conversation(int assistantCount) {
 void main() {
   const parser = StudioLedgerExportParser();
 
+  test('reconciliation range hash is shared with exact reconstruction', () {
+    final messages = _conversation(1);
+    final plan = const LedgerReconciliationPlanner().planForEndpoint(
+      messages: messages,
+      endAssistantMessageId: messages.last.id,
+    );
+
+    expect(plan, isNotNull);
+    expect(
+      plan!.rangeHash,
+      computeLedgerReconciliationRangeHash(plan.messages),
+    );
+  });
+
   group('StudioLedgerPrompt', () {
     test('injects full values only for relevant existing state', () {
       final prompt = const StudioLedgerPrompt().build(
@@ -217,7 +231,7 @@ void main() {
   });
 
   group('Ledger reconciliation', () {
-    test('manual plan ends at the requested assistant and stays bounded', () {
+    test('manual plan ends at the requested assistant with five chunks', () {
       final messages = <ChatMessage>[
         const ChatMessage(id: 'a0', role: 'assistant', content: 'Opening'),
         for (var i = 1; i <= 12; i++) ...[
@@ -233,8 +247,8 @@ void main() {
 
       expect(plan, isNotNull);
       expect(plan!.endMessage.id, 'a12');
-      expect(plan.messages, hasLength(20));
-      expect(plan.startMessageId, 'u3');
+      expect(plan.messages, hasLength(10));
+      expect(plan.startMessageId, 'u8');
     });
 
     const planner = LedgerReconciliationPlanner();
@@ -304,11 +318,9 @@ void main() {
       expect(next, isNotNull);
       expect(next!.endMessage.id, 'a10');
       expect(next.messageIds, isNot(contains('a11')));
-      expect(next.messages, hasLength(18));
-      expect(next.startMessageId, 'u2');
-      // Rolling context remains intentionally overlapping, but chunk 1 is
-      // never split merely to fill the two remaining message slots.
-      expect(next.messageIds, contains('a5'));
+      expect(next.messages, hasLength(10));
+      expect(next.startMessageId, 'u6');
+      expect(next.messageIds, isNot(contains('a5')));
       expect(next.messageIds, isNot(contains('a0')));
       expect(
         planner.plan(
@@ -383,15 +395,15 @@ void main() {
       expect(plan.messageIds, isNot(contains('hidden')));
     });
 
-    test('review range is bounded to twenty physical messages', () {
+    test('review range contains only the five unprocessed chunks', () {
       final messages = _conversation(11);
       final plan = planner.plan(
         messages: messages,
         currentAssistantMessageId: 'a11',
         previousEndMessageId: 'a5',
       )!;
-      expect(plan.messages, hasLength(18));
-      expect(plan.startMessageId, 'u2');
+      expect(plan.messages, hasLength(10));
+      expect(plan.startMessageId, 'u6');
       expect(plan.endMessage.id, 'a10');
     });
 

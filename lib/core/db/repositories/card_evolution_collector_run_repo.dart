@@ -41,6 +41,20 @@ class CardEvolutionCollectorRunRepo {
 
   final AppDatabase db;
 
+  /// Read-only audit history for Agent Ops, newest collector first.
+  Future<List<CardEvolutionCollectorRunRow>> readSession(String sessionId) =>
+      (db.select(db.cardEvolutionCollectorRuns)
+            ..where((row) => row.sessionId.equals(sessionId))
+            ..orderBy([
+              (row) => OrderingTerm.desc(row.collectorOrdinal),
+              (row) => OrderingTerm.desc(row.createdAt),
+            ]))
+          .get();
+
+  Future<CardEvolutionCollectorRunRow?> getById(String id) => (db.select(
+    db.cardEvolutionCollectorRuns,
+  )..where((row) => row.id.equals(id))).getSingleOrNull();
+
   Future<CardEvolutionCollectorClaimOutcome> claim({
     required LedgerReconciliationSuccessfulRunRow reconciliationRun,
     required String characterId,
@@ -61,10 +75,15 @@ class CardEvolutionCollectorRunRepo {
       if (existing.status == 'completed') {
         return CardEvolutionCollectorClaimOutcome('completed', existing);
       }
+      if (existing.status == 'failed') {
+        return CardEvolutionCollectorClaimOutcome('failed', existing);
+      }
       if (existing.inputHash != inputHash) {
         return const CardEvolutionCollectorClaimOutcome('staleInput');
       }
-      if (existing.leaseExpiresAt > now && existing.ownerId != ownerId) {
+      if (existing.status == 'claimed' &&
+          existing.leaseExpiresAt > now &&
+          existing.ownerId != ownerId) {
         return const CardEvolutionCollectorClaimOutcome('busy');
       }
       final changed =
@@ -76,6 +95,10 @@ class CardEvolutionCollectorRunRepo {
                 CardEvolutionCollectorRunsCompanion(
                   ownerId: Value(ownerId),
                   leaseExpiresAt: Value(now + leaseSeconds),
+                  status: const Value('claimed'),
+                  failureCode: const Value(null),
+                  failureDetail: const Value(null),
+                  failedAt: const Value(null),
                 ),
               );
       if (changed != 1) {
@@ -125,6 +148,38 @@ class CardEvolutionCollectorRunRepo {
     return CardEvolutionCollectorClaimOutcome('claimed', row);
   });
 
+  Future<CardEvolutionCollectorClaimOutcome> claimFailed({
+    required String id,
+    required String ownerId,
+    required int now,
+    required int leaseSeconds,
+  }) => db.transaction(() async {
+    final existing = await getById(id);
+    if (existing == null) {
+      return const CardEvolutionCollectorClaimOutcome('notFound');
+    }
+    if (existing.status != 'failed') {
+      return CardEvolutionCollectorClaimOutcome('notFailed', existing);
+    }
+    final changed =
+        await (db.update(db.cardEvolutionCollectorRuns)
+              ..where((row) => row.id.equals(id) & row.status.equals('failed')))
+            .write(
+              CardEvolutionCollectorRunsCompanion(
+                ownerId: Value(ownerId),
+                status: const Value('claimed'),
+                leaseExpiresAt: Value(now + leaseSeconds),
+                failureCode: const Value(null),
+                failureDetail: const Value(null),
+                failedAt: const Value(null),
+              ),
+            );
+    if (changed != 1) {
+      return const CardEvolutionCollectorClaimOutcome('busy');
+    }
+    return CardEvolutionCollectorClaimOutcome('claimed', await getById(id));
+  });
+
   Future<bool> complete({
     required String id,
     required String ownerId,
@@ -159,6 +214,7 @@ class CardEvolutionCollectorRunRepo {
     required int now,
     required Future<void> Function() applyEffects,
     Future<bool> Function()? validateEvidence,
+    String? lastCallId,
   }) => db.transaction(() async {
     final claimed =
         await (db.select(db.cardEvolutionCollectorRuns)..where(
@@ -184,6 +240,9 @@ class CardEvolutionCollectorRunRepo {
               CardEvolutionCollectorRunsCompanion(
                 status: const Value('completed'),
                 modelOutputHash: Value(modelOutputHash),
+                lastCallId: lastCallId == null
+                    ? const Value.absent()
+                    : Value(lastCallId),
                 completedAt: Value(now),
               ),
             );
@@ -201,6 +260,34 @@ class CardEvolutionCollectorRunRepo {
                 row.status.equals('claimed'),
           ))
           .go();
+
+  Future<bool> markFailed({
+    required String id,
+    required String ownerId,
+    required int now,
+    required String code,
+    String? detail,
+    String? callId,
+  }) async {
+    final changed =
+        await (db.update(db.cardEvolutionCollectorRuns)..where(
+              (row) =>
+                  row.id.equals(id) &
+                  row.ownerId.equals(ownerId) &
+                  row.status.equals('claimed'),
+            ))
+            .write(
+              CardEvolutionCollectorRunsCompanion(
+                status: const Value('failed'),
+                leaseExpiresAt: const Value(0),
+                lastCallId: Value(callId),
+                failureCode: Value(code),
+                failureDetail: Value(detail),
+                failedAt: Value(now),
+              ),
+            );
+    return changed == 1;
+  }
 
   Future<int> latestCompletedOrdinal(String sessionId) async {
     final row = await db

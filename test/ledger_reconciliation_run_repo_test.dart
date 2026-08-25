@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:drift/native.dart';
+import 'package:drift/drift.dart' hide isNotNull, isNull;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:glaze_flutter/core/db/app_db.dart';
 import 'package:glaze_flutter/core/db/repositories/ledger_reconciliation_run_repo.dart';
@@ -358,6 +359,38 @@ void main() {
     },
   );
 
+  test('replacement invalidation requires the exact logical head', () async {
+    await _seedSession(db);
+    final first = _run();
+    expect(await repo.append(first), isA<ReconciliationRunAppended>());
+
+    expect(
+      await repo.invalidateLatestForReplacement(
+        sessionId: 'session',
+        expectedRunId: 'other',
+        expectedChainHash: first.chainHash,
+        createdAt: 2,
+      ),
+      isA<ReconciliationHeadInvalidationConflict>(),
+    );
+    expect((await repo.getHead('session'))!.id, first.id);
+
+    expect(
+      await repo.invalidateLatestForReplacement(
+        sessionId: 'session',
+        expectedRunId: first.id,
+        expectedChainHash: first.chainHash,
+        createdAt: 3,
+      ),
+      isA<ReconciliationHeadInvalidated>(),
+    );
+    expect(await repo.getHead('session'), isNull);
+    expect((await repo.readPhysicalSession('session')).single.id, first.id);
+    final invalidation = (await repo.readInvalidations('session')).single;
+    expect(invalidation.reason, 'latest_head_replaced');
+    expect(invalidation.causeMessageId, first.end.messageId);
+  });
+
   test('message mutation invalidates anchored run suffix, not trigger', () async {
     await _seedSession(db);
     final first = _run();
@@ -387,6 +420,120 @@ void main() {
       "UPDATE chat_sessions SET messages_json = '[{\"id\":\"user\",\"role\":\"user\",\"content\":\"accepted\"}]' WHERE session_id = 'session'",
     );
     expect(await repo.validateChain('session'), isA<ReconciliationRunValid>());
+  });
+
+  test('records immutable canonical before and after effects', () async {
+    await db
+        .into(db.trackerRows)
+        .insert(
+          TrackerRowsCompanion.insert(
+            sessionId: 'session',
+            name: 'world:time',
+            value: const Value('before'),
+            scope: const Value('ledger'),
+          ),
+        );
+    final before = await repo.captureState('session');
+    await (db.update(db.trackerRows)
+          ..where((row) => row.sessionId.equals('session'))
+          ..where((row) => row.name.equals('world:time')))
+        .write(const TrackerRowsCompanion(value: Value('after')));
+    final after = await repo.captureState('session');
+
+    await repo.recordEffect(
+      runId: 'run-1',
+      sessionId: 'session',
+      before: before,
+      after: after,
+      createdAt: 1,
+    );
+
+    final effect = await repo.readEffect('run-1');
+    expect(effect, isNotNull);
+    expect(effect!.beforeStateHash, before.hash);
+    expect(effect.afterStateHash, after.hash);
+    final diff = jsonDecode(effect.actualEffectsJson) as Map<String, dynamic>;
+    final ledger = diff['ledger'] as Map<String, dynamic>;
+    expect(ledger['changed'], hasLength(1));
+    expect(
+      ((ledger['changed'] as List).single as Map)['before']['value'],
+      'before',
+    );
+    expect(
+      ((ledger['changed'] as List).single as Map)['after']['value'],
+      'after',
+    );
+    expect(
+      () => db
+          .update(db.ledgerReconciliationEffects)
+          .write(
+            const LedgerReconciliationEffectsCompanion(
+              effectsHash: Value('changed'),
+            ),
+          ),
+      throwsA(anything),
+    );
+  });
+
+  test('validates exact effects and reconstructs anchored messages', () async {
+    await _seedSession(db);
+    final run = _run();
+    expect(await repo.append(run), isA<ReconciliationRunAppended>());
+    final before = await repo.captureState('session');
+    await repo.recordEffect(
+      runId: run.id,
+      sessionId: run.sessionId,
+      before: before,
+      after: before,
+      createdAt: 1,
+    );
+
+    final validation = await repo.validateEffect(
+      (await repo.readPhysicalSession('session')).single,
+    );
+    expect(validation, isA<ReconciliationEffectValid>());
+    expect(await repo.currentStateMatches('session', before), isTrue);
+    final selected = await repo.reconstructSelectedMessages(
+      (await repo.readPhysicalSession('session')).single,
+    );
+    expect(selected, hasLength(1));
+    expect(selected!.single.id, 'message');
+    expect(selected.single.content, 'canonical');
+
+    await db.customStatement(
+      "UPDATE chat_sessions SET messages_json = '[{\"id\":\"message\",\"role\":\"assistant\",\"content\":\"changed\",\"swipes\":[\"changed\"],\"agentSwipes\":[]},{\"id\":\"user\",\"role\":\"user\",\"content\":\"accepted\"}]' WHERE session_id = 'session'",
+    );
+    expect(
+      await repo.reconstructSelectedMessages(
+        (await repo.readPhysicalSession('session')).single,
+      ),
+      isNull,
+    );
+  });
+
+  test('effect validation rejects tampered state hashes', () async {
+    await _seedSession(db);
+    final run = _run();
+    expect(await repo.append(run), isA<ReconciliationRunAppended>());
+    final state = await repo.captureState('session');
+    await repo.recordEffect(
+      runId: run.id,
+      sessionId: run.sessionId,
+      before: state,
+      after: state,
+      createdAt: 1,
+    );
+    await db.customStatement(
+      'DROP TRIGGER ledger_reconciliation_effects_no_update',
+    );
+    await db.customStatement(
+      "UPDATE ledger_reconciliation_effects SET after_state_hash = 'tampered' WHERE run_id = 'run-1'",
+    );
+
+    final validation = await repo.validateEffect(
+      (await repo.readPhysicalSession('session')).single,
+    );
+    expect(validation, isA<ReconciliationEffectInvalid>());
   });
 
   test(

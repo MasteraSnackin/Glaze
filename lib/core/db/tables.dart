@@ -1097,6 +1097,41 @@ class LedgerReconciliationSuccessfulRuns extends Table {
   ];
 }
 
+/// Immutable before/after state captured atomically with a reconciliation run.
+@DataClassName('LedgerReconciliationEffectRow')
+@TableIndex(
+  name: 'idx_reconciliation_effect_session_created',
+  columns: {#sessionId, #createdAt},
+)
+class LedgerReconciliationEffects extends Table {
+  @override
+  String get tableName => 'ledger_reconciliation_effects';
+
+  TextColumn get runId => text()();
+  TextColumn get sessionId => text()();
+  TextColumn get beforeLedgerJson => text()();
+  TextColumn get afterLedgerJson => text()();
+  TextColumn get beforeKnowledgeJson => text()();
+  TextColumn get afterKnowledgeJson => text()();
+  TextColumn get actualEffectsJson => text()();
+  TextColumn get beforeStateHash => text()();
+  TextColumn get afterStateHash => text()();
+  TextColumn get effectsHash => text()();
+  IntColumn get createdAt => integer()();
+
+  @override
+  Set<Column> get primaryKey => {runId};
+
+  @override
+  List<String> get customConstraints => [
+    "CHECK (run_id <> '' AND session_id <> '' AND before_ledger_json <> '' "
+        "AND after_ledger_json <> '' AND before_knowledge_json <> '' "
+        "AND after_knowledge_json <> '' AND actual_effects_json <> '' "
+        "AND before_state_hash <> '' AND after_state_hash <> '' "
+        "AND effects_hash <> '')",
+  ];
+}
+
 @DataClassName('LedgerReconciliationRunInvalidationRow')
 class LedgerReconciliationRunInvalidations extends Table {
   @override
@@ -1147,6 +1182,27 @@ class LedgerReconciliationCursors extends Table {
   ];
 }
 
+/// Local-only mutex for reconciliation work. Rows are ephemeral and are not
+/// included in backup or sync payloads.
+@DataClassName('LedgerReconciliationLeaseRow')
+class LedgerReconciliationLeases extends Table {
+  @override
+  String get tableName => 'ledger_reconciliation_leases';
+  TextColumn get sessionId => text()();
+  TextColumn get ownerId => text()();
+  TextColumn get purpose => text()();
+  IntColumn get leaseExpiresAt => integer()();
+  IntColumn get acquiredAt => integer()();
+  @override
+  Set<Column> get primaryKey => {sessionId};
+  @override
+  List<String> get customConstraints => [
+    "CHECK (session_id <> '' AND owner_id <> '')",
+    "CHECK (purpose IN ('normal', 'manual', 'replacement'))",
+    'CHECK (lease_expires_at > acquired_at)',
+  ];
+}
+
 /// Expiring ownership for one automated evolution proposal attempt. Completed
 /// rows remain as durable idempotency records; executable rows are `claimed`.
 @DataClassName('CardEvolutionClaimRow')
@@ -1174,17 +1230,77 @@ class CardEvolutionClaims extends Table {
   TextColumn get predecessorCursorHash => text()();
   IntColumn get predecessorRunOrdinal => integer()();
   TextColumn get inputHash => text()();
+  TextColumn get selectedInputJson => text().nullable()();
+  TextColumn get writerOptionsJson =>
+      text().withDefault(const Constant('{}'))();
   TextColumn get rewriteJobId => text().nullable()();
+  TextColumn get failureCode => text().nullable()();
+  TextColumn get failureDetail => text().nullable()();
   IntColumn get createdAt => integer()();
   IntColumn get completedAt => integer().nullable()();
+  IntColumn get failedAt => integer().nullable()();
   @override
   Set<Column> get primaryKey => {id};
   @override
   List<String> get customConstraints => [
-    "CHECK (status IN ('claimed', 'completed'))",
+    "CHECK (status IN ('claimed', 'failed', 'completed'))",
     "CHECK (id <> '' AND session_id <> '' AND character_id <> '' "
         "AND owner_id <> '' AND first_run_id <> '' AND second_run_id <> '' "
         "AND input_hash <> '' AND predecessor_run_ordinal >= 0)",
+  ];
+}
+
+/// Durable checkpoints for each logical model call in an automatic Card
+/// Rewriter claim. Completed rows form the reusable prefix after a restart.
+@DataClassName('CardEvolutionWriterCallRow')
+@TableIndex(
+  name: 'idx_card_evolution_writer_call_session_updated',
+  columns: {#sessionId, #updatedAt},
+)
+class CardEvolutionWriterCalls extends Table {
+  @override
+  String get tableName => 'card_evolution_writer_calls';
+  TextColumn get id => text()();
+  TextColumn get claimId => text()();
+  TextColumn get sessionId => text()();
+  IntColumn get ordinal => integer()();
+  TextColumn get stage => text()();
+  IntColumn get stageOrdinal => integer()();
+  TextColumn get status => text()();
+  TextColumn get prompt => text()();
+  TextColumn get promptHash => text()();
+  TextColumn get responseText => text().nullable()();
+  TextColumn get responseHash => text().nullable()();
+  TextColumn get resultJson => text().nullable()();
+  TextColumn get source => text().nullable()();
+  TextColumn get lastCallId => text().nullable()();
+  TextColumn get parentCallId => text().nullable()();
+  TextColumn get parserCode => text().nullable()();
+  TextColumn get parserDetail => text().nullable()();
+  TextColumn get failureCode => text().nullable()();
+  TextColumn get failureDetail => text().nullable()();
+  IntColumn get createdAt => integer()();
+  IntColumn get updatedAt => integer()();
+  IntColumn get completedAt => integer().nullable()();
+  IntColumn get failedAt => integer().nullable()();
+  @override
+  Set<Column> get primaryKey => {id};
+  @override
+  List<Set<Column>> get uniqueKeys => [
+    {claimId, ordinal},
+    {claimId, stage, stageOrdinal},
+  ];
+  @override
+  List<String> get customConstraints => [
+    "CHECK (stage IN ('history_consolidation', 'card_writer', "
+        "'card_repair', 'lorebook_writer'))",
+    "CHECK (status IN ('prepared', 'failed', 'completed'))",
+    "CHECK (id <> '' AND claim_id <> '' AND session_id <> '' "
+        "AND ordinal > 0 AND stage_ordinal > 0 AND prompt <> '' "
+        "AND prompt_hash <> '')",
+    "CHECK (status <> 'completed' OR "
+        "(response_text IS NOT NULL AND response_hash IS NOT NULL))",
+    "CHECK (status <> 'failed' OR failure_code IS NOT NULL)",
   ];
 }
 
@@ -1287,6 +1403,86 @@ class LedgerDebugRuns extends Table {
     "CHECK (id <> '' AND session_id <> '' "
         "AND kind IN ('normal', 'reconciliation') "
         "AND status <> '' AND attempts_json <> '' AND rejected_ops_json <> '')",
+  ];
+}
+
+/// Bounded local history of sanitized requests observed immediately before
+/// provider transport. This diagnostic data is neither canon nor sync state.
+@DataClassName('LlmRequestCaptureRow')
+@TableIndex(
+  name: 'idx_llm_request_capture_session_stage_created',
+  columns: {#sessionId, #stage, #createdAtMs},
+)
+@TableIndex(name: 'idx_llm_request_capture_created', columns: {#createdAtMs})
+@TableIndex(name: 'idx_llm_request_capture_call', columns: {#callId})
+class LlmRequestCaptureRows extends Table {
+  @override
+  String get tableName => 'llm_request_capture_rows';
+
+  IntColumn get id => integer().autoIncrement()();
+  IntColumn get sequence => integer()();
+  IntColumn get createdAtMs => integer()();
+  TextColumn get sessionId => text().nullable()();
+  TextColumn get stage => text().nullable()();
+  TextColumn get messageId => text().nullable()();
+  TextColumn get pipelineRunId => text().nullable()();
+  TextColumn get callId => text().nullable()();
+  TextColumn get logicalCallId => text().nullable()();
+  TextColumn get relatedArtifactId => text().nullable()();
+  TextColumn get agentId => text().nullable()();
+  IntColumn get stageOrdinal => integer().nullable()();
+  IntColumn get attempt => integer().nullable()();
+  TextColumn get protocol => text().nullable()();
+  BoolColumn get truncated => boolean()();
+  TextColumn get eventJson => text()();
+}
+
+/// Append-only transport and parser outcomes linked to request captures by
+/// stable orchestration-owned call identity.
+@DataClassName('LlmCallEventRow')
+@TableIndex(
+  name: 'idx_llm_call_event_session_created',
+  columns: {#sessionId, #createdAtMs},
+)
+@TableIndex(
+  name: 'idx_llm_call_event_call_attempt',
+  columns: {#callId, #attempt},
+)
+class LlmCallEventRows extends Table {
+  @override
+  String get tableName => 'llm_call_event_rows';
+
+  TextColumn get id => text()();
+  IntColumn get createdAtMs => integer()();
+  TextColumn get sessionId => text().nullable()();
+  TextColumn get pipelineRunId => text()();
+  TextColumn get callId => text()();
+  TextColumn get parentCallId => text().nullable()();
+  TextColumn get stage => text()();
+  IntColumn get stageOrdinal => integer().nullable()();
+  IntColumn get attempt => integer().nullable()();
+  TextColumn get relatedArtifactId => text().nullable()();
+  TextColumn get kind => text()();
+  TextColumn get status => text().nullable()();
+  IntColumn get statusCode => integer().nullable()();
+  TextColumn get responseText => text().nullable()();
+  TextColumn get responseHash => text().nullable()();
+  TextColumn get error => text().nullable()();
+  TextColumn get parserName => text().nullable()();
+  TextColumn get parserCode => text().nullable()();
+  TextColumn get parserDetail => text().nullable()();
+  TextColumn get payloadJson => text().withDefault(const Constant('{}'))();
+  BoolColumn get truncated => boolean().withDefault(const Constant(false))();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
+  @override
+  List<String> get customConstraints => [
+    "CHECK (id <> '' AND pipeline_run_id <> '' AND call_id <> '' "
+        "AND stage <> '' AND kind IN ('transport_succeeded', "
+        "'transport_failed', 'parser_accepted', 'parser_rejected', "
+        "'result_selected', 'pipeline_completed', 'pipeline_failed'))",
   ];
 }
 
@@ -1405,8 +1601,12 @@ class CardEvolutionCollectorRuns extends Table {
   TextColumn get status => text()();
   IntColumn get leaseExpiresAt => integer()();
   TextColumn get modelOutputHash => text().nullable()();
+  TextColumn get lastCallId => text().nullable()();
+  TextColumn get failureCode => text().nullable()();
+  TextColumn get failureDetail => text().nullable()();
   IntColumn get createdAt => integer()();
   IntColumn get completedAt => integer().nullable()();
+  IntColumn get failedAt => integer().nullable()();
   @override
   Set<Column> get primaryKey => {id};
   @override
@@ -1416,7 +1616,7 @@ class CardEvolutionCollectorRuns extends Table {
   ];
   @override
   List<String> get customConstraints => [
-    "CHECK (status IN ('claimed', 'completed'))",
+    "CHECK (status IN ('claimed', 'failed', 'completed'))",
     "CHECK (id <> '' AND session_id <> '' AND character_id <> '' "
         "AND collector_ordinal > 0 AND reconciliation_run_id <> '' "
         "AND reconciliation_run_ordinal > 0 AND reconciliation_chain_hash <> '' "

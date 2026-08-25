@@ -110,6 +110,71 @@ void main() {
     },
   );
 
+  test('read-only load models initial lineage without persisting it', () async {
+    final context = await loader.loadReadOnly(
+      sessionId: 's',
+      sourceCharacter: _character('one'),
+    );
+
+    expect(context.effectiveRevision.number, 1);
+    expect(await revisions.getForCharacter('c'), isEmpty);
+  });
+
+  test('read-only exact state overrides current Ledger and facts', () async {
+    final character = _character('one');
+    raw = LedgerRawTrackerState(
+      committedTrackers: const [
+        Tracker(
+          sessionId: 's',
+          name: 'world:time',
+          value: 'current',
+          scope: 'ledger',
+        ),
+      ],
+      manualControls: const [],
+    );
+
+    final context = await loader.loadReadOnlyFromReconciliationState(
+      sessionId: 's',
+      sourceCharacter: character,
+      ledgerTrackers: const [
+        Tracker(
+          sessionId: 's',
+          name: 'world:time',
+          value: 'captured',
+          scope: 'ledger',
+        ),
+        Tracker(
+          sessionId: 's',
+          name: 'canon_lock:world:time',
+          value: 'true',
+          scope: 'ledger',
+        ),
+      ],
+      knowledgeFacts: [
+        CharacterKnowledgeFact(
+          id: 'captured-fact',
+          chatSessionId: 's',
+          knowerKey: 'entity:a',
+          subjectKey: 'entity:b',
+          factClass: CharacterKnowledgeFactClass.knowledge,
+          predicate: 'knows',
+          object: 'captured fact',
+          epistemicState: CharacterKnowledgeEpistemicState.confirmed,
+          sourceMessageId: 'm1',
+          sourceSwipeId: 0,
+          sourceAgentSwipeId: 0,
+          lifecycle: CharacterKnowledgeFactLifecycle.active,
+        ),
+      ],
+    );
+
+    expect(context.committedTrackers.single.value, 'captured');
+    expect(context.manualControls.single.name, 'canon_lock:world:time');
+    expect(context.resolution.activeFacts.single.id, 'captured-fact');
+    expect(await revisions.getForCharacter('c'), isEmpty);
+  });
+
   test(
     'follow, pinned, ask, and unmappable baseline policies fail safely',
     () async {

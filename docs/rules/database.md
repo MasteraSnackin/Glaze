@@ -79,7 +79,7 @@ All schema changes go in `AppDatabase.migration` in `app_db.dart`.
 Bump the schema version and add a `from → to` migration step.
 Never modify existing column types without a migration.
 
-Current version: **122**
+Current version: **130**
 
 Migration history:
 - v18: added `characters.picksHash`
@@ -208,6 +208,20 @@ Migration history:
   checkpoint is restored to its recorded source/base content.
 - v122: added `api_configs.embedding_requests_per_minute` INTEGER NOT NULL
   DEFAULT 50 for the process-wide embedding request rate limit.
+- v123: raised the default Studio final history limit from 30 to 50
+- v124: added bounded local `llm_request_capture_rows` diagnostics
+- v125: added stable call IDs to request captures and append-only
+  `llm_call_event_rows` for transport outcomes and parser verdicts
+- v126: added append-only `ledger_reconciliation_effects` with exact Ledger and
+  knowledge before/after state, actual state diff, and integrity hashes
+- v127: Collector runs retain local `failed` status, call linkage, and failure
+  metadata for safe recovery instead of deleting failed attempts.
+- v128: automatic Card Rewriter claims retain exact selected input and failure
+  state; `card_evolution_writer_calls` checkpoints each restartable model stage.
+- v129: enforces one active rewrite job per session/character and makes rewrite
+  operation revisions, rewrite evidence, and LLM request captures update-immutable.
+- v130: added local-only `ledger_reconciliation_leases` for durable per-session
+  reconciliation mutual exclusion across processes.
 
 ---
 
@@ -401,7 +415,7 @@ fall back to `trackerRepoProvider.getBySessionId` when no snapshot exists
 ### Cloud sync coverage (Phase 9)
 
 `tracker_snapshots` entered the backup format at v5 and remains in the current
-backup whitelist (`backup_exporter.dart`, backup schema v10). It has full cloud
+backup whitelist (`backup_exporter.dart`, backup schema v12). It has full cloud
 sync coverage via
 `SyncTrackerSnapshotStore` + `TrackerSnapshotSyncStore` adapter. Sync
 follows the InfoBlock per-session collection pattern: one entry per

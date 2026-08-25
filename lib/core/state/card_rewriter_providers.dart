@@ -1,6 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../db/app_db.dart' show RewriteJobRow;
+import '../db/app_db.dart' show CardEvolutionDebugRunRow, RewriteJobRow;
 import '../../features/settings/api_list_provider.dart';
 import '../llm/card_rewrite_slot_resolver.dart';
 import '../llm/aux_llm_client.dart';
@@ -58,6 +58,8 @@ final automatedCardEvolutionServiceProvider =
 
       final service = AutomatedCardEvolutionService(
         repo: ref.watch(cardEvolutionRepoProvider),
+        writerCallRepo: ref.watch(cardEvolutionWriterCallRepoProvider),
+        requestCaptureRepo: ref.watch(llmRequestCaptureRepoProvider),
         resolveModel: resolveModel,
         isEnabled: () =>
             ref.read(pipelineSettingsProvider).cardRewriter.enabled,
@@ -86,6 +88,7 @@ final automatedCardEvolutionServiceProvider =
               required temperature,
               required timeoutMs,
               cancelToken,
+              captureContext,
             }) => const AuxLlmClient().callOnceWithLog(
               config: config,
               prompt: prompt,
@@ -93,6 +96,7 @@ final automatedCardEvolutionServiceProvider =
               temperature: temperature,
               timeoutMs: timeoutMs,
               cancelToken: cancelToken,
+              captureContext: captureContext,
             ),
       );
       ref.onDispose(service.dispose);
@@ -105,4 +109,12 @@ final cardRewriteJobsBySessionProvider =
       return ref
           .watch(manualRewriteJobRepoProvider)
           .watchJobsBySessionId(sessionId);
+    });
+
+final cardRewriteDebugRunsProvider =
+    FutureProvider.family<List<CardEvolutionDebugRunRow>, String>((
+      ref,
+      sessionId,
+    ) {
+      return ref.watch(cardEvolutionRepoProvider).readDebugRuns(sessionId);
     });

@@ -6,12 +6,36 @@ import '../../models/character_knowledge_fact.dart';
 import '../../models/knowledge_cleanup.dart';
 import '../../utils/time_helpers.dart';
 import '../app_db.dart';
+import 'reconciliation_state_codec.dart';
 
 /// Transactional lifecycle store for swipe-safe atomic character facts.
 class CharacterKnowledgeFactRepo {
   const CharacterKnowledgeFactRepo(this.db);
 
   final AppDatabase db;
+
+  /// Restores every knowledge row for a session from an exact captured image.
+  /// The caller may include this operation in a wider transaction.
+  Future<void> restoreSessionRowsExact(
+    String sessionId,
+    String rowsJson,
+  ) async {
+    final rows = ReconciliationStateCodec.decode(
+      sessionId: sessionId,
+      ledgerJson: '[]',
+      knowledgeJson: rowsJson,
+    ).knowledgeRows;
+    await db.transaction(() async {
+      await (db.delete(
+        db.characterKnowledgeFactRows,
+      )..where((row) => row.chatSessionId.equals(sessionId))).go();
+      if (rows.isNotEmpty) {
+        await db.batch((batch) {
+          batch.insertAll(db.characterKnowledgeFactRows, rows);
+        });
+      }
+    });
+  }
 
   Future<void> insertTentative(CharacterKnowledgeFact fact) =>
       insertAllTentative([fact]);
@@ -532,6 +556,31 @@ class CharacterKnowledgeFactRepo {
     );
   }
 
+  /// Removes cleanup rollback records for one exact reconciliation range.
+  /// Malformed journal rows fail closed so stale before-images cannot survive
+  /// a replacement unnoticed. The caller may own a wider transaction.
+  Future<void> deleteCleanupJournalsForExactRange({
+    required String sessionId,
+    required String endpointMessageId,
+    required List<String> messageIds,
+  }) async {
+    final journals =
+        await (db.select(db.ledgerReconciliationCleanupJournals)
+              ..where((row) => row.sessionId.equals(sessionId))
+              ..where((row) => row.endpointMessageId.equals(endpointMessageId)))
+            .get();
+    for (final journal in journals) {
+      final decoded = jsonDecode(journal.messageIdsJson);
+      if (decoded is! List || decoded.any((value) => value is! String)) {
+        throw const FormatException('Malformed reconciliation cleanup range');
+      }
+      if (!_sameOrderedStrings(decoded.cast<String>(), messageIds)) continue;
+      await (db.delete(
+        db.ledgerReconciliationCleanupJournals,
+      )..where((row) => row.id.equals(journal.id))).go();
+    }
+  }
+
   Future<void> _rollbackReconciliationCleanupForMessages(
     String sessionId,
     Set<String> invalidatedMessageIds,
@@ -859,6 +908,14 @@ class CharacterKnowledgeFactRepo {
       return const [];
     }
   }
+}
+
+bool _sameOrderedStrings(List<String> left, List<String> right) {
+  if (left.length != right.length) return false;
+  for (var i = 0; i < left.length; i++) {
+    if (left[i] != right[i]) return false;
+  }
+  return true;
 }
 
 String semanticSlotKey(CharacterKnowledgeFact fact) => [

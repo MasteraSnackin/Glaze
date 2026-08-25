@@ -52,10 +52,15 @@ part 'app_db.g.dart';
     LedgerReconciliationCheckpoints,
     LedgerReconciliationCleanupJournals,
     LedgerReconciliationSuccessfulRuns,
+    LedgerReconciliationEffects,
     LedgerReconciliationRunInvalidations,
     LedgerReconciliationCursors,
+    LedgerReconciliationLeases,
     LedgerDebugRuns,
+    LlmRequestCaptureRows,
+    LlmCallEventRows,
     CardEvolutionClaims,
+    CardEvolutionWriterCalls,
     CardEvolutionProposalRuns,
     CardEvolutionDebugRuns,
     CardEvolutionObservations,
@@ -79,7 +84,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 123;
+  int get schemaVersion => 130;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -107,7 +112,9 @@ class AppDatabase extends _$AppDatabase {
       await _createLorebookUseManifestIntegrityTriggers();
       await _createLedgerReconciliationImmutabilityTriggers();
       await _createCardEvolutionIntegrity();
+      await _createRewriteAuditIntegrity();
       await _createSessionCanonIntegrity();
+      await _createLlmCallEventImmutabilityTrigger();
     },
     onUpgrade: (Migrator m, int from, int to) async {
       if (from < 2) {
@@ -1901,6 +1908,14 @@ class AppDatabase extends _$AppDatabase {
       }
       if (from < 92) {
         await m.createTable(cardEvolutionClaims);
+        await customStatement(
+          'CREATE INDEX IF NOT EXISTS idx_card_evolution_claim_session '
+          'ON card_evolution_claims (session_id)',
+        );
+        await customStatement(
+          'CREATE UNIQUE INDEX IF NOT EXISTS idx_card_evolution_claim_input '
+          'ON card_evolution_claims (session_id, input_hash)',
+        );
         await m.createTable(cardEvolutionProposalRuns);
         await _createCardEvolutionIntegrity();
       }
@@ -2254,6 +2269,123 @@ class AppDatabase extends _$AppDatabase {
           'UPDATE studio_preset_rows SET max_final_history_messages = 50 '
           'WHERE max_final_history_messages = 30',
         );
+      }
+      if (from < 124) {
+        await m.createTable(llmRequestCaptureRows);
+        // Drift's createTable path creates indexes for a newly created table,
+        // but migration fixtures may already contain the table and indexes.
+        await customStatement(
+          'CREATE INDEX IF NOT EXISTS '
+          'idx_llm_request_capture_session_stage_created '
+          'ON llm_request_capture_rows (session_id, stage, created_at_ms)',
+        );
+        await customStatement(
+          'CREATE INDEX IF NOT EXISTS idx_llm_request_capture_created '
+          'ON llm_request_capture_rows (created_at_ms)',
+        );
+      }
+      if (from < 125) {
+        final captureColumns = await customSelect(
+          "PRAGMA table_info('llm_request_capture_rows')",
+        ).get();
+        if (!captureColumns.any(
+          (column) => column.read<String>('name') == 'call_id',
+        )) {
+          await m.addColumn(
+            llmRequestCaptureRows,
+            llmRequestCaptureRows.callId,
+          );
+        }
+        await customStatement(
+          'CREATE INDEX IF NOT EXISTS idx_llm_request_capture_call '
+          'ON llm_request_capture_rows (call_id)',
+        );
+        await m.createTable(llmCallEventRows);
+        await customStatement(
+          'CREATE INDEX IF NOT EXISTS idx_llm_call_event_session_created '
+          'ON llm_call_event_rows (session_id, created_at_ms)',
+        );
+        await customStatement(
+          'CREATE INDEX IF NOT EXISTS idx_llm_call_event_call_attempt '
+          'ON llm_call_event_rows (call_id, attempt)',
+        );
+        await _createLlmCallEventImmutabilityTrigger();
+      }
+      if (from < 126) {
+        await m.createTable(ledgerReconciliationEffects);
+        await customStatement(
+          'CREATE INDEX IF NOT EXISTS idx_reconciliation_effect_session_created '
+          'ON ledger_reconciliation_effects (session_id, created_at)',
+        );
+        await _createLedgerReconciliationImmutabilityTriggers();
+      }
+      if (from < 127) {
+        await customStatement(
+          'ALTER TABLE card_evolution_collector_runs '
+          'RENAME TO card_evolution_collector_runs_v126',
+        );
+        await customStatement(
+          'DROP INDEX IF EXISTS idx_card_evolution_collector_session_ordinal',
+        );
+        await customStatement(
+          'DROP INDEX IF EXISTS idx_card_evolution_collector_reconciliation',
+        );
+        await m.createTable(cardEvolutionCollectorRuns);
+        await customStatement(
+          'INSERT INTO card_evolution_collector_runs '
+          '(id, session_id, character_id, collector_ordinal, '
+          'reconciliation_run_id, reconciliation_run_ordinal, '
+          'reconciliation_chain_hash, range_hash, input_hash, owner_id, '
+          'status, lease_expires_at, model_output_hash, created_at, '
+          'completed_at) SELECT id, session_id, character_id, '
+          'collector_ordinal, reconciliation_run_id, '
+          'reconciliation_run_ordinal, reconciliation_chain_hash, range_hash, '
+          'input_hash, owner_id, status, lease_expires_at, model_output_hash, '
+          'created_at, completed_at FROM card_evolution_collector_runs_v126',
+        );
+        await customStatement('DROP TABLE card_evolution_collector_runs_v126');
+      }
+      if (from < 128) {
+        await customStatement(
+          'ALTER TABLE card_evolution_claims '
+          'RENAME TO card_evolution_claims_v127',
+        );
+        await customStatement(
+          'DROP INDEX IF EXISTS idx_card_evolution_claim_session',
+        );
+        await customStatement(
+          'DROP INDEX IF EXISTS idx_card_evolution_claim_input',
+        );
+        await customStatement(
+          'DROP INDEX IF EXISTS idx_card_evolution_active_claim',
+        );
+        await m.createTable(cardEvolutionClaims);
+        await customStatement(
+          'INSERT INTO card_evolution_claims '
+          '(id, session_id, character_id, owner_id, status, lease_expires_at, '
+          'first_run_id, second_run_id, predecessor_cursor_hash, '
+          'predecessor_run_ordinal, input_hash, rewrite_job_id, created_at, '
+          'completed_at) SELECT id, session_id, character_id, owner_id, status, '
+          'lease_expires_at, first_run_id, second_run_id, '
+          'predecessor_cursor_hash, predecessor_run_ordinal, input_hash, '
+          'rewrite_job_id, created_at, completed_at '
+          'FROM card_evolution_claims_v127',
+        );
+        await customStatement('DROP TABLE card_evolution_claims_v127');
+        await m.createTable(cardEvolutionWriterCalls);
+        await customStatement(
+          'CREATE INDEX IF NOT EXISTS '
+          'idx_card_evolution_writer_call_session_updated '
+          'ON card_evolution_writer_calls (session_id, updated_at)',
+        );
+        await _createCardEvolutionIntegrity();
+      }
+      if (from < 129) {
+        await _normalizeDuplicateActiveRewriteJobs();
+        await _createRewriteAuditIntegrity();
+      }
+      if (from < 130) {
+        await m.createTable(ledgerReconciliationLeases);
       }
     },
   );
@@ -2766,6 +2898,7 @@ class AppDatabase extends _$AppDatabase {
   Future<void> _createLedgerReconciliationImmutabilityTriggers() async {
     for (final table in const [
       'reconciliation_successful_runs',
+      'ledger_reconciliation_effects',
       'reconciliation_run_invalidations',
       'ledger_reconciliation_cursors',
     ]) {
@@ -2786,6 +2919,60 @@ class AppDatabase extends _$AppDatabase {
       'CREATE TRIGGER IF NOT EXISTS card_evolution_proposal_runs_no_update '
       'BEFORE UPDATE ON card_evolution_proposal_runs BEGIN '
       "SELECT RAISE(ABORT, 'card_evolution_proposal_runs is immutable'); END",
+    );
+    await customStatement(
+      'CREATE TRIGGER IF NOT EXISTS card_evolution_writer_calls_completed_no_update '
+      'BEFORE UPDATE ON card_evolution_writer_calls '
+      "WHEN OLD.status = 'completed' BEGIN "
+      "SELECT RAISE(ABORT, 'completed card_evolution_writer_calls are immutable'); END",
+    );
+  }
+
+  Future<void> _normalizeDuplicateActiveRewriteJobs() async {
+    final active = await customSelect(
+      "SELECT id, chat_session_id, character_id FROM rewrite_jobs "
+      "WHERE status IN ('generating', 'pending') "
+      'ORDER BY chat_session_id, character_id, created_at, id',
+    ).get();
+    final retained = <String>{};
+    for (final row in active) {
+      final key =
+          '${row.read<String>('chat_session_id')}\u001f'
+          '${row.read<String>('character_id')}';
+      if (retained.add(key)) continue;
+      await customStatement(
+        "UPDATE rewrite_jobs SET status = 'cancelled', "
+        "status_reason = 'duplicateActiveJobMigrated', version = version + 1 "
+        'WHERE id = ?',
+        [row.read<String>('id')],
+      );
+    }
+  }
+
+  Future<void> _createRewriteAuditIntegrity() async {
+    await customStatement(
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_rewrite_job_one_active '
+      'ON rewrite_jobs (chat_session_id, character_id) '
+      "WHERE status IN ('generating', 'pending')",
+    );
+    for (final table in const [
+      'rewrite_operation_revisions',
+      'rewrite_evidence_rows',
+      'llm_request_capture_rows',
+    ]) {
+      await customStatement(
+        'CREATE TRIGGER IF NOT EXISTS ${table}_no_update '
+        'BEFORE UPDATE ON $table BEGIN '
+        "SELECT RAISE(ABORT, '$table is immutable'); END",
+      );
+    }
+  }
+
+  Future<void> _createLlmCallEventImmutabilityTrigger() async {
+    await customStatement(
+      'CREATE TRIGGER IF NOT EXISTS llm_call_event_rows_no_update '
+      'BEFORE UPDATE ON llm_call_event_rows BEGIN '
+      "SELECT RAISE(ABORT, 'llm_call_event_rows is immutable'); END",
     );
   }
 

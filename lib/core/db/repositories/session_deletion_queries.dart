@@ -63,17 +63,26 @@ class SessionDeletionQueries {
       _db.ledgerReconciliationCursors,
     )..where((row) => row.sessionId.equals(sessionId))).go();
     await (_db.delete(
+      _db.ledgerReconciliationLeases,
+    )..where((row) => row.sessionId.equals(sessionId))).go();
+    await (_db.delete(
       _db.cardEvolutionCollectorRuns,
+    )..where((row) => row.sessionId.equals(sessionId))).go();
+    await (_db.delete(
+      _db.cardEvolutionWriterCalls,
     )..where((row) => row.sessionId.equals(sessionId))).go();
     await (_db.delete(_db.cardEvolutionClaims)..where((row) {
           final session = row.sessionId.equals(sessionId);
           return preserveMemoryBookSettings
-              ? session & row.status.equals('claimed')
+              ? session & row.status.isIn(const ['claimed', 'failed'])
               : session;
         }))
         .go();
     await (_db.delete(
       _db.ledgerReconciliationRunInvalidations,
+    )..where((row) => row.sessionId.equals(sessionId))).go();
+    await (_db.delete(
+      _db.ledgerReconciliationEffects,
     )..where((row) => row.sessionId.equals(sessionId))).go();
     await (_db.delete(
       _db.ledgerReconciliationSuccessfulRuns,
@@ -86,6 +95,18 @@ class SessionDeletionQueries {
     )..where((row) => row.sessionId.equals(sessionId))).go();
     await (_db.delete(
       _db.infoBlocks,
+    )..where((row) => row.sessionId.equals(sessionId))).go();
+    await (_db.delete(
+      _db.ledgerDebugRuns,
+    )..where((row) => row.sessionId.equals(sessionId))).go();
+    await (_db.delete(
+      _db.cardEvolutionDebugRuns,
+    )..where((row) => row.sessionId.equals(sessionId))).go();
+    await (_db.delete(
+      _db.llmRequestCaptureRows,
+    )..where((row) => row.sessionId.equals(sessionId))).go();
+    await (_db.delete(
+      _db.llmCallEventRows,
     )..where((row) => row.sessionId.equals(sessionId))).go();
     await (_db.delete(_db.embeddings)..where((row) {
           final chatMessages =

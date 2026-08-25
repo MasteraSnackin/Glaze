@@ -3,6 +3,7 @@ import 'package:drift/drift.dart';
 import '../../models/tracker.dart';
 import '../../utils/time_helpers.dart';
 import '../app_db.dart';
+import 'reconciliation_state_codec.dart';
 
 class TrackerRepo {
   final AppDatabase db;
@@ -159,6 +160,28 @@ class TrackerRepo {
       };
       for (final tracker in byName.values) {
         await upsert(tracker);
+      }
+    });
+  }
+
+  /// Restores model-owned Ledger rows from an exact captured database image.
+  /// Non-Ledger rows are preserved. The caller may include this in a wider
+  /// transaction.
+  Future<void> restoreLedgerRowsExact(String sessionId, String rowsJson) async {
+    final rows = ReconciliationStateCodec.decode(
+      sessionId: sessionId,
+      ledgerJson: rowsJson,
+      knowledgeJson: '[]',
+    ).trackerRows;
+    await db.transaction(() async {
+      await (db.delete(db.trackerRows)
+            ..where((row) => row.sessionId.equals(sessionId))
+            ..where((row) => row.scope.equals('ledger')))
+          .go();
+      if (rows.isNotEmpty) {
+        await db.batch((batch) {
+          batch.insertAll(db.trackerRows, rows);
+        });
       }
     });
   }

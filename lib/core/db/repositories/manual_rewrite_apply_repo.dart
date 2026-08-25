@@ -10,6 +10,8 @@ import '../../models/character.dart';
 import '../../utils/id_generator.dart';
 import '../../utils/time_helpers.dart';
 import '../app_db.dart';
+import 'card_evolution_proposal_run_repo.dart';
+import 'card_evolution_selected_input_validator.dart';
 import 'session_canon_checkpoint_repo.dart';
 import 'session_lorebook_embedding_job_repo.dart';
 import 'session_lorebook_evolution_repo.dart';
@@ -104,6 +106,30 @@ class ManualRewriteApplyRepo {
           return const ManualRewriteApplyOutcome.blocked(
             'staleSessionCharacter',
           );
+        }
+
+        final proposal = await (_db.select(
+          _db.cardEvolutionProposalRuns,
+        )..where((row) => row.rewriteJobId.equals(jobId))).getSingleOrNull();
+        if (proposal != null) {
+          final evidence = CardEvolutionSelectedChatEvidence.tryParse(
+            proposal.selectedInputJson,
+          );
+          if (evidence == null ||
+              !evidence.validatesProposal(
+                proposal,
+                jobId: job.id,
+                sessionId: job.chatSessionId,
+                characterId: job.characterId,
+                messagesJson: session.messagesJson,
+              )) {
+            await CardEvolutionProposalRunRepo(
+              _db,
+            ).cancelPendingJobInTransaction(proposal: proposal);
+            return const ManualRewriteApplyOutcome.blocked(
+              'staleAutomatedEvidence',
+            );
+          }
         }
 
         final input = await _canonReader.readInTransaction(
@@ -461,32 +487,18 @@ class ManualRewriteApplyRepo {
         if (jobChanged != 1) {
           throw StateError('Job CAS changed inside apply transaction.');
         }
-        final proposal = await (_db.select(
-          _db.cardEvolutionProposalRuns,
-        )..where((row) => row.rewriteJobId.equals(jobId))).getSingleOrNull();
         if (proposal != null) {
-          final observationIds = <String>{};
-          try {
-            final selected = jsonDecode(proposal.selectedInputJson);
-            final rawObservations = selected is Map
-                ? selected['accumulatedObservations']
-                : null;
-            if (rawObservations is List) {
-              for (final raw in rawObservations) {
-                if (raw is Map && raw['id'] is String) {
-                  observationIds.add(raw['id'] as String);
-                }
-              }
-            }
-          } catch (_) {
-            // Legacy/malformed provenance must not block an otherwise valid apply.
-          }
-          if (observationIds.isNotEmpty) {
-            await (_db.update(_db.cardEvolutionObservations)
-                  ..where((row) => row.id.isIn(observationIds))
-                  ..where(
-                    (row) => row.status.isIn(const ['active', 'promoted']),
-                  ))
+          final observations = _appliedObservations(
+            proposal.selectedInputJson,
+            parsed,
+          );
+          for (final observation in observations.entries) {
+            await (_db.update(_db.cardEvolutionObservations)..where(
+                  (row) =>
+                      row.id.equals(observation.key) &
+                      row.firstSeenRun.equals(observation.value) &
+                      row.status.equals('promoted'),
+                ))
                 .write(
                   CardEvolutionObservationsCompanion(
                     status: const Value('consumed'),
@@ -499,6 +511,54 @@ class ManualRewriteApplyRepo {
       });
     } on _ApplyBlocked catch (blocked) {
       return ManualRewriteApplyOutcome.blocked(blocked.reason);
+    }
+  }
+
+  static Map<String, int> _appliedObservations(
+    String selectedInputJson,
+    List<_StoredOperation> applied,
+  ) {
+    try {
+      final selected = jsonDecode(selectedInputJson);
+      if (selected is! Map || selected['accumulatedObservations'] is! List) {
+        return const {};
+      }
+      final cardTargets = <(String, String)>{};
+      final loreTargets = <String>{};
+      for (final operation in applied) {
+        switch (operation.snapshot) {
+          case CardRewriteOperationSnapshot card:
+            cardTargets.add((card.transition.scopeKey, card.field.wireName));
+          case LorebookRewriteOperationSnapshot lore:
+            loreTargets.add('${lore.lorebookId}:${lore.entryId}');
+        }
+      }
+      final observations = <String, int>{};
+      for (final raw in selected['accumulatedObservations'] as List) {
+        if (raw is! Map ||
+            raw['id'] is! String ||
+            raw['firstSeenRun'] is! int ||
+            raw['status'] != 'promoted') {
+          continue;
+        }
+        final id = raw['id'] as String;
+        if (raw['targetKind'] == 'main_character_card' &&
+            raw['scopeKey'] is String) {
+          final field = raw['cardFieldPath'];
+          if (cardTargets.any(
+            (target) => target.$1 == raw['scopeKey'] && field == target.$2,
+          )) {
+            observations[id] = raw['firstSeenRun'] as int;
+          }
+        } else if (raw['targetKind'] == 'injected_lorebook_entry' &&
+            raw['lorebookEntryId'] is String &&
+            loreTargets.contains(raw['lorebookEntryId'])) {
+          observations[id] = raw['firstSeenRun'] as int;
+        }
+      }
+      return observations;
+    } catch (_) {
+      return const {};
     }
   }
 

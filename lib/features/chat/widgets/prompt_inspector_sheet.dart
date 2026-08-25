@@ -6,11 +6,13 @@ import '../../../shared/widgets/sheet_view.dart';
 import 'tokenizer_sheet.dart';
 import 'prompt_preview_screen.dart';
 import 'lorebook_coverage_sheet.dart';
+import 'studio_prompt_preview_tab.dart';
 
 /// Unified diagnostics surface that merges the Context (tokenizer), Request
-/// Preview, and Lorebook Coverage sheets into one tabbed sheet. All three
-/// answer the same question - "what actually goes into the prompt?" - so they
-/// live behind a single Magic Drawer entry instead of three separate cards.
+/// Preview, Lorebook Coverage, and current Studio prompt previews into one
+/// sheet. All answer the same question - "what actually goes into the prompt?"
+/// - so they live behind a single Magic Drawer entry instead of three separate
+/// cards.
 class PromptInspectorSheet extends StatefulWidget {
   final String charId;
   final String initialTabId;
@@ -24,6 +26,7 @@ class PromptInspectorSheet extends StatefulWidget {
   static const _tabContext = 'context';
   static const _tabPreview = 'preview';
   static const _tabCoverage = 'coverage';
+  static const _tabStudio = 'studio';
 
   @override
   State<PromptInspectorSheet> createState() => _PromptInspectorSheetState();
@@ -37,6 +40,7 @@ class _PromptInspectorSheetState extends State<PromptInspectorSheet> {
     PromptInspectorSheet._tabContext,
     PromptInspectorSheet._tabPreview,
     PromptInspectorSheet._tabCoverage,
+    PromptInspectorSheet._tabStudio,
   ];
 
   int get _activeIndex {
@@ -60,6 +64,9 @@ class _PromptInspectorSheetState extends State<PromptInspectorSheet> {
         _visitedTabs.contains(PromptInspectorSheet._tabCoverage)
             ? CoveragePanel(charId: widget.charId, embedded: true)
             : const SizedBox.shrink(),
+        _visitedTabs.contains(PromptInspectorSheet._tabStudio)
+            ? StudioPromptPreviewTab(charId: widget.charId)
+            : const SizedBox.shrink(),
       ],
     );
 
@@ -75,6 +82,10 @@ class _PromptInspectorSheetState extends State<PromptInspectorSheet> {
           GlazeTabItem(label: 'tab_context'.tr(), icon: Icons.segment),
           GlazeTabItem(label: 'tab_request'.tr(), icon: Icons.visibility),
           GlazeTabItem(label: 'tab_coverage'.tr(), icon: Icons.search),
+          GlazeTabItem(
+            label: 'prompt_inspector_studio_tab'.tr(),
+            icon: Icons.hub_outlined,
+          ),
         ],
         activeIndex: _activeIndex,
         onChanged: (i) => setState(() {

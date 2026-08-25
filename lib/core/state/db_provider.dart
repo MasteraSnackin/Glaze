@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../db/app_db.dart';
@@ -30,7 +32,13 @@ import '../db/repositories/tracker_snapshot_repo.dart';
 import '../db/repositories/ledger_raw_tracker_state_reader.dart';
 import '../db/repositories/ledger_reconciliation_checkpoint_repo.dart';
 import '../db/repositories/ledger_reconciliation_run_repo.dart';
+import '../db/repositories/ledger_debug_run_repo.dart';
+import '../db/repositories/llm_request_capture_repo.dart';
 import '../db/repositories/card_evolution_repo.dart';
+import '../db/repositories/card_evolution_proposal_run_repo.dart';
+import '../db/repositories/card_evolution_collector_run_repo.dart';
+import '../db/repositories/card_evolution_writer_call_repo.dart';
+import '../db/repositories/card_evolution_observation_repo.dart';
 import '../db/repositories/character_knowledge_fact_repo.dart';
 import '../db/repositories/character_session_baseline_repo.dart';
 import '../db/repositories/character_revision_repo.dart';
@@ -43,6 +51,8 @@ import '../db/repositories/info_blocks_repository.dart';
 import '../db/repositories/session_deletion_repo.dart';
 import '../db/repositories/character_deletion_repo.dart';
 import '../models/memory_book.dart';
+import '../llm/transport/llm_request_capture.dart';
+import '../llm/transport/llm_call_event.dart';
 import '../services/character_importer.dart';
 import '../services/image_storage_service.dart';
 import '../services/migration_service.dart';
@@ -59,10 +69,41 @@ export 'pipeline_settings_provider.dart' show pipelineSettingsProvider;
 // (which already import db_provider) can gate Studio without extra imports.
 export 'studio_feature_provider.dart' show studioFeatureEnabledProvider;
 
+final _captureRepos = Expando<LlmRequestCaptureRepo>();
+
 final appDbProvider = Provider<AppDatabase>((ref) {
   final db = AppDatabase();
-  ref.onDispose(db.close);
+  ref.onDispose(() {
+    final repo = _captureRepos[db];
+    if (repo != null && identical(LlmRequestCapture.sink, repo)) {
+      LlmRequestCapture.sink = null;
+    }
+    if (repo != null && identical(LlmCallEventCapture.sink, repo)) {
+      LlmCallEventCapture.sink = null;
+    }
+    unawaited((repo?.close() ?? Future<void>.value()).whenComplete(db.close));
+  });
   return db;
+});
+
+final llmRequestCaptureRepoProvider = Provider<LlmRequestCaptureRepo>((ref) {
+  return LlmRequestCaptureRepo(ref.watch(appDbProvider));
+});
+
+/// Installs the database-backed request sink for the lifetime of the app scope.
+final llmRequestCaptureInstallationProvider = Provider<void>((ref) {
+  final repo = ref.watch(llmRequestCaptureRepoProvider);
+  _captureRepos[repo.db] = repo;
+  LlmRequestCapture.sink = repo;
+  LlmCallEventCapture.sink = repo;
+  ref.onDispose(() {
+    if (identical(LlmRequestCapture.sink, repo)) {
+      LlmRequestCapture.sink = null;
+    }
+    if (identical(LlmCallEventCapture.sink, repo)) {
+      LlmCallEventCapture.sink = null;
+    }
+  });
 });
 
 final imageStorageProvider = FutureProvider<ImageStorageService>((ref) async {
@@ -164,6 +205,30 @@ final lorebookUseManifestRepoProvider = Provider<LorebookUseManifestRepo>((
 final ledgerReconciliationRunRepoProvider =
     Provider<LedgerReconciliationRunRepo>(
       (ref) => LedgerReconciliationRunRepo(ref.watch(appDbProvider)),
+    );
+
+final ledgerDebugRunRepoProvider = Provider<LedgerDebugRunRepo>(
+  (ref) => LedgerDebugRunRepo(ref.watch(appDbProvider)),
+);
+
+final cardEvolutionCollectorRunRepoProvider =
+    Provider<CardEvolutionCollectorRunRepo>(
+      (ref) => CardEvolutionCollectorRunRepo(ref.watch(appDbProvider)),
+    );
+
+final cardEvolutionWriterCallRepoProvider =
+    Provider<CardEvolutionWriterCallRepo>(
+      (ref) => CardEvolutionWriterCallRepo(ref.watch(appDbProvider)),
+    );
+
+final cardEvolutionObservationRepoProvider =
+    Provider<CardEvolutionObservationRepo>(
+      (ref) => CardEvolutionObservationRepo(ref.watch(appDbProvider)),
+    );
+
+final cardEvolutionProposalRunRepoProvider =
+    Provider<CardEvolutionProposalRunRepo>(
+      (ref) => CardEvolutionProposalRunRepo(ref.watch(appDbProvider)),
     );
 
 final embeddingRepoProvider = Provider<EmbeddingRepo>((ref) {

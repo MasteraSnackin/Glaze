@@ -4,6 +4,8 @@ import 'package:glaze_flutter/core/llm/aux_llm_client.dart';
 import 'package:glaze_flutter/core/llm/aux_retry_runner.dart';
 import 'package:glaze_flutter/core/llm/transport/chat_transport.dart';
 import 'package:glaze_flutter/core/llm/transport/chat_transport_request.dart';
+import 'package:glaze_flutter/core/llm/transport/llm_capture_context.dart';
+import 'package:glaze_flutter/core/llm/transport/llm_call_event.dart';
 
 const _config = AuxApiConfig(
   endpoint: 'https://example.test',
@@ -48,7 +50,16 @@ class _FakeTransport implements ChatTransport {
   }) async => const [];
 }
 
+class _CallEventSink implements LlmCallEventSink {
+  final events = <LlmCallEvent>[];
+
+  @override
+  void recordCallEvent(LlmCallEvent event) => events.add(event);
+}
+
 void main() {
+  tearDown(() => LlmCallEventCapture.sink = null);
+
   group('AuxLlmClient attempt transport lifetime', () {
     test(
       'idle timeout cancels and drains before retry; late completion ignored',
@@ -212,6 +223,69 @@ void main() {
 
       expect(outcome.text, 'new');
       expect(chunks, ['new']);
+    });
+
+    test('capture context tracks individual retry attempts', () async {
+      final contexts = <LlmCaptureContext?>[];
+      final sink = _CallEventSink();
+      LlmCallEventCapture.sink = sink;
+      var starts = 0;
+      final transport = _FakeTransport(({
+        required request,
+        required cancelToken,
+        required onUpdate,
+        required onComplete,
+        required onError,
+      }) async {
+        contexts.add(request.captureContext);
+        starts++;
+        if (starts == 1) {
+          throw DioException(
+            requestOptions: RequestOptions(path: ''),
+            response: Response(
+              requestOptions: RequestOptions(path: ''),
+              statusCode: 503,
+            ),
+            type: DioExceptionType.badResponse,
+          );
+        }
+        onComplete?.call('ok', null);
+      });
+      final client = AuxLlmClient(
+        transportPicker: (_) => transport,
+        retryPolicy: const AuxRetryPolicy(
+          maxAttempts: 2,
+          backoffDelays: [Duration.zero],
+        ),
+      );
+
+      final outcome = await client.callOnceWithLog(
+        config: _config,
+        prompt: 'hello',
+        maxTokens: 10,
+        temperature: 0.2,
+        timeoutMs: 1000,
+        captureContext: const LlmCaptureContext(
+          stage: 'card.writer',
+          sessionId: 'session',
+          logicalCallId: 'call',
+        ),
+      );
+
+      expect(outcome.text, 'ok');
+      expect(contexts.map((context) => context?.attempt), [1, 2]);
+      expect(contexts.map((context) => context?.stage), [
+        'card.writer',
+        'card.writer',
+      ]);
+      expect(contexts.map((context) => context?.callId).toSet(), hasLength(1));
+      expect(outcome.captureContext?.callId, contexts.first?.callId);
+      expect(sink.events.map((event) => event.kind), [
+        'transport_failed',
+        'transport_succeeded',
+      ]);
+      expect(sink.events.map((event) => event.context.attempt), [1, 2]);
+      expect(sink.events.last.responseText, 'ok');
     });
   });
 

@@ -153,6 +153,10 @@ class CardEvolutionRepo {
   final SessionLorebookEvolutionRepo lorebookEvolutionRepo;
   final Future<void> Function()? beforeCursorInsert;
 
+  Future<CardEvolutionClaimRow?> getClaimById(String claimId) => (db.select(
+    db.cardEvolutionClaims,
+  )..where((row) => row.id.equals(claimId))).getSingleOrNull();
+
   Future<bool> isEligible(String sessionId) => db.transaction<bool>(
     () async => (await _selectInput(sessionId)).isSelected,
   );
@@ -220,6 +224,7 @@ class CardEvolutionRepo {
     int throughCollectorOrdinal = 0,
     String collectorBoundaryHash = '',
     List<String> reconciliationRunIds = const [],
+    String writerOptionsJson = '{}',
   }) => db.transaction(() async {
     if (ownerId.isEmpty || leaseSeconds <= 0) {
       return const CardEvolutionClaimOutcome('invalidRequest');
@@ -243,6 +248,41 @@ class CardEvolutionRepo {
             );
     }
     if (existing != null) {
+      final writerCall =
+          await (db.select(db.cardEvolutionWriterCalls)
+                ..where((row) => row.claimId.equals(existing.id))
+                ..limit(1))
+              .getSingleOrNull();
+      if (writerCall != null) {
+        await (db.update(db.cardEvolutionClaims)..where(
+              (row) =>
+                  row.id.equals(existing.id) &
+                  row.status.equals('claimed') &
+                  row.leaseExpiresAt.isSmallerOrEqualValue(now),
+            ))
+            .write(
+              CardEvolutionClaimsCompanion(
+                status: const Value('failed'),
+                leaseExpiresAt: const Value(0),
+                failureCode: const Value('recoveryRequired'),
+                failureDetail: const Value(
+                  'Writer lease expired with durable call checkpoints',
+                ),
+                failedAt: Value(now),
+              ),
+            );
+        final failed = await getClaimById(existing.id);
+        final selected = failed?.selectedInputJson;
+        return CardEvolutionClaimOutcome(
+          'failed',
+          failed == null ||
+                  selected == null ||
+                  computeHash(selected) != failed.inputHash
+              ? null
+              : CardEvolutionClaim(row: failed, selectedInputJson: selected),
+          'recoveryRequired',
+        );
+      }
       // An expired owner cannot finalize (finalize checks the same lease). Do
       // not reuse its snapshot: chat/canon may have advanced while the app was
       // closed, so drop the stale lease and create a fresh claim below.
@@ -255,6 +295,23 @@ class CardEvolutionRepo {
       if (deleted != 1) {
         return const CardEvolutionClaimOutcome('busy');
       }
+    }
+    final failed =
+        await (db.select(db.cardEvolutionClaims)
+              ..where((row) => row.sessionId.equals(sessionId))
+              ..where((row) => row.status.equals('failed'))
+              ..orderBy([(row) => OrderingTerm.desc(row.failedAt)])
+              ..limit(1))
+            .getSingleOrNull();
+    if (failed != null) {
+      final selected = failed.selectedInputJson;
+      return CardEvolutionClaimOutcome(
+        'failed',
+        selected == null || computeHash(selected) != failed.inputHash
+            ? null
+            : CardEvolutionClaim(row: failed, selectedInputJson: selected),
+        failed.failureCode,
+      );
     }
     final selection = await _selectInput(
       sessionId,
@@ -295,6 +352,8 @@ class CardEvolutionRepo {
               predecessorCursorHash: collectorBoundaryHash,
               predecessorRunOrdinal: throughCollectorOrdinal,
               inputHash: inputHash,
+              selectedInputJson: Value(selected),
+              writerOptionsJson: Value(writerOptionsJson),
               createdAt: now,
             ),
           );
@@ -344,6 +403,69 @@ class CardEvolutionRepo {
             .write(
               CardEvolutionClaimsCompanion(
                 leaseExpiresAt: Value(now + leaseSeconds),
+              ),
+            );
+    return changed == 1;
+  }
+
+  Future<CardEvolutionClaimOutcome> claimFailedWriter({
+    required String claimId,
+    required String ownerId,
+    required int now,
+    required int leaseSeconds,
+  }) => db.transaction(() async {
+    if (ownerId.isEmpty || leaseSeconds <= 0) {
+      return const CardEvolutionClaimOutcome('invalidRequest');
+    }
+    final changed =
+        await (db.update(db.cardEvolutionClaims)..where(
+              (row) => row.id.equals(claimId) & row.status.equals('failed'),
+            ))
+            .write(
+              CardEvolutionClaimsCompanion(
+                ownerId: Value(ownerId),
+                status: const Value('claimed'),
+                leaseExpiresAt: Value(now + leaseSeconds),
+                failureCode: const Value(null),
+                failureDetail: const Value(null),
+                failedAt: const Value(null),
+              ),
+            );
+    if (changed != 1) return const CardEvolutionClaimOutcome('notFailed');
+    final row = await (db.select(
+      db.cardEvolutionClaims,
+    )..where((item) => item.id.equals(claimId))).getSingle();
+    final selected = row.selectedInputJson;
+    if (selected == null || computeHash(selected) != row.inputHash) {
+      throw StateError('Stored Card Evolution input is invalid');
+    }
+    return CardEvolutionClaimOutcome(
+      'claimed',
+      CardEvolutionClaim(row: row, selectedInputJson: selected),
+    );
+  });
+
+  Future<bool> markWriterFailed({
+    required String claimId,
+    required String ownerId,
+    required int now,
+    required String code,
+    String? detail,
+  }) async {
+    final changed =
+        await (db.update(db.cardEvolutionClaims)..where(
+              (row) =>
+                  row.id.equals(claimId) &
+                  row.ownerId.equals(ownerId) &
+                  row.status.equals('claimed'),
+            ))
+            .write(
+              CardEvolutionClaimsCompanion(
+                status: const Value('failed'),
+                leaseExpiresAt: const Value(0),
+                failureCode: Value(code),
+                failureDetail: Value(detail),
+                failedAt: Value(now),
               ),
             );
     return changed == 1;
@@ -651,6 +773,18 @@ class CardEvolutionRepo {
     required String claimId,
     required String ownerId,
   }) => db.transaction(() async {
+    final owned =
+        await (db.select(db.cardEvolutionClaims)..where(
+              (row) =>
+                  row.id.equals(claimId) &
+                  row.ownerId.equals(ownerId) &
+                  row.status.equals('claimed'),
+            ))
+            .getSingleOrNull();
+    if (owned == null) return;
+    await (db.delete(
+      db.cardEvolutionWriterCalls,
+    )..where((row) => row.claimId.equals(claimId))).go();
     await (db.delete(db.cardEvolutionClaims)
           ..where((row) => row.id.equals(claimId))
           ..where((row) => row.ownerId.equals(ownerId))
@@ -682,6 +816,16 @@ class CardEvolutionRepo {
           updatedAt: updatedAt,
         ),
       );
+
+  /// Latest replaceable writer diagnostics for each stage, newest first.
+  Future<List<CardEvolutionDebugRunRow>> readDebugRuns(String sessionId) =>
+      (db.select(db.cardEvolutionDebugRuns)
+            ..where((row) => row.sessionId.equals(sessionId))
+            ..orderBy([
+              (row) => OrderingTerm.desc(row.updatedAt),
+              (row) => OrderingTerm.asc(row.stage),
+            ]))
+          .get();
 
   /// Builds a read-only observation snapshot (character + canonical selected
   /// input) without claiming a lease. Used by the observation pass which runs
@@ -785,6 +929,12 @@ class CardEvolutionRepo {
   Future<CardEvolutionSelection> _selectedInputForClaim(
     CardEvolutionClaimRow claim,
   ) async {
+    final stored = claim.selectedInputJson;
+    if (stored != null && computeHash(stored) != claim.inputHash) {
+      return const CardEvolutionSelection.failed(
+        CardEvolutionSelectionFailure.inputHashMismatch,
+      );
+    }
     final runIds = await _reconciliationRunIdsForClaim(claim);
     if (claim.predecessorRunOrdinal > 0 &&
         runIds.length != _writerReconciliationRunCount) {
@@ -804,12 +954,13 @@ class CardEvolutionRepo {
       );
     }
     final snapshot = jsonDecode(selected) as Map<String, dynamic>;
-    return snapshot['chatHistoryHash'] == claim.chatHistoryHash &&
-            snapshot['effectiveCanonIdentity'] == claim.effectiveCanonIdentity
-        ? selection
-        : const CardEvolutionSelection.failed(
-            CardEvolutionSelectionFailure.claimEvidenceMismatch,
-          );
+    if (snapshot['chatHistoryHash'] != claim.chatHistoryHash ||
+        snapshot['effectiveCanonIdentity'] != claim.effectiveCanonIdentity) {
+      return const CardEvolutionSelection.failed(
+        CardEvolutionSelectionFailure.claimEvidenceMismatch,
+      );
+    }
+    return stored == null ? selection : CardEvolutionSelection.selected(stored);
   }
 
   Future<CardEvolutionSelection> _selectInput(

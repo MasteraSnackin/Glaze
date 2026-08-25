@@ -1,26 +1,42 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../core/models/agent_operation_record.dart';
-import '../../../shared/theme/app_colors.dart';
-import 'agentic_operations_tab.dart';
-import 'agentic_last_turn_tab.dart';
+import '../../../shared/widgets/glaze_tab_bar.dart';
+import '../../../shared/widgets/sheet_view.dart';
+import '../../../shared/widgets/swipe_tab_switcher.dart';
+import '../../card_rewrite/card_rewriter_studio_sheet.dart';
+import 'agentic_collector_tab.dart';
+import 'agentic_reconciler_tab.dart';
 import 'agentic_snapshots_tab.dart';
-import 'agentic_tracker_values_tab.dart';
-import 'post_cleaner_diff_dialog.dart';
 
 class AgenticOperationsLogDialog extends ConsumerStatefulWidget {
   final String? sessionId;
+  final String? characterId;
 
-  const AgenticOperationsLogDialog({super.key, this.sessionId});
+  const AgenticOperationsLogDialog({
+    super.key,
+    this.sessionId,
+    this.characterId,
+  });
 
   /// Opens the dialog as an overlay. Caller passes the current [sessionId]
   /// so the dialog can scope the list, or null to show operations across all
   /// sessions.
-  static Future<void> show(BuildContext context, {String? sessionId}) {
-    return showDialog(
+  static Future<String?> show(
+    BuildContext context, {
+    String? sessionId,
+    String? characterId,
+  }) {
+    return showModalBottomSheet<String>(
       context: context,
-      builder: (_) => AgenticOperationsLogDialog(sessionId: sessionId),
+      useRootNavigator: true,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => AgenticOperationsLogDialog(
+        sessionId: sessionId,
+        characterId: characterId,
+      ),
     );
   }
 
@@ -31,71 +47,91 @@ class AgenticOperationsLogDialog extends ConsumerStatefulWidget {
 
 class _AgenticOperationsLogDialogState
     extends ConsumerState<AgenticOperationsLogDialog> {
+  int _activeIndex = 0;
+  final Set<int> _visited = {0};
+
+  void _selectTab(int index) => setState(() {
+    _activeIndex = index;
+    _visited.add(index);
+  });
+
   @override
   Widget build(BuildContext context) {
-    return Dialog(
-      child: SizedBox(
-        width: 720,
-        height: 560,
-        child: DefaultTabController(
-          length: 4,
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(12),
-                child: Row(
-                  children: [
-                    Icon(Icons.smart_toy_outlined, color: context.cs.primary),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Agentic Operations Log',
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                    const Spacer(),
-                    IconButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      icon: const Icon(Icons.close, size: 20),
-                      visualDensity: VisualDensity.compact,
-                    ),
-                  ],
+    final sessionId = widget.sessionId;
+    final children = sessionId == null || sessionId.isEmpty
+        ? <Widget>[Center(child: Text('agent_ops_open_from_chat'.tr()))]
+        : <Widget>[
+            _visited.contains(0)
+                ? AgenticReconcilerTab(
+                    sessionId: sessionId,
+                    characterId: widget.characterId,
+                  )
+                : const SizedBox.shrink(),
+            _visited.contains(1)
+                ? AgenticCollectorTab(sessionId: sessionId)
+                : const SizedBox.shrink(),
+            _visited.contains(2)
+                ? widget.characterId == null || widget.characterId!.isEmpty
+                      ? Center(
+                          child: Text(
+                            'agent_ops_card_rewriter_chat_only'.tr(),
+                            textAlign: TextAlign.center,
+                          ),
+                        )
+                      : CardRewriterStudioSheet(
+                          charId: widget.characterId!,
+                          sessionId: sessionId,
+                        )
+                : const SizedBox.shrink(),
+            _visited.contains(3)
+                ? const AgenticSnapshotsTab()
+                : const SizedBox.shrink(),
+          ];
+
+    final body = sessionId == null || sessionId.isEmpty
+        ? children.single
+        : SwipeTabSwitcher(
+            index: _activeIndex,
+            length: 4,
+            onChanged: _selectTab,
+            child: AgenticSessionScope(
+              sessionId: sessionId,
+              child: IndexedStack(index: _activeIndex, children: children),
+            ),
+          );
+    return SheetView(
+      title: 'agent_ops_title'.tr(),
+      showBack: true,
+      startExpanded: true,
+      onBack: () => Navigator.of(context).maybePop(),
+      headerBottom: sessionId == null || sessionId.isEmpty
+          ? null
+          : GlazeTabBar(
+              tabs: [
+                GlazeTabItem(
+                  label: 'agent_ops_tab_reconciler'.tr(),
+                  icon: Icons.rule_folder_outlined,
                 ),
-              ),
-              const TabBar(
-                tabs: [
-                  Tab(
-                    icon: Icon(Icons.history_outlined, size: 16),
-                    text: 'Operations',
-                  ),
-                  Tab(
-                    icon: Icon(Icons.track_changes_outlined, size: 16),
-                    text: 'Studio Ledger',
-                  ),
-                  Tab(
-                    icon: Icon(Icons.warning_amber_outlined, size: 16),
-                    text: 'Last turn',
-                  ),
-                  Tab(
-                    icon: Icon(Icons.history_edu_outlined, size: 16),
-                    text: 'Snapshots',
-                  ),
-                ],
-                tabAlignment: TabAlignment.fill,
-              ),
-              Expanded(
-                child: AgenticSessionScope(
-                  sessionId: widget.sessionId,
-                  child: const TabBarView(
-                    children: [
-                      AgenticOperationsTab(),
-                      AgenticTrackerValuesTab(),
-                      AgenticLastTurnTab(),
-                      AgenticSnapshotsTab(),
-                    ],
-                  ),
+                GlazeTabItem(
+                  label: 'agent_ops_tab_collector'.tr(),
+                  icon: Icons.filter_alt_outlined,
                 ),
-              ),
-            ],
-          ),
+                GlazeTabItem(
+                  label: 'agent_ops_tab_card_rewriter'.tr(),
+                  icon: Icons.auto_fix_high_outlined,
+                ),
+                GlazeTabItem(
+                  label: 'agent_ops_tab_snapshots'.tr(),
+                  icon: Icons.history_edu_outlined,
+                ),
+              ],
+              activeIndex: _activeIndex,
+              onChanged: _selectTab,
+            ),
+      body: Builder(
+        builder: (context) => Padding(
+          padding: EdgeInsets.only(top: MediaQuery.paddingOf(context).top),
+          child: body,
         ),
       ),
     );
@@ -112,198 +148,4 @@ class AgenticSessionScope extends InheritedWidget {
   @override
   bool updateShouldNotify(AgenticSessionScope oldWidget) =>
       oldWidget.sessionId != sessionId;
-}
-
-/// Shared operation tile used by [AgenticOperationsTab] and
-/// [AgenticLastTurnTab].
-class OperationTile extends StatelessWidget {
-  final AgentOperationRecord record;
-
-  const OperationTile({super.key, required this.record});
-
-  bool get _canShowDiff =>
-      record.kind == AgentOperationKind.postCleaner &&
-      record.status.isOk &&
-      record.sessionId != null &&
-      record.messageId != null;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = _statusColor(context, record.status);
-    return ExpansionTile(
-      dense: true,
-      tilePadding: const EdgeInsets.symmetric(horizontal: 12),
-      leading: Icon(_kindIcon(record.kind), color: color, size: 20),
-      title: Text(
-        record.tileLabel,
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-          color: context.cs.onSurface,
-        ),
-      ),
-      subtitle: record.summary == null
-          ? null
-          : Text(
-              record.summary!,
-              style: TextStyle(
-                fontSize: 11,
-                color: context.cs.onSurfaceVariant,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (_canShowDiff)
-            IconButton(
-              onPressed: () => PostCleanerDiffDialog.show(
-                context,
-                sessionId: record.sessionId!,
-                messageId: record.messageId!,
-              ),
-              icon: const Icon(Icons.compare_arrows, size: 18),
-              tooltip: 'View diff',
-              visualDensity: VisualDensity.compact,
-            ),
-          if (record.canRegenerate)
-            IconButton(
-              onPressed: () => _showRegenHint(context),
-              icon: const Icon(Icons.refresh, size: 18),
-              tooltip: 'Regenerate (next turn)',
-              visualDensity: VisualDensity.compact,
-            ),
-        ],
-      ),
-      children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _detailRow(context, 'Kind', record.kind.label),
-              _detailRow(context, 'Status', record.status.label),
-              _detailRow(
-                context,
-                'Attempts',
-                '${record.attemptCount}${record.wasRetried ? " (retried)" : ""}',
-              ),
-              _detailRow(context, 'Total time', '${record.totalElapsedMs}ms'),
-              if (record.model != null)
-                _detailRow(context, 'Model', record.model!),
-              if (record.messageId != null)
-                _detailRow(context, 'Message', record.messageId!),
-              if (record.attempts.isNotEmpty) ...[
-                const SizedBox(height: 6),
-                Text(
-                  'Attempts:',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: context.cs.onSurfaceVariant,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                ...record.attempts.map(
-                  (a) => Padding(
-                    padding: const EdgeInsets.only(left: 8, bottom: 2),
-                    child: Row(
-                      children: [
-                        Icon(
-                          a.isSuccess ? Icons.check : Icons.error_outline,
-                          size: 14,
-                          color: a.isSuccess
-                              ? context.cs.primary
-                              : _attemptColor(context, a.status),
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          '#${a.attempt} · ${a.status}'
-                          '${a.statusCode != 0 ? " · HTTP ${a.statusCode}" : ""}'
-                          ' · ${a.elapsedMs}ms',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: context.cs.onSurface,
-                            fontFamily: 'monospace',
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _detailRow(BuildContext context, String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 2),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 80,
-            child: Text(
-              label,
-              style: TextStyle(
-                fontSize: 11,
-                color: context.cs.onSurfaceVariant,
-              ),
-            ),
-          ),
-          Expanded(
-            child: Text(
-              value,
-              style: TextStyle(fontSize: 11, color: context.cs.onSurface),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Color _statusColor(BuildContext context, AgentOperationStatus status) {
-    if (status.isOk) return context.cs.primary;
-    if (status.isFailure) return context.cs.error;
-    return context.cs.onSurfaceVariant;
-  }
-
-  Color _attemptColor(BuildContext context, String status) {
-    if (status == 'http_5xx' || status == 'timeout') return context.cs.error;
-    if (status == 'http_4xx') return Colors.orange;
-    return context.cs.onSurfaceVariant;
-  }
-
-  IconData _kindIcon(AgentOperationKind kind) {
-    return switch (kind) {
-      AgentOperationKind.memorySidecar => Icons.memory,
-      AgentOperationKind.postCleaner => Icons.cleaning_services_outlined,
-      AgentOperationKind.agenticSearch => Icons.search,
-      AgentOperationKind.classifier => Icons.category_outlined,
-      AgentOperationKind.consolidation => Icons.merge_type_outlined,
-      AgentOperationKind.studioController => Icons.auto_awesome_outlined,
-      AgentOperationKind.studioFinal => Icons.edit_note,
-      AgentOperationKind.factChecker => Icons.fact_check_outlined,
-      AgentOperationKind.studioLedger => Icons.menu_book_outlined,
-      AgentOperationKind.studioLedgerReconciliation =>
-        Icons.fact_check_outlined,
-    };
-  }
-
-  void _showRegenHint(BuildContext context) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          'This operation will be retried automatically on the next '
-          'generation that triggers it.',
-        ),
-        duration: Duration(seconds: 3),
-      ),
-    );
-  }
 }

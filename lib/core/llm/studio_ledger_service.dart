@@ -4,13 +4,17 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 
+import '../db/app_db.dart';
 import '../db/repositories/character_knowledge_fact_repo.dart';
 import '../db/repositories/character_repo.dart';
 import '../db/repositories/chat_repo.dart';
 import '../db/repositories/ledger_debug_run_repo.dart';
 import '../db/repositories/ledger_reconciliation_checkpoint_repo.dart';
+import '../db/repositories/ledger_reconciliation_lease_repo.dart';
 import '../db/repositories/ledger_reconciliation_run_repo.dart';
 import '../db/repositories/memory_book_repo.dart';
+import '../db/repositories/reconciliation_replacement_repo.dart';
+import '../db/repositories/reconciliation_state_codec.dart';
 import '../db/repositories/tracker_repo.dart';
 import '../db/repositories/tracker_snapshot_repo.dart';
 import '../models/agent_operation_record.dart';
@@ -25,8 +29,10 @@ import '../models/studio_ledger_export.dart';
 import '../models/tracker.dart';
 import '../utils/id_generator.dart';
 import '../utils/cast_helpers.dart';
+import '../utils/time_helpers.dart';
 import '../services/card_rewriter/effective_canon_context_loader.dart';
 import 'aux_llm_client.dart';
+import 'aux_retry_runner.dart';
 import 'ledger/ledger_op_applier.dart';
 import 'knowledge_cleanup_parser.dart';
 import 'json_repair.dart';
@@ -35,6 +41,8 @@ import 'studio/studio_aux_prompt_assembler.dart';
 import 'studio_ledger_export_parser.dart';
 import 'studio_ledger_prompt.dart';
 import 'studio_ledger_reconciliation.dart';
+import 'transport/llm_capture_context.dart';
+import 'transport/llm_call_event.dart';
 
 export 'ledger/ledger_op_applier.dart';
 
@@ -123,6 +131,7 @@ class StudioLedgerService {
   static final Map<String, Future<LedgerRunResult>> _inFlight = {};
 
   static const _maxRepairInputChars = 12000;
+  static const _reconciliationLeaseTtlSeconds = 60 * 60;
   final AuxLlmClient _llm;
   final TrackerRepo _trackerRepo;
   final MemoryBookRepo _bookRepo;
@@ -137,6 +146,8 @@ class StudioLedgerService {
   final StudioLedgerPrompt _promptBuilder;
   final LedgerOpApplier _opApplier;
   final LedgerDebugRunRepo _debugRunRepo;
+  final LedgerReconciliationLeaseRepo _reconciliationLeaseRepo;
+  final ReconciliationReplacementRepo _replacementRepo;
 
   StudioLedgerService({
     required this._llm,
@@ -150,10 +161,17 @@ class StudioLedgerService {
     required this._chatRepo,
     required this._canonContextLoader,
     LedgerDebugRunRepo? debugRunRepo,
+    LedgerReconciliationLeaseRepo? reconciliationLeaseRepo,
+    ReconciliationReplacementRepo? replacementRepo,
   }) : _parser = const StudioLedgerExportParser(),
        _promptBuilder = const StudioLedgerPrompt(),
        _opApplier = const LedgerOpApplier(),
-       _debugRunRepo = debugRunRepo ?? LedgerDebugRunRepo(_trackerRepo.db);
+       _debugRunRepo = debugRunRepo ?? LedgerDebugRunRepo(_trackerRepo.db),
+       _reconciliationLeaseRepo =
+           reconciliationLeaseRepo ??
+           LedgerReconciliationLeaseRepo(_trackerRepo.db),
+       _replacementRepo =
+           replacementRepo ?? ReconciliationReplacementRepo(_trackerRepo.db);
 
   Future<LedgerRunResult> reconcile({
     required String sessionId,
@@ -176,6 +194,7 @@ class StudioLedgerService {
         macroCtx: macroCtx,
         isStillCurrent: isStillCurrent,
         cancelToken: cancelToken,
+        purpose: 'normal',
       );
     }
     final end = plan.endMessage;
@@ -203,8 +222,118 @@ class StudioLedgerService {
         macroCtx: macroCtx,
         isStillCurrent: isStillCurrent,
         cancelToken: cancelToken,
+        purpose: operationIdentity.startsWith('manual:') ? 'manual' : 'normal',
       ),
     );
+  }
+
+  /// Regenerates only the expected current logical reconciliation head.
+  /// Generation reads the immutable before-state; replacement writes happen
+  /// later in one short transaction after all guards are revalidated.
+  Future<LedgerRunResult> replaceLatestReconciliation({
+    required String sessionId,
+    required String expectedRunId,
+    required PipelineSettings settings,
+    required AuxApiConfig config,
+    List<StudioPresetBlock> ledgerBlocks = const [],
+    MacroContext? macroCtx,
+    FutureOr<bool> Function()? isStillCurrent,
+    CancelToken? cancelToken,
+    String? operationIdentity,
+  }) {
+    final key = jsonEncode([
+      'reconciliation-replacement',
+      operationIdentity,
+      sessionId,
+      expectedRunId,
+      settings.toJson(),
+      _configIdentity(config),
+      ledgerBlocks.map((block) => block.toJson()).toList(),
+      _macroIdentity(macroCtx),
+    ]);
+    return _joinInFlight(
+      key,
+      () => _replaceLatestReconciliationUnshared(
+        sessionId: sessionId,
+        expectedRunId: expectedRunId,
+        settings: settings,
+        config: config,
+        ledgerBlocks: ledgerBlocks,
+        macroCtx: macroCtx,
+        isStillCurrent: isStillCurrent,
+        cancelToken: cancelToken,
+      ),
+    );
+  }
+
+  Future<LedgerRunResult> _replaceLatestReconciliationUnshared({
+    required String sessionId,
+    required String expectedRunId,
+    required PipelineSettings settings,
+    required AuxApiConfig config,
+    required List<StudioPresetBlock> ledgerBlocks,
+    required MacroContext? macroCtx,
+    required FutureOr<bool> Function()? isStillCurrent,
+    required CancelToken? cancelToken,
+  }) async {
+    final ownerId = 'ledger-reconciliation-${generateId()}';
+    if (!await _reconciliationLeaseRepo.acquire(
+      sessionId: sessionId,
+      ownerId: ownerId,
+      purpose: 'replacement',
+      ttlSeconds: _reconciliationLeaseTtlSeconds,
+    )) {
+      return const LedgerRunResult(
+        status: 'skipped',
+        error: 'Another reconciliation is already running for this session',
+      );
+    }
+    final token = cancelToken ?? CancelToken();
+    try {
+      final basis = await _prepareReplacementBasis(
+        sessionId: sessionId,
+        expectedRunId: expectedRunId,
+        token: token,
+        isStillCurrent: isStillCurrent,
+      );
+      if (basis is _ReplacementBasisFailure) {
+        return LedgerRunResult(status: 'error', error: basis.reason);
+      }
+      final ready = basis as _ReplacementBasisReady;
+      final trace = _LedgerRunTrace(
+        sessionId: sessionId,
+        kind: LedgerDebugRunKind.reconciliation,
+        messageId: ready.plan.endMessage.id,
+        swipeId: ready.plan.endMessage.swipeId,
+        agentSwipeId: ready.plan.endMessage.agentSwipeId,
+      );
+      final result = await _reconcileTraced(
+        trace: trace,
+        sessionId: sessionId,
+        settings: settings,
+        config: config,
+        plan: ready.plan,
+        ledgerBlocks: ledgerBlocks,
+        macroCtx: macroCtx,
+        isStillCurrent: isStillCurrent,
+        cancelToken: token,
+        canonOverride: ready.beforeCanon,
+        replacement: ready,
+        leaseOwnerId: ownerId,
+      );
+      if (await _reconciliationLeaseRepo.ownsLiveLeaseInTransaction(
+        sessionId: sessionId,
+        ownerId: ownerId,
+      )) {
+        await _recordDebugRun(trace, result);
+      }
+      return result;
+    } finally {
+      await _reconciliationLeaseRepo.release(
+        sessionId: sessionId,
+        ownerId: ownerId,
+      );
+    }
   }
 
   Future<LedgerRunResult> _reconcileUnshared({
@@ -216,7 +345,20 @@ class StudioLedgerService {
     MacroContext? macroCtx,
     FutureOr<bool> Function()? isStillCurrent,
     CancelToken? cancelToken,
+    required String purpose,
   }) async {
+    final ownerId = 'ledger-reconciliation-${generateId()}';
+    if (!await _reconciliationLeaseRepo.acquire(
+      sessionId: sessionId,
+      ownerId: ownerId,
+      purpose: purpose,
+      ttlSeconds: _reconciliationLeaseTtlSeconds,
+    )) {
+      return const LedgerRunResult(
+        status: 'skipped',
+        error: 'Another reconciliation is already running for this session',
+      );
+    }
     final trace = _LedgerRunTrace(
       sessionId: sessionId,
       kind: LedgerDebugRunKind.reconciliation,
@@ -224,19 +366,32 @@ class StudioLedgerService {
       swipeId: plan.endMessage.swipeId,
       agentSwipeId: plan.endMessage.agentSwipeId,
     );
-    final result = await _reconcileTraced(
-      trace: trace,
-      sessionId: sessionId,
-      settings: settings,
-      config: config,
-      plan: plan,
-      ledgerBlocks: ledgerBlocks,
-      macroCtx: macroCtx,
-      isStillCurrent: isStillCurrent,
-      cancelToken: cancelToken,
-    );
-    await _recordDebugRun(trace, result);
-    return result;
+    try {
+      final result = await _reconcileTraced(
+        trace: trace,
+        sessionId: sessionId,
+        settings: settings,
+        config: config,
+        plan: plan,
+        ledgerBlocks: ledgerBlocks,
+        macroCtx: macroCtx,
+        isStillCurrent: isStillCurrent,
+        cancelToken: cancelToken,
+        leaseOwnerId: ownerId,
+      );
+      if (await _reconciliationLeaseRepo.ownsLiveLeaseInTransaction(
+        sessionId: sessionId,
+        ownerId: ownerId,
+      )) {
+        await _recordDebugRun(trace, result);
+      }
+      return result;
+    } finally {
+      await _reconciliationLeaseRepo.release(
+        sessionId: sessionId,
+        ownerId: ownerId,
+      );
+    }
   }
 
   Future<LedgerRunResult> _reconcileTraced({
@@ -249,6 +404,9 @@ class StudioLedgerService {
     MacroContext? macroCtx,
     FutureOr<bool> Function()? isStillCurrent,
     CancelToken? cancelToken,
+    _LedgerCanonContext? canonOverride,
+    _ReplacementBasisReady? replacement,
+    required String leaseOwnerId,
   }) async {
     final token = cancelToken ?? CancelToken();
     if (token.isCancelled || await _isStillCurrent(isStillCurrent) == false) {
@@ -256,7 +414,7 @@ class StudioLedgerService {
     }
     final sw = Stopwatch()..start();
     try {
-      final canon = await _loadCanonContext(sessionId);
+      final canon = canonOverride ?? await _loadCanonContext(sessionId);
       await _throwIfReconciliationAborted(token, isStillCurrent);
       final endpointSnapshot = await _snapshotRepo.getByAnchor(
         sessionId: sessionId,
@@ -317,6 +475,9 @@ class StudioLedgerService {
         character: canon.source,
       );
       await _throwIfReconciliationAborted(token, isStillCurrent);
+      if (!await _renewReconciliationLease(sessionId, leaseOwnerId)) {
+        return LedgerRunResult.aborted;
+      }
       final timeoutMs = _llm.resolveLedgerTimeout(settings);
       final outcome = await _llm.callOnceWithLog(
         config: config,
@@ -330,11 +491,23 @@ class StudioLedgerService {
         timeoutMs: timeoutMs,
         cancelToken: token,
         omitReasoning: true,
+        captureContext: LlmCaptureContext(
+          stage: 'ledger.reconciliation',
+          sessionId: sessionId,
+          messageId: plan.endMessage.id,
+          pipelineRunId: plan.rangeHash,
+          logicalCallId: plan.rangeHash,
+          relatedArtifactId: plan.rangeHash,
+        ),
       );
       if (token.isCancelled || await _isStillCurrent(isStillCurrent) == false) {
         return LedgerRunResult.aborted;
       }
-      if (!await _isCanonStillCurrent(sessionId, canon)) {
+      if (!await _isReconciliationBasisCurrent(
+        sessionId: sessionId,
+        canon: canon,
+        replacement: replacement,
+      )) {
         return LedgerRunResult.aborted;
       }
       if (!outcome.isOk || outcome.text == null || outcome.text!.isEmpty) {
@@ -354,6 +527,7 @@ class StudioLedgerService {
         responseText,
         focalUserName: macroCtx?.userName ?? '',
       );
+      await _recordLedgerParserVerdict(outcome, parsed);
       trace.recordFirstResponse(
         model: config.model,
         responseText: responseText,
@@ -374,13 +548,15 @@ class StudioLedgerService {
       final needsRepair = needsExportRepair || needsCleanupRepair;
       if (needsRepair) {
         await _throwIfReconciliationAborted(token, isStillCurrent);
-        if (!await _isCanonStillCurrent(sessionId, canon)) {
+        if (!await _isReconciliationBasisCurrent(
+          sessionId: sessionId,
+          canon: canon,
+          replacement: replacement,
+        )) {
           return LedgerRunResult.aborted;
         }
         repairAttempted = true;
-        trace.recordRepairRequested(
-          exportRepair: needsExportRepair,
-        );
+        trace.recordRepairRequested(exportRepair: needsExportRepair);
         if (_isOversizedRepairInput(responseText)) {
           return LedgerRunResult(
             status: 'error',
@@ -398,6 +574,9 @@ class StudioLedgerService {
             ? _buildRepairPrompt(responseText, reconciliation: true)
             : _buildCleanupRepairPrompt(responseText);
         totalPromptChars += repairPrompt.length;
+        if (!await _renewReconciliationLease(sessionId, leaseOwnerId)) {
+          return LedgerRunResult.aborted;
+        }
         final repair = await _llm.callOnceWithLog(
           config: config,
           prompt: repairPrompt,
@@ -408,11 +587,23 @@ class StudioLedgerService {
           timeoutMs: timeoutMs,
           cancelToken: token,
           omitReasoning: true,
+          captureContext: LlmCaptureContext(
+            stage: 'ledger.reconciliation_repair',
+            sessionId: sessionId,
+            messageId: plan.endMessage.id,
+            pipelineRunId: plan.rangeHash,
+            logicalCallId: '${plan.rangeHash}:repair',
+            relatedArtifactId: plan.rangeHash,
+          ),
         );
         attempts = _combineAttempts(attempts, repair.attempts);
         totalResponseChars += repair.text?.length ?? 0;
         await _throwIfReconciliationAborted(token, isStillCurrent);
-        if (!await _isCanonStillCurrent(sessionId, canon)) {
+        if (!await _isReconciliationBasisCurrent(
+          sessionId: sessionId,
+          canon: canon,
+          replacement: replacement,
+        )) {
           return LedgerRunResult.aborted;
         }
         if (!repair.isOk || repair.text == null || repair.text!.isEmpty) {
@@ -434,6 +625,7 @@ class StudioLedgerService {
             repairedText,
             focalUserName: macroCtx?.userName ?? '',
           );
+          await _recordLedgerParserVerdict(repair, repaired);
           trace.recordRepairResponse(
             responseText: repairedText,
             parsed: repaired,
@@ -611,16 +803,33 @@ class StudioLedgerService {
       var opsApplied = 0;
       var replayed = false;
       await _trackerRepo.db.transaction(() async {
-        await _throwIfLedgerCommitStale(
+        if (!await _reconciliationLeaseRepo.ownsLiveLeaseInTransaction(
           sessionId: sessionId,
-          canon: canon,
-          token: token,
-          isStillCurrent: isStillCurrent,
-          target: _LedgerTarget.fromMessage(plan.endMessage),
-          requireCommittedSnapshot: true,
-        );
+          ownerId: leaseOwnerId,
+        )) {
+          throw const _LedgerCommitStale();
+        }
+        if (replacement == null) {
+          await _throwIfLedgerCommitStale(
+            sessionId: sessionId,
+            canon: canon,
+            token: token,
+            isStillCurrent: isStillCurrent,
+            target: _LedgerTarget.fromMessage(plan.endMessage),
+            requireCommittedSnapshot: true,
+          );
+        } else {
+          await _throwIfReplacementStale(
+            replacement,
+            token: token,
+            isStillCurrent: isStillCurrent,
+          );
+        }
         final manifestRefs = await _reconciliationRunRepo
             .readAcceptedManifestRefs(sessionId: sessionId, anchors: anchors);
+        final beforeState =
+            replacement?.effect.before ??
+            await _reconciliationRunRepo.captureState(sessionId);
         final candidate = LedgerReconciliationRun(
           id: '',
           sessionId: sessionId,
@@ -634,7 +843,7 @@ class StudioLedgerService {
           predecessorChainHash: '',
           contractVersion: 1,
           opsApplied: intendedOps,
-          createdAt: 0,
+          createdAt: currentTimestampSeconds(),
         );
         // The ID covers immutable candidate content, so a canon change appends
         // rather than colliding with an earlier identical plan/LLM output.
@@ -653,13 +862,67 @@ class StudioLedgerService {
           opsApplied: candidate.opsApplied,
           createdAt: candidate.createdAt,
         );
+        if (replacement != null &&
+            draft.manifestsJson != replacement.head.acceptedManifestRefsJson) {
+          throw const _LedgerCommitStale();
+        }
+        if (replacement != null &&
+            draft.contentHash == replacement.head.contentHash) {
+          replayed = true;
+          return;
+        }
+        if (replacement != null) {
+          await _replacementRepo.resetDownstreamInTransaction(
+            sessionId: sessionId,
+            reconciliationRunId: replacement.head.id,
+            now: candidate.createdAt,
+          );
+          final invalidated = await _reconciliationRunRepo
+              .invalidateLatestForReplacement(
+                sessionId: sessionId,
+                expectedRunId: replacement.head.id,
+                expectedChainHash: replacement.head.chainHash,
+                createdAt: candidate.createdAt,
+              );
+          if (invalidated is! ReconciliationHeadInvalidated) {
+            throw const _LedgerCommitStale();
+          }
+          await _knowledgeFactRepo.deleteCleanupJournalsForExactRange(
+            sessionId: sessionId,
+            endpointMessageId: plan.endMessage.id,
+            messageIds: plan.messageIds,
+          );
+          await _trackerRepo.restoreLedgerRowsExact(
+            sessionId,
+            replacement.effect.before.ledgerJson,
+          );
+          await _knowledgeFactRepo.restoreSessionRowsExact(
+            sessionId,
+            replacement.effect.before.knowledgeJson,
+          );
+          if (!await _reconciliationRunRepo.currentStateMatches(
+            sessionId,
+            replacement.effect.before,
+          )) {
+            throw StateError(
+              'Exact reconciliation before-state was not restored',
+            );
+          }
+        }
         final append = await _reconciliationRunRepo.appendCandidate(draft);
         if (append is ReconciliationRunIdempotent) {
           replayed = true;
           return;
         }
         if (append is! ReconciliationRunAppended) {
-          throw StateError('Unable to append reconciliation run: $append');
+          final reason = switch (append) {
+            ReconciliationRunMalformed(:final reason) => reason,
+            ReconciliationRunChainGap(:final reason) => reason,
+            ReconciliationRunConcurrencyConflict(:final reason) => reason,
+            ReconciliationRunConflict(:final reason) => reason,
+            _ => append.runtimeType.toString(),
+          };
+          throw StateError('Unable to append reconciliation run: $reason');
         }
         await _trackerRepo.replaceLedgerState(
           sessionId,
@@ -672,6 +935,7 @@ class StudioLedgerService {
             token: token,
             isStillCurrent: isStillCurrent,
             target: _LedgerTarget.fromMessage(plan.endMessage),
+            checkCanon: replacement == null,
           );
           await _opApplier.applyOp(
             op: op,
@@ -691,6 +955,7 @@ class StudioLedgerService {
           token: token,
           isStillCurrent: isStillCurrent,
           target: _LedgerTarget.fromMessage(plan.endMessage),
+          checkCanon: replacement == null,
         );
         opsApplied += await _knowledgeFactRepo.applyReconciliationCleanup(
           sessionId: sessionId,
@@ -708,6 +973,21 @@ class StudioLedgerService {
           checkCanon: false,
         );
         final updated = await _trackerRepo.getBySessionId(sessionId);
+        final afterState = await _reconciliationRunRepo.captureState(sessionId);
+        final appendedRun = await _reconciliationRunRepo.getByContentHash(
+          sessionId,
+          draft.contentHash,
+        );
+        if (appendedRun == null) {
+          throw StateError('Appended reconciliation run is unavailable');
+        }
+        await _reconciliationRunRepo.recordEffect(
+          runId: appendedRun.id,
+          sessionId: sessionId,
+          before: beforeState,
+          after: afterState,
+          createdAt: candidate.createdAt,
+        );
         await _throwIfLedgerCommitStale(
           sessionId: sessionId,
           canon: canon,
@@ -784,6 +1064,13 @@ class StudioLedgerService {
       throw const _LedgerReconciliationAborted();
     }
   }
+
+  Future<bool> _renewReconciliationLease(String sessionId, String ownerId) =>
+      _reconciliationLeaseRepo.renew(
+        sessionId: sessionId,
+        ownerId: ownerId,
+        ttlSeconds: _reconciliationLeaseTtlSeconds,
+      );
 
   /// Run the Studio Ledger for [sessionId] on [finalAssistantText].
   ///
@@ -1015,6 +1302,14 @@ class StudioLedgerService {
         timeoutMs: timeoutMs,
         cancelToken: token,
         omitReasoning: true,
+        captureContext: LlmCaptureContext(
+          stage: 'ledger.turn',
+          sessionId: sessionId,
+          messageId: messageId,
+          pipelineRunId: 'ledger:$messageId:$swipeId:$agentSwipeId',
+          logicalCallId: 'ledger:$messageId:$swipeId:$agentSwipeId',
+          relatedArtifactId: messageId,
+        ),
       );
 
       if (token.isCancelled || await _isStillCurrent(isStillCurrent) == false) {
@@ -1054,6 +1349,7 @@ class StudioLedgerService {
         effectiveResponse,
         focalUserName: macroCtx?.userName ?? '',
       );
+      await _recordLedgerParserVerdict(outcome, parseResult);
       trace.recordFirstResponse(
         model: config.model,
         responseText: rawResponse,
@@ -1099,6 +1395,14 @@ class StudioLedgerService {
           timeoutMs: timeoutMs,
           cancelToken: token,
           omitReasoning: true,
+          captureContext: LlmCaptureContext(
+            stage: 'ledger.turn_repair',
+            sessionId: sessionId,
+            messageId: messageId,
+            pipelineRunId: 'ledger:$messageId:$swipeId:$agentSwipeId',
+            logicalCallId: 'ledger:$messageId:$swipeId:$agentSwipeId:repair',
+            relatedArtifactId: messageId,
+          ),
         );
         attempts = _combineAttempts(attempts, repair.attempts);
         totalResponseChars += repair.text?.length ?? 0;
@@ -1127,6 +1431,7 @@ class StudioLedgerService {
           effectiveResponse,
           focalUserName: macroCtx?.userName ?? '',
         );
+        await _recordLedgerParserVerdict(repair, parseResult);
         trace.recordRepairResponse(
           responseText: effectiveResponse,
           parsed: parseResult,
@@ -1694,6 +1999,209 @@ UNTRUSTED_INPUT_BASE64_END''';
     return _LedgerCanonContext(source, context);
   }
 
+  Future<_ReplacementBasis> _prepareReplacementBasis({
+    required String sessionId,
+    required String expectedRunId,
+    required CancelToken token,
+    required FutureOr<bool> Function()? isStillCurrent,
+  }) async {
+    if (token.isCancelled || await _isStillCurrent(isStillCurrent) == false) {
+      return const _ReplacementBasisFailure('Replacement was cancelled');
+    }
+    if (await _reconciliationRunRepo.validateChain(sessionId)
+        is! ReconciliationRunValid) {
+      return const _ReplacementBasisFailure(
+        'Reconciliation history failed integrity validation',
+      );
+    }
+    final head = await _reconciliationRunRepo.getHead(sessionId);
+    if (head == null || head.id != expectedRunId) {
+      return const _ReplacementBasisFailure(
+        'The selected reconciliation is no longer the latest commit',
+      );
+    }
+    final validated = await _reconciliationRunRepo.validateEffect(head);
+    if (validated is! ReconciliationEffectValid) {
+      return _ReplacementBasisFailure(
+        validated is ReconciliationEffectInvalid
+            ? validated.reason
+            : 'Exact reconciliation effect is unavailable',
+      );
+    }
+    if (!await _reconciliationRunRepo.currentStateMatches(
+      sessionId,
+      validated.after,
+    )) {
+      return const _ReplacementBasisFailure(
+        'Current Ledger or knowledge state changed after this commit',
+      );
+    }
+    final messages = await _reconciliationRunRepo.reconstructSelectedMessages(
+      head,
+    );
+    if (messages == null || messages.isEmpty) {
+      return const _ReplacementBasisFailure(
+        'The committed message range no longer matches the transcript',
+      );
+    }
+    final plan = LedgerReconciliationPlan(
+      messages: messages,
+      endMessage: messages.last,
+      rangeHash: computeLedgerReconciliationRangeHash(messages),
+    );
+    final checkpoint = await _reconciliationCheckpointRepo.get(sessionId);
+    if (!_checkpointMatchesPlan(checkpoint, plan)) {
+      return const _ReplacementBasisFailure(
+        'Reconciliation checkpoint does not match the latest commit',
+      );
+    }
+    if (await _replacementRepo.hasAppliedDependency(
+      sessionId: sessionId,
+      reconciliationRunId: head.id,
+    )) {
+      return const _ReplacementBasisFailure(
+        'An applied Card Rewriter proposal depends on this reconciliation',
+      );
+    }
+    final currentCanon = await _loadCanonContextReadOnly(sessionId);
+    final decoded = ReconciliationStateCodec.decode(
+      sessionId: sessionId,
+      ledgerJson: validated.before.ledgerJson,
+      knowledgeJson: validated.before.knowledgeJson,
+    );
+    final beforeContext = await _canonContextLoader
+        .loadReadOnlyFromReconciliationState(
+          sessionId: sessionId,
+          sourceCharacter: currentCanon.source,
+          ledgerTrackers: decoded.trackers,
+          knowledgeFacts: decoded.knowledgeFacts,
+        );
+    if (beforeContext.stamp.identity != head.effectiveCanonStamp ||
+        beforeContext.effectiveRevision.number != head.effectiveCanonRevision ||
+        beforeContext.effectiveRevision.hash != head.effectiveCanonHash) {
+      return const _ReplacementBasisFailure(
+        'The saved before-state no longer matches the commit canon',
+      );
+    }
+    final endpointSnapshot = await _snapshotRepo.getByAnchor(
+      sessionId: sessionId,
+      messageId: plan.endMessage.id,
+      swipeId: plan.endMessage.swipeId,
+      agentSwipeId: plan.endMessage.agentSwipeId,
+    );
+    if (endpointSnapshot == null || !endpointSnapshot.committed) {
+      return const _ReplacementBasisFailure(
+        'The reconciliation endpoint snapshot is not committed',
+      );
+    }
+    return _ReplacementBasisReady(
+      head: head,
+      effect: validated,
+      plan: plan,
+      beforeCanon: _LedgerCanonContext(currentCanon.source, beforeContext),
+      currentCanon: currentCanon,
+    );
+  }
+
+  Future<bool> _isReconciliationBasisCurrent({
+    required String sessionId,
+    required _LedgerCanonContext canon,
+    required _ReplacementBasisReady? replacement,
+  }) async {
+    if (replacement == null) return _isCanonStillCurrent(sessionId, canon);
+    return _replacementBasisStillCurrent(replacement);
+  }
+
+  Future<bool> _replacementBasisStillCurrent(
+    _ReplacementBasisReady basis,
+  ) async {
+    final head = await _reconciliationRunRepo.getHead(basis.head.sessionId);
+    final snapshot = await _snapshotRepo.getByAnchor(
+      sessionId: basis.head.sessionId,
+      messageId: basis.plan.endMessage.id,
+      swipeId: basis.plan.endMessage.swipeId,
+      agentSwipeId: basis.plan.endMessage.agentSwipeId,
+    );
+    return head?.id == basis.head.id &&
+        head?.chainHash == basis.head.chainHash &&
+        snapshot?.committed == true &&
+        await _reconciliationRunRepo.currentStateMatches(
+          basis.head.sessionId,
+          basis.effect.after,
+        ) &&
+        await _isCanonStillCurrent(basis.head.sessionId, basis.currentCanon);
+  }
+
+  Future<_LedgerCanonContext> _loadCanonContextReadOnly(
+    String sessionId,
+  ) async {
+    final session = await _chatRepo.getById(sessionId);
+    if (session == null) {
+      throw StateError('Ledger session not found: $sessionId');
+    }
+    final source = await _characterRepo.getById(session.characterId);
+    if (source == null) {
+      throw StateError(
+        'Ledger source character not found: ${session.characterId}',
+      );
+    }
+    final context = await _canonContextLoader.loadReadOnly(
+      sessionId: sessionId,
+      sourceCharacter: source,
+    );
+    return _LedgerCanonContext(source, context);
+  }
+
+  Future<void> _throwIfReplacementStale(
+    _ReplacementBasisReady basis, {
+    required CancelToken token,
+    required FutureOr<bool> Function()? isStillCurrent,
+  }) async {
+    if (token.isCancelled ||
+        await _isStillCurrent(isStillCurrent) == false ||
+        !await _replacementBasisStillCurrent(basis)) {
+      throw const _LedgerCommitStale();
+    }
+    final messages = await _reconciliationRunRepo.reconstructSelectedMessages(
+      basis.head,
+    );
+    final checkpoint = await _reconciliationCheckpointRepo.get(
+      basis.head.sessionId,
+    );
+    if (messages == null || !_checkpointMatchesPlan(checkpoint, basis.plan)) {
+      throw const _LedgerCommitStale();
+    }
+    final validated = await _reconciliationRunRepo.validateEffect(basis.head);
+    if (validated is! ReconciliationEffectValid ||
+        validated.before.hash != basis.effect.before.hash ||
+        validated.after.hash != basis.effect.after.hash ||
+        await _replacementRepo.hasAppliedDependency(
+          sessionId: basis.head.sessionId,
+          reconciliationRunId: basis.head.id,
+        )) {
+      throw const _LedgerCommitStale();
+    }
+  }
+
+  bool _checkpointMatchesPlan(
+    LedgerReconciliationCheckpoint? checkpoint,
+    LedgerReconciliationPlan plan,
+  ) {
+    if (checkpoint == null ||
+        checkpoint.startMessageId != plan.startMessageId ||
+        checkpoint.endMessageId != plan.endMessage.id ||
+        checkpoint.endSwipeId != plan.endMessage.swipeId ||
+        checkpoint.endAgentSwipeId != plan.endMessage.agentSwipeId ||
+        checkpoint.rangeHash != plan.rangeHash ||
+        checkpoint.messageIds.length != plan.messageIds.length) {
+      return false;
+    }
+    for (var i = 0; i < checkpoint.messageIds.length; i++) {
+      if (checkpoint.messageIds[i] != plan.messageIds[i]) return false;
+    }
+    return true;
+  }
+
   Future<bool> _isCanonStillCurrent(
     String sessionId,
     _LedgerCanonContext canon,
@@ -1845,6 +2353,27 @@ UNTRUSTED_INPUT_BASE64_END''';
     KnowledgeCleanupOpType.renameEntity =>
       'cleanup:rename:${op.fromKey}:${op.toKey}:${op.canonicalName}',
   };
+
+  static Future<void> _recordLedgerParserVerdict(
+    AuxCallOutcome outcome,
+    LedgerParseResult parsed,
+  ) {
+    final context = outcome.selectedCaptureContext;
+    if (context == null) return Future<void>.value();
+    return LlmCallEventCapture.record(
+      LlmCallEvent.parserVerdict(
+        context: context,
+        parserName: 'StudioLedgerExportParser',
+        accepted: parsed.export != null && !parsed.wasRejected,
+        code: parsed.failure.name,
+        detail: parsed.rejectionReason,
+        payload: {
+          'rejectedOps': parsed.rejectedOps,
+          'hasExport': parsed.hasExport,
+        },
+      ),
+    );
+  }
 }
 
 /// Mutable notes gathered while a Ledger run executes.
@@ -1913,6 +2442,32 @@ class _LedgerCanonContext {
   const _LedgerCanonContext(this.source, this.context);
   final Character source;
   final EffectiveCanonContext context;
+}
+
+sealed class _ReplacementBasis {
+  const _ReplacementBasis();
+}
+
+final class _ReplacementBasisReady extends _ReplacementBasis {
+  const _ReplacementBasisReady({
+    required this.head,
+    required this.effect,
+    required this.plan,
+    required this.beforeCanon,
+    required this.currentCanon,
+  });
+
+  final LedgerReconciliationSuccessfulRunRow head;
+  final ReconciliationEffectValid effect;
+  final LedgerReconciliationPlan plan;
+  final _LedgerCanonContext beforeCanon;
+  final _LedgerCanonContext currentCanon;
+}
+
+final class _ReplacementBasisFailure extends _ReplacementBasis {
+  const _ReplacementBasisFailure(this.reason);
+
+  final String reason;
 }
 
 class _LedgerReconciliationAborted implements Exception {

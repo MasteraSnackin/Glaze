@@ -1,8 +1,8 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/models/tracker.dart';
-import '../../../core/models/tracker_snapshot.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/glaze_spinner.dart';
 import '../services/agentic_snapshots_service.dart';
@@ -17,7 +17,7 @@ class AgenticSnapshotsTab extends ConsumerStatefulWidget {
 }
 
 class _AgenticSnapshotsTabState extends ConsumerState<AgenticSnapshotsTab> {
-  List<TrackerSnapshot>? _snapshots;
+  List<AgenticSnapshotView>? _snapshots;
   bool _loaded = false;
   bool _didLoad = false;
 
@@ -58,7 +58,7 @@ class _AgenticSnapshotsTabState extends ConsumerState<AgenticSnapshotsTab> {
     if (!_loaded) {
       return const Center(child: GlazeSpinner());
     }
-    final snapshots = _snapshots ?? const <TrackerSnapshot>[];
+    final snapshots = _snapshots ?? const <AgenticSnapshotView>[];
     return Column(
       children: [
         if (snapshots.isNotEmpty)
@@ -67,7 +67,9 @@ class _AgenticSnapshotsTabState extends ConsumerState<AgenticSnapshotsTab> {
             child: Row(
               children: [
                 Text(
-                  '${snapshots.length} snapshot${snapshots.length == 1 ? '' : 's'}',
+                  'agent_ops_snapshot_count'.tr(
+                    namedArgs: {'count': '${snapshots.length}'},
+                  ),
                   style: TextStyle(
                     color: context.cs.onSurfaceVariant,
                     fontSize: 12,
@@ -77,7 +79,7 @@ class _AgenticSnapshotsTabState extends ConsumerState<AgenticSnapshotsTab> {
                 IconButton(
                   onPressed: _reload,
                   icon: const Icon(Icons.refresh, size: 18),
-                  tooltip: 'Reload',
+                  tooltip: 'agent_ops_reload'.tr(),
                   visualDensity: VisualDensity.compact,
                 ),
               ],
@@ -89,11 +91,7 @@ class _AgenticSnapshotsTabState extends ConsumerState<AgenticSnapshotsTab> {
                   child: Padding(
                     padding: const EdgeInsets.all(24),
                     child: Text(
-                      'No snapshots recorded yet for this session.\n\n'
-                      'Each ledger run writes a per-message snapshot of the '
-                      'Studio Ledger state. Committed snapshots are the '
-                      'accepted base for the next generation; tentative ones '
-                      'are pending the next user turn.',
+                      'agent_ops_snapshots_empty'.tr(),
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         color: context.cs.onSurfaceVariant,
@@ -110,11 +108,8 @@ class _AgenticSnapshotsTabState extends ConsumerState<AgenticSnapshotsTab> {
                   itemCount: snapshots.length,
                   separatorBuilder: (_, _) =>
                       const Divider(height: 1, indent: 12, endIndent: 12),
-                  itemBuilder: (context, i) => _SnapshotTile(
-                    snapshot: snapshots[i],
-                    sessionId: _sessionIdOf(context) ?? '',
-                    onChanged: _reload,
-                  ),
+                  itemBuilder: (context, i) =>
+                      _SnapshotTile(view: snapshots[i]),
                 ),
         ),
       ],
@@ -123,76 +118,16 @@ class _AgenticSnapshotsTabState extends ConsumerState<AgenticSnapshotsTab> {
 }
 
 class _SnapshotTile extends ConsumerWidget {
-  final TrackerSnapshot snapshot;
-  final String sessionId;
-  final VoidCallback onChanged;
+  final AgenticSnapshotView view;
 
-  const _SnapshotTile({
-    required this.snapshot,
-    required this.sessionId,
-    required this.onChanged,
-  });
-
-  Future<void> _rollback(BuildContext context, WidgetRef ref) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Rollback to here?'),
-        content: Text(
-          'This deletes snapshots for message "${snapshot.messageId}" and '
-          'restores the live ledger rows from the previous committed '
-          'snapshot. The read path falls back to that snapshot as the '
-          'accepted base for the next generation.\n\n'
-          'The action cannot be undone.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton.tonal(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Rollback'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
-    final result = await ref
-        .read(agenticSnapshotsServiceProvider)
-        .rollback(sessionId: sessionId, messageId: snapshot.messageId);
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            result.fallbackMessageId != null
-                ? 'Rolled back to ${result.fallbackMessageId}.'
-                : 'Deleted snapshot for ${result.deletedMessageId}. No earlier committed snapshot remains.',
-          ),
-          duration: const Duration(seconds: 3),
-        ),
-      );
-    }
-    onChanged();
-  }
-
-  Future<void> _commit(WidgetRef ref) async {
-    await ref
-        .read(agenticSnapshotsServiceProvider)
-        .commitSnapshot(sessionId: sessionId, snapshot: snapshot);
-    onChanged();
-  }
+  const _SnapshotTile({required this.view});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final cs = context.cs;
     final tt = Theme.of(context).textTheme;
+    final snapshot = view.snapshot;
     final trackers = snapshot.trackers;
-    final menuItems = <PopupMenuEntry<String>>[
-      PopupMenuItem(value: 'rollback', child: const Text('Rollback to here')),
-      if (!snapshot.committed)
-        PopupMenuItem(value: 'commit', child: const Text('Commit')),
-    ];
     return ExpansionTile(
       dense: true,
       tilePadding: const EdgeInsets.symmetric(horizontal: 12),
@@ -205,14 +140,27 @@ class _SnapshotTile extends ConsumerWidget {
         children: [
           Flexible(
             child: Text(
-              snapshot.messageId,
+              view.endMessageNumber == null
+                  ? snapshot.messageId
+                  : view.startMessageNumber == view.endMessageNumber
+                  ? 'agent_ops_snapshot_message'.tr(
+                      namedArgs: {'number': '${view.endMessageNumber}'},
+                    )
+                  : 'agent_ops_snapshot_range'.tr(
+                      namedArgs: {
+                        'start': '${view.startMessageNumber}',
+                        'end': '${view.endMessageNumber}',
+                      },
+                    ),
               style: tt.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
               overflow: TextOverflow.ellipsis,
             ),
           ),
           const SizedBox(width: 8),
           Text(
-            snapshot.committed ? 'committed' : 'tentative',
+            snapshot.committed
+                ? 'agent_ops_snapshot_committed'.tr()
+                : 'agent_ops_snapshot_tentative'.tr(),
             style: tt.labelSmall?.copyWith(
               color: snapshot.committed ? cs.primary : cs.onSurfaceVariant,
             ),
@@ -220,30 +168,24 @@ class _SnapshotTile extends ConsumerWidget {
         ],
       ),
       subtitle: Text(
-        'swipe ${snapshot.swipeId} · agent ${snapshot.agentSwipeId} · '
-         '${trackers.length} ledger values · '
-        '${DateTime.fromMillisecondsSinceEpoch(snapshot.createdAt * 1000).toIso8601String()}',
+        'agent_ops_snapshot_summary'.tr(
+          namedArgs: {
+            'swipeId': '${snapshot.swipeId}',
+            'agentSwipeId': '${snapshot.agentSwipeId}',
+            'count': '${trackers.length}',
+            'createdAt': DateTime.fromMillisecondsSinceEpoch(
+              snapshot.createdAt * 1000,
+            ).toIso8601String(),
+          },
+        ),
         style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant, fontSize: 11),
-      ),
-      trailing: PopupMenuButton<String>(
-        icon: const Icon(Icons.more_vert, size: 18),
-        padding: EdgeInsets.zero,
-        itemBuilder: (_) => menuItems,
-        onSelected: (action) {
-          switch (action) {
-            case 'rollback':
-              _rollback(context, ref);
-            case 'commit':
-              _commit(ref);
-          }
-        },
       ),
       children: [
         if (trackers.isEmpty)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             child: Text(
-              '(no ledger values in this snapshot)',
+              'agent_ops_snapshot_no_values'.tr(),
               style: tt.bodySmall?.copyWith(
                 color: cs.onSurfaceVariant,
                 fontStyle: FontStyle.italic,
@@ -298,7 +240,7 @@ class _SnapshotTrackerRow extends StatelessWidget {
           Expanded(
             flex: 7,
             child: SelectableText(
-              value.isEmpty ? '(empty)' : value,
+              value.isEmpty ? 'agent_ops_empty_value'.tr() : value,
               maxLines: 3,
               style: tt.bodySmall?.copyWith(color: cs.onSurface),
             ),
