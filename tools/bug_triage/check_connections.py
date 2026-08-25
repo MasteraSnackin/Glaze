@@ -1,7 +1,13 @@
 """Read-only smoke test. Verifies every credential/ID works BEFORE the real run.
 
 Creates nothing, comments nothing. For DeepSeek it sends one tiny 1-token
-request just to confirm the key + model are valid.
+request per model — the text one and the vision one — just to confirm the key
+and both ids are valid; an experimental model id that has been retired shows up
+here rather than halfway through a run.
+
+It also prints what the two board passes would pick up (cards nobody audited,
+cards whose verdict was blocked on a screenshot), so a dry run can be judged
+before it is started.
 
 Run:  python check_connections.py
 """
@@ -12,12 +18,16 @@ import sys
 
 import requests
 
+import audit_comment
 from config import Config
 from discord_client import DiscordClient
 from trello_client import TrelloClient
 
 OK = "OK  "
 BAD = "FAIL"
+
+# Cards whose comments the check reads before reporting the image backlog.
+_MAX_SCANNED = 60
 
 
 def _line(status: str, label: str, detail: str = "") -> None:
@@ -68,8 +78,15 @@ def check_discord(cfg: Config) -> bool:
 
         posts = dc.fetch_posts()
         empty = sum(1 for p in posts if not p.has_text)
+        pics = sum(len(p.images) for p in posts)
+        blind = sum(1 for p in posts if not p.has_text and p.has_images)
         _line(OK, "Discord forum read",
-              f"{len(posts)} open post(s), {empty} without readable text")
+              f"{len(posts)} open post(s), {empty} without readable text, "
+              f"{pics} image(s) across them")
+        if blind:
+            _line(OK, "Discord screenshot-only posts",
+                  f"{blind} post(s) are pictures with no text — the vision model "
+                  f"is what makes those auditable")
         if posts and empty == len(posts):
             _line(BAD, "Discord message content",
                   "all bodies empty → enable MESSAGE CONTENT INTENT")
@@ -93,13 +110,11 @@ def check_trello(cfg: Config) -> bool:
         b.raise_for_status()
         _line(OK, "Trello board", b.json().get("name"))
 
-        cards = TrelloClient(
-            cfg.trello_key, cfg.trello_token, cfg.trello_board_id
-        ).fetch_cards()
-        linked = sum(1 for c in cards if c.discord_thread_ids)
-        _line(OK, "Trello cards read",
-              f"{len(cards)} card(s), {linked} discord-linked "
-              f"(only discord-linked cards are ever touched)")
+        tc = TrelloClient(cfg.trello_key, cfg.trello_token, cfg.trello_board_id)
+        cards = tc.fetch_cards()
+        linked = sum(1 for c in cards if c.is_discord_linked)
+        _line(OK, "Trello cards read", f"{len(cards)} card(s), {linked} discord-linked")
+        _report_board_passes(cfg, tc, cards)
 
         lst = requests.get(
             f"https://api.trello.com/1/lists/{cfg.trello_new_bug_list_id}",
@@ -134,27 +149,66 @@ def check_trello(cfg: Config) -> bool:
         return False
 
 
-def check_deepseek(cfg: Config) -> bool:
+def _report_board_passes(cfg: Config, tc: TrelloClient, cards: list) -> None:
+    """What the two board passes would find. Read-only, and capped.
+
+    Only cards that carry comments are inspected, and only the first
+    `_MAX_SCANNED` of them — this is a smoke test, not the run itself.
+    """
+    hand_written = [
+        c for c in cards
+        if not c.is_discord_linked
+        and cfg.trello_audited_label_id not in c.label_ids
+        and c.list_id not in cfg.trello_skip_list_ids
+    ]
+    _line(OK, "Board pass (unmarked cards)",
+          f"{len(hand_written)} card(s) would be audited "
+          f"(AUDIT_BOARD_CARDS={cfg.audit_board_cards}, cap "
+          f"{cfg.max_board_audits_per_run})")
+
+    with_comments = [
+        c for c in cards
+        if c.comment_count and c.list_id not in cfg.trello_skip_list_ids
+    ][:_MAX_SCANNED]
+    blocked = 0
+    for c in with_comments:
+        if audit_comment.read_state(tc.fetch_comments(c)).wants_vision:
+            blocked += 1
+    _line(OK, "Board pass (blocked on images)",
+          f"{blocked} card(s) of {len(with_comments)} scanned were left "
+          f"unjudged because of a picture (REAUDIT_IMAGE_BLOCKED="
+          f"{cfg.reaudit_image_blocked}, cap {cfg.max_reaudits_per_run})")
+
+
+def _ping_model(cfg: Config, model: str, label: str) -> bool:
     try:
         r = requests.post(
             f"{cfg.deepseek_base_url}/chat/completions",
             headers={"Authorization": f"Bearer {cfg.deepseek_api_key}"},
             json={
-                "model": cfg.deepseek_model,
+                "model": model,
                 "messages": [{"role": "user", "content": "ping"}],
                 "max_tokens": 1,
             },
             timeout=30,
         )
         r.raise_for_status()
-        _line(OK, "DeepSeek", f"model {cfg.deepseek_model} responded")
+        _line(OK, label, f"model {model} responded")
         return True
     except requests.HTTPError as e:
-        _line(BAD, "DeepSeek", f"{e.response.status_code} {e.response.text[:160]}")
+        _line(BAD, label, f"{e.response.status_code} {e.response.text[:160]}")
         return False
     except Exception as e:  # noqa: BLE001
-        _line(BAD, "DeepSeek", str(e))
+        _line(BAD, label, str(e))
         return False
+
+
+def check_deepseek(cfg: Config) -> bool:
+    ok = _ping_model(cfg, cfg.deepseek_model, "DeepSeek (text)")
+    if not cfg.vision_enabled:
+        _line(OK, "DeepSeek (vision)", "VISION_ENABLED=false — images are ignored")
+        return ok
+    return _ping_model(cfg, cfg.deepseek_vision_model, "DeepSeek (vision)") and ok
 
 
 def main() -> int:

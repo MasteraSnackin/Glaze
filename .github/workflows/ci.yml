@@ -60,3 +60,23 @@ jobs:
 
       - name: Test
         run: flutter test --reporter expanded
+
+  bug-triage:
+    name: Bug-triage agent (unit tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: pip install -r tools/bug_triage/requirements.txt
+
+      # Pure logic: which card gets audited, what the model is shown, what the
+      # comment records. Nothing here touches Discord, Trello or DeepSeek.
+      - name: Test
+        working-directory: tools/bug_triage
+        run: python -m unittest discover -p 'test_*.py' -v

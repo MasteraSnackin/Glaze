@@ -14,16 +14,22 @@ are handled separately:
                   quiet-but-open reports too; DISCORD_SKIP_ARCHIVED=false keeps
                   them.
 
-Attachments are counted but never downloaded: the auditor cannot see images, so
-a report that leans on screenshots is flagged for a human instead of guessed at.
+Attachments are collected as `ImageRef`s, not just counted: DeepSeek's vision
+model reads screenshots, and a bug report on a Discord forum is very often a
+screenshot with three words under it. The bytes are fetched later (images.py)
+and only for the reports that actually reach an audit, so a run that has nothing
+to audit still downloads nothing.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
 import requests
+
+from images import ImageRef, dedup
 
 _API = "https://discord.com/api/v10"
 
@@ -32,6 +38,8 @@ _MSG_LIMIT = 100
 # Replies longer than this are trimmed so one rambling thread can't blow up the
 # prompt; the auditor gets the gist, a human still has the Discord link.
 _MAX_REPLY_CHARS = 1500
+# Used only when Discord gives no content_type for an upload.
+_IMAGE_EXT_RE = re.compile(r"\.(?:png|jpe?g|gif|webp)$", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -42,10 +50,18 @@ class ForumPost:
     replies: tuple[str, ...]
     attachment_count: int
     url: str
+    # Every picture in the thread, in posting order. `attachment_count` counts
+    # all attachments (a log file, a video); this holds the ones worth showing
+    # to a vision model.
+    images: tuple[ImageRef, ...] = ()
 
     @property
     def has_text(self) -> bool:
         return bool(self.body.strip() or any(r.strip() for r in self.replies))
+
+    @property
+    def has_images(self) -> bool:
+        return bool(self.images)
 
 
 class DiscordClient:
@@ -117,20 +133,53 @@ class DiscordClient:
         embeds = [e for e in msg.get("embeds", []) if e.get("type") == "image"]
         return len(msg.get("attachments", [])) + len(embeds)
 
-    def _thread_content(self, thread_id: str) -> tuple[str, tuple[str, ...], int]:
-        """Return (starter_body, replies, attachment_count) for one thread."""
+    @staticmethod
+    def _image_refs(msg: dict, origin: str) -> list[ImageRef]:
+        """Pictures in one message: real attachments first, then image embeds.
+
+        Discord CDN links are pre-signed and expire in about a day, which is
+        fine — they are fetched during this same run, never stored.
+        """
+        refs: list[ImageRef] = []
+        for a in msg.get("attachments", []) or []:
+            url = a.get("url") or a.get("proxy_url") or ""
+            ctype = (a.get("content_type") or "").lower()
+            name = a.get("filename", "")
+            if not url:
+                continue
+            # Discord fills content_type for uploads; when it does not, fall
+            # back to the file name and let images.py sniff the real bytes.
+            if ctype and not ctype.startswith("image/"):
+                continue
+            if not ctype and not _IMAGE_EXT_RE.search(name):
+                continue
+            refs.append(ImageRef(url=url, name=name, origin=origin))
+        for e in msg.get("embeds", []) or []:
+            if e.get("type") != "image":
+                continue
+            src = (e.get("image") or e.get("thumbnail") or {})
+            url = src.get("url") or src.get("proxy_url") or ""
+            if url:
+                refs.append(ImageRef(url=url, name="", origin=f"{origin} (embed)"))
+        return refs
+
+    def _thread_content(
+        self, thread_id: str
+    ) -> tuple[str, tuple[str, ...], int, tuple[ImageRef, ...]]:
+        """Return (starter_body, replies, attachment_count, images)."""
         msgs: list[dict] = self._get(
             f"/channels/{thread_id}/messages", limit=_MSG_LIMIT
         )
         msgs = list(reversed(msgs))  # API returns newest-first; read chronologically
         if not msgs:
-            return "", (), 0
+            return "", (), 0, ()
 
         attachments = sum(self._attachment_count(m) for m in msgs)
 
         # In a forum thread the starter message shares the thread's id.
         starter = next((m for m in msgs if str(m.get("id")) == thread_id), msgs[0])
         body = (starter.get("content") or "").strip()
+        images = self._image_refs(starter, "original post")
 
         replies: list[str] = []
         for m in msgs:
@@ -140,13 +189,14 @@ class DiscordClient:
             if not text and not self._attachment_count(m):
                 continue  # join/system noise
             author = (m.get("author") or {}).get("username", "unknown")
+            images.extend(self._image_refs(m, f"reply by {author}"))
             if len(text) > _MAX_REPLY_CHARS:
                 text = text[:_MAX_REPLY_CHARS] + " …[trimmed]"
             if not text:
                 text = "(image/attachment only)"
             replies.append(f"{author}: {text}")
 
-        return body, tuple(replies), attachments
+        return body, tuple(replies), attachments, tuple(dedup(images))
 
     def fetch_posts(self) -> list[ForumPost]:
         posts: list[ForumPost] = []
@@ -158,7 +208,7 @@ class DiscordClient:
                 print(f"[discord] skip closed thread {thread.get('id')} ({reason})")
                 continue
             tid = str(thread["id"])
-            body, replies, attachments = self._thread_content(tid)
+            body, replies, attachments, images = self._thread_content(tid)
             posts.append(
                 ForumPost(
                     thread_id=tid,
@@ -167,6 +217,7 @@ class DiscordClient:
                     replies=replies,
                     attachment_count=attachments,
                     url=f"https://discord.com/channels/{self._guild_id}/{tid}",
+                    images=images,
                 )
             )
         if skipped:
