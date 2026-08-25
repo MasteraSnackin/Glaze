@@ -29,11 +29,18 @@ jobs:
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
           DEEPSEEK_MODEL: ${{ vars.DEEPSEEK_MODEL }}
+          DEEPSEEK_VISION_MODEL: ${{ vars.DEEPSEEK_VISION_MODEL }}
+          VISION_ENABLED: ${{ vars.VISION_ENABLED }}
           TRELLO_KEY: ${{ secrets.TRELLO_KEY }}
           TRELLO_TOKEN: ${{ secrets.TRELLO_TOKEN }}
           TRELLO_BOARD_ID: ${{ vars.TRELLO_BOARD_ID }}
           TRELLO_NEW_BUG_LIST_ID: ${{ vars.TRELLO_NEW_BUG_LIST_ID }}
           TRELLO_AUDITED_LABEL_ID: ${{ vars.TRELLO_AUDITED_LABEL_ID }}
+          TRELLO_SKIP_LIST_IDS: ${{ vars.TRELLO_SKIP_LIST_IDS }}
+          REAUDIT_IMAGE_BLOCKED: ${{ vars.REAUDIT_IMAGE_BLOCKED }}
+          MAX_REAUDITS_PER_RUN: ${{ vars.MAX_REAUDITS_PER_RUN }}
+          AUDIT_BOARD_CARDS: ${{ vars.AUDIT_BOARD_CARDS }}
+          MAX_BOARD_AUDITS_PER_RUN: ${{ vars.MAX_BOARD_AUDITS_PER_RUN }}
           DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
           DISCORD_GUILD_ID: ${{ vars.DISCORD_GUILD_ID }}
           DISCORD_FORUM_CHANNEL_ID: ${{ vars.DISCORD_FORUM_CHANNEL_ID }}
