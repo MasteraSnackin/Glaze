@@ -17,6 +17,7 @@ import '../../settings/app_settings_provider.dart';
 import '../catalog_models.dart';
 import '../catalog_provider.dart';
 import '../services/cf_challenge_service.dart';
+import '../services/janitor_session.dart';
 import '../services/janitor_webview_proxy.dart';
 import '../services/chub_provider.dart';
 import '../services/datacat_provider.dart';
@@ -369,26 +370,32 @@ class _CfChallengeWebViewState extends State<_CfChallengeWebView> {
     // time CF re-challenges (the "creds lost after a while" bug). Capture those
     // cookies first and restore them after the wipe so only CF's cookies are
     // actually reset.
+    //
+    // The restore deliberately does NOT re-use the attributes read back with the
+    // cookie: Android's WebView returns none at all on older versions, and a
+    // mangled `Max-Age` on newer ones, so re-setting what was read downgrades a
+    // 400-day login to a session cookie (or to a few hours) and the account is
+    // gone by the next launch. Supabase's own attributes are restated instead —
+    // host-only, site-wide, secure, lax — with the expiry [janitorAuthCookieExpiry]
+    // picks.
     try {
       final origin = WebUri('https://janitorai.com');
       final before = await CookieManager.instance().getCookies(url: origin);
       debugPrint('[CF] Cookies before wipe: ${before.map((c) => c.name).join(', ')}');
-      final authCookies = before
-          .where((c) => c.name.startsWith('sb-') && c.name.contains('-auth-token'))
-          .toList();
+      final authCookies =
+          before.where((c) => isJanitorAuthCookie(c.name)).toList();
       await CookieManager.instance().deleteAllCookies();
+      final nowMs = DateTime.now().millisecondsSinceEpoch;
       for (final c in authCookies) {
         try {
           await CookieManager.instance().setCookie(
             url: origin,
             name: c.name,
             value: c.value.toString(),
-            domain: c.domain,
-            path: c.path ?? '/',
-            expiresDate: c.expiresDate,
-            isSecure: c.isSecure,
-            isHttpOnly: c.isHttpOnly,
-            sameSite: c.sameSite,
+            path: '/',
+            expiresDate: janitorAuthCookieExpiry(c.expiresDate, nowMs: nowMs),
+            isSecure: true,
+            sameSite: HTTPCookieSameSitePolicy.LAX,
           );
         } catch (e) {
           debugPrint('[CF] auth cookie restore error (${c.name}): $e');

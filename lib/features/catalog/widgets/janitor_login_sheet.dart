@@ -117,6 +117,10 @@ class _JanitorLoginSheetState extends ConsumerState<JanitorLoginSheet> {
     if (userName != null) {
       await ref.read(janitorAccountProvider.notifier).setUserName(userName);
     }
+    // Commit the session cookies the login just wrote. Android holds them in
+    // memory and writes them out on its own schedule, so an app killed shortly
+    // after signing in comes back signed out.
+    await JanitorWebViewProxy.flushCookies();
     // Drop the anonymous catalog results so the now-authenticated character set
     // is fetched — mirrors the logout path. Fires regardless of which entry
     // point (menu or catalog) opened this sheet.
