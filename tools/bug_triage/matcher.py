@@ -30,7 +30,7 @@ from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from discord_client import ForumPost
-from trello_client import Card
+from trello_client import Card, strip_markers
 
 # Below this the model is guessing; we open a fresh card instead.
 _MIN_CONFIDENCE = 0.7
@@ -59,11 +59,6 @@ unsure, answer 0. Set `confidence` to how sure you are that the card you picked
 is the same bug (0.0-1.0); when you answer 0, confidence is ignored.
 """
 
-_MARKER_LINE_RE = re.compile(
-    r"^(?:---|discord-thread:\d+|(?:Also )?[Rr]eported on Discord:.*|"
-    r"Attachments:.*)$\n?",
-    re.MULTILINE,
-)
 _WORD_RE = re.compile(r"[^\W\d_]+", re.UNICODE)
 _STOP = {
     "when", "with", "that", "this", "from", "have", "does", "doesn", "there",
@@ -125,16 +120,6 @@ def shortlist(post: ForumPost, cards: list[Card], limit: int) -> list[Card]:
     return sorted(picked, key=lambda c: c.created_at)
 
 
-def _strip_markers(desc: str) -> str:
-    """Card text without the bookkeeping footer.
-
-    The `discord-thread:` markers and back-links say nothing about what the bug
-    is, and on a card that already collected several reports they would crowd
-    out the part the model has to judge.
-    """
-    return _MARKER_LINE_RE.sub("", desc).strip()
-
-
 def _trim(text: str, limit: int) -> str:
     text = text.strip()
     return text if len(text) <= limit else text[:limit] + " …[trimmed]"
@@ -151,7 +136,7 @@ def _prompt(post: ForumPost, candidates: list[Card]) -> str:
     ]
     for i, c in enumerate(candidates, start=1):
         lines.append(f"{i}. {c.name}")
-        desc = _trim(_strip_markers(c.desc), _MAX_CARD_DESC_CHARS)
+        desc = _trim(strip_markers(c.desc), _MAX_CARD_DESC_CHARS)
         if desc:
             lines.append(f"   {desc}")
     lines.append("")
