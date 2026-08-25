@@ -11,6 +11,7 @@ import '../../character_list/character_detail_screen.dart';
 import '../../settings/app_settings_provider.dart';
 import '../catalog_models.dart';
 import '../catalog_provider.dart';
+import '../janitor_account_provider.dart';
 import '../services/chub_provider.dart';
 // `ExtractionResult` here is DataCat's own; the one this file uses is
 // JanitorExtractor's, so the DataCat name is hidden to keep it unambiguous.
@@ -309,6 +310,10 @@ class _CatalogDetailLauncherState
       // The account session went stale mid-import. Ask for a fresh login and
       // pick the import back up once it is done.
       if (e is JanitorAuthException) {
+        // The session survived neither the refresh nor the retry, so stop
+        // claiming an account is signed in while every call to it 401s.
+        await ref.read(janitorAccountProvider.notifier).setUserName(null);
+        if (!mounted) return;
         final loggedIn = await showJanitorSessionExpiredSheet(context);
         if (mounted && loggedIn) {
           await _doImport(mode: mode, skipExtraction: skipExtraction);

@@ -561,6 +561,12 @@ class _JanitorLorebookCaptureState
       // the prompt (creator locked the card to their own model) is a permanent
       // answer, not a failure worth retrying — `describeCatalogError` quotes its
       // wording and says what it means for these books.
+      // A session that failed even the proxy's refresh-and-retry is dead: drop
+      // the stored account so the sheet asks for a login instead of offering a
+      // capture that cannot run.
+      if (e is JanitorAuthException) {
+        await ref.read(janitorAccountProvider.notifier).setUserName(null);
+      }
       if (mounted) {
         setState(() {
           _extractError = describeCatalogError(

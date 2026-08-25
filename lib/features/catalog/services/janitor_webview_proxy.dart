@@ -8,6 +8,7 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import '../../chat/bridge/chat_webview_environment.dart';
 import 'cf_challenge_service.dart';
 import 'janitor_separate.dart';
+import 'janitor_session.dart';
 
 void _log(String m) => debugPrint('[CF-proxy] $m');
 
@@ -724,6 +725,9 @@ class JanitorWebViewProxy {
     if (!await isLoggedIn()) {
       throw Exception('Not logged into JanitorAI — log in first (Menu → JanitorAI).');
     }
+    // The capture spends the session across a dozen account calls and cannot
+    // retry from the middle, so it starts on a token that is known good.
+    await _refreshSession();
 
     // Force the account into proxy mode against an unreachable dummy preset (and
     // context_length 0) so the captured `/generateAlpha` prompt keeps its
@@ -1484,6 +1488,78 @@ class JanitorWebViewProxy {
     }
   }
 
+  /// The account access token as the page currently sees it, or null when the
+  /// page holds no session at all.
+  Future<String?> _readAccessToken() async {
+    final controller = _controller;
+    if (controller == null) return null;
+    try {
+      final res = await controller
+          .callAsyncJavaScript(
+            functionBody: '$_findTokenJs return __glazeFindToken();',
+          )
+          .timeout(const Duration(seconds: 10));
+      final value = res?.value;
+      return (value is String && value.isNotEmpty) ? value : null;
+    } catch (e) {
+      _log('readAccessToken error: $e');
+      return null;
+    }
+  }
+
+  /// Gives the page a chance to mint a fresh access token before one is spent.
+  ///
+  /// The stored session carries a short-lived JWT next to a long-lived refresh
+  /// token, and only JanitorAI's own Supabase client trades one for the other —
+  /// on page load. Opening the app the day after a login therefore starts with
+  /// an expired JWT that 401s every authenticated call, which the UI can only
+  /// report as "session expired, log in again" even though the session is fine.
+  /// Reloading the page and waiting for the refresh to land recovers it without
+  /// touching the user.
+  ///
+  /// [force] reloads even when the token still looks valid — the answer to a
+  /// 401 that came back anyway (a rotated or server-side revoked token).
+  /// Returns true when a usable token is in place afterwards.
+  Future<bool> _refreshSession({bool force = false}) async {
+    final token = await _readAccessToken();
+    if (token == null) return false;
+    if (!force && !isJanitorTokenExpired(token)) return true;
+    _log('access token stale (force=$force) — reloading to refresh it');
+    await _reload();
+    final deadline = DateTime.now().add(const Duration(seconds: 8));
+    while (DateTime.now().isBefore(deadline)) {
+      final fresh = await _readAccessToken();
+      if (fresh != null && !isJanitorTokenExpired(fresh)) {
+        _log('session refreshed in-page');
+        return true;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+    }
+    _log('session still stale after reload — the refresh token is gone too');
+    return false;
+  }
+
+  /// Commits the WebView cookie jar to disk.
+  ///
+  /// Android keeps cookies in memory and writes them out on its own schedule,
+  /// so a login followed by a quick app kill is simply lost. The plugin exposes
+  /// no flush of its own, but every cookie write it performs flushes the whole
+  /// store — hence the throwaway cookie on an origin that is never requested.
+  static Future<void> flushCookies() async {
+    try {
+      final url = WebUri('https://glaze-cookie-flush.invalid/');
+      await CookieManager.instance().setCookie(
+        url: url,
+        name: 'gz_flush',
+        value: '1',
+        path: '/',
+      );
+      await CookieManager.instance().deleteCookie(url: url, name: 'gz_flush');
+    } catch (e) {
+      _log('cookie flush error: $e');
+    }
+  }
+
   /// Returns true if a JanitorAI account token is detectable from [controller]'s
   /// page (shared cookie jar / `localStorage`). The login sheet uses this to
   /// confirm the session was actually persisted before it auto-closes — the
@@ -1592,7 +1668,15 @@ class JanitorWebViewProxy {
     }
     // 401 is the session, not the request: the capture creates a persona, a
     // chat and a proxy preset on the account, and all of them start failing at
-    // once when the JWT goes stale. Say which one it is.
+    // once when the JWT goes stale. A stale JWT is recoverable, though — the
+    // refresh token beside it outlives it by weeks — so reload the page for a
+    // fresh one and try again before telling the user to log in.
+    if (result.status == 401) {
+      _log('401 — refreshing the session and retrying once');
+      if (await _refreshSession(force: true)) {
+        result = await _rawFetch(url, method: method, body: body);
+      }
+    }
     if (result.status == 401) {
       throw const JanitorAuthException();
     }
@@ -1659,6 +1743,10 @@ class JanitorWebViewProxy {
     await created.future;
     await _awaitLoad();
     await _waitForClearance();
+    // A session stored before the app was last closed usually comes back with
+    // an expired access token; catch it here, once per proxy lifetime, rather
+    // than on the first authenticated call.
+    await _refreshSession();
   }
 
   Future<void> _reload() async {
