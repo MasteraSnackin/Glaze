@@ -39,11 +39,22 @@ class ImageGenConnectionService {
           llmApiKey: llmApiKey,
         );
         await _get(_geminiModelsUrl(connection.endpoint), connection.apiKey);
+      case ImageGenApiType.xai:
+        if (settings.xai.apiKey.trim().isEmpty) {
+          throw StateError('xAI API key not configured');
+        }
+        await _get(
+          '${XaiConstants.normalizeEndpoint(settings.xai.endpoint)}/v1/models',
+          settings.xai.apiKey,
+        );
       case ImageGenApiType.naistera:
         if (settings.naisteraApiKey.trim().isEmpty) {
           throw StateError('Naistera API key not configured');
         }
-        await _get(NaisteraConstants.baseUrl, null);
+        await _get(
+          '${NaisteraConstants.baseUrl}/api/models',
+          settings.naisteraApiKey,
+        );
       case ImageGenApiType.routmy:
         if (settings.routmyApiKey.trim().isEmpty) {
           throw StateError('rout.my API key not configured');
@@ -84,6 +95,22 @@ class ImageGenConnectionService {
           extraHeaders: _a1111AuthHeaders(settings.a1111.apiKey),
         );
     }
+  }
+
+  /// Image models exposed by xAI. The listing mixes chat and image models, so
+  /// only the ones whose id reads as an image model are kept.
+  Future<List<String>> fetchXaiModels(ImageGenSettings settings) async {
+    final data = await _get(
+      '${XaiConstants.normalizeEndpoint(settings.xai.endpoint)}/v1/models',
+      settings.xai.apiKey,
+    );
+    final models = data is Map ? data['data'] : null;
+    if (models is! List) return const [];
+    return models
+        .whereType<Map<Object?, Object?>>()
+        .map((model) => model['id']?.toString() ?? '')
+        .where((id) => id.isNotEmpty && id.toLowerCase().contains('image'))
+        .toList();
   }
 
   /// Image models exposed by OpenRouter (`output_modalities=image`).

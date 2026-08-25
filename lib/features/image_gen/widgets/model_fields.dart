@@ -1,3 +1,4 @@
+import 'package:easy_localization/easy_localization.dart';
 import 'package:flutter/material.dart';
 
 import '../../../shared/widgets/menu_group.dart';
@@ -17,42 +18,88 @@ typedef ShowOptionsCallback =
     });
 
 /// Model-field rows for the Naistera image-gen API.
+///
+/// The model list comes from the catalog loaded via the refresh button
+/// (`GET /api/models`) and falls back to the shipped shortlist until then —
+/// mirroring the upstream extension, which also stopped hardcoding the
+/// Naistera model names.
 List<Widget> buildNaisteraModelFields(
-  ImageGenSettings s,
-  ValueChanged<ImageGenSettings> onUpdate,
-  ShowOptionsCallback showOptions,
-) {
+  ImageGenSettings s, {
+  required bool isFetching,
+  required VoidCallback onFetchModels,
+  required ValueChanged<ImageGenSettings> onUpdate,
+  required ShowOptionsCallback showOptions,
+}) {
   // Settings written by older builds can still hold a retired model label
   // ('nano banana'), so the selector matches on the normalized id.
-  final model = NaisteraConstants.normalizeModel(s.naisteraModel);
+  final catalog = s.naisteraModels.map((m) => m.id).toList();
+  final model = catalog.contains(s.naisteraModel)
+      ? s.naisteraModel
+      : NaisteraConstants.normalizeModel(s.naisteraModel);
+  final items = catalog.isEmpty
+      ? NaisteraConstants.models.map((e) => e.$1).toList()
+      : catalog;
+
   return [
-    MenuSelectorItem(
-      label: 'Model',
-      currentValue: NaisteraConstants.models
-          .firstWhere((e) => e.$1 == model, orElse: () => (model, model))
-          .$2,
-      onTap: () => showOptions<String>(
-        title: 'Model',
-        items: NaisteraConstants.models.map((e) => e.$1).toList(),
-        labelBuilder: (v) =>
-            NaisteraConstants.models.firstWhere((e) => e.$1 == v).$2,
-        isSelected: (v) => model == v,
-        onSelected: (v) => onUpdate(s.copyWith(naisteraModel: v)),
-      ),
+    // MenuSelectorItem has no trailing slot, so the refresh button sits
+    // beside it in a row of its own.
+    Row(
+      children: [
+        Expanded(
+          child: MenuSelectorItem(
+            label: 'imggen_model'.tr(),
+            currentValue: s.naisteraModelLabel(model),
+            onTap: () => showOptions<String>(
+              title: 'imggen_model'.tr(),
+              items: items,
+              labelBuilder: s.naisteraModelLabel,
+              isSelected: (v) => model == v,
+              onSelected: (v) => onUpdate(s.copyWith(naisteraModel: v)),
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.only(right: 16),
+          child: rows.ImageGenFetchButton(
+            isFetching: isFetching,
+            onPressed: onFetchModels,
+          ),
+        ),
+      ],
     ),
     MenuSelectorItem(
-      label: 'Aspect Ratio',
+      label: 'imggen_aspect_ratio'.tr(),
       currentValue: s.naisteraAspectRatio,
       onTap: () => showOptions<String>(
-        title: 'Aspect Ratio',
+        title: 'imggen_aspect_ratio'.tr(),
         items: NaisteraConstants.aspectRatios,
         labelBuilder: (v) => v,
         isSelected: (v) => s.naisteraAspectRatio == v,
         onSelected: (v) => onUpdate(s.copyWith(naisteraAspectRatio: v)),
       ),
     ),
+    MenuSelectorItem(
+      label: 'imggen_char_descriptions'.tr(),
+      description: 'imggen_char_descriptions_desc'.tr(),
+      currentValue: _descriptionsModeLabel(s.naisteraCharacterDescriptionsMode),
+      onTap: () => showOptions<CharacterDescriptionsMode>(
+        title: 'imggen_char_descriptions'.tr(),
+        items: CharacterDescriptionsMode.values,
+        labelBuilder: _descriptionsModeLabel,
+        isSelected: (v) => s.naisteraCharacterDescriptionsMode == v,
+        onSelected: (v) =>
+            onUpdate(s.copyWith(naisteraCharacterDescriptionsMode: v)),
+      ),
+    ),
   ];
 }
+
+String _descriptionsModeLabel(CharacterDescriptionsMode mode) => switch (mode) {
+  CharacterDescriptionsMode.none => 'imggen_char_descriptions_none'.tr(),
+  CharacterDescriptionsMode.asIs => 'imggen_char_descriptions_as_is'.tr(),
+  CharacterDescriptionsMode.characterPrompt =>
+    'imggen_char_descriptions_prompt'.tr(),
+};
 
 /// Model-field rows for the rout.my image-gen API. The Russian variant
 /// shares the same shape and only differs in the settings field it

@@ -44,14 +44,13 @@ void main() {
         {'data_url': 'data:image/png;base64,AQI=', 'content_type': 'image/png'},
       ]);
 
-      final bytes = await NaisteraImageProvider(
-        baseUrl: server.baseUrl,
-      ).generate(
-        apiKey: 'key',
-        model: 'grok',
-        prompt: 'a cat',
-        aspectRatio: '16:9',
-      );
+      final bytes = await NaisteraImageProvider(baseUrl: server.baseUrl)
+          .generate(
+            apiKey: 'key',
+            model: 'grok',
+            prompt: 'a cat',
+            aspectRatio: '16:9',
+          );
 
       expect(bytes, [1, 2]);
       expect(server.requests.single.method, 'POST');
@@ -97,26 +96,30 @@ void main() {
       ]);
     });
 
-    test('drops references for models that do not accept them', () async {
-      final server = await startServer([
-        {'data_url': 'data:image/png;base64,AQI='},
-      ]);
+    test(
+      'drops references when the caller says the model takes none',
+      () async {
+        final server = await startServer([
+          {'data_url': 'data:image/png;base64,AQI='},
+        ]);
 
-      await NaisteraImageProvider(baseUrl: server.baseUrl).generate(
-        apiKey: 'key',
-        model: 'novelai',
-        prompt: 'a cat',
-        aspectRatio: '1:1',
-        references: [
-          {'image': 'AQI=', 'mime': 'image/png', 'description': 'Mia'},
-        ],
-      );
+        await NaisteraImageProvider(baseUrl: server.baseUrl).generate(
+          apiKey: 'key',
+          model: 'novelai',
+          prompt: 'a cat',
+          aspectRatio: '1:1',
+          supportsReferences: false,
+          references: [
+            {'image': 'AQI=', 'mime': 'image/png', 'description': 'Mia'},
+          ],
+        );
 
-      expect(
-        server.requests.single.body!.containsKey('reference_objects'),
-        isFalse,
-      );
-    });
+        expect(
+          server.requests.single.body!.containsKey('reference_objects'),
+          isFalse,
+        );
+      },
+    );
 
     test('normalizes a retired model label', () async {
       final server = await startServer([
@@ -140,15 +143,16 @@ void main() {
         {'status': 'completed', 'data_url': 'data:image/png;base64,AQI='},
       ]);
 
-      final bytes = await NaisteraImageProvider(
-        baseUrl: server.baseUrl,
-        pollInterval: const Duration(milliseconds: 10),
-      ).generate(
-        apiKey: 'key',
-        model: 'grok',
-        prompt: 'a cat',
-        aspectRatio: '1:1',
-      );
+      final bytes =
+          await NaisteraImageProvider(
+            baseUrl: server.baseUrl,
+            pollInterval: const Duration(milliseconds: 10),
+          ).generate(
+            apiKey: 'key',
+            model: 'grok',
+            prompt: 'a cat',
+            aspectRatio: '1:1',
+          );
 
       expect(bytes, [1, 2]);
       expect(server.requests.map((r) => r.method).toList(), [

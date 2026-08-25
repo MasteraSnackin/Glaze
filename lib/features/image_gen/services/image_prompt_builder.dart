@@ -35,6 +35,19 @@ String injectStyleBlock(String prompt, String styleValue) {
   return '$styleBlock\n\n$normalizedPrompt'.trim();
 }
 
+/// Puts the style in front of the prompt as plain text, with no `[STYLE: ...]`
+/// wrapper, and drops any style block the model wrote itself.
+///
+/// NovelAI reads the whole prompt as tags, so the wrapper would reach the
+/// sampler as literal tokens (`[STYLE:`, `]`) instead of steering the image.
+String injectPlainStyle(String prompt, String styleValue) {
+  final normalizedPrompt = prompt.replaceAll(_styleBlockRegex, '').trim();
+  final normalizedStyle = styleValue.trim();
+  if (normalizedStyle.isEmpty) return normalizedPrompt;
+  if (normalizedPrompt.isEmpty) return normalizedStyle;
+  return '$normalizedStyle\n\n$normalizedPrompt';
+}
+
 /// The style library wins over the style the model wrote into the tag; with
 /// "no style" selected ([ImageGenSettings.activeStyleId] empty) the tag's own
 /// style is used.
@@ -77,6 +90,50 @@ String buildAvatarDescriptionsBlock(List<Map<String, String>> references) {
   return 'Character reference descriptions:\n${lines.join('\n')}';
 }
 
+/// Appearance descriptions of {{char}} / {{user}} as a prompt block.
+///
+/// Ported from https://github.com/0xl0cal/sillyimages
+/// (`buildCharacterDescriptionPromptBlock`). In [CharacterDescriptionsMode.asIs]
+/// only characters whose avatar is *not* among [references] are described —
+/// the ones that are sent already carry their description next to the image.
+/// [CharacterDescriptionsMode.characterPrompt] describes both regardless and
+/// emits NovelAI character-prompt lines, persona first.
+String buildCharacterDescriptionPromptBlock({
+  required CharacterDescriptionsMode mode,
+  required List<Map<String, String>> references,
+  String charDescription = '',
+  String userDescription = '',
+}) {
+  if (mode == CharacterDescriptionsMode.none) return '';
+
+  final sentSources = references
+      .map((ref) => ref['source'] ?? '')
+      .where((source) => source.isNotEmpty)
+      .toSet();
+  final asCharacterPrompt = mode == CharacterDescriptionsMode.characterPrompt;
+
+  final char = asCharacterPrompt || !sentSources.contains('char')
+      ? charDescription.trim()
+      : '';
+  final user = asCharacterPrompt || !sentSources.contains('user')
+      ? userDescription.trim()
+      : '';
+
+  if (asCharacterPrompt) {
+    final lines = [
+      user,
+      char,
+    ].where((line) => line.isNotEmpty).map((line) => '\\| $line');
+    return lines.join('\n');
+  }
+
+  final lines = <String>[
+    if (char.isNotEmpty) '- {{char}}: $char',
+    if (user.isNotEmpty) '- {{user}}: $user',
+  ];
+  return lines.isEmpty ? '' : 'Character descriptions:\n${lines.join('\n')}';
+}
+
 String appendPromptBlock(String prompt, String block) {
   final text = block.trim();
   if (text.isEmpty) return prompt;
@@ -84,16 +141,19 @@ String appendPromptBlock(String prompt, String block) {
 }
 
 /// Assembles style block + prompt + reference descriptions.
+/// [wrapStyle] false keeps the style as a plain prefix — see
+/// [injectPlainStyle].
 String buildFinalGenerationPrompt({
   required String prompt,
   required String? tagStyle,
   required ImageGenSettings settings,
   List<Map<String, String>> references = const [],
+  bool wrapStyle = true,
 }) {
-  var fullPrompt = injectStyleBlock(
-    prompt,
-    resolveEffectiveStyle(tagStyle, settings),
-  );
+  final style = resolveEffectiveStyle(tagStyle, settings);
+  var fullPrompt = wrapStyle
+      ? injectStyleBlock(prompt, style)
+      : injectPlainStyle(prompt, style);
   if (settings.sendRefDescriptions) {
     fullPrompt = appendPromptBlock(
       fullPrompt,

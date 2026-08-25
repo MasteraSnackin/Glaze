@@ -89,10 +89,15 @@ class NaisteraConstants {
 
   /// Maps stored and retired model labels onto the ids the API accepts today,
   /// so a settings blob written by an older build keeps generating.
+  ///
+  /// An id that is not a known alias passes through untouched: since the
+  /// catalog is loaded from `GET /api/models`, anything the API adds later
+  /// must survive this, and rewriting it to `grok` would silently generate
+  /// with the wrong model.
   static String normalizeModel(String? model) {
-    final raw = (model ?? '').trim().toLowerCase();
-    if (raw.isEmpty) return 'grok';
-    switch (raw) {
+    final trimmed = (model ?? '').trim();
+    if (trimmed.isEmpty) return 'grok';
+    switch (trimmed.toLowerCase()) {
       case 'grok pro':
       case 'grok-pro':
       case 'grok-imagine-pro':
@@ -109,11 +114,89 @@ class NaisteraConstants {
       case 'novelai':
         return 'novelai';
     }
-    return models.any((m) => m.$1 == raw) ? raw : 'grok';
+    // Case is preserved — a catalog id may well be case-sensitive.
+    return trimmed;
   }
 
   static bool supportsReferences(String? model) =>
       !noRefModels.contains(normalizeModel(model));
+
+  /// NovelAI models take the style as a plain prefix — the `[STYLE: ...]`
+  /// wrapper reaches the sampler as literal tokens and poisons the image.
+  static bool isNovelAIModel(String? model) => RegExp(
+    r'^novelai(-|$)',
+    caseSensitive: false,
+  ).hasMatch((model ?? '').trim());
+}
+
+/// xAI Imagine (`https://api.x.ai`).
+///
+/// Ported from https://github.com/0xl0cal/sillyimages (`XAIProvider`):
+/// `/v1/images/generations` without references, `/v1/images/edits` with them,
+/// and a `quality` parameter only `grok-imagine-image-2.0` understands.
+class XaiConstants {
+  static const String defaultEndpoint = 'https://api.x.ai';
+
+  /// Reference images accepted by one `/v1/images/edits` request.
+  static const int maxReferences = 3;
+
+  static const models = [
+    ('grok-imagine-image-2.0', 'Grok Imagine Image 2.0'),
+    ('grok-imagine-image', 'Grok Imagine Image'),
+    ('grok-2-image', 'Grok 2 Image'),
+  ];
+
+  static const aspectRatios = [
+    'auto',
+    '1:1',
+    '16:9',
+    '9:16',
+    '4:3',
+    '3:4',
+    '3:2',
+    '2:3',
+    '2:1',
+    '1:2',
+    '19.5:9',
+    '9:19.5',
+    '20:9',
+    '9:20',
+  ];
+
+  static const resolutions = ['1k', '2k'];
+  static const qualities = ['low', 'medium'];
+
+  /// Only the Imagine image models round-trip reference images; `grok-2-image`
+  /// is generation-only and 400s on `/v1/images/edits`.
+  ///
+  /// The upstream extension checks this too, but only to show or hide the
+  /// reference rows — its collector still attaches references for every xAI
+  /// model. Here the same predicate also drives [providerMaxReferences], so a
+  /// generation-only model never reaches `/edits`.
+  static bool supportsReferences(String? model) =>
+      (model ?? '').toLowerCase().contains('grok-imagine-image');
+
+  /// `quality` is rejected by every Imagine model except 2.0.
+  static bool supportsQuality(String? model) =>
+      (model ?? '').toLowerCase().contains('grok-imagine-image-2.0');
+
+  static String normalizeAspectRatio(String? value) {
+    final normalized = (value ?? '').trim();
+    return aspectRatios.contains(normalized) ? normalized : '1:1';
+  }
+
+  static String normalizeResolution(String? value) =>
+      (value ?? '').trim().toLowerCase() == '2k' ? '2k' : '1k';
+
+  static String normalizeQuality(String? value) =>
+      (value ?? '').trim().toLowerCase() == 'low' ? 'low' : 'medium';
+
+  /// Strips a trailing `/v1` so the client can append its own paths.
+  static String normalizeEndpoint(String? endpoint) {
+    final trimmed = (endpoint ?? '').trim().replaceFirst(RegExp(r'/+$'), '');
+    if (trimmed.isEmpty) return defaultEndpoint;
+    return trimmed.replaceFirst(RegExp(r'/v1$', caseSensitive: false), '');
+  }
 }
 
 class OpenAIConstants {
