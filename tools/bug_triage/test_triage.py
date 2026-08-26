@@ -39,6 +39,7 @@ def make_config(**over) -> Config:
         trello_board_id="b",
         trello_new_bug_list_id="new",
         trello_audited_label_id="lbl",
+        trello_audit_list_ids=("todo",),  # the list make_card() puts cards in
         trello_skip_list_ids=(),
         discord_bot_token="d",
         discord_guild_id="g",
@@ -406,6 +407,18 @@ class ImageBlockedPassTest(unittest.TestCase):
         self.assertEqual(runner.seen, [])
         self.assertEqual(trello.comment_reads, 0)  # not even a board read
 
+    def test_a_blocked_card_outside_the_audit_lists_is_left_alone(self):
+        card = make_card("c1", "Crash", labels=("lbl",), comment_count=1,
+                         attachment_count=1, list_id="ideas")
+        passes, trello, runner, cards = self._pass(
+            [card],
+            {"c1": [make_comment("⚠️ **NEED MORE INFO** — screenshots only")]},
+            {"c1": [ImageRef("http://t/x.png", "x.png", "card attachment")]},
+        )
+        passes.image_blocked(cards, {})
+        self.assertEqual(runner.seen, [])
+        self.assertEqual(trello.comments_posted, [])
+
     def test_the_cap_stops_the_pass(self):
         cards = [
             make_card(f"c{i}", "Crash", labels=("lbl",), comment_count=1,
@@ -441,6 +454,18 @@ class BoardPassTest(unittest.TestCase):
         cfg = make_config(trello_skip_list_ids=("done",))
         AuditPass(cfg, trello, runner).board(cards)
         self.assertEqual(runner.seen, [])
+
+    def test_only_cards_in_the_audit_lists_are_swept(self):
+        cards = [
+            make_card("c1", "Crash", list_id="bugs"),      # in scope
+            make_card("c2", "Folders", list_id="ideas"),   # a feature column
+            make_card("c3", "Redesign", list_id="todo"),   # another one
+        ]
+        trello, runner = FakeTrello(), FakeRunner()
+        cfg = make_config(trello_audit_list_ids=("bugs",))
+        AuditPass(cfg, trello, runner).board(cards)
+        self.assertEqual([s.key for s in runner.seen], ["c1"])
+        self.assertEqual(trello.labels, [("c1", "lbl")])
 
     def test_a_card_audited_before_the_label_existed_is_not_redone(self):
         card = make_card("c1", comment_count=1)
@@ -484,6 +509,11 @@ class BoardPassTest(unittest.TestCase):
         passes = AuditPass(make_config(), FakeTrello(), FakeRunner())
         self.assertTrue(passes.has_work([make_card("c1")]))
 
+    def test_has_work_ignores_cards_outside_the_audit_lists(self):
+        cards = [make_card("c1", list_id="ideas"), make_card("c2", list_id="done")]
+        passes = AuditPass(make_config(), FakeTrello(), FakeRunner())
+        self.assertFalse(passes.has_work(cards))
+
     def test_card_reads_are_cached_across_passes(self):
         card = make_card("c1", comment_count=1)
         trello = FakeTrello({"c1": [make_comment("human note")]})
@@ -491,6 +521,39 @@ class BoardPassTest(unittest.TestCase):
         passes.has_work([card])
         passes.board([card])
         self.assertEqual(trello.comment_reads, 1)
+
+
+class ConfigScopeTest(unittest.TestCase):
+    """`TRELLO_AUDIT_LIST_IDS` — what the board passes are allowed to touch."""
+
+    ENV = {
+        "DEEPSEEK_API_KEY": "k",
+        "TRELLO_KEY": "tk",
+        "TRELLO_TOKEN": "tt",
+        "TRELLO_BOARD_ID": "b",
+        "TRELLO_NEW_BUG_LIST_ID": "newbugs",
+        "TRELLO_AUDITED_LABEL_ID": "lbl",
+        "DISCORD_BOT_TOKEN": "d",
+        "DISCORD_GUILD_ID": "g",
+        "DISCORD_FORUM_CHANNEL_ID": "f",
+    }
+
+    def _load(self, **over):
+        with mock.patch.dict("os.environ", {**self.ENV, **over}, clear=True):
+            return Config.load()
+
+    def test_unset_means_the_new_bug_list_alone(self):
+        self.assertEqual(self._load().trello_audit_list_ids, ("newbugs",))
+
+    def test_an_empty_var_is_not_an_empty_scope(self):
+        # GitHub expands an undefined vars.X to "" — that must not silently
+        # mean "no list is in scope", which would switch both passes off.
+        cfg = self._load(TRELLO_AUDIT_LIST_IDS="")
+        self.assertEqual(cfg.trello_audit_list_ids, ("newbugs",))
+
+    def test_the_var_replaces_the_default(self):
+        cfg = self._load(TRELLO_AUDIT_LIST_IDS="bugs, regressions ")
+        self.assertEqual(cfg.trello_audit_list_ids, ("bugs", "regressions"))
 
 
 class MirrorBodyTest(unittest.TestCase):

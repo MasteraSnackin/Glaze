@@ -52,8 +52,14 @@ class Config:
     trello_board_id: str
     trello_new_bug_list_id: str  # where freshly-discovered bugs land
     trello_audited_label_id: str  # label meaning "AI already audited this"
-    # Lists the board sweep never touches — Done / Released / Ideas columns a
-    # human keeps for themselves.
+    # The ONLY lists the board passes may audit. Everything outside them is
+    # index-only: such a card still links its Discord thread and still counts as
+    # a duplicate candidate, but is never audited, commented on or labelled —
+    # which is what keeps the sweep off the Ideas / Feature columns. Empty means
+    # no list is in scope; `load()` never leaves it empty (see below).
+    trello_audit_list_ids: tuple[str, ...]
+    # Subtractive filter applied on top: a list named here is dropped even if it
+    # is in the allowlist. Only useful when the allowlist spans several columns.
     trello_skip_list_ids: tuple[str, ...]
 
     # --- Discord ---
@@ -101,6 +107,9 @@ class Config:
 
     @staticmethod
     def load() -> "Config":
+        # The audit scope defaults to the new-bug list alone: an unconfigured
+        # board is swept where the bugs are, never across the whole board.
+        new_bug_list = _require("TRELLO_NEW_BUG_LIST_ID")
         return Config(
             deepseek_api_key=_require("DEEPSEEK_API_KEY"),
             deepseek_base_url=_optional("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
@@ -111,8 +120,9 @@ class Config:
             trello_key=_require("TRELLO_KEY"),
             trello_token=_require("TRELLO_TOKEN"),
             trello_board_id=_require("TRELLO_BOARD_ID"),
-            trello_new_bug_list_id=_require("TRELLO_NEW_BUG_LIST_ID"),
+            trello_new_bug_list_id=new_bug_list,
             trello_audited_label_id=_require("TRELLO_AUDITED_LABEL_ID"),
+            trello_audit_list_ids=_csv("TRELLO_AUDIT_LIST_IDS") or (new_bug_list,),
             trello_skip_list_ids=_csv("TRELLO_SKIP_LIST_IDS"),
             discord_bot_token=_require("DISCORD_BOT_TOKEN"),
             discord_guild_id=_require("DISCORD_GUILD_ID"),

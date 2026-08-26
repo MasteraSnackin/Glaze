@@ -22,6 +22,10 @@ Flow (only the audit passes touch the LLM):
   7. Pass 3 (board): cards with no Discord marker and no audited label, i.e.
      hand-written ones. Title, description, comments and attached images.
 
+Both board passes only ever touch cards sitting in `TRELLO_AUDIT_LIST_IDS`
+(the new-bug list unless it is set); the rest of the board is read as an index
+and left alone.
+
 Nothing here ever modifies source code or opens a PR.
 """
 
@@ -87,6 +91,9 @@ def main() -> int:
     images_seen = sum(len(p.images) for p in posts)
     print(f"[triage] discord posts={len(posts)} (images={images_seen}) "
           f"trello cards={len(cards)} already-linked-threads={len(by_thread)}")
+    in_scope = sum(1 for c in cards if c.list_id in cfg.trello_audit_list_ids)
+    print(f"[triage] board passes scoped to list(s) "
+          f"{', '.join(cfg.trello_audit_list_ids)} — {in_scope} card(s) in scope")
 
     # --- Step 3: mirror new Discord posts into Trello -----------------------
     mirror.mirror(cfg, trello, posts, cards, by_thread)

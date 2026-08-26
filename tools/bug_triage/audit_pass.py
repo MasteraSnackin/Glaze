@@ -14,6 +14,12 @@
    Discord and nobody audited, i.e. the ones a human typed straight onto the
    board. Title, description, comments and attached images all go in.
 
+Passes 2 and 3 read the board as a queue, so they are scoped to the lists in
+`TRELLO_AUDIT_LIST_IDS` (the new-bug list by default): a card in an Ideas or
+Feature column is never audited, commented on or labelled by them. Pass 1 is
+driven by the forum, not by the board, and audits a thread's own card wherever
+that card sits.
+
 All three share one commit path (comment + `audited` label) and one per-card
 cache, so a card whose comments were read in pass 2 costs no second request in
 pass 3. A card touched by an earlier pass is never touched again in the same
@@ -91,8 +97,15 @@ class AuditPass:
         return False
 
     def _skipped(self, card: Card) -> bool:
+        """Is this card out of the board passes' reach?
+
+        The allowlist is what scopes the sweep: a card outside
+        `TRELLO_AUDIT_LIST_IDS` is read (it may link a thread, it may be a
+        duplicate candidate) but never audited, whatever else is true of it.
+        """
         return (
             card.id in self._touched
+            or card.list_id not in self._cfg.trello_audit_list_ids
             or card.list_id in self._cfg.trello_skip_list_ids
         )
 
