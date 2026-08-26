@@ -56,7 +56,7 @@
                     "id": "context-size",
                     "name": "Context Size",
                     "alt": "Context Limit",
-                    "desc": "A local Glaze setting — it is not sent to the provider. It caps how many [[token]]s the whole prompt may use. Glaze trims the chat, dropping the oldest messages, so the assembled prompt fits within this size before it is sent. Set it to match your model's [[context|context window]]; raising it above the model's real limit does not give the model more memory."
+                    "desc": "A local Glaze setting — it is not sent to the provider. It caps how many [[token]]s the whole prompt may use. Glaze trims the chat, dropping the oldest messages, so the assembled prompt fits within this size before it is sent. Set it to match your model's [[context|context window]]; raising it above the model's real limit does not give the model more memory. When trimming chat history, Glaze takes the Context Size, subtracts [[max-tokens|Max Output Tokens]] from it (a provider requirement), and fits as many whole history messages as it can into the number that remains."
                 },
                 {
                     "id": "max-tokens",
