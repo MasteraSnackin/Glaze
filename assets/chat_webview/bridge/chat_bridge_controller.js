@@ -23,9 +23,9 @@ export class Bridge {
     this.isGeneratingImage = false;
     this.isPostGenRunning = false;
     // Scroll-hide header state. Lifted out of the _setupScrollListener closure
-    // so setGenerating() can re-show the header when a generation ends (see
-    // setGenerating): the header is frozen for the whole streaming window and
-    // must never be left stuck hidden afterwards.
+    // so the rest of the controller can reach it: _ensureHeaderReachable()
+    // un-hides the header when the list shrinks out of scroll range, and
+    // showHeader() clears it when a chat opens.
     this._headerHidden = false;
     // Last scroll offset the header tracker decided on, and the deadline until
     // which it only re-baselines instead of deciding. Both are instance fields
@@ -133,18 +133,10 @@ export class Bridge {
     const wasGenerating = this.isGenerating;
     this.isGenerating = !!value;
     this._syncGenerationTimer();
-    // updateHeader() early-returns for the whole streaming window, so the
-    // scroll-hide header is frozen at whatever state it had when generation
-    // started. If it was hidden — and especially if the chat then shrank (a
-    // cancelled generation trims its empty placeholder) so it no longer
-    // scrolls and the bounds check also early-returns — the header could never
-    // re-appear. Re-show it once when generation ends so it is never stuck
-    // hidden after a (possibly cancelled) generation. Emitting keeps JS the
-    // single source of truth for the Flutter header state.
-    if (wasGenerating && !this.isGenerating && this._headerHidden) {
-      this._headerHidden = false;
-      this._sendToFlutter('onHeaderScroll', [false]);
-    }
+    // A cancelled generation trims its empty placeholder, so the list can
+    // shrink right here — possibly below the scroll range a hidden header
+    // needs to be scrolled back into view. See _ensureHeaderReachable().
+    if (wasGenerating && !this.isGenerating) this._ensureHeaderReachable();
   }
 
   setPostGenRunning(value) {
@@ -242,6 +234,38 @@ export class Bridge {
     this._trackpadScroll.scrollBy(dx, dy, x, y);
   }
 
+  // True while the list is being scrolled by us rather than by the user. The
+  // virtual list raises the flag around its own scrolls (streaming
+  // auto-follow, scroll-to-bottom / -message, anchor restore) and the bridge
+  // raises it around the bottom-inset re-pin glide (see
+  // _reconcileBottomInset), which also drives `_repinAnimating`.
+  _isProgrammaticScroll() {
+    return !!(this._repinAnimating || this.virtualList?.isProgrammaticScrolling);
+  }
+
+  // Re-shows the header when scrolling can no longer bring it back.
+  //
+  // The tracker only un-hides on an upward scroll, so a hidden header stays
+  // recoverable only while the list has scroll range left. Losing it strands
+  // the header off screen with no gesture that could restore it — which is
+  // what a cancelled generation does when it trims its empty placeholder and
+  // the remaining chat is shorter than the viewport.
+  //
+  // Deliberately conditional: while the list still scrolls, the header belongs
+  // to the user, so this must not undo a hide they asked for by scrolling down
+  // mid-stream. Emitting keeps JS the single source of truth for the Flutter
+  // header state.
+  _ensureHeaderReachable() {
+    if (!this._headerHidden) return;
+    const container = this.virtualList?.container;
+    if (!container) return;
+    // Mirrors the `st > 50` hide threshold: with less range than that left
+    // there is no upward scroll available to bring the header back.
+    if (container.scrollHeight - container.clientHeight > 50) return;
+    this._headerHidden = false;
+    this._sendToFlutter('onHeaderScroll', [false]);
+  }
+
   // Re-shows the header and re-baselines the hide-on-scroll tracker. Flutter
   // calls this whenever a chat is opened or a session is switched.
   //
@@ -272,8 +296,8 @@ export class Bridge {
     let lastShowScrollToBottom = null;
     // Header hide-on-scroll (ported from Glaze/src/core/services/ui.js initHeaderScroll).
     // `_headerHidden` / `_headerLastTop` are instance fields (see constructor)
-    // so setGenerating() can re-show the header when a generation ends and
-    // showHeader() can re-baseline the tracker when a chat opens.
+    // so _ensureHeaderReachable() can re-show the header when the list shrinks
+    // and showHeader() can re-baseline the tracker when a chat opens.
     let ticking = false;
     const container = this.virtualList.container;
 
@@ -302,9 +326,22 @@ export class Bridge {
         this._headerLastTop = st <= 0 ? 0 : st;
         return;
       }
-      // Streaming auto-follow must not hide the header, but an explicit upward
-      // scroll should still restore an already-hidden header.
-      if (this.isGenerating) {
+      // Scrolls we caused ourselves are not user intent: the streaming
+      // auto-follow, the keyboard / input-bar re-pin glide, scroll-to-message
+      // and the anchor restore all move scrollTop on their own. Follow the
+      // offset without deciding, so none of them hides the header.
+      //
+      // This replaced a blanket freeze on the generation flag, which suspended
+      // hide-on-scroll for the whole streaming window: during a long reply the
+      // header simply stopped responding to scrolling. Only the auto-follow
+      // needs suppressing, and it already announces itself through the virtual
+      // list's own programmatic-scroll flag.
+      //
+      // An upward move still restores an already-hidden header. The auto-follow
+      // only ever pins downward, so an upward one inside this window is the
+      // user's — and it is how they detach from the follow in the first place
+      // (the flag stays set for ~80ms after the last pin, see smartScroll()).
+      if (this._isProgrammaticScroll()) {
         if (st < this._headerLastTop - 3 && this._headerHidden) {
           this._headerHidden = false;
           this._sendToFlutter('onHeaderScroll', [false]);
@@ -312,6 +349,8 @@ export class Bridge {
         this._headerLastTop = st <= 0 ? 0 : st;
         return;
       }
+      // A shrink can clamp scrollTop without leaving room to scroll back up.
+      this._ensureHeaderReachable();
       if (st < 0 || st + container.clientHeight > container.scrollHeight) {
         this._headerLastTop = st <= 0 ? 0 : st;
         return;
@@ -724,10 +763,16 @@ export class Bridge {
           this.virtualList.remove(messageId);
         }
         this._pruneOrphanSeparators();
+        // The list just got shorter; a hidden header may have lost the scroll
+        // range that lets the user bring it back. This lands ~340ms after the
+        // exit animation started, which is why setGenerating()'s own check
+        // (the placeholder is still on screen there) is not enough.
+        this._ensureHeaderReachable();
       });
     } else {
       this.virtualList.remove(messageId);
       this._pruneOrphanSeparators();
+      this._ensureHeaderReachable();
     }
   }
 

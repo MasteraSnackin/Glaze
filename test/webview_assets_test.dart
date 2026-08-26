@@ -1396,8 +1396,19 @@ void main() {
       expect(body, contains('this._syncGenerationTimer()'));
     });
 
-    test('upward scroll restores a hidden header during generation', () {
-      final marker = 'if (this.isGenerating) {';
+    test('hide-on-scroll is not frozen for the whole streaming window', () {
+      final idx = bridgeControllerJs.indexOf('const updateHeader = () => {');
+      expect(idx, isNot(-1));
+      final body = _extractBlockBody(bridgeControllerJs, idx);
+      // Gating the tracker on the generation flag suspended hide-on-scroll for
+      // as long as a reply streamed — the header stopped responding to
+      // scrolling entirely. Only our own scrolls may be suppressed.
+      expect(body, isNot(contains('this.isGenerating')));
+      expect(body, contains('this._isProgrammaticScroll()'));
+    });
+
+    test('upward scroll restores a hidden header during auto-follow', () {
+      final marker = 'if (this._isProgrammaticScroll()) {';
       final updateHeaderIdx = bridgeControllerJs.indexOf(
         'const updateHeader = () => {',
       );
@@ -1409,6 +1420,57 @@ void main() {
       expect(body, contains('this._headerHidden = false'));
       expect(body, contains("this._sendToFlutter('onHeaderScroll', [false])"));
       expect(body, isNot(contains('[true]')));
+    });
+
+    test('programmatic-scroll probe reads the virtual list flag', () {
+      final marker = '_isProgrammaticScroll() {';
+      final idx = bridgeControllerJs.indexOf(marker);
+      expect(idx, isNot(-1));
+      final body = _extractBlockBody(bridgeControllerJs, idx);
+      // Streaming auto-follow / scroll-to-bottom / anchor restore raise the
+      // virtual list's own flag; the bottom-inset re-pin glide raises
+      // `_repinAnimating`. Both are ours, neither is the user scrolling.
+      expect(body, contains('this.virtualList?.isProgrammaticScrolling'));
+      expect(body, contains('this._repinAnimating'));
+      expect(virtualScrollJs, contains('this.isProgrammaticScrolling = true'));
+    });
+
+    test('ending a generation re-shows the header only if it is stranded', () {
+      final marker = 'setGenerating(value) {';
+      final idx = bridgeControllerJs.indexOf(marker);
+      expect(idx, isNot(-1));
+      final body = _extractBlockBody(bridgeControllerJs, idx);
+      // A hide the user asked for by scrolling down mid-stream must survive the
+      // end of the generation, so the falling edge no longer force-shows.
+      expect(body, contains('this._ensureHeaderReachable()'));
+      expect(body, isNot(contains("this._sendToFlutter('onHeaderScroll'")));
+
+      final helperIdx = bridgeControllerJs.indexOf(
+        '_ensureHeaderReachable() {',
+      );
+      expect(helperIdx, isNot(-1));
+      final helper = _extractBlockBody(bridgeControllerJs, helperIdx);
+      // Only when the list no longer has the scroll range that an upward
+      // scroll would need to bring the header back.
+      expect(helper, contains('if (!this._headerHidden) return'));
+      expect(
+        helper,
+        contains('container.scrollHeight - container.clientHeight > 50'),
+      );
+      expect(helper, contains('this._headerHidden = false'));
+      expect(helper, contains("this._sendToFlutter('onHeaderScroll', [false])"));
+    });
+
+    test('a trimmed message re-checks that the header is reachable', () {
+      final idx = bridgeControllerJs.indexOf('removeMessage(messageId) {');
+      expect(idx, isNot(-1));
+      final body = _extractBlockBody(bridgeControllerJs, idx);
+      // The cancelled-generation placeholder is dropped ~340ms later, behind
+      // its exit animation — long after setGenerating() ran its own check.
+      expect(
+        '_ensureHeaderReachable()'.allMatches(body).length,
+        greaterThanOrEqualTo(2),
+      );
     });
 
     test('showHeader re-shows the header and re-baselines the tracker', () {
