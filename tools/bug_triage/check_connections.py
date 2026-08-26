@@ -149,17 +149,30 @@ def check_trello(cfg: Config) -> bool:
         return False
 
 
+def _in_scope(cfg: Config, card) -> bool:
+    """The same scoping the board passes apply, minus the per-run bookkeeping."""
+    return (
+        card.list_id in cfg.trello_audit_list_ids
+        and card.list_id not in cfg.trello_skip_list_ids
+    )
+
+
 def _report_board_passes(cfg: Config, tc: TrelloClient, cards: list) -> None:
     """What the two board passes would find. Read-only, and capped.
 
     Only cards that carry comments are inspected, and only the first
     `_MAX_SCANNED` of them — this is a smoke test, not the run itself.
     """
+    _line(OK, "Board pass scope",
+          f"lists {', '.join(cfg.trello_audit_list_ids)} — "
+          f"{sum(1 for c in cards if _in_scope(cfg, c))} card(s) in scope "
+          f"(TRELLO_AUDIT_LIST_IDS)")
+
     hand_written = [
         c for c in cards
         if not c.is_discord_linked
         and cfg.trello_audited_label_id not in c.label_ids
-        and c.list_id not in cfg.trello_skip_list_ids
+        and _in_scope(cfg, c)
     ]
     _line(OK, "Board pass (unmarked cards)",
           f"{len(hand_written)} card(s) would be audited "
@@ -167,8 +180,7 @@ def _report_board_passes(cfg: Config, tc: TrelloClient, cards: list) -> None:
           f"{cfg.max_board_audits_per_run})")
 
     with_comments = [
-        c for c in cards
-        if c.comment_count and c.list_id not in cfg.trello_skip_list_ids
+        c for c in cards if c.comment_count and _in_scope(cfg, c)
     ][:_MAX_SCANNED]
     blocked = 0
     for c in with_comments:

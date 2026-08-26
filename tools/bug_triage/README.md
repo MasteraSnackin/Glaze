@@ -48,17 +48,26 @@ from Discord at all.
    source, then posts a structured audit as a comment on the thread's card and
    applies the label. A card that collected several duplicate threads is
    audited once, on the first of them.
-6. **Pass 2 — the image backlog.** Walks the board for cards whose recorded
+6. **Pass 2 — the image backlog.** Walks the audit lists for cards whose recorded
    verdict was "could not judge this, it's a screenshot" and audits them again
    with the pictures attached. This is what drains the reports the text-only era
    could only answer with NEED MORE INFO. The pass retires itself per card: once
    a vision verdict exists, that card is never re-opened by it again, so a
    report that is genuinely missing information is asked once, not daily.
-7. **Pass 3 — the rest of the board.** Cards with no `discord-thread:` marker
-   and no `audited` label — the ones a human typed straight onto the board — are
-   audited from their title, description, comments and attached images, then
-   labelled. Columns listed in `TRELLO_SKIP_LIST_IDS` (Done, Released, Ideas…)
-   are left alone, as are cards already carrying an audit comment.
+7. **Pass 3 — the rest of the audit lists.** Cards with no `discord-thread:`
+   marker and no `audited` label — the ones a human typed straight onto the
+   board — are audited from their title, description, comments and attached
+   images, then labelled. Cards already carrying an audit comment are left
+   alone.
+
+Both board passes are **scoped to `TRELLO_AUDIT_LIST_IDS`** — the new-bug list
+unless that variable is set. A card in any other column (Ideas, Feature
+requests, Done, Released…) is read as an index entry and nothing more: it can
+link a Discord thread and it can win a duplicate lookup, but the passes never
+audit it, comment on it or label it. `TRELLO_SKIP_LIST_IDS` is the subtractive
+filter on top, only useful when the allowlist spans several columns. Pass 1 is
+driven by the forum, not by the board, so a thread's own card is audited
+wherever on the board it sits.
 
 A report with no readable text **and** no readable picture still skips the LLM
 entirely and gets a NEED MORE INFO comment naming what to ask.
@@ -147,7 +156,8 @@ name.
 | `TRELLO_BOARD_ID` | main board id | — |
 | `TRELLO_NEW_BUG_LIST_ID` | list where new bugs land | — |
 | `TRELLO_AUDITED_LABEL_ID` | label id meaning "AI audited" | — |
-| `TRELLO_SKIP_LIST_IDS` | lists the board passes never touch (comma-separated) | empty |
+| `TRELLO_AUDIT_LIST_IDS` | the only lists passes 2 and 3 audit (comma-separated) | the new-bug list |
+| `TRELLO_SKIP_LIST_IDS` | lists dropped from that scope (comma-separated) | empty |
 | `DISCORD_GUILD_ID` | your server id | — |
 | `DISCORD_FORUM_CHANNEL_ID` | the bug-report forum channel id | — |
 | `DISCORD_IGNORED_TAG_IDS` | forum tag ids meaning closed (comma-separated) | empty |
@@ -174,7 +184,8 @@ and let it drain over a few days.
 Finding IDs:
 - Trello: append `.json` to a board URL, or hit
   `https://api.trello.com/1/members/me/boards?key=…&token=…`. List ids come from
-  the same JSON (`lists[].id`), which is where `TRELLO_SKIP_LIST_IDS` comes from.
+  the same JSON (`lists[].id`), which is where `TRELLO_AUDIT_LIST_IDS` and
+  `TRELLO_SKIP_LIST_IDS` come from.
 - Discord: enable Developer Mode → right-click → "Copy ID".
 
 ## Running locally
