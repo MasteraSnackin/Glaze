@@ -20,6 +20,11 @@ on:
         required: false
         default: true
         type: boolean
+      build_macos:
+        description: 'macOS Apple silicon (personal Profile DMG)'
+        required: false
+        default: false
+        type: boolean
       build_ios:
         description: 'iOS (IPA)'
         required: false
@@ -484,6 +489,136 @@ jobs:
           name: Glaze-release-iOS
           path: "${{ needs.metadata.outputs.file_slug }}.ipa"
 
+  # ── macOS personal Profile DMG ────────────────────────────────────────────
+  # ChatGPT via a user-installed Codex executable is deliberately unavailable
+  # in sandboxed macOS Release builds. This opt-in Profile artifact is AOT,
+  # unsandboxed, ad-hoc signed and intended only for personal testing.
+  build-macos:
+    needs: metadata
+    if: ${{ github.event.inputs.build_macos == 'true' }}
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+
+      - name: Create placeholder .env
+        run: touch .env
+
+      - name: Verify Apple silicon build host
+        run: |
+          set -euo pipefail
+          test "$(uname -m)" = "arm64"
+          xcodebuild -version
+          pod --version
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.9'
+          channel: 'stable'
+          cache: true
+
+      - name: Cache pub
+        uses: actions/cache@v4
+        with:
+          path: ~/.pub-cache
+          key: pub-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('pubspec.lock') }}
+          restore-keys: pub-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Generate code
+        run: dart run build_runner build --delete-conflicting-outputs
+
+      - name: Build macOS Profile application
+        run: |
+          set -euo pipefail
+          APPLE_BUILD_NAME=$(printf '%s' '${{ needs.metadata.outputs.version }}' | sed 's/[^0-9.].*//')
+          test -n "$APPLE_BUILD_NAME"
+          flutter build macos --profile --no-pub \
+            --build-name "$APPLE_BUILD_NAME" \
+            --build-number "${{ github.run_number }}" \
+            "--dart-define=APP_VERSION=${{ needs.metadata.outputs.version }}" \
+            "--dart-define=BUILD_DATE=${{ needs.metadata.outputs.build_date }}" \
+            "--dart-define=BUILD_BRANCH=${{ needs.metadata.outputs.build_branch }}" \
+            "--dart-define=BUILD_COMMIT=${{ needs.metadata.outputs.git_sha }}" \
+            "--dart-define=BUILD_CHANNEL=${{ needs.metadata.outputs.build_channel }}"
+
+      - name: Verify and package DMG
+        env:
+          FILE_SLUG: ${{ needs.metadata.outputs.file_slug }}
+        run: |
+          set -euo pipefail
+
+          APP_PATH=$(find build/macos/Build/Products/Profile -maxdepth 1 \
+            -type d -name '*.app' -print -quit)
+          if [ -z "$APP_PATH" ]; then
+            echo "::error::No Profile .app was produced."
+            exit 1
+          fi
+
+          EXECUTABLE_NAME=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' \
+            "$APP_PATH/Contents/Info.plist")
+          APP_EXECUTABLE="$APP_PATH/Contents/MacOS/$EXECUTABLE_NAME"
+          test -x "$APP_EXECUTABLE"
+          file "$APP_EXECUTABLE"
+          lipo -archs "$APP_EXECUTABLE" | tr ' ' '\n' | grep -qx arm64
+
+          codesign --force --deep --sign - \
+            --preserve-metadata=identifier,entitlements,flags "$APP_PATH"
+          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+
+          ENTITLEMENTS="$RUNNER_TEMP/glaze-profile-entitlements.plist"
+          codesign -d --entitlements :- "$APP_PATH" > "$ENTITLEMENTS" 2>/dev/null || true
+          if [ -s "$ENTITLEMENTS" ]; then
+            plutil -lint "$ENTITLEMENTS"
+            if /usr/libexec/PlistBuddy -c \
+              'Print :com.apple.security.app-sandbox' "$ENTITLEMENTS" \
+              2>/dev/null | grep -qx true; then
+              echo "::error::The personal Profile build unexpectedly has App Sandbox enabled."
+              exit 1
+            fi
+          fi
+
+          DMG_ROOT="$RUNNER_TEMP/glaze-dmg-root"
+          MOUNT_POINT="$RUNNER_TEMP/glaze-dmg-mount"
+          DMG_NAME="${FILE_SLUG}-macos-arm64-profile.dmg"
+          DMG_PATH="$PWD/dist/$DMG_NAME"
+          rm -rf "$DMG_ROOT" "$MOUNT_POINT" dist
+          mkdir -p "$DMG_ROOT" "$MOUNT_POINT" dist
+          ditto "$APP_PATH" "$DMG_ROOT/Glaze.app"
+          ln -s /Applications "$DMG_ROOT/Applications"
+
+          hdiutil create -volname 'Glaze ChatGPT' -srcfolder "$DMG_ROOT" \
+            -ov -format UDZO "$DMG_PATH"
+          hdiutil verify "$DMG_PATH"
+
+          hdiutil attach "$DMG_PATH" -readonly -nobrowse -mountpoint "$MOUNT_POINT"
+          trap 'hdiutil detach "$MOUNT_POINT" >/dev/null 2>&1 || true' EXIT
+          test -d "$MOUNT_POINT/Glaze.app"
+          codesign --verify --deep --strict --verbose=2 "$MOUNT_POINT/Glaze.app"
+          MOUNT_EXECUTABLE=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' \
+            "$MOUNT_POINT/Glaze.app/Contents/Info.plist")
+          lipo -archs "$MOUNT_POINT/Glaze.app/Contents/MacOS/$MOUNT_EXECUTABLE" \
+            | tr ' ' '\n' | grep -qx arm64
+          hdiutil detach "$MOUNT_POINT"
+          trap - EXIT
+
+          shasum -a 256 "$DMG_PATH" > "$DMG_PATH.sha256"
+          cat "$DMG_PATH.sha256"
+
+      - name: Upload macOS DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: Glaze-release-macOS
+          path: |
+            dist/*.dmg
+            dist/*.sha256
+          if-no-files-found: error
+          retention-days: 30
+
   # ── linux ──────────────────────────────────────────────────────────────────
   build-linux:
     needs: metadata
@@ -608,7 +743,7 @@ jobs:
 
   # ── telegram notify ────────────────────────────────────────────────────────
   notify:
-    needs: [metadata, build-android, build-windows, build-ios, build-linux]
+    needs: [metadata, build-android, build-windows, build-macos, build-ios, build-linux]
     runs-on: ubuntu-latest
     # Run when either delivery toggle is on: the group post and/or the direct
     # messages to developers. Each individual step is gated on its own toggle.
@@ -622,6 +757,7 @@ jobs:
       !contains(needs.*.result, 'cancelled') &&
       (github.event.inputs.build_android == 'true' ||
        github.event.inputs.build_windows == 'true' ||
+       github.event.inputs.build_macos == 'true' ||
        github.event.inputs.build_ios == 'true' ||
        github.event.inputs.build_linux == 'true') &&
       (github.event.inputs.post_to_telegram == 'true' ||

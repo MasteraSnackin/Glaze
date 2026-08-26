@@ -110,6 +110,12 @@ lib/generated_plugin_registrant.dart
 
 # Xcode
 *.xcworkspace/
+# Flutter needs the checked-in macOS application workspace before it can
+# generate CocoaPods integration on a clean machine.
+!macos/Runner.xcworkspace/
+!macos/Runner.xcworkspace/contents.xcworkspacedata
+!macos/Runner.xcworkspace/xcshareddata/
+!macos/Runner.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
 xcuserdata/
 
 # ===========================
