@@ -1178,6 +1178,7 @@
   "api_presets": "API Presets",
   "avatar": "Avatar",
   "desc_show_reasoning": "Shows reasoning_content. Doesn't affect model's reasoning.",
+  "error_continue_failed": "Continue Failed",
   "error_generation": "Generation Error",
   "imggen_notification_body": "Generating image...",
   "imggen_notification_title": "Glaze",

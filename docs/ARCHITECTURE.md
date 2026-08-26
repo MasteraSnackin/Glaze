@@ -445,10 +445,14 @@ runs independently when image tags exist; neither task updates Studio Ledger.
 5. Inline image-tag processing after the cleaner/Ledger task, using the
    reloaded canonical message
 
-**Continue exception:** `ChatNotifier.continueMessage()` calls
-`ChatGenerationService.generate()` directly and merges text onto the last assistant
-message. It does **not** use `GenerationPipeline` — no image-tag processing, extensions
-post-gen, or pipeline sync notification. See `docs/INVARIANTS.md` INV-CM2.
+**Continue:** `ChatNotifier.continueMessage()` runs this same pipeline with
+`continueTargetId` set. The prompt gains one system turn — *"Expand your latest
+message, continue."* — directly after the reply being extended, so the request
+never leans on provider prefill. Once the stream ends, `_resolveContinuation()`
+merges the generated block into that message, commits it as a single guarded
+message write, and runs the ordinary post-gen tail against it. A failed
+continuation writes nothing to the message and surfaces as the `Continue Failed`
+toast. See `docs/INVARIANTS.md` INV-CM1–INV-CM6.
 
 **Talkativeness:** `sendMessage()` may skip generation when
 `character.extensions['talkativeness']` rolls above the configured threshold.

@@ -20,10 +20,20 @@ new marker, update all of the following in sync:
 | `==bg:#hex==text==` | `==bg:#333333==highlighted==` | Text with background color | `BackgroundTextMd` | `.glaze-bg` |
 | `==mark==text==` | `==mark=="dialogue"==` | Quote-highlighted text | `MarkMd` | `.glaze-mark` |
 | `==active==text==` | `==active==search hit==` | Active search match | `ActiveMarkMd` | `.glaze-active` |
+| `==accent==text==` | `==accent==Continue==` | Theme accent colour | `AccentTextMd` | `.glaze-accent` |
 
 Note: `==mark==` and `==active==` are injected by JS-side quote highlighting and
-search highlighting. `html_to_markdown.dart` does not produce these markers; it
-only produces the five styling markers above.
+search highlighting. `==accent==` is written by the app itself — the `Continue`
+header a continuation adds to a message's reasoning block (see
+`docs/INVARIANTS.md` INV-CM5). Unlike `==hc:#hex==`, it resolves against the
+active theme at render time (`var(--primary-color)`) rather than baking a colour
+into the stored text, so a marker written once follows theme changes.
+`html_to_markdown.dart` does not produce any of these three; it only produces the
+five styling markers above.
+
+`==mark==`, `==active==` and `==accent==` render their inner content raw: they
+are inline spans, and re-processing the inner text would wrap it in a
+block-level `<p>`. Keep any emphasis outside the marker.
 
 ## Additional Custom InlineMd/BlockMd Classes
 

@@ -318,6 +318,18 @@ if (messageData.isEditing) classes.push('editing');
     return block;
   }
 
+  /* ----- Continue footer -----
+   * Shown on the message a continuation run is extending, for the whole
+   * streaming window. Lives in the footer meta column next to the gen/token
+   * stats so it never displaces the body text mid-stream.
+   */
+  _createContinuingBadge() {
+    const badge = document.createElement('span');
+    badge.className = 'msg-continuing';
+    badge.textContent = 'Continuing…';
+    return badge;
+  }
+
   /* ----- In-game clock (ledger-stamped, display-only) ----- */
   _createGameTimeBlock(gameTime) {
     const el = document.createElement('div');
@@ -475,6 +487,7 @@ if (messageData.isEditing) classes.push('editing');
       const stat = this._createGenStat(m.genTime, m.tokens, '4px');
       metaCol.appendChild(stat);
     }
+    if (m.isContinuing) metaCol.appendChild(this._createContinuingBadge());
     footer.appendChild(metaCol);
 
     /* --- Center controls --- */
@@ -843,6 +856,18 @@ if (messageData.isEditing) classes.push('editing');
       if (!genStatFooter && footerMeta && (hasGen || hasTokens)) {
         const stat = this._createGenStat(msg.genTime, msg.tokens, '4px');
         footerMeta.appendChild(stat);
+      }
+    }
+
+    // Level-reconcile the Continue footer. `role` marks a full message map:
+    // partial patches (memory badges, plain content updates) carry no
+    // `isContinuing` and must leave the badge exactly as it is.
+    if (msg.role !== undefined) {
+      const existing = sectionEl.querySelector('.msg-continuing');
+      if (msg.isContinuing && !existing) {
+        if (footerMeta) footerMeta.appendChild(this._createContinuingBadge());
+      } else if (!msg.isContinuing && existing) {
+        existing.remove();
       }
     }
 

@@ -72,6 +72,41 @@ List<PromptMessage> interleaveDepthWithHistory(
   return result;
 }
 
+/// Continue mode: drop a system turn immediately after the assistant reply
+/// being extended, ahead of every preset block that follows `chat_history`.
+/// Returns [assembledHistory] unchanged when no instruction is set (every
+/// non-continue path) or when the window carries no history message.
+///
+/// The instruction lands after the last `isHistory` message rather than at the
+/// end of the assembled window so depth-0 injections stay *after* it — the
+/// model must read "extend the reply above" while that reply is still the
+/// nearest turn. See `docs/INVARIANTS.md` INV-CM3.
+List<PromptMessage> insertContinueInstruction(
+  List<PromptMessage> assembledHistory,
+  String? continueInstruction,
+) {
+  final instruction = continueInstruction?.trim();
+  if (instruction == null || instruction.isEmpty) return assembledHistory;
+  // `sourceMessageId` is the second half of the anchor: Studio's history
+  // limiter rebuilds each message and drops `isHistory`, but every assembled
+  // chat message keeps the id it came from, while depth-anchored preset blocks
+  // never carry one.
+  final lastHistoryIndex = assembledHistory.lastIndexWhere(
+    (message) => message.isHistory || message.sourceMessageId != null,
+  );
+  if (lastHistoryIndex < 0) return assembledHistory;
+  return [
+    ...assembledHistory.sublist(0, lastHistoryIndex + 1),
+    PromptMessage(
+      role: 'system',
+      content: instruction,
+      blockId: 'continue_instruction',
+      blockName: 'Continue',
+    ),
+    ...assembledHistory.sublist(lastHistoryIndex + 1),
+  ];
+}
+
 class PromptMessage {
   final String role;
   final String content;

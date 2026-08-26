@@ -407,6 +407,32 @@ class MarkMd extends InlineMd {
   }
 }
 
+/// `==accent==text==` — text in the active theme's accent colour. Unlike
+/// [HtmlColorMd] the colour is not baked into the stored text, so a marker
+/// written once keeps tracking whatever theme preset is active. Used for the
+/// `Continue` header inside a continued message's reasoning block.
+/// See `docs/markdown-markers.md`.
+class AccentTextMd extends InlineMd {
+  final Color accentColor;
+
+  AccentTextMd({required this.accentColor});
+
+  @override
+  RegExp get exp => RegExp(r'==accent==(.+?)==', dotAll: true);
+
+  @override
+  InlineSpan span(BuildContext context, String text, GptMarkdownConfig config) {
+    final match = exp.firstMatch(text);
+    final content = match?[1] ?? '';
+    final accentStyle = (config.style ?? const TextStyle()).copyWith(
+      color: accentColor,
+      fontWeight: FontWeight.w600,
+      fontStyle: FontStyle.normal,
+    );
+    return TextSpan(text: content, style: accentStyle);
+  }
+}
+
 class ActiveMarkMd extends InlineMd {
   final GlobalKey? activeKey;
 

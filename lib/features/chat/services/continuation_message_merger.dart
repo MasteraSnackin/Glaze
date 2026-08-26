@@ -22,6 +22,10 @@ ChatMessage mergeContinuationMessage(
   ChatMessage generated,
 ) {
   final content = joinContinuation(original.content, generated.content);
+  final reasoning = joinContinuationReasoning(
+    original.reasoning,
+    generated.reasoning,
+  );
 
   final swipes = original.swipes.isEmpty
       ? [content]
@@ -36,7 +40,7 @@ ChatMessage mergeContinuationMessage(
           AgentSwipe(
             content: content,
             kind: 'final',
-            reasoning: generated.reasoning,
+            reasoning: reasoning,
             genTime: generated.genTime,
             tokens: generated.tokens,
             studioOutputs: generated.studioOutputs,
@@ -49,6 +53,7 @@ ChatMessage mergeContinuationMessage(
       : original.agentSwipeId.clamp(0, agentSwipes.length - 1);
   agentSwipes[agentSwipeId] = agentSwipes[agentSwipeId].copyWith(
     content: content,
+    reasoning: reasoning,
   );
 
   final swipesMeta = List<Map<String, dynamic>>.from(original.swipesMeta);
@@ -57,12 +62,14 @@ ChatMessage mergeContinuationMessage(
   }
   swipesMeta[swipeId] = {
     ...swipesMeta[swipeId],
+    'reasoning': reasoning,
     'agentSwipes': agentSwipes.map((swipe) => swipe.toJson()).toList(),
     'agentSwipeId': agentSwipeId,
   };
 
   return original.copyWith(
     content: content,
+    reasoning: reasoning,
     swipes: swipes,
     swipeId: swipeId,
     swipesMeta: swipesMeta,
@@ -78,4 +85,23 @@ String joinContinuation(String original, String continuation) {
   if (original.isEmpty) return continuation;
   if (continuation.isEmpty) return original;
   return '$original\n\n$continuation';
+}
+
+/// Header the continuation's reasoning is filed under inside the message's
+/// existing reasoning block. `==accent==` renders in the active theme's accent
+/// colour (see `docs/markdown-markers.md`); the rule above it separates the
+/// original turn's thinking from the continuation's.
+const _continueReasoningHeader = '---\n\n==accent==Continue==';
+
+/// Joins the reasoning of an assistant message with the reasoning a
+/// continuation run produced. The continuation's thinking must never reach the
+/// reply text, so it is appended to the reasoning block under its own
+/// `Continue` header instead of being dropped or merged into the prose.
+/// See `docs/INVARIANTS.md` INV-CM5.
+String? joinContinuationReasoning(String? original, String? continuation) {
+  final previous = original?.trim() ?? '';
+  final next = continuation?.trim() ?? '';
+  if (next.isEmpty) return original;
+  if (previous.isEmpty) return next;
+  return '$previous\n\n$_continueReasoningHeader\n\n$next';
 }

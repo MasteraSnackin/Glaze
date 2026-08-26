@@ -88,7 +88,14 @@ PromptResult buildFallbackPrompt(PromptPayload payload) {
   );
 
   return PromptResult(
-    messages: [systemMessage, ...ledgerMessages, ...breakdown.trimmedHistory],
+    messages: [
+      systemMessage,
+      ...ledgerMessages,
+      ...insertContinueInstruction(
+        breakdown.trimmedHistory,
+        payload.continueInstruction,
+      ),
+    ],
     breakdown: breakdown,
     sessionVars: payload.sessionVars,
     globalVars: payload.globalVars,

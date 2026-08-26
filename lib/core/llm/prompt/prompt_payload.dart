@@ -38,6 +38,12 @@ class PromptPayload {
   final String? memoryMacroContent;
   final String memoryInjectionTarget;
   final String? guidanceText;
+
+  /// Continue mode: a system instruction injected immediately after the last
+  /// history message (the assistant reply being extended) and before every
+  /// preset block that follows `chat_history`. Null on every other path.
+  /// See `docs/INVARIANTS.md` INV-CM3.
+  final String? continueInstruction;
   final List<Lorebook> lorebooks;
   final LorebookGlobalSettings lorebookSettings;
   final LorebookActivations lorebookActivations;
@@ -142,6 +148,7 @@ class PromptPayload {
     this.memoryMacroContent,
     this.memoryInjectionTarget = 'summary_block',
     this.guidanceText,
+    this.continueInstruction,
     this.lorebooks = const [],
     this.lorebookSettings = const LorebookGlobalSettings(),
     this.lorebookActivations = const LorebookActivations(),
@@ -240,6 +247,7 @@ class PromptPayload {
       memoryMacroContent: inputs.memoryMacroContent,
       memoryInjectionTarget: inputs.memoryInjectionTarget,
       guidanceText: inputs.guidanceText,
+      continueInstruction: inputs.continueInstruction,
       lorebooks: inputs.lorebooks,
       lorebookSettings: inputs.lorebookSettings,
       lorebookActivations: inputs.lorebookActivations,
@@ -308,6 +316,7 @@ class PromptPayload {
     memoryMacroContent: memoryMacroContent,
     memoryInjectionTarget: memoryInjectionTarget,
     guidanceText: guidanceText,
+    continueInstruction: continueInstruction,
     lorebooks: lorebooks,
     lorebookSettings: lorebookSettings,
     lorebookActivations: lorebookActivations,

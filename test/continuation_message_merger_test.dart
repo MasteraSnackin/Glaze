@@ -86,4 +86,36 @@ void main() {
     expect(merged.agentSwipes.single.genTime, '1.0s');
     expect(merged.agentSwipes.single.tokens, 2);
   });
+
+  group('joinContinuationReasoning', () {
+    test('files the continuation under an accent Continue header', () {
+      expect(
+        joinContinuationReasoning('Opening thought', 'Extension thought'),
+        'Opening thought\n\n---\n\n==accent==Continue==\n\nExtension thought',
+      );
+    });
+
+    test('keeps the original when the continuation reasoned about nothing', () {
+      expect(
+        joinContinuationReasoning('Opening thought', null),
+        'Opening thought',
+      );
+      expect(
+        joinContinuationReasoning('Opening thought', '  '),
+        'Opening thought',
+      );
+      expect(joinContinuationReasoning(null, '   '), isNull);
+    });
+
+    test('needs no header when the original turn had no reasoning', () {
+      expect(
+        joinContinuationReasoning(null, 'Extension thought'),
+        'Extension thought',
+      );
+      expect(
+        joinContinuationReasoning('', 'Extension thought'),
+        'Extension thought',
+      );
+    });
+  });
 }

@@ -34,6 +34,7 @@ class _ThrowingGenerationService extends ChatGenerationService {
     List<Map<String, dynamic>>? previousSwipesMeta,
     String? guidanceText,
     String? regenTargetId,
+    String? continueTargetId,
     StudioTurnConfigSnapshot? studioTurnConfig,
   }) async {
     calls++;

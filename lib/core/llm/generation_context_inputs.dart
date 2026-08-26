@@ -35,6 +35,10 @@ class GenerationContextInputs {
   final String? memoryMacroContent;
   final String memoryInjectionTarget;
   final String? guidanceText;
+
+  /// Continue mode: system instruction injected right after the last history
+  /// message. Null on every other path. See `docs/INVARIANTS.md` INV-CM3.
+  final String? continueInstruction;
   final List<Lorebook> lorebooks;
   final LorebookGlobalSettings lorebookSettings;
   final LorebookActivations lorebookActivations;
@@ -92,6 +96,7 @@ class GenerationContextInputs {
     this.memoryMacroContent,
     this.memoryInjectionTarget = 'summary_block',
     this.guidanceText,
+    this.continueInstruction,
     this.lorebooks = const [],
     this.lorebookSettings = const LorebookGlobalSettings(),
     this.lorebookActivations = const LorebookActivations(),

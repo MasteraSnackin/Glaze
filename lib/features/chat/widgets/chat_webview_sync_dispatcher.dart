@@ -170,6 +170,21 @@ class ChatWebViewSyncDispatcher {
     // that one as typing instead of appending a placeholder. The streaming
     // listener then grows it in place (see ChatWebViewBuildListeners).
     final continuationId = current.continuationTargetId;
+    final previousContinuationId = bridge.continuationTargetId;
+    if (continuationId != previousContinuationId) {
+      // Every message map the bridge builds during the run reads this, so the
+      // extended bubble carries its `Continuing…` footer (INV-CM6).
+      bridge.continuationTargetId = continuationId;
+      if (continuationId == null && previousContinuationId != null) {
+        // Settled (merged, aborted, or failed) — repaint that bubble once with
+        // the flag cleared. A failed continuation changes no message, so this
+        // is the only update that drops the footer on that path.
+        final settled = current.messages.firstWhereOrNull(
+          (m) => m.id == previousContinuationId,
+        );
+        if (settled != null) bridge.updateMessage(settled);
+      }
+    }
     if (!state.wasGenerating &&
         current.isGenerating &&
         continuationId != null) {

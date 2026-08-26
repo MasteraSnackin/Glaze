@@ -77,8 +77,9 @@ on abort and on each new generation start.
 
 `ChatGenerationService.processImageTags()` is called only after the SSE stream completes
 and the assistant message is saved, via `GenerationPipeline._runPostTextSide()`.
-It never runs concurrently with text generation. **Exception:** `continueMessage()`
-bypasses `GenerationPipeline` — see INV-CM2.
+It never runs concurrently with text generation. `continueMessage()` goes
+through the same pipeline and post-gen coordinator, bound to the merged message
+— see INV-CM2.
 
 ### INV-IG2: Image generation has independent abort infrastructure
 
@@ -831,16 +832,20 @@ If abort fails to clear `isGenerating`, the subsequent check rejects.
 
 ### INV-CM1: Continue message appends to the last assistant message
 
-`ChatNotifier.continueMessage()` calls `ChatGenerationService.generate()` directly
-(not `GenerationPipeline.run()`). After the stream completes, it joins the
-original and generated content with a paragraph boundary, then uses
-`ChatRepo.mutateSession` to replace only the expected durable last assistant
-message. The guard checks target ID, last-message position, content, `swipeId`,
-and `agentSwipeId`; a conflict is reloaded instead of overwritten. The session
-variable delta is merged into the latest row, and only the returned durable
-session is published. It does not create a new swipe or keep the temporary
-generated message. The active green and nested swipes are updated to the same
-merged content.
+`ChatNotifier.continueMessage()` runs the ordinary chat pipeline —
+`GenerationPipeline.run(continueTargetId: <last assistant id>)` — so the request
+uses the same transport, protocol, prompt assembly and post-generation stages as
+a send. The pipeline branches into `_resolveContinuation()` once the stream
+completes: it folds the generated block into the message being extended
+(`mergeContinuationMessages`, paragraph boundary) and commits that one message
+through `ChatRepo.commitGenerationResult(regenTargetId: <target id>)`. The
+commit's anchor guard checks content, `swipeId`, `agentSwipeId`, `swipes` and
+`swipesMeta` against the pre-run snapshot; a conflict is rejected instead of
+overwritten. It does not create a new swipe or keep the temporary generated
+message. The active green and nested swipes are updated to the same merged
+content. Passing the target as `regenTargetId` also keeps Studio history
+rotation out of the continue path: continue adds no turn, so the window must not
+advance.
 
 While the continuation streams, `ChatState.continuationTargetId` holds the id of
 that assistant message. The WebView layer keys off it: the sync dispatcher skips
@@ -855,8 +860,7 @@ Stop during a continuation merges the partial text into the target message
 (`AbortHandler._finalizeContinuationAbort`) rather than appending it as a new
 assistant message. `continueMessage()` clears `abortHandler.restorationMessage`
 before starting, so a snapshot left by an earlier regenerate cannot be
-re-appended by that abort (the pipeline's own clearing does not apply here — see
-INV-CM2).
+re-appended by that abort.
 
 When the last message is **not** an assistant message there is nothing to
 extend: a trailing user message is delegated to `regenerateLastAssistant()`,
@@ -866,19 +870,85 @@ role is a no-op.
 Mutex: `continueMessage()` rejects when `_isMemoryDraftActive` (same as
 `sendMessage` / `regenerateLastAssistant`) — see INV-M4.
 
-### INV-CM2: Continue skips post-SSE pipeline side effects
+### INV-CM2: Continue runs the same post-generation stages as a send
 
-Because `continueMessage()` does not use `GenerationPipeline`, the following do
-**not** run on the continue path (by design today — document before changing):
+`_resolveContinuation()` hands the merged message to `PostGenCoordinator.run()`,
+so the continue path runs the full post-SSE tail: sync + notification, POST-
+cleaner / Ledger (Studio ON), ExtBlocks, inline `[IMG:GEN]` processing, chat
+embedding, memory drafts and auto-summary — all bound to the merged message,
+which is the session's last message by then.
 
-- `processImageTags()` — inline `[IMG:GEN]` tags in the continued chunk
-- `processExtensions()` — info-block / extension image post-gen
-- `notifySyncMessageGenerated()` from the pipeline
-- Regen rollback / `restorationMessage` handling from the pipeline
+Two pipeline behaviours stay off the continue path by construction:
+regen rollback (continue keeps no `restorationMessage`) and the append-a-new-
+message commit (continue commits the merged message in place).
 
-Notification start/complete in `continueMessage()` itself still runs.
-If continue should match send/regen post-processing, route it through
-`GenerationPipeline` with a dedicated continue mode.
+### INV-CM3: Continue prompt injects one system turn after the extended reply
+
+`PromptPayload.continueInstruction` carries `kContinueInstruction`
+(`"Expand your latest message, continue."`, `core/services/preset_defaults.dart`)
+and is set only when `StreamGenerationService.run()` is given a
+`continueTargetId`. `insertContinueInstruction()` (`core/llm/history_assembler.dart`)
+places it as a `system` turn immediately after the last chat message, ahead of
+the depth-0 injections pinned to the end of the window and ahead of every preset
+block ordered after `chat_history`. Depth-anchored blocks at depth ≥ 1 stay
+where they are: they sit *before* the extended reply, so they cannot come
+between it and the instruction.
+
+Three assembly paths honour it: the ordinary preset builder
+(`prompt_builder.dart`), the preset-less fallback (`fallback_prompt_builder.dart`),
+and the Studio final writer (`studio_message_builder.dart`, via
+`StudioContext.continueInstruction`). Studio's **controller** agents never see
+it — they analyse the scene rather than extend the reply, so
+`buildAgentMessages` passes it through only when `isFinalResponse` is true.
+
+Consequence: the request's last message is a system turn, not the assistant
+reply. Continue therefore never relies on provider prefill — no Anthropic
+prefill echo prepended to the streamed text, and no dropped trailing assistant
+turn when extended thinking is on.
+
+### INV-CM4: A failed continuation writes nothing to the message
+
+A continuation that fails — transport error, first-chunk timeout, thrown
+pipeline exception, or a completion carrying no usable text — must leave the
+message it was extending byte-for-byte as the user saw it. No error swipe, no
+appended error bubble, no partial merge.
+
+`StreamGenerationService` routes every error site through `_continueFailure()`
+when `continueTargetId` is set: it returns a settled `ChatState` carrying
+`error`, and never calls `SavedMessageWriter.writeError` /
+`writeRegenError`. `GenerationPipeline._settleContinuationFailure()` (and the
+continue branch of `_handlePipelineError`) then clears the streaming flags and
+publishes a `ContinueFailureNotice` on `continueFailureProvider`.
+
+That notice is the failure's only surface: `ContinueFailureListener` (mounted in
+`app.dart`) turns it into the red `Continue Failed` toast.
+
+### INV-CM5: Continuation reasoning is filed, never leaked
+
+Reasoning produced by a continuation — native (`reasoning_content` /
+`thinking` deltas) or inline (`<think>` tags parsed by `StreamAccumulator`) —
+must never reach the reply text. `joinContinuationReasoning()` appends it to the
+message's existing reasoning block, separated by a horizontal rule and headed by
+`==accent==Continue==` (accent-coloured, see `docs/markdown-markers.md`). The
+merged value is written to the message, the active green swipe's meta and the
+active nested swipe, so a swipe round-trip restores it.
+
+The live WebView preview uses the same function, so the streaming reasoning
+block shows exactly what the merge will persist. An aborted continuation goes
+through the same merge (`AbortHandler._finalizeContinuationAbort`), so partial
+reasoning is filed the same way.
+
+### INV-CM6: The extended message shows a `Continuing…` footer
+
+For the whole streaming window the message being extended carries a
+`Continuing…` badge in its footer meta column. `ChatState.continuationTargetId`
+is mirrored onto `ChatBridgeController.continuationTargetId` by the sync
+dispatcher, so every message map `ChatMessageMapper` builds during the run flags
+that one bubble with `isContinuing`. The renderer level-reconciles the badge in
+`_createFooter` and `updateMessageMeta`; partial patches (memory badges, plain
+content updates) carry no `role` and leave it alone. When the run settles the
+dispatcher pushes one update with the flag cleared — the only thing that drops
+the badge on the failure path, where no message changed.
 
 ---
 
@@ -889,7 +959,8 @@ If continue should match send/regen post-processing, route it through
 `ExtensionPostGenService.processAfterGeneration()` is invoked from
 `ChatGenerationService.processExtensions()`, which is called only from
 `GenerationPipeline._runPostTextSide()` after text is saved. It does not run during
-SSE streaming and does not run for `continueMessage()` (INV-CM2).
+SSE streaming. `continueMessage()` runs it too, bound to the merged message
+(INV-CM2).
 
 ### INV-EG2: Extension failures do not fail chat generation
 
@@ -1092,8 +1163,11 @@ Before merging any structural PR:
 - [ ] History cutoff trims oldest messages first
 - [ ] Summary returns a string without affecting chat state
 - [x] Memory draft mutex with chat generation (PR-B C12 / INV-M3, INV-M4)
-- [ ] Image generation completes after text generation (not on continue path — INV-CM2)
-  - [ ] Extensions post-gen runs after normal/regen only (INV-EG1; not on continue)
+- [ ] Image generation completes after text generation (continue included — INV-CM2)
+  - [ ] Extensions post-gen runs after normal/regen/continue (INV-EG1, INV-CM2)
+  - [ ] Continue injects one system turn after the extended reply (INV-CM3)
+  - [ ] A failed continue leaves the message untouched and toasts (INV-CM4)
+  - [ ] Continue reasoning lands in the reasoning block, not the reply (INV-CM5)
   - [ ] Block chain does not start on aborted or errored generation (INV-EG4)
   - [ ] Extension cancel token is separate from chat cancel token (INV-EG5)
   - [ ] `dependsOnPrevious` blocks await the preceding block; output is chained (INV-EG6)

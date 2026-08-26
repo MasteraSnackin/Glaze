@@ -94,6 +94,32 @@ class StudioMessageBuilder {
         );
     final messages = <Map<String, dynamic>>[];
 
+    // Continue mode: the instruction belongs to the final writer only. The
+    // controller agents analyse the scene; they never extend the reply, so
+    // handing them "expand your latest message" would corrupt their briefs.
+    final continueInstruction = isFinalResponse
+        ? context.continueInstruction
+        : null;
+
+    // Emits one chat-history block: depth-anchored blocks interleaved in, the
+    // continue instruction (when set) pinned directly after the last chat
+    // message, and per-message reasoning attached on the final writer's run.
+    List<Map<String, dynamic>> emitHistory(List<PromptMessage> history) {
+      if (isFinalResponse &&
+          (reasoningHistoryCount == -1 || reasoningHistoryCount > 0)) {
+        return _historyWithReasoning(
+          history,
+          reasoningHistoryCount,
+          depthMessages: depthMessages,
+          continueInstruction: continueInstruction,
+        );
+      }
+      return insertContinueInstruction(
+        interleaveDepthWithHistory(history, depthMessages),
+        continueInstruction,
+      ).map((m) => m.toApiMap()).toList();
+    }
+
     for (final block in blocks) {
       // Type-based resolution takes precedence over mode/id. The codec sets
       // `type` and `contextSlot` correctly for every preset, but block ids vary
@@ -120,23 +146,7 @@ class StudioMessageBuilder {
                         StudioControllerOntology.specForAgent(agent),
                       ),
               );
-        if (isFinalResponse &&
-            (reasoningHistoryCount == -1 || reasoningHistoryCount > 0)) {
-          messages.addAll(
-            _historyWithReasoning(
-              history,
-              reasoningHistoryCount,
-              depthMessages: depthMessages,
-            ),
-          );
-        } else {
-          messages.addAll(
-            interleaveDepthWithHistory(
-              history,
-              depthMessages,
-            ).map((m) => m.toApiMap()),
-          );
-        }
+        messages.addAll(emitHistory(history));
         continue;
       }
       if (block.type == StudioBlockType.context && block.contextSlot != null) {
@@ -199,23 +209,7 @@ class StudioMessageBuilder {
                           StudioControllerOntology.specForAgent(agent),
                         ),
                 );
-          if (isFinalResponse &&
-              (reasoningHistoryCount == -1 || reasoningHistoryCount > 0)) {
-            messages.addAll(
-              _historyWithReasoning(
-                history,
-                reasoningHistoryCount,
-                depthMessages: depthMessages,
-              ),
-            );
-          } else {
-            messages.addAll(
-              interleaveDepthWithHistory(
-                history,
-                depthMessages,
-              ).map((m) => m.toApiMap()),
-            );
-          }
+          messages.addAll(emitHistory(history));
         } else if (blockId == 'dynamic_context') {
           _recordLorebookSlotClassifications(
             StudioContextSlot.dynamicContext,
@@ -467,6 +461,7 @@ class StudioMessageBuilder {
     List<PromptMessage> history,
     int reasoningHistoryCount, {
     List<PromptMessage> depthMessages = const [],
+    String? continueInstruction,
   }) {
     // Reasoning selection must run on the raw (unshifted) history so "last N
     // assistant turns" still means the same thing once depth-anchored blocks
@@ -489,7 +484,10 @@ class StudioMessageBuilder {
         if (!includeAll) remaining--;
       }
     }
-    final interleaved = interleaveDepthWithHistory(history, depthMessages);
+    final interleaved = insertContinueInstruction(
+      interleaveDepthWithHistory(history, depthMessages),
+      continueInstruction,
+    );
     return interleaved.map<Map<String, dynamic>>((message) {
       final apiMap = message.toApiMap();
       final reasoning = reasoningByMessage[message];

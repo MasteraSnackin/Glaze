@@ -276,6 +276,11 @@ class _ToastChip extends ConsumerStatefulWidget {
 }
 
 class _ToastChipState extends ConsumerState<_ToastChip> {
+  /// Every toast — error or not — carries the same grey hairline outline, so
+  /// the chip keeps a defined edge against a light bubble or a bright image
+  /// underneath it. Only the fill separates the two kinds.
+  static const _toastBorderColor = Color(0x59A0A0A0);
+
   bool _copied = false;
 
   void _copy() {
@@ -311,9 +316,12 @@ class _ToastChipState extends ConsumerState<_ToastChip> {
   }
 
   Widget _toastContent({bool opaque = false}) {
+    // Battery saver drops the backdrop blur, so its fill stays a touch more
+    // opaque — without the blur behind it, chat text would otherwise read
+    // straight through the chip.
     final bgColor = opaque
-        ? (widget.isError ? const Color(0xFF5C1A1A) : const Color(0xFF1E1E1E))
-        : (widget.isError ? const Color(0xEB5C1A1A) : const Color(0xEB1E1E1E));
+        ? (widget.isError ? const Color(0xE65C1A1A) : const Color(0xE61E1E1E))
+        : (widget.isError ? const Color(0xC25C1A1A) : const Color(0xC21E1E1E));
     return Container(
       constraints: BoxConstraints(
         maxWidth: MediaQuery.of(context).size.width - 48,
@@ -321,9 +329,7 @@ class _ToastChipState extends ConsumerState<_ToastChip> {
       padding: EdgeInsets.fromLTRB(20, 10, widget.showCopyButton ? 8 : 20, 10),
       decoration: BoxDecoration(
         color: bgColor,
-        border: widget.isError
-            ? Border.all(color: const Color(0x80FF4444), width: 1)
-            : null,
+        border: Border.all(color: _toastBorderColor, width: 1),
         borderRadius: BorderRadius.circular(24),
         boxShadow: const [
           BoxShadow(
