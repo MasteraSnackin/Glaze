@@ -163,6 +163,34 @@ void main() {
     },
   );
 
+  test('card writer prompt does not duplicate the card snapshot', () async {
+    await fixture.seedReconciliationRun(ordinal: 1);
+    String? cardPrompt;
+    await fixture
+        .service((_, prompt) async {
+          if (!prompt.contains('observation journal keeper')) {
+            cardPrompt = prompt;
+          }
+          return _ok(fixture.cardBatchOutput);
+        })
+        .runOneBatch('session');
+    expect(cardPrompt, isNotNull);
+    final snapshotIndex = cardPrompt!.indexOf(
+      '# Canonical character card snapshot (read-only)',
+    );
+    expect(snapshotIndex, greaterThanOrEqualTo(0));
+    final snapshotOccurrences = '# Canonical character card snapshot'
+        .allMatches(cardPrompt!)
+        .length;
+    expect(snapshotOccurrences, 1);
+    final historyStart = cardPrompt!.indexOf(
+      '# Immutable chat history and effective canon',
+    );
+    expect(historyStart, greaterThan(snapshotIndex));
+    final historyPayload = cardPrompt!.substring(historyStart);
+    expect(historyPayload, isNot(contains('"card":{')));
+  });
+
   test(
     'writer excludes an active observation unrelated to current ranges',
     () async {
@@ -550,6 +578,36 @@ void main() {
   );
 
   test(
+    'unexpected automatic lane failure leaves durable diagnostics',
+    () async {
+      final service = fixture.service((_, prompt) async {
+        return _ok('{"observations":[]}');
+      });
+      for (var ordinal = 1; ordinal <= 3; ordinal++) {
+        await service.runAfterReconciliation(
+          await fixture.seedReconciliationRun(ordinal: ordinal),
+        );
+      }
+      await fixture.db.customStatement(
+        'DROP TABLE card_evolution_collector_runs',
+      );
+
+      final result = await service.runAfterReconciliation(
+        await fixture.seedReconciliationRun(ordinal: 4),
+      );
+
+      expect(result.kind, 'unexpectedFailure');
+      expect(result.detail, contains('card_evolution_collector_runs'));
+      final debug = await fixture.db
+          .select(fixture.db.cardEvolutionDebugRuns)
+          .getSingle();
+      expect(debug.stage, 'selection');
+      expect(debug.status, 'unexpectedFailure');
+      expect(debug.attemptsJson, contains('card_evolution_collector_runs'));
+    },
+  );
+
+  test(
     'oversized writer streams all immutable history into one handoff',
     () async {
       final messages = List<Map<String, String>>.generate(41, (index) {
@@ -557,7 +615,7 @@ void main() {
           'id': 'long-$index',
           'role': index.isEven ? 'assistant' : 'user',
           'content':
-              '${index.isEven ? 'assistant' : 'user'}-$index ${'x' * 4920}',
+              '${index.isEven ? 'assistant' : 'user'}-$index ${'x' * 10300}',
         };
       });
       final starts = [0, 1, 21, 21];

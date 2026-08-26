@@ -29,7 +29,7 @@ const _writerMaxTokens = 40000;
 const _writerLeaseSeconds = 600;
 const _writerCollectorBatchSize = 2;
 const _writerSnapshotCharacterLimit = 600000;
-const _writerContextCharacterLimit = 180000;
+const _writerContextCharacterLimit = 400000;
 const _historyConsolidationInstruction =
     'Consolidate this next immutable Card Rewriter evidence segment into a '
     'compact cumulative factual handoff. Preserve all durable character '
@@ -446,20 +446,39 @@ class AutomatedCardEvolutionService {
     LedgerReconciliationSuccessfulRunRow reconciliationRun, {
     void Function(AutomatedCardEvolutionStage stage)? onStage,
   }) async {
-    final pending = await collectorRunRepo.pendingValidPairs(
-      reconciliationRun.sessionId,
-      currentRun: reconciliationRun,
-    );
-    for (final pair in pending) {
-      final collected = await _runCollector(pair, onStage: onStage);
-      if (!collected) {
-        return const CardEvolutionFinalizeOutcome('collectorUnavailable');
+    try {
+      final pending = await collectorRunRepo.pendingValidPairs(
+        reconciliationRun.sessionId,
+        currentRun: reconciliationRun,
+      );
+      for (final pair in pending) {
+        final collected = await _runCollector(pair, onStage: onStage);
+        if (!collected) {
+          return const CardEvolutionFinalizeOutcome('collectorUnavailable');
+        }
       }
+      return await _continueWriterAfterCollectors(
+        reconciliationRun.sessionId,
+        onStage: onStage,
+      );
+    } catch (error, stackTrace) {
+      debugPrint(
+        '[CardRewriter] automatic lane failed before a durable writer result: '
+        '$error\n$stackTrace',
+      );
+      await _saveSelectionBail(
+        sessionId: reconciliationRun.sessionId,
+        outcome: 'unexpectedFailure',
+        reason: error.toString(),
+        throughCollectorOrdinal: 0,
+        reconciliationRunIds: [reconciliationRun.id],
+      );
+      return CardEvolutionFinalizeOutcome(
+        'unexpectedFailure',
+        null,
+        error.toString(),
+      );
     }
-    return _continueWriterAfterCollectors(
-      reconciliationRun.sessionId,
-      onStage: onStage,
-    );
   }
 
   Future<CardEvolutionFinalizeOutcome> _continueWriterAfterCollectors(
@@ -1342,7 +1361,10 @@ class AutomatedCardEvolutionService {
         'Stored writer input cannot be decoded for consolidation',
       );
       return _PreparedWriterContext.failure(
-        _snapshotTooLarge(selectedInputJson.length),
+        _snapshotTooLarge(
+          selectedInputJson.length,
+          limit: _writerContextCharacterLimit,
+        ),
       );
     }
     final history = decoded['chatHistory'];
@@ -1355,7 +1377,10 @@ class AutomatedCardEvolutionService {
         'Stored writer input has no valid chat history',
       );
       return _PreparedWriterContext.failure(
-        _snapshotTooLarge(selectedInputJson.length),
+        _snapshotTooLarge(
+          selectedInputJson.length,
+          limit: _writerContextCharacterLimit,
+        ),
       );
     }
     final common = Map<String, dynamic>.from(decoded)
@@ -1370,7 +1395,11 @@ class AutomatedCardEvolutionService {
         'Shared writer context exceeds the safe request limit',
       );
       return _PreparedWriterContext.failure(
-        _snapshotTooLarge(jsonEncode(common).length, stage: 'shared context'),
+        _snapshotTooLarge(
+          jsonEncode(common).length,
+          stage: 'shared context',
+          limit: _writerContextCharacterLimit,
+        ),
       );
     }
     String? handoff;
@@ -1449,7 +1478,11 @@ class AutomatedCardEvolutionService {
         'Final consolidated writer context exceeds the safe request limit',
       );
       return _PreparedWriterContext.failure(
-        _snapshotTooLarge(context.length, stage: 'final writer context'),
+        _snapshotTooLarge(
+          context.length,
+          stage: 'final writer context',
+          limit: _writerContextCharacterLimit,
+        ),
       );
     }
     return _PreparedWriterContext.context(
@@ -1881,18 +1914,19 @@ class AutomatedCardEvolutionService {
   static CardEvolutionFinalizeOutcome _snapshotTooLarge(
     int actual, {
     String stage = 'snapshot',
+    int limit = _writerSnapshotCharacterLimit,
   }) => CardEvolutionFinalizeOutcome(
     'snapshotTooLarge',
     null,
     'Card Rewriter $stage is $actual characters; the safe request limit is '
-        '$_writerSnapshotCharacterLimit.',
+        '$limit.',
   );
 
   static String _cardWriterContext(String selectedInputJson) {
     try {
       final input = Map<String, Object?>.from(
         jsonDecode(selectedInputJson) as Map,
-      );
+      )..remove('card');
       final observations = input['accumulatedObservations'];
       input['accumulatedObservations'] = observations is List
           ? [

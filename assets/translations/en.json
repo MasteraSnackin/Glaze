@@ -2381,7 +2381,7 @@
   "agent_ops_current_commits": "{count} current commits",
   "agent_ops_chain_integrity_failure": "Reconciliation chain integrity failure",
   "agent_ops_no_checkpoint": "No reconciliation checkpoint yet.",
-  "agent_ops_checkpoint": "Checkpoint: {count} messages, ending at {messageId}",
+  "agent_ops_checkpoint": "Checkpoint: {count} messages, ending at message {messageNumber}",
   "agent_ops_run_reconciliation": "Run reconciliation",
   "agent_ops_rerun_ledger": "Rerun latest Ledger",
   "agent_ops_commits": "Commits",
@@ -2619,8 +2619,17 @@
   "card_rewriter_studio_status_generating": "Generating",
   "card_rewriter_studio_status_completed": "Completed",
   "card_rewriter_studio_status_pending": "Pending",
+  "card_rewriter_studio_status_prepared": "Prepared (never sent)",
   "card_rewriter_studio_stage_history_consolidation": "History consolidation",
   "card_rewriter_studio_stage_card_writer": "Card writer",
   "card_rewriter_studio_stage_card_repair": "Card repair",
-  "card_rewriter_studio_stage_lorebook_writer": "Lorebook writer"
+  "card_rewriter_studio_stage_lorebook_writer": "Lorebook writer",
+  "game_time_seed_title": "Game clock start",
+  "game_time_seed_description": "Anchor the ledger game clock. The day always starts at 0. The date is optional.",
+  "game_time_seed_time_label": "Time (HH:MM)",
+  "game_time_seed_date_label": "Date (DD.MM.YYYY, optional)",
+  "game_time_seed_skip": "Skip",
+  "game_time_seed_confirm": "Start",
+  "game_time_seed_invalid_time": "Enter the time as HH:MM (24-hour).",
+  "game_time_seed_invalid_date": "Enter the date as DD.MM.YYYY or leave it empty."
 }

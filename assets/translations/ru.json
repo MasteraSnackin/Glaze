@@ -2410,7 +2410,7 @@
   "agent_ops_current_commits": "Текущих коммитов: {count}",
   "agent_ops_chain_integrity_failure": "Нарушена целостность цепочки сверки",
   "agent_ops_no_checkpoint": "Контрольной точки сверки пока нет.",
-  "agent_ops_checkpoint": "Контрольная точка: сообщений — {count}, последнее — {messageId}",
+  "agent_ops_checkpoint": "Контрольная точка: сообщений — {count}, последнее — сообщение {messageNumber}",
   "agent_ops_run_reconciliation": "Запустить сверку",
   "agent_ops_rerun_ledger": "Повторить последний Ledger",
   "agent_ops_commits": "Коммиты",
@@ -2648,8 +2648,17 @@
   "card_rewriter_studio_status_generating": "Генерация",
   "card_rewriter_studio_status_completed": "Завершён",
   "card_rewriter_studio_status_pending": "Ожидает",
+  "card_rewriter_studio_status_prepared": "Подготовлен (не отправлялся)",
   "card_rewriter_studio_stage_history_consolidation": "Консолидация истории",
   "card_rewriter_studio_stage_card_writer": "Писатель карточки",
   "card_rewriter_studio_stage_card_repair": "Исправление карточки",
-  "card_rewriter_studio_stage_lorebook_writer": "Писатель лорбука"
+  "card_rewriter_studio_stage_lorebook_writer": "Писатель лорбука",
+  "game_time_seed_title": "Начало игрового времени",
+  "game_time_seed_description": "Задай точку отсчёта игровых часов леджера. День всегда начинается с 0. Дата необязательна.",
+  "game_time_seed_time_label": "Время (ЧЧ:ММ)",
+  "game_time_seed_date_label": "Дата (ДД.ММ.ГГГГ, необязательно)",
+  "game_time_seed_skip": "Пропустить",
+  "game_time_seed_confirm": "Начать",
+  "game_time_seed_invalid_time": "Введи время в формате ЧЧ:ММ (24 часа).",
+  "game_time_seed_invalid_date": "Введи дату в формате ДД.ММ.ГГГГ или оставь поле пустым."
 }

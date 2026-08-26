@@ -304,14 +304,33 @@ class CardEvolutionRepo {
               ..limit(1))
             .getSingleOrNull();
     if (failed != null) {
-      final selected = failed.selectedInputJson;
-      return CardEvolutionClaimOutcome(
-        'failed',
-        selected == null || computeHash(selected) != failed.inputHash
-            ? null
-            : CardEvolutionClaim(row: failed, selectedInputJson: selected),
-        failed.failureCode,
-      );
+      // Validate the failed snapshot the way a real restart would: the stored
+      // input must still reproduce from the current chat and canon. Only a
+      // reproducible claim is recoverable through the manual recovery UI.
+      final selection = await _selectedInputForClaim(failed);
+      final selected = selection.json;
+      if (selected != null) {
+        return CardEvolutionClaimOutcome(
+          'failed',
+          CardEvolutionClaim(row: failed, selectedInputJson: selected),
+          failed.failureCode,
+        );
+      }
+      // The failed snapshot can no longer be reproduced (chat, canon, or the
+      // context format moved on), so no restart can ever succeed. Exit the
+      // restart loop instead of blocking the lane forever: drop the dead
+      // claim with its call chain and select a fresh snapshot below.
+      await (db.delete(
+        db.cardEvolutionWriterCalls,
+      )..where((row) => row.claimId.equals(failed.id))).go();
+      final deleted =
+          await (db.delete(db.cardEvolutionClaims)
+                ..where((row) => row.id.equals(failed.id))
+                ..where((row) => row.status.equals('failed')))
+              .go();
+      if (deleted != 1) {
+        return const CardEvolutionClaimOutcome('busy');
+      }
     }
     final selection = await _selectInput(
       sessionId,
@@ -437,7 +456,28 @@ class CardEvolutionRepo {
     )..where((item) => item.id.equals(claimId))).getSingle();
     final selected = row.selectedInputJson;
     if (selected == null || computeHash(selected) != row.inputHash) {
-      throw StateError('Stored Card Evolution input is invalid');
+      // The stored input is corrupt: put the claim back into its failed state
+      // so the recovery UI keeps showing it instead of stranding a claimed
+      // lease that can never produce a snapshot.
+      await (db.update(db.cardEvolutionClaims)..where(
+            (row) => row.id.equals(claimId) & row.ownerId.equals(ownerId),
+          ))
+          .write(
+            CardEvolutionClaimsCompanion(
+              status: const Value('failed'),
+              leaseExpiresAt: const Value(0),
+              failureCode: const Value('inputHashMismatch'),
+              failureDetail: const Value(
+                'Stored Card Evolution input is invalid',
+              ),
+              failedAt: Value(now),
+            ),
+          );
+      return const CardEvolutionClaimOutcome(
+        'stale',
+        null,
+        'inputHashMismatch',
+      );
     }
     return CardEvolutionClaimOutcome(
       'claimed',
@@ -1496,7 +1536,14 @@ class CardEvolutionRepo {
       final overlay = overlays['${entry.lorebookId}\u0000${entry.entryId}'];
       final baseContent = overlay?.baseContent ?? entry.rawContent;
       final content = overlay?.content ?? entry.rawContent;
-      final size = baseContent.length + content.length;
+      // The base is materialized only when session evolution diverged from
+      // the source entry. Without an overlay base and content are identical,
+      // and echoing both would double the shared writer context for every
+      // injected entry.
+      final carriesBase = baseContent != content;
+      final size = carriesBase
+          ? baseContent.length + content.length
+          : content.length;
       // Exact content is required for safe anchored lorebook patching. Omit an
       // oversized target rather than truncating and weakening CAS validation.
       if (baseContent.length > _maxLorebookEntryCharacters ||
@@ -1507,7 +1554,7 @@ class CardEvolutionRepo {
       result.add(<String, Object?>{
         'lorebookId': entry.lorebookId,
         'entryId': entry.entryId,
-        'baseContent': baseContent,
+        if (carriesBase) 'baseContent': baseContent,
         'content': content,
         'expectedContentHash': CardCanonicalizer.scalarSha256(content),
       });
@@ -1525,7 +1572,17 @@ class CardEvolutionRepo {
         sessionId: sessionId,
         characterId: characterId,
       );
-      return (input, const EffectiveCanonAssembler().assemble(input));
+      // The automated evolution lane stamps canon with the stable identity:
+      // the per-turn Ledger mutates committed trackers and facts every turn,
+      // which would invalidate every automated proposal within a minute.
+      // Per-operation anchor CAS and evidence validation carry the safety.
+      return (
+        input,
+        const EffectiveCanonAssembler().assemble(
+          input,
+          stampVolatileState: false,
+        ),
+      );
     } catch (_) {
       return null;
     }
@@ -1711,15 +1768,18 @@ Map<String, (String, String)>? _loreTargetsFromInput(String selectedInputJson) {
     if (entries is! List) return null;
     final result = <String, (String, String)>{};
     for (final raw in entries) {
+      // Entries without session evolution carry no separate base; their
+      // current content is the CAS base the model must echo.
+      final base = raw is Map ? raw['baseContent'] ?? raw['content'] : null;
       if (raw is! Map ||
           raw['lorebookId'] is! String ||
           raw['entryId'] is! String ||
-          raw['baseContent'] is! String ||
+          base is! String ||
           raw['expectedContentHash'] is! String) {
         return null;
       }
       result['${raw['lorebookId']}\u0000${raw['entryId']}'] = (
-        raw['baseContent'] as String,
+        base,
         raw['expectedContentHash'] as String,
       );
     }
