@@ -1185,6 +1185,7 @@
   "api_presets": "API пресеты",
   "avatar": "Аватар",
   "desc_show_reasoning": "Показывает reasoning_content. Не влияет на рассуждения модели.",
+  "error_continue_failed": "Не удалось продолжить",
   "error_generation": "Ошибка генерации",
   "imggen_notification_body": "Генерация изображения...",
   "imggen_notification_title": "Glaze",

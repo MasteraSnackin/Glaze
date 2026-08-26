@@ -327,7 +327,7 @@ export class Formatter {
 
     // 7. Extract Glaze custom markers BEFORE quotes
     const styledSegments = [];
-    const styledRegex = /(==hc:#[0-9a-fA-F]{3,8}==.+?==|==glow:#[0-9a-fA-F]{3,8},\d+==.+?==|==cg:#[0-9a-fA-F]{3,8},#[0-9a-fA-F]{3,8},\d+==.+?==|==grad:#[0-9a-fA-F]{3,8}(?:,#[0-9a-fA-F]{3,8})+==.+?==|==bg:#[0-9a-fA-F]{3,8}==.+?==|==mark==.+?==|==active==.+?==|\*\*[^*\n]+?\*\*|(?<!\*)\*(?=[^*\n]*[^ \t*\n])[^*\n]+?\*(?!\*)|__[^_\n]+?__|(?<!\w)_[^_\n]+?_(?!\w)|~~[^~\n]+?~~)/gs;
+    const styledRegex = /(==hc:#[0-9a-fA-F]{3,8}==.+?==|==glow:#[0-9a-fA-F]{3,8},\d+==.+?==|==cg:#[0-9a-fA-F]{3,8},#[0-9a-fA-F]{3,8},\d+==.+?==|==grad:#[0-9a-fA-F]{3,8}(?:,#[0-9a-fA-F]{3,8})+==.+?==|==bg:#[0-9a-fA-F]{3,8}==.+?==|==mark==.+?==|==active==.+?==|==accent==.+?==|\*\*[^*\n]+?\*\*|(?<!\*)\*(?=[^*\n]*[^ \t*\n])[^*\n]+?\*(?!\*)|__[^_\n]+?__|(?<!\w)_[^_\n]+?_(?!\w)|~~[^~\n]+?~~)/gs;
 
     html = html.replace(styledRegex, (match) => {
       const id = this._ph('S_', styledSegments.length);

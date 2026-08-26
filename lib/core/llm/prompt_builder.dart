@@ -660,8 +660,15 @@ PromptResult _assembleMessages({
           appendedHistoryMessageIds.add(lastUser.sourceMessageId!);
         }
       }
+      final assembledHistory = interleaveDepthWithHistory(
+        historyMsgs,
+        resolvedDepthMsgs,
+      );
       messages.addAll(
-        interleaveDepthWithHistory(historyMsgs, resolvedDepthMsgs),
+        insertContinueInstruction(
+          assembledHistory,
+          payload.continueInstruction,
+        ),
       );
       for (final block in resolvedDepthBlocks) {
         if (block.message.content.trim().isNotEmpty) {

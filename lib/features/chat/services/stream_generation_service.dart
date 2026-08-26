@@ -32,6 +32,7 @@ import '../../../core/models/chat_message.dart';
 import '../../../core/models/api_config.dart';
 import '../../../core/models/pipeline_settings.dart';
 import '../../../core/services/model_usage_service.dart';
+import '../../../core/services/preset_defaults.dart';
 import '../../../core/state/active_selection_provider.dart';
 import '../../../core/state/memory_agent_providers.dart';
 import '../chat_provider.dart';
@@ -73,6 +74,7 @@ class StreamGenerationService {
     List<Map<String, dynamic>>? previousSwipesMeta,
     String? guidanceText,
     String? regenTargetId,
+    String? continueTargetId,
     required ChatState currentState,
     StudioTurnConfigSnapshot? studioTurnConfig,
   }) async {
@@ -111,6 +113,9 @@ class StreamGenerationService {
         session: session,
         apiConfigOverride: turnConfig.activeApiConfig,
         guidanceText: guidanceText,
+        continueInstruction: continueTargetId == null
+            ? null
+            : kContinueInstruction,
         includeEffectiveCanon: turnConfig.enabled,
         shouldAbort: _isAborted,
         cancelToken: cancelToken,
@@ -387,6 +392,9 @@ class StreamGenerationService {
           );
           _ref.read(studioCycleStateProvider.notifier).state =
               StudioCycleState.error(sessionId: session.id);
+          if (continueTargetId != null) {
+            return _continueFailure(message, session, vsi);
+          }
           if (regenTargetId != null && saveSession != null) {
             return _writer.writeRegenError(
               errorText: message,
@@ -686,7 +694,9 @@ class StreamGenerationService {
             final msg = 'error_first_chunk_timeout'.tr(
               namedArgs: {'seconds': '${idleTimeoutMs ~/ 1000}'},
             );
-            if (regenTargetId != null && saveSession != null) {
+            if (continueTargetId != null) {
+              finalState = _continueFailure(msg, session, vsi);
+            } else if (regenTargetId != null && saveSession != null) {
               finalState = _writer.writeRegenError(
                 errorText: msg,
                 saveSession: saveSession,
@@ -713,6 +723,8 @@ class StreamGenerationService {
               isGenerating: false,
               visibleStartIndex: vsi,
             );
+          } else if (continueTargetId != null) {
+            finalState = _continueFailure(formatError(error), session, vsi);
           } else if (regenTargetId != null && saveSession != null) {
             finalState = _writer.writeRegenError(
               errorText: formatError(error),
@@ -752,6 +764,9 @@ class StreamGenerationService {
         _ref.read(studioCycleStateProvider.notifier).state =
             StudioCycleState.error(sessionId: session.id);
       }
+      if (continueTargetId != null) {
+        return _continueFailure(formatError(e), session, vsi);
+      }
       if (regenTargetId != null && saveSession != null) {
         return _writer.writeRegenError(
           errorText: formatError(e),
@@ -766,6 +781,20 @@ class StreamGenerationService {
         visibleStartIndex: vsi,
       );
     }
+  }
+
+  /// Continue mode failure: settle the run without touching the session.
+  /// A failed continuation must leave the message it was extending exactly as
+  /// the user saw it — no error swipe, no appended error bubble — so the only
+  /// surface is the `Continue Failed` toast driven off [ChatState.error].
+  /// See `docs/INVARIANTS.md` INV-CM4.
+  ChatState _continueFailure(String errorText, ChatSession session, int vsi) {
+    return ChatState(
+      session: session,
+      isGenerating: false,
+      error: errorText,
+      visibleStartIndex: vsi,
+    );
   }
 
   PromptResult _studioCompatibilityResult(

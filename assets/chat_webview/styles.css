@@ -714,6 +714,22 @@
   display: inline-flex;
   align-items: center;
 }
+/* Continue: live status on the message a continuation run is extending.
+   Deliberately NOT a .gen-stat — it is feedback, not a statistic, so the
+   bubble layout and the hide-gen-time/hide-token-count settings must not
+   sweep it away with the timing chrome. */
+.msg-continuing {
+  font-size: 11px;
+  color: var(--primary-color, #7996CE);
+  display: inline-flex;
+  align-items: center;
+  animation: msg-continuing-pulse 1.4s ease-in-out infinite;
+}
+@keyframes msg-continuing-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
 .gen-time-wrapper { display: inline-block; }
 .gen-time { transition: opacity 0.15s; }
 .token-count-inline { display: inline-flex; align-items: center; }
@@ -1429,6 +1445,7 @@
 .message-section.native-lite .msg-reasoning {
   border-color: rgba(255, 255, 255, 0.08);
 }
+.message-section.native-lite .msg-continuing { animation: none; opacity: 1; }
 .message-section.native-lite .msg-memory-badge.pending { animation: none; }
 .message-section.native-lite .msg-ext-badge.running { animation: none; }
 .message-section.native-lite .msg-reasoning-content { transition: none; }

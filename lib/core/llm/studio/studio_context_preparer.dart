@@ -304,6 +304,7 @@ final class StudioContextPreparer {
           entry.key: List<PromptMessage>.unmodifiable(entry.value),
       },
       history: List<PromptMessage>.unmodifiable(history),
+      continueInstruction: inputs.continueInstruction,
       sessionVars: Map<String, String>.unmodifiable(inputs.sessionVars),
       globalVars: Map<String, String>.unmodifiable(inputs.globalVars),
       macroContext: macroContext,

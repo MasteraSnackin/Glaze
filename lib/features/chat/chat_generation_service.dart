@@ -32,6 +32,7 @@ class ChatGenerationService {
     List<Map<String, dynamic>>? previousSwipesMeta,
     String? guidanceText,
     String? regenTargetId,
+    String? continueTargetId,
     StudioTurnConfigSnapshot? studioTurnConfig,
   }) async {
     return StreamGenerationService(
@@ -50,6 +51,7 @@ class ChatGenerationService {
       previousSwipesMeta: previousSwipesMeta,
       guidanceText: guidanceText,
       regenTargetId: regenTargetId,
+      continueTargetId: continueTargetId,
       currentState: currentState,
       studioTurnConfig: studioTurnConfig,
     );

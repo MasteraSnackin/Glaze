@@ -35,6 +35,7 @@ import 'shared/theme/theme_preset.dart';
 import 'shared/theme/theme_provider.dart';
 
 import 'features/chat/widgets/chat_webview_preload.dart';
+import 'features/chat/widgets/continue_failure_listener.dart';
 import 'features/chat/widgets/lorebook_vector_search_diagnostic_listener.dart';
 import 'shared/widgets/app_launch_splash.dart';
 import 'shared/widgets/build_watermark.dart';
@@ -334,10 +335,12 @@ class _GlazeAppState extends ConsumerState<GlazeApp>
       builder: (context, child) {
         final appChild = _startupReady
             ? LorebookVectorSearchDiagnosticListener(
-                child: ChatWebViewPreloader(
-                  child: Overlay(
-                    key: toastOverlayKey,
-                    initialEntries: [OverlayEntry(builder: (_) => child!)],
+                child: ContinueFailureListener(
+                  child: ChatWebViewPreloader(
+                    child: Overlay(
+                      key: toastOverlayKey,
+                      initialEntries: [OverlayEntry(builder: (_) => child!)],
+                    ),
                   ),
                 ),
               )

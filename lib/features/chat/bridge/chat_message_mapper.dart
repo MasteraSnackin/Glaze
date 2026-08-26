@@ -29,6 +29,11 @@ abstract class ChatMessageMapperContext with _$ChatMessageMapperContext {
 
     /// messageId → aggregated block status ('running'|'done'|'error')
     @Default({}) Map<String, String> blockStatusByMessageId,
+
+    /// Id of the assistant message a `continueMessage()` run is extending.
+    /// Mirrors `ChatState.continuationTargetId`; drives the `Continuing…`
+    /// footer on that bubble (INV-CM6).
+    String? continuationTargetId,
   }) = _ChatMessageMapperContext;
 }
 
@@ -173,6 +178,8 @@ class ChatMessageMapper {
         'triggeredRegexes': _triggeredToJson(triggeredRegexes),
       'isGenerating': ctx.isGenerating,
       'isPostGenRunning': ctx.isPostGenRunning,
+      if (ctx.continuationTargetId != null && ctx.continuationTargetId == m.id)
+        'isContinuing': true,
     };
   }
 

@@ -53,6 +53,11 @@ class ChatBridgeController {
   bool isGenerating = false;
   bool isGeneratingImage = false;
   bool isPostGenRunning = false;
+
+  /// Mirrors `ChatState.continuationTargetId` while a `continueMessage()` run
+  /// streams, so every message map the bridge builds during that window flags
+  /// the extended bubble (INV-CM6).
+  String? continuationTargetId;
   final Set<String> _coveredMemoryIds = {};
   final Set<String> _pendingMemoryIds = {};
   final Set<String> _draftMemoryIds = {};
@@ -131,6 +136,7 @@ class ChatBridgeController {
     draftMemoryIds: _draftMemoryIds,
     greetingTotal: currentGreetingTotal,
     blockStatusByMessageId: Map.unmodifiable(_blockStatusByMessageId),
+    continuationTargetId: continuationTargetId,
   );
 
   /// Builds the origin separator marker for [session], or null when it has no

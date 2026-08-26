@@ -55,6 +55,12 @@ export const SHADOW_STYLE = `
   .glaze-message .glaze-bg { color: #fff; }
   .glaze-message .glaze-mark { color: var(--current-quote-color, var(--quote-color, #7996CE)); }
   .glaze-message .glaze-active { background: #ffeb3b; color: #000; padding: 2px 4px; border-radius: 4px; }
+  .glaze-message .glaze-accent { color: var(--primary-color, #7996CE); font-weight: 600; font-style: normal; }
+  .glaze-message hr {
+    border: 0;
+    border-top: 1px solid var(--border-color, rgba(255,255,255,0.1));
+    margin: 10px 0;
+  }
   .glaze-message .font-style-block,
   .glaze-message .font-color-block { display: inline-block; vertical-align: baseline; color: inherit; }
   .glaze-message .code-block-wrapper { position: relative; margin: 8px 0; }

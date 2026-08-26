@@ -40,6 +40,13 @@ export function renderStyledSegment(seg, processRichText) {
   m = seg.match(/^==active==(.+?)==$/s);
   if (m) return `<span class="glaze-active">${m[1]}</span>`;
 
+  // Theme accent. Unlike ==hc:#hex== the colour is not baked into the stored
+  // text, so a marker written once keeps tracking the user's active theme.
+  // Inner content stays raw (like ==mark==): the span is inline, and running
+  // it back through _processText would wrap it in a block-level <p>.
+  m = seg.match(/^==accent==(.+?)==$/s);
+  if (m) return `<span class="glaze-accent">${m[1]}</span>`;
+
   // Plain formatting markers (bold/italic/strike) process inner quotes so
   // dialogue inside *"..."* gets the quote color (colored italic), not the
   // gray italic default. Color markers above keep skipQuotes=true (default)

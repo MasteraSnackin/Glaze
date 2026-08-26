@@ -185,7 +185,12 @@ class ChatWebViewBuildListeners {
           final original = messages[idx];
           final updated = original.copyWith(
             content: joinContinuation(original.content, next.text),
-            reasoning: next.reasoning ?? original.reasoning,
+            // Stream the reasoning exactly the way the merge will persist it:
+            // the continuation's thinking is filed under its own `Continue`
+            // header rather than replacing the original turn's (INV-CM5).
+            reasoning:
+                joinContinuationReasoning(original.reasoning, next.reasoning) ??
+                original.reasoning,
             isTyping: true,
           );
           b.updateMessage(updated);

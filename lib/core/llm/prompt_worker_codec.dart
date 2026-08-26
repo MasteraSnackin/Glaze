@@ -33,6 +33,7 @@ Map<String, dynamic> serializePayload(PromptPayload p) => {
   'memoryMacroContent': p.memoryMacroContent,
   'memoryInjectionTarget': p.memoryInjectionTarget,
   'guidanceText': p.guidanceText,
+  'continueInstruction': p.continueInstruction,
   'lorebooks': p.lorebooks.map((l) => l.toJson()).toList(),
   'lorebookSettings': p.lorebookSettings.toJson(),
   'lorebookActivations': p.lorebookActivations.toJson(),
@@ -130,6 +131,7 @@ PromptPayload deserializePayload(Map<String, dynamic> json) {
       json['memoryInjectionTarget'] as String?,
     ),
     guidanceText: json['guidanceText'] as String?,
+    continueInstruction: json['continueInstruction'] as String?,
     lorebooks: (json['lorebooks'] as List)
         .map((l) => Lorebook.fromJson(l as Map<String, dynamic>))
         .toList(),

@@ -8,9 +8,7 @@ import 'package:flutter_riverpod/legacy.dart';
 
 import '../../core/llm/tokenizer.dart';
 import '../../core/models/chat_message.dart';
-import '../../core/db/repositories/chat_repo.dart';
 import '../../core/db/repositories/lorebook_use_manifest_repo.dart';
-import '../../core/services/generation_notification_service.dart';
 import '../../core/utils/id_generator.dart';
 import '../../core/utils/time_helpers.dart';
 import '../../core/state/db_provider.dart';
@@ -18,22 +16,18 @@ import '../../core/state/persona_resolution.dart';
 import '../chat_history/chat_history_provider.dart';
 import '../memory/state/memory_active_drafts_provider.dart';
 import 'abort_handler.dart';
-import 'chat_generation_service.dart';
 import 'chat_session_service.dart';
 import 'chat_state.dart';
 import 'editing_message_provider.dart';
 import 'generating_sessions_provider.dart';
-import 'unread_sessions_provider.dart';
 import 'image_recovery_service.dart';
 import 'controllers/chat_message_ops_controller.dart';
 import 'controllers/chat_swipe_controller.dart';
 import 'controllers/chat_session_controller.dart';
 import 'controllers/chat_draft_controller.dart';
-import 'services/continuation_message_merger.dart';
 import 'services/generation_pipeline.dart';
 import 'services/impersonation_service.dart';
 import 'state/chat_session_write_queue.dart';
-import 'utils/message_preview.dart';
 import '../extensions/services/extension_post_gen_service.dart';
 
 final chatProvider =
@@ -203,11 +197,8 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     String messageId,
     int blockIndex,
     int variantIndex,
-  ) async => _imageRecoverySvc.selectImageVariant(
-    messageId,
-    blockIndex,
-    variantIndex,
-  );
+  ) async =>
+      _imageRecoverySvc.selectImageVariant(messageId, blockIndex, variantIndex);
   final Set<String> _queuedImageRetries = <String>{};
   Future<void> retryImageGenerationForMessage(
     String messageId, {
@@ -900,6 +891,11 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     );
   }
 
+  /// Extend the trailing assistant message with a fresh generation, then fold
+  /// the result back into that message. Runs the ordinary chat pipeline —
+  /// same transport, same protocol, same post-generation stages as a send —
+  /// with the continue instruction injected right after the reply being
+  /// extended. See `docs/INVARIANTS.md` INV-CM1..INV-CM4.
   Future<void> continueMessage() async {
     if (!ref.mounted) return;
     if (ref.read(editingMessageIdProvider(arg)) != null) return;
@@ -929,8 +925,6 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       return;
     }
 
-    final genId = _abortHandler.nextGenId();
-    _abortHandler.clearStreaming();
     // Continuation never rolls a message back on abort; drop any restoration
     // snapshot a previous regenerate left behind so Stop cannot re-append it.
     _abortHandler.restorationMessage = null;
@@ -942,121 +936,11 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       ),
     );
 
-    final notifService = GenerationNotificationService.instance;
-    GenerationForegroundLease? notificationLease;
-    try {
-      notificationLease = await notifService.acquireGenerationLease('Glaze');
-      if (!ref.mounted || !_abortHandler.isCurrentGen(genId)) return;
-      final charRepo = ref.read(characterRepoProvider);
-      final character = await charRepo.getById(arg);
-      if (!ref.mounted || !_abortHandler.isCurrentGen(genId)) return;
-
-      final service = ref.read(chatGenerationServiceProvider);
-      final result = await service.generate(
-        session: current.session!,
-        charId: arg,
-        genId: genId,
-        currentState: current,
-        onStateUpdate: (s) {
-          if (_abortHandler.isCurrentGen(genId)) state = AsyncData(s);
-        },
-        isAborted: () => !_abortHandler.isCurrentGen(genId),
-      );
-
-      if (!ref.mounted || !_abortHandler.isCurrentGen(genId)) return;
-
-      var completedResult = result;
-      final generated = result.messages.lastOrNull;
-      if (generated?.role == 'assistant' && result.session != null) {
-        final finalSession = await ref
-            .read(chatRepoProvider)
-            .mutateSession(
-              sessionId: current.session!.id,
-              updatedAt: currentTimestampSeconds(),
-              mutate: (latest) {
-                final latestIndex = latest.messages.indexWhere(
-                  (message) => message.id == lastMsg.id,
-                );
-                if (latestIndex < 0 ||
-                    latestIndex != latest.messages.length - 1 ||
-                    latest.messages[latestIndex].content != lastMsg.content ||
-                    latest.messages[latestIndex].swipeId != lastMsg.swipeId ||
-                    latest.messages[latestIndex].agentSwipeId !=
-                        lastMsg.agentSwipeId) {
-                  return null;
-                }
-                final messages = List<ChatMessage>.from(latest.messages);
-                messages[latestIndex] = mergeContinuationMessage(
-                  messages[latestIndex],
-                  generated!,
-                );
-                return latest.copyWith(
-                  messages: messages,
-                  sessionVars: ChatRepo.applySessionVarDelta(
-                    latest.sessionVars,
-                    current.session!.sessionVars,
-                    result.session!.sessionVars,
-                  ),
-                );
-              },
-            );
-        if (finalSession == null) return;
-        if (!ref.mounted || !_abortHandler.isCurrentGen(genId)) return;
-        ChatSessionService.updateCache(finalSession);
-        _invalidateHistory();
-        completedResult = result.copyWith(
-          session: finalSession,
-          isGenerating: false,
-          isGeneratingImage: false,
-          isPostGenRunning: false,
-        );
-        state = AsyncData(completedResult);
-      } else {
-        state = AsyncData(result);
-      }
-
-      final preview = buildMessagePreview(completedResult.messages);
-      final finalSessionId = completedResult.session?.id;
-      // Snapshot before the notification pipeline awaits platform channels —
-      // leaving the chat during that gap must not flag a reply the user just
-      // watched land. Mirrors `SyncNotificationStage`.
-      final wasActive = notifService.isActiveSession(arg, finalSessionId);
-      await notifService.onGenerationCompleted(
-        character?.name ?? 'Unknown',
-        arg,
-        messagePreview: preview,
-        sessionId: finalSessionId,
-        msgId: completedResult.messages.isNotEmpty
-            ? completedResult.messages.last.id
-            : null,
-        avatarPath: character?.avatarPath,
-      );
-
-      if (finalSessionId != null &&
-          !wasActive &&
-          !notifService.isActiveSession(arg, finalSessionId)) {
-        ref.read(unreadSessionsProvider.notifier).markUnread(finalSessionId);
-      }
-    } catch (e, st) {
-      debugPrint('[ChatNotifier] continuation failed: $e\n$st');
-      if (ref.mounted && _abortHandler.isCurrentGen(genId)) {
-        _abortHandler.clearStreaming();
-        final latest = state.value;
-        if (latest?.session?.id == current.session!.id) {
-          state = AsyncData(
-            latest!.copyWith(
-              isGenerating: false,
-              isGeneratingImage: false,
-              isPostGenRunning: false,
-              continuationTargetId: null,
-              error: e.toString(),
-            ),
-          );
-        }
-      }
-    } finally {
-      await notificationLease?.release();
-    }
+    final promptSession = current.session!.copyWith(
+      messages: current.messages,
+      updatedAt: currentTimestampSeconds(),
+    );
+    await _runGeneration(promptSession, current, continueTargetId: lastMsg.id);
   }
 
   bool _isMemoryDraftActive(ChatState current) {
@@ -1077,6 +961,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
     int? previousTokens,
     List<Map<String, dynamic>>? previousSwipesMeta,
     String? regenTargetId,
+    String? continueTargetId,
   }) {
     final genId = _abortHandler.nextGenId();
     final pipeline = GenerationPipeline(
@@ -1100,6 +985,7 @@ class ChatNotifier extends AsyncNotifier<ChatState> {
       previousTokens: previousTokens,
       previousSwipesMeta: previousSwipesMeta,
       regenTargetId: regenTargetId,
+      continueTargetId: continueTargetId,
     );
   }
 

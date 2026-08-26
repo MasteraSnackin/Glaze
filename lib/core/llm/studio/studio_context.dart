@@ -55,6 +55,12 @@ final class StudioContext {
   final MacroContext macroContext;
   final StudioContextDiagnostics diagnostics;
 
+  /// Continue mode: the system turn the final writer must see immediately
+  /// after the assistant reply it is extending. Null on every other path, and
+  /// never shown to the controller agents — they analyse the scene, they do
+  /// not extend the reply. See `docs/INVARIANTS.md` INV-CM3.
+  final String? continueInstruction;
+
   const StudioContext({
     required this.slots,
     required this.history,
@@ -62,6 +68,7 @@ final class StudioContext {
     required this.globalVars,
     required this.macroContext,
     required this.diagnostics,
+    this.continueInstruction,
   });
 
   List<PromptMessage> messagesFor(StudioContextSlot slot) => switch (slot) {
